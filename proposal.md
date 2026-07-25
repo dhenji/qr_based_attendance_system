@@ -195,7 +195,7 @@ Registrar provides student roster (CSV)
 
 | Layer           | Technology                               | Purpose                                               |
 | --------------- | ---------------------------------------- | ----------------------------------------------------- |
-| Frontend        | React + PWA (Service Workers)            | Cross-platform UI, offline support, camera/GPS access |
+| Frontend        | SvelteKit + PWA (Service Workers) | Cross-platform UI, offline support, camera/GPS access |
 | Backend         | Python FastAPI                           | REST API server, async request handling               |
 | Database        | PostgreSQL (server) + IndexedDB (client) | Persistent storage + local cache                      |
 | QR Library      | html5-qrcode                             | QR decoding and live detection in browser             |
@@ -333,14 +333,14 @@ The project will follow an Agile approach with 2-week sprints:
 | ------------------ | ------------------------------------------------------------ |
 | Project Manager    | Sprint planning, progress tracking, documentation            |
 | Backend Developer  | FastAPI, database, caching, HMAC, sync logic                 |
-| Frontend Developer | React PWA, QR scanning, GPS, offline storage, live detection |
+| Frontend Developer | SvelteKit PWA, QR scanning, GPS, offline storage, live detection |
 | QA Tester          | Test cases, bug tracking, UAT coordination                   |
 
 ---
 
 ## 11. Summary
 
-This project proposes a QR-code based attendance system that eliminates manual roll call, prevents spoofing through multiple verification layers (session code, GPS, live QR detection, duplicate prevention), and works reliably even with intermittent internet connectivity. It leverages existing student ID cards without requiring any new QR generation. The system is built as a cross-platform PWA using Python (FastAPI) and JavaScript (React), making it accessible on any device with a browser and camera.
+This project proposes a QR-code based attendance system that eliminates manual roll call, prevents spoofing through multiple verification layers (session code, GPS, live QR detection, duplicate prevention), and works reliably even with intermittent internet connectivity. It leverages existing student ID cards without requiring any new QR generation. The system is built as a cross-platform PWA using Python (FastAPI) and SvelteKit, making it accessible on any device with a browser and camera.
 
 ---
 

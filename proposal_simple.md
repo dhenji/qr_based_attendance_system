@@ -51,7 +51,7 @@ A web-based application that:
 | Component | Technology                                |
 | --------- | ----------------------------------------- |
 | Backend   | Python (FastAPI)                          |
-| Frontend  | JavaScript (React)                        |
+| Frontend | JavaScript (SvelteKit) |
 | Database  | PostgreSQL                                |
 | Platform  | Progressive Web App (works on any device) |
 
