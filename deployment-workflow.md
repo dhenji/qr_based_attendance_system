@@ -1,0 +1,372 @@
+# Deployment Workflow — QR Attendance System
+
+**Stack**: FastAPI (backend) + SvelteKit (frontend) + PostgreSQL (database)
+**Services**: Supabase (DB) + Fly.io (backend) + Vercel (frontend)
+**Cost**: $0
+
+---
+
+## Table of Contents
+
+1. [Prerequisites](#1-prerequisites)
+2. [Database — Supabase](#2-database--supabase)
+3. [Backend — Fly.io](#3-backend--flyio)
+4. [Migrations Strategy](#4-migrations-strategy)
+5. [Frontend — Vercel](#5-frontend--vercel)
+6. [PWA Setup](#6-pwa-setup)
+7. [Post-Deployment Checklist](#7-post-deployment-checklist)
+
+---
+
+## 1. Prerequisites
+
+- GitHub account
+- Supabase account (sign up at https://supabase.com)
+- Fly.io account (sign up at https://fly.io)
+- Vercel account (sign up at https://vercel.com)
+- `flyctl` installed locally:
+  ```bash
+  curl -fsSL https://fly.io/install.sh | sh
+  ```
+- Project pushed to a GitHub repository
+
+---
+
+## 2. Database — Supabase
+
+Supabase provides a free PostgreSQL database with 500MB storage. No credit card needed.
+
+### 2.1 Create a Project
+
+```
+1. Go to https://supabase.com → Sign in
+2. Click "New Project"
+3. Fill in:
+   - Name: attendance-system-db
+   - Database Password: (create a strong password)
+   - Region: Choose the closest to your campus
+4. Click "Create new project"
+5. Wait ~2 minutes for provisioning
+```
+
+### 2.2 Get Connection String
+
+```
+1. In your project dashboard, go to Project Settings → Database
+2. Under "Connection string", find:
+   postgresql://postgres:[YOUR-PASSWORD]@db.[REF].supabase.co:5432/postgres
+3. Copy this — you'll need it for Fly.io secrets
+```
+
+### 2.3 Run Schema Migrations (First Time)
+
+You have 3 options here — see [Section 4](#4-migrations-strategy).
+
+---
+
+## 3. Backend — Fly.io
+
+Fly.io provides 3 free shared VMs that stay always-on (no cold starts).
+
+### 3.1 Prepare Backend for Deployment
+
+Your `backend/` folder needs:
+
+```
+backend/
+├── app/
+│   └── main.py
+├── Dockerfile
+├── fly.toml
+├── requirements.txt
+└── .dockerignore
+```
+
+**Sample Dockerfile**:
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+**Sample fly.toml**:
+```toml
+app = "attendance-system-api"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls"]
+```
+
+### 3.2 Deploy
+
+```bash
+# Login to Fly.io
+fly auth login
+
+# Initialize (creates fly.toml if you haven't already)
+cd backend
+fly launch --no-deploy
+
+# Set environment secrets
+fly secrets set DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.REF.supabase.co:5432/postgres"
+fly secrets set HMAC_SECRET_KEY="generate-a-random-secret-key"
+fly secrets set CORS_ORIGINS="https://your-frontend.vercel.app"
+
+# Deploy
+fly deploy
+
+# Your API will be at: https://attendance-system-api.fly.dev
+```
+
+---
+
+## 4. Migrations Strategy
+
+Since Supabase runs its own PostgreSQL and Fly.io hosts the backend separately, migrations need special handling. Choose one:
+
+### Option A: Run Manually from Local Machine (Simplest)
+
+```bash
+# Run once from your local machine after DB is created
+cd backend
+DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.REF.supabase.co:5432/postgres" \
+alembic upgrade head
+```
+
+Only needed when you change the schema. No extra config required.
+
+### Option B: Auto-Migrate on Startup (Automatic)
+
+In your FastAPI `app/main.py`:
+
+```python
+from alembic.config import Config
+from alembic import command
+
+@app.on_event("startup")
+def run_migrations():
+    alembic_cfg = Config("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+```
+
+Migration runs every time the app starts (deploy, restart, scale). Safe because Alembic tracks which migrations already ran.
+
+### Option C: Fly.io Release Command (Recommended)
+
+In `fly.toml`:
+```toml
+[deploy]
+  release_command = "alembic upgrade head"
+```
+
+This runs **once before each deploy**. If migrations fail, the deploy stops automatically. Best balance of safety and automation.
+
+---
+
+## 5. Frontend — Vercel
+
+Vercel provides free hosting for SvelteKit with automatic HTTPS and global CDN.
+
+### 5.1 Prepare Frontend Environment
+
+In your `frontend/.env`:
+```
+PUBLIC_API_URL=https://attendance-system-api.fly.dev
+```
+
+In `svelte.config.js`:
+```js
+import adapter from '@sveltejs/adapter-vercel';
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default {
+  kit: {
+    adapter: adapter()
+  }
+};
+```
+
+### 5.2 Deploy to Vercel
+
+```
+1. Go to https://vercel.com → Sign in with GitHub
+2. Click "Add New Project"
+3. Import your GitHub repository
+4. Set framework preset to "SvelteKit"
+5. Add environment variable:
+   - Name: PUBLIC_API_URL
+   - Value: https://attendance-system-api.fly.dev
+6. Click "Deploy"
+```
+
+Vercel automatically:
+- Detects SvelteKit and runs `sveltekit build`
+- Deploys to a global CDN
+- Enables HTTPS
+- Provides a preview URL for every git branch
+
+### 5.3 Custom Domain (Optional)
+
+```
+In Vercel dashboard → Project → Domains → Add your domain
+```
+
+Vercel handles SSL certificate automatically.
+
+---
+
+## 6. PWA Setup
+
+To make your SvelteKit app a proper PWA (installable, offline-capable):
+
+### 6.1 Install PWA Plugin
+
+```bash
+cd frontend
+npm install -D vite-plugin-pwa
+```
+
+### 6.2 Configure in `vite.config.ts`
+
+```ts
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default defineConfig({
+  plugins: [
+    sveltekit(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'icons/*.png'],
+      manifest: {
+        name: 'QR Attendance System',
+        short_name: 'Attendance',
+        description: 'QR-based campus attendance system',
+        theme_color: '#1e3a5f',
+        background_color: '#ffffff',
+        display: 'standalone',
+        scope: '/',
+        start_url: '/',
+        icons: [
+          { src: '/icons/192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/512.png', sizes: '512x512', type: 'image/png' }
+        ]
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+      }
+    })
+  ]
+});
+```
+
+### 6.3 Add Icons
+
+Place `frontend/static/icons/192.png` and `frontend/static/icons/512.png` (create simple icons using any tool or download from https://maskable.app).
+
+### 6.4 Create Service Worker Logic (for Offline Sync)
+
+In `frontend/src/service-worker.js`:
+```js
+// Background sync for offline attendance records
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-attendance') {
+    event.waitUntil(syncAttendance());
+  }
+});
+
+async function syncAttendance() {
+  const db = await openIndexedDB();
+  const pending = await db.getAll('pendingRecords');
+  for (const record of pending) {
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL}/attendance`, {
+        method: 'POST',
+        body: JSON.stringify(record),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      await db.delete('pendingRecords', record.id);
+    } catch (e) {
+      console.error('Sync failed, will retry later', e);
+    }
+  }
+}
+```
+
+---
+
+## 7. Post-Deployment Checklist
+
+| Item | How to Verify |
+|------|---------------|
+| Backend accessible | Visit `https://attendance-system-api.fly.dev/docs` — should see Swagger UI |
+| Database connected | Try creating a student via the Swagger UI or API |
+| CORS working | Open frontend URL → check browser console for no CORS errors |
+| PWA installable | Open frontend in Chrome → check Lighthouse → PWA badge |
+| Offline mode | Open frontend → DevTools → Network tab → toggle "Offline" → app should still load |
+| Session codes | Create a session via API → verify HMAC token is generated |
+| GPS validation | Submit attendance with fake GPS → should reject; with classroom GPS → should accept |
+
+---
+
+## Architecture Diagram
+
+```
+                         ┌─────────────────┐
+                         │    Vercel CDN    │
+                         │  (SvelteKit PWA) │
+                         │  attendance.vercel.app │
+                         └────────┬────────┘
+                                  │
+                            HTTPS │
+                                  ▼
+                         ┌─────────────────┐
+                         │   Fly.io VM     │
+                         │  (FastAPI)      │
+                         │ api.fly.dev     │
+                         └────────┬────────┘
+                                  │
+                           TCP/IP │
+                                  ▼
+                         ┌─────────────────┐
+                         │   Supabase      │
+                         │  (PostgreSQL)   │
+                         │  db.ref.supabase│
+                         └─────────────────┘
+```
+
+---
+
+**Total free tier limits**:
+
+| Service | Free Limit | What to Watch |
+|---------|-----------|---------------|
+| Supabase | 500MB DB, 2GB bandwidth | Sufficient for ~10,000+ students |
+| Fly.io | 3 shared VMs, 3GB storage | Always-on, no cold starts |
+| Vercel | Unlimited static, 100GB bandwidth | 6000 build minutes/month |
