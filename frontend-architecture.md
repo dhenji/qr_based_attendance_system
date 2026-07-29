@@ -4,6 +4,7 @@
 > frontend structure for the Attendance System. Comments beside each
 > major file describe its responsibility.
 
+```text
 frontend/
 │
 ├── src/
@@ -155,4 +156,4 @@ frontend/
 │   ├── manifest.json                   # PWA manifest
 │   ├── robots.txt                      # Robots rules
 │   └── favicon.png                     # Website icon
-
+```
