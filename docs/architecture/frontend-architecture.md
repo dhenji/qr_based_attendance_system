@@ -4,6 +4,10 @@
 > frontend structure for the Attendance System. Comments beside each
 > major file describe its responsibility.
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 23cd61d (Visual Mockup Presentation with Descriptions)
 ```text
 frontend/
 │
