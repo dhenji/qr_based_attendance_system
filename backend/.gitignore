@@ -1,0 +1,14 @@
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.log
