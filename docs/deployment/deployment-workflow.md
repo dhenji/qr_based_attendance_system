@@ -74,8 +74,13 @@ Your `backend/` folder needs:
 
 ```
 backend/
-├── app/
-│   └── main.py
+├── main.py                    # FastAPI app entry point
+├── core/                      # config, database, security, exceptions
+├── shared/                    # cross-feature helpers (dependencies, cache, base)
+├── api/
+│   └── router.py              # aggregates feature routers
+├── features/                  # vertical slices: auth, student, course,
+│                              # enrollment, session, attendance, sync
 ├── Dockerfile
 ├── fly.toml
 ├── requirements.txt
@@ -93,7 +98,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
 **Sample fly.toml**:
@@ -162,7 +167,7 @@ Only needed when you change the schema. No extra config required.
 
 ### Option B: Auto-Migrate on Startup (Automatic)
 
-In your FastAPI `app/main.py`:
+In your FastAPI `main.py`:
 
 ```python
 from alembic.config import Config
