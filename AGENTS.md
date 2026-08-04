@@ -4,8 +4,8 @@ Proposal/documentation repo with a SvelteKit frontend scaffold at the repo root.
 
 ## Repository State
 
-- Remote: `git@github.com:CodeKharl/attendance_sys_proposal.git`
-- Branch `refactor/revoke-src` has **uncommitted** changes: `src/frontend/` was deleted in favor of root-level `frontend/` (byte-identical content — pure relocation), and an empty `backend/` was created. `git status` shows the deletions; treat `frontend/` as the real layout and don't restore `src/frontend/`.
+- Remote: `git@github.com:CodeKharl/attendance_sys_proposal.git`. Current branch: `main`, clean tree.
+- Layout: root-level `frontend/` is the real frontend; there is no `src/frontend/` (relocation landed in `8dfe5b5`). Don't recreate it.
 - No tests, linters, formatters, CI, or Dockerfile exist. The only verification is `npm run check` in `frontend/`.
 - `.env` files are gitignored everywhere; only `frontend/.env.example` exists.
 
@@ -35,4 +35,6 @@ Duplicates — don't edit both copies:
 
 ## Backend (`backend/`)
 
-- Empty directory. Per `docs/deployment/deployment-workflow.md`: FastAPI, `uvicorn --reload` dev, Alembic migrations, Fly.io Docker deploy (`fly deploy`).
+- Scaffold only — every file is an empty `__init__.py`. No `requirements.txt`, `pyproject.toml`, app entrypoint, or migrations exist yet; nothing runs.
+- Intended structure (per `docs/architecture/project-structure.md`, updated in `f8d3892`): vertical feature slicing — `api/` (router aggregation), `core/` (security, config), `shared/`, `features/{auth,attendance,course,enrollment,session,student,sync}/` (each has `model.py`/`service.py`/`router.py` planned), `tests/`, `alembic/versions/` (empty).
+- Per `docs/deployment/deployment-workflow.md`: FastAPI, `uvicorn --reload` dev, Alembic migrations, Fly.io Docker deploy (`fly deploy`).
