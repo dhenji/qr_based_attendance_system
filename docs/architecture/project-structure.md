@@ -3,44 +3,35 @@
 ```
 attendance-system/
 │
-├── backend/                          # FastAPI Python backend
-│   ├── app/
-│   │   ├── api/                      # Route handlers (endpoints)
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py               # Login, registration, token management
-│   │   │   ├── students.py           # CRUD operations for students
-│   │   │   ├── courses.py            # CRUD operations for courses
-│   │   │   ├── attendance.py         # Record and query attendance records
-│   │   │   └── sessions.py           # HMAC session code generation & validation
-│   │   │
-│   │   ├── core/                     # Core configuration & utilities
-│   │   │   ├── __init__.py
-│   │   │   ├── config.py             # App settings, environment variables
-│   │   │   ├── security.py           # HMAC hashing, password hashing
-│   │   │   └── database.py           # Database connection & session management
-│   │   │
-│   │   ├── models/                   # SQLAlchemy ORM models (database tables)
-│   │   │   ├── __init__.py
-│   │   │   ├── student.py
-│   │   │   ├── course.py
-│   │   │   ├── enrollment.py
-│   │   │   ├── session.py
-│   │   │   └── attendance_record.py
-│   │   │
-│   │   ├── schemas/                  # Pydantic schemas (request/response validation)
-│   │   │   ├── __init__.py
-│   │   │   ├── student.py
-│   │   │   ├── attendance.py
-│   │   │   └── session.py
-│   │   │
-│   │   ├── services/                 # Business logic layer
-│   │   │   ├── __init__.py
-│   │   │   ├── student_service.py    # Student lookup, roster management
-│   │   │   ├── attendance_service.py # Attendance recording & validation
-│   │   │   ├── cache_service.py      # LRU caching / indexing algorithm (O(1) lookup)
-│   │   │   └── sync_service.py       # Offline sync processing
-│   │   │
-│   │   └── main.py                   # FastAPI application entry point
+├── backend/                          # FastAPI Python backend — vertical feature slicing
+│   ├── main.py                       # FastAPI app entry point (uvicorn main:app)
+│   │
+│   ├── core/                         # Cross-cutting infrastructure (no business logic)
+│   │   ├── __init__.py
+│   │   ├── config.py                 # App settings, environment variables
+│   │   ├── database.py               # Async SQLAlchemy engine + session factory + Base
+│   │   ├── security.py               # HMAC signing, password hashing
+│   │   └── exceptions.py             # Domain exceptions + error handlers
+│   │
+│   ├── shared/                       # Cross-feature helpers
+│   │   ├── __init__.py
+│   │   ├── dependencies.py           # get_db, pagination dependencies
+│   │   ├── cache.py                  # LRU cache (O(1) student lookup)
+│   │   └── base.py                   # Base model mixins, shared schemas
+│   │
+│   ├── api/                          # Router aggregation
+│   │   ├── __init__.py
+│   │   └── router.py                 # Mounts all features' routers under /prefixes
+│   │
+│   ├── features/                     # Vertical slices — one folder per domain,
+│   │   │                             # each owning all four layers:
+│   │   ├── auth/                     # │ ├─ model.py   (SQLAlchemy ORM)
+│   │   ├── student/                  # │ ├─ schema.py  (Pydantic v2)
+│   │   ├── course/                   # │ ├─ service.py (business logic)
+│   │   ├── enrollment/               # │ └─ router.py  (endpoints)
+│   │   ├── session/                  #   HMAC session codes & expiry
+│   │   ├── attendance/               #   validation pipeline (HMAC→GPS→uniqueness→enrollment)
+│   │   └── sync/                     #   offline SyncQueue processing
 │   │
 │   ├── tests/                        # Unit & integration tests
 │   │   ├── test_students.py
@@ -131,13 +122,13 @@ attendance-system/
 
 | Directory / File | CS Concept |
 |-----------------|------------|
-| `backend/app/services/cache_service.py` | Caching & Indexing Algorithm (O(1) lookup) |
+| `backend/shared/cache.py` | Caching & Indexing Algorithm (O(1) lookup) |
 | `frontend/src/stores/offline.ts` + `frontend/src/service-worker.ts` | Offline-First Architecture |
-| `backend/app/api/sessions.py` + `backend/app/core/security.py` | HMAC-based Session Auth |
-| `frontend/src/lib/utils/geolocation.ts` + `backend/app/services/attendance_service.py` | Geolocation Proximity (Haversine) |
+| `backend/features/session/` + `backend/core/security.py` | HMAC-based Session Auth |
+| `frontend/src/lib/utils/geolocation.ts` + `backend/features/attendance/service.py` | Geolocation Proximity (Haversine) |
 | `frontend/src/lib/components/QRScanner.svelte` | Live QR Detection (Liveness) |
-| `backend/app/models/` | Database Design & Normalization (3NF) |
-| `backend/app/services/sync_service.py` + `frontend/src/lib/services/sync.ts` | Offline Sync / Eventual Consistency |
+| `backend/features/*/model.py` | Database Design & Normalization (3NF) |
+| `backend/features/sync/service.py` + `frontend/src/lib/services/sync.ts` | Offline Sync / Eventual Consistency |
 
 ---
 
