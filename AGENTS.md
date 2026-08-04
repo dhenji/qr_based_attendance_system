@@ -1,40 +1,39 @@
 # AGENTS.md — attendance_sys_proposal
 
-Proposal/documentation repo with a SvelteKit frontend scaffold at the repo root. Backend (FastAPI + PostgreSQL) is planned but empty.
+Proposal/documentation repo with a **working FastAPI backend skeleton** and a **SvelteKit frontend scaffold** (no source files yet). Backend feature modules and Alembic migrations are still empty.
 
 ## Repository State
 
-- Remote: `git@github.com:CodeKharl/attendance_sys_proposal.git`. Current branch: `main`, clean tree.
-- Layout: root-level `frontend/` is the real frontend; there is no `src/frontend/` (relocation landed in `8dfe5b5`). Don't recreate it.
-- No tests, linters, formatters, CI, or Dockerfile exist. The only verification is `npm run check` in `frontend/`.
-- `.env` files are gitignored everywhere; only `frontend/.env.example` exists.
+- Remote: `git@github.com:CodeKharl/attendance_sys_proposal.git`. Branch `main`, clean tree.
+- Layout: `frontend/` (scaffold only), `backend/` (working skeleton), root `docker-compose.yml` (local dev), `docs/`.
+- There is **no root `.gitignore`** — env/venv ignoring is per-dir (`backend/.gitignore`, `frontend/.gitignore`). Both `backend/.env.example` and `frontend/.env.example` exist; never commit a real `.env`.
+- No linters, formatters, backend tests, or CI. The only automated check is `npm run check` in `frontend/`. (`README.md` is current and accurate.)
 
 ## Docs Layout
 
-Docs live in `docs/proposals/`, `docs/architecture/`, `docs/deployment/`, `docs/design/`, `docs/presentations/`:
+Docs live in `docs/{proposals,architecture,deployment,design,presentations}/`. Duplicates — never edit one copy only:
 
-| File | Purpose |
-|------|---------|
-| `docs/proposals/proposal.md` | Full 11-section proposal (CS concepts, data flow, schema) |
-| `docs/proposals/proposal_simple.md` | Condensed 1-page version for early submission |
-| `docs/design/frontend-architecture.md` | Production-ready SvelteKit structure: route groups `(auth)`, `(student)`, `(professor)`, `(admin)`, Zod validators, scanner module. Clean copy — prefer editing this one |
-| `docs/architecture/frontend-architecture.md` | Same content but still contains leftover `<<<<<<< HEAD` conflict markers; only edit if you clean them. `docs/architecture/project-structure.md`'s frontend section is simpler/outdated |
-| `docs/deployment/deployment-workflow.md` | Free-tier deploy guide: Supabase (DB) → Fly.io (API) → Vercel (frontend) |
-| `docs/presentations/presentation-slides.md`, `presentation.pptx` | Slide content (mermaid diagrams) + deck |
-
-Duplicates — don't edit both copies:
 - `docs/wireframes.md` ≡ `docs/design/wireframes.md` (identical)
+- `docs/design/frontend-architecture.md` ≡ `docs/architecture/frontend-architecture.md` (identical, conflict markers now cleaned)
 - `docs/design/system-mockup.pdf` ≈ `docs/presentations/system-mockup.pdf` (near-duplicates)
+
+Other key files: `docs/proposals/proposal.md` (full 11-section), `docs/proposals/proposal_simple.md` (1-page), `docs/deployment/deployment-workflow.md` (free-tier deploy: Supabase → Fly.io → Vercel), `docs/presentations/presentation-slides.md` + `presentation.pptx`.
 
 ## Frontend (`frontend/`)
 
 - SvelteKit 2 + Svelte 5, `@sveltejs/adapter-auto`, TypeScript strict. Deps: `html5-qrcode`, `zod`.
-- **No source files yet** (no `src/routes/`, no `app.html`) — scaffold only. All commands run from `frontend/`: `npm run dev`, `npm run check`, `npm run check:watch`, `npm run build`, `npm run preview`. `check` runs `svelte-kit sync` first and generates gitignored `.svelte-kit/`.
-- Env: copy `frontend/.env.example` to `.env`; only `PUBLIC_*` vars reach the browser (`PUBLIC_API_URL=http://localhost:8000` for the not-yet-built backend).
-- PWA (`vite-plugin-pwa`) is planned but **not installed**; `vite.config.ts` comments mark it as an optional later upgrade.
+- **No source files yet** (no `src/routes/`, no `app.html`) — scaffold only. Run from `frontend/`: `npm run dev` (port 5173), `npm run check`, `npm run check:watch`, `npm run build`, `npm run preview`. `check` runs `svelte-kit sync` first and generates gitignored `.svelte-kit/`.
+- Env: copy `.env.example` to `.env`; only `PUBLIC_*` vars reach the browser (`PUBLIC_API_URL=http://localhost:8000`).
+- PWA (`vite-plugin-pwa`) planned but **not installed**; `vite.config.ts` comments mark it as an optional later upgrade.
 
 ## Backend (`backend/`)
 
-- Scaffold only — every file is an empty `__init__.py`. No `requirements.txt`, `pyproject.toml`, app entrypoint, or migrations exist yet; nothing runs.
-- Intended structure (per `docs/architecture/project-structure.md`, updated in `f8d3892`): vertical feature slicing — `api/` (router aggregation), `core/` (security, config), `shared/`, `features/{auth,attendance,course,enrollment,session,student,sync}/` (each has `model.py`/`service.py`/`router.py` planned), `tests/`, `alembic/versions/` (empty).
-- Per `docs/deployment/deployment-workflow.md`: FastAPI, `uvicorn --reload` dev, Alembic migrations, Fly.io Docker deploy (`fly deploy`).
+- **Working skeleton, not empty.** FastAPI app is in `main.py` (module `app`, `/health` endpoint, CORS). Run from `backend/`: `uvicorn main:app --reload`.
+- Present and wired: `requirements.txt`, `Dockerfile.dev`, `core/config.py` (pydantic-settings, reads `.env`), `core/database.py` (async SQLAlchemy engine + `get_session`), `api/deps.py` (`get_db`).
+- Gotcha: FastAPI `lifespan` runs `SELECT 1` against Postgres at startup — the app **fails to boot if no database is reachable**.
+- Not yet implemented: feature slices `features/{auth,attendance,course,enrollment,session,student,sync}/` are empty `__init__.py`; `alembic/versions/` exists but there is **no `alembic.ini` or `env.py`** (Alembic not wired up). No backend tests.
+
+## Local dev (running)
+
+- Recommended (from repo root): `docker compose up --build` → API on :8000, Postgres on :5432 (`attendance_sys`, postgres/postgres). `docker-compose.yml` also defines the API, so no need to run `uvicorn` manually.
+- Manual: copy `backend/.env.example` to `.env` (defaults already target `localhost:5432`), then `uvicorn main:app --reload` from `backend/`.
