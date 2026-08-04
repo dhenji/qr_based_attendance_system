@@ -22,7 +22,7 @@ A Progressive Web Application (PWA) that:
 
 - Scans the QR code from existing campus student ID cards
 - Extracts the student ID number embedded in the QR code and matches it against a student roster in the database
-- Validates attendance through multi-layer anti-spoofing: session code, GPS geofencing, live QR detection, and one-scan-per-session enforcement
+- Validates attendance through multi-layer anti-spoofing: session code, GPS geofencing, live QR detection, one-scan-per-session enforcement, and an enrollment check
 - Works offline by storing records locally and auto-syncing when connectivity is restored
 - Provides dashboards and reports for professors and administrators
 
@@ -38,7 +38,7 @@ To design and develop a QR-code based attendance system that automates the atten
 
 1. Develop a QR scanning module that decodes student ID numbers from existing campus ID cards
 2. Implement a caching and indexing algorithm for efficient student data retrieval (O(1) lookup)
-3. Design a multi-layer anti-spoofing mechanism: HMAC session codes, GPS geofencing, live QR detection, and duplicate scan prevention
+3. Design a multi-layer anti-spoofing mechanism: HMAC session codes, GPS geofencing, live QR detection, duplicate scan prevention, and enrollment verification
 4. Implement offline-first local storage with automatic synchronization when internet is restored
 5. Build an admin dashboard for attendance monitoring, reports, and student roster management
 6. Design an auto-advancement feature that updates student year levels at the end of each academic year
@@ -169,6 +169,7 @@ Registrar provides student roster (CSV)
 | GPS Geofencing       | Remote/fake submissions         | Haversine Algorithm          |
 | Live QR Detection    | Screenshot of a classmate's ID  | Reflection/Liveness Analysis |
 | One Scan Per Session | Same ID used multiple times     | Database Constraint          |
+| Enrollment Check     | Non-enrolled students marking attendance | Relational FK Constraint     |
 
 ---
 

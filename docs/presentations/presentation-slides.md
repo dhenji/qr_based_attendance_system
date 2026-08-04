@@ -155,8 +155,10 @@ flowchart LR
     C -->|Outside range| X
     D -->|Physical card| E{One Scan<br>Per Session}
     D -->|Screenshot| X
-    E -->|First scan| F[✅ Attendance Recorded]
+    E -->|First scan| F{Enrollment<br>Check}
     E -->|Duplicate| X
+    F -->|Enrolled| G[✅ Attendance Recorded]
+    F -->|Not enrolled| X
 ```
 
 ### Input → Process → Output
