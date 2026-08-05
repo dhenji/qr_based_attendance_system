@@ -1,45 +1,39 @@
 # AGENTS.md — attendance_sys_proposal
 
-**This is a proposal/documentation repository.** No implementation code exists yet. The actual project (FastAPI + SvelteKit + PostgreSQL) has not been started.
+Proposal/documentation repo with a **working FastAPI backend skeleton** and a **SvelteKit frontend scaffold** (no source files yet). Backend feature modules and Alembic migrations are still empty.
 
 ## Repository State
 
-- 7 commits (initial proposal → sveltekit switch → structure+deployment → presentation → AGENTS.md → frontend-architecture → merge)
-- Remote: `git@github.com:CodeKharl/attendance_sys_proposal.git`
-- No `.gitignore`, `package.json`, `requirements.txt`, `Dockerfile`, CI workflows, tests, linters, formatters, or typecheckers exist
-- No `.env` files are committed
-- When implementation begins, use `project-structure.md` as the directory blueprint
+- Remote: `git@github.com:CodeKharl/attendance_sys_proposal.git`. Branch `main`, clean tree.
+- Layout: `frontend/` (scaffold only), `backend/` (working skeleton), root `docker-compose.yml` (local dev), `docs/`.
+- There is **no root `.gitignore`** — env/venv ignoring is per-dir (`backend/.gitignore`, `frontend/.gitignore`). Both `backend/.env.example` and `frontend/.env.example` exist; never commit a real `.env`.
+- No linters, formatters, backend tests, or CI. The only automated check is `npm run check` in `frontend/`. (`README.md` is current and accurate.)
 
-## Key Documents
+## Docs Layout
 
-| File | Purpose |
-|------|---------|
-| `proposal.md` | Full 11-section proposal with CS concepts, data flow, schema |
-| `proposal_simple.md` | Condensed 1-page version for early submission |
-| `project-structure.md` | Planned directory layout for implementation (frontend section is simpler) |
-| `frontend-architecture.md` | Production-ready SvelteKit frontend structure (supersedes `project-structure.md` frontend portion) |
-| `deployment-workflow.md` | Free-tier deploy guide: Supabase (DB) → Fly.io (API) → Vercel (frontend) |
-| `presentation-slides.md` | Slide content with mermaid diagrams |
-| `presentation.pptx` | Slide deck (binary) |
+Docs live in `docs/{proposals,architecture,deployment,design,presentations}/`. Duplicates — never edit one copy only:
 
-## Tech Stack (Planned)
+- `docs/wireframes.md` ≡ `docs/design/wireframes.md` (identical)
+- `docs/design/frontend-architecture.md` ≡ `docs/architecture/frontend-architecture.md` (identical, conflict markers now cleaned)
+- `docs/design/system-mockup.pdf` ≈ `docs/presentations/system-mockup.pdf` (near-duplicates)
 
-- **Backend**: Python FastAPI (`uvicorn --reload` dev, Fly.io Docker production)
-- **Frontend**: SvelteKit PWA with `vite-plugin-pwa` (switched from React per commit `5fdadc5`)
-- **Database**: PostgreSQL (local Docker dev, Supabase cloud production)
-- **Deployment**: Fly.io (API, `fly deploy`) → Vercel (frontend, git-push deploy) → Supabase (DB)
-- **QR Library**: `html5-qrcode`
-- **Migrations**: Alembic (manual local run, auto-migrate on startup, or Fly.io release command)
+Other key files: `docs/proposals/proposal.md` (full 11-section), `docs/proposals/proposal_simple.md` (1-page), `docs/deployment/deployment-workflow.md` (free-tier deploy: Supabase → Fly.io → Vercel), `docs/presentations/presentation-slides.md` + `presentation.pptx`.
 
-## Frontend Structure Note
+## Frontend (`frontend/`)
 
-Two docs describe the planned frontend layout. The richer one is `frontend-architecture.md` — it uses route groups `(auth)`, `(student)`, `(professor)`, `(admin)`, adds Zod validators, server-side auth helpers, and separates scanner components into a module. Prefer it over the simpler `project-structure.md` frontend section when implementation starts.
+- SvelteKit 2 + Svelte 5, `@sveltejs/adapter-auto`, TypeScript strict. Deps: `html5-qrcode`, `zod`.
+- **No source files yet** (no `src/routes/`, no `app.html`) — scaffold only. Run from `frontend/`: `npm run dev` (port 5173), `npm run check`, `npm run check:watch`, `npm run build`, `npm run preview`. `check` runs `svelte-kit sync` first and generates gitignored `.svelte-kit/`.
+- Env: copy `.env.example` to `.env`; only `PUBLIC_*` vars reach the browser (`PUBLIC_API_URL=http://localhost:8000`).
+- PWA (`vite-plugin-pwa`) planned but **not installed**; `vite.config.ts` comments mark it as an optional later upgrade.
 
-## Development Commands (Planned)
+## Backend (`backend/`)
 
-These are the likely commands once implementation begins:
-- **Backend (dev)**: `cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload`
-- **Frontend (dev)**: `cd frontend && npm install && npm run dev`
-- **DB (local)**: `docker-compose up` (PostgreSQL)
-- **Backend deploy**: `cd backend && fly deploy`
-- **Migrations**: `cd backend && DATABASE_URL="..." alembic upgrade head`
+- **Working skeleton, not empty.** FastAPI app is in `main.py` (module `app`, `/health` endpoint, CORS). Run from `backend/`: `uvicorn main:app --reload`.
+- Present and wired: `requirements.txt`, `Dockerfile.dev`, `core/config.py` (pydantic-settings, reads `.env`), `core/database.py` (async SQLAlchemy engine + `get_session`), `api/deps.py` (`get_db`).
+- Gotcha: FastAPI `lifespan` runs `SELECT 1` against Postgres at startup — the app **fails to boot if no database is reachable**.
+- Not yet implemented: feature slices `features/{auth,attendance,course,enrollment,session,student,sync}/` are empty `__init__.py`; `alembic/versions/` exists but there is **no `alembic.ini` or `env.py`** (Alembic not wired up). No backend tests.
+
+## Local dev (running)
+
+- Recommended (from repo root): `docker compose up --build` → API on :8000, Postgres on :5432 (`attendance_sys`, postgres/postgres). `docker-compose.yml` also defines the API, so no need to run `uvicorn` manually.
+- Manual: copy `backend/.env.example` to `.env` (defaults already target `localhost:5432`), then `uvicorn main:app --reload` from `backend/`.
