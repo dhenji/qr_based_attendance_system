@@ -57,7 +57,7 @@ Every attendance submission is validated against **five layers** before it is ac
 ## Repository Layout
 
 ```
-├── frontend/   # SvelteKit app (scaffold only — no source files yet)
+├── frontend/   # SvelteKit app (minimal app shell + routes)
 ├── backend/    # FastAPI app (working skeleton) + Dockerfile.dev
 ├── docker-compose.yml  # Local dev: PostgreSQL + API
 └── docs/       # Proposal, architecture, deployment, design, presentations
@@ -131,16 +131,18 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 - [`docs/proposals/proposal.md`](docs/proposals/proposal.md) — full 11-section proposal
 - [`docs/architecture/project-structure.md`](docs/architecture/project-structure.md) — intended backend layout
-- [`docs/design/frontend-architecture.md`](docs/design/frontend-architecture.md) — production-ready frontend structure
+- [`docs/architecture/frontend-architecture.md`](docs/architecture/frontend-architecture.md) — production-ready frontend structure
+- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
+- [`docs/design/system-mockup.pdf`](docs/design/system-mockup.pdf) — system mockup
 - [`docs/presentations/presentation-slides.md`](docs/presentations/presentation-slides.md) — slide content
 
 ## Project Status
 
-| Area     | Status                                                                      |
-| -------- | --------------------------------------------------------------------------- |
-| Backend  | Working skeleton — FastAPI with `/health`, async SQLAlchemy session, config |
-| Frontend | Scaffold only — deps installed, no `src/routes/` yet                        |
-| Features | In progress — feature-sliced backend modules exist but are empty            |
-| Tests    | None                                                                        |
+| Area     | Status                                                                               |
+| -------- | ------------------------------------------------------------------------------------ |
+| Backend  | Working skeleton — FastAPI with `/health`, async SQLAlchemy session, Alembic wired up |
+| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present                     |
+| Features | In progress — feature-sliced backend modules exist but are empty                      |
+| Tests    | Frontend `npm run check` only; no backend tests yet                                   |
 

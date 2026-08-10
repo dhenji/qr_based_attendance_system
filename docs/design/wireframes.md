@@ -196,6 +196,7 @@
 │                  │     Scan My ID Card      │                    │
 │                  └──────────────────────────┘                    │
 │                                                                   │
+│  After QR: face challenge (blink / turn head)                     │
 │  🟢 GPS: High (5m)     📍 CS Lab 101      ⚡ Live Validation     │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -225,7 +226,28 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.4 Scan Success Overlay
+### 2.4 Face Liveness Challenge (overlay)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                   │
+│                          🎥 (live)                               │
+│                          Face detected ✔                         │
+│                                                                   │
+│                  ┌──────────────────────────┐                    │
+│                  │   👤  Now do this:       │                    │
+│                  │   ┌──────────────────┐   │                    │
+│                  │   │   Blink Now      │   │                    │
+│                  │   └──────────────────┘   │                    │
+│                  │   (or: Turn head left)   │                    │
+│                  └──────────────────────────┘                    │
+│                                                                   │
+│  Challenge 1 of 2 · auto-advances on success                     │
+│  Offline: evidence saved · verified after sync                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 2.5 Scan Success Overlay
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -237,13 +259,13 @@
 │                       John Doe                                   │
 │                    CS101 — 9:02 AM                                │
 │                                                                   │
-│                    Live · GPS verified                            │
+│                    Live · GPS + Face verified                     │
 │                                                                   │
 │                    Auto-dismissing in 3s...                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.5 Scan Failure Overlay
+### 2.6 Scan Failure Overlay
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -258,7 +280,7 @@
 │                └──────────────────────────┘                      │
 │                                                                   │
 │              Possible reasons: duplicate,                         │
-│              outside geofence, liveness failed                     │
+│              outside geofence, QR/face liveness failed            │
 │                                                                   │
 │                    ┌──────────────────┐                           │
 │                    │    Try Again     │                           │
@@ -266,7 +288,7 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.6 Attendance History — `/student/history`
+### 2.7 Attendance History — `/student/history`
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────┐
@@ -290,7 +312,7 @@
 └──────────┴───────────────────────────────────────────────────────┘
 ```
 
-### 2.7 Schedule — `/student/schedule`
+### 2.8 Schedule — `/student/schedule`
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────┐
@@ -316,7 +338,7 @@
 └──────────┴───────────────────────────────────────────────────────┘
 ```
 
-### 2.8 Notifications — `/student/notifications`
+### 2.9 Notifications — `/student/notifications`
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────┐
@@ -343,7 +365,7 @@
 └──────────┴───────────────────────────────────────────────────────┘
 ```
 
-### 2.9 Student Profile — `/student/profile`
+### 2.10 Student Profile — `/student/profile`
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────┐
@@ -366,7 +388,7 @@
 └──────────┴───────────────────────────────────────────────────────┘
 ```
 
-### 2.10 Student Settings — `/student/settings`
+### 2.11 Student Settings — `/student/settings`
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────┐
@@ -716,6 +738,13 @@ Same CRUD pattern. Columns: Code, Name, Professor, Schedule, Students. Form incl
 │            │  Fri ██████░░░░░░  62%                             │
 │            │                                                   │
 │            │  ⚠ Low Attendance: MATH202 (5 students < 60%)     │
+│            │                                                   │
+│            │  ──── Predictive: At-Risk (next 2 weeks) ────      │
+│            │  J. Santos (MATH202) 79% · A. Reyes (CS101) 74%   │
+│            │                                                   │
+│            │  ──── Prescriptive: Recommended Actions ────      │
+│            │  ✓ Alert at-risk students   ✓ Hold review session  │
+│            │  ✓ Notify prof of Friday dip (62%)                 │
 │            │              [📥 Export Analytics]                  │
 │            └──────────────────────────────────────────────────────┘
 └────────────┴──────────────────────────────────────────────────────┘
@@ -810,7 +839,25 @@ Same CRUD pattern. Columns: Code, Name, Professor, Schedule, Students. Form incl
 
 ### 4.12 Admin Profile
 
-Same as Student Profile (2.9). Fields: Admin ID, Name, Email, Role (Super Admin / Admin), Last Login.
+Same as Student Profile (2.10). Fields: Admin ID, Name, Email, Role (Super Admin / Admin), Last Login.
+
+### 4.13 Admin Liveness Review — `/admin/liveness/review`
+
+```
+┌────────────┬────────────────────────────────────────────────────┐
+│ ☰          │  Liveness Review                                    │
+│────────────│────────────────────────────────────────────────────│
+│            │  Flagged scans awaiting manual review               │
+│            │  ┌──────┬────────────┬──────────┬──────────────┐   │
+│            │  │ Time │ Student    │ Reason   │ Evidence     │   │
+│            │  ├──────┼────────────┼──────────┼──────────────┤   │
+│            │  │09:02 │ J. Santos  │ GPS 35m  │ [View bundle] │  │
+│            │  │08:55 │ A. Reyes   │ Face 62% │ [View bundle] │  │
+│            │  └──────┴────────────┴──────────┴──────────────┘   │
+│            │  [Approve] [Reject] [Export log]                    │
+│            └──────────────────────────────────────────────────────┘
+└────────────┴──────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -845,6 +892,7 @@ Offline state (persistent):
 ┌─────────────────────────────────────────────────────────────────┐
 │ ⚠ You are offline · Records will sync when connected.  [✕]     │
 │                                                    3 pending   │
+│ (2 include face-liveness evidence — verified after sync)        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -873,19 +921,20 @@ Offline state (persistent):
    │Dash(2.1) │    │Dash (3.1) │    │Dash (4.1) │
    ├──────────┤    ├───────────┤    ├───────────┤
    │Scan(2.2) │    │Open Ses   │    │Students   │
-   │Hist(2.6) │    │Act Ses    │    │Profs (4.4)│
-   │Sched(2.7)│    │AttList    │    │Courses(4.5)│
-   │Notif(2.8)│    │SesHist    │    │AttOver    │
-   │Prof(2.9) │    │Courses    │    │Analytics  │
-   │Set(2.10) │    │Reports    │    │Reports    │
-   │          │    │Export     │    │Audit      │
-   │          │    │Prof/Set   │    │Settings   │
+   │Live(2.4) │    │Act Ses    │    │Profs (4.4)│
+   │Hist(2.7) │    │AttList    │    │Courses(4.5)│
+   │Sched(2.8)│    │SesHist    │    │AttOver    │
+   │Notif(2.9)│    │Courses    │    │Review(4.13)│
+   │Prof(2.10)│    │Reports    │    │Analytics  │
+   │Set(2.11) │    │Export     │    │Reports    │
+   │          │    │Prof/Set   │    │Audit      │
+   │          │    │           │    │Settings   │
    │          │    │           │    │Archive    │
    │          │    │           │    │Profile    │
    └──────────┘    └───────────┘    └───────────┘
 ```
 
-### All 34 Screens by Route
+### All 36 Screens by Route
 
 | # | Screen | Route | Role |
 |---|--------|-------|------|
@@ -896,33 +945,35 @@ Offline state (persistent):
 | 5 | Dashboard | `/student/dashboard` | Student |
 | 6 | QR Scanner | `/student/scan` | Student |
 | 7 | Permission Prompt | (modal) | Student |
-| 8 | Scan Success | (overlay) | Student |
-| 9 | Scan Failure | (overlay) | Student |
-| 10 | History | `/student/history` | Student |
-| 11 | Schedule | `/student/schedule` | Student |
-| 12 | Notifications | `/student/notifications` | Student |
-| 13 | Profile | `/student/profile` | Student |
-| 14 | Settings | `/student/settings` | Student |
-| 15 | Dashboard | `/professor/dashboard` | Professor |
-| 16 | Open Session | `/professor/sessions/create` | Professor |
-| 17 | Active Session | `/professor/sessions/active/[id]` | Professor |
-| 18 | Attendance List | `/professor/attendance` | Professor |
-| 19 | Session History | `/professor/sessions/history` | Professor |
-| 20 | Courses | `/professor/courses` | Professor |
-| 21 | Reports | `/professor/reports` | Professor |
-| 22 | Export | `/professor/attendance/export` | Professor |
-| 23 | Dashboard | `/admin/dashboard` | Admin |
-| 24 | Student Mgmt | `/admin/students` | Admin |
-| 25 | CSV Import | `/admin/students/import` | Admin |
-| 26 | Professor Mgmt | `/admin/professors` | Admin |
-| 27 | Course Mgmt | `/admin/courses` | Admin |
-| 28 | Attendance Overview | `/admin/attendance/overview` | Admin |
-| 29 | Analytics | `/admin/attendance/analytics` | Admin |
-| 30 | Reports | `/admin/reports` | Admin |
-| 31 | Audit Logs | `/admin/audit-logs` | Admin |
-| 32 | System Settings | `/admin/system/settings` | Admin |
-| 33 | Archive | `/admin/students/archive` | Admin |
-| 34 | 404 Error | `/+error` | Global |
+| 8 | Face Liveness Challenge | (overlay) | Student |
+| 9 | Scan Success | (overlay) | Student |
+| 10 | Scan Failure | (overlay) | Student |
+| 11 | History | `/student/history` | Student |
+| 12 | Schedule | `/student/schedule` | Student |
+| 13 | Notifications | `/student/notifications` | Student |
+| 14 | Profile | `/student/profile` | Student |
+| 15 | Settings | `/student/settings` | Student |
+| 16 | Dashboard | `/professor/dashboard` | Professor |
+| 17 | Open Session | `/professor/sessions/create` | Professor |
+| 18 | Active Session | `/professor/sessions/active/[id]` | Professor |
+| 19 | Attendance List | `/professor/attendance` | Professor |
+| 20 | Session History | `/professor/sessions/history` | Professor |
+| 21 | Courses | `/professor/courses` | Professor |
+| 22 | Reports | `/professor/reports` | Professor |
+| 23 | Export | `/professor/attendance/export` | Professor |
+| 24 | Dashboard | `/admin/dashboard` | Admin |
+| 25 | Student Mgmt | `/admin/students` | Admin |
+| 26 | CSV Import | `/admin/students/import` | Admin |
+| 27 | Professor Mgmt | `/admin/professors` | Admin |
+| 28 | Course Mgmt | `/admin/courses` | Admin |
+| 29 | Attendance Overview | `/admin/attendance/overview` | Admin |
+| 30 | Liveness Review | `/admin/liveness/review` | Admin |
+| 31 | Analytics | `/admin/attendance/analytics` | Admin |
+| 32 | Reports | `/admin/reports` | Admin |
+| 33 | Audit Logs | `/admin/audit-logs` | Admin |
+| 34 | System Settings | `/admin/system/settings` | Admin |
+| 35 | Archive | `/admin/students/archive` | Admin |
+| 36 | 404 Error | `/+error` | Global |
 
 ---
 
@@ -930,6 +981,7 @@ Offline state (persistent):
 
 - **All screens** are mobile-responsive: sidebar collapses to bottom tab bar on small screens
 - **Permission prompts** (camera + GPS) appear before first scanner use
+- **Face liveness** inserts a challenge step (blink / turn head) between QR scan and result; offline scans queue evidence for later verification
 - **Offline banner** appears on all authenticated screens when connection is lost
 - **Prof/Admin profile & settings** screens mirror the student layouts (2.9, 2.10) with role-specific fields
 - **CRUD screens** (students, professors, courses) follow the same create/edit/list pattern
