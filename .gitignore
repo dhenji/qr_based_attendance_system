@@ -1,0 +1,39 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# env files
+.env
+.env.*
+!.env.example
+!.env.test
+
+# node
+node_modules/
+/.svelte-kit
+/build
+/.output
+/.vercel
+/.netlify
+/.wrangler
+
+# vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# misc
+*.log
+
+# docker
+docker-compose.override.yml
+postgres_data/
+pgdata/
