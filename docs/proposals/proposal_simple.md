@@ -41,9 +41,11 @@ A web-based application that:
 | QR Code Scanning | Scan student ID card QR using phone camera                    |
 | Session Code     | Professor shares a code; required to submit attendance        |
 | GPS Verification | Ensures student is inside the classroom                       |
+| Face Liveness    | Blink/head-turn challenges to block photo, replay & distortion tricks |
 | Offline Mode     | Saves attendance locally when no internet; auto-uploads later |
 | Student Roster   | Import student from CSV file                                  |
 | Dashboard        | View attendance in real time                                  |
+| Analytics        | At-risk forecasting and recommendations for professors        |
 | Reports          | Download attendance reports                                   |
 
 ## 7. Technology Stack
@@ -61,6 +63,8 @@ A web-based application that:
 - **Offline-First Architecture** — local storage + auto-sync
 - **HMAC Hashing** — secure session codes
 - **Geolocation Algorithms** — GPS classroom validation
+- **Liveness Protocol** — challenge-response anti-spoofing with offline deferred validation
+- **Data Analytics** — descriptive, diagnostic, predictive, and prescriptive reporting
 - **Relational Database Design** — normalized tables
 
 ## 9. Expected Outcome
@@ -68,8 +72,10 @@ A web-based application that:
 A fully functional attendance system that:
 
 - Speeds up attendance to under 1 second per student
-- Prevents cheating through session codes + GPS + QR liveness detection
-- Works with or without internet
+- Prevents cheating through session codes + GPS + QR liveness + face liveness
+- Blocks photo, screen-recorder, video-replay, and distortion attacks
+- Works with or without internet (liveness evidence re-validated after sync)
+- Provides at-risk analytics and recommendations for professors
 - Works on any phone with a camera (no app installation needed)
 
 ## 10. Team Members

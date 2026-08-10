@@ -4,10 +4,6 @@
 > frontend structure for the Attendance System. Comments beside each
 > major file describe its responsibility.
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 23cd61d (Visual Mockup Presentation with Descriptions)
 ```text
 frontend/
 │
@@ -120,9 +116,12 @@ frontend/
 │   │   │   │   ├── ScannerOverlay.svelte    # Scanner guide
 │   │   │   │   ├── SessionCodeInput.svelte  # Session code input
 │   │   │   │   ├── GPSStatus.svelte         # GPS indicator
+│   │   │   │   ├── FaceChallenge.svelte     # Blink/head-turn liveness challenges
+│   │   │   │   ├── ChallengePrompt.svelte   # Live challenge instruction overlay
+│   │   │   │   ├── LivenessStatus.svelte    # Liveness evidence status
 │   │   │   │   ├── PermissionPrompt.svelte  # Camera/GPS permissions
 │   │   │   │   ├── ScanResult.svelte        # Result message
-│   │   │   │   └── OfflineStatus.svelte     # Pending sync
+│   │   │   │   └── OfflineStatus.svelte     # Pending sync/liveness queue
 │   │   │   ├── dashboard/              # Dashboard widgets
 │   │   │   ├── charts/                 # Chart components
 │   │   │   ├── forms/                  # Form components
@@ -139,6 +138,8 @@ frontend/
 │   │   │   ├── course.ts               # Course API
 │   │   │   ├── report.ts               # Reports API
 │   │   │   ├── session.ts              # Session API
+│   │   │   ├── liveness.ts             # Liveness evidence API
+│   │   │   ├── analytics.ts            # Analytics API (aggregations, forecasts)
 │   │   │   ├── gps.ts                  # GPS helpers
 │   │   │   └── qr.ts                   # QR helpers
 │   │   ├── stores/                     # Global stores
