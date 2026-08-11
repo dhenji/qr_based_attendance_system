@@ -1,164 +1,177 @@
-# Frontend Architecture (Production Ready)
+# Frontend Architecture — QR Attendance System
 
-> This document contains a recommended production-ready SvelteKit
-> frontend structure for the Attendance System. Comments beside each
-> major file describe its responsibility.
+> Canonical structure for `frontend/src/`. Replaces the earlier flat
+> `services/ + stores/ + components/` layout with domain-driven **feature
+> slices** that mirror `backend/features/` 1:1.
 
-```text
-frontend/
-│
-├── src/
-│   ├── app.html                          # Main HTML template
-│   ├── app.d.ts                          # Global TypeScript declarations
-│   ├── hooks.server.ts                   # Authentication, authorization, request hooks
-│   ├── hooks.client.ts                   # Theme, analytics, reconnect handling
-│   ├── service-worker.ts                 # PWA offline caching & background sync
-│   │
-│   ├── routes/
-│   │   ├── +layout.svelte                # Root application layout
-│   │   ├── +error.svelte                 # Global error page
-│   │   ├── +page.svelte                  # Landing page
-│   │   │
-│   │   ├── (auth)/
-│   │   │   ├── +layout.svelte            # Authentication layout
-│   │   │   ├── login/
-│   │   │   │   ├── +page.svelte          # Login page
-│   │   │   │   └── +page.ts              # Redirect authenticated users
-│   │   │   ├── register/
-│   │   │   │   ├── +page.svelte          # Registration page
-│   │   │   │   └── +page.ts              # Registration loader
-│   │   │   ├── forgot-password/
-│   │   │   │   └── +page.svelte          # Forgot password
-│   │   │   └── reset-password/
-│   │   │       └── +page.svelte          # Reset password
-│   │   │
-│   │   ├── (student)/
-│   │   │   ├── +layout.svelte            # Student layout/sidebar
-│   │   │   ├── dashboard/
-│   │   │   │   ├── +page.svelte          # Student dashboard
-│   │   │   │   ├── attendance/+page.svelte   # Today's attendance
-│   │   │   │   ├── history/+page.svelte      # Attendance history
-│   │   │   │   ├── schedule/+page.svelte     # Class schedule
-│   │   │   │   ├── notifications/+page.svelte# Notifications
-│   │   │   │   ├── profile/+page.svelte      # Student profile
-│   │   │   │   └── settings/+page.svelte     # Student settings
-│   │   │   └── scan/
-│   │   │       ├── +page.svelte          # QR scanner
-│   │   │       ├── success/+page.svelte  # Scan success
-│   │   │       └── failed/+page.svelte   # Scan failed
-│   │   │
-│   │   ├── (professor)/
-│   │   │   ├── +layout.svelte            # Professor layout
-│   │   │   └── dashboard/
-│   │   │       ├── +page.svelte          # Professor dashboard
-│   │   │       ├── attendance/
-│   │   │       │   ├── +page.svelte      # Attendance list
-│   │   │       │   ├── live/+page.svelte # Live attendance
-│   │   │       │   ├── history/+page.svelte # Attendance history
-│   │   │       │   └── export/+page.svelte  # Export attendance
-│   │   │       ├── sessions/
-│   │   │       │   ├── +page.svelte      # Sessions overview
-│   │   │       │   ├── create/+page.svelte # Create session
-│   │   │       │   ├── active/+page.svelte # Active session
-│   │   │       │   └── history/+page.svelte # Session history
-│   │   │       ├── courses/+page.svelte  # Assigned courses
-│   │   │       ├── reports/
-│   │   │       │   ├── +page.svelte      # Reports dashboard
-│   │   │       │   ├── daily/+page.svelte
-│   │   │       │   ├── weekly/+page.svelte
-│   │   │       │   ├── monthly/+page.svelte
-│   │   │       │   └── export/+page.svelte
-│   │   │       ├── profile/+page.svelte  # Professor profile
-│   │   │       └── settings/+page.svelte # Professor settings
-│   │   │
-│   │   └── (admin)/
-│   │       ├── +layout.svelte            # Admin layout
-│   │       └── dashboard/
-│   │           ├── +page.svelte          # Admin dashboard
-│   │           ├── students/
-│   │           │   ├── +page.svelte      # Student management
-│   │           │   ├── create/+page.svelte
-│   │           │   ├── edit/+page.svelte
-│   │           │   ├── import/+page.svelte
-│   │           │   └── archive/+page.svelte
-│   │           ├── professors/
-│   │           │   ├── +page.svelte
-│   │           │   ├── create/+page.svelte
-│   │           │   └── edit/+page.svelte
-│   │           ├── courses/
-│   │           │   ├── +page.svelte
-│   │           │   ├── create/+page.svelte
-│   │           │   ├── edit/+page.svelte
-│   │           │   └── schedule/+page.svelte
-│   │           ├── attendance/
-│   │           │   ├── +page.svelte
-│   │           │   ├── overview/+page.svelte
-│   │           │   └── analytics/+page.svelte
-│   │           ├── reports/
-│   │           │   ├── +page.svelte
-│   │           │   ├── attendance/+page.svelte
-│   │           │   ├── students/+page.svelte
-│   │           │   ├── professors/+page.svelte
-│   │           │   └── export/+page.svelte
-│   │           ├── audit-logs/+page.svelte   # System logs
-│   │           ├── system/
-│   │           │   ├── settings/+page.svelte
-│   │           │   ├── backup/+page.svelte
-│   │           │   └── maintenance/+page.svelte
-│   │           └── profile/+page.svelte
-│   │
-│   ├── lib/
-│   │   ├── components/
-│   │   │   ├── attendance/              # Attendance UI components
-│   │   │   ├── scanner/                 # QR scanner module
-│   │   │   │   ├── QRScanner.svelte         # Initialize scanner
-│   │   │   │   ├── CameraView.svelte        # Camera preview
-│   │   │   │   ├── ScannerOverlay.svelte    # Scanner guide
-│   │   │   │   ├── SessionCodeInput.svelte  # Session code input
-│   │   │   │   ├── GPSStatus.svelte         # GPS indicator
-│   │   │   │   ├── FaceChallenge.svelte     # Blink/head-turn liveness challenges
-│   │   │   │   ├── ChallengePrompt.svelte   # Live challenge instruction overlay
-│   │   │   │   ├── LivenessStatus.svelte    # Liveness evidence status
-│   │   │   │   ├── PermissionPrompt.svelte  # Camera/GPS permissions
-│   │   │   │   ├── ScanResult.svelte        # Result message
-│   │   │   │   └── OfflineStatus.svelte     # Pending sync/liveness queue
-│   │   │   ├── dashboard/              # Dashboard widgets
-│   │   │   ├── charts/                 # Chart components
-│   │   │   ├── forms/                  # Form components
-│   │   │   ├── modals/                 # Modal dialogs
-│   │   │   ├── navigation/             # Navbar/Sidebar
-│   │   │   ├── ui/                     # Generic UI
-│   │   │   └── common/                 # Loading/Error states
-│   │   ├── services/                   # API services
-│   │   │   ├── api.ts                  # Fetch wrapper
-│   │   │   ├── auth.ts                 # Auth API
-│   │   │   ├── attendance.ts           # Attendance API
-│   │   │   ├── student.ts              # Student API
-│   │   │   ├── professor.ts            # Professor API
-│   │   │   ├── course.ts               # Course API
-│   │   │   ├── report.ts               # Reports API
-│   │   │   ├── session.ts              # Session API
-│   │   │   ├── liveness.ts             # Liveness evidence API
-│   │   │   ├── analytics.ts            # Analytics API (aggregations, forecasts)
-│   │   │   ├── gps.ts                  # GPS helpers
-│   │   │   └── qr.ts                   # QR helpers
-│   │   ├── stores/                     # Global stores
-│   │   ├── offline/                    # IndexedDB & sync logic
-│   │   ├── validators/                 # Zod validators
-│   │   ├── constants/                  # Roles, routes, status
-│   │   ├── types/                      # TypeScript models
-│   │   ├── utils/                      # Shared utilities
-│   │   └── server/
-│   │       ├── auth.ts                 # Server auth helpers
-│   │       ├── cookies.ts              # Cookie helpers
-│   │       ├── permissions.ts          # RBAC utilities
-│   │       └── session.ts              # Server session utilities
-│
-├── static/
-│   ├── icons/                          # PWA icons
-│   ├── images/                         # Images & logos
-│   ├── fonts/                          # Custom fonts
-│   ├── manifest.json                   # PWA manifest
-│   ├── robots.txt                      # Robots rules
-│   └── favicon.png                     # Website icon
+## Feature-Slice Convention
+
+Each `features/*` folder owns its domain. Files are created only when
+needed — no `.gitkeep` placeholders.
+
+| File | Responsibility |
+| ---- | -------------- |
+| `store.svelte.ts` | Domain state — runes, `.svelte.ts` extension required |
+| `service.ts` | API calls (mock or real, same interface — swappable) |
+| `schema.ts` | Zod schemas for this domain |
+| `mock.ts` | Fixtures / seed data |
+| `bundle.ts` | Domain-specific builders (e.g. evidence bundles) |
+| `types.ts` | Only if domain types aren't shared (usually in `shared/types`) |
+| `components/` | Domain-specific Svelte components (only if needed) |
+
+`features/{course,enrollment,analytics}` are documented but **not created
+yet** — the mockup pass doesn't use them.
+
+## Tree
+
 ```
+frontend/
+├── package.json · svelte.config.js · vite.config.ts · tsconfig.json
+├── .npmrc · .env.example · .gitignore · README.md
+├── static/
+│   └── favicon.ico (robots.txt shown in docs; favicon.svg already in lib/assets)
+│
+└── src/
+    ├── app.html                                  (unchanged)
+    ├── app.d.ts                                  (unchanged)
+    ├── hooks.client.ts                           (mockup)   # connectivity → offline store; sync trigger
+    │
+    ├── lib/
+    │   ├── index.ts                              (mockup)   # barrel exports
+    │   │
+    │   ├── app/
+    │   │   ├── session.svelte.ts                 (mockup)   # auth session, role switcher, guards
+    │   │   └── offline.svelte.ts                 (mockup)   # online status + pending-sync queue
+    │   │
+    │   ├── api/
+    │   │   ├── client.ts                         (mockup)   # fetch wrapper, error types, MOCK flag
+    │   │   └── endpoints.ts                      (mockup)   # typed endpoint map (mirrors backend)
+    │   │
+    │   ├── features/
+    │   │   ├── auth/                            # ───────── mockup ─────────
+    │   │   │   ├── service.ts                    # mock login/register/logout
+    │   │   │   ├── schema.ts                     # zod: login + register forms
+    │   │   │   ├── mock.ts                       # demo users (student/prof/admin)
+    │   │   │   └── components/
+    │   │   │       ├── LoginForm.svelte
+    │   │   │       └── RegisterForm.svelte
+    │   │   │
+    │   │   ├── student/                         # ───────── mockup ─────────
+    │   │   │   ├── service.ts                    # profile, history, schedule
+    │   │   │   ├── mock.ts                       # current student seed
+    │   │   │   └── components/
+    │   │   │       └── DashboardStats.svelte     # rate/today/total cards
+    │   │   │
+    │   │   ├── session/                         # ───────── mockup ─────────
+    │   │   │   ├── store.svelte.ts               # active session state (professor view)
+    │   │   │   ├── service.ts                    # open/close/list/history
+    │   │   │   ├── schema.ts                     # zod: create-session form
+    │   │   │   ├── mock.ts                       # sample sessions + live-feed stream
+    │   │   │   └── components/
+    │   │   │       ├── OpenSessionForm.svelte
+    │   │   │       ├── SessionCodeCard.svelte    # projector-ready code + timer
+    │   │   │       └── LiveFeedTable.svelte      # auto-refreshing scan table
+    │   │   │
+    │   │   ├── attendance/                      # ───────── mockup ─────────
+    │   │   │   ├── store.svelte.ts               # today's records, recent activity
+    │   │   │   ├── service.ts                    # submit evidence, list records
+    │   │   │   ├── schema.ts                     # zod: evidence bundle
+    │   │   │   └── mock.ts                       # seeded attendance (78% rate)
+    │   │   │
+    │   │   ├── liveness/                        # ───────── mockup ─────────
+    │   │   │   ├── store.svelte.ts               # scan state machine (idle→qr→gps→face→done)
+    │   │   │   ├── bundle.ts                     # evidence-bundle builder (nonce, timestamp, scores)
+    │   │   │   ├── schema.ts                     # zod: evidence bundle validation
+    │   │   │   └── components/
+    │   │   │       ├── QRScanner.svelte          # real html5-qrcode camera scan
+    │   │   │       ├── SessionCodeInput.svelte
+    │   │   │       ├── GPSStatus.svelte          # GPS read + geofence pill
+    │   │   │       ├── FaceChallenge.svelte      # challenge overlay (simulated pass)
+    │   │   │       ├── PermissionPrompt.svelte   # camera/GPS permissions modal
+    │   │   │       └── ScanResult.svelte         # success/failure overlay
+    │   │   │
+    │   │   ├── sync/                            # ───────── mockup ─────────
+    │   │   │   ├── db.ts                         # IndexedDB wrapper (queue store)
+    │   │   │   └── engine.ts                     # enqueue/dequeue, retry, status transitions
+    │   │   │
+    │   │   ├── course/  ○                        (deferred — empty until backend)
+    │   │   ├── enrollment/ ○                     (deferred)
+    │   │   └── analytics/ ○                      (deferred)
+    │   │
+    │   └── shared/
+    │       ├── styles/
+    │       │   └── tokens.css                    (mockup)   # palette, spacing, radius, status colors
+    │       ├── ui/                               (mockup)
+    │       │   ├── Button.svelte · Card.svelte · Input.svelte · Select.svelte
+    │       │   ├── Toggle.svelte · Table.svelte · Badge.svelte
+    │       │   ├── Modal.svelte · EmptyState.svelte
+    │       ├── components/                       (mockup)
+    │       │   ├── Sidebar.svelte · Topbar.svelte
+    │       │   ├── StatusBadge.svelte · OfflineBanner.svelte
+    │       ├── utils/                            (mockup)
+    │       │   ├── geo.ts                        # haversine + geofence check
+    │       │   ├── format.ts                     # date/time/percent
+    │       │   ├── gen.ts                        # fake-id/name generation for fixtures
+    │       │   └── qr.ts                         # html5-qrcode init helpers
+    │       ├── constants/                        (mockup)
+    │       │   ├── roles.ts · routes.ts · status.ts
+    │       ├── types/                            (mockup)
+    │       │   ├── user.ts · student.ts · course.ts · enrollment.ts
+    │       │   ├── session.ts · attendance.ts · liveness.ts · sync.ts
+    │       │   └── index.ts                      # barrel
+    │       └── validators/                       (mockup)
+    │           └── base.ts                       # shared zod bits (email, id, password strength)
+    │
+    └── routes/
+        ├── +layout.svelte                        (mockup)   # tokens import, OfflineBanner, Topbar
+        ├── +page.svelte                          (mockup)   # landing + role switcher
+        │
+        ├── (auth)/
+        │   ├── +layout.svelte                    (mockup)
+        │   ├── login/+page.svelte                (mockup)
+        │   ├── register/+page.svelte             (mockup)
+        │   ├── forgot-password/+page.svelte      (stub)
+        │   └── reset-password/+page.svelte       (stub)
+        │
+        ├── (student)/
+        │   ├── +layout.svelte                    (mockup)   # sidebar shell
+        │   ├── dashboard/+page.svelte            (mockup)
+        │   ├── scan/+page.svelte                 (mockup)   # the centerpiece flow
+        │   ├── history/+page.svelte              (mockup)
+        │   ├── schedule/+page.svelte             (stub)
+        │   ├── profile/+page.svelte              (stub)
+        │   └── settings/+page.svelte             (stub)
+        │
+        ├── (professor)/
+        │   ├── +layout.svelte                    (mockup)   # sidebar shell
+        │   ├── dashboard/+page.svelte            (mockup)
+        │   ├── sessions/
+        │   │   ├── +page.svelte                  (stub)     # overview
+        │   │   ├── create/+page.svelte           (mockup)
+        │   │   ├── active/[id]/+page.svelte      (mockup)   # projector mode + live feed
+        │   │   └── history/+page.svelte          (stub)
+        │   ├── attendance/+page.svelte           (mockup)   # records list + filters
+        │   ├── reports/+page.svelte              (stub)
+        │   └── courses/+page.svelte              (stub)
+        │
+        └── (admin)/
+            ├── +layout.svelte                    (mockup)   # sidebar shell
+            ├── dashboard/+page.svelte            (stub)
+            ├── students/+page.svelte             (mockup)   # table + CSV import modal + edit
+            ├── courses/+page.svelte              (stub)
+            ├── reports/+page.svelte              (stub)
+            └── system/+page.svelte               (stub)
+```
+
+## Key Rules
+
+- **Routes are thin glue** over features — no business logic in `.svelte` pages
+- **`api/` sits above features** — transport is shared infra; features depend on `$lib/api`, never the reverse
+- **`app/` vs `features/`** — app-wide state created once (session/offline); domain state lives in feature stores
+- **`shared/ui` = dumb primitives · `shared/components` = app-aware composites** (Sidebar needs session state, Button doesn't)
+- **Runes only** — `$state`/`$props`, never legacy reactive declarations
+- **Mock-first** — services implement a typed contract, `MOCK` flag in `api/client.ts`; swap to real fetch when backend endpoints land
+
+## Deferred (later passes)
+
+`hooks.server.ts` · `service-worker.ts` · `static/icons/` · `vite-plugin-pwa` · `robots.txt`
