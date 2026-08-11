@@ -24,13 +24,13 @@ A web application that:
 
 Every attendance submission is validated against **five layers** before it is accepted; any single failure rejects the record.
 
-| # | Layer              | What It Prevents                     | CS Concept                   |
-| - | ------------------ | ------------------------------------ | ---------------------------- |
-| 1 | HMAC Session Code  | Outsiders submitting attendance      | HMAC-SHA256                  |
-| 2 | GPS Geofencing     | Remote/fake submissions              | Haversine Algorithm          |
-| 3 | Live QR Detection  | Screenshot of a classmate's ID       | Reflection/Liveness Analysis |
-| 4 | One Scan Per Session | Same ID used multiple times        | Database Constraint          |
-| 5 | Enrollment Check   | Non-enrolled students marking attendance | Relational FK Constraint |
+| #   | Layer                | What It Prevents                         | CS Concept                   |
+| --- | -------------------- | ---------------------------------------- | ---------------------------- |
+| 1   | HMAC Session Code    | Outsiders submitting attendance          | HMAC-SHA256                  |
+| 2   | GPS Geofencing       | Remote/fake submissions                  | Haversine Algorithm          |
+| 3   | Live QR Detection    | Screenshot of a classmate's ID           | Reflection/Liveness Analysis |
+| 4   | One Scan Per Session | Same ID used multiple times              | Database Constraint          |
+| 5   | Enrollment Check     | Non-enrolled students marking attendance | Relational FK Constraint     |
 
 ## Features
 
@@ -46,13 +46,13 @@ Every attendance submission is validated against **five layers** before it is ac
 
 ## Tech Stack
 
-| Component | Technology                                        |
-| --------- | ------------------------------------------------- |
-| Backend   | Python (FastAPI, SQLAlchemy async, Alembic)       |
-| Frontend  | SvelteKit 5 + TypeScript (strict)                 |
-| Database  | PostgreSQL 16                                     |
+| Component | Technology                                         |
+| --------- | -------------------------------------------------- |
+| Backend   | Python (FastAPI, SQLAlchemy async, Alembic)        |
+| Frontend  | SvelteKit 5 + TypeScript (strict)                  |
+| Database  | PostgreSQL 16                                      |
 | Platform  | Progressive Web App (works on any device; planned) |
-| Tooling   | Docker / docker-compose, html5-qrcode, zod        |
+| Tooling   | Docker / docker-compose, html5-qrcode, zod         |
 
 ## Repository Layout
 
@@ -99,19 +99,19 @@ npm run dev            # http://localhost:5173
 
 Backend (`backend/.env.example`):
 
-| Variable         | Default                                                        | Purpose                          |
-| ---------------- | -------------------------------------------------------------- | -------------------------------- |
-| `APP_NAME`       | `QR Attendance System API`                                     | API name                         |
-| `DEBUG`          | `true`                                                         | Enables SQL echo                 |
-| `DATABASE_URL`   | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection |
-| `CORS_ORIGINS`   | `http://localhost:5173`                                        | Allowed browser origins          |
-| `HMAC_SECRET_KEY`| *(empty)*                                                      | Used for secure session codes    |
+| Variable          | Default                                                                | Purpose                       |
+| ----------------- | ---------------------------------------------------------------------- | ----------------------------- |
+| `APP_NAME`        | `QR Attendance System API`                                             | API name                      |
+| `DEBUG`           | `true`                                                                 | Enables SQL echo              |
+| `DATABASE_URL`    | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection   |
+| `CORS_ORIGINS`    | `http://localhost:5173`                                                | Allowed browser origins       |
+| `HMAC_SECRET_KEY` | _(empty)_                                                              | Used for secure session codes |
 
 Frontend (`frontend/.env.example`):
 
-| Variable          | Default                 | Purpose                            |
-| ----------------- | ----------------------- | ---------------------------------- |
-| `PUBLIC_API_URL`  | `http://localhost:8000` | Backend base URL exposed to browser |
+| Variable         | Default                 | Purpose                             |
+| ---------------- | ----------------------- | ----------------------------------- |
+| `PUBLIC_API_URL` | `http://localhost:8000` | Backend base URL exposed to browser |
 
 ## Verification
 
@@ -137,15 +137,10 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ## Project Status
 
-| Area     | Status                                         |
-| -------- | ---------------------------------------------- |
+| Area     | Status                                                                      |
+| -------- | --------------------------------------------------------------------------- |
 | Backend  | Working skeleton — FastAPI with `/health`, async SQLAlchemy session, config |
-| Frontend | Scaffold only — deps installed, no `src/routes/` yet |
-| Features | In progress — feature-sliced backend modules exist but are empty |
-| Tests    | None                                           |
+| Frontend | Scaffold only — deps installed, no `src/routes/` yet                        |
+| Features | In progress — feature-sliced backend modules exist but are empty            |
+| Tests    | None                                                                        |
 
-## Team
-
-| Name | Role |
-| ---- | ---- |
-| [Name] | [Role] |
