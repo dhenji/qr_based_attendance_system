@@ -32,6 +32,10 @@ attendance-system/
 │   │   ├── enrollment/               # │ └─ router.py  (endpoints)
 │   │   ├── session/                  #   HMAC session codes & expiry
 │   │   ├── attendance/               #   validation pipeline (HMAC→GPS→liveness→uniqueness→enrollment)
+│   │   ├── liveness/                 #   face challenges, evidence bundles,
+│   │   │                             #   nonce registry, risk-fusion scoring
+│   │   ├── analytics/                #   aggregations, at-risk forecasting,
+│   │   │                             #   prescriptive rule engine
 │   │   └── sync/                     #   offline SyncQueue processing
 │   │
 │   ├── tests/                        # (planned) Unit & integration tests
@@ -101,9 +105,12 @@ attendance-system/
 │   │   │   │   │   ├── ScannerOverlay.svelte  # Scanner guide
 │   │   │   │   │   ├── SessionCodeInput.svelte# Session code input
 │   │   │   │   │   ├── GPSStatus.svelte       # GPS indicator
+│   │   │   │   │   ├── FaceChallenge.svelte   # Blink/head-turn liveness challenges
+│   │   │   │   │   ├── ChallengePrompt.svelte # Live challenge instruction overlay
+│   │   │   │   │   ├── LivenessStatus.svelte  # Liveness evidence status
 │   │   │   │   │   ├── PermissionPrompt.svelte# Camera/GPS permissions
 │   │   │   │   │   ├── ScanResult.svelte      # Result message
-│   │   │   │   │   └── OfflineStatus.svelte   # Pending sync
+│   │   │   │   │   └── OfflineStatus.svelte   # Pending sync/liveness queue
 │   │   │   │   ├── dashboard/         # Dashboard widgets
 │   │   │   │   ├── charts/            # Chart components
 │   │   │   │   ├── forms/             # Form components
@@ -121,6 +128,8 @@ attendance-system/
 │   │   │   │   ├── course.ts         # Course API
 │   │   │   │   ├── report.ts         # Reports API
 │   │   │   │   ├── session.ts        # Session API
+│   │   │   │   ├── liveness.ts       # Liveness evidence API
+│   │   │   │   ├── analytics.ts      # Analytics API (aggregations, forecasts)
 │   │   │   │   ├── gps.ts            # GPS helpers
 │   │   │   │   └── qr.ts             # QR helpers
 │   │   │   │
@@ -184,6 +193,8 @@ attendance-system/
 | `backend/features/session/` + `backend/core/security.py` | HMAC-based Session Auth |
 | `frontend/src/lib/utils/geolocation.ts` + `backend/features/attendance/service.py` | Geolocation Proximity (Haversine) |
 | `frontend/src/lib/components/scanner/QRScanner.svelte` | Live QR Detection (Liveness) |
+| `frontend/src/lib/components/scanner/FaceChallenge.svelte` + `backend/features/liveness/` | Liveness Protocol: challenge-response, evidence bundles, nonce anti-replay, risk fusion |
+| `backend/features/analytics/` | Data Mining: descriptive/diagnostic aggregation, predictive forecasting, prescriptive rules |
 | `backend/features/*/model.py` | Database Design & Normalization (3NF) |
 | `backend/features/sync/service.py` + `frontend/src/lib/services/sync.ts` | Offline Sync / Eventual Consistency |
 
