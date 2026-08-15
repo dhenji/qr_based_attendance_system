@@ -15,9 +15,11 @@ attendance-system/
 │   │
 │   ├── shared/                       # Cross-feature helpers
 │   │   ├── __init__.py
+│   │   ├── enums.py                   # UserRole, ValidationStatus, SyncStatus, QueueStatus
+│   │   ├── mixins.py                  # CreatedAtMixin, TimestampMixin
 │   │   ├── dependencies.py           # (planned) get_db, pagination dependencies
 │   │   ├── cache.py                  # (planned) LRU cache (O(1) student lookup)
-│   │   └── base.py                   # (planned) Base model mixins, shared schemas
+│   │   └── base.py                   # (planned) shared schemas
 │   │
 │   ├── api/                          # Router aggregation
 │   │   ├── __init__.py
@@ -45,7 +47,7 @@ attendance-system/
 │   │   └── test_sessions.py
 │   │
 │   ├── alembic/                      # Database migration files
-│   │   └── versions/
+│   │   └── versions/                 # initial_schema (users, students, courses, …)
 │   │
 │   ├── requirements.txt              # Python dependencies
 │   ├── Dockerfile.dev                # Local dev container
@@ -176,11 +178,16 @@ attendance-system/
 │   │   └── wireframes.md             # Wireframes
 │   └── presentations/                # Slides + deck (.pptx, .pdf)
 │
-├── docker-compose.yml                # Local development: PostgreSQL + backend
+├── docker-compose.yml                # Local development: PostgreSQL + migrations + backend
 ├── AGENTS.md                         # Repo conventions & reference
 ├── .gitignore
 └── README.md                         # Project overview & setup instructions
 ```
+
+> **Implemented so far:** `model.py` for `auth/`, `student/`, `course/`, `enrollment/`,
+> `session/`, `attendance/`, `sync/` (all 7 tables created by the initial Alembic
+> migration), plus `shared/enums.py` and `shared/mixins.py`. The rest (`schema.py`,
+> `service.py`, `router.py`, `liveness/`, `analytics/`) is still planned.
 
 ---
 

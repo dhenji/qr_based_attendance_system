@@ -170,6 +170,10 @@ fly deploy
 
 Since Supabase runs its own PostgreSQL and Fly.io hosts the backend separately, migrations need special handling. Choose one:
 
+> **Note:** in local dev, `docker compose up` already applies migrations automatically —
+> the one-shot `migrate` service runs `alembic upgrade head` before the API starts. The
+> options below apply to production.
+
 ### Option A: Run Manually from Local Machine (Simplest)
 
 ```bash
