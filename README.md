@@ -57,10 +57,20 @@ Every attendance submission is validated against **five layers** before it is ac
 ## Repository Layout
 
 ```
-├── frontend/   # SvelteKit app (minimal app shell + routes)
-├── backend/    # FastAPI app (models + Alembic migrations) + Dockerfile.dev
-├── docker-compose.yml  # Local dev: PostgreSQL + migrations + API
-└── docs/       # Proposal, architecture, deployment, design, presentations
+├── .gitignore            # Root-level ignores (env/venv, node, docker data, build output)
+├── frontend/             # SvelteKit app (minimal app shell + routes)
+├── backend/              # FastAPI app — vertical feature slices + Alembic
+│   ├── main.py           # App entry point (/health, CORS, DB lifespan check)
+│   ├── core/             # config.py (pydantic-settings), database.py (async engine + Base)
+│   ├── shared/           # Cross-feature enums + mixins
+│   ├── features/         # auth, student, course, enrollment, session, attendance, sync
+│   │   └── */model.py    # SQLAlchemy models per feature
+│   ├── api/              # get_db dependency
+│   ├── tests/            # Empty scaffold — no backend tests yet
+│   ├── alembic/          # Migrations (initial schema: 68a78206e082)
+│   └── Dockerfile.dev    # Multi-stage: builder → runtime → migrate
+├── docker-compose.yml    # Local dev: PostgreSQL + migrations + API
+└── docs/                 # Proposal, architecture, deployment, design, presentations
 ```
 
 ## Getting Started
@@ -74,8 +84,10 @@ docker compose up --build
 This starts three services:
 
 - **Database**: PostgreSQL on `localhost:5432` (`attendance_sys`)
-- **Migrations**: runs `alembic upgrade head` once, applying the schema before the API boots
+- **Migrations**: builds the `migrate` target of `backend/Dockerfile.dev` and runs `alembic upgrade head` once, applying the schema before the API boots
 - **API**: http://localhost:8000 — health check at `/health`
+
+The backend image is multi-stage: a `builder` stage creates a virtualenv at `/opt/venv` and installs dependencies, a `runtime` stage copies it in for the API, and a `migrate` stage reuses the runtime image with `alembic upgrade head` as its command.
 
 ### Option B — Manual backend
 
@@ -132,19 +144,23 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ## Documentation
 
 - [`docs/proposals/proposal.md`](docs/proposals/proposal.md) — full 11-section proposal
+- [`docs/proposals/proposal_simple.md`](docs/proposals/proposal_simple.md) — 1-page summary
+- [`docs/proposals/models.md`](docs/proposals/models.md) — catalog of models used in anti-spoofing/analytics
+- [`docs/proposals/contributions.md`](docs/proposals/contributions.md) — honest CS contributions (offline liveness protocol)
 - [`docs/architecture/project-structure.md`](docs/architecture/project-structure.md) — intended backend layout
 - [`docs/architecture/frontend-architecture.md`](docs/architecture/frontend-architecture.md) — production-ready frontend structure
 - [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
 - [`docs/design/system-mockup.pdf`](docs/design/system-mockup.pdf) — system mockup
 - [`docs/presentations/presentation-slides.md`](docs/presentations/presentation-slides.md) — slide content
+- [`docs/presentations/presentation.pptx`](docs/presentations/presentation.pptx) — slide deck
 
 ## Project Status
 
 | Area     | Status                                                                        |
 | -------- | ----------------------------------------------------------------------------- |
-| Backend  | FastAPI with `/health`, async SQLAlchemy, all feature models, initial Alembic migration |
-| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present              |
+| Backend  | FastAPI with `/health`, async SQLAlchemy, `core`/`shared` infrastructure, all 7 feature models, initial Alembic migration, multi-stage `Dockerfile.dev` |
+| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present; `html5-qrcode` + `zod` deps |
 | Features | Models implemented; `service` / `schema` / `router` layers pending             |
-| Tests    | Frontend `npm run check` only; no backend tests yet                            |
+| Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold           |
 
