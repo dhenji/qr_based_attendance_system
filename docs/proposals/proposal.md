@@ -311,7 +311,7 @@ AttendanceRecords
   - timestamp
   - gps_lat, gps_lng (recorded at scan time)
   - validation_status (valid / pending / pending_liveness / rejected)
-  - sync_status (synced / pending_sync / failed)
+  - sync_status (synced / pending / failed)
   - created_at
 
 FaceEnrollment

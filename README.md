@@ -58,8 +58,8 @@ Every attendance submission is validated against **five layers** before it is ac
 
 ```
 ├── frontend/   # SvelteKit app (minimal app shell + routes)
-├── backend/    # FastAPI app (working skeleton) + Dockerfile.dev
-├── docker-compose.yml  # Local dev: PostgreSQL + API
+├── backend/    # FastAPI app (models + Alembic migrations) + Dockerfile.dev
+├── docker-compose.yml  # Local dev: PostgreSQL + migrations + API
 └── docs/       # Proposal, architecture, deployment, design, presentations
 ```
 
@@ -71,10 +71,11 @@ Every attendance submission is validated against **five layers** before it is ac
 docker compose up --build
 ```
 
-This starts both services:
+This starts three services:
 
-- **API**: http://localhost:8000 — health check at `/health`
 - **Database**: PostgreSQL on `localhost:5432` (`attendance_sys`)
+- **Migrations**: runs `alembic upgrade head` once, applying the schema before the API boots
+- **API**: http://localhost:8000 — health check at `/health`
 
 ### Option B — Manual backend
 
@@ -83,6 +84,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then edit values
+alembic upgrade head   # apply schema migrations
 uvicorn main:app --reload
 ```
 
@@ -139,10 +141,10 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ## Project Status
 
-| Area     | Status                                                                               |
-| -------- | ------------------------------------------------------------------------------------ |
-| Backend  | Working skeleton — FastAPI with `/health`, async SQLAlchemy session, Alembic wired up |
-| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present                     |
-| Features | In progress — feature-sliced backend modules exist but are empty                      |
-| Tests    | Frontend `npm run check` only; no backend tests yet                                   |
+| Area     | Status                                                                        |
+| -------- | ----------------------------------------------------------------------------- |
+| Backend  | FastAPI with `/health`, async SQLAlchemy, all feature models, initial Alembic migration |
+| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present              |
+| Features | Models implemented; `service` / `schema` / `router` layers pending             |
+| Tests    | Frontend `npm run check` only; no backend tests yet                            |
 

@@ -135,7 +135,7 @@ erDiagram
   │──────────────────────────│  │ timestamp                                │
   │ id                PK     │  │ gps_lat, gps_lng                         │
   │ student_id       UK ← QR │  │ validation_status (valid/pending/reject)│
-  │ first_name, last_name    │  │ sync_status (synced/pending_sync/fail)  │
+  │ first_name, last_name    │  │ sync_status (synced/pending/fail)       │
   │ course, year_level       │  └────────────────────┬────────────────────┘
   │ is_active                │                       │ (offline queue — no FK)
   │ created_at, updated_at   │                       ○
