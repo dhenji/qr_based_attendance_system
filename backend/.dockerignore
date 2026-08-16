@@ -14,7 +14,7 @@ __pycache__/
 .gitignore
 
 # tests & scaffolding
-tests/
+src/tests/
 alembic/
 Dockerfile*
 

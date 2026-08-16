@@ -4,7 +4,7 @@ Proposal/documentation repo with a **FastAPI backend** (feature models + initial
 
 ## Repository State
 
-- Remote: `git@github.com:CodeKharl/qr_based_attendance_system.git`. Recent commits are merged PRs (#11–#19) — work flows through branches/PRs against `main`.
+- Remote: `git@github.com:CodeKharl/qr_based_attendance_system.git`. Recent commits are merged PRs (#11–#21) — work flows through branches/PRs against `main`.
 - Layout: `frontend/` (app shell), `backend/` (models + migrations + `Dockerfile.dev`), root `docker-compose.yml` (local dev), `docs/`.
 - Root `.gitignore` exists: ignores `.env`/`.env.*` but **un-ignores** `.env.example` and `.env.test`. A real `backend/.env` exists (ignored); never commit one.
 - No linters, formatters, backend tests, or CI. Only automated check: `npm run check` in `frontend/`. `README.md` is current and accurate.
@@ -25,14 +25,15 @@ Docs live in `docs/{proposals,architecture,deployment,design,presentations}/`. K
 
 ## Backend (`backend/`)
 
-- FastAPI app in `main.py` (instance `app`, `/health`, CORS). Run from `backend/`: `uvicorn main:app --reload`.
-- Wired: `requirements.txt`, `core/config.py` (pydantic-settings, reads `.env`), `core/database.py` (`Base(DeclarativeBase)` + async engine + `get_session`), `api/deps.py` (`get_db`).
-- `Dockerfile.dev` is **multi-stage**: `builder` (venv at `/opt/venv` + pip install) → `runtime` (API) → `migrate` (`alembic upgrade head`). `docker-compose.yml` builds the `migrate` service with `target: migrate`.
+- FastAPI app in `src/main.py` (instance `app`, `/health`, CORS). Run from `backend/`: `uvicorn main:app --app-dir src --reload`.
+- Wired: `requirements.txt`, `src/core/config.py` (pydantic-settings, reads `.env`), `src/core/database.py` (`Base(DeclarativeBase)` + async engine + `get_session`), `src/api/deps.py` (`get_db`).
+- `Dockerfile.dev` is **multi-stage**: `builder` (venv at `/opt/venv` + pip install) → `runtime` (API) → `migrate` (`alembic upgrade head`). `docker-compose.yml` builds the `migrate` service with `target: migrate` and the `api` service with `target: runtime`.
 - **Models & Alembic**: all 7 feature models subclass `core.database.Base` — `auth.User`, `student.Student`, `course.Course`, `enrollment.Enrollment`, `session.Session`, `attendance.Attendance`, `sync.SyncQueue`. `alembic/env.py` imports every feature model, so `target_metadata` is populated; `alembic/versions/68a78206e082_initial_schema.py` creates the full schema. To add a table: write a model, make sure it's imported in `alembic/env.py`, then `alembic revision --autogenerate -m "..."` + `alembic upgrade head`.
 - Gotcha: FastAPI `lifespan` runs `SELECT 1` against Postgres at startup — the app **fails to boot if no database is reachable**.
-- Missing so far: `service.py`, `schema.py`, `router.py` per feature slice; `backend/shared/dependencies.py`/`cache.py`/`base.py`; everything in `backend/tests/`. Existing shared helpers: `shared/enums.py` (`UserRole`, `ValidationStatus`, `SyncStatus`, `QueueStatus`), `shared/mixins.py` (`CreatedAtMixin`, `TimestampMixin`).
+- Missing so far: `service.py`, `schema.py`, `router.py` per feature slice; `backend/src/shared/dependencies.py`/`cache.py`/`base.py`; everything in `backend/src/tests/`. Existing shared helpers: `src/shared/enums.py` (`UserRole`, `ValidationStatus`, `SyncStatus`, `QueueStatus`), `src/shared/mixins.py` (`CreatedAtMixin`, `TimestampMixin`).
 
 ## Local dev (running)
 
 - Recommended (from repo root): `docker compose up --build` → API on :8000, Postgres on :5432 (`attendance_sys`, postgres/postgres), bind-mounts `./backend` into the container. The compose `migrate` service (build target `migrate`) runs `alembic upgrade head` before the API boots, so the schema is applied automatically. No need to run `uvicorn` manually.
-- Manual: copy `backend/.env.example` to `.env` (defaults already target `localhost:5432`), run `alembic upgrade head` from `backend/`, then `uvicorn main:app --reload`.
+- Manual: copy `backend/.env.example` to `.env` (defaults already target `localhost:5432`), run `alembic upgrade head` from `backend/`, then `uvicorn main:app --app-dir src --reload`.
+
