@@ -97,7 +97,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then edit values
 alembic upgrade head   # apply schema migrations
-uvicorn main:app --reload
+uvicorn main:app --reload --app-dir src
 ```
 
 ### Frontend
@@ -157,10 +157,9 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ## Project Status
 
-| Area     | Status                                                                        |
-| -------- | ----------------------------------------------------------------------------- |
+| Area     | Status                                                                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend  | FastAPI with `/health`, async SQLAlchemy, `core`/`shared` infrastructure, all 7 feature models, initial Alembic migration, multi-stage `Dockerfile.dev` |
-| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present; `html5-qrcode` + `zod` deps |
-| Features | Models implemented; `service` / `schema` / `router` layers pending             |
-| Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold           |
-
+| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present; `html5-qrcode` + `zod` deps                                                          |
+| Features | Models implemented; `service` / `schema` / `router` layers pending                                                                                      |
+| Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                    |

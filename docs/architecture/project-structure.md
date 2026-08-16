@@ -4,47 +4,48 @@
 attendance-system/
 │
 ├── backend/                          # FastAPI Python backend — vertical feature slicing
-│   ├── main.py                       # FastAPI app entry point (uvicorn main:app)
-│   │
-│   ├── core/                         # Cross-cutting infrastructure (no business logic)
-│   │   ├── __init__.py
-│   │   ├── config.py                 # App settings, environment variables
-│   │   ├── database.py               # Async SQLAlchemy engine + session factory + Base
-│   │   ├── security.py               # (planned) HMAC signing, password hashing
-│   │   └── exceptions.py             # (planned) Domain exceptions + error handlers
-│   │
-│   ├── shared/                       # Cross-feature helpers
-│   │   ├── __init__.py
-│   │   ├── enums.py                   # UserRole, ValidationStatus, SyncStatus, QueueStatus
-│   │   ├── mixins.py                  # CreatedAtMixin, TimestampMixin
-│   │   ├── dependencies.py           # (planned) get_db, pagination dependencies
-│   │   ├── cache.py                  # (planned) LRU cache (O(1) student lookup)
-│   │   └── base.py                   # (planned) shared schemas
-│   │
-│   ├── api/                          # Router aggregation
-│   │   ├── __init__.py
-│   │   ├── router.py                 # (planned) mounts all features' routers under /prefixes
-│   │   └── deps.py                   # Dependency injection helpers
-│   │
-│   ├── features/                     # Vertical slices — one folder per domain,
-│   │   │                             # each owning all four layers:
-│   │   ├── auth/                     # │ ├─ model.py   (SQLAlchemy ORM)
-│   │   ├── student/                  # │ ├─ schema.py  (Pydantic v2)
-│   │   ├── course/                   # │ ├─ service.py (business logic)
-│   │   ├── enrollment/               # │ └─ router.py  (endpoints)
-│   │   ├── session/                  #   HMAC session codes & expiry
-│   │   ├── attendance/               #   validation pipeline (HMAC→GPS→liveness→uniqueness→enrollment)
-│   │   ├── liveness/                 #   face challenges, evidence bundles,
-│   │   │                             #   nonce registry, risk-fusion scoring
-│   │   ├── analytics/                #   aggregations, at-risk forecasting,
-│   │   │                             #   prescriptive rule engine
-│   │   └── sync/                     #   offline SyncQueue processing
-│   │
-│   ├── tests/                        # (planned) Unit & integration tests
-│   │   ├── test_students.py
-│   │   ├── test_attendance.py
-│   │   ├── test_cache.py
-│   │   └── test_sessions.py
+│   ├── src/                          # Application source (src-layout)
+│   │   ├── main.py                   # FastAPI app entry point (uvicorn main:app --app-dir src)
+│   │   │
+│   │   ├── core/                     # Cross-cutting infrastructure (no business logic)
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py             # App settings, environment variables
+│   │   │   ├── database.py           # Async SQLAlchemy engine + session factory + Base
+│   │   │   ├── security.py           # (planned) HMAC signing, password hashing
+│   │   │   └── exceptions.py         # (planned) Domain exceptions + error handlers
+│   │   │
+│   │   ├── shared/                   # Cross-feature helpers
+│   │   │   ├── __init__.py
+│   │   │   ├── enums.py              # UserRole, ValidationStatus, SyncStatus, QueueStatus
+│   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
+│   │   │   ├── dependencies.py       # (planned) get_db, pagination dependencies
+│   │   │   ├── cache.py              # (planned) LRU cache (O(1) student lookup)
+│   │   │   └── base.py               # (planned) shared schemas
+│   │   │
+│   │   ├── api/                      # Router aggregation
+│   │   │   ├── __init__.py
+│   │   │   ├── router.py             # (planned) mounts all features' routers under /prefixes
+│   │   │   └── deps.py               # Dependency injection helpers
+│   │   │
+│   │   ├── features/                 # Vertical slices — one folder per domain,
+│   │   │   │                         # each owning all four layers:
+│   │   │   ├── auth/                 # │ ├─ model.py   (SQLAlchemy ORM)
+│   │   │   ├── student/              # │ ├─ schema.py  (Pydantic v2)
+│   │   │   ├── course/               # │ ├─ service.py (business logic)
+│   │   │   ├── enrollment/           # │ └─ router.py  (endpoints)
+│   │   │   ├── session/              #   HMAC session codes & expiry
+│   │   │   ├── attendance/           #   validation pipeline (HMAC→GPS→liveness→uniqueness→enrollment)
+│   │   │   ├── liveness/             #   face challenges, evidence bundles,
+│   │   │   │                         #   nonce registry, risk-fusion scoring
+│   │   │   ├── analytics/            #   aggregations, at-risk forecasting,
+│   │   │   │                         #   prescriptive rule engine
+│   │   │   └── sync/                 #   offline SyncQueue processing
+│   │   │
+│   │   └── tests/                    # (planned) Unit & integration tests
+│   │       ├── test_students.py
+│   │       ├── test_attendance.py
+│   │       ├── test_cache.py
+│   │       └── test_sessions.py
 │   │
 │   ├── alembic/                      # Database migration files
 │   │   └── versions/                 # initial_schema (users, students, courses, …)
@@ -184,10 +185,11 @@ attendance-system/
 └── README.md                         # Project overview & setup instructions
 ```
 
-> **Implemented so far:** `model.py` for `auth/`, `student/`, `course/`, `enrollment/`,
-> `session/`, `attendance/`, `sync/` (all 7 tables created by the initial Alembic
-> migration), plus `shared/enums.py` and `shared/mixins.py`. The rest (`schema.py`,
-> `service.py`, `router.py`, `liveness/`, `analytics/`) is still planned.
+> **Implemented so far:** `model.py` for `src/features/auth/`, `src/features/student/`,
+> `src/features/course/`, `src/features/enrollment/`, `src/features/session/`,
+> `src/features/attendance/`, `src/features/sync/` (all 7 tables created by the initial
+> Alembic migration), plus `src/shared/enums.py` and `src/shared/mixins.py`. The rest
+> (`schema.py`, `service.py`, `router.py`, `liveness/`, `analytics/`) is still planned.
 
 ---
 
@@ -195,15 +197,15 @@ attendance-system/
 
 | Directory / File | CS Concept |
 |-----------------|------------|
-| `backend/shared/cache.py` | Caching & Indexing Algorithm (O(1) lookup) |
+| `backend/src/shared/cache.py` | Caching & Indexing Algorithm (O(1) lookup) |
 | `frontend/src/lib/stores/offline.ts` + `frontend/src/service-worker.ts` | Offline-First Architecture |
-| `backend/features/session/` + `backend/core/security.py` | HMAC-based Session Auth |
-| `frontend/src/lib/utils/geolocation.ts` + `backend/features/attendance/service.py` | Geolocation Proximity (Haversine) |
+| `backend/src/features/session/` + `backend/src/core/security.py` | HMAC-based Session Auth |
+| `frontend/src/lib/utils/geolocation.ts` + `backend/src/features/attendance/service.py` | Geolocation Proximity (Haversine) |
 | `frontend/src/lib/components/scanner/QRScanner.svelte` | Live QR Detection (Liveness) |
-| `frontend/src/lib/components/scanner/FaceChallenge.svelte` + `backend/features/liveness/` | Liveness Protocol: challenge-response, evidence bundles, nonce anti-replay, risk fusion |
-| `backend/features/analytics/` | Data Mining: descriptive/diagnostic aggregation, predictive forecasting, prescriptive rules |
-| `backend/features/*/model.py` | Database Design & Normalization (3NF) |
-| `backend/features/sync/service.py` + `frontend/src/lib/services/sync.ts` | Offline Sync / Eventual Consistency |
+| `frontend/src/lib/components/scanner/FaceChallenge.svelte` + `backend/src/features/liveness/` | Liveness Protocol: challenge-response, evidence bundles, nonce anti-replay, risk fusion |
+| `backend/src/features/analytics/` | Data Mining: descriptive/diagnostic aggregation, predictive forecasting, prescriptive rules |
+| `backend/src/features/*/model.py` | Database Design & Normalization (3NF) |
+| `backend/src/features/sync/service.py` + `frontend/src/lib/services/sync.ts` | Offline Sync / Eventual Consistency |
 
 ---
 

@@ -33,6 +33,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
+      target: runtime
     container_name: attendance-api
     ports:
       - "8000:8000"
