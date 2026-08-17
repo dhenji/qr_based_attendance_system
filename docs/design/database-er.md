@@ -9,7 +9,7 @@
 | Table | Attributes |
 | ----- | ---------- |
 | `users` | id (PK), role (admin/professor/student), username, email, password_hash, is_active, created_at |
-| `students` | id (PK), **student_id (UK — value encoded in ID-card QR)**, first_name, last_name, course, year_level, is_active, created_at, updated_at |
+| `students` | id (PK), **user_id (FK → users, UK, nullable — set when the student claims the record at registration)**, **student_id (UK — value encoded in ID-card QR)**, first_name, last_name, course, year_level, is_active, created_at, updated_at |
 | `courses` | id (PK), course_code, course_name, classroom_lat, classroom_lng, schedule |
 | `enrollments` | id (PK), student_id (FK → students), course_id (FK → courses), academic_year |
 | `sessions` | id (PK), course_id (FK → courses), professor_id (FK → users), session_code, expires_at, classroom_radius_meters |
@@ -24,6 +24,7 @@ section below is the canonical crow's-foot representation.
 ```mermaid
 erDiagram
     users ||--o{ sessions : "opens"
+    users ||--o| students : "claims"
     courses ||--o{ sessions : "hosts"
     students ||--o{ enrollments : "is enrolled in"
     courses ||--o{ enrollments : "has"
@@ -41,6 +42,7 @@ erDiagram
     }
     students {
       bigint id PK
+      bigint user_id FK,UK
       varchar student_id UK
       varchar first_name
       varchar last_name
@@ -105,37 +107,38 @@ erDiagram
                      │ password_hash                        │
                      │ is_active                            │
                      │ created_at                           │
-                     └───────────────┬───────────────────────┘
-                                     │ 1   (professor) opens
-                                     │
-   ┌─────────────────────────┐       o<{
-   │         courses         │       │
-   │─────────────────────────│       │
-   │ id                PK    │       │
-   │ course_code             │       │
-   │ course_name             │  ┌────┴───────────────────────┐
-   │ classroom_lat           │  │          sessions          │
-   │ classroom_lng           │  │────────────────────────────│
-   │ schedule                │  │ id                   PK    │
-   └───────────┬─────────────┘  │ professor_id  FK → users   │
-               │ 1              │ course_id     FK → courses │
-               o<{              │ session_code               │
-               │                │ expires_at                 │
-   ┌───────────┴─────────────┐  │ classroom_radius_meters    │
-   │       enrollments       │  └──────────┬─────────────────┘
-   │─────────────────────────│             │ 1  (collects)
-   │ id                 PK   │             o<{────────────┐
-   │ student_id  FK          │             │              │
-   │ course_id   FK          │  ┌──────────┴───────────────┴───────────────┐
-   │ academic_year           │  │            attendance_records            │
-   └───────────┬─────────────┘  │──────────────────────────────────────────│
-               │ 1              │ id                   PK                 │
-  ┌────────────┴─────────────┐  │ student_id  FK → students               │
+  ┬──────────────────└───────────────┬───────────────────────┘
+  │                                   │ 1   (professor) opens
+  │  (claims) 1                       │
+  │  ┌─────────────────────────┐       o<{
+  │  │         courses         │       │
+  │  │─────────────────────────│       │
+  │  │ id                PK    │       │
+  │  │ course_code             │       │
+  │  │ course_name             │       │
+  │  │ classroom_lat           │  ┌────┴───────────────────────┐
+  │  │ classroom_lng           │  │          sessions          │
+  │  │ schedule                │  │────────────────────────────│
+  │  └───────────┬─────────────┘  │ id                   PK    │
+  │               │ 1              │ professor_id  FK → users   │
+  │               o<{              │ course_id     FK → courses │
+  │               │                │ session_code               │
+  │  ┌───────────┴─────────────┐  │ expires_at                 │
+  │  │       enrollments       │  │ classroom_radius_meters    │
+  │  │─────────────────────────│  └──────────┬─────────────────┘
+  │  │ id                 PK   │             │ 1  (collects)
+  │  │ student_id  FK          │             o<{────────────┐
+  │  │ course_id   FK          │             │              │
+  │  │ academic_year           │  ┌──────────┴───────────────┴───────────────┐
+  │  └───────────┬─────────────┘  │──────────────────────────────────────────│
+  │               │ 1              │ id                   PK                 │
+  │  ┌────────────┴─────────────┐  │ student_id  FK → students               │
   │         students         │  │ session_id  FK → sessions               │
   │──────────────────────────│  │ timestamp                                │
-  │ id                PK     │  │ gps_lat, gps_lng                         │
-  │ student_id       UK ← QR │  │ validation_status (valid/pending/reject)│
-  │ first_name, last_name    │  │ sync_status (synced/pending/fail)       │
+  │ user_id   FK → users     │  │ gps_lat, gps_lng                         │
+  │ id                PK     │  │ validation_status (valid/pending/reject)│
+  │ student_id       UK ← QR │  │ sync_status (synced/pending/fail)       │
+  │ first_name, last_name    │
   │ course, year_level       │  └────────────────────┬────────────────────┘
   │ is_active                │                       │ (offline queue — no FK)
   │ created_at, updated_at   │                       ○
@@ -157,6 +160,7 @@ erDiagram
 | Parent (1) | Crow's foot | Child (many) | Cardinality |
 | ---------- | ----------- | ------------ | ----------- |
 | `users` | `‖──○{` | `sessions` | one user *(professor)* opens many |
+| `users` | `‖──○|` | `students` | one user claims zero-or-one student *(set at registration)* |
 | `courses` | `‖──○{` | `sessions` | one course hosts many |
 | `courses` | `‖──○{` | `enrollments` | one course has many enrollments |
 | `students` | `‖──○{` | `enrollments` | one student has many enrollments |
