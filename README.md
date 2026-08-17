@@ -68,7 +68,7 @@ Every attendance submission is validated against **five layers** before it is ac
 │   │   │   └── */model.py # SQLAlchemy models per feature
 │   │   ├── api/          # get_db dependency
 │   │   └── tests/        # Empty scaffold — no backend tests yet
-│   ├── alembic/          # Migrations (initial schema: 68a78206e082)
+│   ├── alembic/          # Migrations (68a78206e082 initial schema; 388e5e496455 links students→users)
 │   └── Dockerfile.dev    # Multi-stage: builder → runtime → migrate
 ├── docker-compose.yml    # Local dev: PostgreSQL + migrations + API
 └── docs/                 # Proposal, architecture, deployment, design, presentations
@@ -160,7 +160,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 | Area     | Status                                                                                                                                                  |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI with `/health`, async SQLAlchemy, `core`/`shared` infrastructure, all 7 feature models, initial Alembic migration, multi-stage `Dockerfile.dev` |
+| Backend  | FastAPI with `/health`, async SQLAlchemy, `core`/`shared` infrastructure, all 7 feature models, Alembic migrations (initial schema + `students.user_id` link to accounts), multi-stage `Dockerfile.dev` |
 | Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present; `html5-qrcode` + `zod` deps                                                          |
 | Features | Models implemented; `service` / `schema` / `router` layers pending                                                                                      |
 | Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                    |

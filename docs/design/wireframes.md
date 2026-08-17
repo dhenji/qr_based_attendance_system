@@ -101,6 +101,7 @@
 │                    │  Password   [________]   │                    │
 │                    │  Confirm    [________]   │                    │
 │                    │  Role       [Select ▼]   │                    │
+│                    │  Student ID [________]   │                    │
 │                    │                          │                    │
 │                    │  ┌─────────────────┐     │                    │
 │                    │  │    Register     │     │                    │
@@ -111,6 +112,10 @@
 │                    └─────────────────────────┘                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+> **Student ID**: required only when Role = Student. It claims the matching
+> roster record imported from the registrar's CSV (a student links their new
+> account to their existing `students` row). Email is the login identity.
 
 ### 1.4 Forgot Password — `/forgot-password`
 

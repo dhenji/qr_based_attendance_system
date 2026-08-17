@@ -134,14 +134,30 @@ A live twin passes face-liveness checks by definition. The system mitigates this
 
 ### 4.1 Setup Phase (One-Time)
 
+Setup happens in two phases. The roster and the accounts are separate; a
+student connects the two by **claiming** their imported record at registration.
+
 ```
+PHASE 1 — Roster import (admin)
 Registrar provides student roster (CSV)
   └→ Columns: student_id, first_name, last_name, course, year_level
-    └→ Imported into database
+    └→ Imported into database as `students` rows (no accounts yet)
       └→ Each student_id is the same one encoded in the student's ID card QR
+      └→ students.user_id = NULL (unclaimed)
+
+PHASE 2 — Account creation (student)
+Student registers with email + password + student_id
+  └→ Look up `students.student_id`  (must exist & be active)
+    └→ Must be unclaimed (user_id is NULL)  → else 409
+      └→ Create `users` row + set students.user_id in one transaction
+        └→ Account is now linked to the roster record
 ```
 
-**Key insight**: The QR code on student IDs already encodes the student ID number. No QR generation or re-encoding is needed. The CSV provides the student's name, course, and year — the QR provides the key to match them.
+**Key insight**: The QR code on student IDs already encodes the student ID
+number. No QR generation or re-encoding is needed. The CSV provides the
+student's name, course, and year — the QR provides the key to match them.
+Login uses **email** (the account identity); the student ID is the attendance
+identity key and is entered once at registration to link the two.
 
 ### 4.2 Per-Class Session Flow
 
@@ -276,8 +292,18 @@ Registrar provides student roster (CSV)
 ### 6.3 Database Schema
 
 ```
+Users
+  - id (PK)
+  - role (admin / professor / student)
+  - username (unique)
+  - email (unique — login identity)
+  - password_hash
+  - is_active
+  - created_at
+
 Students
   - id (PK)
+  - user_id (FK → users, nullable, unique — set when the student claims this record at registration)
   - student_id (unique — the same value encoded in the ID card QR)
   - first_name, last_name
   - course, year_level
