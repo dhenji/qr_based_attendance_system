@@ -8,8 +8,8 @@
 
 | Table | Attributes |
 | ----- | ---------- |
-| `users` | id (PK), role (admin/professor/student), username, email, password_hash, is_active, created_at |
-| `students` | id (PK), **user_id (FK → users, UK, nullable — set when the student claims the record at registration)**, **student_id (UK — value encoded in ID-card QR)**, first_name, last_name, course, year_level, is_active, created_at, updated_at |
+| `users` | id (PK), role (admin/professor/student), username, email, password_hash, security_question_hash, security_answer_hash, mfa_enabled, mfa_secret, failed_login_attempts, is_active, created_at, last_login |
+| `students` | id (PK), **user_id (FK → users, UK, nullable — set when the student claims the record at registration)**, **student_id (UK — value encoded in ID-card QR)**, first_name, middle_name, last_name, course, section, year_level, is_active, created_at, updated_at |
 | `courses` | id (PK), course_code, course_name, classroom_lat, classroom_lng, schedule |
 | `enrollments` | id (PK), student_id (FK → students), course_id (FK → courses), academic_year |
 | `sessions` | id (PK), course_id (FK → courses), professor_id (FK → users), session_code, expires_at, classroom_radius_meters |
@@ -37,16 +37,24 @@ erDiagram
       varchar username
       varchar email
       varchar password_hash
+      varchar security_question_hash
+      varchar security_answer_hash
+      boolean mfa_enabled
+      varchar mfa_secret
+      integer failed_login_attempts
       boolean is_active
       timestamp created_at
+      timestamp last_login
     }
     students {
       bigint id PK
       bigint user_id FK,UK
       varchar student_id UK
       varchar first_name
+      varchar middle_name
       varchar last_name
       varchar course
+      varchar section
       integer year_level
       boolean is_active
       timestamp created_at
@@ -100,13 +108,19 @@ erDiagram
                      ┌───────────────────────────────────────┐
                      │                users                  │
                      │───────────────────────────────────────│
-                     │ id           PK                       │
-                     │ role                                 │
-                     │ username                             │
-                     │ email                                │
-                     │ password_hash                        │
-                     │ is_active                            │
-                     │ created_at                           │
+│ id           PK                       │
+                      │ role                                 │
+                      │ username                             │
+                      │ email                                │
+                      │ password_hash                        │
+                      │ security_question_hash               │
+                      │ security_answer_hash                 │
+                      │ mfa_enabled                          │
+                      │ mfa_secret                           │
+                      │ failed_login_attempts                │
+                      │ is_active                            │
+                      │ created_at                           │
+                      │ last_login                           │
   ┬──────────────────└───────────────┬───────────────────────┘
   │                                   │ 1   (professor) opens
   │  (claims) 1                       │
@@ -138,8 +152,11 @@ erDiagram
   │ user_id   FK → users     │  │ gps_lat, gps_lng                         │
   │ id                PK     │  │ validation_status (valid/pending/reject)│
   │ student_id       UK ← QR │  │ sync_status (synced/pending/fail)       │
-  │ first_name, last_name    │
-  │ course, year_level       │  └────────────────────┬────────────────────┘
+  │ first_name               │
+  │ middle_name              │
+  │ last_name                │
+  │ course, section          │
+  │ year_level               │  └────────────────────┬────────────────────┘
   │ is_active                │                       │ (offline queue — no FK)
   │ created_at, updated_at   │                       ○
   └───────────────┬──────────┘             ┌──────────┴─────────────┐

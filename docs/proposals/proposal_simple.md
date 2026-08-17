@@ -46,7 +46,12 @@ A web-based application that:
 | Student Roster   | Import student from CSV file                                  |
 | Dashboard        | View attendance in real time                                  |
 | Analytics        | At-risk forecasting and recommendations for professors        |
-| Reports          | Download attendance reports                                   |
+| Reports          | Download attendance reports (CSV/PDF/Print)                    |
+| Account Security | Strong passwords, Captcha, OTP, optional MFA, admin reset, lockout |
+
+> **Names & promotion**: students use First/Middle/Last names with a Section
+> field (from CSV import); admins bulk-promote year + section each academic
+> year.
 
 ## 7. Technology Stack
 

@@ -140,7 +140,7 @@ student connects the two by **claiming** their imported record at registration.
 ```
 PHASE 1 — Roster import (admin)
 Registrar provides student roster (CSV)
-  └→ Columns: student_id, first_name, last_name, course, year_level
+  └→ Columns: student_id, first_name, middle_name, last_name, course, section, year_level
     └→ Imported into database as `students` rows (no accounts yet)
       └→ Each student_id is the same one encoded in the student's ID card QR
       └→ students.user_id = NULL (unclaimed)
@@ -251,6 +251,7 @@ identity key and is entered once at registration to link the two.
 | 12  | Predictive Analytics        | At-risk student forecasting from attendance patterns                 |
 | 13  | Prescriptive Analytics      | Recommended actions (alerts/reminders) from predictive output        |
 | 14  | Reports Export              | Download attendance reports as CSV/PDF                               |
+| 15  | Account Security            | Captcha, OTP, optional MFA, strong-password policy, admin reset, lockout |
 
 ---
 
@@ -298,15 +299,21 @@ Users
   - username (unique)
   - email (unique — login identity)
   - password_hash
-  - is_active
+  - security_question_hash   (for password reset)
+  - security_answer_hash     (for password reset)
+  - mfa_enabled              (optional two-factor auth)
+  - mfa_secret               (authenticator-app secret, encrypted)
+  - failed_login_attempts    (5 → temporary lockout)
+  - is_active                (deactivate instead of delete)
   - created_at
+  - last_login
 
 Students
   - id (PK)
   - user_id (FK → users, nullable, unique — set when the student claims this record at registration)
   - student_id (unique — the same value encoded in the ID card QR)
-  - first_name, last_name
-  - course, year_level
+  - first_name, middle_name, last_name
+  - course, section, year_level
   - is_active
   - created_at, updated_at
 
@@ -364,6 +371,29 @@ SyncQueue
   - retry_count
   - created_at
 ```
+
+### 6.4 Account Security & Password Policy
+
+To protect accounts and attendance data, the system enforces the following
+policies across every role:
+
+- **Strong password policy**: minimum **8 characters** with at least **1
+  uppercase, 1 lowercase, 1 number and 1 symbol** (alphanumeric + symbol).
+  Enforced at registration, on password change, and on password reset.
+- **Captcha** at login and on the first step of password recovery to deter
+  automated attacks.
+- **Forgot Password flow** (4 steps): email + captcha → **security question**
+  (max **3 attempts** before abort/lock) → **OTP** (6-digit, expires in 5
+  min) → **enter new password + confirm new password**.
+- **MFA / OTP**: optional two-factor authentication via an authenticator app
+  (TOTP secret + backup codes). When enabled, login requires a second OTP step.
+- **Multiple-attempt lockout**: accounts are temporarily locked after **5
+  failed login attempts**.
+- **Admin password reset**: an admin can reset any user's password — a
+  temporary password is set and the user is prompted to change it on next
+  login.
+- **Deactivate instead of delete**: accounts/records are soft-deleted via
+  `is_active`; permanent deletion only from the Archive screen.
 
 ---
 
