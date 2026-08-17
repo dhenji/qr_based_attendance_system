@@ -26,7 +26,7 @@ A web-based application that:
 - Scans the QR code on student IDs to identify the student
 - Uses a session code (shown by the professor) + GPS location to prevent cheating
 - Works even without internet by saving attendance locally and uploading later
-- Automatically updates student year levels each school year
+- Automatically updates student year levels and sections each school year
 
 ## 5. Target Users
 
@@ -46,7 +46,17 @@ A web-based application that:
 | Student Roster   | Import student from CSV file                                  |
 | Dashboard        | View attendance in real time                                  |
 | Analytics        | At-risk forecasting and recommendations for professors        |
-| Reports          | Download attendance reports                                   |
+| Reports          | Download attendance reports (CSV/PDF/Print)                    |
+| Data Tables      | Sortable columns, category + date-range filters, search, print  |
+| Account Security | Strong passwords, Captcha, OTP, optional MFA, admin reset, lockout |
+
+> **Names & promotion**: students use First/Middle/Last names with a Section
+> field (from CSV import); admins bulk-promote year + section each academic
+> year. **Registration is claim-based**: students and professors
+> self-register with email + password; the email must match their
+> admin-seeded record (official email) and an OTP proves ownership — names
+> are never typed. Admin accounts are seeded at deploy / created by an
+> existing admin — never self-registered.
 
 ## 7. Technology Stack
 

@@ -134,30 +134,45 @@ A live twin passes face-liveness checks by definition. The system mitigates this
 
 ### 4.1 Setup Phase (One-Time)
 
-Setup happens in two phases. The roster and the accounts are separate; a
-student connects the two by **claiming** their imported record at registration.
+Setup happens in two phases. The rosters and the accounts are separate;
+students and professors connect the two by **claiming** their imported record
+at registration, using the **official email** as the lookup key.
 
 ```
-PHASE 1 — Roster import (admin)
+PHASE 1 — Roster seeding (admin)
 Registrar provides student roster (CSV)
-  └→ Columns: student_id, first_name, last_name, course, year_level
+  └→ Columns: student_id, first_name, middle_name, last_name,
+     email, course, section, year_level
     └→ Imported into database as `students` rows (no accounts yet)
       └→ Each student_id is the same one encoded in the student's ID card QR
       └→ students.user_id = NULL (unclaimed)
+Professors are seeded manually [+Add] or via CSV on the Admin Professor
+Management screen
+  └→ Columns: employee_id, first_name, middle_name, last_name,
+     email, department
+    └→ professors.user_id = NULL (unclaimed)
 
-PHASE 2 — Account creation (student)
-Student registers with email + password + student_id
-  └→ Look up `students.student_id`  (must exist & be active)
-    └→ Must be unclaimed (user_id is NULL)  → else 409
-      └→ Create `users` row + set students.user_id in one transaction
-        └→ Account is now linked to the roster record
+PHASE 2 — Claim-based registration (same flow for both roles)
+Student / Professor registers with email + password
+  └→ Role decides which table is looked up (students / professors)
+    └→ Look up the official email (must exist & be active, unclaimed)
+      └→ Else 409 — contact admin to be added to the roster
+        └→ Send OTP to that email (ownership proof, 5-min expiry)
+          └→ Verified → create `users` row + link the record in one transaction
+            └→ Name, course, section are pulled from the seeded record
+Admin — NOT self-registered (never offered on the Register form)
+  └→ First admin is seeded at deployment as **Super Admin** (env/seed script)
+  └→ Additional admins are created by an existing admin (Admin Users)
 ```
 
 **Key insight**: The QR code on student IDs already encodes the student ID
 number. No QR generation or re-encoding is needed. The CSV provides the
-student's name, course, and year — the QR provides the key to match them.
-Login uses **email** (the account identity); the student ID is the attendance
-identity key and is entered once at registration to link the two.
+student's name, course, section and official email — the QR provides the
+attendance key. **Email is both the registration lookup key and the login
+identity**; the student ID is used only as the QR/attendance key and is
+**never entered at registration**. The OTP sent to the official email proves
+the registrant is the real owner of the seeded record (students claim by
+holding their ID, professors claim by holding their school email).
 
 ### 4.2 Per-Class Session Flow
 
@@ -245,12 +260,15 @@ identity key and is entered once at registration to link the two.
 | 6   | Offline Liveness Protocol   | Evidence bundles queued and anti-replay validated after sync          |
 | 7   | One Scan Per Session        | Prevents duplicate submissions                                       |
 | 8   | Offline Mode                | Attendance stored locally, auto-synced when online                   |
-| 9   | Student Roster Management   | CSV import, add/edit/remove students                                 |
+| 9   | Student Roster Management   | CSV import (incl. official email), add/edit/remove students        |
 | 10  | Year-Level Auto-Advancement | Batch-updates student year levels at academic year end               |
 | 11  | Attendance Dashboard        | Real-time view of attendance per session, per course, per student    |
 | 12  | Predictive Analytics        | At-risk student forecasting from attendance patterns                 |
 | 13  | Prescriptive Analytics      | Recommended actions (alerts/reminders) from predictive output        |
-| 14  | Reports Export              | Download attendance reports as CSV/PDF                               |
+| 14  | Reports Export              | Download attendance reports as CSV/PDF, or print them            |
+| 15  | Account Security            | Captcha, OTP, optional MFA, strong-password policy, admin reset, lockout |
+| 16  | Data Table Controls         | Sortable columns, category + date-range filters, search, print on all data tables |
+| 17  | User Provisioning & Claiming | Students/professors self-register by claiming their admin-seeded official email (OTP-verified); admins seeded at deploy / created by admins |
 
 ---
 
@@ -294,19 +312,36 @@ identity key and is entered once at registration to link the two.
 ```
 Users
   - id (PK)
-  - role (admin / professor / student)
+  - role (super_admin / admin / professor / student)
   - username (unique)
   - email (unique — login identity)
   - password_hash
-  - is_active
+  - security_question_hash   (for password reset)
+  - security_answer_hash     (for password reset)
+  - mfa_enabled              (optional two-factor auth)
+  - mfa_secret               (authenticator-app secret, encrypted)
+  - failed_login_attempts    (5 → temporary lockout)
+  - is_active                (deactivate instead of delete)
   - created_at
+  - last_login
 
 Students
   - id (PK)
   - user_id (FK → users, nullable, unique — set when the student claims this record at registration)
   - student_id (unique — the same value encoded in the ID card QR)
-  - first_name, last_name
-  - course, year_level
+  - email (unique — official email, the registration lookup key)
+  - first_name, middle_name, last_name
+  - course, section, year_level
+  - is_active
+  - created_at, updated_at
+
+Professors
+  - id (PK)
+  - user_id (FK → users, nullable, unique — set when the professor claims this record at registration)
+  - employee_id (unique)
+  - email (unique — official email, the registration lookup key)
+  - first_name, middle_name, last_name
+  - department
   - is_active
   - created_at, updated_at
 
@@ -364,6 +399,52 @@ SyncQueue
   - retry_count
   - created_at
 ```
+
+### 6.4 Account Security & Password Policy
+
+To protect accounts and attendance data, the system enforces the following
+policies across every role:
+
+- **Strong password policy**: minimum **8 characters** with at least **1
+  uppercase, 1 lowercase, 1 number and 1 symbol** (alphanumeric + symbol).
+  Enforced at registration, on password change, and on password reset.
+- **Captcha** at login and on the first step of password recovery to deter
+  automated attacks.
+- **Forgot Password flow** (4 steps): email + captcha → **security question**
+  (max **3 attempts** before abort/lock) → **OTP** (6-digit, expires in 5
+  min) → **enter new password + confirm new password**.
+- **MFA / OTP**: optional two-factor authentication via an authenticator app
+  (TOTP secret + backup codes). When enabled, login requires a second OTP step.
+- **Multiple-attempt lockout**: accounts are temporarily locked after **5
+  failed login attempts**.
+- **Admin password reset**: an admin can reset any user's password — a
+  temporary password is set and the user is prompted to change it on next
+  login.
+- **Deactivate instead of delete**: accounts/records are soft-deleted via
+  `is_active`; permanent deletion only from the Archive screen.
+- **Claim-based registration**: students and professors self-register with
+  email + password. The email must match an **admin-seeded record** (student
+  roster CSV / professor management) — the role decides which table is
+  looked up — and an **OTP sent to that email** proves ownership before the
+  account is linked. Name, course and section are pulled from the seeded
+  record; nothing is typed at registration. **Admin accounts are never
+  self-registered** — the first admin is seeded at deployment, and
+  additional admins are created by an existing admin via the Admin Users
+  screen.
+
+### 6.5 Data Tables
+
+Every data table (history, attendance lists, session history, student /
+professor / course management, overviews, reports, audit logs, archive)
+shares the same controls:
+
+- **Sortable column headers** — click a header to toggle ascending/
+  descending order (▲/▼ indicator on the active column)
+- **Category filters** — dropdowns (Course, Status, Section, Year, Action…)
+- **Date-range filter** — From/To pickers for historical data
+- **Search** — free-text search field
+- **Print** — print the current filtered view; **CSV/PDF export** on
+  report/management screens
 
 ---
 

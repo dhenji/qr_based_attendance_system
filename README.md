@@ -18,7 +18,7 @@ A web application that:
 - Scans the QR code on student IDs to identify the student
 - Uses a session code (shown by the professor) + GPS location to prevent cheating
 - Works without internet by saving attendance locally and uploading later
-- Automatically updates student year levels each school year
+- Automatically updates student year levels and sections each school year
 
 ## Security & Anti-Spoofing
 
@@ -39,10 +39,21 @@ Every attendance submission is validated against **five layers** before it is ac
 | QR Code Scanning | Scan student ID card QR using phone camera                    |
 | Session Code     | Professor shares a code; required to submit attendance        |
 | GPS Verification | Ensures student is inside the classroom                       |
+| Face Liveness    | Blink/head-turn challenges to block photo, replay & distortion tricks |
 | Offline Mode     | Saves attendance locally when no internet; auto-uploads later |
-| Student Roster   | Import student from CSV file                                  |
+| Student Roster   | Import student from CSV file (with official email)           |
 | Dashboard        | View attendance in real time                                  |
-| Reports          | Download attendance reports                                   |
+| Analytics        | At-risk forecasting and recommendations for professors        |
+| Reports          | Download attendance reports (CSV/PDF/Print)                    |
+| Data Tables      | Sortable columns, category + date-range filters, search, print |
+| Account Security | Strong passwords, Captcha, OTP, optional MFA, admin reset, lockout |
+
+> **Registration**: students and professors self-register with email +
+> password by **claiming** their admin-seeded record (official email lookup +
+> OTP ownership proof — names are never typed). Admin accounts are seeded at
+> deploy (Super Admin) or created by an existing admin; never
+> self-registered. Students use First/Middle/Last names with a Section field;
+> admins bulk-promote year + section each academic year.
 
 ## Tech Stack
 
@@ -152,7 +163,6 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/architecture/frontend-architecture.md`](docs/architecture/frontend-architecture.md) — production-ready frontend structure
 - [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
-- [`docs/design/system-mockup.pdf`](docs/design/system-mockup.pdf) — system mockup
 - [`docs/presentations/presentation-slides.md`](docs/presentations/presentation-slides.md) — slide content
 - [`docs/presentations/presentation.pptx`](docs/presentations/presentation.pptx) — slide deck
 
