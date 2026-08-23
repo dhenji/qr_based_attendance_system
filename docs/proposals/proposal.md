@@ -148,7 +148,7 @@ Registrar provides student roster (CSV)
       └→ students.user_id = NULL (unclaimed)
 Professors are seeded manually [+Add] or via CSV on the Admin Professor
 Management screen
-  └→ Columns: employee_id, first_name, middle_name, last_name,
+  └→ Columns: first_name, middle_name, last_name,
      email, department
     └→ professors.user_id = NULL (unclaimed)
 
@@ -266,7 +266,7 @@ holding their ID, professors claim by holding their school email).
 | 12  | Predictive Analytics        | At-risk student forecasting from attendance patterns                 |
 | 13  | Prescriptive Analytics      | Recommended actions (alerts/reminders) from predictive output        |
 | 14  | Reports Export              | Download attendance reports as CSV/PDF, or print them            |
-| 15  | Account Security            | Captcha, OTP, optional MFA, strong-password policy, admin reset, lockout |
+| 15  | Account Security            | Cloudflare Turnstile, OTP, optional MFA, strong-password policy (bcrypt), admin reset, lockout |
 | 16  | Data Table Controls         | Sortable columns, category + date-range filters, search, print on all data tables |
 | 17  | User Provisioning & Claiming | Students/professors self-register by claiming their admin-seeded official email (OTP-verified); admins seeded at deploy / created by admins |
 
@@ -315,7 +315,7 @@ Users
   - role (super_admin / admin / professor / student)
   - username (unique)
   - email (unique — login identity)
-  - password_hash
+  - password_hash (bcrypt)
   - security_question_hash   (for password reset)
   - security_answer_hash     (for password reset)
   - mfa_enabled              (optional two-factor auth)
@@ -338,12 +338,21 @@ Students
 Professors
   - id (PK)
   - user_id (FK → users, nullable, unique — set when the professor claims this record at registration)
-  - employee_id (unique)
-  - email (unique — official email, the registration lookup key)
+  - email (unique — official email, the registration lookup key and professor identifier)
   - first_name, middle_name, last_name
   - department
   - is_active
   - created_at, updated_at
+
+OtpCodes
+  - id (PK)
+  - email (index — the lookup key; the user may not exist yet during claim)
+  - purpose (claim / forgot_password)
+  - otp_hash (bcrypt-hashed 6-digit code, never stored plaintext)
+  - expires_at (5-minute TTL)
+  - consumed_at (null until used — single-use)
+  - user_id (FK → users, nullable — set when the code targets an existing account)
+  - created_at
 
 Courses
   - id (PK)
@@ -408,11 +417,14 @@ policies across every role:
 - **Strong password policy**: minimum **8 characters** with at least **1
   uppercase, 1 lowercase, 1 number and 1 symbol** (alphanumeric + symbol).
   Enforced at registration, on password change, and on password reset.
-- **Captcha** at login and on the first step of password recovery to deter
-  automated attacks.
+- **Password hashing**: all passwords (and OTP codes) are hashed with
+  **bcrypt**; plaintext is never stored or logged.
+- **Cloudflare Turnstile** (free, invisible captcha) at login and on the first
+  step of password recovery to deter automated attacks.
 - **Forgot Password flow** (4 steps): email + captcha → **security question**
   (max **3 attempts** before abort/lock) → **OTP** (6-digit, expires in 5
-  min) → **enter new password + confirm new password**.
+  min; stored bcrypt-hashed in the `otp_codes` table, single-use) → **enter
+  new password + confirm new password**.
 - **MFA / OTP**: optional two-factor authentication via an authenticator app
   (TOTP secret + backup codes). When enabled, login requires a second OTP step.
 - **Multiple-attempt lockout**: accounts are temporarily locked after **5

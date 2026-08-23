@@ -9,6 +9,7 @@ import features.attendance.model  # noqa: F401
 import features.auth.model  # noqa: F401
 import features.course.model  # noqa: F401
 import features.enrollment.model  # noqa: F401
+import features.professor.model  # noqa: F401
 import features.session.model  # noqa: F401
 import features.student.model  # noqa: F401
 import features.sync.model  # noqa: F401

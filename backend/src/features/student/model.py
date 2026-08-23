@@ -13,10 +13,13 @@ class Student(TimestampMixin, Base):
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), unique=True
     )
-    student_id: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    student_id: Mapped[str] = mapped_column(String(50), unique=True)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True)
     first_name: Mapped[str] = mapped_column(String(100))
+    middle_name: Mapped[str | None] = mapped_column(String(100))
     last_name: Mapped[str] = mapped_column(String(100))
     course: Mapped[str] = mapped_column(String(100))
+    section: Mapped[str | None] = mapped_column(String(20))
     year_level: Mapped[int] = mapped_column()
     is_active: Mapped[bool] = mapped_column(server_default=true())
 

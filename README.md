@@ -46,7 +46,7 @@ Every attendance submission is validated against **five layers** before it is ac
 | Analytics        | At-risk forecasting and recommendations for professors        |
 | Reports          | Download attendance reports (CSV/PDF/Print)                    |
 | Data Tables      | Sortable columns, category + date-range filters, search, print |
-| Account Security | Strong passwords, Captcha, OTP, optional MFA, admin reset, lockout |
+| Account Security | Strong passwords (bcrypt), Cloudflare Turnstile, OTP, optional MFA, admin reset, lockout |
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +

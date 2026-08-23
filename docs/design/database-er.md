@@ -8,14 +8,15 @@
 
 | Table | Attributes |
 | ----- | ---------- |
-| `users` | id (PK), role (super_admin/admin/professor/student), username, email, password_hash, security_question_hash, security_answer_hash, mfa_enabled, mfa_secret, failed_login_attempts, is_active, created_at, last_login |
+| `users` | id (PK), role (super_admin/admin/professor/student), username, email, password_hash (bcrypt), security_question_hash, security_answer_hash, mfa_enabled, mfa_secret, failed_login_attempts, is_active, created_at, last_login |
 | `students` | id (PK), **user_id (FK → users, UK, nullable — set when the student claims the record at registration)**, **student_id (UK — value encoded in ID-card QR)**, **email (UK — official email, the registration lookup key)**, first_name, middle_name, last_name, course, section, year_level, is_active, created_at, updated_at |
-| `professors` | id (PK), **user_id (FK → users, UK, nullable — set when the professor claims the record at registration)**, employee_id (UK), **email (UK — official email, the registration lookup key)**, first_name, middle_name, last_name, department, is_active, created_at, updated_at |
+| `professors` | id (PK), **user_id (FK → users, UK, nullable — set when the professor claims the record at registration)**, **email (UK — official email, the registration lookup key and professor identifier)**, first_name, middle_name, last_name, department, is_active, created_at, updated_at |
 | `courses` | id (PK), course_code, course_name, classroom_lat, classroom_lng, schedule |
 | `enrollments` | id (PK), student_id (FK → students), course_id (FK → courses), academic_year |
 | `sessions` | id (PK), course_id (FK → courses), professor_id (FK → users), session_code, expires_at, classroom_radius_meters |
 | `attendance_records` | id (PK), student_id (FK → students), session_id (FK → sessions), timestamp, gps_lat, gps_lng, validation_status, sync_status, created_at |
 | `sync_queue` | id (PK), record_data (JSON), status, retry_count, created_at |
+| `otp_codes` | id (PK), email (index — lookup key; user may not exist yet during claim), purpose (claim/forgot_password), otp_hash (bcrypt, never plaintext), expires_at (5-min TTL), consumed_at (single-use), user_id (FK → users, nullable), created_at |
 
 ## Mermaid (renders on GitHub)
 
@@ -27,6 +28,7 @@ erDiagram
     users ||--o{ sessions : "opens"
     users ||--o| students : "claims"
     users ||--o| professors : "claims"
+    users ||--o{ otp_codes : "receives"
     courses ||--o{ sessions : "hosts"
     students ||--o{ enrollments : "is enrolled in"
     courses ||--o{ enrollments : "has"
@@ -66,7 +68,6 @@ erDiagram
     professors {
       bigint id PK
       bigint user_id FK,UK
-      varchar employee_id UK
       varchar email UK
       varchar first_name
       varchar middle_name
@@ -116,6 +117,16 @@ erDiagram
       integer retry_count
       timestamp created_at
     }
+    otp_codes {
+      bigint id PK
+      varchar email
+      varchar purpose
+      varchar otp_hash
+      timestamp expires_at
+      timestamp consumed_at
+      bigint user_id FK
+      timestamp created_at
+    }
 ```
 
 ## Crow's-Foot Diagram (canonical)
@@ -145,7 +156,6 @@ erDiagram
   │  │─────────────────────────│       │
   │  │ id                PK    │       │
   │  │ user_id  FK → users     │       │
-  │  │ employee_id       UK    │       │
   │  │ email              UK   │       │
   │  │ first_name              │       │
   │  │ middle_name             │       │
@@ -200,6 +210,18 @@ erDiagram
                   │                        │ retry_count            │
                   │                        │ created_at             │
                   │                        └────────────────────────┘
+                        ┌────────────────────────┐
+                        │       otp_codes        │
+                        │────────────────────────│
+                        │ id            PK       │
+                        │ email         (index)  │
+                        │ purpose claim/forgot   │
+                        │ otp_hash (bcrypt)      │
+                        │ expires_at    (5-min)  │
+                        │ consumed_at  (1-use)   │
+                        │ user_id  FK → users ○  │
+                        │ created_at             │
+                        └────────────────────────┘
 ```
 
 ## Cardinality (crow's foot)
@@ -208,6 +230,7 @@ erDiagram
 
 | Parent (1) | Crow's foot | Child (many) | Cardinality |
 | ---------- | ----------- | ------------ | ----------- |
+| `users` | `‖──○{` | `otp_codes` | one user receives many OTP codes *(or email-only before the account exists)* |
 | `users` | `‖──○{` | `sessions` | one user *(professor)* opens many |
 | `users` | `‖──○|` | `students` | one user claims zero-or-one student *(set at registration)* |
 | `users` | `‖──○|` | `professors` | one user claims zero-or-one professor *(set at registration)* |
