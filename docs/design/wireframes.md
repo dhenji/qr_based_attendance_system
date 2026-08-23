@@ -77,7 +77,7 @@
 │                    │  │ ••••••••••••    │     │                    │
 │                    │  └─────────────────┘     │                    │
 │                    │                          │                    │
-│                    │  Captcha                 │                    │
+│                    │  Captcha (Turnstile)     │                    │
 │                    │  ┌──────────┐  ┌───┐    │                    │
 │                    │  │ 4F7K2Q   │  │↻  │    │                    │
 │                    │  └──────────┘  └───┘    │                    │
@@ -151,7 +151,7 @@ expires in 5 min, resend allowed) → account created.
 
 Four-step flow. Each step advances after verification.
 
-**Step 1 — Email + Captcha**
+**Step 1 — Email + Turnstile**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -164,7 +164,7 @@ Four-step flow. Each step advances after verification.
 │                    │  │ your@email.com  │     │                    │
 │                    │  └─────────────────┘     │                    │
 │                    │                          │                    │
-│                    │  Captcha                 │                    │
+│                    │  Captcha (Turnstile)     │                    │
 │                    │  ┌──────────┐  ┌───┐    │                    │
 │                    │  │ 2D8MQA   │  │↻  │    │                    │
 │                    │  └──────────┘  └───┘    │                    │
@@ -819,7 +819,7 @@ Four-step flow. Each step advances after verification.
 
 ### 3.9 Professor Profile / Settings
 
-Same layout as Student Profile (2.10) and Settings (2.11). Fields differ: Employee ID, Department, Assigned Courses. Settings identical.
+Same layout as Student Profile (2.10) and Settings (2.11). Fields differ: Department, Assigned Courses. Settings identical.
 
 ---
 
@@ -918,10 +918,10 @@ Same layout as Student Profile (2.10) and Settings (2.11). Fields differ: Employ
 
 Same CRUD pattern as Student Management (4.2), but this screen **seeds the
 professor records that professors claim at registration**. Columns:
-Employee ID, Name (First/Middle/Last), Department, **Email** (the
-registration lookup key), Courses Assigned, Status, **Claim** (Unclaimed ✅
-/ Claimed). Actions: [+Add] [Import CSV] (template: `employee_id,
-first_name, middle_name, last_name, email, department`), [Deactivate]
+Name (First/Middle/Last), Department, **Email** (the
+registration lookup key and professor identifier), Courses Assigned, Status, **Claim** (Unclaimed ✅
+/ Claimed). Actions: [+Add] [Import CSV] (template: `first_name,
+middle_name, last_name, email, department`), [Deactivate]
 [Reset Pwd] [Archive]. Create/Edit form includes multi-select course
 assignment.
 
@@ -1071,7 +1071,7 @@ Same CRUD pattern. Columns: Code, Name, Professor, Schedule, Students. Form incl
 
 ### 4.12 Admin Profile
 
-Same as Student Profile (2.10). Fields: Admin ID, Name (First/Middle/Last), Email, Role (Super Admin / Admin), Last Login.
+Same as Student Profile (2.10). Fields: Name (First/Middle/Last), Email, Role (Super Admin / Admin), Last Login.
 
 ### 4.13 Admin Liveness Review — `/admin/liveness/review`
 
@@ -1170,10 +1170,10 @@ Offline state (persistent):
                     │  Landing    │
                     └──────┬──────┘
                            ▼
-                    ┌─────────────┐
-                    │   Login     │ ←─── Register
-                    │   (+Captcha)│      Forgot Password (4-step)
-                    └──────┬──────┘
+                    ┌───────────────┐
+                    │   Login       │ ←─── Register
+                    │  (+Turnstile) │      Forgot Password (4-step)
+                    └───────┬───────┘
                            ▼
                     ┌─────────────┐
                     │  MFA Verify │  (if MFA enabled)
@@ -1261,7 +1261,7 @@ Offline state (persistent):
 - **Projector mode** (3.3) renders full-screen with large session code visible from the back of a classroom
 - **Sortable tables**: every data table (2.7, 3.4, 3.5, 4.2, 4.6, 4.8, 4.9, 4.11, 4.14) has clickable column headers that toggle ascending/descending with an ▲/▼ indicator, plus **category + date-range filters** and **Print / CSV / PDF** actions
 - **Password policy** (all accounts, incl. reset & admin reset): minimum 8 characters with at least 1 uppercase, 1 lowercase, 1 number and 1 symbol (alphanumeric + symbol)
-- **Account security**: login is protected by **Captcha**; optional **MFA (OTP)** via authenticator app; **Forgot Password** is a 4-step flow (email + captcha → security question w/ 3-attempt limit → OTP → new/confirm password); accounts lock temporarily after 5 failed logins
+- **Account security**: login is protected by **Cloudflare Turnstile** (free, invisible captcha); optional **MFA (OTP)** via authenticator app; **Forgot Password** is a 4-step flow (email + Turnstile → security question w/ 3-attempt limit → OTP → new/confirm password); accounts lock temporarily after 5 failed logins; OTP codes are stored in a dedicated `otp_codes` table (bcrypt-hashed, single-use, 5-min TTL)
 - **Claim-based registration**: students and professors self-register with email + password; the email must match an **admin-seeded record** (roster CSV / professor management), and an **OTP sent to that email** proves ownership before the account is linked. Nothing is typed — name/course/section come from the seeded record. Student ID is only the QR/attendance key, never entered at registration
 - **Soft delete / deactivate**: records are deactivated (`is_active=false`) rather than deleted; permanent deletion only from the Archive screen
 - **Admin reset**: admins can reset any user's password (temp password set; user prompted to change on next login)

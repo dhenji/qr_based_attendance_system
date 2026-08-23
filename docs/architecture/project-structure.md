@@ -11,14 +11,17 @@ attendance-system/
 │   │   │   ├── __init__.py
 │   │   │   ├── config.py             # App settings, environment variables
 │   │   │   ├── database.py           # Async SQLAlchemy engine + session factory + Base
-│   │   │   ├── security.py           # (planned) HMAC signing, password hashing
+│   │   │   ├── security.py           # (planned) HMAC signing, bcrypt hashing, TOTP
 │   │   │   └── exceptions.py         # (planned) Domain exceptions + error handlers
 │   │   │
 │   │   ├── shared/                   # Cross-feature helpers
 │   │   │   ├── __init__.py
-│   │   │   ├── enums.py              # UserRole, ValidationStatus, SyncStatus, QueueStatus
+│   │   │   ├── enums.py              # UserRole, OtpPurpose, ValidationStatus, SyncStatus, QueueStatus
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
 │   │   │   ├── dependencies.py       # (planned) get_db, pagination dependencies
+│   │   │   ├── otp.py                # (planned) 6-digit OTP generate/verify vs otp_codes table
+│   │   │   ├── captcha.py            # (planned) Cloudflare Turnstile siteverify
+│   │   │   ├── email.py              # (planned) SMTP sender (OTP emails)
 │   │   │   ├── cache.py              # (planned) LRU cache (O(1) student lookup)
 │   │   │   └── base.py               # (planned) shared schemas
 │   │   │
@@ -33,6 +36,7 @@ attendance-system/
 │   │   │   ├── student/              # │ ├─ schema.py  (Pydantic v2)
 │   │   │   ├── course/               # │ ├─ service.py (business logic)
 │   │   │   ├── enrollment/           # │ └─ router.py  (endpoints)
+│   │   │   ├── professor/            #   claim-based self-registration (OTP)
 │   │   │   ├── session/              #   HMAC session codes & expiry
 │   │   │   ├── attendance/           #   validation pipeline (HMAC→GPS→liveness→uniqueness→enrollment)
 │   │   │   ├── liveness/             #   face challenges, evidence bundles,
@@ -188,8 +192,11 @@ attendance-system/
 > **Implemented so far:** `model.py` for `src/features/auth/`, `src/features/student/`,
 > `src/features/course/`, `src/features/enrollment/`, `src/features/session/`,
 > `src/features/attendance/`, `src/features/sync/` (all 7 tables created by the initial
-> Alembic migration), plus `src/shared/enums.py` and `src/shared/mixins.py`. The rest
-> (`schema.py`, `service.py`, `router.py`, `liveness/`, `analytics/`) is still planned.
+> Alembic migration), plus `src/shared/enums.py` and `src/shared/mixins.py`. Planned
+> next: `professors` + `otp_codes` tables, account-security fields on `users`
+> (security question, MFA, lockout, `must_change_password`), `email/middle_name/section`
+> on `students`, and the missing `schema.py`, `service.py`, `router.py`, `liveness/`,
+> `analytics/` layers.
 
 ---
 

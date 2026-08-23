@@ -48,7 +48,7 @@ A web-based application that:
 | Analytics        | At-risk forecasting and recommendations for professors        |
 | Reports          | Download attendance reports (CSV/PDF/Print)                    |
 | Data Tables      | Sortable columns, category + date-range filters, search, print  |
-| Account Security | Strong passwords, Captcha, OTP, optional MFA, admin reset, lockout |
+| Account Security | Strong passwords (bcrypt), Cloudflare Turnstile, OTP, optional MFA, admin reset, lockout |
 
 > **Names & promotion**: students use First/Middle/Last names with a Section
 > field (from CSV import); admins bulk-promote year + section each academic
