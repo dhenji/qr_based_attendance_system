@@ -9,15 +9,15 @@
 Each `features/*` folder owns its domain. Files are created only when
 needed — no `.gitkeep` placeholders.
 
-| File | Responsibility |
-| ---- | -------------- |
-| `store.svelte.ts` | Domain state — runes, `.svelte.ts` extension required |
-| `service.ts` | API calls (mock or real, same interface — swappable) |
-| `schema.ts` | Zod schemas for this domain |
-| `mock.ts` | Fixtures / seed data |
-| `bundle.ts` | Domain-specific builders (e.g. evidence bundles) |
-| `types.ts` | Only if domain types aren't shared (usually in `shared/types`) |
-| `components/` | Domain-specific Svelte components (only if needed) |
+| File              | Responsibility                                                 |
+| ----------------- | -------------------------------------------------------------- |
+| `store.svelte.ts` | Domain state — runes, `.svelte.ts` extension required          |
+| `service.ts`      | API calls (mock or real, same interface — swappable)           |
+| `schema.ts`       | Zod schemas for this domain                                    |
+| `mock.ts`         | Fixtures / seed data                                           |
+| `bundle.ts`       | Domain-specific builders (e.g. evidence bundles)               |
+| `types.ts`        | Only if domain types aren't shared (usually in `shared/types`) |
+| `components/`     | Domain-specific Svelte components (only if needed)             |
 
 `features/{course,enrollment,analytics}` are documented but **not created
 yet** — the mockup pass doesn't use them.
@@ -175,3 +175,4 @@ frontend/
 ## Deferred (later passes)
 
 `hooks.server.ts` · `service-worker.ts` · `static/icons/` · `vite-plugin-pwa` · `robots.txt`
+

@@ -37,3 +37,6 @@ vite.config.ts.timestamp-*
 docker-compose.override.yml
 postgres_data/
 pgdata/
+
+# ai prompts
+docs/developer/prompts

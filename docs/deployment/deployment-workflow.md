@@ -90,6 +90,7 @@ backend/
 ```
 
 **Sample `Dockerfile`** (create this in `backend/` — only `Dockerfile.dev` exists now):
+
 ```dockerfile
 FROM python:3.12-slim
 
@@ -106,6 +107,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
 **`.dockerignore`** — keep the image lean and exclude local secrets:
+
 ```
 __pycache__/
 *.pyc
@@ -118,6 +120,7 @@ Dockerfile.dev
 ```
 
 **Sample fly.toml**:
+
 ```toml
 app = "attendance-system-api"
 
@@ -204,6 +207,7 @@ Migration runs every time the app starts (deploy, restart, scale). Safe because 
 ### Option C: Fly.io Release Command (Recommended)
 
 In `fly.toml`:
+
 ```toml
 [deploy]
   release_command = "alembic upgrade head"
@@ -220,20 +224,22 @@ Vercel provides free hosting for SvelteKit with automatic HTTPS and global CDN.
 ### 5.1 Prepare Frontend Environment
 
 In your `frontend/.env`:
+
 ```
 PUBLIC_API_URL=https://attendance-system-api.fly.dev
 ```
 
 In `svelte.config.js` — the scaffold already uses `@sveltejs/adapter-auto`, which auto-selects the Vercel adapter when deployed on Vercel, so no config change is required:
+
 ```js
-import adapter from '@sveltejs/adapter-auto';
-import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+import adapter from "@sveltejs/adapter-auto";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 export default {
   preprocess: vitePreprocess(),
   kit: {
-    adapter: adapter()
-  }
+    adapter: adapter(),
+  },
 };
 ```
 
@@ -251,6 +257,7 @@ export default {
 ```
 
 Vercel automatically:
+
 - Detects SvelteKit and runs `sveltekit build`
 - Deploys to a global CDN
 - Enables HTTPS
@@ -282,35 +289,35 @@ npm install -D vite-plugin-pwa
 ### 6.2 Configure in `vite.config.ts`
 
 ```ts
-import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
+import { sveltekit } from "@sveltejs/kit/vite";
+import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   plugins: [
     sveltekit(),
     VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'icons/*.png'],
+      registerType: "autoUpdate",
+      includeAssets: ["favicon.png", "icons/*.png"],
       manifest: {
-        name: 'QR Attendance System',
-        short_name: 'Attendance',
-        description: 'QR-based campus attendance system',
-        theme_color: '#1e3a5f',
-        background_color: '#ffffff',
-        display: 'standalone',
-        scope: '/',
-        start_url: '/',
+        name: "QR Attendance System",
+        short_name: "Attendance",
+        description: "QR-based campus attendance system",
+        theme_color: "#1e3a5f",
+        background_color: "#ffffff",
+        display: "standalone",
+        scope: "/",
+        start_url: "/",
         icons: [
-          { src: '/icons/192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/512.png', sizes: '512x512', type: 'image/png' }
-        ]
+          { src: "/icons/192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icons/512.png", sizes: "512x512", type: "image/png" },
+        ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
-      }
-    })
-  ]
+        globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+      },
+    }),
+  ],
 });
 ```
 
@@ -321,27 +328,28 @@ Place `frontend/static/icons/192.png` and `frontend/static/icons/512.png` (creat
 ### 6.4 Create Service Worker Logic (for Offline Sync)
 
 In `frontend/src/service-worker.ts` (the canonical file — not `.js`):
+
 ```ts
 // Background sync for offline attendance records
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'sync-attendance') {
+self.addEventListener("sync", (event) => {
+  if (event.tag === "sync-attendance") {
     event.waitUntil(syncAttendance());
   }
 });
 
 async function syncAttendance() {
   const db = await openIndexedDB();
-  const pending = await db.getAll('pendingRecords');
+  const pending = await db.getAll("pendingRecords");
   for (const record of pending) {
     try {
       await fetch(`${API_URL}/attendance`, {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(record),
-        headers: { 'Content-Type': 'application/json' }
+        headers: { "Content-Type": "application/json" },
       });
-      await db.delete('pendingRecords', record.id);
+      await db.delete("pendingRecords", record.id);
     } catch (e) {
-      console.error('Sync failed, will retry later', e);
+      console.error("Sync failed, will retry later", e);
     }
   }
 }
@@ -353,15 +361,15 @@ The `API_URL` here must be the **public** value (`%PUBLIC_API_URL%`). In a Svelt
 
 ## 7. Post-Deployment Checklist
 
-| Item | How to Verify |
-|------|---------------|
-| Backend accessible | Visit `https://attendance-system-api.fly.dev/docs` — should see Swagger UI |
-| Database connected | Try creating a student via the Swagger UI or API |
-| CORS working | Open frontend URL → check browser console for no CORS errors |
-| PWA installable | Open frontend in Chrome → check Lighthouse → PWA badge |
-| Offline mode | Open frontend → DevTools → Network tab → toggle "Offline" → app should still load |
-| Session codes | Create a session via API → verify HMAC token is generated |
-| GPS validation | Submit attendance with fake GPS → should reject; with classroom GPS → should accept |
+| Item               | How to Verify                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Backend accessible | Visit `https://attendance-system-api.fly.dev/docs` — should see Swagger UI          |
+| Database connected | Try creating a student via the Swagger UI or API                                    |
+| CORS working       | Open frontend URL → check browser console for no CORS errors                        |
+| PWA installable    | Open frontend in Chrome → check Lighthouse → PWA badge                              |
+| Offline mode       | Open frontend → DevTools → Network tab → toggle "Offline" → app should still load   |
+| Session codes      | Create a session via API → verify HMAC token is generated                           |
+| GPS validation     | Submit attendance with fake GPS → should reject; with classroom GPS → should accept |
 
 ---
 
@@ -395,8 +403,8 @@ The `API_URL` here must be the **public** value (`%PUBLIC_API_URL%`). In a Svelt
 
 **Total free tier limits**:
 
-| Service | Free Limit | What to Watch |
-|---------|-----------|---------------|
-| Supabase | 500MB DB, 2GB bandwidth | Sufficient for ~10,000+ students |
-| Fly.io | 3 shared VMs, 3GB storage | Always-on, no cold starts |
-| Vercel | Unlimited static, 100GB bandwidth | 6000 build minutes/month |
+| Service  | Free Limit                        | What to Watch                    |
+| -------- | --------------------------------- | -------------------------------- |
+| Supabase | 500MB DB, 2GB bandwidth           | Sufficient for ~10,000+ students |
+| Fly.io   | 3 shared VMs, 3GB storage         | Always-on, no cold starts        |
+| Vercel   | Unlimited static, 100GB bandwidth | 6000 build minutes/month         |

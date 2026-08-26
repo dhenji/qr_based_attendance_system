@@ -80,12 +80,60 @@ npm run check                      # typecheck (runs svelte-kit sync first)
 
 ## Docs Reference
 
+### Design
+- `docs/design/wireframes.md` — 47-screen wireframe catalog (admin/professor/student/shared)
+- `docs/design/database-er.md` — ERD with target schema (programs, year_levels, courses, etc.)
+
+### Proposals
 - `docs/proposals/proposal.md` — full 11-section proposal
 - `docs/proposals/proposal_simple.md` — 1-page summary
-- `docs/proposals/models.md` — model catalog
-- `docs/proposals/contributions.md` — CS contributions
-- `docs/design/database-er.md` — ERD
-- `docs/deployment/deployment-workflow.md` — free-tier: Supabase → Fly.io → Vercel
-- `docs/design/wireframes.md` — wireframes
-- `docs/architecture/project-structure.md` — intended backend layout
+- `docs/proposals/models.md` — ML/AI model catalog
+- `docs/proposals/contributions.md` — CS contributions mapping
+
+### Architecture
+- `docs/architecture/project-structure.md` — intended backend + frontend layout
 - `docs/architecture/frontend-architecture.md` — production-ready frontend structure
+- `docs/architecture/api-contracts.md` — full API endpoint inventory with request/response schemas
+- `docs/architecture/offline-first.md` — IndexedDB sync algorithm & conflict handling
+- `docs/architecture/security-model.md` — threat model & mitigations
+- `docs/architecture/data-flow.md` — sequence diagrams for all major flows
+- `docs/architecture/migration-strategy.md` — Alembic migration plan (current → target schema)
+- `docs/architecture/face-enrollment.md` — 3-photo enrollment & embedding pipeline
+- `docs/architecture/excuse-workflow.md` — state machine & permission matrix
+- `docs/architecture/risk-model.md` — heuristic at-risk prediction & batch job spec
+
+### Deployment
+- `docs/deployment/deployment-workflow.md` — free-tier: Supabase → Fly.io → Vercel
+- `docs/deployment/backup-strategy.md` — full pg_dump pipeline, encryption, retention
+- `docs/deployment/production-checklist.md` — secrets, CORS, storage, first-admin seeding
+
+### Developer
+- `docs/developer/backend-setup.md` — Docker Compose, env setup, alembic, seed script
+- `docs/developer/frontend-setup.md` — Node, runes mode, Chart.js, service worker
+- `docs/developer/feature-template.md` — vertical-slice checklist (model→router→frontend)
+- `docs/developer/coding-standards.md` — Python, TypeScript/Svelte, git conventions
+
+### Operations
+- `docs/operations/runbooks.md` — restore, rollback, unlock, re-enroll, sync-clear, key rotation
+- `docs/operations/monitoring.md` — health endpoints, metrics, SLOs
+- `docs/operations/incident-response.md` — spoof spike, DB outage, sync flood, backup drill
+
+### Testing
+- `docs/testing/test-plan.md` — portal×feature matrix + decision coverage (D1–D43)
+- `docs/testing/test-data.md` — seed spec (3 programs, 42 students, 6-week history)
+- `docs/testing/performance-benchmarks.md` — scan latency, concurrent sync, risk batch targets
+
+### Guides
+- `docs/guides/admin-manual.md` — program setup, imports, assignment, analytics, backup
+- `docs/guides/professor-manual.md` — sessions, windows, excuses, reports
+- `docs/guides/student-manual.md` — 5-step scan, offline, excuses, calendar
+- `docs/guides/face-enrollment-guide.md` — 3-photo capture script & privacy notes
+
+### Project
+- `docs/project/decision-log.md` — authoritative decision log (D1–D43)
+- `docs/project/glossary.md` — terminology definitions
+- `docs/project/roadmap.md` — implementation phases with dependency graph
+
+### Presentations
+- `docs/presentations/presentation-slides.md` — presentation content
+- `docs/presentations/presentation.pptx` — slide deck

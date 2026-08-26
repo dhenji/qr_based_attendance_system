@@ -1,0 +1,232 @@
+# Glossary
+
+> Every term and enum value used in the QR-Based Attendance System, with 1–2 sentence definitions and references to where they appear in the database schema (§6) or API contracts.
+
+---
+
+## Core Domain Terms
+
+### Session
+
+A single class meeting instance opened by a professor. Carries a unique HMAC-signed **session code**, configurable scan windows, duration, and optional classroom override. Stored in `sessions` table. Routes: `POST /professor/sessions`, `GET /professor/sessions/active/{id}`.
+
+### Session Code (HMAC)
+
+A 6–8 character code derived from an HMAC of the session ID + secret, used by students to join a session manually (alternative to scanning the Session QR). Verified via `POST /student/sessions/verify-code`.
+
+### Session QR
+
+A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2M","course":123,"radius":30,"pw":5,"lw":10}`. Scanned by students in Step 1 of the scan flow. Version `v` enables future migration.
+
+### Enrollment (Course-Taking)
+
+A record linking a `student` to a `course` for a specific `academic_year` and `semester`. Validated against the student's `year_level.term_structure`. Stored in `enrollments` table. Unique constraint on `(student_id, course_id, academic_year)`.
+
+### Term / Term Structure
+
+A named academic period (e.g., "1st Semester", "Midyear") defined per **program per year level** in `year_levels.term_structure` JSONB: `{"terms": [{"code": "1st_sem", "label": "1st Semester"}, ...]}`. Enrollment `semester` must match one of these codes.
+
+### Year Level
+
+A row in `year_levels` belonging to a `program`, with `year_number` (1..N), `label` (e.g., "1st Year"), `sort_order`, and its own `term_structure`. FK: `program_id → programs`. Unique on `(program_id, year_number)`.
+
+### Program
+
+An academic program (e.g., "BSCS", "BSIT", "BSECE") in `programs` table. Has `code` (UK), `name`, `description`, `total_years`, `is_active`. Owns multiple `year_levels`.
+
+### Course (= Subject)
+
+A subject offered by a program at a specific year level. Stored in `courses` with `program_id`, `year_level_id`, `course_code`, `course_name`, `units`, scheduling metadata (`sessions_per_week`, `session_duration_hours`, `semester_weeks`, `schedule_days`, `schedule_start_time`, `schedule_end_time`), classroom defaults, and late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`). A course can be taken by students from other programs/year levels via enrollments.
+
+### Section
+
+A student-cohort identifier (e.g., "A", "B") stored on `students.section` only — **not** on enrollments. Changed only via admin action (D2). Used for filtering rosters and reports.
+
+### Compliance Rate
+
+**Default display metric**: `present / total_expected_sessions`. Excludes late, excused, absent. Used in all reports unless toggled.
+
+### Participation Rate
+
+**Alternative metric**: `(present + late + excused) / total_expected_sessions`. Toggled via UI. Excused counts as present.
+
+### Present Window / Late Window
+
+Per-session minute windows measured from `session.created_at`:
+
+- **Present window**: scans within `present_window_minutes` → status `present`
+- **Late window**: scans within the next `late_window_minutes` → status `late`
+  Constraint: `present_window_minutes + late_window_minutes ≤ duration_minutes` (CHECK on `sessions`).
+
+### Duration Expiry
+
+The hard ceiling for scanning: `expires_at = min(session.created_at + duration_minutes, scheduled_end_time)`. After this, no scans accepted; offline scans with `scanned_at` past expiry → `rejected (session_expired)`.
+
+### Scheduled End
+
+The course's scheduled class end time (`courses.schedule_end_time`) copied to `sessions.scheduled_end_time` at session creation. Forms the ceiling for `expires_at`.
+
+### Geofence
+
+Circular GPS boundary centered on classroom coordinates (course default or session override) with `classroom_radius_meters`. Validation uses Haversine distance. Runs in parallel with face check (Step 3 of scan flow).
+
+### Liveness
+
+Anti-spoofing challenge requiring the student to perform a fixed sequence: **blink → turn left → turn right**. Implemented via MediaPipe Face Mesh WASM client-side; EAR (Eye Aspect Ratio) + PnP (Perspective-n-Point) head pose graded server-side.
+
+### EAR (Eye Aspect Ratio)
+
+Metric computed from facial landmarks to detect eye closure (blink). Part of liveness grading.
+
+### PnP (Perspective-n-Point)
+
+Head-pose estimation from facial landmarks to detect left/right turns. Part of liveness grading.
+
+### Embedding
+
+A 128-dimensional face vector (face-api.js compatible ResNet) generated from 3 enrollment photos (front, left, right). Stored encrypted in `students.face_embedding BYTEA` as JSON: `{"mean": [...], "angles": {"front": [...], "left": [...], "right": [...]}}`. Versioned via `face_embedding_version`.
+
+### Evidence Bundle
+
+JSON object attached to an attendance record (offline or online) containing: `gps`, `liveness_scores`, `face_match_score`, `scanned_at`, `device_info`. Stored in `attendance_records.liveness_evidence JSONB`. Used for audit and server-side re-validation on sync.
+
+### Excuse Request
+
+A record in `excuse_requests` representing one of three initiation paths (D21):
+
+- `quick`: professor marks absent/late student excused with reason
+- `prof_with_evidence`: professor uploads evidence and approves immediately
+- `request`: student submits reason + evidence; professor reviews
+  State machine: `pending` → `approved` | `rejected`.
+
+### At-Risk Score
+
+Daily-computed heuristic risk level (`low`|`medium`|`high`) per student per course per semester, stored in `student_risk_scores`. Features: `absence_rate`, `max_streak`, `sync_lag`, `trend_slope`. Thresholds from env vars (D35).
+
+### Sync Queue
+
+Offline-first queue in `sync_queue` table. Client writes pending attendance records (with `record_data` JSON including `scanned_at`, evidence bundle) when offline. Background sync retries with exponential backoff. Server validates `scanned_at` against session window (D16).
+
+### Claim-Based Registration
+
+Account activation flow where a student/professor enters their official email → receives OTP → sets password → links to pre-existing `students`/`professors` record via `user_id` FK. Handled by existing `/auth/claim` endpoints.
+
+---
+
+## Enum Values (from §6 Target Schema)
+
+### ValidationStatus (`attendance_records.validation_status`)
+
+| Value      | Meaning                                                    |
+| ---------- | ---------------------------------------------------------- |
+| `present`  | Scanned within present window                              |
+| `late`     | Scanned within late window                                 |
+| `absent`   | No scan by session expiry                                  |
+| `excused`  | Excused via any path (counts as present for Participation) |
+| `pending`  | Offline queued, not yet synced                             |
+| `rejected` | Failed validation (see rejection reasons)                  |
+
+### Rejection Reasons (stored in `liveness_evidence.rejection_reason` or inferred)
+
+| Value              | Meaning                                    |
+| ------------------ | ------------------------------------------ |
+| `duplicate`        | Student already scanned for this session   |
+| `outside_geofence` | GPS distance > radius                      |
+| `liveness_failed`  | Liveness challenge failed (EAR/PnP)        |
+| `face_mismatch`    | Cosine similarity < `FACE_MATCH_THRESHOLD` |
+| `not_enrolled`     | Student not enrolled in session's course   |
+| `session_expired`  | `scanned_at` > `expires_at` (offline sync) |
+
+### UserRole (`users.role`)
+
+| Value         | Meaning                                                 |
+| ------------- | ------------------------------------------------------- |
+| `super_admin` | Full system access including admin user management      |
+| `admin`       | Program management, analytics, backups, face enrollment |
+| `professor`   | Session management, attendance, excuses, reports        |
+| `student`     | Scan attendance, view history/schedule, request excuses |
+
+### OtpPurpose (`otp_codes.purpose`)
+
+| Value             | Meaning                    |
+| ----------------- | -------------------------- |
+| `claim`           | Account claim registration |
+| `forget_password` | Password reset             |
+
+### SyncStatus (`attendance_records.sync_status`, `sync_queue.status`)
+
+| Value     | Meaning                            |
+| --------- | ---------------------------------- |
+| `synced`  | Successfully written to server     |
+| `pending` | Queued locally or in transit       |
+| `failed`  | Sync rejected (reason in evidence) |
+
+### QueueStatus (`sync_queue.status` — extended)
+
+| Value        | Meaning                      |
+| ------------ | ---------------------------- |
+| `pending`    | Awaiting sync attempt        |
+| `processing` | Sync in progress             |
+| `done`       | Synced successfully          |
+| `failed`     | Exhausted retries / rejected |
+
+### ExcuseRequest Status (`excuse_requests.status`)
+
+| Value      | Meaning                                              |
+| ---------- | ---------------------------------------------------- |
+| `pending`  | Awaiting professor review (student-initiated)        |
+| `approved` | Excuse granted → attendance status becomes `excused` |
+| `rejected` | Excuse denied; original status stands                |
+
+### ExcuseRequest InitiatedBy (`excuse_requests.initiated_by`)
+
+| Value       | Meaning                                 |
+| ----------- | --------------------------------------- |
+| `professor` | Prof-initiated (quick or with evidence) |
+| `student`   | Student-initiated request               |
+
+### ExcuseRequest InitiatedVia (`excuse_requests.initiated_via`)
+
+| Value                | Meaning                                 |
+| -------------------- | --------------------------------------- |
+| `quick`              | Prof quick-excuse (no evidence upload)  |
+| `prof_with_evidence` | Prof files with evidence, auto-approved |
+| `request`            | Student submits request                 |
+
+### ExcuseType (`attendance_records.excuse_type`)
+
+| Value                | Meaning                       |
+| -------------------- | ----------------------------- |
+| `quick`              | From prof quick-excuse        |
+| `prof_with_evidence` | From prof with evidence       |
+| `request_approved`   | From approved student request |
+
+### RiskLevel (`student_risk_scores.risk_level`)
+
+| Value    | Meaning                    |
+| -------- | -------------------------- |
+| `low`    | Below all thresholds       |
+| `medium` | Meets one medium threshold |
+| `high`   | Meets any high threshold   |
+
+### BackupKind (`backup_log.kind`)
+
+| Value       | Meaning                                |
+| ----------- | -------------------------------------- |
+| `full`      | Full pg_dump of all tables (encrypted) |
+| `analytics` | Aggregated CSV/PDF export              |
+
+### BackupStorageBackend (`backup_log.storage_backend`)
+
+| Value   | Meaning                                                  |
+| ------- | -------------------------------------------------------- |
+| `local` | Local filesystem (`BACKUP_LOCAL_DIR`)                    |
+| `s3`    | S3-compatible (`BACKUP_S3_BUCKET`, `BACKUP_S3_ENDPOINT`) |
+
+### ScannedVia (`attendance_records.scanned_via`)
+
+| Value         | Meaning                    |
+| ------------- | -------------------------- |
+| `qr_camera`   | Student scanned session QR |
+| `manual_code` | Student typed session code |
+
