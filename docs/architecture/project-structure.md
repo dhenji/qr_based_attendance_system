@@ -37,12 +37,21 @@ attendance-system/
 │   │   │   ├── course/               # │ ├─ service.py (business logic)
 │   │   │   ├── enrollment/           # │ └─ router.py  (endpoints)
 │   │   │   ├── professor/            #   claim-based self-registration (OTP)
+│   │   │   ├── program/              #   program CRUD, year-level management,
+│   │   │   │                         #   term structure editing
 │   │   │   ├── session/              #   HMAC session codes & expiry
 │   │   │   ├── attendance/           #   validation pipeline (HMAC→GPS→liveness→uniqueness→enrollment)
+│   │   │   ├── face_enrollment/      #   3-photo capture, embedding generation,
+│   │   │   │                         #   versioned storage, revocation
 │   │   │   ├── liveness/             #   face challenges, evidence bundles,
 │   │   │   │                         #   nonce registry, risk-fusion scoring
-│   │   │   ├── analytics/            #   aggregations, at-risk forecasting,
-│   │   │   │                         #   prescriptive rule engine
+│   │   │   ├── excuse/               #   excuse state machine (3 initiation paths),
+│   │   │   │                         #   bulk excuse-all, evidence attachments
+│   │   │   ├── analytics/            #   aggregations, at-risk heuristic scoring,
+│   │   │   │                         #   prescriptive rule engine, nightly batch
+│   │   │   │   └── tasks.py          #   APScheduler jobs (risk batch nightly, retention prune)
+│   │   │   ├── system/               #   backup pipeline, academic-structure updates,
+│   │   │   │                         #   system settings, audit logging
 │   │   │   └── sync/                 #   offline SyncQueue processing
 │   │   │
 │   │   └── tests/                    # (planned) Unit & integration tests
@@ -83,25 +92,56 @@ attendance-system/
 │   │   │   │
 │   │   │   ├── (student)/
 │   │   │   │   ├── +layout.svelte    # Student layout/sidebar
-│   │   │   │   ├── dashboard/        # Dashboard, attendance, history, schedule,
-│   │   │   │   │                     #  notifications, profile, settings
-│   │   │   │   └── scan/             # QR scanner, success, failed
+│   │   │   │   ├── dashboard/        # Dashboard overview
+│   │   │   │   ├── scan/
+│   │   │   │   │   ├── step/         # 5-step scan flow
+│   │   │   │   │   │   ├── 1/        # 2.2a Session Entry (code/QR)
+│   │   │   │   │   │   ├── 2/        # 2.2b ID Scan
+│   │   │   │   │   │   ├── 3/        # 2.2c Location Check
+│   │   │   │   │   │   ├── 4/        # 2.2d Face Check
+│   │   │   │   │   │   └── 5/        # 2.2e Result
+│   │   │   │   │   └── +page.svelte  # Scanner root redirect
+│   │   │   │   ├── history/          # 2.7 Attendance history + filters
+│   │   │   │   ├── schedule/         # 2.8 Calendar (month/week)
+│   │   │   │   ├── excuses/          # Student excuse requests
+│   │   │   │   ├── profile/          # 2.10 Read-only profile
+│   │   │   │   └── settings/         # 2.11 Appearance/Notifications/Security
 │   │   │   │
 │   │   │   ├── (professor)/
 │   │   │   │   ├── +layout.svelte    # Professor layout
-│   │   │   │   └── dashboard/        # Attendance (list/live/history/export),
-│   │   │   │                         #  sessions (create/active/history), courses,
-│   │   │   │                         #  reports (daily/weekly/monthly/export),
-│   │   │   │                         #  profile, settings
+│   │   │   │   ├── dashboard/        # 3.1 Dashboard (today's sessions, quick actions)
+│   │   │   │   ├── courses/
+│   │   │   │   │   ├── +page.svelte  # 3.6 My Courses (grouped by program)
+│   │   │   │   │   └── [id]/         # 3.6 Course detail deep-link
+│   │   │   │   ├── sessions/
+│   │   │   │   │   ├── new/          # 3.2a/b Session creation (locked vs selector)
+│   │   │   │   │   ├── active/[id]/  # 3.3 Active session (dual timers)
+│   │   │   │   │   └── history/      # 3.5 Session history
+│   │   │   │   ├── attendance/       # 3.4 Attendance list (filters + section)
+│   │   │   │   ├── reports/          # 3.7 Reports (3 tabs: All/Course/Trends)
+│   │   │   │   ├── excuses/          # Excuse request review
+│   │   │   │   ├── profile/          # 3.9 Read-only profile
+│   │   │   │   └── settings/         # 3.9 Change password / MFA
 │   │   │   │
 │   │   │   └── (admin)/
 │   │   │       ├── +layout.svelte    # Admin layout
-│   │   │       └── dashboard/        # Students (create/edit/import/archive),
-│   │   │                             #  professors, courses (create/edit/schedule),
-│   │   │                             #  attendance (overview/analytics), reports
-│   │   │                             #  (attendance/students/professors/export),
-│   │   │                             #  audit-logs, system (settings/backup/maintenance),
-│   │   │                             #  profile
+│   │   │       ├── dashboard/        # 4.1 Dashboard (KPIs, quick actions)
+│   │   │       ├── students/         # Student management (CRUD/import/archive)
+│   │   │       ├── professors/       # Professor management
+│   │   │       ├── programs/
+│   │   │       │   ├── +page.svelte  # 4.5a Programs list
+│   │   │       │   └── [id]/
+│   │   │       │       ├── +page.svelte  # 4.5b Program detail (year tabs)
+│   │   │       │       ├── years/[yid]/
+│   │   │       │       │   └── courses/  # 4.5c Year-level courses
+│   │   │       │       │       └── [cid]/ # 4.5d Course detail (tabs)
+│   │   │       │       └── courses/[cid]/ # Direct course access
+│   │   │       ├── analytics/        # 4.7 Analytics & Reports (5 tabs)
+│   │   │       ├── audit-logs/       # Audit trail viewer
+│   │   │       ├── system/
+│   │   │       │   ├── settings/     # 4.10 System settings
+│   │   │       │   └── backups/      # Backup management
+│   │   │       └── face-enrollment/  # Face enrollment admin tool
 │   │   │
 │   │   ├── lib/
 │   │   │   ├── components/
@@ -117,9 +157,25 @@ attendance-system/
 │   │   │   │   │   ├── LivenessStatus.svelte  # Liveness evidence status
 │   │   │   │   │   ├── PermissionPrompt.svelte# Camera/GPS permissions
 │   │   │   │   │   ├── ScanResult.svelte      # Result message
-│   │   │   │   │   └── OfflineStatus.svelte   # Pending sync/liveness queue
+│   │   │   │   │   ├── OfflineStatus.svelte   # Pending sync/liveness queue
+│   │   │   │   │   ├── Step1SessionEntry.svelte   # 2.2a code/QR entry
+│   │   │   │   │   ├── Step2IdScan.svelte         # 2.2b student-ID QR
+│   │   │   │   │   ├── Step3LocationCheck.svelte  # 2.2c GPS validation
+│   │   │   │   │   ├── Step4FaceCheck.svelte      # 2.2d liveness challenge
+│   │   │   │   │   └── Step5Result.svelte         # 2.2e success/fail overlay
+│   │   │   │   ├── charts/
+│   │   │   │   │   └── ChartCanvas.svelte    # Reusable Chart.js wrapper (D41)
+│   │   │   │   ├── calendar/
+│   │   │   │   │   ├── MonthGrid.svelte      # 2.8 Month calendar view
+│   │   │   │   │   ├── WeekGrid.svelte       # 2.8 Week calendar view
+│   │   │   │   │   └── DaySheet.svelte       # 2.8 Day detail sheet
+│   │   │   │   ├── excuse/
+│   │   │   │   │   ├── QuickModal.svelte     # Prof quick-excuse (D21 path a)
+│   │   │   │   │   ├── RequestForm.svelte    # Student excuse request (D21 path c)
+│   │   │   │   │   └── ReviewList.svelte     # Prof review pending requests
+│   │   │   │   ├── face-enrollment/
+│   │   │   │   │   └── FaceEnrollmentModal.svelte  # 3-photo capture modal
 │   │   │   │   ├── dashboard/         # Dashboard widgets
-│   │   │   │   ├── charts/            # Chart components
 │   │   │   │   ├── forms/             # Form components
 │   │   │   │   ├── modals/            # Modal dialogs
 │   │   │   │   ├── navigation/        # Navbar/Sidebar
@@ -170,16 +226,28 @@ attendance-system/
 │   └── .env                          # PUBLIC_API_URL (gitignored)
 │
 ├── docs/                             # Documentation
+│   ├── project/
+│   │   ├── decision-log.md           # ADR-format decision log (D1–D43)
+│   │   └── glossary.md               # Term definitions
 │   ├── proposals/
 │   │   ├── proposal.md               # Full project proposal
-│   │   └── proposal_simple.md        # Simplified proposal (1st week)
+│   │   ├── proposal_simple.md        # Simplified proposal (1st week)
+│   │   ├── models.md                 # ML/model catalog
+│   │   └── contributions.md          # CS contribution mapping
 │   ├── architecture/
 │   │   ├── frontend-architecture.md  # Production SvelteKit structure
-│   │   └── project-structure.md      # This file
+│   │   ├── project-structure.md      # This file
+│   │   ├── api-contracts.md          # Endpoint schemas & conventions
+│   │   ├── offline-first.md          # IndexedDB, sync algorithm, embedding pull
+│   │   ├── security-model.md         # Threat model & mitigations
+│   │   ├── data-flow.md              # Mermaid sequence diagrams
+│   │   └── migration-strategy.md     # Alembic migration plan
 │   ├── deployment/
-│   │   └── deployment-workflow.md    # Deployment guide
+│   │   ├── deployment-workflow.md    # Deployment guide
+│   │   └── backup-strategy.md        # Backup pipeline (Phase 3)
 │   ├── design/
 │   │   ├── frontend-architecture.md  # Clean copy of frontend structure
+│   │   ├── database-er.md            # ERD diagrams
 │   │   └── wireframes.md             # Wireframes
 │   └── presentations/                # Slides + deck (.pptx, .pdf)
 │
@@ -210,9 +278,18 @@ attendance-system/
 | `frontend/src/lib/utils/geolocation.ts` + `backend/src/features/attendance/service.py` | Geolocation Proximity (Haversine) |
 | `frontend/src/lib/components/scanner/QRScanner.svelte` | Live QR Detection (Liveness) |
 | `frontend/src/lib/components/scanner/FaceChallenge.svelte` + `backend/src/features/liveness/` | Liveness Protocol: challenge-response, evidence bundles, nonce anti-replay, risk fusion |
-| `backend/src/features/analytics/` | Data Mining: descriptive/diagnostic aggregation, predictive forecasting, prescriptive rules |
+| `backend/src/features/analytics/` + `tasks.py` | Data Mining: descriptive/diagnostic aggregation, heuristic at-risk scoring, prescriptive rules, nightly batch scheduling |
 | `backend/src/features/*/model.py` | Database Design & Normalization (3NF) |
 | `backend/src/features/sync/service.py` + `frontend/src/lib/services/sync.ts` | Offline Sync / Eventual Consistency |
+| `backend/src/features/program/` | Academic Hierarchy: Program → Year Level → Course (tree structure, FK constraints) |
+| `backend/src/features/face_enrollment/` | Biometrics: face embedding generation (pretrained ResNet), template protection (AES-GCM encryption), versioned distribution |
+| `backend/src/features/excuse/` | State Machine: excuse request lifecycle (pending→approved/rejected), permission matrix, audit trail |
+| `backend/src/features/system/` | DevOps: backup pipeline (pg_dump→encrypt→store→prune), academic-structure CRUD, system settings |
+| `frontend/src/lib/components/charts/ChartCanvas.svelte` | Data Visualization: Chart.js wrapper for analytics dashboards |
+| `frontend/src/lib/components/calendar/` | Calendar UI: month/week grid views, day detail sheets |
+| `frontend/src/lib/components/scanner/Step[1-5]*.svelte` | Sequential UI Pattern: guided 5-step scan flow with state machine |
+| `frontend/src/lib/components/excuse/` | Workflow UI: excuse modals, request forms, review lists |
+| `frontend/src/lib/components/face-enrollment/FaceEnrollmentModal.svelte` | Capture UI: 3-photo quality gates, live preview |
 
 ---
 

@@ -1,0 +1,354 @@
+# Decision Log (ADR Format)
+
+> All decisions below were explicitly confirmed by the project owner on **2026-08-25**.
+> Status: **Accepted** — do not re-litigate.
+
+---
+
+## 2.1 Data Model / Academic Structure
+
+### ADR-001: Academic Hierarchy — Program → Year Level → Course
+- **Decision (D1):** Introduce hierarchy **Program → Year Level → Course** with strict FK constraints (NOT NULL after backfill, cascade/restrict rules per §6).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** The current flat `courses` table cannot express program-specific year structures or term definitions. A hierarchical model enables per-program-per-year term structures and proper course ownership.
+- **Consequences:** Requires new tables `programs` and `year_levels`; `courses` gains `program_id` and `year_level_id` FKs. Migration must backfill from legacy `students.course` strings.
+
+### ADR-002: Course = Subject; Section on Students Only
+- **Decision (D2):** `course == subject` (one subject), and a student has **one section**, stored on `students` only — NOT on enrollments. Section changes only via admin action (e.g., promotion-style update).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Enrollments represent course-taking; section is a student-cohort property. This avoids duplication and keeps section management centralized.
+- **Consequences:** `students.section` retained; `enrollments` has no section field.
+
+### ADR-003: Term Structure Per Program Per Year
+- **Decision (D3):** Term structure is **per-program-per-year**: each `year_levels` row owns its own `term_structure` JSONB. Example reality: BSCS Y1/Y2 = 2 semesters; BSCS Y3 = 1st, 2nd + Midyear; BSCS Y4 = 2 semesters. Other programs define their own.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Different programs and year levels have different academic calendars. A single global term table is insufficient.
+- **Consequences:** `year_levels.term_structure` JSONB stores `{"terms": [{"code": "...", "label": "..."}, ...]}`. Enrollment `semester` validated against this.
+
+### ADR-004: Course Scheduling Metadata
+- **Decision (D4):** Courses gain scheduling metadata: `units`, `sessions_per_week`, `session_duration_hours`, `semester_weeks`, structured schedule fields (`schedule_days`, start/end time), `classroom_name`, GPS coords. These feed analytics and at-risk prediction.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Current `courses.schedule` is a free-text string. Structured fields enable expected-session calculation for risk scoring and conflict detection.
+- **Consequences:** `courses` table gains 9+ new columns. Expected sessions formula: `semester_weeks × sessions_per_week`.
+
+### ADR-005: Enrollment Gains Semester
+- **Decision (D5):** Enrollment gains `semester` (term code validated against the year level's term structure).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Needed to scope enrollments to a specific term within a year level's structure.
+- **Consequences:** `enrollments.semester` NOT NULL after backfill; validated via application logic against `year_levels.term_structure`.
+
+### ADR-006: Courses Shared Across Programs/Year Levels
+- **Decision (D6):** A course can be taken by multiple programs/year levels (e.g., a BSCS 1st-year subject also taken by BSIT 1st year). Filters everywhere must support program/year slicing of the same course.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** General education (GE) courses are shared. Analytics must slice the same course by cohort.
+- **Consequences:** `courses` has `program_id` + `year_level_id` (owning program/year), but enrollments from other programs/years can reference it. Filters in reports must join through enrollments to get student's program/year.
+
+---
+
+## 2.2 Professor Assignment
+
+### ADR-007: Course↔Professor Many-to-Many with Effectiveness Dates
+- **Decision (D7):** Course↔Professor is many-to-many via `course_professors` with `is_primary`, plus **time-bounded effectiveness**: `effective_from`, `effective_to` (nullable = ongoing), `semester`, `assigned_by`, `assigned_at`.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Professors change mid-semester; history must be preserved. A simple FK on `sessions` or `courses` loses attribution history.
+- **Consequences:** New table `course_professors` with composite PK `(course_id, professor_id, effective_from)`. Service layer must reject overlapping effectiveness ranges for same `(course_id, professor_id)`.
+
+### ADR-008: Professor Changes Mid-Semester — History Preserved
+- **Decision (D8):** Professors CAN be changed entirely mid-semester: end old assignment (`effective_to` = day before), open new one. History is never rewritten; old sessions stay attributed to the original professor.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Real-world handover scenarios. Audit integrity requires immutable attribution.
+- **Consequences:** Session creation reads active assignment at `created_at`; `course_professors` row at that time determines professor of record.
+
+### ADR-009: Assistants Supported via Secondary Assignments
+- **Decision (D9):** Assistants are supported (secondary assignments). Any professor with an active assignment for course+semester may open sessions.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Multiple professors may teach the same course (primary + assistants).
+- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches.
+
+### ADR-010: Absent Professor, Class Activities — No Special Feature
+- **Decision (D10):** Rare real-world case "prof is absent but class does activities" needs no special feature — session runs normally; live monitoring is optional.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Edge case; existing session flow handles it.
+- **Consequences:** No new fields or workflows.
+
+---
+
+## 2.3 Sessions & Attendance
+
+### ADR-011: Session Creation — Locked Course vs Selector
+- **Decision (D11):** Opening a session **from My Courses locks the course** (no selector). Opening from Dashboard "New Session" allows choosing among the professor's active assignments.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** UX optimization — common case (professor opens session for their course) should be frictionless.
+- **Consequences:** Two session-create entry points with different UI; same backend endpoint with optional `course_id` (required for locked variant).
+
+### ADR-012: Session Duration & Expiry — System-Time Based
+- **Decision (D12):** Session duration is **system-time based**. Example: class scheduled 7:00–8:30; prof arrives 7:10 and sets duration 15 min → scan window ends 7:25. Class still ends at scheduled 8:30 (system time). `expires_at = min(created_at + duration_minutes, scheduled_end_time)`.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Prevents sessions from running past scheduled class end. Professor sets intended scan duration; system enforces hard ceiling at scheduled end.
+- **Consequences:** `sessions` gains `duration_minutes`, `scheduled_start_time`, `scheduled_end_time`, `expires_at` (STORED/computed). Dual timers in live view.
+
+### ADR-013: Present/Late Windows Per Session
+- **Decision (D13):** Present/Late windows per session: scans within `present_window_minutes` → `present`; within `late_window_minutes` after that → `late`; scanning closes at duration expiry; no-scan students become `absent` when the session expires. Constraint: `present_window_minutes + late_window_minutes ≤ duration_minutes`.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Configurable grace periods. Late window starts after present window ends.
+- **Consequences:** `sessions` gains `present_window_minutes`, `late_window_minutes` with CHECK constraint. Status determined at scan time by comparing `scanned_at` to `session.created_at`.
+
+### ADR-014: Late Policy Defaults on Course
+- **Decision (D14):** Late policy defaults live on the **course** (`default_present_window_minutes`, `default_late_window_minutes`) and are overridable per session.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Reduces repetitive configuration; professors can override for specific sessions.
+- **Consequences:** `courses` gains two default window columns; session create pre-fills from course.
+
+### ADR-015: Expanded Validation Status Enum
+- **Decision (D15):** Validation status enum expands to: `present`, `late`, `absent`, `excused`, `pending`, `rejected`. Rejection reasons include duplicate, geofence, liveness, face mismatch, not enrolled, `session_expired` (DB/API identifiers defined in §6: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Current enum (`valid`, `pending`, `rejected`) is insufficient for compliance reporting and excuse workflow.
+- **Consequences:** Migration must map existing values: `valid → present`, keep `pending`, `rejected → rejected` (with reason). New `ValidationStatus` enum in code.
+
+### ADR-016: Offline Scans — Server Validates `scanned_at`
+- **Decision (D16):** Offline scans are stored with device `scanned_at`; on sync the server validates `scanned_at` against the session window. Expired-window offline scans → `rejected` with reason `session_expired`.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Prevents clock manipulation. Offline queue items carry client timestamp; server is authority.
+- **Consequences:** `sync_queue.record_data` must include `scanned_at`. Sync endpoint validates and sets rejection reason.
+
+### ADR-017: Classroom Override — Session-Level Optional
+- **Decision (D17):** Classroom override is **session-level optional** (`sessions.classroom_*` fields override course defaults when set); geofence uses session coords if overridden, else course coords.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Room changes happen; course default is fallback.
+- **Consequences:** `sessions` gains `classroom_name`, `classroom_lat`, `classroom_lng` (nullable). Geofence logic checks session override first.
+
+### ADR-018: Session Entry — Code or QR
+- **Decision (D18):** Session entry for students supports BOTH: typing the 6–8 char session code OR scanning the projected session QR. Session QR payload is JSON: `{"v":1,"code":"A7X-9K2M","course":123,"radius":30,"pw":5,"lw":10}` (versioned for future migration).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Accessibility — not all students can scan QR reliably. Versioned payload enables future fields.
+- **Consequences:** Student app has two entry modes (manual code input / QR scan). Verify-code endpoint returns session config bundle.
+
+### ADR-019: Student ID-Card QR — Student Number Only
+- **Decision (D19):** Student ID-card QR contains **the student number only** (e.g., `24-2111`). Course context always comes from the verified session, never from the QR.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Simplifies ID card printing; security — course context bound to active session.
+- **Consequences:** QR payload is just `student_id` string. Scan flow: verify session first, then scan ID QR.
+
+---
+
+## 2.4 Excuse Workflow
+
+### ADR-020: Excused Attendance — First-Class Status
+- **Decision (D20):** Excused attendance is a first-class status with a mandatory reason and audit trail (`excused_by`, `excused_at`).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Compliance reporting treats excused as present. Audit trail required for disputes.
+- **Consequences:** `attendance_records` gains `original_status`, `excuse_reason`, `excused_by`, `excused_at`, `excuse_type`, `excuse_request_id`.
+
+### ADR-021: Three Excuse Initiation Paths
+- **Decision (D21):** Three initiation paths, all persisted in `excuse_requests`:
+  - (a) **Prof quick-excuse** — prof marks absent/late student excused with reason;
+  - (b) **Prof-initiated with evidence** — prof holds physical proof (e.g., excuse letter) and files/approves immediately, attaching evidence;
+  - (c) **Student-initiated request** — student submits reason + evidence upload; professor approves/rejects.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Covers all real-world excuse scenarios with different evidence burdens.
+- **Consequences:** New table `excuse_requests` with `initiated_by` (`professor`|`student`), `initiated_via` (`quick`|`prof_with_evidence`|`request`). State machine: `pending` → `approved`|`rejected`.
+
+### ADR-022: Excuse Overrides Scanned Status
+- **Decision (D22):** Excusing overrides the scanned status: if a late-scanning student is excused, final status = `excused` (treated as present for compliance), while `original_status` preserves what actually happened (audit).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Compliance rates count excused as present; audit needs truth.
+- **Consequences:** `attendance_records.validation_status` becomes `excused`; `original_status` stores prior value (`late`/`absent`/`rejected`).
+
+### ADR-023: Bulk Excuse All Absent
+- **Decision (D23):** Bulk action: professors can **"Excuse All Absent"** for a session (typical use: cancelled class).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Common workflow for cancelled classes.
+- **Consequences:** Endpoint `POST /professor/sessions/{id}/excuse-all-absent` with reason. Idempotent — only affects currently `absent` records.
+
+### ADR-024: Excuse Evidence — S3-Compatible Storage
+- **Decision (D24):** Excuse evidence attachments are stored in S3-compatible storage (Supabase Storage / R2 / S3; local filesystem in dev). DB stores URL references only. Same storage backend as backups.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Binary files don't belong in DB. Shared infrastructure with backups.
+- **Consequences:** `excuse_requests.attachment_urls` JSONB array. Env vars for storage config mirror backup config.
+
+---
+
+## 2.5 Cancelled Classes / Security Posture
+
+### ADR-025: No "Mark All Present" or Security-Disabled Sessions
+- **Decision (D25):** NEVER implement "mark all present" or sessions with security disabled. Cancelled class = either **no session opened**, or session opened and **Excuse All** applied.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Security posture — attendance must reflect reality. Excuse All provides audit trail for cancelled classes.
+- **Consequences:** No "disable security" flag. UI never offers "mark all present".
+
+### ADR-026: Remote/Online Classes — Relaxed Geofence, Liveness Mandatory
+- **Decision (D26):** Remote/online classes (if ever needed) use a relaxed/large geofence but **liveness remains mandatory**.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Anti-spoofing is non-negotiable. Geofence can be widened for remote.
+- **Consequences:** Geofence radius configurable per session; liveness challenge always runs.
+
+---
+
+## 2.6 Student Scan Flow & Face
+
+### ADR-027: Strict 5-Step Sequential Scan Flow
+- **Decision (D27):** Scan flow is strictly sequential:
+  1. Enter/scan session code → verify → fetch session config
+  2. Scan student-ID QR → resolve student number → fetch student record incl. enrolled face embedding + enrollment check for the session's course + duplicate-scan check
+  3. GPS geofence validation runs alongside steps 2–3 (Haversine vs radius)
+  4. Face liveness challenge (fixed sequence: blink → turn left → turn right) then embedding comparison vs fetched embedding(s) (cosine similarity ≥ threshold)
+  5. Success writes attendance record (status present/late by window timing; pending if offline)
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Security requires ordered verification. Each step gates the next.
+- **Consequences:** Student app has 5 sub-screens (`/student/scan/step/[1-5]`). Offline mode queues at step 5.
+
+### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
+- **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 128-d embeddings (face-api.js-compatible), stores encrypted (`students.face_embedding BYTEA`) + `face_enrolled_at` + `face_embedding_version`.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Privacy — biometric enrollment is admin-supervised. 3 angles improve accuracy. Encryption at rest required.
+- **Consequences:** `students` gains `face_embedding BYTEA`, `face_enrolled_at`, `face_embedding_version`. Admin face-enrollment UI separate from student import.
+
+### ADR-029: Embedding Distribution — Pull-on-Login
+- **Decision (D29):** Embedding distribution to student devices is **pull-on-login** (client checks version and downloads if newer; cached encrypted in IndexedDB). No push/WebSocket infra.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Simplicity — no real-time infrastructure. Devices fetch on login.
+- **Consequences:** Endpoint `GET /student/me/face-embedding` with version gating. Client caches in IndexedDB encrypted via WebCrypto.
+
+### ADR-030: Offline Verification — Local Compare, Scores Sync
+- **Decision (D30):** Offline verification compares against cached embedding locally; only scores/evidence sync to server.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Embedding never leaves device in offline mode. Server re-verifies on sync? No — server trusts client score but validates liveness evidence.
+- **Consequences:** Offline queue item includes `face_match_score`, `liveness_evidence`. Server validates evidence, not embedding.
+
+### ADR-031: Fixed Liveness Sequence — Blink → Left → Right
+- **Decision (D31):** Liveness sequence is **fixed** (blink → left → right), MediaPipe Face Mesh WASM client-side, EAR + PnP heuristics graded server-side. Sibling-confusion risk is acknowledged as a known limitation, not solved (per instructor: treated as future assignment).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Deterministic sequence simplifies implementation and grading. Sibling confusion accepted as known gap.
+- **Consequences:** Client implements fixed 3-step challenge. Server grades EAR (eye aspect ratio) + PnP (head pose). Review queue for borderline scores.
+
+### ADR-032: Student Profile — Read-Only Identity
+- **Decision (D32):** Student profile is **read-only** (identity data admin-managed); students may only change password/security settings (same rule as professors).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Data integrity — student identity (name, student_id, program, year, section) managed by admin.
+- **Consequences:** Student profile UI shows read-only fields + password/MFA/security question settings.
+
+---
+
+## 2.7 Analytics & Reporting
+
+### ADR-033: Admin Analytics & Reports — Unified, Cascading Filters
+- **Decision (D33):** Admin **merges Reports (4.8) and Analytics (4.7)** into one "Analytics & Reports" page with tabs: Overview, Course Comparison, Trends, At-Risk, Export. Cascading filters: Program → Year → Term → Courses (multi). Granularity: daily / weekly / monthly.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Unified view reduces navigation; cascading filters enable cohort slicing.
+- **Consequences:** Single route `/admin/analytics` with 5 tabs. Filter rail persistent on left.
+
+### ADR-034: Per-Course Comparison — Slice by Program/Year
+- **Decision (D34):** Per-course comparison must slice by program and year level (same subject across cohorts), within term (semester) durations. Daily-average becomes a Trends view supporting day/week/month granularity.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Same course (e.g., "Math 101") taken by BSCS Y1 and BSIT Y1 — must compare side by side.
+- **Consequences:** Course Comparison tab groups by course, shows multiple bars per course (one per program/year cohort).
+
+### ADR-035: At-Risk Heuristic Thresholds — Daily Batch Job
+- **Decision (D35):** At-risk prediction starts as **heuristic thresholds** (env-configurable):
+  - `absence_rate > 0.30 → high`; `> 0.15 → medium`
+  - `streak ≥ 3 consecutive misses → high`
+  - `sync-lag pending ≥ 5 → medium`
+  - `trend slope < −0.05/week → medium`
+  Expected sessions derive from course metadata: `semester_weeks × sessions_per_week` (e.g., 3 units ≈ 2 meetings/week × 1.5 h). Runs as a **daily batch job** (nightly), writing `student_risk_scores`. Manual refresh endpoint exists (admin-only). ML (logistic regression) is a later upgrade, same feature vector.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Rule-based first; ML later. Thresholds configurable via env for tuning.
+- **Consequences:** New table `student_risk_scores`. Nightly job (Celery/APScheduler). Features: `expected_sessions`, `absence_rate`, `max_streak`, `sync_lag`, `trend_slope`.
+
+### ADR-036: Two Rate Metrics — Compliance & Participation
+- **Decision (D36):** Two rate metrics everywhere: **Compliance Rate** = present / total (DEFAULT display) and **Participation Rate** = (present + late + excused) / total (toggle/option).
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Compliance is strict (on-time only); participation is inclusive.
+- **Consequences:** All reports/charts default to Compliance; toggle for Participation. Excused counts as present for Participation.
+
+### ADR-037: Professor Reports — All Courses Aggregate + Per-Course Comparison
+- **Decision (D37):** Professor reports add an **All Courses** aggregate tab (daily/weekly/monthly across all assigned courses) plus per-course comparison with program/year filters.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Professors teaching multiple courses need holistic view.
+- **Consequences:** `/professor/reports` has 3 tabs: All Courses, Per-Course Comparison, Trends.
+
+---
+
+## 2.8 Admin System Settings
+
+### ADR-038: Academic Structure Updates Replace Promotion
+- **Decision (D38):** Remove "Year + Section Promotion" (grade-dependent; inappropriate for attendance-only system). Replace with **Academic Structure Updates**: bulk edit flows into Program Management (add/rename year levels, adjust term structures, move courses) — manual, intentional, audited.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Promotion implies grade progression; this system is attendance-only. Structural changes should be deliberate.
+- **Consequences:** Admin nav: "Programs" replaces "Courses". System Settings gets "Academic Structure Updates" block linking to Program Management. Audit log captures all structural changes.
+
+### ADR-039: Full Encrypted Backups — Everything by Default
+- **Decision (D39):** Backup = **full database dump of EVERY table — nothing excluded by default** (pg_dump custom format, compressed) **encrypted AES-256-GCM** with key from env; plus separate "Analytics Export" (aggregated CSV/PDF). Storage: local volume (dev) / S3-compatible (prod) via `BACKUP_STORAGE_TYPE`. Retention: last 30 daily + 12 monthly. All backups logged in `backup_log`.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Compliance requires full recoverability. Encryption mandatory. Optional opt-in to skip ephemeral `otp_codes`.
+- **Consequences:** New table `backup_log`. Backup pipeline: `pg_dump -Fc` → gzip → AES-256-GCM encrypt → upload → log → prune. Key rotation via version header.
+
+### ADR-040: Admin Nav Restructure
+- **Decision (D40):** Admin nav becomes: Dashboard · Students · Professors · **Programs** (was Courses) · **Analytics** (merged Reports+Analytics) · Audit Logs · System Settings. Existing screens 4.13 Liveness Review, 4.14 Admin Users remain.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Reflects new hierarchy and merged analytics.
+- **Consequences:** Route changes: `/admin/programs/*`, `/admin/analytics`. Old `/admin/courses` removed (functionality moved under Programs).
+
+---
+
+## 2.9 Misc
+
+### ADR-041: Frontend Chart Library — Chart.js
+- **Decision (D41):** Frontend chart library: **Chart.js** (+ date adapter) wrapped in a reusable Svelte component.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Lightweight, works with Svelte 5 runes, good date-axis support.
+- **Consequences:** Component `charts/ChartCanvas.svelte` wraps Chart.js.
+
+### ADR-042: Buildings/Campuses Table — Deferred to v2
+- **Decision (D42):** Buildings/campuses table deferred to v2. MVP uses classroom name + lat/lng on courses/sessions.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Scope control. Classroom coords on course/session sufficient for MVP geofence.
+- **Consequences:** No `buildings` or `campuses` tables in target schema.
+
+### ADR-043: Multi-Angle Enrollment — 3 Photos
+- **Decision (D43):** Multi-angle enrollment reduced to 3 photos (front/left/right) — chosen over 1 or 5.
+- **Date:** 2026-08-25
+- **Status:** Accepted
+- **Context:** Balance of accuracy (3 angles) vs capture burden.
+- **Consequences:** Face enrollment UI captures exactly 3 photos. Embedding blob stores mean + 3 per-angle vectors.
