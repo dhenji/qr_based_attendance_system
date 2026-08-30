@@ -15,7 +15,7 @@
 | T3  | **QR relay** — student sends session QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
 | T4  | **Sibling confusion** — twin/brother scans                 | Low      | Face embedding comparison (cosine similarity ≥ 0.7 threshold). Known limitation: acknowledged by instructor as accepted risk. No PAD CNN (class-level face anti-spoofing) in scope.                                                 | D31                                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
-| T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP. bcrypt for password hashing. Account lockout after failed attempts.                                                                                        | D32                                      |
+| T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP. Argon2id for password hashing. Account lockout after failed attempts.                                                                                        | D32                                      |
 | T7  | **Session code brute-force**                               | Medium   | HMAC-derived 6–8 char codes from random secret. 62^8 ≈ 2.18 × 10^14 possibilities. Rate-limited verification endpoint. Codes expire with session.                                                                                   | D18                                      |
 | T8  | **Offline scan manipulation** — modify `scanned_at`        | Medium   | Server compares `scanned_at` against `session.expires_at`. Expired → `rejected` with reason `session_expired`. Client timestamp is untrusted input.                                                                                 | D16                                      |
 | T9  | **Embedding theft from device**                            | Medium   | Embeddings encrypted at rest in IndexedDB via WebCrypto AES-GCM with device-unique non-extractable key. Server never stores plaintext embeddings.                                                                                   | D28                                      |
@@ -93,7 +93,7 @@ Student scans QR or types code → server verifies
 
 | Control                | Implementation                        |
 | ---------------------- | ------------------------------------- |
-| Hashing                | bcrypt (12 rounds)                    |
+| Hashing                | Argon2id (memory=64MB, time=3, parallelism=4) |
 | Lockout                | 5 failed attempts → 15-minute lockout |
 | MFA                    | TOTP (RFC 6238) via authenticator app |
 | Password policy        | Min 8 chars, mixed case + number      |

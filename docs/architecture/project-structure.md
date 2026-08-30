@@ -11,7 +11,7 @@ attendance-system/
 │   │   │   ├── __init__.py
 │   │   │   ├── config.py             # App settings, environment variables
 │   │   │   ├── database.py           # Async SQLAlchemy engine + session factory + Base
-│   │   │   ├── security.py           # (planned) HMAC signing, bcrypt hashing, TOTP
+│   │   │   ├── security.py           # (planned) HMAC signing, Argon2id hashing, TOTP
 │   │   │   └── exceptions.py         # (planned) Domain exceptions + error handlers
 │   │   │
 │   │   ├── shared/                   # Cross-feature helpers

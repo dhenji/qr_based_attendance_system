@@ -177,7 +177,7 @@ General API endpoint performance under normal load (not peak).
 
 | Endpoint Category                  | Target (p50) | Target (p95) | Notes                          |
 | ---------------------------------- | ------------ | ------------ | ------------------------------ |
-| Auth (login, OTP)                  | <300ms       | <1s          | Includes bcrypt verification   |
+| Auth (login, OTP)                  | <300ms       | <1s          | Includes Argon2id verification |
 | CRUD (programs, courses, students) | <100ms       | <300ms       | Standard ORM operations        |
 | Session creation                   | <200ms       | <500ms       | Includes HMAC generation       |
 | Attendance submit (online)         | <300ms       | <800ms       | Includes face score validation |
