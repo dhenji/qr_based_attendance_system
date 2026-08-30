@@ -124,7 +124,7 @@ These are standard engineering with off-the-shelf components; presenting them as
 - The 4-level descriptive/diagnostic/predictive/prescriptive taxonomy itself (standard BI framework)
 - PWA offline storage (IndexedDB + Service Workers)
 - Chart.js charting (standard visualization library)
-- bcrypt password hashing
+- Argon2id password hashing
 - AES-256-GCM backup encryption (standard cryptographic primitive)
 
 ---

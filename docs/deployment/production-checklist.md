@@ -350,13 +350,13 @@ curl -sf https://your-app.vercel.app/ | head -20
 -- Connect to production DB
 psql "$DATABASE_URL"
 
--- Create admin user (password should be bcrypt-hashed)
+-- Create admin user (password should be Argon2id-hashed)
 INSERT INTO users (role, username, email, password_hash, is_active)
 VALUES (
     'admin',
     'admin',
     'admin@yourdomain.com',
-    '$2b$12$<bcrypt_hash_of_password>',  -- generate with bcrypt
+    '$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>',  -- generate with argon2
     true
 );
 

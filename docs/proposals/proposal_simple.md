@@ -58,7 +58,7 @@ A web-based application that:
 | Reports                 | Download attendance reports (CSV/PDF/Print)                                              |
 | Data Tables             | Sortable columns, category + date-range filters, search, print                           |
 | Encrypted Backups       | Full DB dump AES-256-GCM encrypted, 30D daily + 12M monthly                              |
-| Account Security        | Strong passwords (bcrypt), Cloudflare Turnstile, OTP, optional MFA, admin reset, lockout |
+| Account Security        | Strong passwords (Argon2id), Cloudflare Turnstile, OTP, optional MFA, admin reset, lockout |
 
 > **Names & structure**: students use First/Middle/Last names with a Section
 > field (from CSV import); section changes are admin-only actions. The academic

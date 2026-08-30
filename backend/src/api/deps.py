@@ -1,4 +1,5 @@
-from typing import Annotated, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -28,11 +29,17 @@ async def get_current_user(
 
     settings: Settings = get_settings()
 
+    payload: dict[str, Any] | None = decode_access_token(
+        credentials.credentials, settings
+    )
+
+    if payload is None:
+        raise _unauthorized("invalid_token", "Invalid or expired token")
+
     try:
-        payload: dict = decode_access_token(credentials.credentials, settings)
         user_id: int = extract_user_id(payload)
     except PyJWTError:
-        raise _unauthorized("invalid_token", "Invalid or expired token")
+        raise _unauthorized("invalid_token", "Invalid or corrupted token")
 
     user: User | None = await _get_active_user(session, user_id)
 

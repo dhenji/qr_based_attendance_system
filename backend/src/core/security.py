@@ -1,10 +1,65 @@
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import argon2
 import jwt
 
-from core.config import Settings
+from core.config import Settings, get_settings
+
+REFRESH_TOKEN_TYPE = "refresh"
+
+_hasher = argon2.PasswordHasher()
 
 
-def decode_access_token(token: str, settings: Settings) -> dict:
-    return jwt.decode(token, settings.jwt_secret, algorithms=settings.jwt_algorithm)
+def hash_password(password: str) -> str:
+    return _hasher.hash(password)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return _hasher.verify(hashed, plain)
+    except (argon2.exceptions.VerificationError, argon2.exceptions.InvalidHash):
+        return False
+
+
+def create_access_token(
+    user_id: int, role: str, settings: Settings | None = None
+) -> str:
+    settings = settings or get_settings()
+    now: datetime = datetime.now(timezone.utc)
+
+    payload: dict[str, Any] = {
+        "sub": str(user_id),
+        "role": role,
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
+    }
+
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def create_refresh_token(user_id: int, settings: Settings | None = None) -> str:
+    settings = settings or get_settings()
+    now: datetime = datetime.now(timezone.utc)
+
+    payload: dict[str, Any] = {
+        "sub": str(user_id),
+        "type": REFRESH_TOKEN_TYPE,
+        "iat": now,
+        "exp": now + timedelta(days=settings.refresh_token_expire_days),
+    }
+
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_token(
+    token: str, settings: Settings | None = None
+) -> dict[str, Any] | None:
+    settings = settings or get_settings()
+    try:
+        return jwt.decode(token, settings.jwt_secret, algorithms=settings.jwt_algorithm)
+    except jwt.PyJWTError:
+        return None
 
 
 def extract_user_id(payload: dict) -> int:
