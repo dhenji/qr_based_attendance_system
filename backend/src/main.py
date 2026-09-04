@@ -2,12 +2,14 @@ from collections.abc import Coroutine
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from core.config import Settings, get_settings
 from core.database import database
+from core.exceptions import AppException
 
 
 @asynccontextmanager
@@ -29,6 +31,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.to_dict()})
 
 
 @app.get("/health")
