@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from api.router import api_router
 from core.config import Settings, get_settings
 from core.database import database
 from core.exceptions import AppException
@@ -36,6 +37,9 @@ app.add_middleware(
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.to_dict()})
+
+
+app.include_router(api_router)
 
 
 @app.get("/health")
