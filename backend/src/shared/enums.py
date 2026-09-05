@@ -14,9 +14,55 @@ class OtpPurpose(StrEnum):
 
 
 class ValidationStatus(StrEnum):
-    VALID = "valid"
+    PRESENT = "present"
+    LATE = "late"
+    ABSENT = "absent"
+    EXCUSED = "excused"
     PENDING = "pending"
     REJECTED = "rejected"
+
+
+class ExcuseInitiatedBy(StrEnum):
+    PROFESSOR = "professor"
+    STUDENT = "student"
+
+
+class ExcuseInitiatedVia(StrEnum):
+    QUICK = "quick"
+    PROF_WITH_EVIDENCE = "prof_with_evidence"
+    REQUEST = "request"
+
+
+class ExcuseStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class RiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class BackupKind(StrEnum):
+    FULL = "full"
+    ANALYTICS = "analytics"
+
+
+class BackupStorage(StrEnum):
+    LOCAL = "local"
+    S3 = "s3"
+
+
+class BackupStatus(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class ScannedVia(StrEnum):
+    QR_CAMERA = "qr_camera"
+    MANUAL_CODE = "manual_code"
 
 
 class SyncStatus(StrEnum):
