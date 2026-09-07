@@ -1,0 +1,123 @@
+// features/student/service.ts
+// Student-facing service: profile, schedule, history, scan
+
+import type { Student, Course } from '$lib/shared/types';
+import { isWithinGeofence } from '$lib/shared/utils/geo';
+
+// MOCK flag
+const MOCK = true;
+
+// Mock current student
+const MOCK_STUDENT: Student = {
+	id: 'student-1',
+	userId: 'user-1',
+	studentNumber: 'STU-001',
+	firstName: 'John',
+	middleName: 'Michael',
+	lastName: 'Doe',
+	programCode: 'BSIT',
+	yearLevelLabel: '3rd',
+	section: 'A',
+	faceEnrolled: true,
+	isActive: true,
+};
+
+// Profile
+export const getProfile = async (): Promise<Student> => {
+	if (MOCK) return MOCK_STUDENT;
+	return MOCK_STUDENT;
+};
+
+// Update profile (partial)
+export const updateProfile = async (updates: Partial<Student>): Promise<Student> => {
+	if (MOCK) {
+		return { ...MOCK_STUDENT, ...updates };
+	}
+	return { ...MOCK_STUDENT, ...updates };
+};
+
+// Schedule
+export const getSchedule = async (): Promise<Course[]> => {
+	if (MOCK) {
+		return [
+			{
+				id: 1,
+				courseCode: 'CS-101',
+				courseName: 'Introduction to Computing',
+				units: 3,
+				semesterWeeks: 18,
+				scheduleDays: ['Monday', 'Wednesday'],
+				scheduleStartTime: '08:00',
+				scheduleEndTime: '09:30',
+				classroomName: 'Room A101',
+				defaultPresentWindowMinutes: 15,
+				defaultLateWindowMinutes: 5,
+				isActive: true,
+			},
+		];
+	}
+	return [];
+};
+
+// Session history
+export const getSessionHistory = async (_params?: {
+	programId?: number;
+	yearLevelId?: number;
+	status?: string;
+}) => {
+	if (MOCK) {
+		return {
+			items: [
+				{
+					id: 1,
+					courseId: 1,
+					code: 'CS-101',
+					courseName: 'Intro to Computing',
+					status: 'present' as const,
+					originalStatus: undefined,
+					excuseReason: undefined,
+					scannedAt: new Date(Date.now() - 86400000).toISOString(),
+					scannedVia: 'qr' as const,
+				},
+			],
+			total: 1,
+			page: 1,
+			size: 20,
+		};
+	}
+	return { items: [], total: 0, page: 1, size: 20 };
+};
+
+// Attendance scan (online or queued for offline)
+export const submitScan = async (scanData: {
+	sessionId: number;
+	qrStudentNumber: string;
+	gps: { lat: number; lng: number; accuracy: number };
+	livenessEvidence: {
+		blinkDetected: boolean;
+		headTurnLeft: boolean;
+		headTurnRight: boolean;
+		earSamples: number[];
+		pnpEvidence: object;
+	};
+	faceMatchScore: number;
+	scannedAt: string;
+}) => {
+	if (MOCK) {
+		const statuses = ['present', 'late', 'rejected'] as const;
+		return {
+			attendance_id: Math.floor(Math.random() * 10000) + 1,
+			status: statuses[Math.floor(Math.random() * statuses.length)],
+			scanned_at: scanData.scannedAt,
+			expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+		};
+	}
+	return {
+		attendance_id: Math.floor(Math.random() * 10000) + 1,
+		status: 'present' as const,
+		scanned_at: scanData.scannedAt,
+		expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+	};
+};
+
+export { isWithinGeofence };

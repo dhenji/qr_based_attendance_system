@@ -40,3 +40,4 @@ pgdata/
 
 # ai prompts
 docs/developer/prompts
+/frontend/.svelte-kit
