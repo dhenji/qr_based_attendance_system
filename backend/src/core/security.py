@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -70,3 +71,17 @@ def extract_user_id(payload: dict) -> int:
         return int(payload["sub"])
     except (TypeError, ValueError):
         raise jwt.InvalidTokenError("Invalid subject claim")
+
+
+# Otp utilities
+def generate_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+# Hashing same logics
+def hash_otp(otp: str) -> str:
+    return hash_password(otp)
+
+
+def verify_otp(plain: str, hashed: str) -> bool:
+    return verify_password(plain, hashed)
