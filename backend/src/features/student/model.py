@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, ForeignKey, String, true
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -20,7 +20,7 @@ class Student(TimestampMixin, Base):
     last_name: Mapped[str] = mapped_column(String(100))
     course: Mapped[str] = mapped_column(String(100))
     section: Mapped[str | None] = mapped_column(String(20))
-    year_level: Mapped[int] = mapped_column()
-    is_active: Mapped[bool] = mapped_column(server_default=true())
+    year_level: Mapped[int] = mapped_column(Integer)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     user: Mapped[User | None] = relationship()
