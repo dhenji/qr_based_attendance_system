@@ -160,7 +160,7 @@ class CourseOffering(Base):
 
 **Migration:** `alembic revision --autogenerate -m "create course_professors many-to-many with effectiveness dates"`
 
-**Model:** `features/professor/model.py` (extend) or new `features/course_assignment/model.py`
+**Model:** `features/professor/model.py` (extend) or new `features/course_professor/model.py`
 
 ```python
 class CourseProfessor(Base):
@@ -384,7 +384,7 @@ import features.sync.model  # noqa: F401
 
 ```python
 import features.program.model  # noqa: F401        # programs, year_levels
-import features.course_assignment.model  # noqa: F401  # course_professors (or professor.model if extended)
+import features.course_professor.model  # noqa: F401  # course_professors
 import features.excuse.model  # noqa: F401        # excuse_requests
 import features.analytics.model  # noqa: F401      # student_risk_scores
 import features.system.model  # noqa: F401        # backup_log
