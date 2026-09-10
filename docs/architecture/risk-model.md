@@ -13,19 +13,18 @@ Key properties:
 - Runs as a **nightly batch job** at 02:00 (configurable via `RISK_BATCH_CRON`).
 - Writes results to `student_risk_scores` table.
 - Manual refresh endpoint available (admin-only).
-- Expected sessions derived from course metadata: `semester_weeks × sessions_per_week`
-  (D35).
+- Expected sessions derived from course offering metadata: `course_offering.semester_weeks × course_offering.sessions_per_week` (D35).
 
 ---
 
 ## 2. Feature Definitions
 
-For each (student, course, semester) tuple, the batch job computes:
+For each (student, offering, semester) tuple, the batch job computes:
 
 ### 2.1 Expected Sessions
 
 ```
-expected_sessions = course.semester_weeks × course.sessions_per_week
+expected_sessions = course_offering.semester_weeks × course_offering.sessions_per_week
 ```
 
 Example: a 3-unit course meeting 2×/week over 16 weeks = 32 expected sessions.
@@ -33,7 +32,7 @@ Example: a 3-unit course meeting 2×/week over 16 weeks = 32 expected sessions.
 ### 2.2 Absence Rate
 
 ```
-absence_rate = count(absent records for student+course+semester) / expected_sessions
+absence_rate = count(absent records for student+offering+semester) / expected_sessions
 ```
 
 Only records with `status IN ('absent', 'late', 'excused')` that are NOT
@@ -117,14 +116,14 @@ Clamped to [0.0, 1.0]. Higher = more at-risk.
 CREATE TABLE student_risk_scores (
     id              SERIAL PRIMARY KEY,
     student_id      INT NOT NULL REFERENCES students(id),
-    course_id       INT NOT NULL REFERENCES courses(id),
+    offering_id     INT NOT NULL REFERENCES course_offerings(id),
     semester        VARCHAR NOT NULL,
     risk_probability NUMERIC(5,4) NOT NULL,   -- 0.0000–1.0000
     risk_level      VARCHAR NOT NULL          -- 'low' | 'medium' | 'high'
                     CHECK (risk_level IN ('low', 'medium', 'high')),
     features        JSONB NOT NULL,           -- full feature snapshot
     computed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(student_id, course_id, semester, computed_at::date)
+    UNIQUE(student_id, offering_id, semester, computed_at::date)
 );
 ```
 
@@ -165,19 +164,19 @@ Scheduler triggers at 02:00
 BEGIN BATCH
     │
     ├─ 1. Load all active enrollments
-    │     SELECT e.student_id, e.course_id, e.semester,
-    │            c.semester_weeks, c.sessions_per_week
+    │     SELECT e.student_id, e.offering_id, e.semester,
+    │            co.semester_weeks, co.sessions_per_week
     │     FROM enrollments e
-    │     JOIN courses c ON e.course_id = c.id
-    │     WHERE c.is_active = true
+    │     JOIN course_offerings co ON e.offering_id = co.id
+    │     WHERE co.is_active = true
     │
-    ├─ 2. For each (student, course, semester):
-    │     a. Fetch attendance records for student+course+semester
+    ├─ 2. For each (student, offering, semester):
+    │     a. Fetch attendance records for student+offering+semester
     │     b. Compute features (§2)
     │     c. Evaluate heuristic rules (§3)
     │     d. Compute risk_probability (§3.1)
     │     e. UPSERT INTO student_risk_scores
-    │        (ON CONFLICT (student_id, course_id, semester, computed_at::date)
+    │        (ON CONFLICT (student_id, offering_id, semester, computed_at::date)
     │         DO UPDATE SET risk_probability = ..., risk_level = ..., features = ...,
     │                       computed_at = NOW())
     │
@@ -213,11 +212,11 @@ POST /admin/analytics/refresh-risk
 
 - **Role:** Admin only.
 - Triggers the same batch computation as the nightly job but for a **single**
-  (student, course, semester) tuple or all enrollments if no filter provided.
+  (student, offering, semester) tuple or all enrollments if no filter provided.
 - Query params (all optional):
-  - `student_id` — refresh one student across all their courses
-  - `course_id` — refresh all students in a course
-  - `semester` — filter by semester (required if `course_id` provided)
+  - `student_id` — refresh one student across all their offerings
+  - `offering_id` — refresh all students in a course offering
+  - `semester` — filter by semester (required if `offering_id` provided)
 - Returns: `{ processed: N, high: X, medium: Y, low: Z, duration_ms: T }`
 - Rate-limited: max 1 call per 60 seconds per admin (prevents abuse).
 
@@ -315,7 +314,7 @@ risk_probability = (
 ```json
 {
   "student_id": 42,
-  "course_id": 7,
+  "offering_id": 7,
   "semester": "1st_sem",
   "risk_probability": 0.65,
   "risk_level": "high",

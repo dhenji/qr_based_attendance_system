@@ -16,9 +16,9 @@ sequenceDiagram
     Note over S,DB: Step 1 — Session Entry (D27.1)
 
     S->>API: POST /student/sessions/verify-code {code: "A7X-9K2M"}
-    API->>DB: SELECT sessions.id, sessions.code, sessions.expires_at,<br>courses.id, courses.classroom_lat, courses.classroom_lng<br>WHERE code = 'A7X-9K2M' AND expires_at > now()
-    DB-->>API: Session row + course context
-    API-->>S: 200 {session_id, course_code, course_name, expires_at,<br>scheduled_end_time, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
+    API->>DB: SELECT sessions.id, sessions.code, sessions.expires_at,<br>course_offerings.id, course_offerings.classroom_lat, course_offerings.classroom_lng<br>WHERE code = 'A7X-9K2M' AND expires_at > now()
+    DB-->>API: Session row + offering context
+    API-->>S: 200 {session_id, offering_id, course_code, course_name, expires_at,<br>scheduled_end_time, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
 
     Note over S,DB: Step 2 — Student-ID QR Scan (D27.2)
 
@@ -197,22 +197,22 @@ sequenceDiagram
 
     CRON->>API: Trigger risk-score batch job
 
-    API->>DB: SELECT DISTINCT student_id, course_id, semester<br>FROM enrollments<br>WHERE is_active = true
+    API->>DB: SELECT DISTINCT student_id, offering_id, semester<br>FROM enrollments<br>WHERE is_active = true
     DB-->>API: Active enrollment pairs
 
-    loop For each (student_id, course_id, semester)
-        API->>DB: SELECT COUNT(*) FROM sessions<br>WHERE course_id = ? AND created_at<br>BETWEEN semester_start AND now()
+    loop For each (student_id, offering_id, semester)
+        API->>DB: SELECT COUNT(*) FROM sessions<br>WHERE offering_id = ? AND created_at<br>BETWEEN semester_start AND now()
         DB-->>API: total_sessions
 
-        API->>DB: SELECT COUNT(*) FROM attendance_records ar<br>JOIN sessions s ON ar.session_id = s.id<br>WHERE s.course_id = ? AND ar.student_id = ?<br>AND ar.status = 'absent'
+        API->>DB: SELECT COUNT(*) FROM attendance_records ar<br>JOIN sessions s ON ar.session_id = s.id<br>WHERE s.offering_id = ? AND ar.student_id = ?<br>AND ar.status = 'absent'
         DB-->>API: absent_count
 
         API->>API: Compute features:<br>absence_rate = absent_count / total_sessions<br>max_streak = longest consecutive absent run<br>sync_lag = COUNT(sync_queue WHERE status='pending')<br>trend_slope = 4-week linear regression of weekly rates
 
         API->>API: Apply heuristic thresholds (D35):<br>absence_rate > 0.30 → high<br>absence_rate > 0.15 → medium<br>streak ≥ 3 → high<br>sync_lag ≥ 5 → medium<br>trend_slope < -0.05 → medium
 
-        API->>DB: INSERT INTO student_risk_scores<br>(student_id, course_id, semester,<br>risk_probability, risk_level,<br>features: {absence_rate, max_streak,<br>sync_lag, trend_slope},<br>computed_at = now())
-        Note over DB: UNIQUE(student_id, course_id,<br>semester, computed_at::date)
+        API->>DB: INSERT INTO student_risk_scores<br>(student_id, offering_id, semester,<br>risk_probability, risk_level,<br>features: {absence_rate, max_streak,<br>sync_lag, trend_slope},<br>computed_at = now())
+        Note over DB: UNIQUE(student_id, offering_id,<br>semester, computed_at::date)
     end
 
     API-->>CRON: Batch complete (logged)
@@ -277,7 +277,7 @@ All diagrams above reference the target schema in §6:
 
 | Diagram      | Tables Referenced                                                                    |
 | ------------ | ------------------------------------------------------------------------------------ |
-| Online Scan  | `sessions`, `courses`, `enrollments`, `attendance_records`, `students`               |
+| Online Scan  | `sessions`, `course_offerings`, `enrollments`, `attendance_records`, `students`    |
 | Offline Sync | `attendance_records`, `sync_queue` (client-side `attendance_queue`)                  |
 | Excuse       | `excuse_requests`, `attendance_records`, `users` (excused_by, reviewed_by)           |
 | Risk Batch   | `enrollments`, `sessions`, `attendance_records`, `student_risk_scores`, `sync_queue` |

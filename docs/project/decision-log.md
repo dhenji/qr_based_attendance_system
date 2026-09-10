@@ -396,3 +396,25 @@
 - **Context:** Balance of accuracy (3 angles) vs capture burden.
 - **Consequences:** Face enrollment UI captures exactly 3 photos. Embedding blob stores mean + 3 per-angle vectors.
 
+---
+
+## 2.10 Schema Evolution (Superseding)
+
+### ADR-044: Course Offerings — Decouple Course from Program/Year/Schedule
+
+- **Decision (D44):** Introduce a `course_offerings` table (course_id FK, program_id FK, year_level_id FK, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time/end_time, classroom_name/lat/lng, default_present_window_minutes, default_late_window_minutes, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)). `courses` becomes a pure template (course_code, course_name, units, session_duration_hours, is_active, timestamps).
+- **Date:** 2026-09-10
+- **Status:** Accepted
+- **Context:** A course can be offered by multiple programs AND taken at multiple year levels with differing schedules/classrooms per offering (e.g., CS101 in BSCS MWF 9am vs BSIT TTh 2pm). Single program_id/year_level_id FKs on courses forced 1:1 and broke sharing.
+- **Supersedes:** D1 (FK placement — program_id/year_level_id move to course_offerings), D4 (scheduling metadata — only units + session_duration_hours stay on courses; the rest move to course_offerings), D6 (sharing mechanism — via multiple offerings per course instead of cross-program enrollments), D14 (late policy defaults live on course_offerings, pre-fill sessions from offering).
+- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id.
+
+### ADR-045: Professor Assignments & Risk Scores Reference Course Offerings
+
+- **Decision (D45):** `course_professors` FK changes from `course_id` to `offering_id` (PK(offering_id, professor_id, effective_from)); `student_risk_scores` FK changes from `course_id` to `offering_id` (UNIQUE(student_id, offering_id, semester, computed_at::date)).
+- **Date:** 2026-09-10
+- **Status:** Accepted
+- **Context:** Assignments and risk are scoped to a specific offering (program + year + semester), not the course template.
+- **Supersedes:** D7 (composite PK now on offering_id), D17 (classroom defaults now come from offering), D35 (risk scores keyed by offering).
+- **Consequences:** Step 4 and Step 8 migrations use offering_id.
+

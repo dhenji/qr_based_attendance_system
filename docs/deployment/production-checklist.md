@@ -167,8 +167,8 @@ curl -H "Authorization: Bearer invalid_token" \
 psql "$DATABASE_URL" -c "\dt"
 
 # Expected tables:
-# users, otp_codes, students, professors, courses, programs,
-# year_levels, course_professors, enrollments, sessions,
+# users, otp_codes, students, professors, courses, course_offerings,
+# programs, year_levels, course_professors, enrollments, sessions,
 # attendance_records, excuse_requests, student_risk_scores,
 # backup_log, sync_queue
 ```
@@ -396,11 +396,12 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 | 5   | Admin login    | POST `/auth/login` with admin creds | JWT returned                    |
 | 6   | Student list   | GET `/admin/students`               | 200 OK                          |
 | 7   | Create student | POST `/admin/students`              | 201 Created                     |
-| 8   | Create course  | POST `/admin/programs/.../courses`  | 201 Created                     |
-| 9   | Open session   | POST `/professor/sessions`          | 201 + session code              |
-| 10  | Student scan   | POST `/student/attendance/scan`     | 200 + status                    |
-| 11  | Backup trigger | POST `/admin/backups`               | 202 Accepted                    |
-| 12  | Backup log     | Query `backup_log`                  | New entry with `status=success` |
+| 8   | Create course template | POST `/admin/courses`       | 201 Created                     |
+| 9   | Create offering       | POST `/admin/offerings`     | 201 Created                     |
+| 10  | Open session          | POST `/professor/sessions`  | 201 + session code              |
+| 11  | Student scan          | POST `/student/attendance/scan` | 200 + status                |
+| 12  | Backup trigger        | POST `/admin/backups`       | 202 Accepted                    |
+| 13  | Backup log            | Query `backup_log`          | New entry with `status=success` |
 
 ### Performance Baseline
 
