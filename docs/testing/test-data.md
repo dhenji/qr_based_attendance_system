@@ -6,7 +6,7 @@
 > **Design principles:**
 >
 > - 3 programs with distinct term structures (proves D3).
-> - ~40 students across cohorts sharing one GE course (proves D6).
+> - ~40 students across cohorts sharing one GE course template (proves D6).
 > - Professors including one effective-dated handover mid-semester (proves D8).
 > - 6 weeks of historical attendance for risk-model demo (proves D35).
 > - All data matches DOCS_REFACTOR_PLAN §6 target schema column-for-column.
@@ -84,35 +84,43 @@
 
 ### Shared GE Course (D6 — taken by BSCS Y1, BSIT Y1, BSECE Y1)
 
-| Field                          | Value                  |
-| ------------------------------ | ---------------------- |
-| course_code                    | GE101                  |
-| course_name                    | Understanding the Self |
-| program_id                     | BSCS (owning)          |
-| year_level_id                  | BSCS Year 1            |
-| units                          | 3                      |
-| sessions_per_week              | 2                      |
-| session_duration_hours         | 1.5                    |
-| semester_weeks                 | 16                     |
-| schedule_days                  | MW                     |
-| schedule_start_time            | 07:00                  |
-| schedule_end_time              | 08:30                  |
-| classroom_name                 | Room 301               |
-| classroom_lat                  | 14.5995                |
-| classroom_lng                  | 120.9842               |
-| default_present_window_minutes | 5                      |
-| default_late_window_minutes    | 10                     |
+**Course template:**
+
+| course_code | course_name            | units | session_duration_hours | is_active |
+| ----------- | ---------------------- | ----- | ---------------------- | --------- |
+| GE101       | Understanding the Self | 3     | 1.5                    | true      |
+
+**Course offerings (one per program/year/semester):**
+
+| offering | course_code | program | year | semester  | academic_year | sessions_per_week | semester_weeks | schedule_days | start | end   | classroom_name | classroom_lat | classroom_lng | present_window | late_window |
+| -------- | ----------- | ------- | ---- | --------- | ------------- | ----------------- | -------------- | ------------- | ----- | ----- | -------------- | ------------- | ------------- | -------------- | ----------- |
+| GE101-BSCS-Y1-1st | GE101 | BSCS    | 1    | 1st_sem   | 2026-2027     | 2                 | 16             | MW            | 07:00 | 08:30 | Room 301       | 14.5995       | 120.9842      | 5              | 10          |
+| GE101-BSIT-Y1-1st | GE101 | BSIT    | 1    | 1st_sem   | 2026-2027     | 2                 | 16             | MW            | 07:00 | 08:30 | Room 301       | 14.5995       | 120.9842      | 5              | 10          |
+| GE101-BSECE-Y1-1st | GE101 | BSECE   | 1    | 1st_sem   | 2026-2027     | 2                 | 16             | MW            | 07:00 | 08:30 | Room 301       | 14.5995       | 120.9842      | 5              | 10          |
 
 ### Program-Specific Courses
 
-| course_code | course_name            | program | year | units | sessions/wk | duration_hrs | schedule_days | start | end   |
-| ----------- | ---------------------- | ------- | ---- | ----- | ----------- | ------------ | ------------- | ----- | ----- |
-| CS101       | Intro to Computing     | BSCS    | 1    | 3     | 3           | 1.5          | MWF           | 09:00 | 10:30 |
-| CS201       | Data Structures        | BSCS    | 2    | 4     | 3           | 2.0          | MWF           | 10:30 | 12:30 |
-| CS301       | Operating Systems      | BSCS    | 3    | 3     | 2           | 1.5          | TF            | 13:00 | 14:30 |
-| IT101       | Web Dev Foundations    | BSIT    | 1    | 3     | 3           | 1.5          | MWF           | 13:00 | 14:30 |
-| IT201       | Network Administration | BSIT    | 2    | 3     | 2           | 1.5          | MW            | 10:00 | 11:30 |
-| ECE101      | Circuit Theory 1       | BSECE   | 1    | 4     | 3           | 2.0          | MWF           | 08:00 | 10:00 |
+**Course templates:**
+
+| course_code | course_name            | units | session_duration_hours | is_active |
+| ----------- | ---------------------- | ----- | ---------------------- | --------- |
+| CS101       | Intro to Computing     | 3     | 1.5                    | true      |
+| CS201       | Data Structures        | 4     | 2.0                    | true      |
+| CS301       | Operating Systems      | 3     | 1.5                    | true      |
+| IT101       | Web Dev Foundations    | 3     | 1.5                    | true      |
+| IT201       | Network Administration | 3     | 1.5                    | true      |
+| ECE101      | Circuit Theory 1       | 4     | 2.0                    | true      |
+
+**Offerings (one per program/year/semester):**
+
+| offering         | course_code | program | year | semester | academic_year | sessions_per_week | schedule_days | start | end   |
+| ---------------- | ----------- | ------- | ---- | -------- | ------------- | ----------------- | ------------- | ----- | ----- |
+| CS101-BSCS-Y1-1st  | CS101  | BSCS    | 1    | 1st_sem  | 2026-2027     | 3                 | MWF           | 09:00 | 10:30 |
+| CS201-BSCS-Y2-1st  | CS201  | BSCS    | 2    | 1st_sem  | 2026-2027     | 3                 | MWF           | 10:30 | 12:30 |
+| CS301-BSCS-Y3-1st  | CS301  | BSCS    | 3    | 1st_sem  | 2026-2027     | 2                 | TF            | 13:00 | 14:30 |
+| IT101-BSIT-Y1-1st  | IT101  | BSIT    | 1    | 1st_sem  | 2026-2027     | 3                 | MWF           | 13:00 | 14:30 |
+| IT201-BSIT-Y2-1st  | IT201  | BSIT    | 2    | 1st_sem  | 2026-2027     | 2                 | MW            | 10:00 | 11:30 |
+| ECE101-BSECE-Y1-1st | ECE101 | BSECE  | 1    | 1st_sem  | 2026-2027     | 3                 | MWF           | 08:00 | 10:00 |
 
 ---
 
@@ -129,28 +137,28 @@
 
 ### Course Assignments
 
-| professor         | course | is_primary | effective_from | effective_to | semester | assigned_by |
-| ----------------- | ------ | ---------- | -------------- | ------------ | -------- | ----------- |
-| prof1 (Dela Cruz) | GE101  | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
-| prof1 (Dela Cruz) | CS101  | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
-| prof1 (Dela Cruz) | CS201  | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
-| prof2 (Santos)    | CS301  | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
-| prof3 (Reyes)     | IT101  | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
-| prof3 (Reyes)     | IT201  | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
-| prof4 (Garcia)    | ECE101 | true       | 2026-06-01     | NULL         | 1st_sem  | admin1      |
+| professor         | offering               | is_primary | effective_from | effective_to | assigned_by |
+| ----------------- | ---------------------- | ---------- | -------------- | ------------ | ----------- |
+| prof1 (Dela Cruz) | GE101-BSCS-Y1-1st      | true       | 2026-06-01     | NULL         | admin1      |
+| prof1 (Dela Cruz) | CS101-BSCS-Y1-1st      | true       | 2026-06-01     | NULL         | admin1      |
+| prof1 (Dela Cruz) | CS201-BSCS-Y2-1st      | true       | 2026-06-01     | NULL         | admin1      |
+| prof2 (Santos)    | CS301-BSCS-Y3-1st      | true       | 2026-06-01     | NULL         | admin1      |
+| prof3 (Reyes)     | IT101-BSIT-Y1-1st      | true       | 2026-06-01     | NULL         | admin1      |
+| prof3 (Reyes)     | IT201-BSIT-Y2-1st      | true       | 2026-06-01     | NULL         | admin1      |
+| prof4 (Garcia)    | ECE101-BSECE-Y1-1st    | true       | 2026-06-01     | NULL         | admin1      |
 
 **Handover Scenario (D8):** prof2 (Santos) takes over CS301 from prof1 (Dela Cruz) mid-semester. Handover date falls between weeks 3 and 4 of the session window so existing sessions remain attributed to prof1.
 
-| professor         | course | is_primary | effective_from | effective_to | semester | assigned_by |
-| ----------------- | ------ | ---------- | -------------- | ------------ | -------- | ----------- |
-| prof1 (Dela Cruz) | CS301  | true       | 2026-06-01     | 2026-06-20   | 1st_sem  | admin1      |
-| prof2 (Santos)    | CS301  | true       | 2026-06-22     | NULL         | 1st_sem  | admin1      |
+| professor         | offering               | is_primary | effective_from | effective_to | assigned_by |
+| ----------------- | ---------------------- | ---------- | -------------- | ------------ | ----------- |
+| prof1 (Dela Cruz) | CS301-BSCS-Y3-1st      | true       | 2026-06-01     | 2026-06-20   | admin1      |
+| prof2 (Santos)    | CS301-BSCS-Y3-1st      | true       | 2026-06-22     | NULL         | admin1      |
 
 **Assistant assignment (D9):**
 
-| professor      | course | is_primary | effective_from | effective_to | semester |
-| -------------- | ------ | ---------- | -------------- | ------------ | -------- |
-| prof2 (Santos) | GE101  | false      | 2026-06-01     | NULL         | 1st_sem  |
+| professor      | offering               | is_primary | effective_from | effective_to |
+| -------------- | ---------------------- | ---------- | -------------- | ------------ |
+| prof2 (Santos) | GE101-BSCS-Y1-1st      | false      | 2026-06-01     | NULL         |
 
 ---
 
@@ -219,20 +227,24 @@ Total: 42 students across 3 cohorts, sharing GE101.
 
 ## 5. Enrollments
 
-All 42 students are enrolled in GE101 (proving D6: shared course across programs). Each student also enrolled in one program-specific course.
+All 42 students are enrolled in GE101 (proving D6: shared course template across programs). Each student enrolls in their program's offering. Each student also enrolled in one program-specific offering.
 
-| enrollment_pattern | course | academic_year | semester |
-| ------------------ | ------ | ------------- | -------- |
-| All 42 students    | GE101  | 2026-2027     | 1st_sem  |
-| BSCS Y1 (14)       | CS101  | 2026-2027     | 1st_sem  |
-| BSIT Y1 (14)       | IT101  | 2026-2027     | 1st_sem  |
-| BSECE Y1 (14)      | ECE101 | 2026-2027     | 1st_sem  |
+| enrollment_pattern | offering               | academic_year | semester |
+| ------------------ | ---------------------- | ------------- | -------- |
+| BSCS Y1 (14)       | GE101-BSCS-Y1-1st      | 2026-2027     | 1st_sem  |
+| BSIT Y1 (14)       | GE101-BSIT-Y1-1st      | 2026-2027     | 1st_sem  |
+| BSECE Y1 (14)      | GE101-BSECE-Y1-1st     | 2026-2027     | 1st_sem  |
+| BSCS Y1 (14)       | CS101-BSCS-Y1-1st      | 2026-2027     | 1st_sem  |
+| BSIT Y1 (14)       | IT101-BSIT-Y1-1st      | 2026-2027     | 1st_sem  |
+| BSECE Y1 (14)      | ECE101-BSECE-Y1-1st    | 2026-2027     | 1st_sem  |
+
+> **UNIQUE constraint:** `(student_id, offering_id, academic_year)` — a student may not be enrolled in the same offering twice per academic year.
 
 ---
 
 ## 6. Sessions & Attendance (6-Week History)
 
-### GE101 Session Pattern (2 sessions/week, MW, 16 weeks = 32 sessions total)
+### GE101-BSCS-Y1-1st Session Pattern (2 sessions/week, MW, 16 weeks = 32 sessions total)
 
 The seed creates 12 sessions across 6 weeks (Mon + Wed each week) for GE101,
 with varying attendance distributions to exercise the risk model.
@@ -252,7 +264,7 @@ with varying attendance distributions to exercise the risk model.
 
 | Field                   | Value                                                                                                             |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| course_id               | GE101                                                                                                             |
+| offering_id             | GE101-BSCS-Y1-1st                                                                                                 |
 | professor_id            | prof1 (Dela Cruz) for weeks 1–3; prof2 (Santos) for weeks 4–6 (assistant assignment D9; either may open sessions) |
 | duration_minutes        | 90                                                                                                                |
 | present_window_minutes  | 5                                                                                                                 |
@@ -309,9 +321,9 @@ distribution patterns to create realistic risk scenarios:
 | 24-0013    | 1 absence, 2 late                           | low                 | absence_rate = 0.08                                             |
 | 24-0014    | 2 absences, 1 excused                       | low                 | absence_rate = 0.17                                             |
 
-### Additional Sessions for CS101 (BSCS-only, to test program-filtered analytics)
+### Additional Sessions for CS101-BSCS-Y1-1st (BSCS-only, to test program-filtered analytics)
 
-6 sessions (3 weeks, MWF pattern) for CS101 with prof1:
+6 sessions (3 weeks, MWF pattern) for CS101 offering with prof1:
 
 | Week | Dates              | present | late | absent |
 | ---- | ------------------ | ------- | ---- | ------ |
@@ -319,9 +331,9 @@ distribution patterns to create realistic risk scenarios:
 | 2    | 2026-06-09, 11, 12 | 11      | 2    | 1      |
 | 3    | 2026-06-16, 18, 19 | 10      | 1    | 3      |
 
-### Additional Sessions for IT101 (BSIT-only)
+### Additional Sessions for IT101-BSIT-Y1-1st (BSIT-only)
 
-6 sessions for IT101 with prof3:
+6 sessions for IT101 offering with prof3:
 
 | Week | Dates              | present | late | absent |
 | ---- | ------------------ | ------- | ---- | ------ |
@@ -455,25 +467,35 @@ SELECT count(*) FROM programs;  -- Expected: 3
 -- Year levels count
 SELECT count(*) FROM year_levels;  -- Expected: 4 + 4 + 5 = 13
 
--- Courses count
+-- Courses count (templates only)
 SELECT count(*) FROM courses;  -- Expected: 7
 
--- Enrollments in GE101 (shared across programs)
-SELECT count(*) FROM enrollments e
-JOIN courses c ON e.course_id = c.id
-WHERE c.course_code = 'GE101';  -- Expected: 42
+-- Course offerings count
+SELECT count(*) FROM course_offerings;  -- Expected: 9 (3 for GE101 + 6 program-specific)
 
--- Sessions created
-SELECT count(*) FROM sessions WHERE course_id = (
-  SELECT id FROM courses WHERE course_code = 'GE101'
+-- Enrollments in GE101 (shared across programs via offerings)
+SELECT count(*) FROM enrollments e
+JOIN course_offerings co ON e.offering_id = co.id
+JOIN courses c ON co.course_id = c.id
+WHERE c.course_code = 'GE101';  -- Expected: 42 (14 per program × 3 programs)
+
+-- Sessions created (via offering)
+SELECT count(*) FROM sessions WHERE offering_id = (
+  SELECT id FROM course_offerings WHERE course_code = 'GE101' AND program_id = (
+    SELECT id FROM programs WHERE code = 'BSCS'
+  ) AND semester = '1st_sem' AND academic_year = '2026-2027'
 );  -- Expected: 12
 
 -- Attendance records
 SELECT count(*) FROM attendance_records;  -- Expected: ~504 (42 students × 12 sessions)
 
--- Professor handover
+-- Professor handover (via offering)
 SELECT professor_id, effective_from, effective_to
 FROM course_professors
-WHERE course_id = (SELECT id FROM courses WHERE course_code = 'CS301')
+WHERE offering_id = (
+  SELECT id FROM course_offerings WHERE course_code = 'CS301' AND program_id = (
+    SELECT id FROM programs WHERE code = 'BSCS'
+  ) AND semester = '1st_sem' AND academic_year = '2026-2027'
+)
 ORDER BY effective_from;  -- Expected: prof1 (2026-06-01 to 2026-06-20), prof2 (2026-06-22 to NULL)
 ```

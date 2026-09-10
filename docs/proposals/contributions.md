@@ -65,11 +65,11 @@ The dashboard layers (descriptive: what happened, diagnostic: why, predictive: w
 
 **Folder**: `backend/src/features/session/` + `backend/src/features/attendance/service.py`
 
-**Contribution**: a time-window policy engine that determines attendance status (present/late/absent) from configurable windows, duration expiry, and scheduled class end — with per-session overrides of course defaults.
+**Contribution**: a time-window policy engine that determines attendance status (present/late/absent) from configurable windows, duration expiry, and scheduled class end — with per-session overrides of offering defaults.
 
 - Session creation: professor sets `duration_minutes`, `present_window_minutes`, `late_window_minutes`; server computes `expires_at = min(now + duration, scheduled_end_time)` (D12).
 - Constraint: `present_window + late_window ≤ duration` — enforced at the API layer.
-- Course-level defaults (`default_present_window_minutes`, `default_late_window_minutes`) are prefilled per D14; per-session overrides allow fine-tuning.
+- Offering-level defaults (`default_present_window_minutes`, `default_late_window_minutes`) are prefilled per D14; per-session overrides allow fine-tuning.
 - Status determination: scans within present_window → `present`; within late_window after that → `late`; no-scan when session expires → `absent` (D13).
 - Supports both code-entry and QR-scan session entry modes (D18).
 

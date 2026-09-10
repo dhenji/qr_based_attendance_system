@@ -26,7 +26,7 @@
 | --------- | ----------------------------- | ---------------- | --------------- |
 | Admin     | Program Management            | 4                | 3               |
 | Admin     | Year-Level & Term Structure   | 3                | 2               |
-| Admin     | Course Management             | 4                | 3               |
+| Admin     | Course Management             | 7                | 3               |
 | Admin     | Professor Assignment          | 3                | 2               |
 | Admin     | Student Enrollment (bulk CSV) | 2                | 2               |
 | Admin     | Face Enrollment               | 3                | 2               |
@@ -49,7 +49,7 @@
 | Shared    | Auth / OTP / MFA              | 3                | 2               |
 | Security  | Anti-Spoofing                 | 5                | 5               |
 | Offline   | Sync & Queue                  | 3                | 3               |
-| **Total** |                               | **68**           | **58**          |
+| **Total** |                               | **71**           | **58**          |
 
 ---
 
@@ -78,29 +78,33 @@
 
 | #      | Decision IDs | Case                                      | Preconditions                            | Steps                                                                                                                            | Expected Result                                                      |
 | ------ | ------------ | ----------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| A-CM-1 | D4           | Create course with full metadata          | Year level exists                        | Open Year-Level Courses; click [+Add Course]; fill all fields including units=3, sessions_per_week=2, schedule_days=MWF, windows | Course created with all metadata; default present/late windows set   |
-| A-CM-2 | D4           | Reject invalid window constraint          | Default present=10, late=20, duration=25 | Submit course                                                                                                                    | 400 Bad Request: present + late exceeds duration                     |
-| A-CM-3 | D17          | Session-level classroom override          | Course has classroom_name="Rm 101"       | Create session with classroom_name override="Rm 201"                                                                             | Session uses Rm 201 for geofence; course default unchanged           |
-| A-CM-4 | D17          | Geofence falls back to course coords      | Session classroom_* fields all NULL      | Verify session geofence                                                                                                          | Uses course classroom_lat/lng and classroom_radius_meters            |
-| A-CM-5 | D14          | Course default windows applied to session | Course: present=5, late=10               | Professor creates session without overriding windows                                                                             | Session inherits present_window_minutes=5, late_window_minutes=10    |
+| A-CM-1a | D4           | Create course template                    | —                                         | POST /admin/courses with course_code, course_name, units=3, session_duration_hours=1.5 | Course template created; no schedule/classroom/window/program fields accepted |
+| A-CM-1b | D4           | Create course offering                    | Course template GE101 exists              | POST /admin/offerings with course_id, program_id=BSCS, year_level_id=Y1, semester=1st_sem, academic_year=2026-2027, sessions_per_week=2, schedule_days=MW, schedule_start_time=07:00, schedule_end_time=08:30, classroom_name="Room 301", classroom_lat/lng, default_present_window_minutes=5, default_late_window_minutes=10 | Offering created; UNIQUE(course_id, program_id, semester, academic_year) enforced |
+| A-CM-2 | D4           | Reject invalid window constraint (offering) | Offering: present=10, late=20, duration=25 | Submit offering                                                                                                              | 400 Bad Request: present + late exceeds duration                     |
+| A-CM-3 | D17          | Session-level classroom override          | Offering has classroom_name="Rm 101"      | Create session with classroom_name override="Rm 201"                                                                             | Session uses Rm 201 for geofence; offering default unchanged           |
+| A-CM-4 | D17          | Geofence falls back to offering coords   | Session classroom_* fields all NULL      | Verify session geofence                                                                                                          | Uses offering classroom_lat/lng and classroom_radius_meters            |
+| A-CM-5 | D14          | Offering default windows applied to session | Offering: present=5, late=10             | Professor creates session without overriding windows                                                                             | Session inherits present_window_minutes=5, late_window_minutes=10    |
 | A-CM-6 | D2           | Section stored on students only           | Student record                           | Inspect enrollment record                                                                                                        | No `section` column on enrollments; section exists on students table |
+| A-CM-7 | D4           | Reject duplicate offering                 | Offering for GE101+BSCS+1st_sem+2026-2027 exists | Attempt POST /admin/offerings with same (course_id, program_id, semester, academic_year) | 409 Conflict; UNIQUE constraint on (course_id, program_id, semester, academic_year) |
+| A-CM-8 | D14          | Offering window defaults copy to session  | Offering: present=5, late=10             | Professor creates session from offering without overriding windows                                                               | Session created with present_window_minutes=5, late_window_minutes=10 copied from offering |
+| A-CM-9 | D17          | Offering classroom/geofence used by session | Offering: classroom_name="Room 301", lat/lng set | Professor creates session without classroom override                                                                     | Session geofence uses offering's classroom_lat/lng and classroom_radius_meters |
 
 ### 2.4 Professor Assignment
 
 | #      | Decision IDs | Case                            | Preconditions                                                      | Steps                                                                                   | Expected Result                                                                                  |
 | ------ | ------------ | ------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| A-PA-1 | D7           | Assign professor to course      | Course and professor exist                                         | POST /admin/courses/{cid}/professors with professor_id, is_primary=true, effective_from | Assignment created; professor listed on course detail                                            |
+| A-PA-1 | D7           | Assign professor to offering              | Offering and professor exist              | POST /admin/offerings/{oid}/professors with professor_id, is_primary=true, effective_from | Assignment created; professor listed on offering detail |
 | A-PA-2 | D8           | Mid-semester professor handover | Prof A assigned effective_from=2026-06-01, effective_to=NULL       | Set effective_to=2026-07-14 on Prof A; assign Prof B effective_from=2026-07-15          | Prof A shows end date; Prof B shows start; sessions before 2026-07-15 still attributed to Prof A |
-| A-PA-3 | D9           | Assign assistant (secondary)    | Course has primary professor                                       | Assign second professor with is_primary=false                                           | Both listed; either can open sessions for the course                                             |
-| A-PA-4 | D7           | Reject overlapping assignment   | Prof A already assigned for course+semester with overlapping dates | Attempt assign Prof A with overlapping effective_from/to                                | 409 Conflict; overlapping range rejected at service layer                                        |
+| A-PA-3 | D9           | Assign assistant (secondary)    | Offering has primary professor                                              | Assign second professor with is_primary=false                                           | Both listed; either can open sessions for the offering                                             |
+| A-PA-4 | D7           | Reject overlapping assignment   | Prof A already assigned for offering+semester with overlapping dates | Attempt assign Prof A with overlapping effective_from/to                                | 409 Conflict; overlapping range rejected at service layer                                        |
 
 ### 2.5 Student Enrollment (Bulk CSV)
 
 | #      | Decision IDs | Case                           | Preconditions                                                | Steps                                      | Expected Result                                                                     |
 | ------ | ------------ | ------------------------------ | ------------------------------------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------- |
-| A-BE-1 | D2, D5       | Bulk enroll students to course | CSV with 20 students; course belongs to BSCS Y1              | POST /admin/courses/{cid}/enrollments/bulk | 20 enrollments created; each with semester validated against BSCS Y1 term_structure |
-| A-BE-2 | D5           | Reject invalid semester        | CSV row has semester="summer" but BSCS Y1 has no summer term | Bulk enroll                                | Row rejected; error lists invalid semester for year level                           |
-| A-BE-3 | D2           | Reject duplicate enrollment    | Student already enrolled in course for same academic_year    | Bulk enroll same student again             | Duplicate skipped; no error (idempotent)                                            |
+| A-BE-1 | D2, D5       | Bulk enroll students to offering | CSV with 20 students; offering belongs to BSCS Y1           | POST /admin/offerings/{oid}/enrollments/bulk | 20 enrollments created; each with semester validated against BSCS Y1 term_structure |
+| A-BE-2 | D5           | Reject invalid semester        | CSV row has semester="summer" but BSCS Y1 has no summer term | Bulk enroll                                                              | Row rejected; error lists invalid semester for year level                           |
+| A-BE-3 | D2           | Reject duplicate enrollment    | Student already enrolled in offering for same academic_year   | Bulk enroll same student again             | Duplicate skipped; no error (idempotent)                                            |
 
 ### 2.6 Face Enrollment
 
@@ -226,7 +230,7 @@
 | S-SC-2  | D27, D18     | Step 1 — Scan session QR               | Session QR displayed                                   | Scan QR code                             | QR decoded: `{"v":1,"code":"A7X-9K2M","course":123,...}`; session config fetched; proceed to step 2 |
 | S-SC-3  | D27, D19     | Step 2 — Scan student ID QR            | Session verified                                       | Scan student-ID QR containing "24-2111"  | Student number resolved; student record fetched (enrollment + face embedding + duplicate check)     |
 | S-SC-4  | D27          | Step 2 — Duplicate scan rejected       | Student already scanned for this session               | Scan same ID again                       | Error: "Already scanned for this session"; no duplicate record created                              |
-| S-SC-5  | D27          | Step 2 — Not enrolled rejected         | Student not enrolled in session's course               | Scan non-enrolled student ID             | Error: "Not enrolled in this course"                                                                |
+| S-SC-5  | D27          | Step 2 — Not enrolled rejected         | Student not enrolled in session's offering              | Scan non-enrolled student ID             | Error: "Not enrolled in this course"                                                                |
 | S-SC-6  | D27          | Step 3 — GPS geofence pass             | Student within 30m of classroom                        | Auto-runs GPS check                      | Distance < 30m; green pill "Within geofence"; proceed to step 4                                     |
 | S-SC-7  | D27          | Step 3 — GPS geofence fail             | Student 50m outside radius                             | Auto-runs GPS check                      | Red pill "Outside geofence"; retry option; cannot proceed                                           |
 | S-SC-8  | D27, D31     | Step 4 — Liveness pass                 | Face embedded; student within radius                   | Blink → Turn Left → Turn Right challenge | Each step confirmed; cosine similarity ≥ 0.7; "Verifying identity…" spinner; proceed to step 5      |
@@ -322,7 +326,7 @@ Every decision D1–D43 is covered by at least one test case above.
 | D1       | A-PM-1, A-PM-2, A-PM-4, A-PM-5, A-YL-3                                                                                                                                                              |
 | D2       | A-CM-6, A-BE-1, A-BE-3, P-AL-1, S-SCH-1                                                                                                                                                             |
 | D3       | A-YL-1, A-YL-2, A-YL-3                                                                                                                                                                              |
-| D4       | A-CM-1, S-SCH-1, S-SCH-2                                                                                                                                                                            |
+| D4       | A-CM-1a, A-CM-1b, A-CM-7, A-CM-8, A-CM-9, S-SCH-1, S-SCH-2                                                                                                                                    |
 | D5       | A-BE-1, A-BE-2, A-YL-3                                                                                                                                                                              |
 | D6       | A-PM-1, A-PM-3, A-PM-4                                                                                                                                                                              |
 | D7       | A-PA-1, A-PA-2, A-PA-4                                                                                                                                                                              |

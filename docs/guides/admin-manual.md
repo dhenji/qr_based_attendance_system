@@ -74,15 +74,28 @@ The **Program Management** suite replaces the legacy Course Management. It imple
 
 [FIG: Course table with Code, Name, Units, Schedule, Students; [+Add Course] button; term chips shown at top]
 
-**Add Course Form** ([D4](../project/decision-log.md)):
+**Create Course (Template)** ([D4](../project/decision-log.md)):
+
+A _course_ is a reusable template — a subject definition with no schedule, classroom, or program attached.
+
+| Field                 | Description                              |
+| --------------------- | ---------------------------------------- |
+| `course_code`         | Unique code (e.g., `CS101`)              |
+| `course_name`         | Full name (e.g., Software Engineering)   |
+| `units`               | Credit units (affects expected sessions) |
+| `session_duration_hours` | Length per meeting (e.g., 1.5)         |
+
+**Create Course Offering** (per program / year level / semester):
+
+An _offering_ is a specific instance of a course for a program, year level, and semester. Create one offering per cohort the course spans.
 
 | Field                                                | Description                              |
 | ---------------------------------------------------- | ---------------------------------------- |
-| `course_code`                                        | Unique code (e.g., `CS101`)              |
-| `course_name`                                        | Full name (e.g., Software Engineering)   |
-| `units`                                              | Credit units (affects expected sessions) |
+| `program`                                            | Target _program_ (e.g., BSCS)            |
+| `year_level`                                         | Target _year level_ (e.g., Year 2)       |
+| `semester`                                           | Term (e.g., 1st Sem)                     |
+| `academic_year`                                      | Academic year (e.g., 2025–2026)          |
 | `sessions_per_week`                                  | Meetings per week                        |
-| `session_duration_hours`                             | Length per meeting (e.g., 1.5)           |
 | `semester_weeks`                                     | Weeks in the semester                    |
 | `schedule_days`                                      | Pattern (e.g., `MWF`, `TTH`)             |
 | `schedule_start_time` / `schedule_end_time`          | Class times                              |
@@ -90,7 +103,7 @@ The **Program Management** suite replaces the legacy Course Management. It imple
 | `default_present_window_minutes`                     | Default _present window_ (default 5)     |
 | `default_late_window_minutes`                        | Default _late window_ (default 10)       |
 
-> **Note**: A _course_ can be taken by multiple programs/year levels ([D6](../project/decision-log.md)). The same course row appears under each cohort it spans.
+> **Note**: A _course_ template can span multiple programs/year levels ([D6](../project/decision-log.md)). Create a separate _offering_ for each program/year/semester combination, each with its own schedule and classroom.
 
 ### 2.4 Course Detail — `/admin/courses/{cid}`
 
@@ -98,7 +111,7 @@ The **Program Management** suite replaces the legacy Course Management. It imple
 
 #### Overview Tab
 
-Shows schedule metadata, classroom GPS, units, duration, weeks, and _default windows_.
+Shows template metadata (units, duration). _Offering_ details (schedule, classroom GPS, weeks, default windows) are shown on the _offering_ overview.
 
 #### Professors Tab (Assignment & History)
 
@@ -106,9 +119,9 @@ Shows schedule metadata, classroom GPS, units, duration, weeks, and _default win
 
 **Assignment Rules** ([D7–D9](../project/decision-log.md)):
 
-- _Professor_ assignments are many-to-many via `course_professors` with `is_primary`, `effective_from`, `effective_to` (nullable = ongoing), `semester`, `assigned_by`, `assigned_at`
+- _Professor_ assignments are many-to-many via `course_professors` scoped to an _offering_ (`offering_id`) with `is_primary`, `effective_from`, `effective_to` (nullable = ongoing), `semester`, `assigned_by`, `assigned_at`
 - **Mid-term replacement**: End the old assignment by setting `effective_to` to the day before the change; create a new assignment with `effective_from` = change date. History is never rewritten — old sessions stay attributed to the original professor
-- Any professor with an **active assignment** for the _course_ + _semester_ may open _sessions_
+- Any professor with an **active assignment** for the _offering_ + _semester_ may open _sessions_
 - Assistants are secondary assignments (`is_primary=false`)
 
 #### Enrolled Students Tab
@@ -117,7 +130,7 @@ Shows roster with _section_ filter ([D2](../project/decision-log.md)), bulk CSV 
 
 #### Settings Tab
 
-Edits _course_ defaults: _present window_, _late window_, _geofence radius_.
+Edits _offering_ defaults: _present window_, _late window_, _geofence radius_.
 
 ---
 
@@ -268,8 +281,8 @@ Access via **System Settings** → **Academic Structure Updates** → **[Edit Pr
 | Add/rename _program_                            | Programs List (4.5a)            | Yes     |
 | Add/rename _year level_                         | Program Detail (4.5b)           | Yes     |
 | Edit _term structure_ (add/remove/rename terms) | Program Detail → [Manage Terms] | Yes     |
-| Add/move _course_ between programs/year levels  | Year-Level Courses (4.5c)       | Yes     |
-| Edit _course_ metadata (schedule, windows, GPS) | Course Detail → Settings        | Yes     |
+| Create new _offering_ for a program/year/semester | Year-Level Courses (4.5c)       | Yes     |
+| Edit _offering_ defaults (schedule, windows, GPS) | Offering Detail → Settings      | Yes     |
 
 **Last Structural Change** is displayed on the System Settings screen with timestamp and admin name.
 

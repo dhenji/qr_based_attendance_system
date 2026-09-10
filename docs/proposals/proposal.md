@@ -1,5 +1,7 @@
 # Project Proposal: QR-Code Based Offline-Capable Attendance System with Anti-Spoofing
 
+> **Note:** Schema design has evolved since this proposal was submitted. See `docs/architecture/migration-strategy.md` for the current target schema (a `course_offerings` table now decouples courses from program/year/schedule, and professor assignments/enrollments reference offerings).
+
 ---
 
 ## 1. Introduction

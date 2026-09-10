@@ -474,8 +474,8 @@ Four-step flow. Each step advances after verification.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> GPS uses Haversine formula vs course/session radius. If session has
-> override coordinates (D17), those are used; otherwise course defaults.
+> GPS uses Haversine formula vs offering/session radius. If session has
+> override coordinates (D17), those are used; otherwise offering defaults.
 
 #### 2.2d Face Check — `/student/scan/step/4`
 
@@ -865,7 +865,7 @@ Four-step flow. Each step advances after verification.
 > **Locked variant** (D11): course is fixed from My Courses card — no
 > selector. Window math block (§9) shows live validation P+L≤duration.
 > Duration prefilled = scheduled length. Optional classroom override
-> overrides course defaults when set (D17).
+> overrides offering defaults when set (D17).
 
 #### 3.2b From Dashboard (Selector) — `/professor/sessions/create`
 
@@ -886,7 +886,7 @@ Four-step flow. Each step advances after verification.
 
 > **Selector variant** (D11): course dropdown limited to professor's
 > active assignments this term. Form identical to 3.2a below the selector.
-> **Window defaults** come from the course (D14) and are overridable per
+> **Window defaults** come from the offering (D14) and are overridable per
 > session. **Duration expiry** (D12): `expires_at = min(created_at +
 duration_minutes, scheduled_end_time)`.
 

@@ -111,8 +111,8 @@ attendance-system/
 │   │   │   │   ├── +layout.svelte    # Professor layout
 │   │   │   │   ├── dashboard/        # 3.1 Dashboard (today's sessions, quick actions)
 │   │   │   │   ├── courses/
-│   │   │   │   │   ├── +page.svelte  # 3.6 My Courses (grouped by program)
-│   │   │   │   │   └── [id]/         # 3.6 Course detail deep-link
+│   │   │   │   │   ├── +page.svelte  # 3.6 My Courses — offering cards (grouped by program)
+│   │   │   │   │   └── [id]/         # 3.6 Offering detail deep-link
 │   │   │   │   ├── sessions/
 │   │   │   │   │   ├── new/          # 3.2a/b Session creation (locked vs selector)
 │   │   │   │   │   ├── active/[id]/  # 3.3 Active session (dual timers)
@@ -133,9 +133,9 @@ attendance-system/
 │   │   │       │   └── [id]/
 │   │   │       │       ├── +page.svelte  # 4.5b Program detail (year tabs)
 │   │   │       │       ├── years/[yid]/
-│   │   │       │       │   └── courses/  # 4.5c Year-level courses
-│   │   │       │       │       └── [cid]/ # 4.5d Course detail (tabs)
-│   │   │       │       └── courses/[cid]/ # Direct course access
+│   │   │       │       │   └── offerings/  # 4.5c Year-level course offerings
+│   │   │       │       │       └── [oid]/ # 4.5d Offering detail (tabs)
+│   │   │       │       └── offerings/[oid]/ # Direct offering access
 │   │   │       ├── analytics/        # 4.7 Analytics & Reports (5 tabs)
 │   │   │       ├── audit-logs/       # Audit trail viewer
 │   │   │       ├── system/
