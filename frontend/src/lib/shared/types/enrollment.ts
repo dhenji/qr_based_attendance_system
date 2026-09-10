@@ -1,8 +1,7 @@
 export interface Enrollment {
   id: number;
   studentId: number;
-  courseId: number;
+  offeringId: number;
+  academicYear: string;
   semester: string;
-  yearLevel: number;
-  isActive: boolean;
 }

@@ -19,7 +19,7 @@
 - Expand `sessions` with `offering_id`, duration, windows, scheduled times, classroom override (D12, D14, D17)
 - Expand `attendance_records` with excuse fields, face evidence, rejection reasons (D15, D16)
 - Expand `students` with face embedding columns (D28)
-- Add `offering_id` + `semester` to `enrollments` (D5)
+- ~~Add `offering_id` + `semester` to `enrollments` (D5)~~ ✅
 - Enum expansion: `ValidationStatus` gains `excused`, `rejected` (D15)
 - Data backfill: `valid` → `present`, `invalid` → `rejected` (migration-strategy.md §0.3)
 
