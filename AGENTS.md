@@ -45,7 +45,7 @@ npm run check                      # typecheck (runs svelte-kit sync first)
   - `student.Student` — `user_id` unique FK to users
   - `professor.Professor` — `user_id` unique FK to users
   - `course.Course` — includes `classroom_lat`/`classroom_lng` for geofencing
-  - `enrollment.Enrollment`
+  - `enrollment.Enrollment` — `student_id`, `offering_id` (FK → course_offerings), `academic_year`, `semester`
   - `session.Session` — `session_code` unique, `expires_at`, `classroom_radius_meters`
   - `attendance.AttendanceRecord` (table: `attendance_records`)
   - `sync.SyncQueue`

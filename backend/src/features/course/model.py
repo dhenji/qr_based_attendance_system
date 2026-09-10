@@ -74,4 +74,4 @@ class CourseOffering(TimestampMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
-    course: Mapped["Course"] = relationship("Course", back_populates="course_offerings")
+    course: Mapped[Course] = relationship("Course", back_populates="course_offerings")

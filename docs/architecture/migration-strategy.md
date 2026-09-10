@@ -184,7 +184,7 @@ class CourseProfessor(Base):
 
 ---
 
-### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK
+### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK ✅ DONE
 
 **Migration:** `alembic revision --autogenerate -m "add semester and offering_id to enrollments with backfill"`
 
@@ -196,6 +196,27 @@ class CourseProfessor(Base):
    (via course_id + student's program/year_level) and set `offering_id`
    - Set `semester` from `course_offerings.semester` (default `'1st_sem'`)
 4. After backfill: `ALTER COLUMN offering_id SET NOT NULL`, `ALTER COLUMN semester SET NOT NULL`
+5. Drop `course_id` column (offering_id provides the course link via course_offerings.course_id)
+6. Update unique constraint from `(student_id, course_id, academic_year)` to `(student_id, offering_id, academic_year)`
+
+**Backfill SQL:**
+```sql
+UPDATE enrollments e
+SET
+    offering_id = co.id,
+    semester = COALESCE(co.semester, '1st_sem')
+FROM students s
+JOIN programs p ON p.code = s.course
+JOIN year_levels yl ON yl.program_id = p.id AND yl.year_number = s.year_level
+JOIN course_offerings co
+    ON co.course_id = e.course_id
+    AND co.program_id = p.id
+    AND co.year_level_id = yl.id
+    AND (co.academic_year = e.academic_year OR e.academic_year IS NULL)
+WHERE e.student_id = s.id;
+```
+
+> **Note:** `COALESCE(co.semester, '1st_sem')` handles the case where multiple offerings exist for the same (course, program, year_level) with different semesters. Rows with ambiguous semester default to `'1st_sem'` and can be corrected post-migration.
 
 **Validation:** Application logic validates `semester` against `student.year_level.term_structure` (via `student.year_level` → `year_levels.term_structure`).
 
@@ -429,7 +450,7 @@ After all migrations, verify:
 - [ ] `courses`: course_code(UK), course_name, units, session_duration_hours, is_active, timestamps (no FKs — template only)
 - [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
 - [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
-- [ ] `enrollments`: offering_id NOT NULL, semester NOT NULL, validated against year_level.term_structure
+- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, validated against year_level.term_structure
 - [ ] `sessions`: offering_id, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint
 - [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
