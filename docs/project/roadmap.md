@@ -16,7 +16,7 @@
 - New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
 - Strip `courses` to a pure template: retains only `units` + `session_duration_hours` (D4)
 - Create `course_offerings` with schedule, classroom, default windows, and program/year-level FKs (D4)
-- Expand `sessions` with `offering_id`, duration, windows, scheduled times, classroom override (D12, D14, D17)
+- Expand `sessions` (drop `course_id`, add `offering_id`), duration, windows, scheduled times, classroom override (D12, D14, D17)
 - Expand `attendance_records` with excuse fields, face evidence, rejection reasons (D15, D16)
 - Expand `students` with face embedding columns (D28)
 - ~~Add `offering_id` + `semester` to `enrollments` (D5)~~ ✅

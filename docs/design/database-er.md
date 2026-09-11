@@ -20,7 +20,7 @@
 | `students`            | id (PK), user_id (FK → users, UK, nullable), student_id (UK), email (UK), first_name, middle_name, last_name, year_level (INT, retained), section (retained per D2), is_active, face_embedding (BYTEA NULL), face_enrolled_at (TIMESTAMPTZ NULL), face_embedding_version (INT DEF 0), created_at, updated_at — **legacy `course` string dropped**                                                                                                                                                  |
 | `professors`          | id (PK), user_id (FK → users, UK, nullable), email (UK), first_name, middle_name, last_name, department, is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                         |
 | `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings), academic_year, semester (validated against year_level.term_structure), UNIQUE(student_id, offering_id, academic_year)                                                                                                                                                                                                                                                                                                             |
-| `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → users), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), expires_at (TIMESTAMPTZ, STORED: LEAST(created_at + duration_minutes, scheduled_end_time)), classroom_radius_meters, classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), created_at |
+| `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → professors), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), expires_at (TIMESTAMPTZ, STORED: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)), classroom_radius_meters, classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), created_at |
 | `attendance_records`  | id (PK), student_id (FK → students), session_id (FK → sessions), timestamp, gps_lat, gps_lng, validation_status (present/late/absent/excused/pending/rejected), sync_status, liveness_evidence (JSONB), face_match_score (NUMERIC(5,4)), scanned_via (qr_camera/manual_code), original_status (NULL), excuse_reason (NULL), excused_by (FK → users NULL), excused_at (NULL), excuse_type (quick/prof_with_evidence/request_approved NULL), excuse_request_id (FK NULL), created_at                 |
 | `excuse_requests`     | id (PK), student_id (FK), session_id (FK), initiated_by (professor/student), initiated_via (quick/prof_with_evidence/request), reason, attachment_urls (JSONB), status (pending/approved/rejected DEF pending), requested_at, reviewed_by (FK → users NULL), reviewed_at (NULL), review_notes (NULL)                                                                                                                                                                                               |
 | `student_risk_scores` | id (PK), student_id (FK → students), offering_id (FK → course_offerings), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high), features (JSONB), computed_at, UNIQUE(student_id, offering_id, semester, computed_at::date)                                                                                                                                                                                                                                                                   |
@@ -36,7 +36,7 @@ erDiagram
     users ||--o{ otp_codes : "receives"
     users ||--o| students : "claims"
     users ||--o| professors : "claims"
-    users ||--o{ sessions : "opens (professor)"
+    professors ||--o{ sessions : "opens"
     users ||--o{ course_professors : "assigns"
     users ||--o{ excuse_requests : "reviews (excused_by/reviewed_by)"
     users ||--o{ attendance_records : "excuses"
@@ -289,7 +289,7 @@ erDiagram
    │  │ first_name, middle_name, last_name│      │  │───────────────────────────────────────│
    │  │ year_level, section, is_active    │      │  │ id                        PK           │
    │  │ face_embedding BYTEA,             │      │  │ offering_id FK → course_offerings      │
-   │  │   face_enrolled_at                │      │  │ professor_id  FK → users               │
+   │  │   face_enrolled_at                │      │  │ professor_id  FK → professors           │
    │  │ face_embedding_version            │      │  │ session_code  UK                       │
    │  │ created_at, updated_at            │      │  │ duration_minutes                        │
    │  └───────────────┬───────────────────┘      │  │ present_window_minutes                 │
@@ -435,7 +435,7 @@ erDiagram
 | Parent (1)          | Crow's foot | Child (many)          | Cardinality                                                                                                     |
 | ------------------- | ----------- | --------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `users`             | `‖──○{`     | `otp_codes`           | one user receives many OTP codes _(or email-only before account exists)_                                        |
-| `users`             | `‖──○{`     | `sessions`            | one user _(professor)_ opens many                                                                               |
+| `professors`        | `‖──○{`     | `sessions`            | one professor opens many                                                                                         |
 | `users`             | `‖──○       | `                     | `students`                                                                                                      | one user claims zero-or-one student _(set at registration)_   |
 | `users`             | `‖──○       | `                     | `professors`                                                                                                    | one user claims zero-or-one professor _(set at registration)_ |
 | `users`             | `‖──○{`     | `excuse_requests`     | one user reviews many (as `excused_by`/`reviewed_by`)                                                           |
