@@ -44,16 +44,17 @@ npm run check                      # typecheck (runs svelte-kit sync first)
   - `auth.User` + `auth.OtpCodes`
   - `student.Student` — `user_id` unique FK to users
   - `professor.Professor` — `user_id` unique FK to users
-  - `course.Course` — includes `classroom_lat`/`classroom_lng` for geofencing
+  - `course.Course` (template: `course_code`, `course_name`, `units`, `session_duration_hours`) + `course.CourseOffering` — geofence `classroom_*` fields live here
   - `enrollment.Enrollment` — `student_id`, `offering_id` (FK → course_offerings), `academic_year`, `semester`
   - `session.Session` — `session_code` unique, `expires_at`, `classroom_radius_meters`
-  - `attendance.AttendanceRecord` (table: `attendance_records`)
+  - `attendance.AttendanceRecord` (table: `attendance_records`) — `liveness_evidence` (JSONB), `face_match_score` (NUMERIC(5,4)), `scanned_via`, `original_status`, `excuse_type`/`excuse_reason`/`excused_*` fields
   - `sync.SyncQueue`
-  - `program.Program` + `program.YearLevel` — **not imported in `alembic/env.py`** (see Gotchas)
+  - `excuse.ExcuseRequest` (table: `excuse_requests`) — `initiated_by`/`initiated_via`, `reason`, `attachment_urls` (JSONB), `status`, `reviewed_by`/`reviewed_at`
+  - `program.Program` + `program.YearLevel` — imported in `alembic/env.py`
 - **Routers**: `src/api/router.py` mounts 5 routers under `/api`. `course` and `enrollment` routers exist as files but are **not mounted**. All mounted routers are currently empty stubs.
 - **Alembic**: 3 migrations in `alembic/versions/`. To add a table: write model, add `import features.X.model` to `alembic/env.py`, then `alembic revision --autogenerate -m "..."` + `alembic upgrade head`.
 - **Shared**: `src/shared/enums.py` (15 StrEnum classes), `src/shared/mixins.py`, `src/shared/pagination.py`, `src/shared/base.py` (BaseCRUD generic), `src/shared/email.py`.
-- **Missing**: `service.py` and `schema.py` for all features; `src/shared/dependencies.py`/`cache.py`; `src/tests/` is empty.
+- **Missing**: `service.py` and `schema.py` for all features (incl. `excuse`, which has model only); `src/shared/dependencies.py`/`cache.py`; `src/tests/` is empty.
 - **Dockerfile.dev**: 3-stage — `builder` (venv at `/opt/venv`) → `runtime` (uvicorn) → `migrate` (alembic upgrade head).
 
 ## Frontend (`frontend/`)
@@ -73,8 +74,7 @@ npm run check                      # typecheck (runs svelte-kit sync first)
 | Area | Detail |
 |------|--------|
 | DB connection | FastAPI lifespan runs `SELECT 1` at startup — container fails if Postgres not ready. Compose handles via `depends_on: condition: service_healthy`. |
-| Migrations | `alembic/env.py` imports models using `features.*.model` (not `src.features...`). Must `cd backend` so imports resolve. |
-| Program models missing from alembic | `program.Program` and `program.YearLevel` exist in `src/features/program/model.py` but are **NOT imported in `alembic/env.py`**. Add them before generating migrations involving these tables. |
+| Alembic model imports | `alembic/env.py` imports models using `features.*.model` (not `src.features...`). Must `cd backend` so imports resolve. Currently imports all feature models incl. `features.program.model`. When `features/excuse/model.py` (ExcuseRequest) is created, add `import features.excuse.model` before regenerating migrations. |
 | Frontend mock mode | `MOCK = true` in `src/lib/api/client.ts`. All API calls return mock data. No real backend integration yet. |
 | Env files | Backend reads `.env` from `backend/` (not root). Frontend reads `.env` from `frontend/`. |
 | CORS | `CORS_ORIGINS` in backend `.env` must include frontend origin (`http://localhost:5173`). |
