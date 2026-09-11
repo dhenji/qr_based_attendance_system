@@ -1,26 +1,57 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Computed,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
-from features.auth.model import User
-from features.course.model import Course
+from features.course.model import CourseOffering
+from features.professor.model import Professor
+from shared.mixins import CreatedAtMixin
 
 
-class Session(Base):
+class Session(CreatedAtMixin, Base):
     __tablename__ = "sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "present_window_minutes + late_window_minutes <= duration_minutes",
+            name="ck_session_window_sum_lte_duration",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    course_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("courses.id", ondelete="RESTRICT"), index=True
+    offering_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("course_offerings.id", ondelete="RESTRICT"), index=True
     )
+
     professor_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), index=True
+        BigInteger, ForeignKey("professors.id", ondelete="RESTRICT"), index=True
     )
     session_code: Mapped[str] = mapped_column(String(50), unique=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    present_window_minutes: Mapped[int] = mapped_column(Integer)
+    late_window_minutes: Mapped[int] = mapped_column(Integer)
+    scheduled_start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    scheduled_end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        Computed(
+            "LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)",
+            persisted=True,
+        ),
+    )
     classroom_radius_meters: Mapped[int] = mapped_column(server_default="50")
+    classroom_name: Mapped[str | None] = mapped_column(String(100))
+    classroom_lat: Mapped[float | None] = mapped_column(Float)
+    classroom_lng: Mapped[float | None] = mapped_column(Float)
 
-    course: Mapped[Course] = relationship()
-    professor: Mapped[User] = relationship()
+    offering: Mapped[CourseOffering] = relationship()
+    professor: Mapped[Professor] = relationship()

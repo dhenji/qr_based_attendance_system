@@ -28,5 +28,5 @@ class Student(TimestampMixin, Base):
     year_level: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
-    user: Mapped[User | None] = relationship("User")
-    program: Mapped[Program] = relationship("Program")
+    user: Mapped[User | None] = relationship()
+    program: Mapped[Program] = relationship()

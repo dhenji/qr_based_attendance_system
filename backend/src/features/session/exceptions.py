@@ -28,13 +28,15 @@ class SessionExpiredException(SessionDomainException):
 
 
 class SessionAlreadyActiveException(SessionDomainException):
-    """409 - course already has an active session open."""
+    """409 - offering already has an active session open."""
 
     status_code: int = 409
     code: str = "session_already_active"
 
-    def __init__(self, course_id: int) -> None:
-        super().__init__(message=f"Course {course_id} already has an active session")
+    def __init__(self, offering_id: int) -> None:
+        super().__init__(
+            message=f"Offering {offering_id} already has an active session"
+        )
 
 
 class DuplicateScanException(SessionDatabseException):
