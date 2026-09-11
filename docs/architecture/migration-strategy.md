@@ -26,7 +26,7 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 ## Target Schema (Reference §6)
 
 New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (+offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+3 face cols, drop legacy `course`)
+Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+3 face cols, drop legacy `course`)
 
 ---
 
@@ -232,8 +232,10 @@ WHERE e.student_id = s.id;
 
 ```python
 class Session(Base):
-    # Existing: id, course_id, professor_id, session_code, expires_at, classroom_radius_meters
+    # Existing: id, session_code, expires_at, classroom_radius_meters
+    # DROP: course_id (redundant — reachable via offering_id → course_offerings.course_id)
     # NEW FK: offering_id → course_offerings.id
+    # RETARGET: professor_id FK from users.id → professors.id
     # NEW:
     duration_minutes = Integer
     present_window_minutes = Integer
@@ -250,6 +252,7 @@ class Session(Base):
 **Backfill:**
 
 - `offering_id` = look up `course_offerings` row matching session's course + inferred program/semester
+- `course_id` = **DROP** after `offering_id` is backfilled and NOT NULL
 - `duration_minutes` = `course.session_duration_hours * 60` (default 90)
 - `present_window_minutes` = `course_offering.default_present_window_minutes` (5)
 - `late_window_minutes` = `course_offering.default_late_window_minutes` (10)
@@ -257,7 +260,7 @@ class Session(Base):
 - `classroom_lat/lng/name` = `course_offering` classroom (override for session-specific room changes)
 - `expires_at` = recomputed via STORED expression (PostgreSQL `GENERATED ALWAYS AS ... STORED`)
 
-**Rollback:** Drop new columns. STORED column requires `ALTER TABLE ... ALTER COLUMN expires_at DROP EXPRESSION` first.
+**Rollback:** Drop new columns, restore `course_id` from backup. STORED column requires `ALTER TABLE ... ALTER COLUMN expires_at DROP EXPRESSION` first.
 
 ---
 
@@ -451,7 +454,7 @@ After all migrations, verify:
 - [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
 - [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
 - [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, validated against year_level.term_structure
-- [ ] `sessions`: offering_id, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint
+- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint; course_id DROPPED
 - [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
 - [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, offering_id, semester, date)

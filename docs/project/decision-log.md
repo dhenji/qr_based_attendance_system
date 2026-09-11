@@ -66,6 +66,7 @@
 - **Status:** Accepted
 - **Context:** Professors change mid-semester; history must be preserved. A simple FK on `sessions` or `courses` loses attribution history.
 - **Consequences:** New table `course_professors` with composite PK `(course_id, professor_id, effective_from)`. Service layer must reject overlapping effectiveness ranges for same `(course_id, professor_id)`.
+> **Superseded by D45** — PK changed to `(offering_id, professor_id, effective_from)`.
 
 ### ADR-008: Professor Changes Mid-Semester — History Preserved
 
@@ -101,7 +102,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** UX optimization — common case (professor opens session for their course) should be frictionless.
-- **Consequences:** Two session-create entry points with different UI; same backend endpoint with optional `course_id` (required for locked variant).
+- **Consequences:** Two session-create entry points with different UI; same backend endpoint with optional `offering_id` (required for locked variant).
 
 ### ADR-012: Session Duration & Expiry — System-Time Based
 
@@ -145,7 +146,7 @@
 
 ### ADR-017: Classroom Override — Session-Level Optional
 
-- **Decision (D17):** Classroom override is **session-level optional** (`sessions.classroom_*` fields override course defaults when set); geofence uses session coords if overridden, else course coords.
+- **Decision (D17):** Classroom override is **session-level optional** (`sessions.classroom_*` fields override offering defaults when set); geofence uses session coords if overridden, else offering coords.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Room changes happen; course default is fallback.
@@ -153,7 +154,7 @@
 
 ### ADR-018: Session Entry — Code or QR
 
-- **Decision (D18):** Session entry for students supports BOTH: typing the 6–8 char session code OR scanning the projected session QR. Session QR payload is JSON: `{"v":1,"code":"A7X-9K2M","course":123,"radius":30,"pw":5,"lw":10}` (versioned for future migration).
+- **Decision (D18):** Session entry for students supports BOTH: typing the 6–8 char session code OR scanning the projected session QR. Session QR payload is JSON: `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}` (versioned for future migration).
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Accessibility — not all students can scan QR reliably. Versioned payload enables future fields.
@@ -417,4 +418,12 @@
 - **Context:** Assignments and risk are scoped to a specific offering (program + year + semester), not the course template.
 - **Supersedes:** D7 (composite PK now on offering_id), D17 (classroom defaults now come from offering), D35 (risk scores keyed by offering).
 - **Consequences:** Step 4 and Step 8 migrations use offering_id.
+
+### ADR-046: Session Professor FK References Professors Table
+
+- **Decision (D46):** `sessions.professor_id` references `professors.id`, not `users.id`.
+- **Date:** 2026-09-11
+- **Status:** Accepted
+- **Context:** A session is opened by a specific professor (not a generic user). `CourseProfessor.professor_id` already targets `professors.id`; sessions should follow the same pattern for consistency. This gives direct access to professor name/department without an extra join through `users`.
+- **Consequences:** The session `professor` relationship returns a `Professor` instance. The logged-in user (JWT) resolves to a professor record via `Professor.user_id` before session creation. `database-er.md` FK notation and cardinality table updated. `migration-strategy.md` Step 6 includes retargeting the `professor_id` FK from `users.id` to `professors.id`.
 
