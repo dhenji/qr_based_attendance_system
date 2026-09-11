@@ -24,5 +24,5 @@ class Enrollment(Base):
     )
     semester: Mapped[str | None] = mapped_column(String(20))
 
-    student: Mapped[Student] = relationship("Student")
-    offering: Mapped[CourseOffering] = relationship("CourseOffering")
+    student: Mapped[Student] = relationship()
+    offering: Mapped[CourseOffering] = relationship()
