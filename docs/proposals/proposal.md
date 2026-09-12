@@ -1,5 +1,7 @@
 # Project Proposal: QR-Code Based Offline-Capable Attendance System with Anti-Spoofing
 
+> **Note:** Schema design has evolved since this proposal was submitted. See `docs/architecture/migration-strategy.md` for the current target schema (a `course_offerings` table now decouples courses from program/year/schedule, and professor assignments/enrollments reference offerings).
+
 ---
 
 ## 1. Introduction
@@ -442,8 +444,8 @@ Courses (REDESIGNED — D1/D2/D4)
   - created_at, updated_at
   -- A course can be taken by multiple programs/year levels (D6)
 
-CourseProfessors (NEW — D7/D8/D9)
-  - course_id (FK → courses, CASCADE)
+CourseProfessors (NEW — D7/D8/D9, FK updated per D45)
+  - offering_id (FK → course_offerings, CASCADE)
   - professor_id (FK → professors, CASCADE)
   - is_primary (BOOLEAN)
   - effective_from (DATE)
@@ -451,19 +453,19 @@ CourseProfessors (NEW — D7/D8/D9)
   - semester (VARCHAR — e.g. "1st_sem")
   - assigned_by (FK → users)
   - assigned_at (TIMESTAMPTZ)
-  - PK(course_id, professor_id, effective_from)
-  -- Overlapping effective ranges for same (course, professor) rejected at service layer
+  - PK(offering_id, professor_id, effective_from)
+  -- Overlapping effective ranges for same (offering, professor) rejected at service layer
 
-Enrollments (REDESIGNED — D5)
+Enrollments (REDESIGNED — D5, course_id dropped per Step 5)
   - id (PK)
   - student_id (FK → students)
-  - course_id (FK → courses)
+  - offering_id (FK → course_offerings)
   - academic_year
   - semester (VARCHAR — validated against year_level.term_structure)
 
-Sessions (EXTENDED — D11/D12/D13/D17)
+Sessions (EXTENDED — D11/D12/D13/D17, course_id dropped per Step 6)
   - id (PK)
-  - course_id (FK → courses)
+  - offering_id (FK → course_offerings)
   - professor_id (FK → professors)
   - session_code (HMAC token)
   - duration_minutes (INT)
@@ -514,13 +516,13 @@ ExcuseRequests (NEW — D20/D21)
 StudentRiskScores (NEW — D35)
   - id (PK)
   - student_id (FK → students)
-  - course_id (FK → courses)
+  - offering_id (FK → course_offerings)
   - semester (VARCHAR)
   - risk_probability (NUMERIC(5,4))
   - risk_level ('low' | 'medium' | 'high')
   - features (JSONB — absence_rate, max_streak, sync_lag, trend_slope)
   - computed_at (TIMESTAMPTZ)
-  - UNIQUE(student_id, course_id, semester, computed_at::date)
+  - UNIQUE(student_id, offering_id, semester, computed_at::date)
 
 BackupLog (NEW — D39)
   - id (PK)

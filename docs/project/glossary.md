@@ -20,7 +20,7 @@ A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2
 
 ### Enrollment (Course-Taking)
 
-A record linking a `student` to a `course` for a specific `academic_year` and `semester`. Validated against the student's `year_level.term_structure`. Stored in `enrollments` table. Unique constraint on `(student_id, course_id, academic_year)`.
+A record linking a `student` to a `course_offering` for a specific `academic_year` and `semester`. Validated against the student's `year_level.term_structure`. Stored in `enrollments` table. Unique constraint on `(student_id, offering_id, academic_year)`.
 
 ### Term / Term Structure
 
@@ -36,7 +36,11 @@ An academic program (e.g., "BSCS", "BSIT", "BSECE") in `programs` table. Has `co
 
 ### Course (= Subject)
 
-A subject offered by a program at a specific year level. Stored in `courses` with `program_id`, `year_level_id`, `course_code`, `course_name`, `units`, scheduling metadata (`sessions_per_week`, `session_duration_hours`, `semester_weeks`, `schedule_days`, `schedule_start_time`, `schedule_end_time`), classroom defaults, and late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`). A course can be taken by students from other programs/year levels via enrollments.
+A reusable subject template stored in `courses` with `course_code` (UK), `course_name`, `units`, `session_duration_hours`. The course itself has **no** program/year-level/scheduling/classroom/window columns â€” those live on `course_offerings`.
+
+### CourseOffering
+
+A concrete instance of a `course` offered by a `program` to a `year_level` for a specific `semester`/`academic_year`. Stored in `course_offerings` with FKs to `courses`, `programs`, `year_levels`, plus scheduling metadata (`sessions_per_week`, `semester_weeks`, `schedule_days`, `schedule_start_time`, `schedule_end_time`), classroom defaults (`classroom_name`, `classroom_lat/lng`), and late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`). Unique on `(course_id, program_id, semester, academic_year)`. Enrollments, sessions, professor assignments, and risk scores reference the offering.
 
 ### Section
 
@@ -64,11 +68,11 @@ The hard ceiling for scanning: `expires_at = min(session.created_at + duration_m
 
 ### Scheduled End
 
-The course's scheduled class end time (`courses.schedule_end_time`) copied to `sessions.scheduled_end_time` at session creation. Forms the ceiling for `expires_at`.
+The offering's scheduled class end time (`course_offerings.schedule_end_time`) copied to `sessions.scheduled_end_time` at session creation. Forms the ceiling for `expires_at`.
 
 ### Geofence
 
-Circular GPS boundary centered on classroom coordinates (course default or session override) with `classroom_radius_meters`. Validation uses Haversine distance. Runs in parallel with face check (Step 3 of scan flow).
+Circular GPS boundary centered on classroom coordinates (offering default from `course_offerings` or session override) with `classroom_radius_meters`. Validation uses Haversine distance. Runs in parallel with face check (Step 3 of scan flow).
 
 ### Liveness
 
@@ -101,7 +105,7 @@ A record in `excuse_requests` representing one of three initiation paths (D21):
 
 ### At-Risk Score
 
-Daily-computed heuristic risk level (`low`|`medium`|`high`) per student per course per semester, stored in `student_risk_scores`. Features: `absence_rate`, `max_streak`, `sync_lag`, `trend_slope`. Thresholds from env vars (D35).
+Daily-computed heuristic risk level (`low`|`medium`|`high`) per student per offering per semester, stored in `student_risk_scores`. Features: `absence_rate`, `max_streak`, `sync_lag`, `trend_slope`. Thresholds from env vars (D35).
 
 ### Sync Queue
 
@@ -134,7 +138,7 @@ Account activation flow where a student/professor enters their official email â†
 | `outside_geofence` | GPS distance > radius                      |
 | `liveness_failed`  | Liveness challenge failed (EAR/PnP)        |
 | `face_mismatch`    | Cosine similarity < `FACE_MATCH_THRESHOLD` |
-| `not_enrolled`     | Student not enrolled in session's course   |
+| `not_enrolled`     | Student not enrolled in session's offering |
 | `session_expired`  | `scanned_at` > `expires_at` (offline sync) |
 
 ### UserRole (`users.role`)

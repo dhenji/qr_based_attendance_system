@@ -28,7 +28,7 @@ Key properties:
 | ---------- | --------------------------------------------------------- |
 | auth       | `users`, `otp_codes`                                      |
 | student    | `students`                                                |
-| course     | `courses`, `year_levels`, `programs`, `course_professors` |
+| course     | `courses`, `course_offerings`, `year_levels`, `programs`, `course_professors` |
 | enrollment | `enrollments`                                             |
 | session    | `sessions`                                                |
 | attendance | `attendance_records`                                      |

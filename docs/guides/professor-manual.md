@@ -95,12 +95,12 @@ Per [D11](../project/decision-log.md), there are **two entry points** that deter
 
 | Field                  | Description                                                                                              | Default                                     |
 | ---------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| **Course**             | 🔒 Locked — shows _course_ code, name, _program·year_, section, schedule, room                           | From _course_ card                          |
-| **Geofence Radius**    | Preset buttons: 10m, 20m, 30m, 50m, 100m                                                                 | Course default (typically 30m)              |
+| **Course**             | 🔒 Locked — shows _course_ code, name, _program·year_, section, schedule, room                           | From _offering_ card                        |
+| **Geofence Radius**    | Preset buttons: 10m, 20m, 30m, 50m, 100m                                                                 | Offering default (typically 30m)            |
 | **Duration (minutes)** | Session length; expiry = `min(now + duration, scheduled_end_time)` per [D12](../project/decision-log.md) | Scheduled length (e.g., 90 for 1.5h)        |
-| **Present Window**     | Minutes from session start for _present_ status                                                          | Course `default_present_window_minutes` (5) |
-| **Late Window**        | Minutes after present window for _late_ status                                                           | Course `default_late_window_minutes` (10)   |
-| **Classroom Override** | Optional — overrides _course_ GPS/room for this session only                                             | Blank = use _course_ defaults               |
+| **Present Window**     | Minutes from session start for _present_ status                                                          | Offering `default_present_window_minutes` (5) |
+| **Late Window**        | Minutes after present window for _late_ status                                                           | Offering `default_late_window_minutes` (10)   |
+| **Classroom Override** | Optional — overrides _offering_ GPS/room for this session only                                           | Blank = use _offering_ defaults             |
 | **HMAC Preview**       | Shows the 6–8 char _session code_ that will be generated                                                 | Auto-generated                              |
 
 **Window Math Validation** (live):
@@ -116,7 +116,7 @@ Constraint: `present_window_minutes + late_window_minutes ≤ duration_minutes` 
 
 [FIG: Same form as Locked but with "Select Course" dropdown at top showing only active assignments for the current term]
 
-**Course Dropdown**: Lists only _courses_ where you have an active `course_professors` assignment for the current _term_ ([D11](../project/decision-log.md)).
+**Course Dropdown**: Lists only _offerings_ where you have an active `course_professors` assignment for the current _term_ ([D11](../project/decision-log.md)).
 
 ### 3.4 After Generating the Session
 
@@ -139,7 +139,7 @@ Constraint: `present_window_minutes + late_window_minutes ≤ duration_minutes` 
 | Timer             | Meaning                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------ |
 | **⏱ Scan window** | Countdown from `session.created_at + duration_minutes` (or `scheduled_end_time`, whichever is earlier) |
-| **🏁 Class ends** | Fixed _scheduled end time_ from the _course_ schedule                                                  |
+| **🏁 Class ends** | Fixed _scheduled end time_ from the _offering_ schedule                                                  |
 
 > **Duration Expiry** ([D12](../project/decision-log.md)): `expires_at = min(created_at + duration_minutes, scheduled_end_time)`. After this, no new scans accepted.
 
@@ -223,14 +223,14 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 ### 7.1 My Courses — `/professor/courses`
 
-[FIG: My Courses with collapsible Program headers, course cards showing cohort badge, schedule, room, student count, primary/assistant indicator, [Open Session] (locked), [Reports] (deep-linked)]
+[FIG: My Courses with collapsible Program headers, offering cards showing course code/name, cohort badge (program·year·semester), schedule, room, student count, primary/assistant indicator, [Open Session] (locked), [Reports] (deep-linked)]
 
 **Card Information**:
 
-- **Cohort Badge**: `BSCS·Y1` — identifies which program/year this _course_ instance belongs to ([D6](../project/decision-log.md))
-- **Primary/Assistant**: Shows your role for this _course_
+- **Cohort Badge**: `BSCS·Y2 1st Sem` — identifies which _offering_ this card represents (program, year level, semester) ([D6](../project/decision-log.md))
+- **Primary/Assistant**: Shows your role for this _offering_
 - **[🔐 Open Session]**: Opens Locked variant (Section 3.2)
-- **[📊 Reports]**: Deep-links to [Reports](#8-reports) pre-filtered to this _course_
+- **[📊 Reports]**: Deep-links to [Reports](#8-reports) pre-filtered to this _offering_
 
 ---
 
@@ -366,7 +366,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 | Lab (lenient)         | 10 min             | 15 min      | 180 min  |
 | **Constraint**        | `P + L ≤ Duration` |             |          |
 
-> **Defaults** come from the _course_ (`default_present_window_minutes`, `default_late_window_minutes`) and are overridable per session ([D14](../project/decision-log.md)).
+> **Defaults** come from the _offering_ (`default_present_window_minutes`, `default_late_window_minutes`) and are overridable per session ([D14](../project/decision-log.md)).
 
 ---
 

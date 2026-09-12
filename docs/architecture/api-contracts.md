@@ -39,7 +39,7 @@ Scanned by students. Server generates HMAC-signed JSON.
 | -------- | ------ | -------------------------------------- |
 | `v`      | int    | Payload version (migration-safe)       |
 | `code`   | string | 6–8 char session code (HMAC-truncated) |
-| `course` | int    | `courses.id`                           |
+| `course` | int    | `course_offerings.id`                  |
 | `radius` | int    | Geofence radius in metres              |
 | `pw`     | int    | Present window minutes                 |
 | `lw`     | int    | Late window minutes                    |
@@ -168,48 +168,90 @@ Archive year level. Restrict if courses exist.
 
 #### `GET /admin/programs/{pid}/years/{yid}/courses`
 
-|                  |                                                                                                                                                                                                                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ items: [{ id, course_code, course_name, units, sessions_per_week, session_duration_hours, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, is_active }], ... }` |
+|                  |                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Response 200** | `{ items: [{ id, course_code, course_name, units, session_duration_hours, is_active, created_at, updated_at }], ... }` |
 
 #### `POST /admin/programs/{pid}/years/{yid}/courses`
 
-|                  |                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ course_code: string, course_name: string, units: int, sessions_per_week: int, session_duration_hours: numeric(3,1), semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int }` |
-| **Response 201** | Created course                                                                                                                                                                                                                                                                                                                                                               |
-| **Errors**       | 409 `course_code_exists` · 422 `windows_exceed_duration`                                                                                                                                                                                                                                                                                                                     |
+|                  |                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Request**      | `{ course_code: string, course_name: string, units: int, session_duration_hours: numeric(3,1) }`            |
+| **Response 201** | Created course template                                                                                      |
+| **Errors**       | 409 `course_code_exists` · 422 validation                                                                    |
 
 #### `GET /admin/courses/{cid}`
 
 |                  |                                              |
 | ---------------- | -------------------------------------------- |
-| **Response 200** | Full course object with program/year context |
+| **Response 200** | Full course template                         |
 
 #### `PATCH /admin/courses/{cid}`
 
 |                  |                             |
 | ---------------- | --------------------------- |
-| **Request**      | Any mutable field from POST |
-| **Response 200** | Updated course              |
+| **Request**      | Any mutable template field from POST |
+| **Response 200** | Updated course template              |
 
 #### `DELETE /admin/courses/{cid}`
 
-Archive course.
+Archive course template.
 
 |                  |            |
 | ---------------- | ---------- |
 | **Response 204** | No content |
 
-#### `GET /admin/courses/{cid}/professors`
+---
+
+### Course Offerings
+
+A course offering is a specific instance of a course template for a program, year level, and semester. It holds scheduling, classroom, and window configuration.
+
+#### `GET /admin/offerings`
+
+|                  |                                                                                                                                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_id?&is_active?&page=1&size=20`                                                                                                                                             |
+| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, is_active, created_at, updated_at }], ... }` |
+
+#### `POST /admin/offerings`
+
+|                  |                                                                                                                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int }` |
+| **Response 201** | Created course offering                                                                                                                                                                                                                                             |
+| **Errors**       | 409 `offering_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration`                                                                                                                                                            |
+
+#### `GET /admin/offerings/{oid}`
+
+|                  |                  |
+| ---------------- | ---------------- |
+| **Response 200** | Course offering  |
+
+#### `PATCH /admin/offerings/{oid}`
+
+|                  |                                                |
+| ---------------- | ---------------------------------------------- |
+| **Request**      | Any mutable field from POST (except course_id, program_id, year_level_id, semester, academic_year) |
+| **Response 200** | Updated course offering                        |
+
+#### `DELETE /admin/offerings/{oid}`
+
+Archive course offering.
+
+|                  |            |
+| ---------------- | ---------- |
+| **Response 204** | No content |
+
+#### `GET /admin/offerings/{oid}/professors`
 
 |                  |                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ items: [{ course_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }], ... }` |
+| **Response 200** | `{ items: [{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }], ... }` |
 
-#### `POST /admin/courses/{cid}/professors`
+#### `POST /admin/offerings/{oid}/professors`
 
-Assign professor to course.
+Assign professor to course offering.
 
 |                  |                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
@@ -217,7 +259,7 @@ Assign professor to course.
 | **Response 201** | Created assignment                                                                                     |
 | **Errors**       | 409 `overlapping_assignment` · 404 `professor_not_found`                                               |
 
-#### `DELETE /admin/courses/{cid}/professors/{pid}`
+#### `DELETE /admin/offerings/{oid}/professors/{pid}`
 
 End assignment (set `effective_to` = today).
 
@@ -226,15 +268,15 @@ End assignment (set `effective_to` = today).
 | **Response 200** | `{ effective_to: "YYYY-MM-DD" }` |
 | **Errors**       | 404 `assignment_not_found`       |
 
-#### `POST /admin/courses/{cid}/enrollments/bulk`
+#### `POST /admin/offerings/{oid}/enrollments/bulk`
 
 Bulk-enroll students via CSV upload.
 
 |                  |                                                               |
 | ---------------- | ------------------------------------------------------------- |
-| **Request**      | `multipart/form-data: file=students.csv, semester: string`    |
+| **Request**      | `multipart/form-data: file=students.csv`                      |
 | **Response 201** | `{ enrolled: int, skipped: int, errors: [{ line, reason }] }` |
-| **Errors**       | 422 `invalid_semester` · 422 `validation_error`               |
+| **Errors**       | 422 `validation_error`                                        |
 
 ---
 
@@ -289,7 +331,7 @@ Check enrollment status.
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high` |
-| **Response 200** | `{ items: [{ student_id, student_name, program, year_level, course_id, course_code, absence_rate, max_streak, trend_slope, risk_level, computed_at }], ... }` |
+| **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at }], ... }` |
 
 #### `POST /admin/analytics/export`
 
@@ -381,7 +423,7 @@ List professor's active course assignments with program/year badges.
 |                  |                                                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | professor                                                                                                                                      |
-| **Response 200** | `{ items: [{ course_id, course_code, course_name, program_code, year_level_label, section, is_primary, effective_from, effective_to }], ... }` |
+| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to }], ... }` |
 
 ---
 
@@ -391,8 +433,8 @@ List professor's active course assignments with program/year badges.
 
 |                  |                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?from?&to?&course_id?&page=1&size=20`                                                                                                 |
-| **Response 200** | `{ items: [{ id, course_id, code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
+| **Query**        | `?from?&to?&offering_id?&page=1&size=20`                                                                                               |
+| **Response 200** | `{ items: [{ id, offering_id, code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
 
 #### `POST /professor/sessions`
 
@@ -400,10 +442,10 @@ Open a new attendance session.
 
 |                  |                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ course_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, geofence_radius?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
-| **Response 201** | `{ id, code, course_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration`                                                                                                                                            |
-| **Notes**        | If opened from My Courses → course locked (D11). From Dashboard → course chosen from active assignments. `expires_at = min(now + duration_minutes, scheduled_end_time)` (D12).                          |
+| **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, geofence_radius?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
+| **Response 201** | `{ id, code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration`                                                                                                                          |
+| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(now + duration_minutes, scheduled_end_time)` (D12).                                |
 
 #### `GET /professor/sessions/active/{id}`
 
@@ -489,7 +531,7 @@ Query attendance records with filters.
 
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?course_id?&section?&status?&from?&to?&page=1&size=20`                                                                                         |
+| **Query**        | `?offering_id?&section?&status?&from?&to?&page=1&size=20`                                                                                       |
 | **Response 200** | `{ items: [{ id, student_id, student_name, section, session_id, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
 
 #### `GET /professor/sessions/history`
@@ -498,7 +540,7 @@ Session history with filters.
 
 |                  |                                                 |
 | ---------------- | ----------------------------------------------- |
-| **Query**        | `?course_id?&section?&from?&to?&page=1&size=20` |
+| **Query**        | `?offering_id?&section?&from?&to?&page=1&size=20` |
 | **Response 200** | `{ items: [SessionSummary], ... }`              |
 
 ---
@@ -568,7 +610,7 @@ Verify a typed session code or scan session QR.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
-| **Response 200** | `{ session_id, course_id, course_code, course_name, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
+| **Response 200** | `{ session_id, offering_id, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired`                                                                                                                    |
 
 ---
@@ -605,7 +647,7 @@ Submit attendance scan (online or queued for offline sync).
 
 |                  |                                                                                                                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ courses: [{ course_id, course_code, course_name, program_code, year_level_label, schedule_days, schedule_start_time, schedule_end_time, classroom_name, professor_name }] }` |
+| **Response 200** | `{ offerings: [{ offering_id, course_id, course_code, course_name, program_code, year_level_label, semester, schedule_days, schedule_start_time, schedule_end_time, classroom_name, professor_name }] }` |
 
 ---
 

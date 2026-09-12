@@ -25,8 +25,8 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 
 ## Target Schema (Reference §6)
 
-New tables: `programs`, `year_levels`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-Modified tables: `courses` (+9 cols, +2 FKs), `enrollments` (+semester), `sessions` (+7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+3 face cols, drop legacy `course`)
+New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
+Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+3 face cols, drop legacy `course`)
 
 ---
 
@@ -86,43 +86,73 @@ class YearLevel(Base):
 
 ---
 
-### Step 3: Extend `courses` — Add FKs + Metadata Columns
+### Step 3: Extend `courses` + Create `course_offerings` Table
 
-**Migration:** `alembic revision --autogenerate -m "extend courses with program/year_level FKs and scheduling metadata"`
+**Migration:** `alembic revision --autogenerate -m "extend courses with metadata and create course_offerings"`
 
 **Changes to `features/course/model.py`:**
 
+Course becomes a pure template — no program/year FKs. Scheduling and classroom
+details move to `course_offerings` since they vary per program/semester.
+
 ```python
-class Course(Base):
+class Course(TimestampMixin, Base):
     # Existing: id, course_code, course_name, classroom_lat, classroom_lng, schedule
+    # REMOVED: classroom_lat, classroom_lng (moved to course_offerings)
     # NEW:
+    units = Integer
+    session_duration_hours = Numeric(3,1)
+    is_active = Boolean default True
+    created_at, updated_at = TimestampMixin
+```
+
+**New table `course_offerings`** (in `features/course/model.py`):
+
+```python
+class CourseOffering(Base):
+    __tablename__ = "course_offerings"
+    id = BigInteger PK
+    course_id = BigInteger FK → courses.id RESTRICT
     program_id = BigInteger FK → programs.id RESTRICT
     year_level_id = BigInteger FK → year_levels.id RESTRICT
-    units = Integer
+    semester = String(20)  -- '1st_sem', '2nd_sem', 'midyear'
+    academic_year = String(20)  -- '2025-2026'
     sessions_per_week = Integer
-    session_duration_hours = Numeric(3,1)
     semester_weeks = Integer
     schedule_days = String(10)  -- "MWF", "TTh", etc.
     schedule_start_time = Time
     schedule_end_time = Time
     classroom_name = String(100)
+    classroom_lat = Float
+    classroom_lng = Float
     default_present_window_minutes = Integer default 5
     default_late_window_minutes = Integer default 10
     is_active = Boolean default True
     created_at, updated_at = TimestampMixin
+    UNIQUE(course_id, program_id, semester, academic_year)
 ```
+
+**Design rationale:**
+- Course is a reusable template (e.g., "CS101: Intro to Programming")
+- CourseOffering is a specific instance for a program + year level + semester
+- Same course can have different schedules/classrooms per program offering
+- `Session` and `Enrollment` will reference `offering_id` in later steps
 
 **Backfill strategy:**
 
-1. Add new columns as **nullable** first
+1. Add new columns to `courses` as **nullable** first
 2. For each existing `courses` row:
-   - Infer `program_id`/`year_level_id` from `students` enrolled in that course (most common program/year)
-   - Parse legacy `schedule` string to extract days/times if possible; else default
-   - Set defaults for units (3), sessions_per_week (2), session_duration_hours (1.5), semester_weeks (18), windows (5/10)
-3. After backfill: `ALTER COLUMN ... SET NOT NULL` on FKs and critical metadata
-4. Drop legacy `schedule` column (or keep as deprecated text)
+   - Set defaults: units (3), session_duration_hours (1.5)
+3. Create `course_offerings` rows: for each course, create one offering per
+   program that has enrolled students (via enrollments → students), inferring
+   program_id/year_level_id from enrolled students
+   - Parse legacy `schedule` string for schedule_days/times; else default
+   - Set defaults: sessions_per_week (2), semester_weeks (18), windows (5/10)
+4. After backfill: `ALTER COLUMN ... SET NOT NULL` on critical `courses` metadata
+5. Drop legacy `schedule`, `classroom_lat`, `classroom_lng` from `courses`
+   (data now lives in `course_offerings`)
 
-**Rollback:** Revert columns to nullable, drop NOT NULL, restore `schedule` if dropped. **Backup before migrate.**
+**Rollback:** Drop `course_offerings` rows, revert `courses` columns to nullable, restore dropped columns from backup. **Backup before migrate.**
 
 ---
 
@@ -130,12 +160,12 @@ class Course(Base):
 
 **Migration:** `alembic revision --autogenerate -m "create course_professors many-to-many with effectiveness dates"`
 
-**Model:** `features/professor/model.py` (extend) or new `features/course_assignment/model.py`
+**Model:** `features/professor/model.py` (extend) or new `features/course_professor/model.py`
 
 ```python
 class CourseProfessor(Base):
     __tablename__ = "course_professors"
-    course_id = BigInteger FK → courses.id CASCADE
+    offering_id = BigInteger FK → course_offerings.id CASCADE
     professor_id = BigInteger FK → professors.id CASCADE
     is_primary = Boolean default False
     effective_from = Date NOT NULL
@@ -143,26 +173,54 @@ class CourseProfessor(Base):
     semester = String(20)  -- validated against year_level.term_structure
     assigned_by = BigInteger FK → users.id
     assigned_at = DateTime(timezone=True) default now()
-    PK(course_id, professor_id, effective_from)
+    PK(offering_id, professor_id, effective_from)
 ```
 
-**Service-layer rule (enforced in Python, not DB):** Reject overlapping `[effective_from, effective_to)` ranges for same `(course_id, professor_id)`.
+**Service-layer rule (enforced in Python, not DB):** Reject overlapping `[effective_from, effective_to)` ranges for same `(offering_id, professor_id)`.
 
-**Migrate implied assignments:** For each existing `sessions` row, create a `course_professors` entry with `effective_from = session.created_at::date`, `effective_to = NULL`, `semester = enrollment.semester` (or default), `is_primary = true`.
+**Migrate implied assignments:** For each existing `sessions` row, look up the `course_offerings` row matching the session's course + inferred program/semester, create a `course_professors` entry with `effective_from = session.created_at::date`, `effective_to = NULL`, `semester = enrollment.semester` (or default), `is_primary = true`.
 
 **Rollback:** `DROP TABLE course_professors`
 
 ---
 
-### Step 5: Extend `enrollments` — Add `semester`
+### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK ✅ DONE
 
-**Migration:** `alembic revision --autogenerate -m "add semester to enrollments with backfill"`
+**Migration:** `alembic revision --autogenerate -m "add semester and offering_id to enrollments with backfill"`
 
-**Change:** Add `semester VARCHAR(20)` nullable → backfill default `'1st_sem'` → set NOT NULL.
+**Changes:**
+
+1. Add `offering_id = BigInteger FK → course_offerings.id` nullable
+2. Add `semester VARCHAR(20)` nullable
+3. Backfill: for each enrollment, look up the matching `course_offerings` row
+   (via course_id + student's program/year_level) and set `offering_id`
+   - Set `semester` from `course_offerings.semester` (default `'1st_sem'`)
+4. After backfill: `ALTER COLUMN offering_id SET NOT NULL`, `ALTER COLUMN semester SET NOT NULL`
+5. Drop `course_id` column (offering_id provides the course link via course_offerings.course_id)
+6. Update unique constraint from `(student_id, course_id, academic_year)` to `(student_id, offering_id, academic_year)`
+
+**Backfill SQL:**
+```sql
+UPDATE enrollments e
+SET
+    offering_id = co.id,
+    semester = COALESCE(co.semester, '1st_sem')
+FROM students s
+JOIN programs p ON p.code = s.course
+JOIN year_levels yl ON yl.program_id = p.id AND yl.year_number = s.year_level
+JOIN course_offerings co
+    ON co.course_id = e.course_id
+    AND co.program_id = p.id
+    AND co.year_level_id = yl.id
+    AND (co.academic_year = e.academic_year OR e.academic_year IS NULL)
+WHERE e.student_id = s.id;
+```
+
+> **Note:** `COALESCE(co.semester, '1st_sem')` handles the case where multiple offerings exist for the same (course, program, year_level) with different semesters. Rows with ambiguous semester default to `'1st_sem'` and can be corrected post-migration.
 
 **Validation:** Application logic validates `semester` against `student.year_level.term_structure` (via `student.year_level` → `year_levels.term_structure`).
 
-**Rollback:** Drop column (data loss — backup first)
+**Rollback:** Drop columns (data loss — backup first)
 
 ---
 
@@ -174,14 +232,17 @@ class CourseProfessor(Base):
 
 ```python
 class Session(Base):
-    # Existing: id, course_id, professor_id, session_code, expires_at, classroom_radius_meters
+    # Existing: id, session_code, expires_at, classroom_radius_meters
+    # DROP: course_id (redundant — reachable via offering_id → course_offerings.course_id)
+    # NEW FK: offering_id → course_offerings.id
+    # RETARGET: professor_id FK from users.id → professors.id
     # NEW:
     duration_minutes = Integer
     present_window_minutes = Integer
     late_window_minutes = Integer
     CHECK (present_window_minutes + late_window_minutes <= duration_minutes)
-    scheduled_start_time = DateTime(timezone=True)  -- copied from course at open
-    scheduled_end_time = DateTime(timezone=True)    -- copied from course at open
+    scheduled_start_time = DateTime(timezone=True)  -- copied from course_offering at open
+    scheduled_end_time = DateTime(timezone=True)    -- copied from course_offering at open
     expires_at = DateTime(timezone=True)  -- STORED: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)
     classroom_name = String(100) NULL
     classroom_lat = Float NULL
@@ -190,13 +251,16 @@ class Session(Base):
 
 **Backfill:**
 
+- `offering_id` = look up `course_offerings` row matching session's course + inferred program/semester
+- `course_id` = **DROP** after `offering_id` is backfilled and NOT NULL
 - `duration_minutes` = `course.session_duration_hours * 60` (default 90)
-- `present_window_minutes` = `course.default_present_window_minutes` (5)
-- `late_window_minutes` = `course.default_late_window_minutes` (10)
-- `scheduled_start_time/end_time` = course schedule for that day (compute from `schedule_days` + date)
+- `present_window_minutes` = `course_offering.default_present_window_minutes` (5)
+- `late_window_minutes` = `course_offering.default_late_window_minutes` (10)
+- `scheduled_start_time/end_time` = `course_offering` schedule for that day (compute from `schedule_days` + date)
+- `classroom_lat/lng/name` = `course_offering` classroom (override for session-specific room changes)
 - `expires_at` = recomputed via STORED expression (PostgreSQL `GENERATED ALWAYS AS ... STORED`)
 
-**Rollback:** Drop new columns. STORED column requires `ALTER TABLE ... ALTER COLUMN expires_at DROP EXPRESSION` first.
+**Rollback:** Drop new columns, restore `course_id` from backup. STORED column requires `ALTER TABLE ... ALTER COLUMN expires_at DROP EXPRESSION` first.
 
 ---
 
@@ -265,13 +329,13 @@ class StudentRiskScore(Base):
     __tablename__ = "student_risk_scores"
     id = BigInteger PK
     student_id = BigInteger FK → students.id
-    course_id = BigInteger FK → courses.id
+    offering_id = BigInteger FK → course_offerings.id
     semester = String(20)
     risk_probability = Numeric(5,4)
     risk_level = String(10)  -- 'low' | 'medium' | 'high'
     features = JSONB  -- {absence_rate, max_streak, sync_lag, trend_slope, expected_sessions}
     computed_at = DateTime(timezone=True) default now()
-    UNIQUE(student_id, course_id, semester, computed_at::date)
+    UNIQUE(student_id, offering_id, semester, computed_at::date)
 ```
 
 #### `backup_log` (feature: `system`)
@@ -344,7 +408,7 @@ import features.sync.model  # noqa: F401
 
 ```python
 import features.program.model  # noqa: F401        # programs, year_levels
-import features.course_assignment.model  # noqa: F401  # course_professors (or professor.model if extended)
+import features.course_professor.model  # noqa: F401  # course_professors
 import features.excuse.model  # noqa: F401        # excuse_requests
 import features.analytics.model  # noqa: F401      # student_risk_scores
 import features.system.model  # noqa: F401        # backup_log
@@ -361,9 +425,9 @@ import features.system.model  # noqa: F401        # backup_log
 | ------------------------------ | ----------- | ------------------------------------------------------------------------------ |
 | 1. programs                    | ✅          | `DROP TABLE` — no dependencies yet                                             |
 | 2. year_levels                 | ✅          | `DROP TABLE` — CASCADE only to programs (safe)                                 |
-| 3. courses extend              | ⚠️          | **Backup first**. Data migration; NOT NULL after backfill makes rollback lossy |
+| 3. courses + course_offerings  | ⚠️          | **Backup first**. New table + data migration; drop offering rows + revert columns on rollback |
 | 4. course_professors           | ✅          | `DROP TABLE`                                                                   |
-| 5. enrollments.semester        | ⚠️          | **Backup first**. Data loss on rollback                                        |
+| 5. enrollments.semester+offering | ⚠️          | **Backup first**. Data loss on rollback                                        |
 | 6. sessions extend             | ✅          | Columns + STORED expression; reversible                                        |
 | 7. attendance_records          | ⚠️          | **Backup first**. Enum data migration; rollback maps `present→valid`           |
 | 8. new tables                  | ✅          | `DROP TABLE`                                                                   |
@@ -386,13 +450,14 @@ After all migrations, verify:
 
 - [ ] `programs`: id, code(UK), name, description, total_years, is_active, created_at, updated_at
 - [ ] `year_levels`: id, program_id(FK CASCADE), year_number, label, term_structure(JSONB), sort_order, UNIQUE(program_id, year_number)
-- [ ] `courses`: all §6 columns including FKs, metadata, windows, is_active, timestamps
-- [ ] `course_professors`: composite PK, effectiveness dates, is_primary, semester, assigned_by, assigned_at
-- [ ] `enrollments`: semester NOT NULL, validated against year_level.term_structure
-- [ ] `sessions`: duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint
+- [ ] `courses`: course_code(UK), course_name, units, session_duration_hours, is_active, timestamps (no FKs — template only)
+- [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
+- [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
+- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, validated against year_level.term_structure
+- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint; course_id DROPPED
 - [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
-- [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, course_id, semester, date)
+- [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, offering_id, semester, date)
 - [ ] `backup_log`: all columns including sha256, key_version
 - [ ] `students`: face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED
 - [ ] All enums in code match §6 (ValidationStatus expanded, etc.)

@@ -13,12 +13,13 @@
 
 ### Deliverables
 
-- New tables: `programs`, `year_levels`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-- Expand `courses` with scheduling metadata, default windows, GPS (D4)
-- Expand `sessions` with duration, windows, scheduled times, classroom override (D12, D14, D17)
+- New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
+- Strip `courses` to a pure template: retains only `units` + `session_duration_hours` (D4)
+- Create `course_offerings` with schedule, classroom, default windows, and program/year-level FKs (D4)
+- Expand `sessions` (drop `course_id`, add `offering_id`), duration, windows, scheduled times, classroom override (D12, D14, D17)
 - Expand `attendance_records` with excuse fields, face evidence, rejection reasons (D15, D16)
 - Expand `students` with face embedding columns (D28)
-- Add `semester` to `enrollments` (D5)
+- ~~Add `offering_id` + `semester` to `enrollments` (D5)~~ ✅
 - Enum expansion: `ValidationStatus` gains `excused`, `rejected` (D15)
 - Data backfill: `valid` → `present`, `invalid` → `rejected` (migration-strategy.md §0.3)
 
@@ -26,12 +27,12 @@
 
 | ID  | Decision                                                           |
 | --- | ------------------------------------------------------------------ |
-| D1  | Program → Year Level → Course hierarchy with strict FK constraints |
-| D2  | Section stored on `students` only, not enrollments                 |
-| D3  | Term structure per-program-per-year (JSONB on `year_levels`)       |
-| D4  | Course scheduling metadata (units, duration, windows, GPS)         |
-| D5  | Enrollment gains `semester` validated against term structure       |
-| D6  | Courses shared across programs/year levels                         |
+| D1  | Program → Year Level → CourseOffering ← Course hierarchy (courses have no program/year FKs) |
+| D2  | Section stored on `students` only, not enrollments                                         |
+| D3  | Term structure per-program-per-year (JSONB on `year_levels`)                                |
+| D4  | Scheduling metadata, default windows, GPS moved to `course_offerings`; courses keep only units + session_duration_hours |
+| D5  | Enrollment gains `semester` + `offering_id` validated against term structure                |
+| D6  | Courses shared across programs/year levels via multiple offerings per course                |
 
 ### Prerequisite Docs
 

@@ -18,6 +18,27 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # Account lockout fields
+    lockout_attempts: int = 5
+    lockout_duration_minutes: int = 15
+
+    # Face enrollment fields
+    face_match_threshold: float = 0.70
+    face_review_band_low: float = 0.65
+    face_embedding_version: int = 1
+
+    # Backup-attachment fields
+    backup_storage_type: str = "local"
+    backup_local_dir: str = "./backups"
+    backup_s3_bucket: str = ""
+    backup_s3_endpoint: str = ""
+    backup_s3_prefix: str = "backups/"
+    backup_encryption_key: str = ""
+    backup_encryption_key_version: int = 1
+    backup_retention_daily: int = 30
+    backup_retention_monthly: int = 12
+    backup_exclude_otp_codes: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @model_validator(mode="after")

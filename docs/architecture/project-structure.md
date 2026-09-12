@@ -111,8 +111,8 @@ attendance-system/
 │   │   │   │   ├── +layout.svelte    # Professor layout
 │   │   │   │   ├── dashboard/        # 3.1 Dashboard (today's sessions, quick actions)
 │   │   │   │   ├── courses/
-│   │   │   │   │   ├── +page.svelte  # 3.6 My Courses (grouped by program)
-│   │   │   │   │   └── [id]/         # 3.6 Course detail deep-link
+│   │   │   │   │   ├── +page.svelte  # 3.6 My Courses — offering cards (grouped by program)
+│   │   │   │   │   └── [id]/         # 3.6 Offering detail deep-link
 │   │   │   │   ├── sessions/
 │   │   │   │   │   ├── new/          # 3.2a/b Session creation (locked vs selector)
 │   │   │   │   │   ├── active/[id]/  # 3.3 Active session (dual timers)
@@ -133,9 +133,9 @@ attendance-system/
 │   │   │       │   └── [id]/
 │   │   │       │       ├── +page.svelte  # 4.5b Program detail (year tabs)
 │   │   │       │       ├── years/[yid]/
-│   │   │       │       │   └── courses/  # 4.5c Year-level courses
-│   │   │       │       │       └── [cid]/ # 4.5d Course detail (tabs)
-│   │   │       │       └── courses/[cid]/ # Direct course access
+│   │   │       │       │   └── offerings/  # 4.5c Year-level course offerings
+│   │   │       │       │       └── [oid]/ # 4.5d Offering detail (tabs)
+│   │   │       │       └── offerings/[oid]/ # Direct offering access
 │   │   │       ├── analytics/        # 4.7 Analytics & Reports (5 tabs)
 │   │   │       ├── audit-logs/       # Audit trail viewer
 │   │   │       ├── system/
@@ -259,12 +259,13 @@ attendance-system/
 
 > **Implemented so far:** `model.py` for `src/features/auth/`, `src/features/student/`,
 > `src/features/course/`, `src/features/enrollment/`, `src/features/session/`,
-> `src/features/attendance/`, `src/features/sync/` (all 7 tables created by the initial
-> Alembic migration), plus `src/shared/enums.py` and `src/shared/mixins.py`. Planned
-> next: `professors` + `otp_codes` tables, account-security fields on `users`
-> (security question, MFA, lockout, `must_change_password`), `email/middle_name/section`
-> on `students`, and the missing `schema.py`, `service.py`, `router.py`, `liveness/`,
-> `analytics/` layers.
+> `src/features/attendance/` (incl. evidence/excuse columns: `liveness_evidence`,
+> `face_match_score`, `scanned_via`, `original_status`, `excuse_*`), `src/features/sync/`,
+> `src/features/program/`, `src/features/course_professor/`, `src/features/excuse/`
+> (ExcuseRequest: `initiated_by`/`initiated_via`, `attachment_urls`, `status`,
+> `reviewed_by`/`reviewed_at`), plus `src/shared/enums.py` and `src/shared/mixins.py`.
+> Planned next: `analytics` (StudentRiskScore) + `system` (BackupLog) models, and
+> the missing `schema.py`/`service.py`/`router.py`/`liveness/` layers.
 
 ---
 

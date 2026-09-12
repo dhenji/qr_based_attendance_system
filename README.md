@@ -46,7 +46,7 @@ Every attendance submission is validated against **five layers** before it is ac
 | Analytics        | At-risk forecasting and recommendations for professors        |
 | Reports          | Download attendance reports (CSV/PDF/Print)                    |
 | Data Tables      | Sortable columns, category + date-range filters, search, print |
-| Account Security | Strong passwords (bcrypt), Cloudflare Turnstile, OTP, optional MFA, admin reset, lockout |
+| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, planned) |
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -59,7 +59,7 @@ Every attendance submission is validated against **five layers** before it is ac
 
 | Component | Technology                                              |
 | --------- | ------------------------------------------------------- |
-| Backend   | Python (FastAPI, SQLAlchemy async, Alembic)             |
+| Backend   | Python (FastAPI, SQLAlchemy async, Alembic, Argon2id, PyJWT) |
 | Frontend  | SvelteKit 5 + TypeScript (strict, runes mode)           |
 | Database  | PostgreSQL 16                                           |
 | Platform  | Progressive Web App (works on any device; planned)      |
@@ -75,17 +75,23 @@ Every attendance submission is validated against **five layers** before it is ac
 
 ```
 ├── .gitignore            # Root-level ignores (env/venv, node, docker data, build output)
-├── frontend/             # SvelteKit app (minimal app shell + routes)
+├── frontend/             # SvelteKit app — mock-first feature slices + routes
+│   ├── src/routes/       # auth/login, auth/register, student/dashboard, student/scan, professor/sessions
+│   └── src/lib/
+│       ├── api/          # client.ts (fetch wrapper) + endpoints.ts (typed mock endpoint map)
+│       ├── features/     # auth, student, session, attendance, liveness, sync — services + stores + components
+│       └── shared/       # types, utils (qr/geo/format/gen), constants (routes/status/roles)
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
-│   │   ├── main.py       # App entry point (/health, CORS, DB lifespan check)
-│   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base)
-│   │   ├── shared/       # Cross-feature enums + mixins
-│   │   ├── features/     # auth, professor, student, course, enrollment, session, attendance, sync
-│   │   │   └── */model.py # SQLAlchemy models per feature (8 models total)
-│   │   ├── api/          # get_db dependency
+│   │   ├── main.py       # App entry point (/health, CORS, DB lifespan check, AppException handler)
+│   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py, exceptions.py (AppException/DomainException/DatabaseException)
+│   │   ├── shared/       # enums.py (15 enums), mixins.py, base.py (CRUD base), pagination.py, email.py
+│   │   ├── features/     # auth, professor, student, course, program, enrollment, session, attendance, sync
+│   │   │   └── */model.py # SQLAlchemy models per feature (11 model classes, 9 features)
+│   │   │   └── */router.py# API routers exist for 7 features (attendance, auth, course, enrollment, professor, session, student)
+│   │   ├── api/          # deps.py (get_db) + router.py (5 feature routers mounted under /api: auth, student, session, attendance, professor)
 │   │   └── tests/        # Empty scaffold — no backend tests yet
-│   ├── alembic/          # 3 migrations: initial schema, students→users link, OTP codes + security fields
+│   ├── alembic/          # 3 migrations: initial schema, students→users link, professors + OTP codes + security fields
 │   └── Dockerfile.dev    # Multi-stage: builder → runtime → migrate
 ├── docker-compose.yml    # Local dev: PostgreSQL + migrations + API
 └── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, testing
@@ -115,7 +121,6 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then edit values
 alembic upgrade head   # apply schema migrations
-PYTHONPATH=src python seed_programs.py   # seed BSCS/BSIT/BSECE programs + year levels
 uvicorn main:app --reload --app-dir src
 ```
 
@@ -138,14 +143,29 @@ Backend (`backend/.env.example`):
 | Variable                  | Default                                                                | Purpose                              |
 | ------------------------- | ---------------------------------------------------------------------- | ------------------------------------ |
 | `APP_NAME`                | `QR Attendance System API`                                             | API name                             |
-| `DEBUG`                   | `true`                                                                 | Enables SQL echo                     |
+| `DEBUG`                   | `false`                                                                | Enables SQL echo; skips JWT_SECRET validation when `true` |
 | `DATABASE_URL`            | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection          |
 | `CORS_ORIGINS`            | `http://localhost:5173`                                                | Allowed browser origins              |
 | `HMAC_SECRET_KEY`         | _(empty)_                                                              | Used for secure session codes        |
 | `JWT_SECRET`              | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32` |
 | `JWT_ALGORITHM`           | `HS256`                                                                | JWT signing algorithm                |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30`                                                               | Access token TTL                     |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15`                                                               | Access token TTL                     |
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | `7`                                                                 | Refresh token TTL                    |
+| `LOCKOUT_ATTEMPTS`        | `5`                                                                    | Failed login attempts before lockout |
+| `LOCKOUT_DURATION_MINUTES`   | `15`                                                               | Lockout duration after failed attempts |
+| `FACE_MATCH_THRESHOLD`    | `0.70`                                                                 | Face-match similarity threshold      |
+| `FACE_REVIEW_BAND_LOW`    | `0.65`                                                                 | Lower band requiring manual review   |
+| `FACE_EMBEDDING_VERSION`  | `1`                                                                    | Face embedding format version        |
+| `BACKUP_STORAGE_TYPE`     | `local`                                                                | Backup backend: `local` or `s3`      |
+| `BACKUP_LOCAL_DIR`        | `./backups`                                                            | Local backup directory               |
+| `BACKUP_S3_BUCKET`        | _(empty)_                                                              | S3 bucket (when using S3)            |
+| `BACKUP_S3_ENDPOINT`      | _(empty)_                                                              | S3-compatible endpoint               |
+| `BACKUP_S3_PREFIX`        | `backups/`                                                             | S3 key prefix                        |
+| `BACKUP_ENCRYPTION_KEY`   | _(empty)_                                                              | Backup encryption key                |
+| `BACKUP_ENCRYPTION_KEY_VERSION` | `1`                                                               | Encryption key version               |
+| `BACKUP_RETENTION_DAILY`  | `30`                                                                   | Daily backups to retain              |
+| `BACKUP_RETENTION_MONTHLY`   | `12`                                                               | Monthly backups to retain         |
+| `BACKUP_EXCLUDE_OTP_CODES`   | `false`                                                            | Exclude OTP codes from backups    |
 
 Frontend (`frontend/.env.example`):
 
@@ -235,8 +255,8 @@ The project is in **Phase 1 (partial)** of the [11-phase roadmap](docs/project/r
 
 | Area     | Status                                                                                                                                                                |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI with `/health`, async SQLAlchemy, `core`/`shared` infrastructure, 8 feature models (auth, professor, student, course, enrollment, session, attendance, sync), 3 Alembic migrations (initial schema + `students.user_id` link + OTP codes/security fields), multi-stage `Dockerfile.dev` |
-| Frontend | Minimal app shell — `src/routes/`, `src/lib/`, `app.html` present; `html5-qrcode` + `zod` deps; Svelte 5 runes mode enabled                                            |
-| Features | Models implemented; `service` / `schema` / `router` layers pending for all features                                                                                  |
-| Schema   | 8 of 15 target tables modeled; remaining: programs, year_levels, course_professors, excuse_requests, student_risk_scores, backup_log ([ERD](docs/design/database-er.md)) |
+| Backend  | FastAPI with `/health`, `/api` routers, async SQLAlchemy, `core`/`shared` infrastructure (config, database, security, exceptions, base CRUD, pagination, email, 15 enums), 9 feature slices / 11 model classes (auth, professor, student, course, program, enrollment, session, attendance, sync), 7 feature router files with 5 mounted under `/api` (auth, student, session, attendance, professor), 3 Alembic migrations, multi-stage `Dockerfile.dev`, Argon2id password hashing |
+| Frontend | Mock-first feature-slice implementation — routes for auth (login/register), student (dashboard/scan), professor (sessions); feature services + stores (auth, student, session, attendance, liveness, sync); shared types/utils/constants; typed `api/client.ts` + mock `api/endpoints.ts`; Svelte 5 runes mode enabled |
+| Features | Models + 7 feature router files implemented; `service` / `schema` layers pending for all features; sync & program routers not yet created |
+| Schema   | 12 of 16 target tables modeled (incl. programs, year_levels); remaining: course_professors, excuse_requests, student_risk_scores, backup_log ([ERD](docs/design/database-er.md)) |
 | Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                                  |
