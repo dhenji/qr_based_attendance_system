@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" role="img" aria-labelledby="title desc">
+  <title id="title">Attendly icon</title>
+  <desc id="desc">A polished indigo scan frame surrounds QR-style modules and a bright confirmation check.</desc>
+  <defs>
+    <linearGradient id="mark" x1="25" y1="24" x2="179" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5C67F2"/>
+      <stop offset="1" stop-color="#27369C"/>
+    </linearGradient>
+    <linearGradient id="confirm" x1="126" y1="118" x2="171" y2="169" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55E7C4"/>
+      <stop offset="1" stop-color="#0CBF9C"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="9" stdDeviation="8" flood-color="#2436A1" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <!-- Scan-corner silhouette gives the mark its own recognisable shape. -->
+  <g filter="url(#shadow)">
+    <path fill="url(#mark)" d="M27 27h54v18H45v36H27zm112 0h54v54h-18V45h-36zm36 112h18v54h-54v-18h36zM27 139h18v36h36v18H27z"/>
+    <rect x="54" y="54" width="112" height="112" rx="31" fill="#fff"/>
+    <!-- QR modules stay abstract and balanced, avoiding a literal, noisy code. -->
+    <g fill="#3345B2">
+      <rect x="75" y="75" width="23" height="23" rx="6"/>
+      <rect x="122" y="75" width="23" height="23" rx="6"/>
+      <rect x="75" y="122" width="23" height="23" rx="6"/>
+      <rect x="107" y="107" width="14" height="14" rx="4"/>
+      <rect x="128" y="114" width="17" height="31" rx="4"/>
+    </g>
+    <circle cx="167" cy="167" r="31" fill="url(#confirm)" stroke="#fff" stroke-width="7"/>
+    <path d="m152 167 10 10 21-23" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
