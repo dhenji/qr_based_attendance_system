@@ -8,7 +8,7 @@ This document states the project's contributions to computer science honestly. T
 
 ## C1 — Offline-First Liveness Protocol (flagship)
 
-**Folder**: `backend/src/features/liveness/` + `backend/src/features/sync/` + `frontend/src/lib/offline/` + `frontend/src/service-worker.ts`
+**Folder**: `frontend/src/lib/features/liveness/` (frontend-only feature — no backend `features/liveness/` dir) + `backend/src/features/sync/` (model.py only — router pending) + `frontend/src/lib/features/sync/` + `frontend/src/service-worker.ts` (both proposed — deferred per frontend-architecture.md)
 
 Standard liveness detection assumes an always-reachable server. Our defining constraint is offline-first: students' scans must be captured and provably trusted even when no server responds.
 
@@ -23,7 +23,7 @@ This transforms liveness verification from an online gate into a provable, repla
 
 ## C2 — Challenge-Response Liveness Grading (flagship)
 
-**Folder**: `backend/src/features/liveness/` + `frontend/src/lib/components/scanner/FaceChallenge.svelte` + `Step4FaceCheck.svelte`
+**Folder**: `frontend/src/lib/features/liveness/` (frontend-only) + `frontend/src/lib/features/liveness/components/FaceChallenge.svelte` (proposed)
 
 **Contribution**: a fixed-sequence, statistically graded challenge-response protocol for face liveness, verifiable entirely from a landmark transcript — no image classification model required.
 
@@ -36,7 +36,7 @@ The contribution is the _grading protocol_ — deterministic, explainable, and o
 
 ## C3 — Evaluation Methodology: Attack Corpus + APCER/BPCER
 
-**Folder**: `backend/src/tests/` (planned)
+**Folder**: `backend/src/tests/` (empty scaffolding — no test runner configured yet; planned)
 
 **Contribution**: a reproducible evaluation protocol for the liveness layers, following ISO/IEC 30107-3 presentation-attack metrics — rare in comparable student-built systems.
 
@@ -48,7 +48,7 @@ This separates _what the protocol guarantees_ (replay, photo, distortion) from _
 
 ## C4 — Heuristic At-Risk Analytics over Sync-Corrupted Attendance Data
 
-**Folder**: `backend/src/features/analytics/` + `backend/src/features/analytics/tasks.py` + `frontend/src/lib/components/charts/ChartCanvas.svelte`
+**Folder**: `backend/src/features/analytics/` + `backend/src/features/analytics/tasks.py` (planned) + `frontend/src/lib/features/analytics/components/ChartCanvas.svelte` (planned)
 
 **Contribution**: predictive/prescriptive analytics adapted to the data regime this system itself creates — sparse, batch-arriving, sync-gapped attendance enriched with an untrusted-evidence pipeline.
 
@@ -75,7 +75,7 @@ The dashboard layers (descriptive: what happened, diagnostic: why, predictive: w
 
 ## C6 — Excuse State Machine with Three-Path Workflow
 
-**Folder**: `backend/src/features/excuse/` + `frontend/src/lib/components/excuse/`
+**Folder**: `backend/src/features/excuse/` + `frontend/src/lib/features/excuse/components/` (planned)
 
 **Contribution**: a formal state machine for attendance excuses with three initiation paths, each producing an auditable trail — not a simple status flip.
 
@@ -88,14 +88,14 @@ The dashboard layers (descriptive: what happened, diagnostic: why, predictive: w
 
 ## C7 — Biometric Template Protection with Pull-on-Distribution
 
-**Folder**: `backend/src/features/face_enrollment/` + `frontend/src/lib/components/face-enrollment/` + `frontend/src/lib/offline/`
+**Folder**: `backend/src/features/student/` (face columns; admin face-enrollment service/router planned) + `frontend/src/lib/features/student/components/FaceEnrollmentModal.svelte` (proposed) + `frontend/src/lib/features/sync/` (proposed — deferred per frontend-architecture.md)
 
 **Contribution**: a biometric enrollment and distribution pipeline that generates, encrypts, and distributes face embeddings without training any model — using pretrained embeddings with versioned pull-on-login.
 
 - **Enrollment**: admin captures **3 photos** (front, left, right) per D43. Quality gates: brightness, face-size, single-face check. Server runs pretrained face-api.js ResNet-34-like model → 128-d embedding per photo. Stored as encrypted JSON blob in `students.face_embedding` (BYTEA): `{"mean":[128f],"angles":{"front":[128f],"left":[128f],"right":[128f]}}` (D28).
 - **Encryption**: face embedding encrypted at rest (pgcrypto/AES) on server; cached encrypted on device via WebCrypto device key.
 - **Distribution**: pull-on-login — client checks `face_embedding_version`, downloads if newer; cached in IndexedDB (D29). No push/WebSocket infrastructure.
-- **Verification**: cosine similarity ≥ `FACE_MATCH_THRESHOLD` (default 0.7). Score bands: ≥ 0.75 → pass; 0.65–0.75 → review-flag → liveness-review queue; < 0.65 → fail. Offline: compares against cached embedding locally; only scores/evidence sync to server (D30).
+- **Verification**: cosine similarity ≥ `FACE_MATCH_THRESHOLD` (default 0.7). Score bands: ≥ 0.70 → pass; 0.65–0.70 → review-flag → liveness-review queue; < 0.65 → fail. Offline: compares against cached embedding locally; only scores/evidence sync to server (D30).
 - **Revocation**: on student archive; re-enrollment supersedes old vectors.
 - **No model training**: the pretrained face-api.js model runs as-is; we generate embeddings but do not fine-tune it.
 

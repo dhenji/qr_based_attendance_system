@@ -6,10 +6,11 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
-    UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -29,12 +30,13 @@ class StudentRiskScore(Base):
             f"'{RiskLevel.HIGH.value}')",
             name="ck_student_risk_scores_risk_level",
         ),
-        UniqueConstraint(
+        Index(
+            "uq_student_risk_scores_student_offering_semester_day",
             "student_id",
             "offering_id",
             "semester",
-            "computed_at",
-            name="uq_student_risk_scores_student_offering_semester_day",
+            text("(date(computed_at))"),
+            unique=True,
         ),
     )
 

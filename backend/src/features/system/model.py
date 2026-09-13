@@ -19,7 +19,7 @@ class BackupLog(Base):
             name="ck_backup_log_storage_backend",
         ),
         CheckConstraint(
-            f"status in ('{BackupStatus.SUCCESS.value}', '{BackupStatus.FAILED.value}')",
+            f"status in ('{BackupStatus.STARTED.value}', '{BackupStatus.COMPLETED.value}', '{BackupStatus.FAILED.value}')",
             name="ck_backup_log_status",
         ),
     )
@@ -32,6 +32,6 @@ class BackupLog(Base):
     storage_backend: Mapped[str] = mapped_column(String(10))
     encryption_key_version: Mapped[int] = mapped_column(Integer)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(10))
     error: Mapped[str | None] = mapped_column(Text)

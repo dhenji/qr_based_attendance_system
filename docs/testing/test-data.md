@@ -9,7 +9,7 @@
 > - ~40 students across cohorts sharing one GE course template (proves D6).
 > - Professors including one effective-dated handover mid-semester (proves D8).
 > - 6 weeks of historical attendance for risk-model demo (proves D35).
-> - All data matches DOCS_REFACTOR_PLAN §6 target schema column-for-column.
+> - All data matches the [target schema](../design/database-er.md) column-for-column.
 
 ---
 
@@ -436,7 +436,7 @@ Seed 1 backup log entry for display in admin settings:
 
 | filename                          | kind | size_bytes | sha256                                                           | storage_backend | encryption_key_version | status  |
 | --------------------------------- | ---- | ---------- | ---------------------------------------------------------------- | --------------- | ---------------------- | ------- |
-| backup_20260708_020000.pgdump.enc | full | 5242880    | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | local           | 1                      | success |
+| backup_20260708_020000.pgdump.enc | full | 5242880    | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | local           | 1                      | completed |
 
 ---
 

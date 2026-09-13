@@ -18,7 +18,7 @@ backend/src/features/{feature}/
 └── router.py       # FastAPI endpoints
 ```
 
-Plus an Alembic migration, backend tests, and frontend feature slice.
+Plus an Alembic migration, frontend feature slice, and (aspirational) backend tests.
 
 ---
 
@@ -84,7 +84,7 @@ class YearLevel(TimestampMixin, Base):
 **Done:**
 
 - [ ] Model class defined with correct `__tablename__`
-- [ ] PK, columns, FKs match target schema (§6 of DOCS_REFACTOR_PLAN.md)
+- [ ] PK, columns, FKs match the [target schema](../design/database-er.md)
 - [ ] Relationships defined where needed
 - [ ] `TimestampMixin` inherited for entities that need it
 
@@ -262,7 +262,7 @@ async def get_program(
 
 **Conventions:**
 
-- Prefix matches API contract (§7 of DOCS_REFACTOR_PLAN.md)
+- Prefix matches [API contract](../architecture/api-contracts.md)
 - `Depends(get_db)` for session injection
 - Response model is the Read schema
 - Errors: `HTTPException` with appropriate status codes
@@ -288,6 +288,11 @@ api_router.include_router(program_router)
 ---
 
 ### 7. Backend Tests (`backend/src/tests/test_{feature}.py`)
+
+> **Aspirational:** no test runner is configured yet — `backend/src/tests/`
+> exists as empty scaffolding (`__init__.py` only; `pytest`/`httpx` are not
+> dependencies). The example below is the intended shape once a runnable suite
+> is added.
 
 ```python
 import pytest
@@ -413,7 +418,7 @@ export async function fetchPrograms() {
 6. service.py            → write business logic
 7. router.py             → write endpoints
 8. api/router.py         → mount router
-9. tests                 → write tests
+9. tests                 → write tests (aspirational — no test runner yet)
 10. frontend/            → feature slice
 11. docs/                → update wireframes, contracts, structure
 ```
@@ -437,7 +442,7 @@ export async function fetchPrograms() {
 
 ## Reference
 
-- **Target schema:** `DOCS_REFACTOR_PLAN.md` §6
-- **API endpoints:** `DOCS_REFACTOR_PLAN.md` §7
+- **Target schema:** `docs/design/database-er.md`
+- **API endpoints:** `docs/architecture/api-contracts.md`
 - **Migration strategy:** `docs/architecture/migration-strategy.md`
 - **AGENTS.md conventions:** never commit `.env`, run alembic from `backend/`, imports in `alembic/env.py`

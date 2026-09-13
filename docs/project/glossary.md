@@ -16,7 +16,7 @@ A 6â€“8 character code derived from an HMAC of the session ID + secret, used by 
 
 ### Session QR
 
-A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2M","course":123,"radius":30,"pw":5,"lw":10}`. Scanned by students in Step 1 of the scan flow. Version `v` enables future migration.
+A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}`. Scanned by students in Step 1 of the scan flow. Version `v` enables future migration.
 
 ### Enrollment (Course-Taking)
 
@@ -157,7 +157,7 @@ Account activation flow where a student/professor enters their official email â†
 | `claim`           | Account claim registration |
 | `forget_password` | Password reset             |
 
-### SyncStatus (`attendance_records.sync_status`, `sync_queue.status`)
+### SyncStatus (`attendance_records.sync_status`)
 
 | Value     | Meaning                            |
 | --------- | ---------------------------------- |
@@ -165,7 +165,7 @@ Account activation flow where a student/professor enters their official email â†
 | `pending` | Queued locally or in transit       |
 | `failed`  | Sync rejected (reason in evidence) |
 
-### QueueStatus (`sync_queue.status` â€” extended)
+### QueueStatus (`sync_queue.status`)
 
 | Value        | Meaning                      |
 | ------------ | ---------------------------- |

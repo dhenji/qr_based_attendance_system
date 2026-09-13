@@ -24,18 +24,21 @@ Key properties:
 
 **Every table** in the database is included:
 
-| Schema     | Tables                                                    |
-| ---------- | --------------------------------------------------------- |
-| auth       | `users`, `otp_codes`                                      |
-| student    | `students`                                                |
-| course     | `courses`, `course_offerings`, `year_levels`, `programs`, `course_professors` |
-| enrollment | `enrollments`                                             |
-| session    | `sessions`                                                |
-| attendance | `attendance_records`                                      |
-| excuse     | `excuse_requests`                                         |
-| analytics  | `student_risk_scores`                                     |
-| sync       | `sync_queue`                                              |
-| system     | `backup_log`                                              |
+| Schema            | Tables                                                      |
+| ----------------- | ----------------------------------------------------------- |
+| auth              | `users`, `otp_codes`                                        |
+| student           | `students`                                                  |
+| professor         | `professors`                                                |
+| course            | `courses`, `course_offerings`                               |
+| program           | `programs`, `year_levels`                                   |
+| enrollment        | `enrollments`                                               |
+| course_professor  | `course_professors`                                         |
+| session           | `sessions`                                                  |
+| attendance        | `attendance_records`                                        |
+| excuse            | `excuse_requests`                                           |
+| analytics         | `student_risk_scores`                                       |
+| sync              | `sync_queue`                                                |
+| system            | `backup_log`                                                |
 
 ### 2.2 Optional Exclusion
 
@@ -127,7 +130,7 @@ Trigger (scheduled or manual)
 │   ) VALUES (...)                                     │
 │                                                       │
 │   kind = 'full' (default) | 'analytics'              │
-│   status = 'success' | 'failed'                      │
+│   status = 'started' | 'completed' | 'failed'              │
 └────────────────────┬─────────────────────────────────┘
                      │
                      ▼
@@ -154,7 +157,9 @@ Trigger (scheduled or manual)
 
 ### 3.3 Environment Variables
 
-All variables from **Section 8 of the plan** (DOCS_REFACTOR_PLAN.md):
+All variables from **Section 8 of the plan** (see the
+[target schema](../design/database-er.md) and
+[migration strategy](../architecture/migration-strategy.md)):
 
 ```bash
 # Storage
@@ -192,8 +197,8 @@ CREATE TABLE backup_log (
     storage_backend      VARCHAR NOT NULL CHECK (storage_backend IN ('local', 's3')),
     encryption_key_version INT NOT NULL,
     started_at           TIMESTAMPTZ NOT NULL,
-    finished_at          TIMESTAMPTZ NOT NULL,
-    status               VARCHAR NOT NULL CHECK (status IN ('success', 'failed')),
+    finished_at          TIMESTAMPTZ NULL,
+    status               VARCHAR NOT NULL CHECK (status IN ('started', 'completed', 'failed')),
     error                TEXT NULL
 );
 ```
@@ -314,7 +319,7 @@ Body: {
 
 | Metric              | Alert Threshold                  | Action                          |
 | ------------------- | -------------------------------- | ------------------------------- |
-| Backup freshness    | No successful backup in 25 hours | Investigate cron job / pipeline |
+| Backup freshness    | No completed backup in 25 hours | Investigate cron job / pipeline |
 | Backup size delta   | > 50% change from previous day   | Verify data or schema change    |
 | Backup duration     | > 10 minutes for < 1 GB DB       | Investigate I/O or DB locks     |
 | Prune failures      | Any delete error                 | Manual cleanup required         |

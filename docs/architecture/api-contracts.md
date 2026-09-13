@@ -1,8 +1,7 @@
 # API Contracts — QR Attendance System
 
 > Canonical reference for every endpoint. Each entry: method, path, role guard,
-> request schema, response schema, error codes. Diff-checked against §7 of
-> DOCS_REFACTOR_PLAN.md.
+> request schema, response schema, error codes.
 
 ---
 
@@ -16,7 +15,21 @@
 | Error shape | `{ detail: { code: string, message: string, field?: string } }`                             |
 | Idempotency | Scan submit accepts `X-Idempotency-Key` header; duplicate returns prior result              |
 | Timestamps  | ISO-8601 UTC (`2026-08-25T14:30:00Z`)                                                       |
-| Soft-delete | `DELETE` endpoints archive (set `is_active=false`) unless stated destructive                |
+| Soft-delete | `DELETE` endpoints archive (set `is_active=false`) unless stated destructive               |
+
+### DTO → Column Mapping
+
+DTO field names below are canonical and exotic DB column names are mapped where they differ:
+
+| DTO field       | DB column                                  |
+| --------------- | ------------------------------------------ |
+| `status`        | `attendance_records.validation_status`     |
+| `scanned_at`    | `attendance_records.timestamp`             |
+| `student_number`| `students.student_id`                      |
+| session `code`  | `sessions.session_code`                    |
+| `offering`      | column `offering_id`                       |
+| geofence `radius`| `classroom_radius_meters`                 |
+| session `status`| computed DTO (no backing column)          |
 
 ---
 
@@ -28,21 +41,26 @@ Scanned by students. Server generates HMAC-signed JSON.
 {
   "v": 1,
   "code": "A7X-9K2M",
-  "course": 123,
+  "offering": 123,
   "radius": 30,
   "pw": 5,
   "lw": 10
 }
 ```
 
-| Field    | Type   | Meaning                                |
-| -------- | ------ | -------------------------------------- |
-| `v`      | int    | Payload version (migration-safe)       |
-| `code`   | string | 6–8 char session code (HMAC-truncated) |
-| `course` | int    | `course_offerings.id`                  |
-| `radius` | int    | Geofence radius in metres              |
-| `pw`     | int    | Present window minutes                 |
-| `lw`     | int    | Late window minutes                    |
+| Field      | Type   | Meaning                                |
+| ---------- | ------ | -------------------------------------- |
+| `v`        | int    | Payload version (migration-safe)       |
+| `code`     | string | 6–8 char session code (HMAC-truncated) |
+| `offering` | int    | `course_offerings.id`                  |
+| `radius`   | int    | Geofence radius in metres              |
+| `pw`       | int    | Present window minutes                 |
+| `lw`       | int    | Late window minutes                    |
+
+**Note:** The HMAC payload uses compact keys. On verify, they map to DB columns:
+`code` → `sessions.session_code`, `offering` → `sessions.offering_id`,
+`radius` → `sessions.classroom_radius_meters`, `pw` → `present_window_minutes`,
+`lw` → `late_window_minutes`.
 
 ---
 
@@ -348,7 +366,8 @@ Trigger manual risk-score recalculation (admin-only).
 
 |                  |                                |
 | ---------------- | ------------------------------ |
-| **Response 202** | `{ job_id, status: "queued" }` |
+| **Response 202** | `{ job_id, status: "pending" }` |
+| **Notes**        | `job_id` is an opaque DTO (queue job reference), not a table column. `status` is the queue job status (QueueStatus). |
 
 ---
 
@@ -387,7 +406,7 @@ Trigger a full backup.
 
 |                  |                                   |
 | ---------------- | --------------------------------- |
-| **Response 202** | `{ backup_id, status: "queued" }` |
+| **Response 202** | `{ backup_id, status: "started" }` |
 
 #### `GET /admin/backups/{id}/download`
 
@@ -424,6 +443,7 @@ List professor's active course assignments with program/year badges.
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | professor                                                                                                                                      |
 | **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to }], ... }` |
+| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. |
 
 ---
 
@@ -434,7 +454,8 @@ List professor's active course assignments with program/year badges.
 |                  |                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?from?&to?&offering_id?&page=1&size=20`                                                                                               |
-| **Response 200** | `{ items: [{ id, offering_id, code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
+| **Response 200** | `{ items: [{ id, offering_id, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
+| **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `active`/`closed` derived from `expires_at`/close time. |
 
 #### `POST /professor/sessions`
 
@@ -442,8 +463,8 @@ Open a new attendance session.
 
 |                  |                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, geofence_radius?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
-| **Response 201** | `{ id, code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
+| **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
+| **Response 201** | `{ id, session_code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
 | **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration`                                                                                                                          |
 | **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(now + duration_minutes, scheduled_end_time)` (D12).                                |
 
@@ -453,7 +474,8 @@ Live session detail with dual timers.
 
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, course, code, scan_window_remaining, class_end_time, status, students: [{ student_id, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
+| **Response 200** | `{ id, offering, session_code, scan_window_remaining, scheduled_end_time, status, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
+| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns). `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. |
 
 #### `POST /professor/sessions/{id}/close`
 
@@ -461,7 +483,8 @@ Manually close session scanning.
 
 |                  |                                                 |
 | ---------------- | ----------------------------------------------- |
-| **Response 200** | `{ id, status: "closed", final_counts: {...} }` |
+| **Response 200** | `{ id, status: "closed", final_counts: {...} }`                               |
+| **Notes**        | `status: "closed"` is a server-side computed DTO — sessions have no `status` column. |
 
 ---
 
@@ -475,6 +498,7 @@ Quick-excuse a student for this session.
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Request**      | `{ reason: string }`                                                                |
 | **Response 201** | `{ excuse_request_id, status: "approved", original_status, new_status: "excused" }` |
+| **Notes**        | `new_status`/`original_status` are DTO fields mapping `attendance_records.validation_status`. |
 
 #### `PATCH /professor/sessions/{id}/attendance/{sid}/excuse`
 
@@ -518,7 +542,7 @@ Approve or reject an excuse request.
 
 |                  |                               |
 | ---------------- | ----------------------------- |
-| **Request**      | `{ decision: "approved"       | "rejected", review_notes?: string }` |
+| **Request**      | `{ status: "approved"       | "rejected", review_notes?: string }` |
 | **Response 200** | `{ id, status, reviewed_at }` |
 
 ---
@@ -532,7 +556,8 @@ Query attendance records with filters.
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?offering_id?&section?&status?&from?&to?&page=1&size=20`                                                                                       |
-| **Response 200** | `{ items: [{ id, student_id, student_name, section, session_id, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
+| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
+| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. |
 
 #### `GET /professor/sessions/history`
 
@@ -584,7 +609,8 @@ Read-only profile.
 
 |                  |                                                                                                                         |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, first_name, middle_name, last_name, email, department, employee_number, assigned_courses: [...], claim_status }` |
+| **Response 200** | `{ id, first_name, middle_name, last_name, email, department, assigned_courses: [...], claim_status }` |
+| **Notes**        | No `employee_number` column exists on `professors` — omitted. `claim_status` is a computed DTO derived from `professors.user_id` non-null. |
 
 #### `PATCH /professor/profile/password`
 
@@ -611,6 +637,7 @@ Verify a typed session code or scan session QR.
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
 | **Response 200** | `{ session_id, offering_id, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
+| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired`                                                                                                                    |
 
 ---
@@ -623,9 +650,10 @@ Submit attendance scan (online or queued for offline sync).
 
 |                  |                                                                                                                                                                                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ session_id: int, qr_student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
-| **Response 200** | `{ attendance_id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
+| **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
+| **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
 | **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 410 `session_expired`                                                                                                                                                     |
+| **Notes**        | `student_number` maps `students.student_id`. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
 
 ---

@@ -55,6 +55,14 @@ cd backend
 alembic upgrade head
 ```
 
+> **Note:** The current migrations (`68a78206e082` initial schema,
+> `388e5e496455` link students to user accounts, `996b2fb85c6f` account
+> security/OTP fields) produce the **legacy flat schema** (flat `courses`,
+> no `course_offerings`). The target schema (`programs`, `year_levels`,
+> `course_offerings`, `course_professors`, offering-scoped enrollments/sessions,
+> etc.) lands via the **pending full-baseline migration** — see
+> [migration-strategy.md](../architecture/migration-strategy.md).
+
 ### 5. Seed programs and year levels
 
 ```bash
@@ -261,7 +269,7 @@ Copy `backend/.env.example` to `backend/.env` and fill in:
 | `HMAC_SECRET_KEY`             | Yes                    | —                                                                      | For session code signing  |
 | `JWT_SECRET`                  | Yes (when DEBUG=false) | —                                                                      | `openssl rand -base64 32` |
 | `JWT_ALGORITHM`               | No                     | `HS256`                                                                |                           |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | No                     | `30`                                                                   |                           |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | No                     | `15`                                                                   |                           |
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | No                     | `7`                                                                    |                           |
 
-See `DOCS_REFACTOR_PLAN.md` §8 for the full list of additional env vars (face, risk, backup, attachments).
+See `backend/.env.example` and [§1 of the production checklist](../deployment/production-checklist.md) for the full list of additional env vars (face, risk, backup, attachments).

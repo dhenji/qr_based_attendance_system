@@ -1,6 +1,6 @@
 # Database Entity–Relationship Diagram (ERD)
 
-> Crow's-foot notation for the QR-based attendance system — **Target Schema** (per DOCS_REFACTOR_PLAN §6).
+> Crow's-foot notation for the QR-based attendance system — **Target Schema** (canonical ERD).
 > Source: `docs/project/migration-strategy.md` steps 1–9.
 > New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`.
 
@@ -17,14 +17,14 @@
 | `courses`             | id (PK), course_code (UK), course_name, units, session_duration_hours (NUMERIC(3,1)), is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                                              |
 | `course_offerings`    | id (PK), course_id (FK → courses RESTRICT), program_id (FK → programs RESTRICT), year_level_id (FK → year_levels RESTRICT), semester (String 20: '1st_sem'/'2nd_sem'/'midyear'), academic_year (String 20), sessions_per_week, semester_weeks, schedule_days (String 10: 'MWF'), schedule_start_time (TIME), schedule_end_time (TIME), classroom_name (String 100), classroom_lat, classroom_lng, default_present_window_minutes (DEF 5), default_late_window_minutes (DEF 10), is_active, created_at, updated_at, UNIQUE(course_id, program_id, semester, academic_year) |
 | `course_professors`   | offering_id (FK → course_offerings CASCADE), professor_id (FK → professors CASCADE), is_primary (BOOL), effective_from (DATE), effective_to (DATE NULL), semester, assigned_by (FK → users), assigned_at, PK(offering_id, professor_id, effective_from)                                                                                                                                                                                                                                                         |
-| `students`            | id (PK), user_id (FK → users, UK, nullable), student_id (UK), email (UK), first_name, middle_name, last_name, year_level (INT, retained), section (retained per D2), is_active, face_embedding (BYTEA NULL), face_enrolled_at (TIMESTAMPTZ NULL), face_embedding_version (INT DEF 0), created_at, updated_at — **legacy `course` string dropped**                                                                                                                                                  |
+| `students`            | id (PK), user_id (FK → users, UK, nullable), year_level_id (FK → year_levels, RESTRICT), student_id (UK), email (UK), first_name, middle_name, last_name, section (retained per D2), is_active, face_embedding (BYTEA NULL), face_enrolled_at (TIMESTAMPTZ NULL), face_embedding_version (INT DEF 0), created_at, updated_at — **legacy `course` string dropped**                                                                                                                                                  |
 | `professors`          | id (PK), user_id (FK → users, UK, nullable), email (UK), first_name, middle_name, last_name, department, is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                         |
-| `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings), academic_year, semester (validated against year_level.term_structure), UNIQUE(student_id, offering_id, academic_year)                                                                                                                                                                                                                                                                                                             |
+| `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings) NOT NULL, academic_year NOT NULL, semester NOT NULL (validated against year_level.term_structure), UNIQUE(student_id, offering_id, academic_year)                                                                                                                                                                                                                                                                                                             |
 | `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → professors), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), expires_at (TIMESTAMPTZ, STORED: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)), classroom_radius_meters, classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), created_at |
 | `attendance_records`  | id (PK), student_id (FK → students), session_id (FK → sessions), timestamp, gps_lat, gps_lng, validation_status (present/late/absent/excused/pending/rejected), sync_status, liveness_evidence (JSONB), face_match_score (NUMERIC(5,4)), scanned_via (qr_camera/manual_code), original_status (NULL), excuse_reason (NULL), excused_by (FK → users NULL), excused_at (NULL), excuse_type (quick/prof_with_evidence/request_approved NULL), excuse_request_id (FK NULL), created_at                 |
 | `excuse_requests`     | id (PK), student_id (FK), session_id (FK), initiated_by (professor/student), initiated_via (quick/prof_with_evidence/request), reason, attachment_urls (JSONB), status (pending/approved/rejected DEF pending), requested_at, reviewed_by (FK → users NULL), reviewed_at (NULL), review_notes (NULL)                                                                                                                                                                                               |
 | `student_risk_scores` | id (PK), student_id (FK → students), offering_id (FK → course_offerings), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high), features (JSONB), computed_at, UNIQUE(student_id, offering_id, semester, computed_at::date)                                                                                                                                                                                                                                                                   |
-| `backup_log`          | id (PK), filename, kind (full/analytics), size_bytes (BIGINT), sha256, storage_backend (local/s3), encryption_key_version, started_at, finished_at, status, error (NULL)                                                                                                                                                                                                                                                                                                                           |
+| `backup_log`          | id (PK), filename, kind (full/analytics), size_bytes (BIGINT), sha256, storage_backend (local/s3), encryption_key_version, started_at, finished_at, status (started/completed/failed), error (NULL)                                                                                                                                                                                                                                                                                                                           |
 | `sync_queue`          | id (PK), record_data (JSON), status, retry_count, created_at                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ---
@@ -147,12 +147,12 @@ erDiagram
     students {
         bigint id PK
         bigint user_id UK
+        bigint year_level_id FK
         varchar student_id UK
         varchar email UK
         varchar first_name
         varchar middle_name
         varchar last_name
-        integer year_level
         varchar section
         boolean is_active
         bytea face_embedding
@@ -285,12 +285,12 @@ erDiagram
    │  │────────────────────────────────────│      │
    │  │ id                        PK       │      │
    │  │ user_id    FK → users (UK)        │      │  ┌───────────────────────────────────────┐
-   │  │ student_id UK, email UK           │      │  │               sessions                 │
-   │  │ first_name, middle_name, last_name│      │  │───────────────────────────────────────│
-   │  │ year_level, section, is_active    │      │  │ id                        PK           │
-   │  │ face_embedding BYTEA,             │      │  │ offering_id FK → course_offerings      │
-   │  │   face_enrolled_at                │      │  │ professor_id  FK → professors           │
-   │  │ face_embedding_version            │      │  │ session_code  UK                       │
+   │  │ year_level_id FK → year_levels    │      │  │               sessions                 │
+   │  │ student_id UK, email UK           │      │  │───────────────────────────────────────│
+   │  │ first/middle/last name            │      │  │ id                        PK           │
+   │  │ year_level_id, section, is_active   │      │  │ offering_id FK → course_offerings      │
+   │  │ face_embedding BYTEA,             │      │  │ professor_id  FK → professors           │
+   │  │   face_enrolled_at, embedding_ver │      │  │ session_code  UK                       │
    │  │ created_at, updated_at            │      │  │ duration_minutes                        │
    │  └───────────────┬───────────────────┘      │  │ present_window_minutes                 │
    │                  │ 1                        │  │ late_window_minutes                    │
@@ -300,9 +300,9 @@ erDiagram
    │  │────────────────────────────────────│      │  │ expires_at (STORED)                    │
    │  │ id                        PK       │      │  │   = LEAST(created_at + duration,       │
    │  │ student_id FK → students          │      │  │          scheduled_end_time)           │
-   │  │ offering_id FK → course_offerings │      │  │ classroom_radius_meters                │
-   │  │ academic_year                     │      │  │ classroom_name/lat/lng (NULL override) │
-   │  │ semester (term_structure)         │      │  │ created_at                             │
+   │  │ offering_id → course_offering (NN)│      │  │ classroom_radius_meters                │
+   │  │ academic_year NOT NULL            │      │  │ classroom_name/lat/lng (NULL override) │
+   │  │ semester NOT NULL                 │      │  │ created_at                             │
    │  │ UNIQUE(student_id, offering_id,   │      │  └─────────────────┬─────────────────────┘
    │  │   academic_year)                  │      │                    │ 1 (collects)
    │  └───────────────┬───────────────────┘      │                    o<{
@@ -404,7 +404,7 @@ erDiagram
    │  │ storage_backend (local/s3)                │
    │  │ encryption_key_version                    │
    │  │ started_at, finished_at                   │
-   │  │ status, error (NULL)                      │
+   │  │ status (started/completed/failed), error  │
    │  └───────────────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
@@ -443,7 +443,7 @@ erDiagram
 | `programs`          | `‖──○{`     | `year_levels`         | one program owns many year levels (CASCADE)                                                                     |
 | `programs`          | `‖──○{`     | `course_offerings`    | one program offers many course offerings (RESTRICT)                                                             |
 | `year_levels`       | `‖──○{`     | `course_offerings`    | one year level contains many course offerings (RESTRICT)                                                        |
-| `year_levels`       | `‖──○{`     | `students`            | one year level has many students                                                                                |
+| `year_levels`       | `‖──○{`     | `students`            | one year level has many students (RESTRICT)                                                                                |
 | `courses`           | `‖──○{`     | `course_offerings`    | one course templates many offerings (per program/year/semester)                                                 |
 | `course_offerings`  | `‖──○{`     | `course_professors`   | one offering has many professor assignments                                                                     |
 | `professors`        | `‖──○{`     | `course_professors`   | one professor teaches many offerings                                                                            |
@@ -467,4 +467,24 @@ erDiagram
 > - `sessions.expires_at` is a **STORED generated column**: `LEAST(created_at + duration_minutes * interval '1 minute', scheduled_end_time)` (D12).
 > - `ValidationStatus` enum: `present` · `late` · `absent` · `excused` · `pending` · `rejected` (D15).
 > - Rejection reasons: `duplicate` · `outside_geofence` · `liveness_failed` · `face_mismatch` · `not_enrolled` · `session_expired` (D15/D16).
+
+---
+
+## DTO ↔ Column Mapping
+
+API DTOs use `status` / `scanned_at` / `student_number`; DB columns use `validation_status` / `timestamp` / `student_id`.
+
+| DTO field                    | DB column (target schema)          |
+| ---------------------------- | ---------------------------------- |
+| `attendance.status`          | `attendance_records.validation_status` |
+| `attendance.scanned_at`      | `attendance_records.timestamp`     |
+| `student_number`             | `students.student_id`              |
+| QR payload `offering`        | `sessions.offering_id`             |
+| QR payload `code`            | `sessions.session_code`            |
+| QR payload `geofence.radius` | `sessions.classroom_radius_meters` |
+| QR payload `geofence.lat`    | `sessions.classroom_lat`           |
+| QR payload `geofence.lng`    | `sessions.classroom_lng`           |
+
+> **`sessions.status` ("active"/"closed") is a computed DTO-only field — there is NO column.**
+> A session is `"active"` when `expires_at > now()`, otherwise `"closed"`.
 

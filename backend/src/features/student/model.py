@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
 from features.auth.model import User
-from features.program.model import Program
+from features.program.model import YearLevel
 from shared.mixins import TimestampMixin
 
 
@@ -27,17 +27,16 @@ class Student(TimestampMixin, Base):
         BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), unique=True
     )
     student_id: Mapped[str] = mapped_column(String(50), unique=True)
-    email: Mapped[str | None] = mapped_column(String(255), unique=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
     first_name: Mapped[str] = mapped_column(String(100))
     middle_name: Mapped[str | None] = mapped_column(String(100))
     last_name: Mapped[str] = mapped_column(String(100))
-    program_id: Mapped[int] = mapped_column(
+    year_level_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("programs.id", ondelete="RESTRICT"),
+        ForeignKey("year_levels.id", ondelete="RESTRICT"),
         index=True,
     )
     section: Mapped[str | None] = mapped_column(String(20))
-    year_level: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     face_embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
@@ -47,4 +46,4 @@ class Student(TimestampMixin, Base):
     )
 
     user: Mapped[User | None] = relationship()
-    program: Mapped[Program] = relationship()
+    year_level: Mapped[YearLevel | None] = relationship()

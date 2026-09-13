@@ -22,15 +22,19 @@ A web application that:
 
 ## Security & Anti-Spoofing
 
-Every attendance submission is validated against **five layers** before it is accepted; any single failure rejects the record.
+Every attendance submission follows the canonical **5-step scan flow (D27)**:
+`session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
+Any single failure rejects the record with one of the canonical D15 rejection
+reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
+`not_enrolled`, `session_expired`.
 
-| #   | Layer                | What It Prevents                         | CS Concept                   |
-| --- | -------------------- | ---------------------------------------- | ---------------------------- |
-| 1   | HMAC Session Code    | Outsiders submitting attendance          | HMAC-SHA256                  |
-| 2   | GPS Geofencing       | Remote/fake submissions                  | Haversine Algorithm          |
-| 3   | Live QR Detection    | Screenshot of a classmate's ID           | Reflection/Liveness Analysis |
-| 4   | One Scan Per Session | Same ID used multiple times              | Database Constraint          |
-| 5   | Enrollment Check     | Non-enrolled students marking attendance | Relational FK Constraint     |
+| #   | Layer                    | What It Prevents                                 | CS Concept                     |
+| --- | ------------------------ | ------------------------------------------------ | ------------------------------ |
+| 1   | Session Entry (code/QR) | Outsiders submitting attendance                  | HMAC-SHA256                    |
+| 2   | Student-ID QR            | Wrong identity / unattended devices              | QR payload = student number    |
+| 3   | GPS Geofencing           | Remote/fake submissions                          | Haversine Algorithm            |
+| 4   | Face Liveness + Match    | Photos, replay & distortion tricks               | Blink/turn challenge + embedding similarity |
+| 5   | Uniqueness + Enrollment  | Same ID used twice / non-enrolled students       | DB Constraint + FK Check       |
 
 ## Features
 
@@ -60,7 +64,7 @@ Every attendance submission is validated against **five layers** before it is ac
 | Component | Technology                                              |
 | --------- | ------------------------------------------------------- |
 | Backend   | Python (FastAPI, SQLAlchemy async, Alembic, Argon2id, PyJWT) |
-| Frontend  | SvelteKit 5 + TypeScript (strict, runes mode)           |
+| Frontend  | SvelteKit 2 (Svelte 5 runes) + TypeScript (strict)      |
 | Database  | PostgreSQL 16                                           |
 | Platform  | Progressive Web App (works on any device; planned)      |
 | Tooling   | Docker / docker-compose, html5-qrcode, zod, chart.js    |
@@ -85,9 +89,9 @@ Every attendance submission is validated against **five layers** before it is ac
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, DB lifespan check, AppException handler)
 │   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py, exceptions.py (AppException/DomainException/DatabaseException)
-│   │   ├── shared/       # enums.py (15 enums), mixins.py, base.py (CRUD base), pagination.py, email.py
-│   │   ├── features/     # auth, professor, student, course, program, enrollment, session, attendance, sync
-│   │   │   └── */model.py # SQLAlchemy models per feature (11 model classes, 9 features)
+│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py
+│   │   ├── features/     # analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system
+│   │   │   └── */model.py # SQLAlchemy models per feature (16 model classes, 13 features)
 │   │   │   └── */router.py# API routers exist for 7 features (attendance, auth, course, enrollment, professor, session, student)
 │   │   ├── api/          # deps.py (get_db) + router.py (5 feature routers mounted under /api: auth, student, session, attendance, professor)
 │   │   └── tests/        # Empty scaffold — no backend tests yet
@@ -237,7 +241,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ### Project
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 11-phase implementation roadmap
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D43)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D48)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -255,8 +259,8 @@ The project is in **Phase 1 (partial)** of the [11-phase roadmap](docs/project/r
 
 | Area     | Status                                                                                                                                                                |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI with `/health`, `/api` routers, async SQLAlchemy, `core`/`shared` infrastructure (config, database, security, exceptions, base CRUD, pagination, email, 15 enums), 9 feature slices / 11 model classes (auth, professor, student, course, program, enrollment, session, attendance, sync), 7 feature router files with 5 mounted under `/api` (auth, student, session, attendance, professor), 3 Alembic migrations, multi-stage `Dockerfile.dev`, Argon2id password hashing |
+| Backend  | FastAPI with `/health`, `/api` routers, async SQLAlchemy, `core`/`shared` infrastructure (config, database, security, exceptions, base CRUD, pagination, email, 13 enums), 13 feature slices / 16 model classes (analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system), 7 feature router files with 5 mounted under `/api` (auth, student, session, attendance, professor; course & enrollment routers exist but are unmounted), 3 Alembic migrations (still create the legacy flat schema — upgrade head does NOT match models yet), multi-stage `Dockerfile.dev`, Argon2id password hashing |
 | Frontend | Mock-first feature-slice implementation — routes for auth (login/register), student (dashboard/scan), professor (sessions); feature services + stores (auth, student, session, attendance, liveness, sync); shared types/utils/constants; typed `api/client.ts` + mock `api/endpoints.ts`; Svelte 5 runes mode enabled |
-| Features | Models + 7 feature router files implemented; `service` / `schema` layers pending for all features; sync & program routers not yet created |
-| Schema   | 12 of 16 target tables modeled (incl. programs, year_levels); remaining: course_professors, excuse_requests, student_risk_scores, backup_log ([ERD](docs/design/database-er.md)) |
+| Features | Models + 7 feature router files implemented; `service` / `schema` layers pending for all features (exception: `course_professor/service.py` exists); sync & program have no router file yet |
+| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); full baseline migration pending — current Alembic head still creates the legacy flat schema ([ERD](docs/design/database-er.md)) |
 | Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                                  |

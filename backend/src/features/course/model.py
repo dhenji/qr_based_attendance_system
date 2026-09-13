@@ -63,9 +63,9 @@ class CourseOffering(TimestampMixin, Base):
     schedule_days: Mapped[str] = mapped_column(String(10))
     schedule_start_time: Mapped[time] = mapped_column(Time)
     schedule_end_time: Mapped[time] = mapped_column(Time)
-    classroom_name: Mapped[str] = mapped_column(String(100))
-    classroom_lat: Mapped[float] = mapped_column(Float)
-    classroom_lng: Mapped[float] = mapped_column(Float)
+    classroom_name: Mapped[str | None] = mapped_column(String(100))
+    classroom_lat: Mapped[float | None] = mapped_column(Float)
+    classroom_lng: Mapped[float | None] = mapped_column(Float)
     default_present_window_minutes: Mapped[int] = mapped_column(
         Integer, server_default=text("5")
     )

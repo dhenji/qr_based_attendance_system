@@ -1,7 +1,7 @@
 # Data Flow Diagrams
 
-> Mermaid sequence diagrams for all major system flows. References §6 table
-> and column names from DOCS_REFACTOR_PLAN.md.
+> Mermaid sequence diagrams for all major system flows. References the
+> [target schema](../design/database-er.md) and its column names.
 
 ---
 
@@ -16,7 +16,7 @@ sequenceDiagram
     Note over S,DB: Step 1 — Session Entry (D27.1)
 
     S->>API: POST /student/sessions/verify-code {code: "A7X-9K2M"}
-    API->>DB: SELECT sessions.id, sessions.code, sessions.expires_at,<br>course_offerings.id, course_offerings.classroom_lat, course_offerings.classroom_lng<br>WHERE code = 'A7X-9K2M' AND expires_at > now()
+    API->>DB: SELECT sessions.id, sessions.session_code, sessions.expires_at,<br>course_offerings.id, course_offerings.classroom_lat, course_offerings.classroom_lng<br>WHERE session_code = 'A7X-9K2M' AND expires_at > now()
     DB-->>API: Session row + offering context
     API-->>S: 200 {session_id, offering_id, course_code, course_name, expires_at,<br>scheduled_end_time, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
 
@@ -46,7 +46,7 @@ sequenceDiagram
 
     Note over S,DB: Step 5 — Submit Attendance
 
-    S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>qr_student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>face_match_score: 0.82,<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
+    S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>face_match_score: 0.82,<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
 
     API->>API: 1. Validate session active + not expired
     API->>API: 2. Check idempotency key
@@ -59,10 +59,10 @@ sequenceDiagram
 
     API->>API: 9. Compute status:<br>scanned_at ≤ present_window → present<br>scanned_at ≤ present_window + late_window → late<br>else → rejected
 
-    API->>DB: INSERT INTO attendance_records<br>(session_id, student_id, status, scanned_at,<br>scanned_via, liveness_evidence, face_match_score,<br>gps_lat, gps_lng)
-    DB-->>API: attendance_record.id
+    API->>DB: INSERT INTO attendance_records<br>(session_id, student_id, validation_status, timestamp,<br>scanned_via, liveness_evidence, face_match_score,<br>gps_lat, gps_lng)
+    DB-->>API: attendance_records.id
 
-    API-->>S: 200 {attendance_id: 789, status: "present",<br>scanned_at, expires_at}
+    API-->>S: 200 {id: 789, status: "present",<br>scanned_at, expires_at}
 ```
 
 ---
@@ -80,31 +80,37 @@ sequenceDiagram
 
     S->>S: Steps 1–4 same as online scan
     S->>S: Local validation passes
-    S->>IDB: INSERT INTO attendance_queue<br>{id: UUID, session_id, gps, liveness,<br>face_score, scanned_at, status: "pending"}
+    S->>IDB: INSERT INTO attendance_queue<br>{id: UUID, session_id, gps_lat, gps_lng,<br>liveness_evidence, face_match_score, scanned_at,<br>status: "pending" (client queue state)}
     IDB-->>S: Stored locally
     S-->>S: Show "Evidence saved — will verify after sync"
 
     Note over S,DB: Network restored — background sync
 
-    S->>IDB: SELECT * FROM attendance_queue<br>WHERE status = 'pending'<br>ORDER BY created_at ASC
+    S->>IDB: SELECT * FROM attendance_queue<br>WHERE status = 'pending' (client queue state)<br>ORDER BY created_at ASC
     IDB-->>S: [item1, item2, ...]
 
     loop For each pending item
-        S->>IDB: UPDATE status = 'syncing'
+        S->>IDB: UPDATE status = 'syncing' (client queue state)
         S->>API: POST /student/attendance/scan<br>+ X-Idempotency-Key: item.id
         API->>DB: Check idempotency key
         API->>API: Validate scanned_at vs session.expires_at (D16)
 
         alt scanned_at > expires_at (D16)
             API-->>S: 410 {code: "session_expired"}
-            S->>IDB: UPDATE status = 'rejected',<br>last_error = 'session_expired'
+            S->>IDB: UPDATE status = 'rejected' (client queue state),<br>last_error = 'session_expired'
         else scanned_at within window
-            API->>DB: INSERT attendance_record
+            API->>DB: INSERT attendance_records
             API-->>S: 200 {status: "present"|"late"}
-            S->>IDB: UPDATE status = 'synced'
+            S->>IDB: UPDATE status = 'synced' (client queue state)
         end
     end
 ```
+
+> **Client vs DB statuses:** `pending`/`syncing`/`synced`/`rejected` above are
+> **client-local queue states** on the `attendance_queue` IndexedDB store — NOT
+> server enums. The DB uses `SyncStatus` (`synced`/`pending`/`failed`) on
+> `attendance_records.sync_status` and `QueueStatus`
+> (`pending`/`processing`/`done`/`failed`) on the `sync_queue` table.
 
 ---
 
@@ -120,10 +126,10 @@ sequenceDiagram
 
     P->>API: POST /professor/sessions/{sid}/attendance/{stid}/excuse<br>{reason: "Student was present but camera failed"}
     API->>DB: SELECT attendance_records WHERE session_id=sid AND student_id=stid
-    DB-->>API: Record (status: "absent")
+    DB-->>API: Record (validation_status: "absent")
 
     API->>DB: BEGIN
-    API->>DB: UPDATE attendance_records SET<br>original_status = 'absent',<br>status = 'excused',<br>excuse_reason = '...',<br>excused_by = professor_user_id,<br>excused_at = now(),<br>excuse_type = 'quick'
+    API->>DB: UPDATE attendance_records SET<br>original_status = 'absent',<br>validation_status = 'excused',<br>excuse_reason = '...',<br>excused_by = professor_user_id,<br>excused_at = now(),<br>excuse_type = 'quick'
     API->>DB: INSERT INTO excuse_requests<br>(student_id, session_id, initiated_by='professor',<br>initiated_via='quick', reason, status='approved',<br>reviewed_by=professor_user_id, reviewed_at=now())
     DB-->>API: excuse_request.id
     API->>DB: UPDATE attendance_records SET<br>excuse_request_id = excuse_request.id
@@ -148,7 +154,7 @@ sequenceDiagram
     API->>DB: BEGIN
     API->>DB: INSERT INTO excuse_requests<br>(student_id, session_id, initiated_by='professor',<br>initiated_via='prof_with_evidence',<br>reason, attachment_urls: [url],<br>status='approved',<br>reviewed_by=professor_user_id, reviewed_at=now())
     DB-->>API: excuse_request.id
-    API->>DB: UPDATE attendance_records SET<br>original_status = current_status,<br>status = 'excused',<br>excuse_type = 'prof_with_evidence',<br>excuse_request_id = id
+    API->>DB: UPDATE attendance_records SET<br>original_status = current_status,<br>validation_status = 'excused',<br>excuse_type = 'prof_with_evidence',<br>excuse_request_id = id
     API->>DB: COMMIT
 
     API-->>P: 201 {status: "approved", attachment_saved: true}
@@ -177,9 +183,9 @@ sequenceDiagram
     P->>API: GET /professor/excuse-requests?status=pending
     API-->>P: 200 {items: [{id, student_name, session, reason, ...}]}
 
-    P->>API: POST /professor/excuse-requests/{rid}/review<br>{decision: "approved", review_notes: "Legitimate medical reason"}
+    P->>API: POST /professor/excuse-requests/{rid}/review<br>{status: "approved", review_notes: "Legitimate medical reason"}
     API->>DB: UPDATE excuse_requests SET<br>status = 'approved',<br>reviewed_by = professor_user_id,<br>reviewed_at = now(),<br>review_notes = '...'
-    API->>DB: UPDATE attendance_records SET<br>original_status = current_status,<br>status = 'excused',<br>excuse_type = 'request_approved',<br>excuse_request_id = rid
+    API->>DB: UPDATE attendance_records SET<br>original_status = current_status,<br>validation_status = 'excused',<br>excuse_type = 'request_approved',<br>-- (request_approved is a valid attendance_records.excuse_type;<br>-- differs from excuse_requests.initiated_via = 'request')<br>excuse_request_id = rid
     API-->>P: 200 {id, status: "approved"}
 
     API-->>ST: (notification: excuse request approved)
@@ -197,17 +203,17 @@ sequenceDiagram
 
     CRON->>API: Trigger risk-score batch job
 
-    API->>DB: SELECT DISTINCT student_id, offering_id, semester<br>FROM enrollments<br>WHERE is_active = true
+    API->>DB: SELECT DISTINCT e.student_id, e.offering_id, e.semester<br>FROM enrollments e<br>JOIN course_offerings co ON e.offering_id = co.id<br>WHERE co.is_active = true
     DB-->>API: Active enrollment pairs
 
     loop For each (student_id, offering_id, semester)
         API->>DB: SELECT COUNT(*) FROM sessions<br>WHERE offering_id = ? AND created_at<br>BETWEEN semester_start AND now()
         DB-->>API: total_sessions
 
-        API->>DB: SELECT COUNT(*) FROM attendance_records ar<br>JOIN sessions s ON ar.session_id = s.id<br>WHERE s.offering_id = ? AND ar.student_id = ?<br>AND ar.status = 'absent'
+        API->>DB: SELECT COUNT(*) FROM attendance_records ar<br>JOIN sessions s ON ar.session_id = s.id<br>WHERE s.offering_id = ? AND ar.student_id = ?<br>AND ar.validation_status = 'absent'
         DB-->>API: absent_count
 
-        API->>API: Compute features:<br>absence_rate = absent_count / total_sessions<br>max_streak = longest consecutive absent run<br>sync_lag = COUNT(sync_queue WHERE status='pending')<br>trend_slope = 4-week linear regression of weekly rates
+        API->>API: Compute features:<br>absence_rate = absent_count / total_sessions<br>max_streak = longest consecutive absent run<br>sync_lag = COUNT(attendance_records WHERE<br>sync_status = 'pending' AND<br>timestamp < now() - interval '24 hours')<br>trend_slope = 4-week linear regression of weekly rates
 
         API->>API: Apply heuristic thresholds (D35):<br>absence_rate > 0.30 → high<br>absence_rate > 0.15 → medium<br>streak ≥ 3 → high<br>sync_lag ≥ 5 → medium<br>trend_slope < -0.05 → medium
 
@@ -279,6 +285,6 @@ All diagrams above reference the target schema in §6:
 | ------------ | ------------------------------------------------------------------------------------ |
 | Online Scan  | `sessions`, `course_offerings`, `enrollments`, `attendance_records`, `students`    |
 | Offline Sync | `attendance_records`, `sync_queue` (client-side `attendance_queue`)                  |
-| Excuse       | `excuse_requests`, `attendance_records`, `users` (excused_by, reviewed_by)           |
+| Excuse       | `excuse_requests` (reviewed_by), `attendance_records` (excused_by)                    |
 | Risk Batch   | `enrollments`, `sessions`, `attendance_records`, `student_risk_scores`, `sync_queue` |
 | Backup       | `backup_log`, all tables via `pg_dump`                                               |

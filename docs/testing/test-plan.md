@@ -1,7 +1,9 @@
 # Test Plan — QR Attendance System
 
-> **Scope:** Every decision D1–D43 from the DOCS_REFACTOR_PLAN §2 must be covered by
-> at least one test case. Cases are organized by portal, then by feature area.
+> **Scope:** Every decision D1–D48 from the [decision log](../project/decision-log.md) must be covered by
+> at least one test case. (D44–D46 are the course_offerings / offering-scoped
+> course_professors+risk-scores / sessions.professor_id→professors.id refactor decisions.)
+> Cases are organized by portal, then by feature area.
 > Each case lists: portal, feature, decision IDs, case name, preconditions,
 > steps, expected result, and edge-case variant where applicable.
 
@@ -319,7 +321,7 @@
 
 ## 8. Decision Coverage Matrix
 
-Every decision D1–D43 is covered by at least one test case above.
+Every decision D1–D48 is covered by at least one test case above.
 
 | Decision | Covered By (Test IDs)                                                                                                                                                                               |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -366,6 +368,11 @@ Every decision D1–D43 is covered by at least one test case above.
 | D41      | (Technology decision — verified via dependency audit, not functional test)                                                                                                                          |
 | D42      | A-BS-5                                                                                                                                                                                              |
 | D43      | A-FE-1, A-FE-4                                                                                                                                                                                      |
+| D44      | A-CM-1a, A-CM-1b, A-CM-7, A-CM-8, A-CM-9, S-SCH-2 (course_offerings; courses as pure templates)                                                                                                   |
+| D45      | A-PA-1, A-PA-2, A-PA-3, P-SS-3, A-AN-3 (course_professors & student_risk_scores keyed by offering_id)                                                                                              |
+| D46      | P-SC-1, P-SC-2, P-SC-4, P-AS-1, P-SS-3 (sessions.professor_id references professors.id)                                                                                                           |
+| D47      | A-BS-1, A-BS-2, A-BS-3, SEC-9 (backup statuses started/completed/failed; finished_at nullable)                                                                                                       |
+| D48      | A-FE-1, S-SC-8, S-SC-9 (FACE_MATCH_THRESHOLD=0.70, review band 0.65–0.70; session status active/closed computed DTO-only)                                                                             |
 
 ---
 

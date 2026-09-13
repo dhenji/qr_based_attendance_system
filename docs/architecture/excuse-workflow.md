@@ -7,7 +7,8 @@
 Excused attendance is a **first-class status** (D20) with a mandatory reason and
 full audit trail. The system supports three distinct initiation paths (D21), each
 with different permission models and evidence requirements. All paths ultimately
-write to the `excuse_requests` table and may mutate `attendance_records.status`.
+write to the `excuse_requests` table and may mutate
+`attendance_records.validation_status`.
 
 Key properties:
 
@@ -51,10 +52,10 @@ Key properties:
 
 | Transition             | Who                            | Preconditions                                                                          | Side Effects                                                                                                                        |
 | ---------------------- | ------------------------------ | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| (create) → `approved`  | Professor (quick)              | Student has absent/late record for session; professor has active assignment for course | `excuse_requests` row created with `status=approved`; `attendance_records.status` mutated to `excused`; `original_status` preserved |
+| (create) → `approved`  | Professor (quick)              | Student has absent/late record for session; professor has active assignment for course | `excuse_requests` row created with `status=approved`; `attendance_records.validation_status` mutated to `excused`; `original_status` preserved |
 | (create) → `approved`  | Professor (prof_with_evidence) | Same as above + at least 1 attachment uploaded                                         | Same as quick + `attachment_urls` populated                                                                                         |
 | (create) → `pending`   | Student (request)              | Student has absent/late/rejected record for session; reason text provided              | `excuse_requests` row created with `status=pending`; no mutation to `attendance_records` yet                                        |
-| `pending` → `approved` | Professor (review)             | Professor has active assignment for the course; `reviewed_by` set                      | `attendance_records.status` mutated to `excused`; `original_status` preserved                                                       |
+| `pending` → `approved` | Professor (review)             | Professor has active assignment for the course; `reviewed_by` set                      | `attendance_records.validation_status` mutated to `excused`; `original_status` preserved                                                       |
 | `pending` → `rejected` | Professor (review)             | Same as above + optional `review_notes`                                                | No mutation to `attendance_records`; student notified                                                                               |
 
 ---
@@ -89,8 +90,8 @@ Server atomically:
         initiated_via='quick', reason=..., status='approved',
         reviewed_by=prof_user_id, reviewed_at=NOW())
     2. UPDATE attendance_records
-       SET original_status = status,
-           status = 'excused',
+       SET original_status = validation_status,
+           validation_status = 'excused',
            excuse_reason = ...,
            excused_by = prof_user_id,
            excused_at = NOW(),
@@ -205,8 +206,9 @@ Reviews reason + attachments
      │                      │─────────────────────▶│
      │                      │  UPDATE attendance   │
      │                      │  SET original_status │
-     │                      │      = status        │
-     │                      │      status='excused'│
+     │                      │  = validation_status │
+     │                      │  validation_status = │
+     │                      │  'excused'           │
      │                      │─────────────────────▶│
      │                      │  COMMIT              │
      │                      │─────────────────────▶│
@@ -265,7 +267,8 @@ Reviews reason + attachments
      │                      │  → approved          │                  │
      │                      │─────────────────────▶│                  │
      │                      │  UPDATE attendance   │                  │
-     │                      │  → excused           │                  │
+     │                      │  validation_status → │                  │
+     │                      │  'excused'           │                  │
      │                      │─────────────────────▶│                  │
      │                      │                      │   notify student │
      │                      │                      │─────────────────▶│
@@ -287,15 +290,15 @@ Body: { "reason": "Class cancelled due to typhoon" }
 ```
 1. Validate professor has active assignment for session's course
 2. BEGIN TX
-3. SELECT all attendance_records WHERE session_id = ? AND status = 'absent'
+3. SELECT all attendance_records WHERE session_id = ? AND validation_status = 'absent'
 4. For each record:
    a. INSERT INTO excuse_requests
       (student_id, session_id, initiated_by='professor',
        initiated_via='quick', reason=..., status='approved',
        reviewed_by=prof_user_id, reviewed_at=NOW())
-   b. UPDATE attendance_record
+   b. UPDATE attendance_records
       SET original_status = 'absent',
-          status = 'excused',
+          validation_status = 'excused',
           excuse_reason = ...,
           excused_by = prof_user_id,
           excused_at = NOW(),
@@ -310,7 +313,7 @@ Body: { "reason": "Class cancelled due to typhoon" }
 - If called twice for the same session with the same reason, the second call
   is a **no-op** for students already excused. Only students still marked
   `absent` (not yet processed) are excused.
-- The server checks: `WHERE status = 'absent'` — already-excused rows are
+- The server checks: `WHERE validation_status = 'absent'` — already-excused rows are
   skipped by the WHERE clause.
 - Response always returns the count of **newly** excused students.
 
@@ -323,19 +326,22 @@ When an excuse is approved (any path), the `attendance_records` row is updated:
 ```sql
 UPDATE attendance_records
 SET
-    original_status = status,        -- preserve what actually happened
-    status = 'excused',              -- override to excused
+    original_status = validation_status, -- preserve what actually happened
+    validation_status = 'excused',       -- override to excused
     excuse_reason = $1,
     excused_by = $2,
     excused_at = NOW(),
-    excuse_type = $3,                -- 'quick' | 'prof_with_evidence' | 'request_approved'
+    excuse_type = $3,                -- attendance_records.excuse_type:
+                                     -- 'quick' | 'prof_with_evidence' | 'request_approved'
+                                     -- (distinct from excuse_requests.initiated_via,
+                                     --  whose student path uses 'request')
     excuse_request_id = $4
 WHERE student_id = $5 AND session_id = $6;
 ```
 
 **Purpose:** Audit trail. A student who arrived late and was later excused will
-show `status = 'excused'` but `original_status = 'late'`, preserving the factual
-record of what happened at scan time.
+show `validation_status = 'excused'` but `original_status = 'late'`, preserving
+the factual record of what happened at scan time.
 
 ---
 
@@ -394,7 +400,7 @@ Compliance Rate = present / total
 ```
 
 Excused records are **NOT counted as present** in the compliance rate. They are
-excluded from the numerator. Only `status = 'present'` counts.
+excluded from the numerator. Only `validation_status = 'present'` counts.
 
 ### Participation Rate
 

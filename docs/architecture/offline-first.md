@@ -28,14 +28,14 @@ Stores pending scan submissions.
 | `id`                | UUID     | Auto-generated client ID                                     |
 | `session_id`        | int      | FK to server session                                         |
 | `session_code`      | string   | For display/debug                                            |
-| `qr_student_number` | string   | Student number from ID QR                                    |
+| `student_number`  | string   | Student number from ID QR                                    |
 | `gps_lat`           | float    | Captured at scan time                                        |
 | `gps_lng`           | float    | Captured at scan time                                        |
 | `gps_accuracy`      | float    | metres                                                       |
 | `liveness_evidence` | JSON     | blink, head turns, EAR, PnP                                  |
 | `face_match_score`  | float    | Cosine similarity                                            |
 | `scanned_at`        | ISO-8601 | **Device timestamp at scan** (validated server-side per D16) |
-| `status`            | enum     | `pending` → `syncing` → `synced` / `rejected`                |
+| `status`            | enum     | `pending` → `syncing` → `synced` / `rejected` — **client-local queue states** (NOT DB enums; server uses `SyncStatus` = `synced`/`pending`/`failed` and `QueueStatus` = `pending`/`processing`/`done`/`failed`) |
 | `retry_count`       | int      | Exponential backoff counter                                  |
 | `last_error`        | string   | Server rejection reason, if any                              |
 | `created_at`        | ISO-8601 | Local enqueue time                                           |
@@ -88,10 +88,10 @@ Read-only snapshots of active session config (for offline display and GPS checks
 │                                                      │
 │  4. Drain queue:                                     │
 │     for each item (oldest first):                    │
-│       set status = syncing                           │
+│       set status = syncing (client-only state)       │
 │       POST /attendance/scan with X-Idempotency-Key   │
 │       = item.id                                      │
-│       → 200: set status = synced                     │
+│       → 200: set status = synced (client-only state) │
 │       → 4xx reject: set status = rejected,           │
 │         last_error = server message                  │
 │       → network error: revert status = pending,      │
@@ -120,7 +120,7 @@ Read-only snapshots of active session config (for offline display and GPS checks
 │       scanned_at ≤ present_window + late_window      │
 │                                        → late        │
 │       else → rejected (late after window)            │
-│    10. Write attendance_record                        │
+│    10. Write attendance_records                       │
 │    11. Return result                                 │
 │                                                      │
 └─────────────────────────────────────────────────────┘
@@ -231,7 +231,7 @@ sequenceDiagram
     participant DB as Database
 
     S->>API: POST /student/sessions/verify-code {code}
-    API->>DB: SELECT session WHERE code = ?
+    API->>DB: SELECT sessions WHERE session_code = ?
     DB-->>API: Session + course config
     API-->>S: 200 {session_id, geofence, windows, ...}
 
@@ -240,7 +240,7 @@ sequenceDiagram
     S->>S: Face liveness challenge (blink→left→right)
     S->>S: Face match vs cached embedding
 
-    S->>API: POST /student/attendance/scan {session_id, gps, liveness, face_score, scanned_at}
+    S->>API: POST /student/attendance/scan {session_id, gps {lat, lng, accuracy}, liveness_evidence, face_match_score, scanned_at}
     API->>DB: Check idempotency key
     API->>API: Validate scanned_at vs window
     API->>API: Validate geofence
@@ -248,8 +248,8 @@ sequenceDiagram
     API->>API: Validate face score
     API->>API: Check enrollment + duplicate
     API->>API: Compute status (present/late/rejected)
-    API->>DB: INSERT attendance_record
-    API-->>S: 200 {attendance_id, status}
+    API->>DB: INSERT attendance_records
+    API-->>S: 200 {id, status}
 ```
 
 ### Offline Scan → Later Sync
@@ -267,7 +267,7 @@ sequenceDiagram
     S->>S: GPS geofence check (local cache)
     S->>S: Face liveness challenge
     S->>S: Face match vs cached embedding (offline)
-    S->>Q: Enqueue {session_id, gps, evidence, face_score, scanned_at}
+    S->>Q: Enqueue {session_id, gps_lat, gps_lng, liveness_evidence, face_match_score, scanned_at}
     Q-->>S: "Evidence saved — will verify after sync"
 
     Note over S: Network restored
@@ -281,11 +281,11 @@ sequenceDiagram
 
     alt scanned_at > expires_at
         API-->>S: 410 {code: "session_expired"}
-        Q->>Q: status = rejected, last_error = "session_expired"
+        Q->>Q: status = rejected (client-only state),<br>last_error = "session_expired"
     else scanned_at within window
-        API->>DB: INSERT attendance_record
+        API->>DB: INSERT attendance_records
         API-->>S: 200 {status: "present"|"late"}
-        Q->>Q: status = synced
+        Q->>Q: status = synced (client-only state)
     end
 ```
 
