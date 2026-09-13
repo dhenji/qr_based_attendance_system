@@ -1,4 +1,16 @@
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, true
+from datetime import datetime
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    text,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -27,6 +39,12 @@ class Student(TimestampMixin, Base):
     section: Mapped[str | None] = mapped_column(String(20))
     year_level: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
+
+    face_embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
+    face_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    face_embedding_version: Mapped[int] = mapped_column(
+        Integer, server_default=text("0")
+    )
 
     user: Mapped[User | None] = relationship()
     program: Mapped[Program] = relationship()
