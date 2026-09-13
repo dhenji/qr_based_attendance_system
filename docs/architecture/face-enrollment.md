@@ -89,7 +89,7 @@ A single encrypted JSON blob stored in `students.face_embedding` (BYTEA column):
 - **`mean`** (128 floats): element-wise average of the three angle vectors. Used as
   the **primary comparison target** during verification (D28).
 - **`angles`** (3 × 128 floats): per-angle vectors retained for **tie-breaking**
-  when the mean score falls in the review band (0.65–0.6999). The system re-checks
+  when the mean score falls in the review band (0.65–0.70). The system re-checks
   cosine similarity against each individual angle; if any angle passes ≥
   `FACE_MATCH_THRESHOLD` (0.70), the scan is auto-approved.
 - **Encryption**: the JSON is encrypted with AES-256-GCM using a server-side key
@@ -224,8 +224,8 @@ model (128-d output).
 | Score Range                            | Outcome         | Action                                                                                                                                                                                                                          |
 | -------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ≥ `FACE_MATCH_THRESHOLD` (0.70)        | **Pass**        | Proceed to step 5; record `face_match_score`                                                                                                                                                                                    |
-| `FACE_REVIEW_BAND_LOW` (0.65) – 0.6999 | **Review flag** | Proceed to step 5 (record saved), but the attendance record is flagged in `liveness_review` for admin manual review. Tie-break: re-check against individual angle vectors; if any angle ≥ `FACE_MATCH_THRESHOLD`, auto-approve. |
-| < `FACE_REVIEW_BAND_LOW` (0.65)        | **Fail**        | Scan **rejected**; `rejection_reason = 'face_mismatch'`; student may retry.                                                                                                                                                     |
+| `FACE_REVIEW_BAND_LOW` (0.65) – 0.70 | **Review flag** | Proceed to step 5 (record saved), but the attendance record is flagged in `liveness_review` for admin manual review. Tie-break: re-check against individual angle vectors; if any angle ≥ `FACE_MATCH_THRESHOLD`, auto-approve. |
+| < `FACE_REVIEW_BAND_LOW` (0.65)        | **Fail**        | Scan **rejected**; `rejection_reason = 'face_mismatch'` is recorded inside the `liveness_evidence` JSONB bundle (not a dedicated column); student may retry. |
 
 Thresholds are configurable via environment variables:
 
@@ -257,7 +257,7 @@ Submitted with every scan request (online or queued offline):
 
 ```json
 {
-  "student_id": "24-2111",
+  "student_number": "24-2111",
   "session_id": 582,
   "gps": {
     "latitude": 10.3157,

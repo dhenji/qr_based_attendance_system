@@ -56,7 +56,8 @@ class BackupStorage(StrEnum):
 
 
 class BackupStatus(StrEnum):
-    SUCCESS = "success"
+    STARTED = "started"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 

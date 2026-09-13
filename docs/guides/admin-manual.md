@@ -143,12 +143,12 @@ Edits _offering_ defaults: _present window_, _late window_, _geofence radius_.
 **CSV Template Columns**:
 
 ```
-student_id, first_name, middle_name, last_name, email, course, section, year_level
+student_id, first_name, middle_name, last_name, email, program_code, section, year_level
 ```
 
 - **Email** is the _registration lookup key_ — students claim their record by registering with this email + OTP ([Claim-Based Registration](../project/glossary.md#claim-based-registration))
 - **Section** is stored on the _student_ only (not on _enrollments_) per [D2](../project/decision-log.md)
-- **Course** and **Year Level** in the CSV map to the _program_ hierarchy for initial enrollment
+- **Program Code** in the CSV maps to the _program_ hierarchy (offering + year level) for initial enrollment
 
 ### 3.2 Professor CSV Import — `/admin/professors` → [Import CSV]
 

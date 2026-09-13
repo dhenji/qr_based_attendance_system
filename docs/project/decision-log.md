@@ -14,6 +14,7 @@
 - **Status:** Accepted
 - **Context:** The current flat `courses` table cannot express program-specific year structures or term definitions. A hierarchical model enables per-program-per-year term structures and proper course ownership.
 - **Consequences:** Requires new tables `programs` and `year_levels`; `courses` gains `program_id` and `year_level_id` FKs. Migration must backfill from legacy `students.course` strings.
+> **Superseded by D44** — program/year-level FKs moved from `courses` to `course_offerings`; hierarchy is now Program → Year Level → CourseOffering (course templates carry no program/year FKs).
 
 ### ADR-002: Course = Subject; Section on Students Only
 
@@ -38,6 +39,7 @@
 - **Status:** Accepted
 - **Context:** Current `courses.schedule` is a free-text string. Structured fields enable expected-session calculation for risk scoring and conflict detection.
 - **Consequences:** `courses` table gains 9+ new columns. Expected sessions formula: `semester_weeks × sessions_per_week`.
+> **Superseded by D44** — scheduling/classroom/window metadata moved to `course_offerings`; `courses` keeps only `units` + `session_duration_hours`.
 
 ### ADR-005: Enrollment Gains Semester
 
@@ -54,6 +56,7 @@
 - **Status:** Accepted
 - **Context:** General education (GE) courses are shared. Analytics must slice the same course by cohort.
 - **Consequences:** `courses` has `program_id` + `year_level_id` (owning program/year), but enrollments from other programs/years can reference it. Filters in reports must join through enrollments to get student's program/year.
+> **Superseded by D44** — sharing now happens via multiple `course_offerings` per course instead of cross-program/year enrollments on a single course.
 
 ---
 
@@ -127,6 +130,7 @@
 - **Status:** Accepted
 - **Context:** Reduces repetitive configuration; professors can override for specific sessions.
 - **Consequences:** `courses` gains two default window columns; session create pre-fills from course.
+> **Superseded by D44** — late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`) moved to `course_offerings`; sessions pre-fill from the offering.
 
 ### ADR-015: Expanded Validation Status Enum
 
@@ -426,4 +430,21 @@
 - **Status:** Accepted
 - **Context:** A session is opened by a specific professor (not a generic user). `CourseProfessor.professor_id` already targets `professors.id`; sessions should follow the same pattern for consistency. This gives direct access to professor name/department without an extra join through `users`.
 - **Consequences:** The session `professor` relationship returns a `Professor` instance. The logged-in user (JWT) resolves to a professor record via `Professor.user_id` before session creation. `database-er.md` FK notation and cardinality table updated. `migration-strategy.md` Step 6 includes retargeting the `professor_id` FK from `users.id` to `professors.id`.
+
+### ADR-047: Backup Status Enum — Started/Completed/Failed
+
+- **Decision (D47):** `BackupStatus` enum values are `started`, `completed`, `failed` (replacing the earlier implied `success`/`failed` pairing).
+- **Date:** 2026-09-13
+- **Status:** Accepted
+- **Context:** A backup run spends time in a non-failed, in-flight state before finishing; `started` lets the backup UI/log distinguish running vs done vs failed.
+- **Supersedes:** D39's implied `success`/`failed` status values.
+- **Consequences:** `backup_log.status` stores `started` | `completed` | `failed`. Implemented in `src/shared/enums.py` `BackupStatus`.
+
+### ADR-048: Face-Match Threshold ≥ 0.70; Session Status Computed DTO-Only
+
+- **Decision (D48):** Face-match pass threshold is **`FACE_MATCH_THRESHOLD = 0.70`** (config default — supersedes the earlier 0.75 pass band). Session lifecycle `status` (`active`/`closed`) is **computed in the DTO layer only**; it is not a stored column (`active` = `expires_at > now()`).
+- **Date:** 2026-09-13
+- **Status:** Accepted
+- **Context:** Threshold tuned to reduce false rejects; session lifecycle state is fully derivable from `sessions.expires_at`, so persisting a separate status column would risk drift.
+- **Consequences:** `face_match_score >= 0.70` passes (below → `face_mismatch` rejection); `FACE_REVIEW_BAND_LOW` (0.65) still flags borderline scans for manual review. `sessions.status` (`active`/`closed`) is derived during serialization.
 

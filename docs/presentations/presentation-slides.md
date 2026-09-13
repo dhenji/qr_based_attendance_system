@@ -113,12 +113,11 @@ sequenceDiagram
     Student->>Student: Capture GPS
     Student->>Server: Submit evidence bundle {id, session, gps, challenge, nonce}
 
-    Server->>Server: 1. HMAC verification
-    Server->>Server: 2. GPS geofencing (Haversine)
-    Server->>Server: 3. Live QR liveness check
-    Server->>Server: 4. Face liveness + nonce anti-replay
-    Server->>Server: 5. One-scan-per-session check
-    Server->>Server: 6. Enrollment check
+    Server->>Server: 1. HMAC verification (invalid / session_expired)
+    Server->>Server: 2. GPS geofencing (Haversine → outside_geofence)
+    Server->>Server: 3. Face liveness challenge + face match (liveness_failed / face_mismatch)
+    Server->>Server: 4. One-scan-per-session duplicate check
+    Server->>Server: 5. Enrollment check (not_enrolled)
 
     alt Risk score passes
         Server-->>Student: ✅ Attendance recorded
@@ -154,10 +153,8 @@ flowchart LR
     A[Student submits<br>evidence bundle] --> B{Session Code<br>HMAC-SHA256}
     B -->|Valid| C{GPS Geofencing<br>Haversine}
     B -->|Invalid| X[Rejected ❌]
-    C -->|Within range| D{Live QR Detection<br>Reflection analysis}
+    C -->|Within range| E{Face Liveness<br>Challenge-response}
     C -->|Outside range| X
-    D -->|Physical card| E{Face Liveness<br>Challenge-response}
-    D -->|Screenshot| X
     E -->|Challenges passed| F{Nonce Anti-Replay<br>+ Uniqueness}
     E -->|Photo / replay / print| X
     F -->|Fresh + first scan| G{Enrollment<br>Check}
@@ -183,7 +180,7 @@ flowchart LR
 
 | Layer          | Borrowed model            | Our contribution                                                                                           |
 | -------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| QR liveness    | `html5-qrcode` heuristics | Integration into the risk-fusion pipeline                                                                  |
+| QR decoding    | `html5-qrcode`            | Session binding + one-scan-per-session duplicate rejection (D15 `duplicate`)       |
 | Face liveness  | MediaPipe landmarks       | Challenge-response protocol: random blink/head-turn challenges, EAR + head-pose scoring                    |
 | Offline safety | —                         | **Offline liveness protocol**: HMAC evidence bundles, nonce anti-replay, deferred risk-based re-validation |
 | Decision logic | —                         | **Risk-fusion scorer**: weighted layer confidences → accept / flag-for-review / reject                     |
@@ -203,7 +200,7 @@ flowchart LR
 This project proposes a QR-based attendance system that:
 
 - Automates the entire attendance process
-- Prevents fraud through session codes, GPS, QR liveness, and face liveness
+- Prevents fraud through session codes, GPS, and face liveness
 - Extends anti-spoofing to offline environments via deferred evidence validation
 - Provides predictive-prescriptive attendance analytics
 - Works with or without internet

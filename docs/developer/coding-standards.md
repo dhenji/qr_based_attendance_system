@@ -168,7 +168,7 @@ features/
 
 ### 2.6 Import Paths
 
-- Use `$lib` alias: `import { api } from '$lib/services/api'`.
+- Use `$lib` alias for shared code: `import { get } from '$lib/api/client'`.
 - Feature imports: `import { StudentCard } from '$lib/features/student/components'`.
 - Never use relative paths going more than two levels up.
 
@@ -297,7 +297,7 @@ See [test-data.md](../testing/test-data.md) for seed specifications:
 
 ### 6.1 Backend
 
-All backend env vars are documented in [§8 of the Refactor Plan](../../DOCS_REFACTOR_PLAN.md#8-environment-variables-reference) and `backend/.env.example`.
+All backend env vars are documented in [backend-setup.md](./backend-setup.md), [production-checklist.md §1](../deployment/production-checklist.md), and `backend/.env.example`.
 
 Rules:
 

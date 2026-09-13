@@ -2,7 +2,8 @@
 
 > Canonical structure for `frontend/src/`. Replaces the earlier flat
 > `services/ + stores/ + components/` layout with domain-driven **feature
-> slices** that mirror `backend/features/` 1:1.
+> slices** aligned with backend domains, except `liveness` (frontend-only) and
+> the pending slices (professor, program, course_professor, excuse, system) that are not yet implemented.
 
 ## Feature-Slice Convention
 

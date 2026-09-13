@@ -129,9 +129,14 @@ Usage in components:
 
 ---
 
-## Service Worker Development
+## Service Worker (deferred)
 
-The PWA service worker (`src/service-worker.ts`) is planned but not yet installed. When ready:
+The PWA offline stack — `src/service-worker.ts` and the local queue under
+`src/lib/features/sync/` — is
+**deferred**, not planned-but-impending. See
+[frontend-architecture.md](../architecture/frontend-architecture.md) ("Deferred
+(later passes)"): `hooks.server.ts`, `service-worker.ts`, `static/icons/`,
+`vite-plugin-pwa`, `robots.txt`. If it is picked up later:
 
 ```bash
 npm install -D vite-plugin-pwa
@@ -163,7 +168,13 @@ VitePWA({
 
 ## Mock Service Pattern
 
-The planned feature-slice structure uses mock services for frontend development without a live backend.
+The feature-slice structure (under `src/lib/features/`) uses mock services for
+frontend development without a live backend.
+
+> **Canonical mock toggle:** the global switch is `MOCK = true` in
+> `src/lib/api/client.ts` (mock data comes from `src/lib/api/endpoints.ts`).
+> The per-service fallback pattern below is how individual services can also
+> short-circuit in dev when `PUBLIC_API_URL` is unset.
 
 ### Directory pattern per feature
 

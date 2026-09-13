@@ -53,7 +53,7 @@ npm run check                      # typecheck (runs svelte-kit sync first)
   - `program.Program` + `program.YearLevel` — imported in `alembic/env.py`
 - **Routers**: `src/api/router.py` mounts 5 routers under `/api`. `course` and `enrollment` routers exist as files but are **not mounted**. All mounted routers are currently empty stubs.
 - **Alembic**: 3 migrations in `alembic/versions/`. To add a table: write model, add `import features.X.model` to `alembic/env.py`, then `alembic revision --autogenerate -m "..."` + `alembic upgrade head`.
-- **Shared**: `src/shared/enums.py` (15 StrEnum classes), `src/shared/mixins.py`, `src/shared/pagination.py`, `src/shared/base.py` (BaseCRUD generic), `src/shared/email.py`.
+- **Shared**: `src/shared/enums.py` (13 StrEnum classes), `src/shared/mixins.py`, `src/shared/pagination.py`, `src/shared/base.py` (BaseCRUD generic), `src/shared/email.py`.
 - **Missing**: `service.py` and `schema.py` for all features (incl. `excuse`, which has model only); `src/shared/dependencies.py`/`cache.py`; `src/tests/` is empty.
 - **Dockerfile.dev**: 3-stage — `builder` (venv at `/opt/venv`) → `runtime` (uvicorn) → `migrate` (alembic upgrade head).
 

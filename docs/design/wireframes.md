@@ -406,7 +406,7 @@ Four-step flow. Each step advances after verification.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> **Session QR payload** (D18): `{\"v\":1,\"code\":\"A7X-9K2M\",\"course\":123,
+> **Session QR payload** (D18): `{\"v\":1,\"code\":\"A7X-9K2M\",\"offering\":123,
 \"radius\":30,\"pw\":5,\"lw\":10}` — versioned for future migration.
 > Student ID-card QR contains **student number only** (D19); course
 > context always comes from the verified session.
@@ -505,7 +505,7 @@ Four-step flow. Each step advances after verification.
 │  Comparing face embedding (cosine similarity ≥ 0.70)            │
 │                                                                 │
 │  ✅ Match (score: 0.82) → proceeds to Step 5                    │
-│  ⚠ Review (score: 0.65–0.75) → flagged for admin review         │
+│  ⚠ Review (score: 0.65–0.70) → flagged for admin review         │
 │  ❌ Fail (score < 0.65) → rejection                             │
 │                                                                 │
 │  📱 Offline badge: \"Evidence saved — will verify after sync\"  │
@@ -1267,7 +1267,7 @@ duration_minutes, scheduled_end_time)`.
 │            │  Step 1: Download Template                         │
 │            │  [📥 Download CSV Template]                        │
 │            │  student_id, first_name, middle_name, last_name,   │
-│            │  email, course, section, year_level                │
+│            │  email, program_code, section, year_level             │
 │            │                                                    │
 │            │  Step 2: Upload File                               │
 │            │  ┌──────────────────────────────────────────┐      │

@@ -1,9 +1,11 @@
 # Migration Strategy: Current → Target Schema
 
 > Ordered Alembic migration plan from the current 7-feature schema to the §6 target schema.
-> **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py` alongside the existing eight feature imports so autogenerate sees them in `target_metadata`. Face enrollment columns live on `features.student/model.py` — no separate import needed. Run alembic from `backend/`.
+> **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py` alongside the existing thirteen feature imports (`analytics`, `attendance`, `auth`, `course`, `course_professor`, `enrollment`, `excuse`, `professor`, `program`, `session`, `student`, `sync`, `system`) so autogenerate sees them in `target_metadata`. Face enrollment columns live on `features.student/model.py` — no separate import needed. Run alembic from `backend/`.
 
 ---
+
+> **Full-migration ("full baseline") approach:** Models already express the target schema below, so the ordered Steps 1–9 collapse into a **single full-baseline migration** — `alembic revision --autogenerate -m "baseline target schema"` then `alembic upgrade head` from `backend/`. The three original revisions (`68a78206e082`, `388e5e496455`, `996b2fb85c6f`) are dropped — the regenerated baseline is the single source of truth. The per-step narrative remains only as a **backfill/rollback reference** for migrating existing data.
 
 ## Current Schema (Baseline)
 
@@ -26,7 +28,7 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 ## Target Schema (Reference §6)
 
 New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+3 face cols, drop legacy `course`)
+Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+year_level_id FK, +3 face cols, drop legacy `course`)
 
 ---
 
@@ -352,7 +354,7 @@ class BackupLog(Base):
     encryption_key_version = Integer
     started_at = DateTime(timezone=True)
     finished_at = DateTime(timezone=True) NULL
-    status = String(20)  -- 'success' | 'failed'
+    status = String(20)  -- 'started' | 'completed' | 'failed'
     error = Text NULL
 ```
 
@@ -360,7 +362,7 @@ class BackupLog(Base):
 
 ---
 
-### Step 9: Extend `students` — Face Columns + Drop Legacy `course`
+### Step 9: Extend `students` — Year Level FK + Face Columns + Drop Legacy `course`
 
 **Migration:** `alembic revision --autogenerate -m "add face embedding columns to students and drop legacy course string"`
 
@@ -368,22 +370,26 @@ class BackupLog(Base):
 
 ```python
 class Student(Base):
-    # Existing: id, user_id, student_id, email, names, course (string), section, year_level, is_active
+    # Existing: id, user_id, student_id, email, names, section, year_level, is_active
+    # NEW FK: year_level_id → year_levels.id (RESTRICT) — NOT program_id
+    year_level_id = BigInteger FK → year_levels.id
+    # RETAINED: section — kept as a snapshot on the row (year level via FK)
     # NEW:
     face_embedding = LargeBinary NULL  -- BYTEA: encrypted JSON blob
     face_enrolled_at = DateTime(timezone=True) NULL
     face_embedding_version = Integer default 0
-    # DROP: course (string) — after backfill to FK-based courses/enrollments
+    # DROP: course (string) — after backfill to FK-based year_levels/enrollments
 ```
 
 **Backfill legacy `course` string:**
 
 1. For each student, parse `student.course` string (e.g., "BSCS-1")
 2. Match to `programs.code` + `year_levels.year_number`
-3. Ensure enrollment exists for that course in the correct program/year
-4. After verification, drop `course` column
+3. Set `student.year_level_id` from the matching `year_levels` row
+4. Ensure enrollment exists for that course in the correct program/year
+5. After verification: `ALTER COLUMN year_level_id SET NOT NULL`, then drop `course` column
 
-**Rollback:** Recreate `course` VARCHAR column, restore from backup. Face columns dropped.
+**Rollback:** Recreate `course` VARCHAR column, restore from backup. `year_level_id` and face columns dropped.
 
 ---
 
@@ -391,28 +397,22 @@ class Student(Base):
 
 **File:** `backend/alembic/env.py`
 
-Current imports (lines 8–15):
+Current imports — all 13 features:
 
 ```python
+import features.analytics.model  # noqa: F401        # student_risk_scores
 import features.attendance.model  # noqa: F401
 import features.auth.model  # noqa: F401
 import features.course.model  # noqa: F401
-import features.enrollment.model  # noqa: F401
-import features.professor.model  # noqa: F401
-import features.session.model  # noqa: F401
-import features.student.model  # noqa: F401
-import features.sync.model  # noqa: F401
-```
-
-**After adding new features, MUST add:**
-
-```python
-import features.program.model  # noqa: F401        # programs, year_levels
 import features.course_professor.model  # noqa: F401  # course_professors
-import features.excuse.model  # noqa: F401        # excuse_requests
-import features.analytics.model  # noqa: F401      # student_risk_scores
-import features.system.model  # noqa: F401        # backup_log
-# face_enrollment columns live on features.student.model — no separate import needed
+import features.enrollment.model  # noqa: F401
+import features.excuse.model  # noqa: F401            # excuse_requests
+import features.professor.model  # noqa: F401
+import features.program.model  # noqa: F401           # programs, year_levels
+import features.session.model  # noqa: F401
+import features.student.model  # noqa: F401           # + face_enrollment columns
+import features.sync.model  # noqa: F401
+import features.system.model  # noqa: F401            # backup_log
 ```
 
 **Run alembic from `backend/` directory** so `features.*` imports resolve.
@@ -453,12 +453,12 @@ After all migrations, verify:
 - [ ] `courses`: course_code(UK), course_name, units, session_duration_hours, is_active, timestamps (no FKs — template only)
 - [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
 - [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
-- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, validated against year_level.term_structure
+- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, academic_year NOT NULL, UNIQUE(student_id, offering_id, academic_year), validated against year_level.term_structure
 - [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint; course_id DROPPED
 - [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
-- [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, offering_id, semester, date)
-- [ ] `backup_log`: all columns including sha256, key_version
-- [ ] `students`: face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED
+- [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, offering_id, semester, computed_at::date)
+- [ ] `backup_log`: all columns including sha256, key_version; status = started/completed/failed
+- [ ] `students`: year_level_id FK → year_levels; section retained (snapshot per D2); face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED (no program_id)
 - [ ] All enums in code match §6 (ValidationStatus expanded, etc.)
 
