@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import features.analytics.model  # noqa: F401
 import features.attendance.model  # noqa: F401
 import features.auth.model  # noqa: F401
 import features.course.model  # noqa: F401
@@ -16,6 +17,7 @@ import features.program.model  # noqa: F401
 import features.session.model  # noqa: F401
 import features.student.model  # noqa: F401
 import features.sync.model  # noqa: F401
+import features.system.model  # noqa: F401
 from alembic import context
 from core.config import get_settings
 from core.database import Base
