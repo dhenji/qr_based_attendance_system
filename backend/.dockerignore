@@ -17,6 +17,7 @@ __pycache__/
 src/tests/
 alembic/
 Dockerfile*
+.dockerignore
 
 # misc
 .DS_Store
