@@ -80,6 +80,7 @@ class YearLevel(TimestampMixin, Base):
 - Use `String(n)` for bounded strings, `Text` for unbounded
 - FK `ondelete` rule: `CASCADE` for owned children, `RESTRICT` for references
 - Import `Base` from `core.database`
+- Avoid `Computed`/`GENERATED` columns that reference other columns with `server_default` (e.g., `created_at` with `func.now()`) — compute in service layer instead (see D49)
 
 **Done:**
 

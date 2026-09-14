@@ -272,7 +272,7 @@
 ### Deliverables
 
 - Test plan covering all 48 decisions (test-plan.md)
-- Seed data: 3 programs, ~40 students, shared GE course, 6-week history (test-data.md)
+- Test data: ~40 students, shared GE course, 6-week history (test-data.md)
 - Performance benchmarks: scan latency, concurrent sync, risk batch, backup scaling (performance-benchmarks.md)
 - Security audit: threat model validation, bypass attempt testing (security-model.md)
 - Offline → online sync integration tests

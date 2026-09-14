@@ -127,7 +127,7 @@ CREATE TABLE student_risk_scores (
                     CHECK (risk_level IN ('low', 'medium', 'high')),
     features        JSONB NOT NULL,           -- full feature snapshot
     computed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(student_id, offering_id, semester, computed_at::date)
+    UNIQUE(student_id, offering_id, semester, computed_day)
 );
 ```
 
@@ -180,7 +180,7 @@ BEGIN BATCH
     │     c. Evaluate heuristic rules (§3)
     │     d. Compute risk_probability (§3.1)
     │     e. UPSERT INTO student_risk_scores
-    │        (ON CONFLICT (student_id, offering_id, semester, computed_at::date)
+     │        (ON CONFLICT (student_id, offering_id, semester, computed_day)
     │         DO UPDATE SET risk_probability = ..., risk_level = ..., features = ...,
     │                       computed_at = NOW())
     │

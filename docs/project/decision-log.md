@@ -113,7 +113,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Prevents sessions from running past scheduled class end. Professor sets intended scan duration; system enforces hard ceiling at scheduled end.
-- **Consequences:** `sessions` gains `duration_minutes`, `scheduled_start_time`, `scheduled_end_time`, `expires_at` (STORED/computed). Dual timers in live view.
+- **Consequences:** `sessions` gains `duration_minutes`, `scheduled_start_time`, `scheduled_end_time`, `expires_at` (app-computed, D49). Dual timers in live view.
 
 ### ADR-013: Present/Late Windows Per Session
 
@@ -416,7 +416,7 @@
 
 ### ADR-045: Professor Assignments & Risk Scores Reference Course Offerings
 
-- **Decision (D45):** `course_professors` FK changes from `course_id` to `offering_id` (PK(offering_id, professor_id, effective_from)); `student_risk_scores` FK changes from `course_id` to `offering_id` (UNIQUE(student_id, offering_id, semester, computed_at::date)).
+- **Decision (D45):** `course_professors` FK changes from `course_id` to `offering_id` (PK(offering_id, professor_id, effective_from)); `student_risk_scores` FK changes from `course_id` to `offering_id` (UNIQUE(student_id, offering_id, semester, computed_day)).
 - **Date:** 2026-09-10
 - **Status:** Accepted
 - **Context:** Assignments and risk are scoped to a specific offering (program + year + semester), not the course template.
@@ -447,4 +447,28 @@
 - **Status:** Accepted
 - **Context:** Threshold tuned to reduce false rejects; session lifecycle state is fully derivable from `sessions.expires_at`, so persisting a separate status column would risk drift.
 - **Consequences:** `face_match_score >= 0.70` passes (below → `face_mismatch` rejection); `FACE_REVIEW_BAND_LOW` (0.65) still flags borderline scans for manual review. `sessions.status` (`active`/`closed`) is derived during serialization.
+
+### ADR-049: Session expires_at Computed in Application Layer
+
+- **Decision (D49):** `sessions.expires_at` is computed in the application service layer (Python) instead of as a PostgreSQL `GENERATED ALWAYS AS ... STORED` column.
+- **Date:** 2026-09-13
+- **Status:** Accepted
+- **Context:** PostgreSQL persisted computed columns require IMMUTABLE expressions. `timestamptz + interval` is classified as STABLE (timezone-dependent), causing `generation expression is not immutable` error on `alembic upgrade head`.
+- **Consequences:**
+  - `expires_at` becomes a regular `DateTime(timezone=True)` nullable column
+  - Model exposes `@property computed_expires_at` — single source of truth for the formula
+  - Service layer sets `expires_at = session.computed_expires_at` at session creation
+  - Simpler migrations, portable across databases, easier to test
+- **Supersedes:** Part of D12 (the STORED column implementation detail)
+
+### ADR-050: student_risk_scores uses computed_day DATE column
+
+- **Decision (D50):** `student_risk_scores` unique index uses a plain `computed_day DATE` column instead of `date(computed_at)` expression.
+- **Date:** 2026-09-14
+- **Status:** Accepted
+- **Context:** PostgreSQL `date(timestamptz)` is STABLE, not IMMUTABLE. Expression indexes require IMMUTABLE functions. Using `date(computed_at)` in a unique index causes `functions in index expression must be marked IMMUTABLE`.
+- **Consequences:**
+  - `computed_day` is a regular `DATE NOT NULL` column, set by the service layer: `risk_score.computed_day = risk_score.computed_at.date()`
+  - Unique index becomes `UNIQUE(student_id, offering_id, semester, computed_day)` — plain column, no expression
+  - Same pattern as D49: move computation to application layer, store result as regular column
 

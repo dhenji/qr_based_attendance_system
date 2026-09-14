@@ -455,7 +455,7 @@ List professor's active course assignments with program/year badges.
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?from?&to?&offering_id?&page=1&size=20`                                                                                               |
 | **Response 200** | `{ items: [{ id, offering_id, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
-| **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `active`/`closed` derived from `expires_at`/close time. |
+| **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `active`/`closed` derived from `expires_at`/close time. `expires_at` is a regular column populated by service layer at creation (D49). |
 
 #### `POST /professor/sessions`
 
@@ -466,7 +466,7 @@ Open a new attendance session.
 | **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
 | **Response 201** | `{ id, session_code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
 | **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration`                                                                                                                          |
-| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(now + duration_minutes, scheduled_end_time)` (D12).                                |
+| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49).                                |
 
 #### `GET /professor/sessions/active/{id}`
 
@@ -757,7 +757,7 @@ Existing claim-based registration, MFA, and forgot-password flows are unchanged 
 | Contract Element                                    | Decision(s)        |
 | --------------------------------------------------- | ------------------ |
 | Session QR payload schema                           | D18                |
-| `expires_at` = `min(now+duration, scheduled_end)`   | D12                |
+| `expires_at` = `min(created_at+duration, scheduled_end)`   | D12, D49           |
 | Present/Late window validation `P+L ≤ D`            | D13                |
 | Offline `scanned_at` validation → `session_expired` | D16                |
 | Excuse state machine paths                          | D20, D21, D22, D23 |
