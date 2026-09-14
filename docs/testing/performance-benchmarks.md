@@ -130,7 +130,7 @@ e.g., CS101: 16 × 3 = 48 expected sessions
 
 ### Measurement Method
 
-1. Seed 10k students + 25k enrollments + 800k attendance records via `seed_test_data.py --scale 10k`.
+1. Seed 10k students + 25k enrollments + 800k attendance records via `test_seed_data.py --scale 10k`.
 2. Run batch job with `time` command; record wall-clock time.
 3. Profile with `cProfile` or `py-spy` to identify bottlenecks.
 4. Spot-check: manually compute 20 random students' scores in SQL and compare with batch output.
@@ -163,7 +163,7 @@ e.g., CS101: 16 × 3 = 48 expected sessions
 
 ### Measurement Method
 
-1. Generate test data at each volume using `seed_test_data.py --scale {small|medium|large|xl}`.
+1. Generate test data at each volume using `test_seed_data.py --scale {small|medium|large|xl}`.
 2. Run backup pipeline: `pg_dump -Fc | gzip | openssl enc -aes-256-gcm`; measure each stage with `time` and `pv`.
 3. Verify restored data matches source: `pg_dump | pg_restore | pg_dump` round-trip comparison.
 4. Monitor disk I/O with `iostat` during backup.

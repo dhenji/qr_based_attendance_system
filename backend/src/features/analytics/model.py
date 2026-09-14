@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -35,7 +36,7 @@ class StudentRiskScore(Base):
             "student_id",
             "offering_id",
             "semester",
-            text("(date(computed_at))"),
+            "computed_day",
             unique=True,
         ),
     )
@@ -60,6 +61,7 @@ class StudentRiskScore(Base):
         server_default=func.now(),
         index=True,
     )
+    computed_day: Mapped[date] = mapped_column(Date)
 
     student: Mapped[Student] = relationship()
     offering: Mapped[CourseOffering] = relationship()

@@ -522,7 +522,7 @@ StudentRiskScores (NEW — D35)
   - risk_level ('low' | 'medium' | 'high')
   - features (JSONB — absence_rate, max_streak, sync_lag, trend_slope)
   - computed_at (TIMESTAMPTZ)
-  - UNIQUE(student_id, offering_id, semester, computed_at::date)
+  - UNIQUE(student_id, offering_id, semester, computed_day)
 
 BackupLog (NEW — D39)
   - id (PK)

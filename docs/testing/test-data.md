@@ -1,11 +1,13 @@
 # Test Data Specification — QR Attendance System
 
-> **Purpose:** Seed data for development, integration tests, and risk-model demos.
-> Loadable via a single command: `python backend/seed_test_data.py`.
+> **Purpose:** Test data for development, integration tests, and risk-model demos.
+> Loadable via a single command: `python backend/test_seed_data.py`.
+>
+> **Prerequisites:** Programs and year levels must exist before running the seed.
+> Create them via the admin API (`POST /admin/programs` + `POST /admin/programs/{pid}/years`).
 >
 > **Design principles:**
 >
-> - 3 programs with distinct term structures (proves D3).
 > - ~40 students across cohorts sharing one GE course template (proves D6).
 > - Professors including one effective-dated handover mid-semester (proves D8).
 > - 6 weeks of historical attendance for risk-model demo (proves D35).
@@ -30,7 +32,9 @@
 
 ---
 
-## 1. Programs & Year Levels
+## 1. Programs & Year Levels (Prerequisite)
+
+> **These are NOT seeded by `test_seed_data.py`.** Create them via the admin API before running the seed.
 
 ### Program: BSCS
 
@@ -442,32 +446,36 @@ Seed 1 backup log entry for display in admin settings:
 
 ## 12. Seed Command
 
+> **Prerequisite:** Programs (BSCS, BSIT, BSECE) and their year levels must exist
+> before running the seed. Create them via the admin API first:
+> `POST /admin/programs` + `POST /admin/programs/{pid}/years`.
+
 ```bash
 # From project root — default seed (42 students, matching this spec):
-cd backend && python seed_test_data.py
+cd backend && python test_seed_data.py
 
 # Scaled seed for performance benchmarks (§3 of performance-benchmarks.md):
-cd backend && python seed_test_data.py --scale 10k     # 10,000 students, 25k enrollments
-cd backend && python seed_test_data.py --scale small    # 50 students (dev)
-cd backend && python seed_test_data.py --scale medium   # 500 students (pilot)
-cd backend && python seed_test_data.py --scale large    # 10,000 students
-cd backend && python seed_test_data.py --scale xl       # 50,000 students (multi-year)
+cd backend && python test_seed_data.py --scale 10k     # 10,000 students, 25k enrollments
+cd backend && python test_seed_data.py --scale small    # 50 students (dev)
+cd backend && python test_seed_data.py --scale medium   # 500 students (pilot)
+cd backend && python test_seed_data.py --scale large    # 10,000 students
+cd backend && python test_seed_data.py --scale xl       # 50,000 students (multi-year)
 
 # Or via Alembic data migration (if preferred):
 alembic upgrade head  # schema first
-alembic run seed_test_data  # data migration
+alembic run test_seed_data  # data migration
 ```
 
 **Verification after seed:**
 
 ```sql
--- Programs count
-SELECT count(*) FROM programs;  -- Expected: 3
+-- Programs (admin-created, not seeded — should exist before running seed)
+SELECT count(*) FROM programs;  -- Expected: ≥3
 
--- Year levels count
-SELECT count(*) FROM year_levels;  -- Expected: 4 + 4 + 5 = 13
+-- Year levels (admin-created, not seeded)
+SELECT count(*) FROM year_levels;  -- Expected: ≥13
 
--- Courses count (templates only)
+-- Courses count (templates only, seeded)
 SELECT count(*) FROM courses;  -- Expected: 7
 
 -- Course offerings count

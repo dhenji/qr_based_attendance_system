@@ -218,7 +218,7 @@ sequenceDiagram
         API->>API: Apply heuristic thresholds (D35):<br>absence_rate > 0.30 → high<br>absence_rate > 0.15 → medium<br>streak ≥ 3 → high<br>sync_lag ≥ 5 → medium<br>trend_slope < -0.05 → medium
 
         API->>DB: INSERT INTO student_risk_scores<br>(student_id, offering_id, semester,<br>risk_probability, risk_level,<br>features: {absence_rate, max_streak,<br>sync_lag, trend_slope},<br>computed_at = now())
-        Note over DB: UNIQUE(student_id, offering_id,<br>semester, computed_at::date)
+        Note over DB: UNIQUE(student_id, offering_id,<br>semester, computed_day)
     end
 
     API-->>CRON: Batch complete (logged)

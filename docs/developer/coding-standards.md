@@ -286,10 +286,11 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 
 See [test-data.md](../testing/test-data.md) for seed specifications:
 
-- 3 programs with distinct term structures
 - ~40 students across cohorts sharing a GE course
 - Professors including one effective-dated handover
 - 6 weeks of historical attendance
+
+> **Note:** Programs and year levels are admin-created, not seeded.
 
 ---
 

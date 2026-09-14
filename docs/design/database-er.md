@@ -20,10 +20,10 @@
 | `students`            | id (PK), user_id (FK → users, UK, nullable), year_level_id (FK → year_levels, RESTRICT), student_id (UK), email (UK), first_name, middle_name, last_name, section (retained per D2), is_active, face_embedding (BYTEA NULL), face_enrolled_at (TIMESTAMPTZ NULL), face_embedding_version (INT DEF 0), created_at, updated_at — **legacy `course` string dropped**                                                                                                                                                  |
 | `professors`          | id (PK), user_id (FK → users, UK, nullable), email (UK), first_name, middle_name, last_name, department, is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                         |
 | `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings) NOT NULL, academic_year NOT NULL, semester NOT NULL (validated against year_level.term_structure), UNIQUE(student_id, offering_id, academic_year)                                                                                                                                                                                                                                                                                                             |
-| `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → professors), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), expires_at (TIMESTAMPTZ, STORED: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)), classroom_radius_meters, classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), created_at |
+| `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → professors), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), expires_at (TIMESTAMPTZ, set by application: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)), classroom_radius_meters, classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), created_at |
 | `attendance_records`  | id (PK), student_id (FK → students), session_id (FK → sessions), timestamp, gps_lat, gps_lng, validation_status (present/late/absent/excused/pending/rejected), sync_status, liveness_evidence (JSONB), face_match_score (NUMERIC(5,4)), scanned_via (qr_camera/manual_code), original_status (NULL), excuse_reason (NULL), excused_by (FK → users NULL), excused_at (NULL), excuse_type (quick/prof_with_evidence/request_approved NULL), excuse_request_id (FK NULL), created_at                 |
 | `excuse_requests`     | id (PK), student_id (FK), session_id (FK), initiated_by (professor/student), initiated_via (quick/prof_with_evidence/request), reason, attachment_urls (JSONB), status (pending/approved/rejected DEF pending), requested_at, reviewed_by (FK → users NULL), reviewed_at (NULL), review_notes (NULL)                                                                                                                                                                                               |
-| `student_risk_scores` | id (PK), student_id (FK → students), offering_id (FK → course_offerings), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high), features (JSONB), computed_at, UNIQUE(student_id, offering_id, semester, computed_at::date)                                                                                                                                                                                                                                                                   |
+| `student_risk_scores` | id (PK), student_id (FK → students), offering_id (FK → course_offerings), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high), features (JSONB), computed_at, computed_day (DATE), UNIQUE(student_id, offering_id, semester, computed_day)                                                                                                                                                                                                                                                                   |
 | `backup_log`          | id (PK), filename, kind (full/analytics), size_bytes (BIGINT), sha256, storage_backend (local/s3), encryption_key_version, started_at, finished_at, status (started/completed/failed), error (NULL)                                                                                                                                                                                                                                                                                                                           |
 | `sync_queue`          | id (PK), record_data (JSON), status, retry_count, created_at                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
@@ -292,20 +292,20 @@ erDiagram
    │  │ face_embedding BYTEA,             │      │  │ professor_id  FK → professors           │
    │  │   face_enrolled_at, embedding_ver │      │  │ session_code  UK                       │
    │  │ created_at, updated_at            │      │  │ duration_minutes                        │
-   │  └───────────────┬───────────────────┘      │  │ present_window_minutes                 │
-   │                  │ 1                        │  │ late_window_minutes                    │
-   │                  o<{                        │  │ CHECK(present+late <= duration)        │
-   │  ┌───────────────┴───────────────────┐      │  │ scheduled_start_time                   │
-   │  │             enrollments            │      │  │ scheduled_end_time                     │
-   │  │────────────────────────────────────│      │  │ expires_at (STORED)                    │
-   │  │ id                        PK       │      │  │   = LEAST(created_at + duration,       │
-   │  │ student_id FK → students          │      │  │          scheduled_end_time)           │
-   │  │ offering_id → course_offering (NN)│      │  │ classroom_radius_meters                │
-   │  │ academic_year NOT NULL            │      │  │ classroom_name/lat/lng (NULL override) │
-   │  │ semester NOT NULL                 │      │  │ created_at                             │
-   │  │ UNIQUE(student_id, offering_id,   │      │  └─────────────────┬─────────────────────┘
-   │  │   academic_year)                  │      │                    │ 1 (collects)
-   │  └───────────────┬───────────────────┘      │                    o<{
+│  └───────────────┬───────────────────┘      │  │ present_window_minutes                 │
+    │                  │ 1                        │  │ late_window_minutes                    │
+    │                  o<{                        │  │ CHECK(present+late <= duration)        │
+    │  ┌───────────────┴───────────────────┐      │  │ scheduled_start_time                   │
+    │  │             enrollments            │      │  │ scheduled_end_time                     │
+    │  │────────────────────────────────────│      │  │ expires_at (app-computed)              │
+    │  │ id                        PK       │      │  │   = LEAST(created_at + duration,       │
+    │  │ student_id FK → students          │      │  │          scheduled_end_time)           │
+    │  │ offering_id → course_offering (NN)│      │  │ classroom_radius_meters                │
+    │  │ academic_year NOT NULL            │      │  │ classroom_name/lat/lng (NULL override) │
+    │  │ semester NOT NULL                 │      │  │ created_at                             │
+    │  │ UNIQUE(student_id, offering_id,   │      │  └─────────────────┬─────────────────────┘
+    │  │   academic_year)                  │      │                    │ 1 (collects)
+    │  └───────────────┬───────────────────┘      │                    o<{
    │                  │ 1                        │  ┌─────────────────┴───────────────────────────────────────┐
    │  ┌───────────────┴───────────────────┐      │  │               attendance_records                        │
    │  │           course_offerings         │      │  │───────────────────────────────────────────────────────│
@@ -393,7 +393,7 @@ erDiagram
    │  │ risk_level (low/medium/high)              │
    │  │ features JSONB, computed_at               │
    │  │ UNIQUE(student_id, offering_id,           │
-   │  │   semester, computed_at::date)            │
+   │  │   semester, computed_day)              │
    │  └───────────────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
@@ -464,7 +464,7 @@ erDiagram
 > - `course_professors` uses **effectiveness dating** (D7/D8): a session's professor of record is the `course_professors` row where `session.created_at::date BETWEEN effective_from AND COALESCE(effective_to, 'infinity')` AND `semester` matches.
 > - `students.face_embedding` stores encrypted JSON blob: `{"mean":[128f],"angles":{"front":[...],"left":[...],"right":[...]}}` (D28/D43).
 > - `year_levels.term_structure` JSONB: `{"terms":[{"code":"1st_sem","label":"1st Semester"},...]}` (D3).
-> - `sessions.expires_at` is a **STORED generated column**: `LEAST(created_at + duration_minutes * interval '1 minute', scheduled_end_time)` (D12).
+> - `sessions.expires_at` is a **regular column populated by the application service layer**: `LEAST(created_at + duration_minutes * interval '1 minute', scheduled_end_time)` (D12, D49).
 > - `ValidationStatus` enum: `present` · `late` · `absent` · `excused` · `pending` · `rejected` (D15).
 > - Rejection reasons: `duplicate` · `outside_geofence` · `liveness_failed` · `face_mismatch` · `not_enrolled` · `session_expired` (D15/D16).
 

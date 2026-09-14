@@ -28,15 +28,15 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 ## Target Schema (Reference §6)
 
 New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+year_level_id FK, +3 face cols, drop legacy `course`)
+Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, app-computed expires_at per D49), `attendance_records` (+9 cols, expanded status enum), `students` (+year_level_id FK, +3 face cols, drop legacy `course`)
 
 ---
 
 ## Migration Steps (Ordered)
 
-### Step 1: Create `programs` Table + Seed Defaults
+### Step 1: Create `programs` Table
 
-**Migration:** `alembic revision --autogenerate -m "create programs table and seed defaults"`
+**Migration:** `alembic revision --autogenerate -m "create programs table"`
 
 **Model:** `features/program/model.py` (new feature)
 
@@ -52,13 +52,7 @@ class Program(Base):
     created_at, updated_at = TimestampMixin
 ```
 
-**Seed data (per D3 examples):**
-
-| code  | name                                           | total_years | term_structure (per year_level)                                                                         |
-| ----- | ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
-| BSCS  | Bachelor of Science in Computer Science        | 4           | Y1: [1st_sem, 2nd_sem]; Y2: [1st_sem, 2nd_sem]; Y3: [1st_sem, 2nd_sem, midyear]; Y4: [1st_sem, 2nd_sem] |
-| BSIT  | Bachelor of Science in Information Technology  | 4           | Y1-4: [1st_sem, 2nd_sem]                                                                                |
-| BSECE | Bachelor of Science in Electronics Engineering | 5           | Y1-5: [1st_sem, 2nd_sem]                                                                                |
+**Programs are created by admins via `POST /admin/programs`.** No seed data — the table starts empty.
 
 **Rollback:** `DROP TABLE programs` (destructive — backup first)
 
@@ -82,7 +76,7 @@ class YearLevel(Base):
     UNIQUE(program_id, year_number)
 ```
 
-**Seed:** Create year levels for each seeded program per their `total_years`, populate `term_structure` from D3 examples.
+**Year levels are created by admins via `POST /admin/programs/{pid}/years`.** No seed data.
 
 **Rollback:** `DROP TABLE year_levels` (CASCADE drops nothing yet)
 
@@ -245,10 +239,14 @@ class Session(Base):
     CHECK (present_window_minutes + late_window_minutes <= duration_minutes)
     scheduled_start_time = DateTime(timezone=True)  -- copied from course_offering at open
     scheduled_end_time = DateTime(timezone=True)    -- copied from course_offering at open
-    expires_at = DateTime(timezone=True)  -- STORED: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)
+    expires_at = DateTime(timezone=True)  -- regular column, app-computed via @property (D49)
     classroom_name = String(100) NULL
     classroom_lat = Float NULL
     classroom_lng = Float NULL
+
+    # @property computed_expires_at:
+    #   return min(created_at + timedelta(minutes=duration_minutes), scheduled_end_time)
+    # Service sets: session.expires_at = session.computed_expires_at
 ```
 
 **Backfill:**
@@ -260,9 +258,9 @@ class Session(Base):
 - `late_window_minutes` = `course_offering.default_late_window_minutes` (10)
 - `scheduled_start_time/end_time` = `course_offering` schedule for that day (compute from `schedule_days` + date)
 - `classroom_lat/lng/name` = `course_offering` classroom (override for session-specific room changes)
-- `expires_at` = recomputed via STORED expression (PostgreSQL `GENERATED ALWAYS AS ... STORED`)
+- `expires_at` = set by service layer: `min(created_at + duration_minutes * interval '1 min', scheduled_end_time)`
 
-**Rollback:** Drop new columns, restore `course_id` from backup. STORED column requires `ALTER TABLE ... ALTER COLUMN expires_at DROP EXPRESSION` first.
+**Rollback:** Drop new columns, restore `course_id` from backup.
 
 ---
 
@@ -337,7 +335,7 @@ class StudentRiskScore(Base):
     risk_level = String(10)  -- 'low' | 'medium' | 'high'
     features = JSONB  -- {absence_rate, max_streak, sync_lag, trend_slope, expected_sessions}
     computed_at = DateTime(timezone=True) default now()
-    UNIQUE(student_id, offering_id, semester, computed_at::date)
+    UNIQUE(student_id, offering_id, semester, computed_day)
 ```
 
 #### `backup_log` (feature: `system`)
@@ -428,7 +426,7 @@ import features.system.model  # noqa: F401            # backup_log
 | 3. courses + course_offerings  | ⚠️          | **Backup first**. New table + data migration; drop offering rows + revert columns on rollback |
 | 4. course_professors           | ✅          | `DROP TABLE`                                                                   |
 | 5. enrollments.semester+offering | ⚠️          | **Backup first**. Data loss on rollback                                        |
-| 6. sessions extend             | ✅          | Columns + STORED expression; reversible                                        |
+| 6. sessions extend             | ✅          | Columns + regular column (no STORED expression); reversible                    |
 | 7. attendance_records          | ⚠️          | **Backup first**. Enum data migration; rollback maps `present→valid`           |
 | 8. new tables                  | ✅          | `DROP TABLE`                                                                   |
 | 9. students face + drop course | ⚠️          | **Backup first**. Legacy `course` string unrecoverable after drop              |
@@ -454,10 +452,10 @@ After all migrations, verify:
 - [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
 - [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
 - [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, academic_year NOT NULL, UNIQUE(student_id, offering_id, academic_year), validated against year_level.term_structure
-- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint; course_id DROPPED
+- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(regular column set by service layer)/override coords, CHECK constraint; course_id DROPPED
 - [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
-- [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, offering_id, semester, computed_at::date)
+- [ ] `student_risk_scores`: features JSONB, computed_day DATE, UNIQUE on (student_id, offering_id, semester, computed_day)
 - [ ] `backup_log`: all columns including sha256, key_version; status = started/completed/failed
 - [ ] `students`: year_level_id FK → year_levels; section retained (snapshot per D2); face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED (no program_id)
 - [ ] All enums in code match §6 (ValidationStatus expanded, etc.)
