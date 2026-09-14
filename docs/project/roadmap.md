@@ -9,7 +9,7 @@
 
 ## Phase 1: Database & Academic Structure
 
-**Goal:** Migrate from the current flat schema to the target hierarchical model (D1–D6).
+**Goal:** Create the target hierarchical model (baseline migration creates all 16 tables directly).
 
 ### Deliverables
 
@@ -21,7 +21,7 @@
 - Expand `students` with face embedding columns (D28)
 - ~~Add `offering_id` + `semester` to `enrollments` (D5)~~ ✅ — `enrollments` modeled with `offering_id`/`semester` NOT NULL, `academic_year` NOT NULL, and `UNIQUE(student_id, offering_id, academic_year)`
 - Enum expansion: `ValidationStatus` gains `excused`, `rejected` (D15)
-- Data backfill: `valid` → `present`, `invalid` → `rejected` (migration-strategy.md §0.3)
+- Enum expansion: `ValidationStatus` values are `present`/`late`/`absent`/`excused`/`pending`/`rejected` in the target schema (no migration needed — baseline creates correct enum values)
 
 ### Key Decisions
 

@@ -385,7 +385,7 @@ Students
   - face_enrolled_at (TIMESTAMPTZ, nullable)
   - face_embedding_version (INT, default 0 — bumped on every write)
   - created_at, updated_at
-  -- legacy `course` string column dropped after backfill to FK-based courses
+  -- In the target schema, students uses year_level_id FK (no legacy course string)
 
 Professors
   - id (PK)

@@ -9,11 +9,11 @@
 
 ### ADR-001: Academic Hierarchy — Program → Year Level → Course
 
-- **Decision (D1):** Introduce hierarchy **Program → Year Level → Course** with strict FK constraints (NOT NULL after backfill, cascade/restrict rules per §6).
+- **Decision (D1):** Introduce hierarchy **Program → Year Level → Course** with strict FK constraints (NOT NULL in target schema, cascade/restrict rules per §6).
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** The current flat `courses` table cannot express program-specific year structures or term definitions. A hierarchical model enables per-program-per-year term structures and proper course ownership.
-- **Consequences:** Requires new tables `programs` and `year_levels`; `courses` gains `program_id` and `year_level_id` FKs. Migration must backfill from legacy `students.course` strings.
+- **Consequences:** Requires new tables `programs` and `year_levels`; `courses` gains `program_id` and `year_level_id` FKs. In the target schema, `students` uses `year_level_id` FK directly (no legacy `course` string).
 > **Superseded by D44** — program/year-level FKs moved from `courses` to `course_offerings`; hierarchy is now Program → Year Level → CourseOffering (course templates carry no program/year FKs).
 
 ### ADR-002: Course = Subject; Section on Students Only
@@ -47,7 +47,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Needed to scope enrollments to a specific term within a year level's structure.
-- **Consequences:** `enrollments.semester` NOT NULL after backfill; validated via application logic against `year_levels.term_structure`.
+- **Consequences:** `enrollments.semester` NOT NULL in target schema; validated via application logic against `year_levels.term_structure`.
 
 ### ADR-006: Courses Shared Across Programs/Year Levels
 

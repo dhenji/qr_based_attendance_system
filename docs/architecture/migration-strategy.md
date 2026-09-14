@@ -1,15 +1,25 @@
-# Migration Strategy: Current → Target Schema
+# Migration Strategy: Target Schema
 
-> Ordered Alembic migration plan from the current 7-feature schema to the §6 target schema.
-> **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py` alongside the existing thirteen feature imports (`analytics`, `attendance`, `auth`, `course`, `course_professor`, `enrollment`, `excuse`, `professor`, `program`, `session`, `student`, `sync`, `system`) so autogenerate sees them in `target_metadata`. Face enrollment columns live on `features.student/model.py` — no separate import needed. Run alembic from `backend/`.
+> Target schema reference (§6) and rollback guide. This project is **greenfield** — the
+> baseline migration (`679a319c12d6`) creates all 16 tables directly. `alembic upgrade head`
+> on a fresh database produces the full target schema with correct columns, constraints,
+> and FKs. **No backfill functions or data migration scripts are needed.**
+>
+> **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in
+> `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py`
+> alongside the existing thirteen feature imports so autogenerate sees them in
+> `target_metadata`. Run alembic from `backend/`.
 
 ---
 
-> **Full-migration ("full baseline") approach:** Models already express the target schema below, so the ordered Steps 1–9 collapse into a **single full-baseline migration** — `alembic revision --autogenerate -m "baseline target schema"` then `alembic upgrade head` from `backend/`. The three original revisions (`68a78206e082`, `388e5e496455`, `996b2fb85c6f`) are dropped — the regenerated baseline is the single source of truth. The per-step narrative remains only as a **backfill/rollback reference** for migrating existing data.
+## Historical Reference: Legacy Schema (Superseded)
 
-## Current Schema (Baseline)
+> The 9-step incremental migration narrative below was the original plan before the
+> full-baseline approach was adopted. It is **reference documentation only** — useful for
+> institutions migrating from an existing flat-schema database. For greenfield deployments,
+> ignore the backfill and migration steps entirely.
 
-Tables from existing models (Alembic head `996b2fb85c6f`):
+Tables from the original flat schema (Alembic head `996b2fb85c6f`, now replaced):
 
 - `users` — auth + roles + security fields
 - `otp_codes` — OTP for claim/forgot-password
@@ -25,10 +35,11 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 
 ---
 
-## Target Schema (Reference §6)
+## Target Schema (§6 — Authoritative Reference)
 
-New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, app-computed expires_at per D49), `attendance_records` (+9 cols, expanded status enum), `students` (+year_level_id FK, +3 face cols, drop legacy `course`)
+Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `excuse_requests`, `student_risk_scores`, `backup_log`, `sync_queue`
+
+The baseline migration creates all 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
 
 ---
 
@@ -134,7 +145,11 @@ class CourseOffering(Base):
 - Same course can have different schedules/classrooms per program offering
 - `Session` and `Enrollment` will reference `offering_id` in later steps
 
-**Backfill strategy:**
+> **Reference Only** — In greenfield deployments, `course_offerings` rows are created by
+> admins via the API. No backfill needed. The steps below apply only when migrating from
+> the legacy flat schema.
+
+**Backfill strategy (legacy data only):**
 
 1. Add new columns to `courses` as **nullable** first
 2. For each existing `courses` row:
@@ -174,13 +189,20 @@ class CourseProfessor(Base):
 
 **Service-layer rule (enforced in Python, not DB):** Reject overlapping `[effective_from, effective_to)` ranges for same `(offering_id, professor_id)`.
 
-**Migrate implied assignments:** For each existing `sessions` row, look up the `course_offerings` row matching the session's course + inferred program/semester, create a `course_professors` entry with `effective_from = session.created_at::date`, `effective_to = NULL`, `semester = enrollment.semester` (or default), `is_primary = true`.
+> **Reference Only** — In greenfield deployments, `course_professors` rows are created via
+> admin API. The steps below apply only when migrating from legacy session data.
+
+**Migrate implied assignments (legacy data only):** For each existing `sessions` row, look up the `course_offerings` row matching the session's course + inferred program/semester, create a `course_professors` entry with `effective_from = session.created_at::date`, `effective_to = NULL`, `semester = enrollment.semester` (or default), `is_primary = true`.
 
 **Rollback:** `DROP TABLE course_professors`
 
 ---
 
-### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK ✅ DONE
+### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK
+
+> **Reference Only** — In greenfield deployments, enrollments are created with
+> `offering_id` and `semester` directly. The steps below apply only when migrating
+> from the legacy enrollment schema.
 
 **Migration:** `alembic revision --autogenerate -m "add semester and offering_id to enrollments with backfill"`
 
@@ -249,7 +271,10 @@ class Session(Base):
     # Service sets: session.expires_at = session.computed_expires_at
 ```
 
-**Backfill:**
+> **Reference Only** — In greenfield deployments, sessions are created with all fields
+> populated. The steps below apply only when migrating from the legacy session schema.
+
+**Backfill (legacy data only):**
 
 - `offering_id` = look up `course_offerings` row matching session's course + inferred program/semester
 - `course_id` = **DROP** after `offering_id` is backfilled and NOT NULL
@@ -379,7 +404,11 @@ class Student(Base):
     # DROP: course (string) — after backfill to FK-based year_levels/enrollments
 ```
 
-**Backfill legacy `course` string:**
+> **Reference Only** — In greenfield deployments, students are created with
+> `year_level_id` directly. The steps below apply only when migrating from the legacy
+> `students.course` string format.
+
+**Backfill legacy `course` string (legacy data only):**
 
 1. For each student, parse `student.course` string (e.g., "BSCS-1")
 2. Match to `programs.code` + `year_levels.year_number`
@@ -419,6 +448,9 @@ import features.system.model  # noqa: F401            # backup_log
 
 ## Rollback Strategy Summary
 
+> For greenfield deployments, rollback is simply `DROP TABLE` — no data to lose. The
+> complex scenarios below apply only to legacy-data migrations.
+
 | Step                           | Reversible? | Notes                                                                          |
 | ------------------------------ | ----------- | ------------------------------------------------------------------------------ |
 | 1. programs                    | ✅          | `DROP TABLE` — no dependencies yet                                             |
@@ -434,6 +466,10 @@ import features.system.model  # noqa: F401            # backup_log
 ---
 
 ## Staging-First Rule
+
+> For greenfield deployments, this is not needed — `alembic upgrade head` on a fresh
+> database is sufficient. The staging-first approach applies to legacy-data migrations
+> where production data must be preserved.
 
 1. **Always test migrations on staging** (copy of production DB) before production.
 2. Run `alembic upgrade head` on staging; verify all tables/columns match §6 exactly.

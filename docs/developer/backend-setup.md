@@ -55,13 +55,9 @@ cd backend
 alembic upgrade head
 ```
 
-> **Note:** The current migrations (`68a78206e082` initial schema,
-> `388e5e496455` link students to user accounts, `996b2fb85c6f` account
-> security/OTP fields) produce the **legacy flat schema** (flat `courses`,
-> no `course_offerings`). The target schema (`programs`, `year_levels`,
-> `course_offerings`, `course_professors`, offering-scoped enrollments/sessions,
-> etc.) lands via the **pending full-baseline migration** — see
-> [migration-strategy.md](../architecture/migration-strategy.md).
+> **Note:** `alembic upgrade head` creates the full target schema (16 tables with correct
+> columns, constraints, and FKs). See [migration-strategy.md](../architecture/migration-strategy.md)
+> for the target schema reference.
 
 ### 5. Run the server
 
