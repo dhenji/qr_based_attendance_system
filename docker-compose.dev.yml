@@ -47,5 +47,22 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  app:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: attendance-app
+    ports:
+      - "5173:5173"
+    environment:
+      PUBLIC_API_URL: http://localhost:8000
+      CHOKIDAR_USEPOLLING: "1"
+      CHOKIDAR_INTERVAL: "1000"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - api
+
+
 volumes:
   pgdata:

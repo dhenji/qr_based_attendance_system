@@ -126,7 +126,7 @@ attendance-system/
 │   │   └── wireframes.md             # Wireframes
 │   └── presentations/                # Slides + deck (.pptx, .pdf)
 │
-├── docker-compose.yml                # Local development: PostgreSQL + migrations + backend
+├── docker-compose.dev.yml             # Local development: PostgreSQL + migrations + backend + frontend (frontend HMR via CHOKIDAR_USEPOLLING)
 ├── AGENTS.md                         # Repo conventions & reference
 ├── .gitignore
 └── README.md                         # Project overview & setup instructions

@@ -9,10 +9,11 @@
 ```bash
 # From project root
 cp backend/.env.example backend/.env   # edit values as needed
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
 
 API available at `http://localhost:8000`. Postgres at `:5432`. Migrations run automatically on boot.
+Frontend (SvelteKit) available at `http://localhost:5173` — HMR uses polling (`CHOKIDAR_USEPOLLING`) so file changes in `frontend/src` auto-refresh the browser.
 
 Verify:
 

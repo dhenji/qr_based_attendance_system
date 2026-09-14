@@ -5,14 +5,14 @@
 ## Repository State
 
 - Remote: `git@github.com:CodeKharl/qr_based_attendance_system.git`. Branches/PRs against `main`.
-- Layout: `frontend/`, `backend/` (models + migrations + `Dockerfile.dev`), root `docker-compose.yml`, `docs/`.
+- Layout: `frontend/`, `backend/` (models + migrations + `Dockerfile.dev`), root `docker-compose.dev.yml`, `docs/`.
 - Root `.gitignore` ignores `.env`/`.env.*` but un-ignores `.env.example` and `.env.test`. `backend/.env` exists (ignored) — never commit it.
 
 ## Key Commands
 
 ### Local Dev (Docker — recommended)
 ```bash
-docker compose up --build          # API on :8000, Postgres on :5432, migrations run automatically
+docker compose -f docker-compose.dev.yml up --build          # API on :8000, Postgres on :5432, frontend on :5173, migrations run automatically
 ```
 
 ### Manual Backend
