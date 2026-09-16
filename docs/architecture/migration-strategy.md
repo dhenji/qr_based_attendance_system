@@ -299,7 +299,7 @@ class Session(Base):
 class Attendance(Base):
     # Existing: id, student_id, session_id, timestamp, gps_lat, gps_lng, validation_status, sync_status
     # NEW:
-    liveness_evidence = JSONB  -- {gps, liveness_scores, face_match_score, scanned_at, device_info, rejection_reason?}
+    liveness_evidence = JSONB  -- {gps{lat,lng,accuracy}, liveness_evidence{blink_detected, head_turn_left, head_turn_right, ear_samples, pnp_evidence}, face_match_score, scanned_via, scanned_at, rejection_reason?}
     face_match_score = Numeric(5,4)  -- cosine similarity
     scanned_via = String(20)  -- 'qr_camera' | 'manual_code'
     original_status = String(20) NULL  -- status before excuse

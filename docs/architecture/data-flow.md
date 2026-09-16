@@ -96,7 +96,7 @@ sequenceDiagram
         API->>API: Validate scanned_at vs session.expires_at (D16)
 
         alt scanned_at > expires_at (D16)
-            API-->>S: 410 {code: "session_expired"}
+            API-->>S: 410 {detail: {code: "session_expired", message: "Scan submitted after window closed"}}
             S->>IDB: UPDATE status = 'rejected' (client queue state),<br>last_error = 'session_expired'
         else scanned_at within window
             API->>DB: INSERT attendance_records

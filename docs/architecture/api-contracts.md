@@ -184,13 +184,16 @@ Archive year level. Restrict if courses exist.
 
 ### Courses
 
-#### `GET /admin/programs/{pid}/years/{yid}/courses`
+A course is a standalone reusable **template** (D44) — it carries no program, year-level, scheduling, or classroom fields. Program/year-specific instances are `CourseOfferings` (next section).
+
+#### `GET /admin/courses`
 
 |                  |                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Query**        | `?is_active?&page=1&size=20`                                                                                  |
 | **Response 200** | `{ items: [{ id, course_code, course_name, units, session_duration_hours, is_active, created_at, updated_at }], ... }` |
 
-#### `POST /admin/programs/{pid}/years/{yid}/courses`
+#### `POST /admin/courses`
 
 |                  |                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -213,7 +216,7 @@ Archive year level. Restrict if courses exist.
 
 #### `DELETE /admin/courses/{cid}`
 
-Archive course template.
+Archive course template (soft-delete: `is_active=false`).
 
 |                  |            |
 | ---------------- | ---------- |
@@ -737,18 +740,23 @@ Same contract as professor password change.
 
 ## SHARED Auth Endpoints
 
-Existing claim-based registration, MFA, and forgot-password flows are unchanged from current implementation. Documented here for completeness:
+Phase 2 auth surface. Schemas live in `backend/src/features/auth/schema.py`; see
+`backend-prompts.txt` Phase 2 for the register (exact-one roster match), MFA
+(preauth-gated login), refresh (body), and lockout behaviors.
 
-| Method | Path                    | Purpose                        |
-| ------ | ----------------------- | ------------------------------ |
-| POST   | `/auth/register`        | Claim-based registration (OTP) |
-| POST   | `/auth/login`           | Email/password login           |
-| POST   | `/auth/otp/verify`      | Verify OTP code                |
-| POST   | `/auth/forgot-password` | Request password reset         |
-| POST   | `/auth/reset-password`  | Reset with token               |
-| POST   | `/auth/mfa/setup`       | Generate TOTP secret           |
-| POST   | `/auth/mfa/verify`      | Verify TOTP code               |
-| GET    | `/auth/me`              | Current user info              |
+| Method | Path                    | Purpose                              |
+| ------ | ----------------------- | ------------------------------------ |
+| POST   | `/auth/otp/request`     | Request 6-digit OTP (email)          |
+| POST   | `/auth/otp/verify`      | Verify OTP code                      |
+| POST   | `/auth/register`        | Claim-based registration (OTP)       |
+| POST   | `/auth/login`           | Email/password login (+ MFA gate)    |
+| POST   | `/auth/refresh`         | Refresh-token rotation               |
+| POST   | `/auth/forgot-password` | Request OTP password reset           |
+| POST   | `/auth/reset-password`  | Reset password with OTP              |
+| POST   | `/auth/change-password` | Change password (authenticated)      |
+| GET    | `/auth/me`              | Current user info                    |
+| POST   | `/auth/mfa/setup`       | Generate TOTP secret                 |
+| POST   | `/auth/mfa/verify`      | Verify TOTP (login exchange or setup) |
 
 ---
 

@@ -9,7 +9,7 @@ class SessionDomainException(SessionException, DomainException):
     pass
 
 
-class SessionDatabseException(SessionException, DatabaseException):
+class SessionDatabaseException(SessionException, DatabaseException):
     pass
 
 
@@ -39,7 +39,7 @@ class SessionAlreadyActiveException(SessionDomainException):
         )
 
 
-class DuplicateScanException(SessionDatabseException):
+class DuplicateScanException(SessionDatabaseException):
     """409 - student already scanned for this session."""
 
     code: str = "duplicate_scan"

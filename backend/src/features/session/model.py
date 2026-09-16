@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
-    Computed,
     DateTime,
     Float,
     ForeignKey,
