@@ -1,15 +1,17 @@
 # Test Data Specification — QR Attendance System
 
-> **Purpose:** Seed data for development, integration tests, and risk-model demos.
-> Loadable via a single command: `python backend/seed_test_data.py`.
+> **Purpose:** Test data for development, integration tests, and risk-model demos.
+> Loadable via a single command: `python backend/test_seed_data.py`.
+>
+> **Prerequisites:** Programs and year levels must exist before running the seed.
+> Create them via the admin API (`POST /admin/programs` + `POST /admin/programs/{pid}/years`).
 >
 > **Design principles:**
 >
-> - 3 programs with distinct term structures (proves D3).
 > - ~40 students across cohorts sharing one GE course template (proves D6).
 > - Professors including one effective-dated handover mid-semester (proves D8).
 > - 6 weeks of historical attendance for risk-model demo (proves D35).
-> - All data matches DOCS_REFACTOR_PLAN §6 target schema column-for-column.
+> - All data matches the [target schema](../design/database-er.md) column-for-column.
 
 ---
 
@@ -30,7 +32,9 @@
 
 ---
 
-## 1. Programs & Year Levels
+## 1. Programs & Year Levels (Prerequisite)
+
+> **These are NOT seeded by `test_seed_data.py`.** Create them via the admin API before running the seed.
 
 ### Program: BSCS
 
@@ -352,7 +356,7 @@ Each attendance record includes:
 | sync_status       | synced                                                               |
 | scanned_via       | qr_camera                                                            |
 | face_match_score  | 0.82 (present/late students)                                         |
-| liveness_evidence | `{"blink":true,"turn_left":true,"turn_right":true,"ear_score":0.35}` |
+| liveness_evidence | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true,"ear_samples":[0.18,0.31,0.29,0.33],"pnp_evidence":{"yaw":12.5}}` |
 
 ---
 
@@ -398,9 +402,9 @@ Seed 3 queued offline scan records for student 24-0008 (profile: "2 absences, 3 
 
 | student_id | session_id       | scanned_at             | gps_lat | gps_lng  | sync_status | face_match_score | liveness_evidence                                   |
 | ---------- | ---------------- | ---------------------- | ------- | -------- | ----------- | ---------------- | --------------------------------------------------- |
-| 24-0008    | GE101 Week 3 Mon | 2026-06-15 07:12:00+08 | 14.5995 | 120.9842 | pending     | 0.81             | `{"blink":true,"turn_left":true,"turn_right":true}` |
-| 24-0008    | GE101 Week 4 Mon | 2026-06-22 07:08:00+08 | 14.5995 | 120.9842 | pending     | 0.83             | `{"blink":true,"turn_left":true,"turn_right":true}` |
-| 24-0008    | GE101 Week 5 Mon | 2026-06-29 07:15:00+08 | 14.5995 | 120.9842 | pending     | 0.79             | `{"blink":true,"turn_left":true,"turn_right":true}` |
+| 24-0008    | GE101 Week 3 Mon | 2026-06-15 07:12:00+08 | 14.5995 | 120.9842 | pending     | 0.81             | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true}` |
+| 24-0008    | GE101 Week 4 Mon | 2026-06-22 07:08:00+08 | 14.5995 | 120.9842 | pending     | 0.83             | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true}` |
+| 24-0008    | GE101 Week 5 Mon | 2026-06-29 07:15:00+08 | 14.5995 | 120.9842 | pending     | 0.79             | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true}` |
 
 **Notes:**
 
@@ -436,38 +440,42 @@ Seed 1 backup log entry for display in admin settings:
 
 | filename                          | kind | size_bytes | sha256                                                           | storage_backend | encryption_key_version | status  |
 | --------------------------------- | ---- | ---------- | ---------------------------------------------------------------- | --------------- | ---------------------- | ------- |
-| backup_20260708_020000.pgdump.enc | full | 5242880    | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | local           | 1                      | success |
+| backup_20260708_020000.pgdump.enc | full | 5242880    | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | local           | 1                      | completed |
 
 ---
 
 ## 12. Seed Command
 
+> **Prerequisite:** Programs (BSCS, BSIT, BSECE) and their year levels must exist
+> before running the seed. Create them via the admin API first:
+> `POST /admin/programs` + `POST /admin/programs/{pid}/years`.
+
 ```bash
 # From project root — default seed (42 students, matching this spec):
-cd backend && python seed_test_data.py
+cd backend && python test_seed_data.py
 
 # Scaled seed for performance benchmarks (§3 of performance-benchmarks.md):
-cd backend && python seed_test_data.py --scale 10k     # 10,000 students, 25k enrollments
-cd backend && python seed_test_data.py --scale small    # 50 students (dev)
-cd backend && python seed_test_data.py --scale medium   # 500 students (pilot)
-cd backend && python seed_test_data.py --scale large    # 10,000 students
-cd backend && python seed_test_data.py --scale xl       # 50,000 students (multi-year)
+cd backend && python test_seed_data.py --scale 10k     # 10,000 students, 25k enrollments
+cd backend && python test_seed_data.py --scale small    # 50 students (dev)
+cd backend && python test_seed_data.py --scale medium   # 500 students (pilot)
+cd backend && python test_seed_data.py --scale large    # 10,000 students
+cd backend && python test_seed_data.py --scale xl       # 50,000 students (multi-year)
 
 # Or via Alembic data migration (if preferred):
 alembic upgrade head  # schema first
-alembic run seed_test_data  # data migration
+alembic run test_seed_data  # data migration
 ```
 
 **Verification after seed:**
 
 ```sql
--- Programs count
-SELECT count(*) FROM programs;  -- Expected: 3
+-- Programs (admin-created, not seeded — should exist before running seed)
+SELECT count(*) FROM programs;  -- Expected: ≥3
 
--- Year levels count
-SELECT count(*) FROM year_levels;  -- Expected: 4 + 4 + 5 = 13
+-- Year levels (admin-created, not seeded)
+SELECT count(*) FROM year_levels;  -- Expected: ≥13
 
--- Courses count (templates only)
+-- Courses count (templates only, seeded)
 SELECT count(*) FROM courses;  -- Expected: 7
 
 -- Course offerings count

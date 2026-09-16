@@ -1,8 +1,8 @@
 # Security Model
 
 > Threat model, mitigations, and security posture for the QR-Based Attendance
-> System. Every mitigation cites the governing decision from §2 of the
-> DOCS_REFACTOR_PLAN.md.
+> System. Every mitigation cites the governing decision from the
+> [decision log](../project/decision-log.md).
 
 ---
 
@@ -37,7 +37,7 @@ HMAC-SHA256(secret, session_id + timestamp)
 Base62-truncate to 6–8 chars → session code
    │
    ▼
-Stored in sessions.code (unique, indexed)
+Stored in sessions.session_code (unique, indexed)
    │
    ▼
 QR payload includes code + HMAC signature
@@ -62,30 +62,33 @@ Student scans QR or types code → server verifies
 1. Admin imports student/professor record with email
 2. User visits `/auth/register` → enters email → receives 6-digit OTP via email
 3. OTP verified → user sets password → account activated
-4. One-time use; OTP expires after 10 minutes
+4. One-time use; OTP expires after 5 minutes
 
 ### JWT Structure
 
 ```json
 {
   "sub": "user_id",
-  "role": "student|professor|admin",
+  "role": "student|professor|admin|super_admin",
   "exp": 1724592000,
   "iat": 1724591100
 }
 ```
 
 - Access token: 15-minute expiry
-- Refresh token: 7-day expiry (httpOnly cookie)
+- Refresh token: 7-day expiry, returned in `TokenResponse` body (D51); httpOnly cookie form deferred to Phase 10 (same-origin HTTPS)
+- MFA login gating (D51): if `user.mfa_enabled`, `POST /auth/login` returns `{mfa_pending: true, preauth_token}` (5-min JWT `type="preauth"`, grants no access); `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for full token pair
+- Forgot-password: OTP-only via `OtpPurpose.FORGET_PASSWORD` (SH-AU-5); security-question and Turnstile flows deferred
 - Role-based access: `Depends(require_role(Role.admin))` in FastAPI
 
 ### Role Hierarchy
 
-| Role        | Access                                                      |
-| ----------- | ----------------------------------------------------------- |
-| `admin`     | All endpoints + system settings + backup + analytics        |
-| `professor` | `/professor/*` — own courses, sessions, attendance, reports |
-| `student`   | `/student/*` — own scan, history, schedule, excuse requests |
+| Role          | Access                                                      |
+| ------------- | ----------------------------------------------------------- |
+| `super_admin` | All admin access + platform/system-level management         |
+| `admin`       | All endpoints + system settings + backup + analytics        |
+| `professor`   | `/professor/*` — own courses, sessions, attendance, reports |
+| `student`     | `/student/*` — own scan, history, schedule, excuse requests |
 
 ---
 
@@ -122,8 +125,8 @@ Client:
 
 **Thresholds:**
 
-- ≥ 0.75: Pass (high confidence match)
-- 0.65–0.75: Review flag → routed to liveness review queue
+- ≥ 0.70: Pass (high confidence match)
+- 0.65–0.70: Review flag → routed to liveness review queue
 - < 0.65: Fail
 
 ### Liveness Protocol (D31)

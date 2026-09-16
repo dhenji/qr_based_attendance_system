@@ -93,7 +93,7 @@ The scan flow is **strictly sequential** per [D27](../project/decision-log.md). 
 2. Point your camera at the QR code projected on screen
 3. The app reads the QR payload automatically
 
-> **Session QR payload** ([D18](../project/decision-log.md)): `{"v":1,"code":"A7X-9K2M","course":123,"radius":30,"pw":5,"lw":10}` — versioned for future migration.
+> **Session QR payload** ([D18](../project/decision-log.md)): `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}` — versioned for future migration.
 
 **What happens**: Server verifies the code, fetches the _session_ config (windows, duration, _geofence_ radius, classroom). On failure, a generic "Invalid code" message is shown (no detail leak about wrong program or expired _session_).
 
@@ -147,8 +147,8 @@ The scan flow is **strictly sequential** per [D27](../project/decision-log.md). 
 
 | Score     | Result                                                 |
 | --------- | ------------------------------------------------------ |
-| ≥ 0.75    | ✅ **Pass** — proceeds to Step 5                       |
-| 0.65–0.75 | ⚠ **Review** — flagged for admin liveness review queue |
+| ≥ 0.70    | ✅ **Pass** — proceeds to Step 5                       |
+| 0.65–0.70 | ⚠ **Review** — flagged for admin liveness review queue |
 | < 0.65    | ❌ **Fail** — rejection with reason `face_mismatch`    |
 
 > **Known Limitation**: Sibling confusion is acknowledged but not solved ([D31](../project/decision-log.md)). Liveness checks mitigate photo/video replay.

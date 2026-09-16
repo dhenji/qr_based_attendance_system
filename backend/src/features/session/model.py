@@ -1,14 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
-    Computed,
     DateTime,
     Float,
     ForeignKey,
     Integer,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,17 +41,22 @@ class Session(CreatedAtMixin, Base):
     late_window_minutes: Mapped[int] = mapped_column(Integer)
     scheduled_start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     scheduled_end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    expires_at: Mapped[datetime] = mapped_column(
+    expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        Computed(
-            "LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)",
-            persisted=True,
-        ),
     )
-    classroom_radius_meters: Mapped[int] = mapped_column(server_default="50")
+    classroom_radius_meters: Mapped[int] = mapped_column(server_default=text("50"))
     classroom_name: Mapped[str | None] = mapped_column(String(100))
     classroom_lat: Mapped[float | None] = mapped_column(Float)
     classroom_lng: Mapped[float | None] = mapped_column(Float)
+
+    @property
+    def computed_expires_at(self) -> datetime:
+        """LEAST(created_at + duration_minutes, scheduled_end_time) - 12, D49."""
+
+        return min(
+            self.created_at + timedelta(minutes=self.duration_minutes),
+            self.scheduled_end_time,
+        )
 
     offering: Mapped[CourseOffering] = relationship()
     professor: Mapped[Professor] = relationship()

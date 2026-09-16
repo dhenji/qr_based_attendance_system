@@ -97,7 +97,7 @@ Nightly batch job computing at-risk scores for all active enrollments.
 | Active enrollments             | 25,000 (avg 2.5 courses per student)                    |
 | Historical sessions per course | 32 (16 weeks × 2/week)                                  |
 | Historical attendance records  | ~800,000                                                |
-| Risk features computed         | absence_rate, max_streak, sync_lag_pending, trend_slope |
+| Risk features computed         | absence_rate, max_streak, sync_lag, trend_slope |
 
 ### Targets
 
@@ -124,13 +124,13 @@ e.g., CS101: 16 × 3 = 48 expected sessions
 | --------------------------- | ------------ | ---------- |
 | absence_rate                | > 0.30       | high       |
 | absence_rate                | > 0.15       | medium     |
-| streak (consecutive misses) | >= 3         | high       |
-| sync_lag (pending records)  | >= 5         | medium     |
+| max_streak                   | >= 3         | high       |
+| sync_lag                     | >= 5         | medium     |
 | trend_slope (4-week linear) | < -0.05/week | medium     |
 
 ### Measurement Method
 
-1. Seed 10k students + 25k enrollments + 800k attendance records via `seed_test_data.py --scale 10k`.
+1. Seed 10k students + 25k enrollments + 800k attendance records via `test_seed_data.py --scale 10k`.
 2. Run batch job with `time` command; record wall-clock time.
 3. Profile with `cProfile` or `py-spy` to identify bottlenecks.
 4. Spot-check: manually compute 20 random students' scores in SQL and compare with batch output.
@@ -163,7 +163,7 @@ e.g., CS101: 16 × 3 = 48 expected sessions
 
 ### Measurement Method
 
-1. Generate test data at each volume using `seed_test_data.py --scale {small|medium|large|xl}`.
+1. Generate test data at each volume using `test_seed_data.py --scale {small|medium|large|xl}`.
 2. Run backup pipeline: `pg_dump -Fc | gzip | openssl enc -aes-256-gcm`; measure each stage with `time` and `pv`.
 3. Verify restored data matches source: `pg_dump | pg_restore | pg_dump` round-trip comparison.
 4. Monitor disk I/O with `iostat` during backup.

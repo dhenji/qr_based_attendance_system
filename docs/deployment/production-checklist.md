@@ -3,7 +3,8 @@
 > Pre-launch checklist for deploying the QR Attendance System to production.
 > Every item must be verified before go-live. References:
 > [Deployment Workflow](deployment-workflow.md), [Backup Strategy](backup-strategy.md),
-> [Security Model](../architecture/security-model.md), [§8 Environment Variables](../../DOCS_REFACTOR_PLAN.md#8-environment-variables-reference).
+> [Security Model](../architecture/security-model.md), [Database ER](../design/database-er.md),
+> [Migration Strategy](../architecture/migration-strategy.md).
 
 ---
 
@@ -32,7 +33,7 @@
 | `DEBUG`                          | Yes      | `false`                    | Enables JWT_SECRET validation                                 |
 | `JWT_SECRET`                     | Yes      | `openssl rand -base64 32`  | Required when DEBUG=false                                     |
 | `JWT_ALGORITHM`                  | Yes      | `HS256`                    | Default                                                       |
-| `ACCESS_TOKEN_EXPIRE_MINUTES`    | Yes      | `30`                       | Or per policy                                                 |
+| `ACCESS_TOKEN_EXPIRE_MINUTES`    | Yes      | `15`                       | Or per policy                                                 |
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | Yes      | `7`                        | Or per policy                                                 |
 | `HMAC_SECRET_KEY`                | Yes      | `openssl rand -base64 32`  | For session code signing                                      |
 | `CORS_ORIGINS`                   | Yes      | Vercel frontend URL        | `https://your-app.vercel.app`                                 |
@@ -106,7 +107,7 @@ curl -I -X OPTIONS https://your-api.fly.dev/health \
 | Item                          | Check                                                     |
 | ----------------------------- | --------------------------------------------------------- |
 | `JWT_SECRET`                  | Set and non-empty (validated at startup when DEBUG=false) |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Set to reasonable value (15–60 min)                       |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Set to reasonable value (15 min)                        |
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | Set to reasonable value (7–30 days)                       |
 
 ### HMAC Session Codes
@@ -265,10 +266,10 @@ psql "$DATABASE_URL" -c \
 ### Verification
 
 ```bash
-# Check backup_log for recent successful backup
+# Check backup_log for recent completed backup
 psql "$DATABASE_URL" -c \
     "SELECT filename, status, size_bytes, started_at, finished_at
-     FROM backup_log WHERE kind='full' AND status='success'
+     FROM backup_log WHERE kind='full' AND status='completed'
      ORDER BY finished_at DESC LIMIT 1;"
 ```
 
@@ -401,7 +402,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 | 10  | Open session          | POST `/professor/sessions`  | 201 + session code              |
 | 11  | Student scan          | POST `/student/attendance/scan` | 200 + status                |
 | 12  | Backup trigger        | POST `/admin/backups`       | 202 Accepted                    |
-| 13  | Backup log            | Query `backup_log`          | New entry with `status=success` |
+| 13  | Backup log            | Query `backup_log`          | New entry with `status=completed` |
 
 ### Performance Baseline
 

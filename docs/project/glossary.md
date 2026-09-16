@@ -16,7 +16,7 @@ A 6–8 character code derived from an HMAC of the session ID + secret, used by 
 
 ### Session QR
 
-A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2M","course":123,"radius":30,"pw":5,"lw":10}`. Scanned by students in Step 1 of the scan flow. Version `v` enables future migration.
+A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}`. Scanned by students in Step 1 of the scan flow. Version `v` enables future migration.
 
 ### Enrollment (Course-Taking)
 
@@ -92,7 +92,7 @@ A 128-dimensional face vector (face-api.js compatible ResNet) generated from 3 e
 
 ### Evidence Bundle
 
-JSON object attached to an attendance record (offline or online) containing: `gps`, `liveness_scores`, `face_match_score`, `scanned_at`, `device_info`. Stored in `attendance_records.liveness_evidence JSONB`. Used for audit and server-side re-validation on sync.
+JSON object attached to an attendance record (offline or online) containing: `gps{lat, lng, accuracy}`, `liveness_evidence{blink_detected, head_turn_left, head_turn_right, ear_samples, pnp_evidence}`, `face_match_score`, `scanned_via`, `scanned_at`. Stored in `attendance_records.liveness_evidence JSONB`. Used for audit and server-side re-validation on sync.
 
 ### Excuse Request
 
@@ -113,7 +113,7 @@ Offline-first queue in `sync_queue` table. Client writes pending attendance reco
 
 ### Claim-Based Registration
 
-Account activation flow where a student/professor enters their official email → receives OTP → sets password → links to pre-existing `students`/`professors` record via `user_id` FK. Handled by existing `/auth/claim` endpoints.
+Account activation flow where a student/professor enters their official email → receives OTP → sets password → links to pre-existing `students`/`professors` record via `user_id` FK. Handled by `/auth/register` + `/auth/otp/*` (Phase 2, see api-contracts § Shared Auth Endpoints).
 
 ---
 
@@ -157,7 +157,7 @@ Account activation flow where a student/professor enters their official email �
 | `claim`           | Account claim registration |
 | `forget_password` | Password reset             |
 
-### SyncStatus (`attendance_records.sync_status`, `sync_queue.status`)
+### SyncStatus (`attendance_records.sync_status`)
 
 | Value     | Meaning                            |
 | --------- | ---------------------------------- |
@@ -165,7 +165,7 @@ Account activation flow where a student/professor enters their official email �
 | `pending` | Queued locally or in transit       |
 | `failed`  | Sync rejected (reason in evidence) |
 
-### QueueStatus (`sync_queue.status` — extended)
+### QueueStatus (`sync_queue.status`)
 
 | Value        | Meaning                      |
 | ------------ | ---------------------------- |

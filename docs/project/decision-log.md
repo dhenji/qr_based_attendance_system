@@ -9,11 +9,12 @@
 
 ### ADR-001: Academic Hierarchy — Program → Year Level → Course
 
-- **Decision (D1):** Introduce hierarchy **Program → Year Level → Course** with strict FK constraints (NOT NULL after backfill, cascade/restrict rules per §6).
+- **Decision (D1):** Introduce hierarchy **Program → Year Level → Course** with strict FK constraints (NOT NULL in target schema, cascade/restrict rules per §6).
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** The current flat `courses` table cannot express program-specific year structures or term definitions. A hierarchical model enables per-program-per-year term structures and proper course ownership.
-- **Consequences:** Requires new tables `programs` and `year_levels`; `courses` gains `program_id` and `year_level_id` FKs. Migration must backfill from legacy `students.course` strings.
+- **Consequences:** Requires new tables `programs` and `year_levels`; `courses` gains `program_id` and `year_level_id` FKs. In the target schema, `students` uses `year_level_id` FK directly (no legacy `course` string).
+> **Superseded by D44** — program/year-level FKs moved from `courses` to `course_offerings`; hierarchy is now Program → Year Level → CourseOffering (course templates carry no program/year FKs).
 
 ### ADR-002: Course = Subject; Section on Students Only
 
@@ -38,6 +39,7 @@
 - **Status:** Accepted
 - **Context:** Current `courses.schedule` is a free-text string. Structured fields enable expected-session calculation for risk scoring and conflict detection.
 - **Consequences:** `courses` table gains 9+ new columns. Expected sessions formula: `semester_weeks × sessions_per_week`.
+> **Superseded by D44** — scheduling/classroom/window metadata moved to `course_offerings`; `courses` keeps only `units` + `session_duration_hours`.
 
 ### ADR-005: Enrollment Gains Semester
 
@@ -45,7 +47,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Needed to scope enrollments to a specific term within a year level's structure.
-- **Consequences:** `enrollments.semester` NOT NULL after backfill; validated via application logic against `year_levels.term_structure`.
+- **Consequences:** `enrollments.semester` NOT NULL in target schema; validated via application logic against `year_levels.term_structure`.
 
 ### ADR-006: Courses Shared Across Programs/Year Levels
 
@@ -54,6 +56,7 @@
 - **Status:** Accepted
 - **Context:** General education (GE) courses are shared. Analytics must slice the same course by cohort.
 - **Consequences:** `courses` has `program_id` + `year_level_id` (owning program/year), but enrollments from other programs/years can reference it. Filters in reports must join through enrollments to get student's program/year.
+> **Superseded by D44** — sharing now happens via multiple `course_offerings` per course instead of cross-program/year enrollments on a single course.
 
 ---
 
@@ -110,7 +113,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Prevents sessions from running past scheduled class end. Professor sets intended scan duration; system enforces hard ceiling at scheduled end.
-- **Consequences:** `sessions` gains `duration_minutes`, `scheduled_start_time`, `scheduled_end_time`, `expires_at` (STORED/computed). Dual timers in live view.
+- **Consequences:** `sessions` gains `duration_minutes`, `scheduled_start_time`, `scheduled_end_time`, `expires_at` (app-computed, D49). Dual timers in live view.
 
 ### ADR-013: Present/Late Windows Per Session
 
@@ -127,6 +130,7 @@
 - **Status:** Accepted
 - **Context:** Reduces repetitive configuration; professors can override for specific sessions.
 - **Consequences:** `courses` gains two default window columns; session create pre-fills from course.
+> **Superseded by D44** — late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`) moved to `course_offerings`; sessions pre-fill from the offering.
 
 ### ADR-015: Expanded Validation Status Enum
 
@@ -412,7 +416,7 @@
 
 ### ADR-045: Professor Assignments & Risk Scores Reference Course Offerings
 
-- **Decision (D45):** `course_professors` FK changes from `course_id` to `offering_id` (PK(offering_id, professor_id, effective_from)); `student_risk_scores` FK changes from `course_id` to `offering_id` (UNIQUE(student_id, offering_id, semester, computed_at::date)).
+- **Decision (D45):** `course_professors` FK changes from `course_id` to `offering_id` (PK(offering_id, professor_id, effective_from)); `student_risk_scores` FK changes from `course_id` to `offering_id` (UNIQUE(student_id, offering_id, semester, computed_day)).
 - **Date:** 2026-09-10
 - **Status:** Accepted
 - **Context:** Assignments and risk are scoped to a specific offering (program + year + semester), not the course template.
@@ -426,4 +430,68 @@
 - **Status:** Accepted
 - **Context:** A session is opened by a specific professor (not a generic user). `CourseProfessor.professor_id` already targets `professors.id`; sessions should follow the same pattern for consistency. This gives direct access to professor name/department without an extra join through `users`.
 - **Consequences:** The session `professor` relationship returns a `Professor` instance. The logged-in user (JWT) resolves to a professor record via `Professor.user_id` before session creation. `database-er.md` FK notation and cardinality table updated. `migration-strategy.md` Step 6 includes retargeting the `professor_id` FK from `users.id` to `professors.id`.
+
+### ADR-047: Backup Status Enum — Started/Completed/Failed
+
+- **Decision (D47):** `BackupStatus` enum values are `started`, `completed`, `failed` (replacing the earlier implied `success`/`failed` pairing).
+- **Date:** 2026-09-13
+- **Status:** Accepted
+- **Context:** A backup run spends time in a non-failed, in-flight state before finishing; `started` lets the backup UI/log distinguish running vs done vs failed.
+- **Supersedes:** D39's implied `success`/`failed` status values.
+- **Consequences:** `backup_log.status` stores `started` | `completed` | `failed`. Implemented in `src/shared/enums.py` `BackupStatus`.
+
+### ADR-048: Face-Match Threshold ≥ 0.70; Session Status Computed DTO-Only
+
+- **Decision (D48):** Face-match pass threshold is **`FACE_MATCH_THRESHOLD = 0.70`** (config default — supersedes the earlier 0.75 pass band). Session lifecycle `status` (`active`/`closed`) is **computed in the DTO layer only**; it is not a stored column (`active` = `expires_at > now()`).
+- **Date:** 2026-09-13
+- **Status:** Accepted
+- **Context:** Threshold tuned to reduce false rejects; session lifecycle state is fully derivable from `sessions.expires_at`, so persisting a separate status column would risk drift.
+- **Consequences:** `face_match_score >= 0.70` passes (below → `face_mismatch` rejection); `FACE_REVIEW_BAND_LOW` (0.65) still flags borderline scans for manual review. `sessions.status` (`active`/`closed`) is derived during serialization.
+
+### ADR-049: Session expires_at Computed in Application Layer
+
+- **Decision (D49):** `sessions.expires_at` is computed in the application service layer (Python) instead of as a PostgreSQL `GENERATED ALWAYS AS ... STORED` column.
+- **Date:** 2026-09-13
+- **Status:** Accepted
+- **Context:** PostgreSQL persisted computed columns require IMMUTABLE expressions. `timestamptz + interval` is classified as STABLE (timezone-dependent), causing `generation expression is not immutable` error on `alembic upgrade head`.
+- **Consequences:**
+  - `expires_at` becomes a regular `DateTime(timezone=True)` nullable column
+  - Model exposes `@property computed_expires_at` — single source of truth for the formula
+  - Service layer sets `expires_at = session.computed_expires_at` at session creation
+  - Simpler migrations, portable across databases, easier to test
+- **Supersedes:** Part of D12 (the STORED column implementation detail)
+
+### ADR-050: student_risk_scores uses computed_day DATE column
+
+- **Decision (D50):** `student_risk_scores` unique index uses a plain `computed_day DATE` column instead of `date(computed_at)` expression.
+- **Date:** 2026-09-14
+- **Status:** Accepted
+- **Context:** PostgreSQL `date(timestamptz)` is STABLE, not IMMUTABLE. Expression indexes require IMMUTABLE functions. Using `date(computed_at)` in a unique index causes `functions in index expression must be marked IMMUTABLE`.
+- **Consequences:**
+  - `computed_day` is a regular `DATE NOT NULL` column, set by the service layer: `risk_score.computed_day = risk_score.computed_at.date()`
+  - Unique index becomes `UNIQUE(student_id, offering_id, semester, computed_day)` — plain column, no expression
+  - Same pattern as D49: move computation to application layer, store result as regular column
+
+### ADR-051: Auth Phase 2 — Token Transport & MFA Login Gating
+
+- **Decision (D51):** Refresh token travels in the `TokenResponse` body (not
+  httpOnly cookie); cookie form (`httpOnly; Secure; SameSite=Strict`) is Phase 10
+  scope behind same-origin HTTPS. When `user.mfa_enabled`, `POST /auth/login`
+  returns `{mfa_pending: true, preauth_token}` (5-min, no access) and
+  `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for the full token
+  pair. Forgot-password is OTP-only (`OtpPurpose.FORGET_PASSWORD`) per test-plan
+  SH-AU-5; the wireframe 4-step flow (Turnstile + security question, 3-attempt
+  cap) is deferred.
+- **Date:** 2026-09-16
+- **Status:** Accepted
+- **Context:** Cross-origin frontend + HTTP local dev make Secure httpOnly cookies
+  impossible (security-model.md:79); T6's 15-min access + MFA + lockout covers
+  body-refresh risk. MFA must gate login to stay meaningful (wireframes:102,
+  proposal:565). Docs conflicted on forgot-password — aligned to test-plan.
+- **Consequences:** `TokenResponse` includes `refresh_token` (client keeps in
+  memory); `preauth` JWT type, 5-min expiry; `security_question_*` columns stay
+  reserved; api-contracts auth table gains `/otp/request`, `/refresh`,
+  `/change-password`.
+- **Supersedes:** httpOnly-cookie detail of security-model.md:79 (re-scoped to
+  Phase 10).
 

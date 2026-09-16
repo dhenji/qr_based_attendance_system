@@ -89,7 +89,7 @@ A single encrypted JSON blob stored in `students.face_embedding` (BYTEA column):
 - **`mean`** (128 floats): element-wise average of the three angle vectors. Used as
   the **primary comparison target** during verification (D28).
 - **`angles`** (3 × 128 floats): per-angle vectors retained for **tie-breaking**
-  when the mean score falls in the review band (0.65–0.6999). The system re-checks
+  when the mean score falls in the review band (0.65–0.70). The system re-checks
   cosine similarity against each individual angle; if any angle passes ≥
   `FACE_MATCH_THRESHOLD` (0.70), the scan is auto-approved.
 - **Encryption**: the JSON is encrypted with AES-256-GCM using a server-side key
@@ -194,11 +194,10 @@ generates:
 {
   "liveness_evidence": {
     "blink_detected": true,
-    "left_turn_detected": true,
-    "right_turn_detected": true,
-    "timestamps_ms": [1200, 3400, 5100],
-    "ear_values": [0.18, 0.31, 0.29, 0.33],
-    "pnp_vectors": [[...], [...], [...]]
+    "head_turn_left": true,
+    "head_turn_right": true,
+    "ear_samples": [0.18, 0.31, 0.29, 0.33],
+    "pnp_evidence": { "yaw": 12.5 }
   }
 }
 ```
@@ -224,8 +223,8 @@ model (128-d output).
 | Score Range                            | Outcome         | Action                                                                                                                                                                                                                          |
 | -------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ≥ `FACE_MATCH_THRESHOLD` (0.70)        | **Pass**        | Proceed to step 5; record `face_match_score`                                                                                                                                                                                    |
-| `FACE_REVIEW_BAND_LOW` (0.65) – 0.6999 | **Review flag** | Proceed to step 5 (record saved), but the attendance record is flagged in `liveness_review` for admin manual review. Tie-break: re-check against individual angle vectors; if any angle ≥ `FACE_MATCH_THRESHOLD`, auto-approve. |
-| < `FACE_REVIEW_BAND_LOW` (0.65)        | **Fail**        | Scan **rejected**; `rejection_reason = 'face_mismatch'`; student may retry.                                                                                                                                                     |
+| `FACE_REVIEW_BAND_LOW` (0.65) – 0.70 | **Review flag** | Proceed to step 5 (record saved), but the attendance record is flagged in `liveness_review` for admin manual review. Tie-break: re-check against individual angle vectors; if any angle ≥ `FACE_MATCH_THRESHOLD`, auto-approve. |
+| < `FACE_REVIEW_BAND_LOW` (0.65)        | **Fail**        | Scan **rejected**; `rejection_reason = 'face_mismatch'` is recorded inside the `liveness_evidence` JSONB bundle (not a dedicated column); student may retry. |
 
 Thresholds are configurable via environment variables:
 
@@ -257,24 +256,21 @@ Submitted with every scan request (online or queued offline):
 
 ```json
 {
-  "student_id": "24-2111",
+  "student_number": "24-2111",
   "session_id": 582,
   "gps": {
-    "latitude": 10.3157,
-    "longitude": 123.8854,
-    "accuracy_meters": 8.2
+    "lat": 10.3157,
+    "lng": 123.8854,
+    "accuracy": 8.2
   },
-  "liveness": {
+  "liveness_evidence": {
     "blink_detected": true,
-    "left_turn_detected": true,
-    "right_turn_detected": true,
-    "timestamps_ms": [1200, 3400, 5100],
-    "ear_values": [0.18, 0.31, 0.29, 0.33],
-    "pnp_vectors": [
-      [0.01, 0.02, 0.99],
-      [0.15, 0.03, 0.98],
-      [-0.14, 0.02, 0.98]
-    ]
+    "head_turn_left": true,
+    "head_turn_right": true,
+    "ear_samples": [0.18, 0.31, 0.29, 0.33],
+    "pnp_evidence": {
+      "yaw": 12.5
+    }
   },
   "face_match_score": 0.8234,
   "scanned_via": "qr_camera",
@@ -284,7 +280,8 @@ Submitted with every scan request (online or queued offline):
 
 The server stores the full bundle in `attendance_records.liveness_evidence`
 (JSONB) and the numeric score in `attendance_records.face_match_score`
-(NUMERIC(5,4)).
+(NUMERIC(5,4)). Key names match the scan request contract in
+[api-contracts.md](api-contracts.md).
 
 ---
 
@@ -293,7 +290,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 | Method | Path                                         | Role    | Description                                                                               |
 | ------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
 | POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server generates + stores embedding                          |
-| GET    | `/admin/face-enrollment/{student_id}/status` | Admin   | Check enrollment status, version, enrolled_at                                             |
+| GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
 
 ---

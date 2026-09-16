@@ -39,6 +39,34 @@ class Settings(BaseSettings):
     backup_retention_monthly: int = 12
     backup_exclude_otp_codes: bool = False
 
+    # Attendance defaults (D13, geofence)
+    default_present_window_minutes: int = 5
+    default_late_window_minutes: int = 10
+    default_geofence_radius_meters: int = 50
+    otp_expires_minutes: int = 5
+
+    # Risk scoring (D35)
+    risk_absence_rate_high: float = 0.30
+    risk_absence_rate_medium: float = 0.15
+    risk_streak_gaps_high: int = 3
+    risk_sync_lag_high: int = 5
+    risk_trend_negative: float = -0.05
+    risk_batch_cron: str = "0 2 * * *"
+    risk_batch_chunk_size: int = 1000
+    risk_batch_workers: int = 4
+    risk_batch_dry_run: bool = False
+
+    # Attachment storage (excuse evidence)
+    attachments_storage_type: str = "local"
+    attachments_max_bytes: int = 5242880
+
+    # Cloudfare Trunstile CAPTCHA (optional)
+    turnstile_secret_key: str = ""
+
+    # Testing/benchmark + backup tuning
+    benchmark_mode: bool = False
+    backup_compression_level: int = 6
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @model_validator(mode="after")

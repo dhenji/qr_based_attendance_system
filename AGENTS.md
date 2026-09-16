@@ -5,14 +5,14 @@
 ## Repository State
 
 - Remote: `git@github.com:CodeKharl/qr_based_attendance_system.git`. Branches/PRs against `main`.
-- Layout: `frontend/`, `backend/` (models + migrations + `Dockerfile.dev`), root `docker-compose.yml`, `docs/`.
+- Layout: `frontend/`, `backend/` (models + migrations + `Dockerfile.dev`), root `docker-compose.dev.yml`, `docs/`.
 - Root `.gitignore` ignores `.env`/`.env.*` but un-ignores `.env.example` and `.env.test`. `backend/.env` exists (ignored) — never commit it.
 
 ## Key Commands
 
 ### Local Dev (Docker — recommended)
 ```bash
-docker compose up --build          # API on :8000, Postgres on :5432, migrations run automatically
+docker compose -f docker-compose.dev.yml up --build          # API on :8000, Postgres on :5432, frontend on :5173, migrations run automatically
 ```
 
 ### Manual Backend
@@ -52,8 +52,8 @@ npm run check                      # typecheck (runs svelte-kit sync first)
   - `excuse.ExcuseRequest` (table: `excuse_requests`) — `initiated_by`/`initiated_via`, `reason`, `attachment_urls` (JSONB), `status`, `reviewed_by`/`reviewed_at`
   - `program.Program` + `program.YearLevel` — imported in `alembic/env.py`
 - **Routers**: `src/api/router.py` mounts 5 routers under `/api`. `course` and `enrollment` routers exist as files but are **not mounted**. All mounted routers are currently empty stubs.
-- **Alembic**: 3 migrations in `alembic/versions/`. To add a table: write model, add `import features.X.model` to `alembic/env.py`, then `alembic revision --autogenerate -m "..."` + `alembic upgrade head`.
-- **Shared**: `src/shared/enums.py` (15 StrEnum classes), `src/shared/mixins.py`, `src/shared/pagination.py`, `src/shared/base.py` (BaseCRUD generic), `src/shared/email.py`.
+- **Alembic**: 1 baseline migration (`679a319c12d6`) creating the 16-table target schema. To add a table: write model, add `import features.X.model` to `alembic/env.py`, then `alembic revision --autogenerate -m "..."` + `alembic upgrade head`.
+- **Shared**: `src/shared/enums.py` (13 StrEnum classes), `src/shared/mixins.py`, `src/shared/pagination.py`, `src/shared/base.py` (BaseCRUD generic), `src/shared/email.py`.
 - **Missing**: `service.py` and `schema.py` for all features (incl. `excuse`, which has model only); `src/shared/dependencies.py`/`cache.py`; `src/tests/` is empty.
 - **Dockerfile.dev**: 3-stage — `builder` (venv at `/opt/venv`) → `runtime` (uvicorn) → `migrate` (alembic upgrade head).
 
@@ -74,7 +74,7 @@ npm run check                      # typecheck (runs svelte-kit sync first)
 | Area | Detail |
 |------|--------|
 | DB connection | FastAPI lifespan runs `SELECT 1` at startup — container fails if Postgres not ready. Compose handles via `depends_on: condition: service_healthy`. |
-| Alembic model imports | `alembic/env.py` imports models using `features.*.model` (not `src.features...`). Must `cd backend` so imports resolve. Currently imports all feature models incl. `features.program.model`. When `features/excuse/model.py` (ExcuseRequest) is created, add `import features.excuse.model` before regenerating migrations. |
+| Alembic model imports | `alembic/env.py` imports models using `features.*.model` (not `src.features...`). Must `cd backend` so imports resolve. All 13 feature models (incl. `features.excuse.model`) are already imported and the single baseline migration exists, so do not autogenerate unless you actually add/change a model. |
 | Frontend mock mode | `MOCK = true` in `src/lib/api/client.ts`. All API calls return mock data. No real backend integration yet. |
 | Env files | Backend reads `.env` from `backend/` (not root). Frontend reads `.env` from `frontend/`. |
 | CORS | `CORS_ORIGINS` in backend `.env` must include frontend origin (`http://localhost:5173`). |

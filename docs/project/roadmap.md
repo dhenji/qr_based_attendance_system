@@ -9,19 +9,19 @@
 
 ## Phase 1: Database & Academic Structure
 
-**Goal:** Migrate from the current flat schema to the target hierarchical model (D1–D6).
+**Goal:** Create the target hierarchical model (baseline migration creates all 16 tables directly).
 
 ### Deliverables
 
-- New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
+- New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log` — **all 16/16 target tables are now modeled**; migrations regenerated as a single full baseline (3 legacy revisions dropped, alembic 996b2fb85c6f replaced)
 - Strip `courses` to a pure template: retains only `units` + `session_duration_hours` (D4)
 - Create `course_offerings` with schedule, classroom, default windows, and program/year-level FKs (D4)
 - Expand `sessions` (drop `course_id`, add `offering_id`), duration, windows, scheduled times, classroom override (D12, D14, D17)
 - Expand `attendance_records` with excuse fields, face evidence, rejection reasons (D15, D16)
 - Expand `students` with face embedding columns (D28)
-- ~~Add `offering_id` + `semester` to `enrollments` (D5)~~ ✅
+- ~~Add `offering_id` + `semester` to `enrollments` (D5)~~ ✅ — `enrollments` modeled with `offering_id`/`semester` NOT NULL, `academic_year` NOT NULL, and `UNIQUE(student_id, offering_id, academic_year)`
 - Enum expansion: `ValidationStatus` gains `excused`, `rejected` (D15)
-- Data backfill: `valid` → `present`, `invalid` → `rejected` (migration-strategy.md §0.3)
+- Enum expansion: `ValidationStatus` values are `present`/`late`/`absent`/`excused`/`pending`/`rejected` in the target schema (no migration needed — baseline creates correct enum values)
 
 ### Key Decisions
 
@@ -36,7 +36,7 @@
 
 ### Prerequisite Docs
 
-- [Target Schema](../design/database-er.md) — ERD must match §6 of DOCS_REFACTOR_PLAN.md
+- [Target Schema](../design/database-er.md) — canonical ERD for the target schema
 - [Migration Strategy](../architecture/migration-strategy.md) — ordered Alembic plan
 
 ---
@@ -271,8 +271,8 @@
 
 ### Deliverables
 
-- Test plan covering all 43 decisions (test-plan.md)
-- Seed data: 3 programs, ~40 students, shared GE course, 6-week history (test-data.md)
+- Test plan covering all 48 decisions (test-plan.md)
+- Test data: ~40 students, shared GE course, 6-week history (test-data.md)
 - Performance benchmarks: scan latency, concurrent sync, risk batch, backup scaling (performance-benchmarks.md)
 - Security audit: threat model validation, bypass attempt testing (security-model.md)
 - Offline → online sync integration tests
@@ -347,18 +347,18 @@ Phase 1 (DB Schema)
 
 ---
 
-## Cross-Reference: Phases to DOCS_REFACTOR_PLAN.md
+## Cross-Reference: Phases to Reference Docs
 
-| Phase    | Refactor Plan Reference                                                          |
-| -------- | -------------------------------------------------------------------------------- |
-| Phase 1  | §2.1 (D1–D6), §6 Target Schema, Task 0.3 Migration Strategy                      |
-| Phase 2  | §2.5 (D25–D26), §2.6 (D32), Task 2.3 Security Model                              |
-| Phase 3  | §2.6 (D28), §2.8 (D38, D40), Task 3.1 Face Enrollment, Task 1.1 Admin Wireframes |
-| Phase 4  | §2.2 (D7–D10), §2.3 (D11–D19), Task 2.1 API Contracts                            |
-| Phase 5  | §2.3 (D15–D19), §2.6 (D27–D32), Task 2.2 Offline-First                           |
-| Phase 6  | §2.4 (D20–D24), Task 3.2 Excuse Workflow                                         |
-| Phase 7  | §2.7 (D33–D37), Task 3.3 Risk Model                                              |
-| Phase 8  | §2.8 (D38–D40), Task 3.4 Backup Strategy                                         |
-| Phase 9  | §8–§10 of this plan; Task 7.1–7.3 Testing Docs                                   |
-| Phase 10 | deployment-workflow.md, production-checklist.md                                  |
-| Phase 11 | runbooks.md, monitoring.md, incident-response.md                                 |
+| Phase    | Reference Docs                                                                                          |
+| -------- | ------------------------------------------------------------------------------------------------------- |
+| Phase 1  | [decision-log.md](./decision-log.md) (D1–D6), [database-er.md](../design/database-er.md) Target Schema, [migration-strategy.md](../architecture/migration-strategy.md) |
+| Phase 2  | decision-log (D25–D26, D32), [security-model.md](../architecture/security-model.md)                      |
+| Phase 3  | decision-log (D28, D38, D40), [face-enrollment.md](../architecture/face-enrollment.md), [wireframes.md](../design/wireframes.md) |
+| Phase 4  | decision-log (D7–D10, D11–D19), [api-contracts.md](../architecture/api-contracts.md)                     |
+| Phase 5  | decision-log (D15–D19, D27–D32), [offline-first.md](../architecture/offline-first.md)                    |
+| Phase 6  | decision-log (D20–D24), [excuse-workflow.md](../architecture/excuse-workflow.md)                         |
+| Phase 7  | decision-log (D33–D37), [risk-model.md](../architecture/risk-model.md)                                   |
+| Phase 8  | decision-log (D38–D40), [backup-strategy.md](../deployment/backup-strategy.md)                           |
+| Phase 9  | [test-plan.md](../testing/test-plan.md), [test-data.md](../testing/test-data.md)                         |
+| Phase 10 | [deployment-workflow.md](../deployment/deployment-workflow.md), [production-checklist.md](../deployment/production-checklist.md) |
+| Phase 11 | [runbooks.md](../operations/runbooks.md), [monitoring.md](../operations/monitoring.md), [incident-response.md](../operations/incident-response.md) |

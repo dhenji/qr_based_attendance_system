@@ -59,8 +59,8 @@ ORDER BY hour DESC;
    SELECT
        student_id,
        session_id,
-       rejection_reason,
-       liveness_evidence->>'face_match_score' as score,
+       liveness_evidence->>'rejection_reason' as rejection_reason,
+       face_match_score,
        created_at
    FROM attendance_records
    WHERE validation_status = 'rejected'
@@ -252,7 +252,7 @@ SELECT filename, kind, size_bytes, sha256, status,
        started_at, finished_at,
        NOW() - finished_at as age
 FROM backup_log
-WHERE kind = 'full' AND status = 'success'
+WHERE kind = 'full' AND status = 'completed'
 ORDER BY finished_at DESC
 LIMIT 3;
 ```

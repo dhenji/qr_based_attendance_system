@@ -16,7 +16,7 @@ attendance-system/
 │   │   │
 │   │   ├── shared/                   # Cross-feature helpers
 │   │   │   ├── __init__.py
-│   │   │   ├── enums.py              # UserRole, OtpPurpose, ValidationStatus, SyncStatus, QueueStatus
+│   │   │   ├── enums.py              # UserRole, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SyncStatus, QueueStatus
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
 │   │   │   ├── dependencies.py       # (planned) get_db, pagination dependencies
 │   │   │   ├── otp.py                # (planned) 6-digit OTP generate/verify vs otp_codes table
@@ -27,32 +27,23 @@ attendance-system/
 │   │   │
 │   │   ├── api/                      # Router aggregation
 │   │   │   ├── __init__.py
-│   │   │   ├── router.py             # (planned) mounts all features' routers under /prefixes
+│   │   │   ├── router.py             # mounts auth, student, session, attendance, professor; course & enrollment routers exist unmounted
 │   │   │   └── deps.py               # Dependency injection helpers
 │   │   │
-│   │   ├── features/                 # Vertical slices — one folder per domain,
-│   │   │   │                         # each owning all four layers:
-│   │   │   ├── auth/                 # │ ├─ model.py   (SQLAlchemy ORM)
-│   │   │   ├── student/              # │ ├─ schema.py  (Pydantic v2)
-│   │   │   ├── course/               # │ ├─ service.py (business logic)
-│   │   │   ├── enrollment/           # │ └─ router.py  (endpoints)
-│   │   │   ├── professor/            #   claim-based self-registration (OTP)
-│   │   │   ├── program/              #   program CRUD, year-level management,
-│   │   │   │                         #   term structure editing
-│   │   │   ├── session/              #   HMAC session codes & expiry
-│   │   │   ├── attendance/           #   validation pipeline (HMAC→GPS→liveness→uniqueness→enrollment)
-│   │   │   ├── face_enrollment/      #   3-photo capture, embedding generation,
-│   │   │   │                         #   versioned storage, revocation
-│   │   │   ├── liveness/             #   face challenges, evidence bundles,
-│   │   │   │                         #   nonce registry, risk-fusion scoring
-│   │   │   ├── excuse/               #   excuse state machine (3 initiation paths),
-│   │   │   │                         #   bulk excuse-all, evidence attachments
-│   │   │   ├── analytics/            #   aggregations, at-risk heuristic scoring,
-│   │   │   │                         #   prescriptive rule engine, nightly batch
-│   │   │   │   └── tasks.py          #   APScheduler jobs (risk batch nightly, retention prune)
-│   │   │   ├── system/               #   backup pipeline, academic-structure updates,
-│   │   │   │                         #   system settings, audit logging
-│   │   │   └── sync/                 #   offline SyncQueue processing
+│   │   ├── features/                 # Vertical slices — one folder per domain
+│   │   │   ├── auth/                 # model.py: User, OtpCodes (router mounted)
+│   │   │   ├── student/              # model.py: Student (router mounted)
+│   │   │   ├── session/              # model.py: Session (router mounted)
+│   │   │   ├── attendance/           # model.py: Attendance (router mounted)
+│   │   │   ├── professor/            # model.py: Professor (router mounted)
+│   │   │   ├── course/               # model.py: Course, CourseOffering (router file exists, unmounted)
+│   │   │   ├── course_professor/     # model.py: CourseProfessor + service.py
+│   │   │   ├── enrollment/           # model.py: Enrollment (router file exists, unmounted)
+│   │   │   ├── program/              # model.py: Program, YearLevel (no router file)
+│   │   │   ├── excuse/               # model.py: ExcuseRequest (model only)
+│   │   │   ├── analytics/            # model.py: StudentRiskScore (model only)
+│   │   │   ├── sync/                 # model.py: SyncQueue (no router file)
+│   │   │   └── system/               # model.py: BackupLog (model only)
 │   │   │
 │   │   └── tests/                    # (planned) Unit & integration tests
 │   │       ├── test_students.py
@@ -70,156 +61,40 @@ attendance-system/
 │   ├── .env.example                  # Template for local env vars
 │   └── .env                          # Local environment variables (gitignored)
 │
-├── frontend/                         # SvelteKit PWA frontend
+├── frontend/                         # SvelteKit app — mock-first feature slices (SvelteKit 2 + Svelte 5 runes)
 │   ├── src/
 │   │   ├── app.html                  # Main HTML template
 │   │   ├── app.d.ts                  # Global TypeScript declarations
-│   │   ├── hooks.server.ts           # Auth, authorization, request hooks
-│   │   ├── hooks.client.ts           # Theme, analytics, reconnect handling
-│   │   ├── service-worker.ts         # PWA offline caching & background sync
-│   │   │
-│   │   ├── routes/
-│   │   │   ├── +layout.svelte        # Root application layout
-│   │   │   ├── +error.svelte         # Global error page
-│   │   │   ├── +page.svelte          # Landing page
-│   │   │   │
-│   │   │   ├── (auth)/
-│   │   │   │   ├── +layout.svelte    # Authentication layout
-│   │   │   │   ├── login/            # Login page (+page.ts redirects authed)
-│   │   │   │   ├── register/         # Registration page + loader
-│   │   │   │   ├── forgot-password/  # Forgot password
-│   │   │   │   └── reset-password/   # Reset password
-│   │   │   │
-│   │   │   ├── (student)/
-│   │   │   │   ├── +layout.svelte    # Student layout/sidebar
-│   │   │   │   ├── dashboard/        # Dashboard overview
-│   │   │   │   ├── scan/
-│   │   │   │   │   ├── step/         # 5-step scan flow
-│   │   │   │   │   │   ├── 1/        # 2.2a Session Entry (code/QR)
-│   │   │   │   │   │   ├── 2/        # 2.2b ID Scan
-│   │   │   │   │   │   ├── 3/        # 2.2c Location Check
-│   │   │   │   │   │   ├── 4/        # 2.2d Face Check
-│   │   │   │   │   │   └── 5/        # 2.2e Result
-│   │   │   │   │   └── +page.svelte  # Scanner root redirect
-│   │   │   │   ├── history/          # 2.7 Attendance history + filters
-│   │   │   │   ├── schedule/         # 2.8 Calendar (month/week)
-│   │   │   │   ├── excuses/          # Student excuse requests
-│   │   │   │   ├── profile/          # 2.10 Read-only profile
-│   │   │   │   └── settings/         # 2.11 Appearance/Notifications/Security
-│   │   │   │
-│   │   │   ├── (professor)/
-│   │   │   │   ├── +layout.svelte    # Professor layout
-│   │   │   │   ├── dashboard/        # 3.1 Dashboard (today's sessions, quick actions)
-│   │   │   │   ├── courses/
-│   │   │   │   │   ├── +page.svelte  # 3.6 My Courses — offering cards (grouped by program)
-│   │   │   │   │   └── [id]/         # 3.6 Offering detail deep-link
-│   │   │   │   ├── sessions/
-│   │   │   │   │   ├── new/          # 3.2a/b Session creation (locked vs selector)
-│   │   │   │   │   ├── active/[id]/  # 3.3 Active session (dual timers)
-│   │   │   │   │   └── history/      # 3.5 Session history
-│   │   │   │   ├── attendance/       # 3.4 Attendance list (filters + section)
-│   │   │   │   ├── reports/          # 3.7 Reports (3 tabs: All/Course/Trends)
-│   │   │   │   ├── excuses/          # Excuse request review
-│   │   │   │   ├── profile/          # 3.9 Read-only profile
-│   │   │   │   └── settings/         # 3.9 Change password / MFA
-│   │   │   │
-│   │   │   └── (admin)/
-│   │   │       ├── +layout.svelte    # Admin layout
-│   │   │       ├── dashboard/        # 4.1 Dashboard (KPIs, quick actions)
-│   │   │       ├── students/         # Student management (CRUD/import/archive)
-│   │   │       ├── professors/       # Professor management
-│   │   │       ├── programs/
-│   │   │       │   ├── +page.svelte  # 4.5a Programs list
-│   │   │       │   └── [id]/
-│   │   │       │       ├── +page.svelte  # 4.5b Program detail (year tabs)
-│   │   │       │       ├── years/[yid]/
-│   │   │       │       │   └── offerings/  # 4.5c Year-level course offerings
-│   │   │       │       │       └── [oid]/ # 4.5d Offering detail (tabs)
-│   │   │       │       └── offerings/[oid]/ # Direct offering access
-│   │   │       ├── analytics/        # 4.7 Analytics & Reports (5 tabs)
-│   │   │       ├── audit-logs/       # Audit trail viewer
-│   │   │       ├── system/
-│   │   │       │   ├── settings/     # 4.10 System settings
-│   │   │       │   └── backups/      # Backup management
-│   │   │       └── face-enrollment/  # Face enrollment admin tool
+│   │   ├── hooks.client.ts           # Connectivity → offline store; sync trigger
 │   │   │
 │   │   ├── lib/
-│   │   │   ├── components/
-│   │   │   │   ├── attendance/       # Attendance UI components
-│   │   │   │   ├── scanner/          # QR scanner module
-│   │   │   │   │   ├── QRScanner.svelte       # Camera QR scanner
-│   │   │   │   │   ├── CameraView.svelte      # Camera preview
-│   │   │   │   │   ├── ScannerOverlay.svelte  # Scanner guide
-│   │   │   │   │   ├── SessionCodeInput.svelte# Session code input
-│   │   │   │   │   ├── GPSStatus.svelte       # GPS indicator
-│   │   │   │   │   ├── FaceChallenge.svelte   # Blink/head-turn liveness challenges
-│   │   │   │   │   ├── ChallengePrompt.svelte # Live challenge instruction overlay
-│   │   │   │   │   ├── LivenessStatus.svelte  # Liveness evidence status
-│   │   │   │   │   ├── PermissionPrompt.svelte# Camera/GPS permissions
-│   │   │   │   │   ├── ScanResult.svelte      # Result message
-│   │   │   │   │   ├── OfflineStatus.svelte   # Pending sync/liveness queue
-│   │   │   │   │   ├── Step1SessionEntry.svelte   # 2.2a code/QR entry
-│   │   │   │   │   ├── Step2IdScan.svelte         # 2.2b student-ID QR
-│   │   │   │   │   ├── Step3LocationCheck.svelte  # 2.2c GPS validation
-│   │   │   │   │   ├── Step4FaceCheck.svelte      # 2.2d liveness challenge
-│   │   │   │   │   └── Step5Result.svelte         # 2.2e success/fail overlay
-│   │   │   │   ├── charts/
-│   │   │   │   │   └── ChartCanvas.svelte    # Reusable Chart.js wrapper (D41)
-│   │   │   │   ├── calendar/
-│   │   │   │   │   ├── MonthGrid.svelte      # 2.8 Month calendar view
-│   │   │   │   │   ├── WeekGrid.svelte       # 2.8 Week calendar view
-│   │   │   │   │   └── DaySheet.svelte       # 2.8 Day detail sheet
-│   │   │   │   ├── excuse/
-│   │   │   │   │   ├── QuickModal.svelte     # Prof quick-excuse (D21 path a)
-│   │   │   │   │   ├── RequestForm.svelte    # Student excuse request (D21 path c)
-│   │   │   │   │   └── ReviewList.svelte     # Prof review pending requests
-│   │   │   │   ├── face-enrollment/
-│   │   │   │   │   └── FaceEnrollmentModal.svelte  # 3-photo capture modal
-│   │   │   │   ├── dashboard/         # Dashboard widgets
-│   │   │   │   ├── forms/             # Form components
-│   │   │   │   ├── modals/            # Modal dialogs
-│   │   │   │   ├── navigation/        # Navbar/Sidebar
-│   │   │   │   ├── ui/                # Generic UI
-│   │   │   │   └── common/            # Loading/Error states
-│   │   │   │
-│   │   │   ├── services/             # API communication layer
-│   │   │   │   ├── api.ts            # HTTP client (fetch wrapper)
-│   │   │   │   ├── auth.ts           # Auth API
-│   │   │   │   ├── attendance.ts     # Attendance API
-│   │   │   │   ├── student.ts        # Student API
-│   │   │   │   ├── professor.ts      # Professor API
-│   │   │   │   ├── course.ts         # Course API
-│   │   │   │   ├── report.ts         # Reports API
-│   │   │   │   ├── session.ts        # Session API
-│   │   │   │   ├── liveness.ts       # Liveness evidence API
-│   │   │   │   ├── analytics.ts      # Analytics API (aggregations, forecasts)
-│   │   │   │   ├── gps.ts            # GPS helpers
-│   │   │   │   └── qr.ts             # QR helpers
-│   │   │   │
-│   │   │   ├── stores/               # Global reactive stores (auth, offline, attendance)
-│   │   │   ├── offline/              # IndexedDB & sync logic
-│   │   │   ├── validators/           # Zod validators
-│   │   │   ├── constants/            # Roles, routes, status
-│   │   │   ├── types/                # TypeScript models
-│   │   │   ├── utils/                # Shared utilities (hmac, geolocation, format)
-│   │   │   └── server/
-│   │   │       ├── auth.ts           # Server auth helpers
-│   │   │       ├── cookies.ts        # Cookie helpers
-│   │   │       ├── permissions.ts    # RBAC utilities
-│   │   │       └── session.ts        # Server session utilities
+│   │   │   ├── index.ts              # Barrel exports
+│   │   │   ├── app/                  # session.svelte.ts (auth session, role switcher), offline.svelte.ts (online status + pending queue)
+│   │   │   ├── api/                  # client.ts (fetch wrapper, MOCK flag) + endpoints.ts (typed mock endpoint map)
+│   │   │   ├── features/             # one folder per frontend domain
+│   │   │   │   ├── auth/             # service.ts, store.svelte.ts, schema.ts, mock.ts, components/
+│   │   │   │   ├── student/          # service.ts, store.svelte.ts, mock.ts, components/
+│   │   │   │   ├── session/          # service.ts, store.svelte.ts, schema.ts, mock.ts, components/
+│   │   │   │   ├── attendance/       # service.ts, store.svelte.ts, schema.ts, mock.ts
+│   │   │   │   ├── liveness/         # store.svelte.ts (scan state machine), bundle.ts, schema.ts, components/ — frontend-only feature
+│   │   │   │   ├── sync/             # service.ts, db.ts (IndexedDB wrapper), engine.ts (enqueue/dequeue/retry/status)
+│   │   │   │   ├── course/  ○        # deferred — empty until backend
+│   │   │   │   ├── enrollment/ ○     # deferred
+│   │   │   │   └── analytics/ ○      # deferred
+│   │   │   └── shared/
+│   │   │       ├── styles/tokens.css # palette, spacing, radius, status colors
+│   │   │       ├── ui/               # Button, Card, Input, Select, Toggle, Table, Badge, Modal, EmptyState
+│   │   │       ├── components/       # Sidebar, Topbar, StatusBadge, OfflineBanner
+│   │   │       ├── utils/            # geo.ts (haversine + geofence), format.ts, gen.ts, qr.ts
+│   │   │       ├── constants/        # roles.ts, routes.ts, status.ts
+│   │   │       ├── types/            # mirrors backend models (user, student, course, enrollment, session, attendance, liveness, sync)
+│   │   │       └── validators/       # base.ts shared zod bits (email, id, password strength)
 │   │   │
-│   │   └── ...                       # NOTE: src/ source files not yet written (scaffold only)
+│   │   └── routes/                   # auth/login, auth/register, student/dashboard, student/scan, professor/sessions
 │   │
-│   ├── static/                       # Static assets
-│   │   ├── icons/                    # PWA icons (192x192, 512x512)
-│   │   ├── images/                   # Images & logos
-│   │   ├── fonts/                    # Custom fonts
-│   │   ├── manifest.json             # PWA manifest file
-│   │   ├── robots.txt                # Robots rules
-│   │   └── favicon.png               # Website icon
-│   │
+│   ├── static/                       # Static assets (favicon, logo)
 │   ├── svelte.config.js              # SvelteKit configuration
-│   ├── vite.config.ts                # Vite + PWA plugin configuration
+│   ├── vite.config.ts                # Vite config (vite-plugin-pwa: Deferred)
 │   ├── tsconfig.json                 # TypeScript strict config
 │   ├── package.json                  # Node dependencies
 │   ├── .env.example                  # PUBLIC_API_URL template
@@ -227,7 +102,7 @@ attendance-system/
 │
 ├── docs/                             # Documentation
 │   ├── project/
-│   │   ├── decision-log.md           # ADR-format decision log (D1–D43)
+│   │   ├── decision-log.md           # ADR-format decision log (D1–D48)
 │   │   └── glossary.md               # Term definitions
 │   ├── proposals/
 │   │   ├── proposal.md               # Full project proposal
@@ -251,7 +126,7 @@ attendance-system/
 │   │   └── wireframes.md             # Wireframes
 │   └── presentations/                # Slides + deck (.pptx, .pdf)
 │
-├── docker-compose.yml                # Local development: PostgreSQL + migrations + backend
+├── docker-compose.dev.yml             # Local development: PostgreSQL + migrations + backend + frontend (frontend HMR via CHOKIDAR_USEPOLLING)
 ├── AGENTS.md                         # Repo conventions & reference
 ├── .gitignore
 └── README.md                         # Project overview & setup instructions
@@ -264,8 +139,13 @@ attendance-system/
 > `src/features/program/`, `src/features/course_professor/`, `src/features/excuse/`
 > (ExcuseRequest: `initiated_by`/`initiated_via`, `attachment_urls`, `status`,
 > `reviewed_by`/`reviewed_at`), plus `src/shared/enums.py` and `src/shared/mixins.py`.
-> Planned next: `analytics` (StudentRiskScore) + `system` (BackupLog) models, and
-> the missing `schema.py`/`service.py`/`router.py`/`liveness/` layers.
+> Model layer is now complete (16/16): `analytics` (StudentRiskScore) + `system`
+> (BackupLog) are modeled. Remaining work: `schema.py`/`service.py`/`router.py`
+> layers for all features (exception: `course_professor/service.py` exists);
+> `liveness` is a frontend-only feature (no backend `features/liveness/` dir).
+
+> **Deferred (frontend):** `src/service-worker.ts` (PWA offline caching & background
+> sync), `hooks.server.ts`, `vite-plugin-pwa`, `static/icons/`.
 
 ---
 
@@ -273,24 +153,24 @@ attendance-system/
 
 | Directory / File                                                                              | CS Concept                                                                                                                  |
 | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `backend/src/shared/cache.py`                                                                 | Caching & Indexing Algorithm (O(1) lookup)                                                                                  |
-| `frontend/src/lib/stores/offline.ts` + `frontend/src/service-worker.ts`                       | Offline-First Architecture                                                                                                  |
+| `backend/src/shared/cache.py` (planned)                                                        | Caching & Indexing Algorithm (O(1) lookup)                                                                                  |
+| `frontend/src/lib/features/sync/service.ts` (+ planned `db.ts`/`engine.ts`; service-worker deferred) | Offline-First Architecture                                                                                             |
 | `backend/src/features/session/` + `backend/src/core/security.py`                              | HMAC-based Session Auth                                                                                                     |
-| `frontend/src/lib/utils/geolocation.ts` + `backend/src/features/attendance/service.py`        | Geolocation Proximity (Haversine)                                                                                           |
-| `frontend/src/lib/components/scanner/QRScanner.svelte`                                        | Live QR Detection (Liveness)                                                                                                |
-| `frontend/src/lib/components/scanner/FaceChallenge.svelte` + `backend/src/features/liveness/` | Liveness Protocol: challenge-response, evidence bundles, nonce anti-replay, risk fusion                                     |
-| `backend/src/features/analytics/` + `tasks.py`                                                | Data Mining: descriptive/diagnostic aggregation, heuristic at-risk scoring, prescriptive rules, nightly batch scheduling    |
+| `frontend/src/lib/shared/utils/geo.ts` + `backend/src/features/attendance/` (service.py planned) | Geolocation Proximity (Haversine)                                                                                         |
+| `frontend/src/lib/features/liveness/components/QRScanner.svelte`                              | QR Code Detection (student-ID & session codes)                                                                              |
+| `frontend/src/lib/features/liveness/` (components/ + service.ts)                              | Liveness Protocol: challenge-response, nonce anti-replay, evidence bundle (`gps_lat`/`gps_lng`/`liveness_evidence`), risk fusion |
+| `backend/src/features/analytics/` (model.py; aggregation service + nightly `tasks.py` planned) | Data Mining: descriptive/diagnostic aggregation, heuristic at-risk scoring, prescriptive rules, nightly batch scheduling    |
 | `backend/src/features/*/model.py`                                                             | Database Design & Normalization (3NF)                                                                                       |
-| `backend/src/features/sync/service.py` + `frontend/src/lib/services/sync.ts`                  | Offline Sync / Eventual Consistency                                                                                         |
-| `backend/src/features/program/`                                                               | Academic Hierarchy: Program → Year Level → Course (tree structure, FK constraints)                                          |
-| `backend/src/features/face_enrollment/`                                                       | Biometrics: face embedding generation (pretrained ResNet), template protection (AES-GCM encryption), versioned distribution |
-| `backend/src/features/excuse/`                                                                | State Machine: excuse request lifecycle (pending→approved/rejected), permission matrix, audit trail                         |
+| `frontend/src/lib/features/sync/service.ts` + `backend/src/features/sync/` (router/service planned) | Offline Sync / Eventual Consistency                                                                                    |
+| `backend/src/features/program/` + `backend/src/features/course/`                              | Academic Hierarchy: Program → Year Level → CourseOffering (courses = templates)                                             |
+| `backend/src/features/student/` (face columns; admin face-enrollment service/router planned)  | Biometrics: face embedding generation (pretrained ResNet), template protection (AES-GCM encryption), versioned distribution |
+| `backend/src/features/excuse/` (model.py; service/router planned)                             | State Machine: excuse request lifecycle (pending→approved/rejected), permission matrix, audit trail                         |
 | `backend/src/features/system/`                                                                | DevOps: backup pipeline (pg_dump→encrypt→store→prune), academic-structure CRUD, system settings                             |
-| `frontend/src/lib/components/charts/ChartCanvas.svelte`                                       | Data Visualization: Chart.js wrapper for analytics dashboards                                                               |
-| `frontend/src/lib/components/calendar/`                                                       | Calendar UI: month/week grid views, day detail sheets                                                                       |
-| `frontend/src/lib/components/scanner/Step[1-5]*.svelte`                                       | Sequential UI Pattern: guided 5-step scan flow with state machine                                                           |
-| `frontend/src/lib/components/excuse/`                                                         | Workflow UI: excuse modals, request forms, review lists                                                                     |
-| `frontend/src/lib/components/face-enrollment/FaceEnrollmentModal.svelte`                      | Capture UI: 3-photo quality gates, live preview                                                                             |
+| `frontend/src/lib/features/analytics/components/` (planned)                                   | Data Visualization: Chart.js wrapper for analytics dashboards                                                               |
+| `frontend/src/lib/features/session/components/calendar/` (planned)                            | Calendar UI: month/week grid views, day detail sheets                                                                       |
+| `frontend/src/routes/student/scan/` + `frontend/src/lib/features/{student,liveness}/components/` | Sequential UI Pattern: guided 5-step scan flow with state machine                                                          |
+| `frontend/src/lib/features/excuse/components/` (planned)                                      | Workflow UI: excuse modals, request forms, review lists                                                                     |
+| `frontend/src/lib/features/student/components/FaceEnrollmentModal.svelte` (planned)          | Capture UI: 3-photo quality gates, live preview                                                                             |
 
 ---
 

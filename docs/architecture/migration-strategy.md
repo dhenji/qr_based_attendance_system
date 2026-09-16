@@ -1,13 +1,25 @@
-# Migration Strategy: Current → Target Schema
+# Migration Strategy: Target Schema
 
-> Ordered Alembic migration plan from the current 7-feature schema to the §6 target schema.
-> **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py` alongside the existing eight feature imports so autogenerate sees them in `target_metadata`. Face enrollment columns live on `features.student/model.py` — no separate import needed. Run alembic from `backend/`.
+> Target schema reference (§6) and rollback guide. This project is **greenfield** — the
+> baseline migration (`679a319c12d6`) creates all 16 tables directly. `alembic upgrade head`
+> on a fresh database produces the full target schema with correct columns, constraints,
+> and FKs. **No backfill functions or data migration scripts are needed.**
+>
+> **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in
+> `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py`
+> alongside the existing thirteen feature imports so autogenerate sees them in
+> `target_metadata`. Run alembic from `backend/`.
 
 ---
 
-## Current Schema (Baseline)
+## Historical Reference: Legacy Schema (Superseded)
 
-Tables from existing models (Alembic head `996b2fb85c6f`):
+> The 9-step incremental migration narrative below was the original plan before the
+> full-baseline approach was adopted. It is **reference documentation only** — useful for
+> institutions migrating from an existing flat-schema database. For greenfield deployments,
+> ignore the backfill and migration steps entirely.
+
+Tables from the original flat schema (Alembic head `996b2fb85c6f`, now replaced):
 
 - `users` — auth + roles + security fields
 - `otp_codes` — OTP for claim/forgot-password
@@ -23,18 +35,19 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 
 ---
 
-## Target Schema (Reference §6)
+## Target Schema (§6 — Authoritative Reference)
 
-New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`
-Modified tables: `courses` (+2 cols — units, session_duration_hours), `enrollments` (+semester, +offering_id FK), `sessions` (-course_id, +offering_id FK, +7 cols, STORED expires_at), `attendance_records` (+9 cols, expanded status enum), `students` (+3 face cols, drop legacy `course`)
+Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `excuse_requests`, `student_risk_scores`, `backup_log`, `sync_queue`
+
+The baseline migration creates all 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
 
 ---
 
 ## Migration Steps (Ordered)
 
-### Step 1: Create `programs` Table + Seed Defaults
+### Step 1: Create `programs` Table
 
-**Migration:** `alembic revision --autogenerate -m "create programs table and seed defaults"`
+**Migration:** `alembic revision --autogenerate -m "create programs table"`
 
 **Model:** `features/program/model.py` (new feature)
 
@@ -50,13 +63,7 @@ class Program(Base):
     created_at, updated_at = TimestampMixin
 ```
 
-**Seed data (per D3 examples):**
-
-| code  | name                                           | total_years | term_structure (per year_level)                                                                         |
-| ----- | ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
-| BSCS  | Bachelor of Science in Computer Science        | 4           | Y1: [1st_sem, 2nd_sem]; Y2: [1st_sem, 2nd_sem]; Y3: [1st_sem, 2nd_sem, midyear]; Y4: [1st_sem, 2nd_sem] |
-| BSIT  | Bachelor of Science in Information Technology  | 4           | Y1-4: [1st_sem, 2nd_sem]                                                                                |
-| BSECE | Bachelor of Science in Electronics Engineering | 5           | Y1-5: [1st_sem, 2nd_sem]                                                                                |
+**Programs are created by admins via `POST /admin/programs`.** No seed data — the table starts empty.
 
 **Rollback:** `DROP TABLE programs` (destructive — backup first)
 
@@ -80,7 +87,7 @@ class YearLevel(Base):
     UNIQUE(program_id, year_number)
 ```
 
-**Seed:** Create year levels for each seeded program per their `total_years`, populate `term_structure` from D3 examples.
+**Year levels are created by admins via `POST /admin/programs/{pid}/years`.** No seed data.
 
 **Rollback:** `DROP TABLE year_levels` (CASCADE drops nothing yet)
 
@@ -138,7 +145,11 @@ class CourseOffering(Base):
 - Same course can have different schedules/classrooms per program offering
 - `Session` and `Enrollment` will reference `offering_id` in later steps
 
-**Backfill strategy:**
+> **Reference Only** — In greenfield deployments, `course_offerings` rows are created by
+> admins via the API. No backfill needed. The steps below apply only when migrating from
+> the legacy flat schema.
+
+**Backfill strategy (legacy data only):**
 
 1. Add new columns to `courses` as **nullable** first
 2. For each existing `courses` row:
@@ -178,13 +189,20 @@ class CourseProfessor(Base):
 
 **Service-layer rule (enforced in Python, not DB):** Reject overlapping `[effective_from, effective_to)` ranges for same `(offering_id, professor_id)`.
 
-**Migrate implied assignments:** For each existing `sessions` row, look up the `course_offerings` row matching the session's course + inferred program/semester, create a `course_professors` entry with `effective_from = session.created_at::date`, `effective_to = NULL`, `semester = enrollment.semester` (or default), `is_primary = true`.
+> **Reference Only** — In greenfield deployments, `course_professors` rows are created via
+> admin API. The steps below apply only when migrating from legacy session data.
+
+**Migrate implied assignments (legacy data only):** For each existing `sessions` row, look up the `course_offerings` row matching the session's course + inferred program/semester, create a `course_professors` entry with `effective_from = session.created_at::date`, `effective_to = NULL`, `semester = enrollment.semester` (or default), `is_primary = true`.
 
 **Rollback:** `DROP TABLE course_professors`
 
 ---
 
-### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK ✅ DONE
+### Step 5: Extend `enrollments` — Add `semester` + `offering_id` FK
+
+> **Reference Only** — In greenfield deployments, enrollments are created with
+> `offering_id` and `semester` directly. The steps below apply only when migrating
+> from the legacy enrollment schema.
 
 **Migration:** `alembic revision --autogenerate -m "add semester and offering_id to enrollments with backfill"`
 
@@ -243,13 +261,20 @@ class Session(Base):
     CHECK (present_window_minutes + late_window_minutes <= duration_minutes)
     scheduled_start_time = DateTime(timezone=True)  -- copied from course_offering at open
     scheduled_end_time = DateTime(timezone=True)    -- copied from course_offering at open
-    expires_at = DateTime(timezone=True)  -- STORED: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)
+    expires_at = DateTime(timezone=True)  -- regular column, app-computed via @property (D49)
     classroom_name = String(100) NULL
     classroom_lat = Float NULL
     classroom_lng = Float NULL
+
+    # @property computed_expires_at:
+    #   return min(created_at + timedelta(minutes=duration_minutes), scheduled_end_time)
+    # Service sets: session.expires_at = session.computed_expires_at
 ```
 
-**Backfill:**
+> **Reference Only** — In greenfield deployments, sessions are created with all fields
+> populated. The steps below apply only when migrating from the legacy session schema.
+
+**Backfill (legacy data only):**
 
 - `offering_id` = look up `course_offerings` row matching session's course + inferred program/semester
 - `course_id` = **DROP** after `offering_id` is backfilled and NOT NULL
@@ -258,9 +283,9 @@ class Session(Base):
 - `late_window_minutes` = `course_offering.default_late_window_minutes` (10)
 - `scheduled_start_time/end_time` = `course_offering` schedule for that day (compute from `schedule_days` + date)
 - `classroom_lat/lng/name` = `course_offering` classroom (override for session-specific room changes)
-- `expires_at` = recomputed via STORED expression (PostgreSQL `GENERATED ALWAYS AS ... STORED`)
+- `expires_at` = set by service layer: `min(created_at + duration_minutes * interval '1 min', scheduled_end_time)`
 
-**Rollback:** Drop new columns, restore `course_id` from backup. STORED column requires `ALTER TABLE ... ALTER COLUMN expires_at DROP EXPRESSION` first.
+**Rollback:** Drop new columns, restore `course_id` from backup.
 
 ---
 
@@ -274,7 +299,7 @@ class Session(Base):
 class Attendance(Base):
     # Existing: id, student_id, session_id, timestamp, gps_lat, gps_lng, validation_status, sync_status
     # NEW:
-    liveness_evidence = JSONB  -- {gps, liveness_scores, face_match_score, scanned_at, device_info, rejection_reason?}
+    liveness_evidence = JSONB  -- {gps{lat,lng,accuracy}, liveness_evidence{blink_detected, head_turn_left, head_turn_right, ear_samples, pnp_evidence}, face_match_score, scanned_via, scanned_at, rejection_reason?}
     face_match_score = Numeric(5,4)  -- cosine similarity
     scanned_via = String(20)  -- 'qr_camera' | 'manual_code'
     original_status = String(20) NULL  -- status before excuse
@@ -335,7 +360,7 @@ class StudentRiskScore(Base):
     risk_level = String(10)  -- 'low' | 'medium' | 'high'
     features = JSONB  -- {absence_rate, max_streak, sync_lag, trend_slope, expected_sessions}
     computed_at = DateTime(timezone=True) default now()
-    UNIQUE(student_id, offering_id, semester, computed_at::date)
+    UNIQUE(student_id, offering_id, semester, computed_day)
 ```
 
 #### `backup_log` (feature: `system`)
@@ -352,7 +377,7 @@ class BackupLog(Base):
     encryption_key_version = Integer
     started_at = DateTime(timezone=True)
     finished_at = DateTime(timezone=True) NULL
-    status = String(20)  -- 'success' | 'failed'
+    status = String(20)  -- 'started' | 'completed' | 'failed'
     error = Text NULL
 ```
 
@@ -360,7 +385,7 @@ class BackupLog(Base):
 
 ---
 
-### Step 9: Extend `students` — Face Columns + Drop Legacy `course`
+### Step 9: Extend `students` — Year Level FK + Face Columns + Drop Legacy `course`
 
 **Migration:** `alembic revision --autogenerate -m "add face embedding columns to students and drop legacy course string"`
 
@@ -368,22 +393,30 @@ class BackupLog(Base):
 
 ```python
 class Student(Base):
-    # Existing: id, user_id, student_id, email, names, course (string), section, year_level, is_active
+    # Existing: id, user_id, student_id, email, names, section, year_level, is_active
+    # NEW FK: year_level_id → year_levels.id (RESTRICT) — NOT program_id
+    year_level_id = BigInteger FK → year_levels.id
+    # RETAINED: section — kept as a snapshot on the row (year level via FK)
     # NEW:
     face_embedding = LargeBinary NULL  -- BYTEA: encrypted JSON blob
     face_enrolled_at = DateTime(timezone=True) NULL
     face_embedding_version = Integer default 0
-    # DROP: course (string) — after backfill to FK-based courses/enrollments
+    # DROP: course (string) — after backfill to FK-based year_levels/enrollments
 ```
 
-**Backfill legacy `course` string:**
+> **Reference Only** — In greenfield deployments, students are created with
+> `year_level_id` directly. The steps below apply only when migrating from the legacy
+> `students.course` string format.
+
+**Backfill legacy `course` string (legacy data only):**
 
 1. For each student, parse `student.course` string (e.g., "BSCS-1")
 2. Match to `programs.code` + `year_levels.year_number`
-3. Ensure enrollment exists for that course in the correct program/year
-4. After verification, drop `course` column
+3. Set `student.year_level_id` from the matching `year_levels` row
+4. Ensure enrollment exists for that course in the correct program/year
+5. After verification: `ALTER COLUMN year_level_id SET NOT NULL`, then drop `course` column
 
-**Rollback:** Recreate `course` VARCHAR column, restore from backup. Face columns dropped.
+**Rollback:** Recreate `course` VARCHAR column, restore from backup. `year_level_id` and face columns dropped.
 
 ---
 
@@ -391,28 +424,22 @@ class Student(Base):
 
 **File:** `backend/alembic/env.py`
 
-Current imports (lines 8–15):
+Current imports — all 13 features:
 
 ```python
+import features.analytics.model  # noqa: F401        # student_risk_scores
 import features.attendance.model  # noqa: F401
 import features.auth.model  # noqa: F401
 import features.course.model  # noqa: F401
-import features.enrollment.model  # noqa: F401
-import features.professor.model  # noqa: F401
-import features.session.model  # noqa: F401
-import features.student.model  # noqa: F401
-import features.sync.model  # noqa: F401
-```
-
-**After adding new features, MUST add:**
-
-```python
-import features.program.model  # noqa: F401        # programs, year_levels
 import features.course_professor.model  # noqa: F401  # course_professors
-import features.excuse.model  # noqa: F401        # excuse_requests
-import features.analytics.model  # noqa: F401      # student_risk_scores
-import features.system.model  # noqa: F401        # backup_log
-# face_enrollment columns live on features.student.model — no separate import needed
+import features.enrollment.model  # noqa: F401
+import features.excuse.model  # noqa: F401            # excuse_requests
+import features.professor.model  # noqa: F401
+import features.program.model  # noqa: F401           # programs, year_levels
+import features.session.model  # noqa: F401
+import features.student.model  # noqa: F401           # + face_enrollment columns
+import features.sync.model  # noqa: F401
+import features.system.model  # noqa: F401            # backup_log
 ```
 
 **Run alembic from `backend/` directory** so `features.*` imports resolve.
@@ -421,6 +448,9 @@ import features.system.model  # noqa: F401        # backup_log
 
 ## Rollback Strategy Summary
 
+> For greenfield deployments, rollback is simply `DROP TABLE` — no data to lose. The
+> complex scenarios below apply only to legacy-data migrations.
+
 | Step                           | Reversible? | Notes                                                                          |
 | ------------------------------ | ----------- | ------------------------------------------------------------------------------ |
 | 1. programs                    | ✅          | `DROP TABLE` — no dependencies yet                                             |
@@ -428,7 +458,7 @@ import features.system.model  # noqa: F401        # backup_log
 | 3. courses + course_offerings  | ⚠️          | **Backup first**. New table + data migration; drop offering rows + revert columns on rollback |
 | 4. course_professors           | ✅          | `DROP TABLE`                                                                   |
 | 5. enrollments.semester+offering | ⚠️          | **Backup first**. Data loss on rollback                                        |
-| 6. sessions extend             | ✅          | Columns + STORED expression; reversible                                        |
+| 6. sessions extend             | ✅          | Columns + regular column (no STORED expression); reversible                    |
 | 7. attendance_records          | ⚠️          | **Backup first**. Enum data migration; rollback maps `present→valid`           |
 | 8. new tables                  | ✅          | `DROP TABLE`                                                                   |
 | 9. students face + drop course | ⚠️          | **Backup first**. Legacy `course` string unrecoverable after drop              |
@@ -436,6 +466,10 @@ import features.system.model  # noqa: F401        # backup_log
 ---
 
 ## Staging-First Rule
+
+> For greenfield deployments, this is not needed — `alembic upgrade head` on a fresh
+> database is sufficient. The staging-first approach applies to legacy-data migrations
+> where production data must be preserved.
 
 1. **Always test migrations on staging** (copy of production DB) before production.
 2. Run `alembic upgrade head` on staging; verify all tables/columns match §6 exactly.
@@ -453,12 +487,12 @@ After all migrations, verify:
 - [ ] `courses`: course_code(UK), course_name, units, session_duration_hours, is_active, timestamps (no FKs — template only)
 - [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
 - [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
-- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, validated against year_level.term_structure
-- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(STORED)/override coords, CHECK constraint; course_id DROPPED
+- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, academic_year NOT NULL, UNIQUE(student_id, offering_id, academic_year), validated against year_level.term_structure
+- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(regular column set by service layer)/override coords, CHECK constraint; course_id DROPPED
 - [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
-- [ ] `student_risk_scores`: features JSONB, UNIQUE on (student_id, offering_id, semester, date)
-- [ ] `backup_log`: all columns including sha256, key_version
-- [ ] `students`: face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED
+- [ ] `student_risk_scores`: features JSONB, computed_day DATE, UNIQUE on (student_id, offering_id, semester, computed_day)
+- [ ] `backup_log`: all columns including sha256, key_version; status = started/completed/failed
+- [ ] `students`: year_level_id FK → year_levels; section retained (snapshot per D2); face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED (no program_id)
 - [ ] All enums in code match §6 (ValidationStatus expanded, etc.)
 

@@ -147,7 +147,7 @@ at registration, using the **official email** as the lookup key.
 PHASE 1 — Roster seeding (admin)
 Registrar provides student roster (CSV)
   └→ Columns: student_id, first_name, middle_name, last_name,
-     email, course, section, year_level
+     email, program_code, section, year_level
     └→ Imported into database as `students` rows (no accounts yet)
       └→ Each student_id is the same one encoded in the student's ID card QR
       └→ students.user_id = NULL (unclaimed)
@@ -191,7 +191,7 @@ holding their ID, professors claim by holding their school email).
 │    → Server computes: expires_at = min(now + duration,          │
 │        scheduled_end_time) per D12                               │
 │    → Server generates HMAC-signed session code + QR payload     │
-│      {"v":1,"code":"A7X-9K2M","course":123,"radius":30,        │
+│      {"v":1,"code":"A7X-9K2M","offering":123,"radius":30,      │
 │       "pw":5,"lw":10} per D18                                   │
 │    → Professor displays code/QR on projector                    │
 └─────────────────────────────────────────────────────────────────┘
@@ -266,7 +266,7 @@ holding their ID, professors claim by holding their school email).
 | -------------------- | -------------------------------------------------------- | -------------------------------------- |
 | Session Code         | Outsiders submitting attendance                          | HMAC-SHA256                            |
 | GPS Geofencing       | Remote/fake submissions                                  | Haversine Algorithm                    |
-| Live QR Detection    | Screenshot of a classmate's ID                           | Reflection/Liveness Analysis           |
+| Live QR Detection    | Screenshot of a classmate's ID                           | Liveness Analysis                                |
 | Face Liveness        | Photo, video-replay, screen-recorder, distortion attacks | Challenge-Response + Landmark Tracking |
 | Offline Evidence     | Replayed/forged scans after sync                         | Nonce + HMAC Evidence Bundles          |
 | One Scan Per Session | Same ID used multiple times                              | Database Constraint                    |
@@ -378,14 +378,14 @@ Students
   - student_id (unique — same value encoded in ID card QR)
   - email (unique — official email, registration lookup key)
   - first_name, middle_name, last_name
-  - year_level (INT, retained per D2)
+  - year_level_id (FK → year_levels)
   - section (VARCHAR, retained per D2 — changes only via admin action)
   - is_active
   - face_embedding (BYTEA, nullable — encrypted JSON blob: {"mean":[128f],"angles":{"front":[...],"left":[...],"right":[...]}} per D28/D43)
   - face_enrolled_at (TIMESTAMPTZ, nullable)
   - face_embedding_version (INT, default 0 — bumped on every write)
   - created_at, updated_at
-  -- legacy `course` string column dropped after backfill to FK-based courses
+  -- In the target schema, students uses year_level_id FK (no legacy course string)
 
 Professors
   - id (PK)
@@ -522,7 +522,7 @@ StudentRiskScores (NEW — D35)
   - risk_level ('low' | 'medium' | 'high')
   - features (JSONB — absence_rate, max_streak, sync_lag, trend_slope)
   - computed_at (TIMESTAMPTZ)
-  - UNIQUE(student_id, offering_id, semester, computed_at::date)
+  - UNIQUE(student_id, offering_id, semester, computed_day)
 
 BackupLog (NEW — D39)
   - id (PK)

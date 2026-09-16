@@ -8,7 +8,14 @@ from features.student.model import Student
 
 class Enrollment(Base):
     __tablename__ = "enrollments"
-    __table_args__ = (UniqueConstraint("student_id", "offering_id"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id",
+            "offering_id",
+            "academic_year",
+            name="uq_enrollment_student_offering_academic_year",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     student_id: Mapped[int] = mapped_column(
@@ -17,12 +24,13 @@ class Enrollment(Base):
         index=True,
     )
 
-    offering_id: Mapped[int | None] = mapped_column(
+    offering_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("course_offerings.id", ondelete="RESTRICT"),
         index=True,
     )
-    semester: Mapped[str | None] = mapped_column(String(20))
+    semester: Mapped[str] = mapped_column(String(20))
+    academic_year: Mapped[str] = mapped_column(String(20))
 
     student: Mapped[Student] = relationship()
     offering: Mapped[CourseOffering] = relationship()

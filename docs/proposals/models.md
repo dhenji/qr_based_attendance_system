@@ -46,17 +46,17 @@ A scan passes only if the landmark transcript correlates with the **fixed** chal
 ### MVP: Heuristic Threshold Engine (rule-based, not trained)
 
 - **Algorithm**: env-configurable heuristic thresholds, not a trained model.
-- **Features** (per student): absence_rate = absences / expected_sessions; max_consecutive_misses (streak); sync_lag_pending_count; 4-week linear trend_slope (D35).
-- **Thresholds** (D35): absence_rate > 0.30 → high; > 0.15 → medium; streak ≥ 3 → high; sync_lag_pending ≥ 5 → medium; trend_slope < −0.05/week → medium. Order of evaluation: high overrides medium overrides low.
+- **Features** (per student): absence_rate = absences / expected_sessions; max_streak (consecutive misses); sync_lag (pending syncs >24h); 4-week linear trend_slope (D35).
+- **Thresholds** (D35): absence_rate > 0.30 → high; > 0.15 → medium; max_streak ≥ 3 → high; sync_lag ≥ 5 → medium; trend_slope < −0.05/week → medium. Order of evaluation: high overrides medium overrides low.
 - **Expected sessions** derived from course metadata: `semester_weeks × sessions_per_week` (e.g. 3 units ≈ 2 meetings/week × 1.5h → 30 expected sessions per semester).
-- **Output**: rows in `student_risk_scores` with risk_probability (numeric score), risk_level (low/medium/high), and features JSONB. Unique per (student, course, semester, computed_date).
+- **Output**: rows in `student_risk_scores` with risk_probability (numeric score), risk_level (low/medium/high), and features JSONB. Unique per (student_id, offering_id, semester, computed_day).
 - **Batch schedule**: daily at 02:00 (configurable via `RISK_BATCH_CRON`). Manual refresh endpoint available for admins.
 - **Interpretability**: deterministic, explainable, auditable — same input always produces same output.
 
 ### Upgrade Path: Logistic Regression (planned, not yet implemented)
 
 - **Algorithm**: logistic regression via scikit-learn — deliberately lightweight, non-black-box.
-- **Feature vector**: identical to heuristic engine (absence_rate, streak, sync_lag, trend_slope) — the upgrade path preserves the same feature space.
+- **Feature vector**: identical to heuristic engine (absence_rate, max_streak, sync_lag, trend_slope) — the upgrade path preserves the same feature space.
 - **Training**: requires longitudinal deployment data (months of attendance). Will be trained on historical data once sufficient volume exists.
 - **Interpretability requirement**: deliberately chosen over gradient boosting or deep models for defensibility and explainability.
 

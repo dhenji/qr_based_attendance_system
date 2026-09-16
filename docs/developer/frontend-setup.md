@@ -15,6 +15,32 @@ npm run dev               # http://localhost:5173
 
 ---
 
+## Docker Development (with HMR)
+
+When using Docker Compose (`docker compose -f docker-compose.dev.yml up --build`), the frontend runs inside a container with hot-reload enabled via polling.
+
+**How it works:**
+
+- `./frontend/src` is mounted into the container at `/app/src`
+- `CHOKIDAR_USEPOLLING=1` and `CHOKIDAR_INTERVAL=1000` are set in `docker-compose.dev.yml` — this makes Vite's file watcher use polling instead of `inotify`, which is unreliable through Docker volume mounts on Linux
+- Changes to files in `src/` are detected automatically and hot-reloaded in the browser — **no manual page refresh needed**
+
+**What auto-reloads (HMR — no refresh required):**
+
+- Svelte component edits (template, script, style)
+- TypeScript/JS changes in `src/lib/`
+- CSS/style changes
+
+**What may require a manual refresh:**
+
+- Changes to `svelte.config.js` or `vite.config.ts`
+- Changes to the app entry point (`+layout.svelte`, root `+page.svelte`)
+- Adding or removing dependencies in `package.json`
+
+**Note:** The polling approach uses slightly more CPU than native `inotify`, but is necessary for reliable file watching in Docker. This is a development-only concern and does not affect production.
+
+---
+
 ## Node Engine Strict
 
 `.npmrc` sets `engine-strict=true`. If `npm install` fails with an engine mismatch:
@@ -129,9 +155,14 @@ Usage in components:
 
 ---
 
-## Service Worker Development
+## Service Worker (deferred)
 
-The PWA service worker (`src/service-worker.ts`) is planned but not yet installed. When ready:
+The PWA offline stack — `src/service-worker.ts` and the local queue under
+`src/lib/features/sync/` — is
+**deferred**, not planned-but-impending. See
+[frontend-architecture.md](../architecture/frontend-architecture.md) ("Deferred
+(later passes)"): `hooks.server.ts`, `service-worker.ts`, `static/icons/`,
+`vite-plugin-pwa`, `robots.txt`. If it is picked up later:
 
 ```bash
 npm install -D vite-plugin-pwa
@@ -163,7 +194,13 @@ VitePWA({
 
 ## Mock Service Pattern
 
-The planned feature-slice structure uses mock services for frontend development without a live backend.
+The feature-slice structure (under `src/lib/features/`) uses mock services for
+frontend development without a live backend.
+
+> **Canonical mock toggle:** the global switch is `MOCK = true` in
+> `src/lib/api/client.ts` (mock data comes from `src/lib/api/endpoints.ts`).
+> The per-service fallback pattern below is how individual services can also
+> short-circuit in dev when `PUBLIC_API_URL` is unset.
 
 ### Directory pattern per feature
 

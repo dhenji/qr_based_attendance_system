@@ -232,7 +232,7 @@ Use this script when explaining face enrollment to students:
 | "Upload failed"                          | Network error; file too large                        | Retry; ensure stable connection; check file size      |
 | "Student not found"                      | Wrong student ID                                     | Verify student ID; check student is active            |
 | Embedding not updating on student device | Version mismatch; student hasn't logged in           | Ask student to log out and back in; check version     |
-| Borderline score (0.65–0.75) in scan     | Embedding may need refresh                           | Re-enroll the student with updated photos             |
+| Borderline score (0.65–0.70) in scan     | Embedding may need refresh                           | Re-enroll the student with updated photos             |
 | Sibling confusion                        | Known limitation ([D31](../project/decision-log.md)) | Not currently solved; acknowledge as known limitation |
 
 ---
@@ -243,7 +243,7 @@ Use this script when explaining face enrollment to students:
 | ---------------------------- | ------------------------------------------------------------------ |
 | Admin: Enroll Face           | `/admin/face-enrollment/{student_id}` (UI)                         |
 | API: Upload 3 photos         | `POST /admin/face-enrollment/{student_id}` (multipart)             |
-| API: Check enrollment status | `GET /admin/face-enrollment/{student_id}/status`                   |
+| API: Check enrollment status | `GET /admin/face-enrollment/{student_id}`                          |
 | Student: Pull embedding      | `GET /student/me/face-embedding` (version-gated)                   |
 | Architecture docs            | [Face Enrollment Architecture](../architecture/face-enrollment.md) |
 

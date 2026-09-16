@@ -25,7 +25,7 @@ A web-based application that:
 
 - Scans the QR code on student IDs to identify the student
 - Uses a session code (shown by the professor) + GPS location + face verification to prevent cheating
-- Organizes courses under a **Program → Year Level → Course** hierarchy with per-year term structures
+- Organizes courses under a **Program → Year Level → Course Offering (discrete Course template)** hierarchy with per-year term structures
 - Enforces present/late time windows and duration expiry for each session
 - Supports a full excuse workflow: professor quick-excuse, professor with evidence, student-initiated request
 - Admin-enrolls face embeddings from 3-angle photos (front/left/right) for identity verification
@@ -48,7 +48,7 @@ A web-based application that:
 | GPS Verification        | Ensures student is inside the classroom                                                  |
 | Face Liveness           | Blink→left→right challenges to block photo, replay & distortion tricks                   |
 | Face Enrollment         | Admin captures 3-angle photos; 128-d encrypted embeddings                                |
-| Academic Structure      | Program → Year Level → Course hierarchy with term structures                             |
+| Academic Structure      | Program → Year Level → Course Offering hierarchy (discrete Course templates)  |
 | Window-Based Attendance | Present/late windows, duration expiry, per-session overrides                             |
 | Excuse Workflow         | 3 paths: professor quick-excuse, with evidence, student request                          |
 | Offline Mode            | Saves attendance locally when no internet; auto-uploads later                            |
@@ -62,7 +62,7 @@ A web-based application that:
 
 > **Names & structure**: students use First/Middle/Last names with a Section
 > field (from CSV import); section changes are admin-only actions. The academic
-> hierarchy (Program → Year Level → Course) is managed by admins through
+> hierarchy (Program → Year Level → Course Offering — discrete Course templates) is managed by admins through
 > Academic Structure Updates (add/rename year levels, adjust term structures,
 > move courses) — replacing year-level promotion (D38). **Registration is
 > claim-based**: students and professors self-register with email + password;
@@ -93,7 +93,7 @@ A web-based application that:
 - **State Machine** — excuse workflow (pending → approved/rejected) with audit trail
 - **Heuristic Analytics** — env-configurable thresholds for at-risk prediction (future ML upgrade path)
 - **Data Analytics** — descriptive, diagnostic, predictive, and prescriptive reporting with compliance/participation rates
-- **Relational Database Design** — normalized tables with academic hierarchy (Program → Year Level → Course)
+- **Relational Database Design** — normalized tables with academic hierarchy (Program → Year Level → Course Offering; Courses are discrete templates)
 - **Encrypted Backups** — AES-256-GCM full-database dumps with retention policy
 
 ## 9. Expected Outcome
@@ -101,7 +101,7 @@ A web-based application that:
 A fully functional attendance system that:
 
 - Speeds up attendance to under 1 second per student
-- Prevents cheating through session codes + GPS + QR liveness + face liveness
+- Prevents cheating through session codes + GPS + face liveness
 - Blocks photo, screen-recorder, video-replay, and distortion attacks
 - Works with or without internet (liveness evidence re-validated after sync; expired scans rejected)
 - Manages academic programs with per-year term structures and multi-program course sharing

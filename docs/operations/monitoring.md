@@ -143,14 +143,14 @@ INFO: Risk batch completed: 247 students scored in 12.3s
 
 ### 4. Backup Freshness SLO
 
-**Definition:** Time since the last successful full backup.
+**Definition:** Time since the last completed full backup (`backup_log.status ∈ started / completed / failed` per D47; a `failed` run counts as no completed backup for this SLO).
 
 ```sql
 SELECT
     finished_at,
     EXTRACT(EPOCH FROM (NOW() - finished_at)) / 3600 as hours_since
 FROM backup_log
-WHERE kind = 'full' AND status = 'success'
+WHERE kind = 'full' AND status = 'completed'
 ORDER BY finished_at DESC
 LIMIT 1;
 ```
@@ -219,7 +219,7 @@ psql -h localhost -U postgres -d attendance_sys -t -c \
 # Last backup age?
 psql -h localhost -U postgres -d attendance_sys -t -c \
     "SELECT EXTRACT(EPOCH FROM (NOW() - finished_at))/3600::int
-     FROM backup_log WHERE kind='full' AND status='success'
+     FROM backup_log WHERE kind='full' AND status='completed'
      ORDER BY finished_at DESC LIMIT 1;"
 
 # Active sessions?
@@ -236,7 +236,7 @@ psql -h localhost -U postgres -d attendance_sys -t -c \
 | API health      | HTTP 5xx for > 2 min          | Critical | Pager/Slack |
 | Sync backlog    | > 50 items for > 5 min        | Warning  | Slack       |
 | Sync backlog    | > 100 items for > 10 min      | Critical | Pager       |
-| Backup age      | > 48 hours since last success | Critical | Slack       |
+| Backup age      | > 48 hours since last completed backup | Critical | Slack       |
 | Risk batch      | Failed to complete            | Warning  | Slack       |
 | DB connections  | > 80% pool utilization        | Warning  | Slack       |
 | API p95 latency | > 1s for > 5 min              | Warning  | Slack       |

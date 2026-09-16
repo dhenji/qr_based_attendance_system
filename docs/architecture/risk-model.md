@@ -13,7 +13,7 @@ Key properties:
 - Runs as a **nightly batch job** at 02:00 (configurable via `RISK_BATCH_CRON`).
 - Writes results to `student_risk_scores` table.
 - Manual refresh endpoint available (admin-only).
-- Expected sessions derived from course offering metadata: `course_offering.semester_weeks × course_offering.sessions_per_week` (D35).
+- Expected sessions derived from course offering metadata: `course_offerings.semester_weeks × course_offerings.sessions_per_week` (D35).
 
 ---
 
@@ -24,7 +24,7 @@ For each (student, offering, semester) tuple, the batch job computes:
 ### 2.1 Expected Sessions
 
 ```
-expected_sessions = course_offering.semester_weeks × course_offering.sessions_per_week
+expected_sessions = course_offerings.semester_weeks × course_offerings.sessions_per_week
 ```
 
 Example: a 3-unit course meeting 2×/week over 16 weeks = 32 expected sessions.
@@ -35,10 +35,10 @@ Example: a 3-unit course meeting 2×/week over 16 weeks = 32 expected sessions.
 absence_rate = count(absent records for student+offering+semester) / expected_sessions
 ```
 
-Only records with `status IN ('absent', 'late', 'excused')` that are NOT
-`rejected` are considered. `pending` records are excluded from the numerator
-but included in the denominator (they represent expected attendance that hasn't
-been validated yet).
+Only records with `validation_status IN ('absent', 'late', 'excused')` that are
+NOT `rejected` are considered. `validation_status = 'pending'` records are
+excluded from the numerator but included in the denominator (they represent
+expected attendance that hasn't been validated yet).
 
 ### 2.3 Maximum Consecutive Streak
 
@@ -53,8 +53,12 @@ record does NOT break the streak (treated as unknown — conservative).
 ### 2.4 Sync Lag (Pending Records)
 
 ```
-sync_lag = count(records with status = 'pending' older than 24 hours)
+sync_lag = count(attendance_records WHERE sync_status = 'pending'
+                 AND timestamp < now() - interval '24 hours')
 ```
+
+Count of attendance records still awaiting sync (offline scans not yet
+drained); only records pending in `sync_status` and older than 24 hours count.
 
 Students with many unresolved pending records may have device issues or
 deliberate sync avoidance.
@@ -123,7 +127,8 @@ CREATE TABLE student_risk_scores (
                     CHECK (risk_level IN ('low', 'medium', 'high')),
     features        JSONB NOT NULL,           -- full feature snapshot
     computed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(student_id, offering_id, semester, computed_at::date)
+    computed_day    DATE NOT NULL,            -- set by service: computed_at.date() (D50)
+    UNIQUE(student_id, offering_id, semester, computed_day)
 );
 ```
 
@@ -176,7 +181,7 @@ BEGIN BATCH
     │     c. Evaluate heuristic rules (§3)
     │     d. Compute risk_probability (§3.1)
     │     e. UPSERT INTO student_risk_scores
-    │        (ON CONFLICT (student_id, offering_id, semester, computed_at::date)
+     │        (ON CONFLICT (student_id, offering_id, semester, computed_day)
     │         DO UPDATE SET risk_probability = ..., risk_level = ..., features = ...,
     │                       computed_at = NOW())
     │
@@ -360,7 +365,7 @@ The current heuristic model and the future logistic regression model share the
 
 1. **Collect labeled data:** As professors use the system, manually tag students
    as "at-risk" or "not at-risk" in the admin dashboard. Store labels in a
-   `risk_labels` table.
+   `risk_labels` table (future/planned — not part of the current schema).
 2. **Train logistic regression:** Use scikit-learn or similar; 4-feature input,
    binary output. No GPU required.
 3. **Shadow mode:** Run both heuristic and LR models; compare outputs for 30 days
