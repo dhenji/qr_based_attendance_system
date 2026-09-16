@@ -73,7 +73,7 @@ Read-only snapshots of active session config (for offline display and GPS checks
 │                   Client Side                        │
 │                                                      │
 │  1. Online scan happy path:                          │
-│     scan → validate locally → POST /attendance/scan  │
+│     scan → validate locally → POST /student/attendance/scan  │
 │     → server responds → update queue (synced)        │
 │                                                      │
 │  2. Offline scan path:                               │
@@ -89,7 +89,7 @@ Read-only snapshots of active session config (for offline display and GPS checks
 │  4. Drain queue:                                     │
 │     for each item (oldest first):                    │
 │       set status = syncing (client-only state)       │
-│       POST /attendance/scan with X-Idempotency-Key   │
+│       POST /student/attendance/scan with X-Idempotency-Key   │
 │       = item.id                                      │
 │       → 200: set status = synced (client-only state) │
 │       → 4xx reject: set status = rejected,           │
@@ -102,7 +102,7 @@ Read-only snapshots of active session config (for offline display and GPS checks
 ┌─────────────────────────────────────────────────────┐
 │                   Server Side                        │
 │                                                      │
-│  POST /attendance/scan:                              │
+│  POST /student/attendance/scan:                              │
 │    1. Verify session exists & is active              │
 │    2. Validate scanned_at against session window:    │
 │       - If scanned_at > session.expires_at:          │
@@ -280,7 +280,7 @@ sequenceDiagram
     API->>API: Validate scanned_at vs expires_at (D16)
 
     alt scanned_at > expires_at
-        API-->>S: 410 {code: "session_expired"}
+        API-->>S: 410 {detail: {code: "session_expired", message: "Scan submitted after window closed"}}
         Q->>Q: status = rejected (client-only state),<br>last_error = "session_expired"
     else scanned_at within window
         API->>DB: INSERT attendance_records

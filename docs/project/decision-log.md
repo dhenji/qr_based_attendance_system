@@ -472,3 +472,26 @@
   - Unique index becomes `UNIQUE(student_id, offering_id, semester, computed_day)` — plain column, no expression
   - Same pattern as D49: move computation to application layer, store result as regular column
 
+### ADR-051: Auth Phase 2 — Token Transport & MFA Login Gating
+
+- **Decision (D51):** Refresh token travels in the `TokenResponse` body (not
+  httpOnly cookie); cookie form (`httpOnly; Secure; SameSite=Strict`) is Phase 10
+  scope behind same-origin HTTPS. When `user.mfa_enabled`, `POST /auth/login`
+  returns `{mfa_pending: true, preauth_token}` (5-min, no access) and
+  `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for the full token
+  pair. Forgot-password is OTP-only (`OtpPurpose.FORGET_PASSWORD`) per test-plan
+  SH-AU-5; the wireframe 4-step flow (Turnstile + security question, 3-attempt
+  cap) is deferred.
+- **Date:** 2026-09-16
+- **Status:** Accepted
+- **Context:** Cross-origin frontend + HTTP local dev make Secure httpOnly cookies
+  impossible (security-model.md:79); T6's 15-min access + MFA + lockout covers
+  body-refresh risk. MFA must gate login to stay meaningful (wireframes:102,
+  proposal:565). Docs conflicted on forgot-password — aligned to test-plan.
+- **Consequences:** `TokenResponse` includes `refresh_token` (client keeps in
+  memory); `preauth` JWT type, 5-min expiry; `security_question_*` columns stay
+  reserved; api-contracts auth table gains `/otp/request`, `/refresh`,
+  `/change-password`.
+- **Supersedes:** httpOnly-cookie detail of security-model.md:79 (re-scoped to
+  Phase 10).
+

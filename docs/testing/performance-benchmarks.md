@@ -97,7 +97,7 @@ Nightly batch job computing at-risk scores for all active enrollments.
 | Active enrollments             | 25,000 (avg 2.5 courses per student)                    |
 | Historical sessions per course | 32 (16 weeks × 2/week)                                  |
 | Historical attendance records  | ~800,000                                                |
-| Risk features computed         | absence_rate, max_streak, sync_lag_pending, trend_slope |
+| Risk features computed         | absence_rate, max_streak, sync_lag, trend_slope |
 
 ### Targets
 
@@ -124,8 +124,8 @@ e.g., CS101: 16 × 3 = 48 expected sessions
 | --------------------------- | ------------ | ---------- |
 | absence_rate                | > 0.30       | high       |
 | absence_rate                | > 0.15       | medium     |
-| streak (consecutive misses) | >= 3         | high       |
-| sync_lag (pending records)  | >= 5         | medium     |
+| max_streak                   | >= 3         | high       |
+| sync_lag                     | >= 5         | medium     |
 | trend_slope (4-week linear) | < -0.05/week | medium     |
 
 ### Measurement Method

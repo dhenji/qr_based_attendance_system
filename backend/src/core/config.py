@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     otp_expires_minutes: int = 5
 
     # Risk scoring (D35)
-    risk_absense_rate_high: float = 0.30
-    risk_absense_rate_medium: float = 0.15
+    risk_absence_rate_high: float = 0.30
+    risk_absence_rate_medium: float = 0.15
     risk_streak_gaps_high: int = 3
     risk_sync_lag_high: int = 5
     risk_trend_negative: float = -0.05
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     attachments_max_bytes: int = 5242880
 
     # Cloudfare Trunstile CAPTCHA (optional)
-    trunstile_secret_key: str = ""
+    turnstile_secret_key: str = ""
 
     # Testing/benchmark + backup tuning
     benchmark_mode: bool = False

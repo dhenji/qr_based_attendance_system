@@ -76,7 +76,9 @@ Student scans QR or types code → server verifies
 ```
 
 - Access token: 15-minute expiry
-- Refresh token: 7-day expiry (httpOnly cookie)
+- Refresh token: 7-day expiry, returned in `TokenResponse` body (D51); httpOnly cookie form deferred to Phase 10 (same-origin HTTPS)
+- MFA login gating (D51): if `user.mfa_enabled`, `POST /auth/login` returns `{mfa_pending: true, preauth_token}` (5-min JWT `type="preauth"`, grants no access); `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for full token pair
+- Forgot-password: OTP-only via `OtpPurpose.FORGET_PASSWORD` (SH-AU-5); security-question and Turnstile flows deferred
 - Role-based access: `Depends(require_role(Role.admin))` in FastAPI
 
 ### Role Hierarchy

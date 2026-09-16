@@ -356,7 +356,7 @@ Each attendance record includes:
 | sync_status       | synced                                                               |
 | scanned_via       | qr_camera                                                            |
 | face_match_score  | 0.82 (present/late students)                                         |
-| liveness_evidence | `{"blink":true,"turn_left":true,"turn_right":true,"ear_score":0.35}` |
+| liveness_evidence | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true,"ear_samples":[0.18,0.31,0.29,0.33],"pnp_evidence":{"yaw":12.5}}` |
 
 ---
 
@@ -402,9 +402,9 @@ Seed 3 queued offline scan records for student 24-0008 (profile: "2 absences, 3 
 
 | student_id | session_id       | scanned_at             | gps_lat | gps_lng  | sync_status | face_match_score | liveness_evidence                                   |
 | ---------- | ---------------- | ---------------------- | ------- | -------- | ----------- | ---------------- | --------------------------------------------------- |
-| 24-0008    | GE101 Week 3 Mon | 2026-06-15 07:12:00+08 | 14.5995 | 120.9842 | pending     | 0.81             | `{"blink":true,"turn_left":true,"turn_right":true}` |
-| 24-0008    | GE101 Week 4 Mon | 2026-06-22 07:08:00+08 | 14.5995 | 120.9842 | pending     | 0.83             | `{"blink":true,"turn_left":true,"turn_right":true}` |
-| 24-0008    | GE101 Week 5 Mon | 2026-06-29 07:15:00+08 | 14.5995 | 120.9842 | pending     | 0.79             | `{"blink":true,"turn_left":true,"turn_right":true}` |
+| 24-0008    | GE101 Week 3 Mon | 2026-06-15 07:12:00+08 | 14.5995 | 120.9842 | pending     | 0.81             | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true}` |
+| 24-0008    | GE101 Week 4 Mon | 2026-06-22 07:08:00+08 | 14.5995 | 120.9842 | pending     | 0.83             | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true}` |
+| 24-0008    | GE101 Week 5 Mon | 2026-06-29 07:15:00+08 | 14.5995 | 120.9842 | pending     | 0.79             | `{"blink_detected":true,"head_turn_left":true,"head_turn_right":true}` |
 
 **Notes:**
 

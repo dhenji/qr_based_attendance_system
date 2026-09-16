@@ -243,7 +243,7 @@ Use this script when explaining face enrollment to students:
 | ---------------------------- | ------------------------------------------------------------------ |
 | Admin: Enroll Face           | `/admin/face-enrollment/{student_id}` (UI)                         |
 | API: Upload 3 photos         | `POST /admin/face-enrollment/{student_id}` (multipart)             |
-| API: Check enrollment status | `GET /admin/face-enrollment/{student_id}/status`                   |
+| API: Check enrollment status | `GET /admin/face-enrollment/{student_id}`                          |
 | Student: Pull embedding      | `GET /student/me/face-embedding` (version-gated)                   |
 | Architecture docs            | [Face Enrollment Architecture](../architecture/face-enrollment.md) |
 

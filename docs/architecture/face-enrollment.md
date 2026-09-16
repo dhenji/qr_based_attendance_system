@@ -194,11 +194,10 @@ generates:
 {
   "liveness_evidence": {
     "blink_detected": true,
-    "left_turn_detected": true,
-    "right_turn_detected": true,
-    "timestamps_ms": [1200, 3400, 5100],
-    "ear_values": [0.18, 0.31, 0.29, 0.33],
-    "pnp_vectors": [[...], [...], [...]]
+    "head_turn_left": true,
+    "head_turn_right": true,
+    "ear_samples": [0.18, 0.31, 0.29, 0.33],
+    "pnp_evidence": { "yaw": 12.5 }
   }
 }
 ```
@@ -260,21 +259,18 @@ Submitted with every scan request (online or queued offline):
   "student_number": "24-2111",
   "session_id": 582,
   "gps": {
-    "latitude": 10.3157,
-    "longitude": 123.8854,
-    "accuracy_meters": 8.2
+    "lat": 10.3157,
+    "lng": 123.8854,
+    "accuracy": 8.2
   },
-  "liveness": {
+  "liveness_evidence": {
     "blink_detected": true,
-    "left_turn_detected": true,
-    "right_turn_detected": true,
-    "timestamps_ms": [1200, 3400, 5100],
-    "ear_values": [0.18, 0.31, 0.29, 0.33],
-    "pnp_vectors": [
-      [0.01, 0.02, 0.99],
-      [0.15, 0.03, 0.98],
-      [-0.14, 0.02, 0.98]
-    ]
+    "head_turn_left": true,
+    "head_turn_right": true,
+    "ear_samples": [0.18, 0.31, 0.29, 0.33],
+    "pnp_evidence": {
+      "yaw": 12.5
+    }
   },
   "face_match_score": 0.8234,
   "scanned_via": "qr_camera",
@@ -284,7 +280,8 @@ Submitted with every scan request (online or queued offline):
 
 The server stores the full bundle in `attendance_records.liveness_evidence`
 (JSONB) and the numeric score in `attendance_records.face_match_score`
-(NUMERIC(5,4)).
+(NUMERIC(5,4)). Key names match the scan request contract in
+[api-contracts.md](api-contracts.md).
 
 ---
 
@@ -293,7 +290,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 | Method | Path                                         | Role    | Description                                                                               |
 | ------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
 | POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server generates + stores embedding                          |
-| GET    | `/admin/face-enrollment/{student_id}/status` | Admin   | Check enrollment status, version, enrolled_at                                             |
+| GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
 
 ---

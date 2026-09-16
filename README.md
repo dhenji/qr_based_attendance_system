@@ -95,7 +95,7 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 │   │   │   └── */router.py# API routers exist for 7 features (attendance, auth, course, enrollment, professor, session, student)
 │   │   ├── api/          # deps.py (get_db) + router.py (5 feature routers mounted under /api: auth, student, session, attendance, professor)
 │   │   └── tests/        # Empty scaffold — no backend tests yet
-│   ├── alembic/          # 3 migrations: initial schema, students→users link, professors + OTP codes + security fields
+│   ├── alembic/          # 1 baseline migration (679a319c12d6) creating the 16-table target schema
 │   └── Dockerfile.dev    # Multi-stage: builder → runtime → migrate
 ├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend
 └── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, testing
@@ -226,7 +226,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ### Design
 
-- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (15-table target schema)
+- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (16-table target schema)
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
 
 ### Developer
@@ -252,7 +252,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 11-phase implementation roadmap
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D48)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D51)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -272,8 +272,8 @@ The project is in **Phase 1 (partial)** of the [11-phase roadmap](docs/project/r
 
 | Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI with `/health`, `/api` routers, async SQLAlchemy, `core`/`shared` infrastructure (config, database, security, exceptions, base CRUD, pagination, email, 13 enums), 13 feature slices / 16 model classes (analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system), 7 feature router files with 5 mounted under `/api` (auth, student, session, attendance, professor; course & enrollment routers exist but are unmounted), 3 Alembic migrations (still create the legacy flat schema — upgrade head does NOT match models yet), multi-stage `Dockerfile.dev`, Argon2id password hashing |
+| Backend  | FastAPI with `/health`, `/api` routers, async SQLAlchemy, `core`/`shared` infrastructure (config, database, security, exceptions, base CRUD, pagination, email, 13 enums), 13 feature slices / 16 model classes (analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system), 7 feature router files with 5 mounted under `/api` (auth, student, session, attendance, professor; course & enrollment routers exist but are unmounted), 1 baseline Alembic migration `679a319c12d6` creating the 16-table target schema, multi-stage `Dockerfile.dev`, Argon2id password hashing |
 | Frontend | Mock-first feature-slice implementation — routes for auth (login/register), student (dashboard/scan), professor (sessions); feature services + stores (auth, student, session, attendance, liveness, sync); shared types/utils/constants; typed `api/client.ts` + mock `api/endpoints.ts`; Svelte 5 runes mode enabled                                                                                                                                                                                                                                                                                                                                                 |
 | Features | Models + 7 feature router files implemented; `service` / `schema` layers pending for all features (exception: `course_professor/service.py` exists); sync & program have no router file yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); full baseline migration pending — current Alembic head still creates the legacy flat schema ([ERD](docs/design/database-er.md))                                                                                                                                                                                                                                                                                                                                                                                   |
+| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)) |
 | Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

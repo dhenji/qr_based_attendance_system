@@ -127,6 +127,7 @@ CREATE TABLE student_risk_scores (
                     CHECK (risk_level IN ('low', 'medium', 'high')),
     features        JSONB NOT NULL,           -- full feature snapshot
     computed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    computed_day    DATE NOT NULL,            -- set by service: computed_at.date() (D50)
     UNIQUE(student_id, offering_id, semester, computed_day)
 );
 ```
