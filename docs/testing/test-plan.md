@@ -51,7 +51,7 @@
 | Shared    | Auth / OTP / MFA              | 3                | 2               |
 | Security  | Anti-Spoofing                 | 5                | 5               |
 | Offline   | Sync & Queue                  | 3                | 3               |
-| **Total** |                               | **71**           | **58**          |
+| **Total** |                               | **71**           | **57**          |
 
 ---
 
@@ -283,7 +283,10 @@
 | SH-AU-2 | D25          | No security-disabled session option                       | Inspect session creation form     | Check form fields                | No toggle/option to disable security features on a session                   |
 | SH-AU-3 | D26          | Remote class uses relaxed geofence but liveness mandatory | Session created with large radius | Student scans remotely           | Geofence passes (large radius); liveness challenge still required            |
 | SH-AU-4 | —            | MFA setup                                                 | Professor/student logged in       | Enable MFA in settings           | MFA secret generated; QR code for authenticator app displayed; TOTP verified |
-| SH-AU-5 | —            | Forgot password flow                                      | User exists                       | Request password reset via email | OTP sent; password reset completes after OTP verification                    |
+| SH-AU-5 | D52         | Forgot password flow                                      | User exists                       | Step 1: email → step 2: answer security question (3-attempt cap then lock) → step 3: OTP sent → step 4: password reset completes after OTP verification. Security question is mandatory (set at registration). See `api-contracts.md` Shared Auth. |
+| SH-AU-6 | ADR-053     | Turnstile captcha key-gating                            | No `TURNSTILE_SECRET_KEY` (dev)    | Login / forgot-password step 1 with and without `turnstile_token` | Pass-through (no enforcement) with empty key; with key set: valid token passes, invalid token → 400 `invalid_captcha` |
+| SH-AU-7 | ADR-054     | MFA backup codes                                       | User with MFA enabled              | Generate backup codes → logout → login + MFA via backup code | 10 single-use codes returned once; a code verifies MFA once and is rejected on reuse; regenerating invalidates old codes |
+| SH-AU-8 | —           | Password policy incl. symbol                           | Register / change / reset password | Submit password without a symbol                 | Rejected (policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol — wireframes.md:1903)                           |
 
 ---
 

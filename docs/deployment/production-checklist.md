@@ -36,7 +36,7 @@
 | `ACCESS_TOKEN_EXPIRE_MINUTES`    | Yes      | `15`                       | Or per policy                                                 |
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | Yes      | `7`                        | Or per policy                                                 |
 | `HMAC_SECRET_KEY`                | Yes      | `openssl rand -base64 32`  | For session code signing                                      |
-| `CORS_ORIGINS`                   | Yes      | Vercel frontend URL        | `https://your-app.vercel.app`                                 |
+| `CORS_ORIGINS`                   | Yes      | Vercel frontend URL        | `https://attendance-system.vercel.app`                                 |
 | `BACKUP_ENCRYPTION_KEY`          | Yes      | `openssl rand -base64 32`  | AES-256-GCM key                                               |
 | `BACKUP_ENCRYPTION_KEY_VERSION`  | Yes      | `1`                        | Increment on key rotation                                     |
 | `BACKUP_STORAGE_TYPE`            | Yes      | `local` or `s3`            | `local` for dev, `s3` for prod                                |
@@ -82,7 +82,7 @@ fly secrets list --app attendance-system-api
 
 | Item                | Value                                             | Notes                                    |
 | ------------------- | ------------------------------------------------- | ---------------------------------------- |
-| `CORS_ORIGINS`      | `https://your-app.vercel.app`                     | Must match Vercel deployment URL exactly |
+| `CORS_ORIGINS`      | `https://attendance-system.vercel.app`                     | Must match Vercel deployment URL exactly |
 | `allow_credentials` | `true`                                            | Required for JWT in cookies              |
 | `allow_methods`     | `["GET","POST","PUT","PATCH","DELETE","OPTIONS"]` |                                          |
 | `allow_headers`     | `["*"]`                                           | Or restrict to known headers             |
@@ -92,8 +92,8 @@ fly secrets list --app attendance-system-api
 ```bash
 # From browser dev tools, check for CORS errors on API calls
 # Or test with curl:
-curl -I -X OPTIONS https://your-api.fly.dev/health \
-    -H "Origin: https://your-app.vercel.app" \
+curl -I -X OPTIONS https://attendance-system-api.fly.dev/health \
+    -H "Origin: https://attendance-system.vercel.app" \
     -H "Access-Control-Request-Method: GET"
 # Expected: Access-Control-Allow-Origin header present
 ```
@@ -334,7 +334,7 @@ npm run check
 
 ```bash
 # Deploy and check
-curl -sf https://your-app.vercel.app/ | head -20
+curl -sf https://attendance-system.vercel.app/ | head -20
 # Should return HTML
 
 # Check for CORS errors in browser console
@@ -390,9 +390,9 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 | #   | Test           | Command                             | Expected                        |
 | --- | -------------- | ----------------------------------- | ------------------------------- |
-| 1   | API health     | `curl https://api.fly.dev/health`   | `{"status":"ok"}`               |
-| 2   | Swagger docs   | Open `https://api.fly.dev/docs`     | Swagger UI loads                |
-| 3   | Frontend loads | Open `https://your-app.vercel.app`  | Page renders                    |
+| 1   | API health     | `curl https://attendance-system-api.fly.dev/health`   | `{"status":"ok"}`               |
+| 2   | Swagger docs   | Open `https://attendance-system-api.fly.dev/docs`     | Swagger UI loads                |
+| 3   | Frontend loads | Open `https://attendance-system.vercel.app`  | Page renders                    |
 | 4   | CORS           | Browser console on frontend         | No CORS errors                  |
 | 5   | Admin login    | POST `/auth/login` with admin creds | JWT returned                    |
 | 6   | Student list   | GET `/admin/students`               | 200 OK                          |
@@ -408,7 +408,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ```bash
 # Check API response times
-curl -w "@curl-timing.txt" -o /dev/null -s https://api.fly.dev/health
+curl -w "@curl-timing.txt" -o /dev/null -s https://attendance-system-api.fly.dev/health
 
 # curl-timing.txt format:
 # time_total: %{time_total}s

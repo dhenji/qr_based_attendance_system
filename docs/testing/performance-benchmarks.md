@@ -130,7 +130,7 @@ e.g., CS101: 16 × 3 = 48 expected sessions
 
 ### Measurement Method
 
-1. Seed 10k students + 25k enrollments + 800k attendance records via `test_seed_data.py --scale 10k`.
+1. Seed 10k students + 25k enrollments + 800k attendance records via `test_seed_data.py --scale large` (the "large" scale in §4's table; the ~800k here counts enrollment-level history — 25k × ~32 sessions — vs §4's 200,000 session rows).
 2. Run batch job with `time` command; record wall-clock time.
 3. Profile with `cProfile` or `py-spy` to identify bottlenecks.
 4. Spot-check: manually compute 20 random students' scores in SQL and compare with batch output.

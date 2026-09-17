@@ -75,14 +75,15 @@ from features.student.model import Student
 ### 1.5 Schema Conventions (Pydantic)
 
 - Use **Pydantic v2** (`BaseModel` from `pydantic`).
-- Request schemas: `FooCreate`, `FooUpdate`, `FooResponse`.
+- Request schemas: `FooCreate`, `FooUpdate`; read schemas: `FooRead` (e.g. `ProgramRead`, `StudentRead`). Legacy `FooResponse` names in `auth/schema.py` are kept as-is.
 - Response models: use `model_config = ConfigDict(from_attributes=True)`.
 - Never return ORM objects directly — serialize via response schema.
 - Use `Annotated` with `Field()` for validation rules.
 
 ### 1.6 Service Conventions
 
-- Services are classes instantiated with `AsyncSession`.
+- Services are **module-level async functions**: `async def create_foo(session: AsyncSession, ...)`.
+- No service classes. The legacy class in `features/course_professor/service.py` is slated for conversion to module functions.
 - Business logic lives in services, not routers.
 - Services call `BaseCRUD` for database operations.
 - Raise `HTTPException` or domain exceptions, never raw `ValueError`.
@@ -139,7 +140,7 @@ Svelte 5 runes are **forced on** via `vite.config.ts`. Write all reactive code u
 - Use `interface` for object shapes, `type` for unions/intersections.
 - Prefix component props interfaces with the component name: `SessionCardProps`.
 - Use `enum` for role/status constants shared across features.
-- Zod schemas for API request/response validation (import from `$lib/validators`).
+- Zod schemas for API request/response validation (live in the feature's `schema.ts`).
 
 ### 2.4 Svelte Component Conventions
 

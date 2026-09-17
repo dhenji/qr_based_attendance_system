@@ -103,7 +103,7 @@ COPY . .
 COPY alembic alembic
 COPY alembic.ini .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 **`.dockerignore`** — keep the image lean and exclude local secrets:
@@ -127,14 +127,14 @@ app = "attendance-system-api"
 [build]
 
 [http_service]
-  internal_port = 8080
+  internal_port = 8000
   force_https = true
   auto_stop_machines = false
   auto_start_machines = true
 
 [[services]]
   protocol = "tcp"
-  internal_port = 8080
+  internal_port = 8000
 
   [[services.ports]]
     port = 80
@@ -159,7 +159,7 @@ fly launch --no-deploy
 # Set environment secrets
 fly secrets set DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.REF.supabase.co:5432/postgres"
 fly secrets set HMAC_SECRET_KEY="generate-a-random-secret-key"
-fly secrets set CORS_ORIGINS="https://your-frontend.vercel.app"
+fly secrets set CORS_ORIGINS="https://attendance-system.vercel.app"
 
 # Deploy
 fly deploy
@@ -376,27 +376,27 @@ The `API_URL` here must be the **public** value (`%PUBLIC_API_URL%`). In a Svelt
 ## Architecture Diagram
 
 ```
-                         ┌─────────────────┐
-                         │    Vercel CDN    │
-                         │  (SvelteKit PWA) │
-                         │  attendance.vercel.app │
-                         └────────┬────────┘
-                                  │
-                            HTTPS │
-                                  ▼
-                         ┌─────────────────┐
-                         │   Fly.io VM     │
-                         │  (FastAPI)      │
-                         │ api.fly.dev     │
-                         └────────┬────────┘
-                                  │
-                           TCP/IP │
-                                  ▼
-                         ┌─────────────────┐
-                         │   Supabase      │
-                         │  (PostgreSQL)   │
-                         │  db.ref.supabase│
-                         └─────────────────┘
+                    ┌───────────────────────────────┐
+                    │          Vercel CDN           │
+                    │       (SvelteKit PWA)         │
+                    │ attendance-system.vercel.app  │
+                    └───────────────┬───────────────┘
+                                    │
+                              HTTPS │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │           Fly.io VM           │
+                    │           (FastAPI)           │
+                    │ attendance-system-api.fly.dev │
+                    └───────────────┬───────────────┘
+                                    │
+                             TCP/IP │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │           Supabase            │
+                    │         (PostgreSQL)          │
+                    │        db.ref.supabase        │
+                    └───────────────────────────────┘
 ```
 
 ---

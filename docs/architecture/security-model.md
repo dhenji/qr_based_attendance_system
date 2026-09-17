@@ -78,7 +78,7 @@ Student scans QR or types code → server verifies
 - Access token: 15-minute expiry
 - Refresh token: 7-day expiry, returned in `TokenResponse` body (D51); httpOnly cookie form deferred to Phase 10 (same-origin HTTPS)
 - MFA login gating (D51): if `user.mfa_enabled`, `POST /auth/login` returns `{mfa_pending: true, preauth_token}` (5-min JWT `type="preauth"`, grants no access); `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for full token pair
-- Forgot-password: OTP-only via `OtpPurpose.FORGET_PASSWORD` (SH-AU-5); security-question and Turnstile flows deferred
+- Forgot-password (ADR-052, supersedes D51's OTP-only deferral): mandatory 4-step — email → security question (Argon2id-hashed answer, 3-attempt cap then lock) → OTP via `OtpPurpose.FORGET_PASSWORD` → new password. Turnstile on step 1 was deferred in ADR-052; it is now implemented as key-gated siteverify (ADR-053).
 - Role-based access: `Depends(require_role(Role.admin))` in FastAPI
 
 ### Role Hierarchy
@@ -99,7 +99,7 @@ Student scans QR or types code → server verifies
 | Hashing                | Argon2id (memory=64MB, time=3, parallelism=4) |
 | Lockout                | 5 failed attempts → 15-minute lockout |
 | MFA                    | TOTP (RFC 6238) via authenticator app |
-| Password policy        | Min 8 chars, mixed case + number      |
+| Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
 | `must_change_password` | Flag on first login / admin reset     |
 | Security question      | Stored hashed, used for recovery      |
 

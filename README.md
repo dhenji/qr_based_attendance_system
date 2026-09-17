@@ -80,25 +80,25 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 ```
 ├── .gitignore            # Root-level ignores (env/venv, node, docker data, build output)
 ├── frontend/             # SvelteKit app — mock-first feature slices + routes
-│   ├── src/routes/       # auth/login, auth/register, student/dashboard, student/scan, professor/sessions
+│   ├── Dockerfile.dev    # Vite dev server on :5173 (node:22-alpine)
+│   ├── src/routes/       # landing, auth (login/register/forgot-password), student (dashboard/scan), professor/sessions
 │   └── src/lib/
-│       ├── api/          # client.ts (fetch wrapper) + endpoints.ts (typed mock endpoint map)
-│       ├── features/     # auth, student, session, attendance, liveness, sync — services + stores + components
-│       └── shared/       # types, utils (qr/geo/format/gen), constants (routes/status/roles)
+│       ├── api/          # client.ts (fetch wrapper, MOCK=true) + endpoints.ts (typed mock endpoint map)
+│       ├── features/     # auth, student, session, attendance, liveness, sync — mock services + runes stores ($state) + components (DashboardStats, QRScanner)
+│       └── shared/       # types/, constants/ (routes/status/roles), utils/ (qr/geo/format/gen), index.ts
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
-│   │   ├── main.py       # App entry point (/health, CORS, DB lifespan check, AppException handler)
-│   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py, exceptions.py (AppException/DomainException/DatabaseException)
-│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py
-│   │   ├── features/     # analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system
-│   │   │   └── */model.py # SQLAlchemy models per feature (16 model classes, 13 features)
-│   │   │   └── */router.py# API routers exist for 7 features (attendance, auth, course, enrollment, professor, session, student)
-│   │   ├── api/          # deps.py (get_db) + router.py (5 feature routers mounted under /api: auth, student, session, attendance, professor)
+│   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot, AppException handler)
+│   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP), exceptions.py
+│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py
+│   │   ├── api/          # deps.py (get_db, get_current_user, require_role) + router.py (mounts 5 of 7 routers under /api)
+│   │   ├── features/     # 13 slices: analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system
+│   │   │   └── */        # model.py per slice (16 classes); router.py stubs for 7; auth/schema.py + auth/constants.py; course_professor/service.py
 │   │   └── tests/        # Empty scaffold — no backend tests yet
-│   ├── alembic/          # 1 baseline migration (679a319c12d6) creating the 16-table target schema
-│   └── Dockerfile.dev    # Multi-stage: builder → runtime → migrate
+│   ├── alembic/          # env.py imports all 13 feature models; 1 baseline migration (679a319c12d6) creating the 16-table target schema
+│   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
 ├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend
-└── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, testing
+└── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, presentations, project, testing
 ```
 
 ## Getting Started
@@ -163,6 +163,10 @@ Backend (`backend/.env.example`):
 | `FACE_MATCH_THRESHOLD`          | `0.70`                                                                 | Face-match similarity threshold                                     |
 | `FACE_REVIEW_BAND_LOW`          | `0.65`                                                                 | Lower band requiring manual review                                  |
 | `FACE_EMBEDDING_VERSION`        | `1`                                                                    | Face embedding format version                                       |
+| `DEFAULT_PRESENT_WINDOW_MINUTES`| `5`                                                                    | Default present window for sessions                                 |
+| `DEFAULT_LATE_WINDOW_MINUTES`   | `10`                                                                   | Default late window for sessions                                    |
+| `DEFAULT_GEOFENCE_RADIUS_METERS`| `50`                                                                   | Default classroom geofence radius                                   |
+| `OTP_EXPIRES_MINUTES`           | `5`                                                                    | OTP code TTL                                                        |
 | `BACKUP_STORAGE_TYPE`           | `local`                                                                | Backup backend: `local` or `s3`                                     |
 | `BACKUP_LOCAL_DIR`              | `./backups`                                                            | Local backup directory                                              |
 | `BACKUP_S3_BUCKET`              | _(empty)_                                                              | S3 bucket (when using S3)                                           |
@@ -173,6 +177,20 @@ Backend (`backend/.env.example`):
 | `BACKUP_RETENTION_DAILY`        | `30`                                                                   | Daily backups to retain                                             |
 | `BACKUP_RETENTION_MONTHLY`      | `12`                                                                   | Monthly backups to retain                                           |
 | `BACKUP_EXCLUDE_OTP_CODES`      | `false`                                                                | Exclude OTP codes from backups                                      |
+| `BACKUP_COMPRESSION_LEVEL`      | `6`                                                                    | pg_dump compression level                                           |
+| `RISK_ABSENCE_RATE_HIGH`        | `0.30`                                                                 | Absence rate threshold for high risk scoring                        |
+| `RISK_ABSENCE_RATE_MEDIUM`      | `0.15`                                                                 | Absence rate threshold for medium risk scoring                      |
+| `RISK_STREAK_GAPS_HIGH`         | `3`                                                                    | Consecutive missed sessions that trigger high risk                  |
+| `RISK_SYNC_LAG_HIGH`            | `5`                                                                    | Days of unsynced records that trigger high risk                     |
+| `RISK_TREND_NEGATIVE`           | `-0.05`                                                               | Negative attendance trend slope threshold                           |
+| `RISK_BATCH_CRON`               | `0 2 * * *`                                                           | Cron schedule for the risk-scoring batch job                        |
+| `RISK_BATCH_CHUNK_SIZE`         | `1000`                                                                 | Risk batch chunk size                                               |
+| `RISK_BATCH_WORKERS`            | `4`                                                                    | Concurrent risk batch workers                                       |
+| `RISK_BATCH_DRY_RUN`            | `false`                                                                | Dry-run flag for risk batch job                                     |
+| `ATTACHMENTS_STORAGE_TYPE`      | `local`                                                                | Excuse attachment storage backend                                   |
+| `ATTACHMENTS_MAX_BYTES`         | `5242880`                                                              | Maximum upload size for excuse attachments                          |
+| `TURNSTILE_SECRET_KEY`          | _(empty)_                                                              | Cloudflare Turnstile captcha secret (optional)                      |
+| `BENCHMARK_MODE`                | `false`                                                                | Enables performance-benchmark endpoint                              |
 
 Frontend (`frontend/.env.example`):
 
@@ -251,8 +269,8 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ### Project
 
-- [`docs/project/roadmap.md`](docs/project/roadmap.md) — 11-phase implementation roadmap
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D51)
+- [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D54)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -268,12 +286,12 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ## Project Status
 
-The project is in **Phase 1 (partial)** of the [11-phase roadmap](docs/project/roadmap.md).
+Shared infrastructure is complete — **Phase 0** of the [13-phase roadmap](docs/project/roadmap.md) is **[Done]**. The 16-table model layer covers **Phase 1** (Database & Academic Structure), and current work (auth schemas, JWT deps, OTP/MFA/lockout config) is building out **Phase 2** (Auth, Claims & User Management). **Phase 12** is flagged as a **[gap]** in the roadmap.
 
-| Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI with `/health`, `/api` routers, async SQLAlchemy, `core`/`shared` infrastructure (config, database, security, exceptions, base CRUD, pagination, email, 13 enums), 13 feature slices / 16 model classes (analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system), 7 feature router files with 5 mounted under `/api` (auth, student, session, attendance, professor; course & enrollment routers exist but are unmounted), 1 baseline Alembic migration `679a319c12d6` creating the 16-table target schema, multi-stage `Dockerfile.dev`, Argon2id password hashing |
-| Frontend | Mock-first feature-slice implementation — routes for auth (login/register), student (dashboard/scan), professor (sessions); feature services + stores (auth, student, session, attendance, liveness, sync); shared types/utils/constants; typed `api/client.ts` + mock `api/endpoints.ts`; Svelte 5 runes mode enabled                                                                                                                                                                                                                                                                                                                                                 |
-| Features | Models + 7 feature router files implemented; `service` / `schema` layers pending for all features (exception: `course_professor/service.py` exists); sync & program have no router file yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)) |
-| Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security, exceptions, base CRUD, pagination, email, validators, 13 enums); `api/deps.py` with `get_db`, `get_current_user` (JWT/HTTPBearer), `require_role(*roles)`; 13 feature slices / 16 model classes; 5 of 7 router stubs mounted under `/api` (auth→`/api/auth`, student→`/api/student`, session→`/api/professor`, attendance→`/api/student`, professor→`/api/professor`; course & enrollment routers exist but are unmounted); 1 baseline Alembic migration `679a319c12d6` creating the 16-table target schema; multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
+| Frontend | Mock-first feature-slice implementation — routes for landing, auth (login/register/forgot-password), student (dashboard/scan), professor (sessions); mock feature services + runes stores (auth, student) + components (DashboardStats, QRScanner); shared types/utils/constants; typed `api/client.ts` (`MOCK = true`) + mock `api/endpoints.ts`; Svelte 5 runes mode forced in `vite.config.ts`                                                                                                                                                                                                                                                                            |
+| Features | Model layer complete for all 13 slices; `auth/schema.py` (Pydantic) and `course_professor/service.py` are the only service/schema layers so far; router stubs exist for 7 slices (course_professor, excuse, analytics, program, sync, system have no router file yet); `liveness` is frontend-only                                                                                                                                                                                                                                                                                                                                                                          |
+| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `mfa_backup_codes`, `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                           |
+| Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

@@ -85,7 +85,7 @@ A Progressive Web Application (PWA) that:
 | User               | Role                                                           |
 | ------------------ | -------------------------------------------------------------- |
 | **Professors**     | Open sessions, view real-time attendance, generate reports     |
-| **Students**       | Scan own ID card QR, mark attendance in seconds, no app needed |
+| **Students**       | Scan own ID card QR, mark attendance via a single 5-step flow, no app needed |
 | **Administrators** | Import rosters from CSV, manage courses, export reports        |
 
 ---
@@ -107,22 +107,22 @@ sequenceDiagram
     Server-->>Professor: Session code
     Professor-->>Student: Code on projector
 
-    Student->>Student: Enter session code
+Student->>Student: Enter session code
     Student->>Student: Scan QR on ID card
-    Student->>Student: Answer face challenge (blink / turn head)
     Student->>Student: Capture GPS
-    Student->>Server: Submit evidence bundle {id, session, gps, challenge, nonce}
+    Student->>Student: Face liveness challenge (fixed blink-left-right)
+    Student->>Student: Submit result (scan status: qr_ok / out-of-range / liveness_ok)
 
-    Server->>Server: 1. HMAC verification (invalid / session_expired)
-    Server->>Server: 2. GPS geofencing (Haversine → outside_geofence)
-    Server->>Server: 3. Face liveness challenge + face match (liveness_failed / face_mismatch)
-    Server->>Server: 4. One-scan-per-session duplicate check
+    Server->>Server: 1. Session HMAC verification (invalid / session_expired)
+    Server->>Server: 2. Duplicate check (qr_ok: auto-marked)
+    Server->>Server: 3. GPS geofencing (Haversine → out-of-range: flagged)
+    Server->>Server: 4. Face liveness + face match (liveness_failed / <0.65: rejected)
     Server->>Server: 5. Enrollment check (not_enrolled)
 
-    alt Risk score passes
+    alt All checks pass
         Server-->>Student: ✅ Attendance recorded
-        Server-->>Professor: Student marked present
-    else Risk score borderline
+        Server-->>Student: Professor sees student present
+    else Face match in review band (0.65–0.70)
         Server-->>Student: ⏳ Flagged for manual review
     else Any check fails
         Server-->>Student: ❌ Attendance rejected
@@ -181,10 +181,10 @@ flowchart LR
 | Layer          | Borrowed model            | Our contribution                                                                                           |
 | -------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | QR decoding    | `html5-qrcode`            | Session binding + one-scan-per-session duplicate rejection (D15 `duplicate`)       |
-| Face liveness  | MediaPipe landmarks       | Challenge-response protocol: random blink/head-turn challenges, EAR + head-pose scoring                    |
-| Offline safety | —                         | **Offline liveness protocol**: HMAC evidence bundles, nonce anti-replay, deferred risk-based re-validation |
-| Decision logic | —                         | **Risk-fusion scorer**: weighted layer confidences → accept / flag-for-review / reject                     |
-| Data analytics | pandas / scikit-learn     | At-risk forecasting adapted to sparse, sync-gapped data + prescriptive rule engine                         |
+| Face liveness  | MediaPipe landmarks       | Fixed challenge sequence (blink → left → right), EAR + head-pose scoring (0.65–0.70 review band)          |
+| Offline safety | —                         | **Offline evidence protocol**: HMAC evidence bundles, nonce anti-replay, deferred re-validation            |
+| Decision logic | —                         | **Per-scan checks** (HMAC, dupe, geofence, face, enrollment) + nightly batch risk scoring                  |
+| Risk analytics | — (heuristic rule engine) | At-risk detection (absence rate, streak, sync lag, trend) adapted to sparse, sync-gapped data              |
 | Verification   | —                         | Empirical PAD evaluation: self-built attack corpus, APCER/BPCER metrics                                    |
 
 **Attack parameters we defend against:** image/photo · screen recorder · video replay · distortion · offline replay · identical twins (documented limitation, mitigated via cross-modal fusion)
@@ -210,8 +210,8 @@ This project proposes a QR-based attendance system that:
 
 | Benefit     | Impact                                  |
 | ----------- | --------------------------------------- |
-| Speed       | Under 1 second per student              |
-| Accuracy    | Zero fraudulent entries                 |
+| Speed       | Scan-to-confirm: p50 < 6s, p95 < 8s (target per benchmarking) |
+| Accuracy    | Blocks QR/photo/replay/geo-bypass; identical twins remain a documented limitation |
 | Convenience | No app to install, works in any browser |
 | Reliability | Works even when internet is down        |
 

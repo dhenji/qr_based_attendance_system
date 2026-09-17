@@ -48,7 +48,7 @@ A scan passes only if the landmark transcript correlates with the **fixed** chal
 - **Algorithm**: env-configurable heuristic thresholds, not a trained model.
 - **Features** (per student): absence_rate = absences / expected_sessions; max_streak (consecutive misses); sync_lag (pending syncs >24h); 4-week linear trend_slope (D35).
 - **Thresholds** (D35): absence_rate > 0.30 → high; > 0.15 → medium; max_streak ≥ 3 → high; sync_lag ≥ 5 → medium; trend_slope < −0.05/week → medium. Order of evaluation: high overrides medium overrides low.
-- **Expected sessions** derived from course metadata: `semester_weeks × sessions_per_week` (e.g. 3 units ≈ 2 meetings/week × 1.5h → 30 expected sessions per semester).
+- **Expected sessions** derived from course metadata: `semester_weeks × sessions_per_week` (e.g. 3 units ≈ 2 meetings/week × 1.5h × 16 weeks → 32 expected sessions per semester).
 - **Output**: rows in `student_risk_scores` with risk_probability (numeric score), risk_level (low/medium/high), and features JSONB. Unique per (student_id, offering_id, semester, computed_day).
 - **Batch schedule**: daily at 02:00 (configurable via `RISK_BATCH_CRON`). Manual refresh endpoint available for admins.
 - **Interpretability**: deterministic, explainable, auditable — same input always produces same output.

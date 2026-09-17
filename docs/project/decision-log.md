@@ -495,3 +495,79 @@
 - **Supersedes:** httpOnly-cookie detail of security-model.md:79 (re-scoped to
   Phase 10).
 
+### ADR-052: Security Question in Auth Recovery
+
+- **Decision (D52):** Supersede D51's security-question deferral. Implement the
+  wireframe 4-step forgot-password flow (wireframes.md:152-260): email → mandatory
+  security question (Argon2id-hashed answer, 3-attempt cap then lock) → OTP via
+  `OtpPurpose.FORGET_PASSWORD` → new password. The security question is set at claim
+  registration (`/auth/register`) and updatable later via `/auth/security-question`
+  (authenticated). No migration — `users.security_question_hash` and
+  `users.security_answer_hash` columns already exist. Cloudflare Turnstile on step 1
+  remained deferred at ADR-052 time (no `shared/captcha.py`); it is now
+  implemented separately in ADR-053.
+- **Date:** 2026-09-16
+- **Status:** Accepted
+- **Context:** D51 deferred the security question because the OTP-only path matched
+  test-plan SH-AU-5 and the Turnstile requirement. Now that the feature is being
+  implemented, the wireframes are authoritative for the recovery UX. Since registration
+  requires a security question (every user has one), the mandatory gate never leaves a
+  user without a recovery path. D51's OTP-only note is superseded for the security-
+  question step; the rest of D51 (refresh-token body transport, MFA preauth gating)
+  remains unchanged.
+- **Consequences:** Implements the service, router, and registration changes in the
+  Phase 2 auth slice. `api-contracts.md` gains three endpoints
+  (`/auth/forgot-password`, `/auth/forgot-password/verify`, `/auth/security-question`);
+  test-plan SH-AU-5 now includes the security-question step; security-model.md is
+  updated. No schema or enum changes.
+- **Supersedes:** security-question deferral portion of D51 (security-model.md:81).
+
+### ADR-053: Turnstile Captcha Implemented (Key-Gated)
+
+- **Decision (D53):** Implement Cloudflare Turnstile on `POST /auth/login` and
+  forgot-password step 1 (wireframes.md:82, 156, 1904) in Phase 2,
+  superseding the "deferred" notes in D51/D52/security-model.md:81. Verification
+  lives in `shared/captcha.py` (`verify_turnstile_token`); when
+  `TURNSTILE_SECRET_KEY` is empty (local/dev/test) it is a pass-through no-op, so
+  the code ships without credentials and enforcement turns on purely via env
+  (production-checklist.md:129-138). Optional `turnstile_token` fields on
+  `LoginRequest` / `ForgotPasswordStep1Request`; never block the flow when captcha
+  is disabled.
+- **Date:** 2026-09-17
+- **Status:** Accepted
+- **Context:** The roadmap placed Turnstile at Phase 10 as a production-checklist
+  item, but the guarded endpoints are Phase 2 and the roadmapped Phase-10 item
+  already covers provisioning (site/secret keys). Writing siteverify code at
+  deployment time was awkward; the key-gated design lets Phase 2 own the code and
+  Phase 10 own the credentials. Rate limiting + lockout (D25) remain
+  the always-on bot protection.
+- **Consequences:** Adds `shared/captcha.py`,
+  gateway calls in the auth router, and schema fields; `api-contracts.md` notes
+  the turnstile_token fields; `security-model.md:81` no longer defers Turnstile;
+  production-checklist rows are unchanged (provisioning). No migration, no new
+  config field.
+- **Supersedes:** Turnstile-deferral portions of D51 (security-model.md:81) and
+  D52 (ADR-052 consequences).
+
+### ADR-054: MFA Backup Codes
+
+- **Decision (D54):** Add single-use backup codes for MFA (wireframes.md:291-292
+  "Generate Backup Codes", 1.6:325 "Use a backup code") in Phase 2. New
+  `mfa_backup_codes` table (user_id FK, Argon2id `code_hash`, `created_at`,
+  `used_at`); endpoints `POST /auth/mfa/backup-codes` (10 new codes returned in
+  plaintext exactly once), `GET /auth/mfa/backup-codes` (summary), and a
+  backup-code branch in `/auth/mfa/verify`. Codes are single-use, hashed, never
+  stored in plaintext; generating a new set invalidates unconsumed codes.
+- **Date:** 2026-09-17
+- **Status:** Accepted
+- **Context:** MFA TOTP was implemented (2.2/2.3) with no recovery path if the
+  authenticator app is lost. The wireframes explicitly require backup codes. This
+  is the one new table introduced by the Phase-2 alignment (follow the alembic
+  import rule: add `features.auth.model` to `alembic/env.py` + one autogenerate
+  revision).
+- **Consequences:** One new table + migration; two new auth endpoints; `/auth/mfa/verify`
+  accepts backup codes; `api-contracts.md` auth table updated; test coverage
+  added in Phase 9 (test_auth.py). Security question (ADR-052) remains the
+  password-recovery path; backup codes are MFA-recovery only.
+- **Supersedes:** (none).
+
