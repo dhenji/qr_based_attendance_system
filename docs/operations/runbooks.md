@@ -24,35 +24,35 @@
    # Local
    ls -lh ./backups/
 
-   # S3
-   aws s3 ls s3://$BACKUP_S3_BUCKET/backups/ --recursive
+   # S3 (objects stored as $BACKUP_S3_PREFIX/<timestamp>/backup.sql.gz.enc)
+   aws s3 ls s3://$BACKUP_S3_BUCKET/$BACKUP_S3_PREFIX/ --recursive
    ```
 
 2. **Download the backup file** (if S3):
 
    ```bash
-   aws s3 cp s3://$BACKUP_S3_BUCKET/backups/<filename>.enc ./restore/
+   aws s3 cp s3://$BACKUP_S3_BUCKET/$BACKUP_S3_PREFIX/<timestamp>/backup.sql.gz.enc ./restore/
    ```
 
 3. **Decrypt the backup:**
 
    ```bash
    openssl enc -aes-256-gcm -d -salt -pbkdf2 \
-       -in ./restore/<filename>.enc \
-       -out ./restore/<filename>.sql.gz \
+       -in ./restore/backup_<timestamp>.sql.gz.enc \
+       -out ./restore/backup_<timestamp>.sql.gz \
        -pass env:BACKUP_ENCRYPTION_KEY
    ```
 
 4. **Verify integrity** (if sha256 sidecar exists):
 
    ```bash
-   sha256sum -c ./restore/<filename>.sha256
+   sha256sum -c ./restore/backup_<timestamp>.sha256
    ```
 
 5. **Decompress:**
 
    ```bash
-   gunzip ./restore/<filename>.sql.gz
+   gunzip ./restore/backup_<timestamp>.sql.gz
    ```
 
 6. **Restore to Postgres:**
@@ -60,7 +60,7 @@
    ```bash
    pg_restore --verbose --clean --no-acl --no-owner \
        -h localhost -p 5432 -U postgres -d attendance_sys \
-       ./restore/<filename>.sql
+       ./restore/backup_<timestamp>.sql
    ```
 
 7. **Verify row counts:**

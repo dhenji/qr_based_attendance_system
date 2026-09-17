@@ -7,13 +7,38 @@
 
 ---
 
+## Phase 0: Shared Infrastructure [Done]
+
+**Goal:** Core app shell, config, database, shared utilities, baseline migration.
+
+### Deliverables
+
+- FastAPI app shell (`main.py`, `/health`, CORS, lifespan) — `backend/src/main.py`
+- pydantic-settings config (`core/config.py`) incl. backup/attachment env vars
+- Async engine + session factory + `Base` (`core/database.py`)
+- Shared exceptions taxonomy (`core/exceptions.py` — `AppException`/`DomainException`/`DatabaseException`)
+- `core/security.py` — Argon2id hashing, JWT access/refresh tokens, HMAC session codes, 6-digit OTP
+- `shared/enums.py`, `shared/mixins.py`, `shared/pagination.py`, `shared/base.py` (BaseCRUD), `shared/email.py` (debug stub)
+- `api/deps.py` — `get_db`, `get_current_user`, `require_role(*roles)`
+- Alembic baseline migration `679a319c12d6` (16 tables)
+
+> **Forward-looking:** `mfa_backup_codes`, `audit_logs`, `app_settings` land in Phases
+> 2/8/12 → 19-table target. See [migration-strategy.md](../architecture/migration-strategy.md).
+
+### Prerequisite Docs
+
+- [Migration Strategy](../architecture/migration-strategy.md)
+- [Coding Standards](../developer/coding-standards.md)
+
+---
+
 ## Phase 1: Database & Academic Structure
 
 **Goal:** Create the target hierarchical model (baseline migration creates all 16 tables directly).
 
 ### Deliverables
 
-- New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log` — **all 16/16 target tables are now modeled**; migrations regenerated as a single full baseline (3 legacy revisions dropped, alembic 996b2fb85c6f replaced)
+- New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log` — **all 16/16 target tables are now modeled**; migrations regenerated as a single full baseline `679a319c12d6` (3 legacy revisions dropped, `996b2fb85c6f` replaced)
 - Strip `courses` to a pure template: retains only `units` + `session_duration_hours` (D4)
 - Create `course_offerings` with schedule, classroom, default windows, and program/year-level FKs (D4)
 - Expand `sessions` (drop `course_id`, add `offering_id`), duration, windows, scheduled times, classroom override (D12, D14, D17)
@@ -30,7 +55,7 @@
 | D1  | Program → Year Level → CourseOffering ← Course hierarchy (courses have no program/year FKs) |
 | D2  | Section stored on `students` only, not enrollments                                         |
 | D3  | Term structure per-program-per-year (JSONB on `year_levels`)                                |
-| D4  | Scheduling metadata, default windows, GPS moved to `course_offerings`; courses keep only units + session_duration_hours |
+| D4  | Scheduling metadata, default windows, GPS moved to `course_offerings`; courses keep only units + session_duration_hours — superseded by D44 (final placement) |
 | D5  | Enrollment gains `semester` + `offering_id` validated against term structure                |
 | D6  | Courses shared across programs/year levels via multiple offerings per course                |
 
@@ -47,7 +72,7 @@
 
 ### Deliverables
 
-- `User` model security fields: `security_question_hash`, `security_answer_hash`, `mfa_enable`, `mfa_secret`, `failed_login_attempts`, `must_change_password` (already in migration `996b2fb85c6f`)
+- `User` model security fields: `security_question_hash`, `security_answer_hash`, `mfa_enabled`, `mfa_secret`, `failed_login_attempts`, `must_change_password` (already in baseline migration `679a319c12d6`)
 - `OtpCodes` table (already migrated)
 - `Professor` model (already migrated)
 - Claim-based registration flow: email → OTP → password → link to student/professor record
@@ -62,6 +87,10 @@
 | D25 | No "mark all present" or security-disabled sessions — security posture constrains all auth/session design |
 | D26 | Liveness remains mandatory even for remote/relaxed-geofence sessions                                      |
 | D32 | Student and professor profiles are read-only (admin-managed)                                              |
+| D51 | Token transport (JWT bearer) + MFA login gating                                                          |
+| D52 | Security question in auth recovery (ADR-052)                                                              |
+| D53 | Cloudflare Turnstile captcha, key-gated (ADR-053)                                                         |
+| D54 | MFA backup codes (ADR-054)                                                                               |
 
 ### Prerequisite Docs
 
@@ -118,13 +147,13 @@
 
 | ID  | Decision                                                                 |
 | --- | ------------------------------------------------------------------------ |
-| D7  | Course↔Professor M2M with `is_primary`, effective dating, semester       |
+| D7  | Course↔Professor M2M with `is_primary`, effective dating, semester — superseded by D45 (composite PK on `offering_id`) |
 | D8  | Mid-semester professor replacement via effective_to / new effective_from |
 | D9  | Assistants supported (secondary assignments)                             |
 | D11 | Opening from My Courses locks course; Dashboard allows selector          |
 | D12 | Duration expiry = min(created_at + duration, scheduled_end)              |
 | D13 | Present window + late window ≤ duration (CHECK constraint)               |
-| D14 | Default windows on course, overridable per session                       |
+| D14 | Default windows on course, overridable per session — superseded by D44 (defaults moved to `course_offerings`) |
 | D17 | Classroom override at session level                                      |
 | D18 | Session QR payload versioned JSON                                        |
 
@@ -271,7 +300,7 @@
 
 ### Deliverables
 
-- Test plan covering all 48 decisions (test-plan.md)
+- Test plan covering all 54 decisions (test-plan.md)
 - Test data: ~40 students, shared GE course, 6-week history (test-data.md)
 - Performance benchmarks: scan latency, concurrent sync, risk batch, backup scaling (performance-benchmarks.md)
 - Security audit: threat model validation, bypass attempt testing (security-model.md)
@@ -329,20 +358,45 @@
 
 ---
 
+## Phase 12: Frontend-Readiness Roundup [gap]
+
+**Goal:** Backend endpoints that exist solely to power the frontend wireframe audit
+(in backend-prompts.txt as PROMPT 12.0 [S54]).
+
+### Deliverables
+
+- `app_settings` KV table + `GET/PATCH /admin/system/settings` (`geofence_default_radius`,
+  `present_window_default`, `late_window_default`, `backup_retention_daily/monthly`,
+  `pending_sync_count`)
+- Admin reset-password ×3 (admin / student / professor accounts)
+- `POST /auth/mfa/disable` (password required; clears backup codes)
+- Dashboard summaries ×3 (`/student/dashboard`, `/professor/dashboard`, `/admin/dashboard`)
+- CSV export/template ×3 (student history, attendance overview, roster template)
+- `GET /auth/me` + profile enrichments (prompts 2.3/4.4/5.7)
+
+### Prerequisite Docs
+
+- [API Contracts](../architecture/api-contracts.md) — SHARED Auth Endpoints + Dashboard Summaries
+- [Decision Log](./decision-log.md) (D51–D54, ADR-052/053/054)
+
+---
+
 ## Dependency Graph
 
 ```
-Phase 1 (DB Schema)
-  └─→ Phase 2 (Auth/Claims)
-       └─→ Phase 3 (Admin CRUD)
-            ├─→ Phase 4 (Professor Sessions)
-            │    └─→ Phase 5 (Student Scan)
-            │         └─→ Phase 6 (Excuses)
-            │              └─→ Phase 7 (Reports & Analytics)
-            └─→ Phase 8 (Settings & Backup)
-                     └─→ Phase 9 (Integration Testing)
-                          └─→ Phase 10 (Deployment)
-                               └─→ Phase 11 (Operations)
+Phase 0 (Shared Infrastructure)
+  └─→ Phase 1 (DB Schema)
+       └─→ Phase 2 (Auth/Claims)
+            └─→ Phase 3 (Admin CRUD)
+                 ├─→ Phase 4 (Professor Sessions)
+                 │    └─→ Phase 5 (Student Scan)
+                 │         └─→ Phase 6 (Excuses)
+                 │              └─→ Phase 7 (Reports & Analytics)
+                 └─→ Phase 8 (Settings & Backup)
+                          └─→ Phase 9 (Integration Testing)
+                               └─→ Phase 10 (Deployment)
+                                    ├─→ Phase 11 (Operations)
+                                    └─→ Phase 12 (Frontend-Readiness Roundup)
 ```
 
 ---
@@ -351,8 +405,9 @@ Phase 1 (DB Schema)
 
 | Phase    | Reference Docs                                                                                          |
 | -------- | ------------------------------------------------------------------------------------------------------- |
+| Phase 0  | [migration-strategy.md](../architecture/migration-strategy.md), [coding-standards.md](../developer/coding-standards.md) |
 | Phase 1  | [decision-log.md](./decision-log.md) (D1–D6), [database-er.md](../design/database-er.md) Target Schema, [migration-strategy.md](../architecture/migration-strategy.md) |
-| Phase 2  | decision-log (D25–D26, D32), [security-model.md](../architecture/security-model.md)                      |
+| Phase 2  | decision-log (D25–D26, D32, D51–D54), [security-model.md](../architecture/security-model.md)            |
 | Phase 3  | decision-log (D28, D38, D40), [face-enrollment.md](../architecture/face-enrollment.md), [wireframes.md](../design/wireframes.md) |
 | Phase 4  | decision-log (D7–D10, D11–D19), [api-contracts.md](../architecture/api-contracts.md)                     |
 | Phase 5  | decision-log (D15–D19, D27–D32), [offline-first.md](../architecture/offline-first.md)                    |
@@ -362,3 +417,4 @@ Phase 1 (DB Schema)
 | Phase 9  | [test-plan.md](../testing/test-plan.md), [test-data.md](../testing/test-data.md)                         |
 | Phase 10 | [deployment-workflow.md](../deployment/deployment-workflow.md), [production-checklist.md](../deployment/production-checklist.md) |
 | Phase 11 | [runbooks.md](../operations/runbooks.md), [monitoring.md](../operations/monitoring.md), [incident-response.md](../operations/incident-response.md) |
+| Phase 12 | [api-contracts.md](../architecture/api-contracts.md) (SHARED + Dashboard Summaries), [wireframes.md](../design/wireframes.md) |

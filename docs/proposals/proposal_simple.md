@@ -100,7 +100,7 @@ A web-based application that:
 
 A fully functional attendance system that:
 
-- Speeds up attendance to under 1 second per student
+- Speeds up attendance from a manual roll-call to a single 5-step scan flow (p50 < 6s per scan)
 - Prevents cheating through session codes + GPS + face liveness
 - Blocks photo, screen-recorder, video-replay, and distortion attacks
 - Works with or without internet (liveness evidence re-validated after sync; expired scans rejected)

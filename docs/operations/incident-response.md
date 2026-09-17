@@ -49,7 +49,7 @@ ORDER BY hour DESC;
    - Close the session early (`POST /professor/sessions/{id}/close`)
    - Notify the professor via direct message
 3. If a specific student is repeatedly rejected:
-   - Flag for manual review in the liveness review queue (`/admin/liveness-review`)
+   - Flag for manual review in the liveness review queue (`/admin/attendance/liveness-review`)
    - Do NOT lock the account automatically (let admin investigate)
 
 ### Investigation
@@ -119,7 +119,7 @@ Active sessions are affected. Students cannot scan. Offline scans will queue and
 
 ### Investigation
 
-1. Check Supabase dashboard → Logs → Postgres for connection满, deadlocks.
+1. Check Supabase dashboard → Logs → Postgres for connection pool exhaustion, deadlocks.
 2. Check Fly.io logs for the API container.
 3. Determine if it's a network issue, resource exhaustion, or Supabase-side problem.
 
@@ -266,8 +266,8 @@ LIMIT 3;
 LATEST=$(ls -t ./backups/*.enc 2>/dev/null | head -1)
 echo "Latest backup: $LATEST"
 
-# S3
-aws s3 ls s3://$BACKUP_S3_BUCKET/backups/ --recursive | sort | tail -5
+# S3 (objects stored as $BACKUP_S3_PREFIX/<timestamp>/backup.sql.gz.enc)
+aws s3 ls s3://$BACKUP_S3_BUCKET/$BACKUP_S3_PREFIX/ --recursive | sort | tail -5
 ```
 
 #### Step 3: Verify Integrity
