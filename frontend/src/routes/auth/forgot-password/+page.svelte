@@ -175,10 +175,10 @@
 			{#if step === 1}
 				<div class="step-panel">
 					<h2>Forgot Password</h2>
-					<p class="step-sub">Step 1 of 4 · Enter your email</p>
+					<p class="step-sub">Step 1 of 4. Enter your email.</p>
 
 					{#if error}
-						<div class="error-banner">⚠️ {error}</div>
+						<div class="error-banner">{error}</div>
 					{/if}
 
 					<div class="field">
@@ -203,10 +203,10 @@
 			{:else if step === 2}
 				<div class="step-panel">
 					<h2>Verify Identity</h2>
-					<p class="step-sub">Step 2 of 4 · Security question</p>
+					<p class="step-sub">Step 2 of 4. Answer your security question.</p>
 
 					{#if error}
-						<div class="error-banner">⚠️ {error}</div>
+						<div class="error-banner">{error}</div>
 					{/if}
 
 					<div class="question-panel">"{securityQuestion}"</div>
@@ -219,7 +219,7 @@
 
 					{#if attempts < 3}
 						<div class="warning-banner">
-							⚠️ {attempts} attempt{attempts !== 1 ? 's' : ''} remaining (3 max — then lock)
+							{attempts} attempt{attempts !== 1 ? 's' : ''} remaining, then the account locks.
 						</div>
 					{/if}
 
@@ -228,11 +228,11 @@
 			{:else if step === 3}
 				<div class="step-panel">
 					<h2>One-Time Code</h2>
-					<p class="step-sub">Step 3 of 4 · Check your email</p>
+					<p class="step-sub">Step 3 of 4. Enter the code from your email.</p>
 					<p class="step-sub">A 6-digit code was sent to <strong>{email}</strong></p>
 
 					{#if error}
-						<div class="error-banner">⚠️ {error}</div>
+						<div class="error-banner">{error}</div>
 					{/if}
 
 					<div class="otp-row">
@@ -246,7 +246,7 @@
 					</div>
 
 					<div class="expiry">
-						Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong> ·
+						Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong>.
 						<button class="resend-btn" onclick={resend} disabled={countdown > 0 && countdown < 300}>Resend code</button>
 					</div>
 
@@ -255,10 +255,10 @@
 			{:else}
 				<div class="step-panel">
 					<h2>New Password</h2>
-					<p class="step-sub">Step 4 of 4 · Set your new password</p>
+					<p class="step-sub">Step 4 of 4. Set your new password.</p>
 
 					{#if error}
-						<div class="error-banner">⚠️ {error}</div>
+						<div class="error-banner">{error}</div>
 					{/if}
 
 					<div class="field">
@@ -298,7 +298,7 @@
 					</div>
 
 					{#if success}
-						<div class="success-banner">✓ Password reset successful. Redirecting to login…</div>
+						<div class="success-banner">Password updated. Redirecting to login.</div>
 					{/if}
 
 					<div class="req-list">
@@ -311,12 +311,12 @@
 
 					{#if passwordsMatch !== null}
 						<div class="match-banner {passwordsMatch ? 'match' : 'no-match'}">
-							{passwordsMatch ? '✔ Passwords match' : '✗ Passwords do not match'}
+							{passwordsMatch ? 'Passwords match.' : 'Passwords do not match.'}
 						</div>
 					{/if}
 
 					<button class="btn-primary" onclick={handleStep4} disabled={success}>
-						{success ? 'Success!' : 'Reset Password'}
+						{success ? 'Password updated' : 'Reset password'}
 					</button>
 				</div>
 			{/if}
@@ -326,13 +326,13 @@
 
 <style>
 	main.auth {
-		min-height: 100vh;
+		min-height: calc(100vh - 3.75rem);
 		background: #f5f7fb;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		padding: 2rem;
-		font-family: 'DM Sans', system-ui, sans-serif;
+		font-family: system-ui, sans-serif;
 	}
 
 	.wrapper {
@@ -351,7 +351,7 @@
 	.header-logo {
 		width: 40px;
 		height: 40px;
-		background: linear-gradient(135deg, #1e3a5f, #0d9488);
+		background: #1e3a5f;
 		border-radius: 12px;
 		display: flex;
 		align-items: center;
@@ -365,7 +365,7 @@
 	}
 
 	.brand-name {
-		font-family: 'DM Sans', sans-serif;
+		font-family: system-ui, sans-serif;
 		font-size: 1.375rem;
 		font-weight: 700;
 		color: #1e3a5f;
@@ -427,7 +427,7 @@
 	}
 
 	h2 {
-		font-family: 'DM Sans', sans-serif;
+		font-family: system-ui, sans-serif;
 		font-size: 1.375rem;
 		font-weight: 700;
 		color: #1e3a5f;
@@ -511,7 +511,7 @@
 
 	.captcha-display {
 		flex: 1;
-		background: linear-gradient(135deg, #f0f4f8, #e2e8f0);
+		background: #f1f5f9;
 		border: 1.5px solid #d1d5db;
 		border-radius: 8px;
 		padding: 0.625rem;
@@ -519,7 +519,7 @@
 		align-items: center;
 		justify-content: center;
 		text-align: center;
-		font-family: 'JetBrains Mono', monospace;
+		font-family: monospace;
 		font-weight: 700;
 		font-size: 1.125rem;
 		letter-spacing: 0.25em;
@@ -578,7 +578,7 @@
 		height: 52px;
 		text-align: center;
 		font-size: 1.25rem;
-		font-family: 'JetBrains Mono', monospace;
+		font-family: monospace;
 		font-weight: 700;
 		color: #1e3a5f;
 		border: 1.5px solid #d1d5db;
@@ -641,7 +641,7 @@
 	}
 
 	.req-item {
-		color: #9ca3af;
+		color: #64748b;
 	}
 
 	.req-item.met {
@@ -681,7 +681,7 @@
 		padding: 0.75rem;
 		border: none;
 		border-radius: 8px;
-		background: #2563eb;
+		background: #1e3a5f;
 		color: white;
 		font-size: 1rem;
 		font-weight: 600;
@@ -690,11 +690,11 @@
 	}
 
 	.btn-primary:hover {
-		background: #1d4ed8;
+		background: #16324f;
 	}
 
 	.btn-primary:disabled {
-		background: #a5b4fc;
+		background: #94a3b8;
 		cursor: not-allowed;
 	}
 
