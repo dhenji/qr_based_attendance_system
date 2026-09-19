@@ -60,7 +60,8 @@ Scanned by students. Server generates HMAC-signed JSON.
 **Note:** The HMAC payload uses compact keys. On verify, they map to DB columns:
 `code` → `sessions.session_code`, `offering` → `sessions.offering_id`,
 `radius` → `sessions.classroom_radius_meters`, `pw` → `present_window_minutes`,
-`lw` → `late_window_minutes`.
+`lw` → `late_window_minutes`. The `radius:30` sample above is illustrative —
+`sessions.classroom_radius_meters` defaults to **50 m**.
 
 ---
 
@@ -113,7 +114,8 @@ List all programs (with year-level counts).
 | ---------------- | ----------------------------------------------------------------------------------------------------------------- |
 | **Role**         | admin                                                                                                             |
 | **Query**        | `?is_active=true&page=1&size=20`                                                                                  |
-| **Response 200** | `{ items: [{ id, code, name, description, total_years, is_active, created_at, updated_at }], total, page, size }` |
+| **Response 200** | `{ items: [{ id, code, name, description, total_years, is_active, course_count, year_level_count, terms_count, created_at, updated_at }], total, page, size }` |
+| **Notes**        | `course_count`/`year_level_count`/`terms_count` are aggregate DTOs for the Programs table (wireframes.md 4.5a: Years / Terms / Courses columns). |
 
 #### `POST /admin/programs`
 
@@ -233,7 +235,8 @@ A course offering is a specific instance of a course template for a program, yea
 |                  |                                                                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?program_id?&year_level_id?&semester?&course_id?&is_active?&page=1&size=20`                                                                                                                                             |
-| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, is_active, created_at, updated_at }], ... }` |
+| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, enrolled_count, is_active, created_at, updated_at }], ... }` |
+| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. |
 
 #### `POST /admin/offerings`
 
@@ -291,13 +294,25 @@ End assignment (set `effective_to` = today).
 
 #### `POST /admin/offerings/{oid}/enrollments/bulk`
 
-Bulk-enroll students via CSV upload.
+Bulk-enroll EXISTING students via CSV upload (wireframes.md 4.3 template; creating
+new roster students is `POST /admin/students/import`).
 
 |                  |                                                               |
 | ---------------- | ------------------------------------------------------------- |
 | **Request**      | `multipart/form-data: file=students.csv`                      |
+| **CSV columns**  | `student_id, first_name, middle_name, last_name, email, program_code, year_level, section` |
 | **Response 201** | `{ enrolled: int, skipped: int, errors: [{ line, reason }] }` |
 | **Errors**       | 422 `validation_error`                                        |
+
+#### `GET /admin/offerings/{oid}/students`
+
+Offering roster read (wireframes.md 4.5d Enrolled tab; drives the D2 `section`
+filters on professor screens and the active-session "Enrolled" count).
+
+|                  |                                                                   |
+| ---------------- | ----------------------------------------------------------------- |
+| **Query**        | `?section?&page=1&size=20`                                        |
+| **Response 200** | `{ items: [{ student_id, name, section, enrolled_at }], total, page, size }` |
 
 ---
 
@@ -365,12 +380,14 @@ Export analytics as CSV/PDF.
 
 #### `POST /admin/analytics/refresh-risk`
 
-Trigger manual risk-score recalculation (admin-only).
+Trigger manual risk-score recalculation (admin-only). Synchronous and scoped —
+no async job. Rate-limited to 1 call per 60 seconds per admin.
 
-|                  |                                |
-| ---------------- | ------------------------------ |
-| **Response 202** | `{ job_id, status: "pending" }` |
-| **Notes**        | `job_id` is an opaque DTO (queue job reference), not a table column. `status` is the queue job status (QueueStatus). |
+|                  |                                                          |
+| ---------------- | -------------------------------------------------------- |
+| **Query**        | `student_id?` `offering_id?` `semester?` (all optional)  |
+| **Response 200** | `{ processed: N, high: X, medium: Y, low: Z, duration_ms: T }` |
+| **Notes**        | No filter = run the full batch. `student_id` refreshes one student across their offerings; `offering_id` refreshes all students in a course offering (`semester` required when `offering_id` is set). Sourced from `risk-model.md` §6. |
 
 ---
 
@@ -380,7 +397,8 @@ Trigger manual risk-score recalculation (admin-only).
 
 |                  |                                                                                                                                   |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ geofence_default_radius, present_window_default, late_window_default, backup_retention_daily, backup_retention_monthly, ... }` |
+| **Response 200** | `{ geofence_default_radius, present_window_default, late_window_default, backup_retention_daily, backup_retention_monthly, pending_sync_count, ... }` |
+| **Notes**        | Persisted in the `app_settings` key-value table (seeded from env defaults at startup) — PATCH writes rows, no in-memory-only updates. `pending_sync_count` is an unprocessed `sync_queue` row count for the maintenance line (wireframes.md 4.9 "Pending sync: N"). |
 
 #### `PATCH /admin/system/settings`
 
@@ -419,6 +437,23 @@ Download backup file.
 | ---------------- | -------------------- |
 | **Response 200** | Binary file download |
 
+#### `POST /admin/system/sync/flush`
+
+Force-process pending `sync_queue` rows now (re-runs each through the scan
+validation path). Refuses to run concurrently with a backup/risk batch.
+
+|                  |                                    |
+| ---------------- | ---------------------------------- |
+| **Response 200** | `{ processed, succeeded, failed }` |
+
+#### `POST /admin/system/cleanup`
+
+Prune expired data (7-day OTPs, 30-day completed/failed sync_queue).
+
+|                  |                  |
+| ---------------- | ---------------- |
+| **Response 200** | `{ removed }`    |
+
 ---
 
 ### Excuses (Admin View)
@@ -434,6 +469,203 @@ List pending excuse requests.
 
 ---
 
+### Attendance Overview
+
+#### `GET /admin/attendance/overview`
+
+Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
+
+|                  |                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| **Query**        | `?course_id?&professor_id?&date_from?&date_to?`                                          |
+| **Response 200** | `{ items: [{ course_id, course_code, course_name, sessions_count, avg_rate, trend }] }`  `trend: "up" \| "down" \| "flat"` |
+
+#### `GET /admin/attendance/overview/export`
+
+CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview").
+
+|                  |                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| **Query**        | Same filters as `GET /admin/attendance/overview`                                            |
+| **Response 200** | CSV file download (all rows, not just the page)                                            |
+
+#### `GET /admin/attendance/recent-scans`
+
+Latest scans feed for the admin dashboard (wireframes.md 4.1).
+
+|                  |                                                                     |
+| ---------------- | ------------------------------------------------------------------- |
+| **Query**        | `?limit=10`                                                          |
+| **Response 200** | `{ items: [{ id, scanned_at, student_name, course_code, status }] }` |
+
+### Liveness Review
+
+Queue of attendance records flagged for manual review — records whose
+`face_match_score` fell in the review band
+`[FACE_REVIEW_BAND_LOW, FACE_MATCH_THRESHOLD)` (0.65–0.70) submitted with
+`liveness_evidence.review=true` and `validation_status=pending` (PROMPT 5.2).
+
+#### `GET /admin/attendance/liveness-review`
+
+List flagged records for manual review.
+
+|                  |                                                                     |
+| ---------------- | ------------------------------------------------------------------- |
+| **Query**        | `?status=pending                                                    | approved | rejected&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, student_number, student_name, session_code, course_code, face_match_score, evidence, scanned_at }], total, page, size }` |
+| **Notes**        | `evidence` is the stored `liveness_evidence` JSONB (review flag, EAR/PnP samples). Only `status=pending` records are actionable. |
+
+#### `PATCH /admin/attendance/liveness-review/{id}/resolve`
+
+Approve or reject a flagged record.
+
+|                  |                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------- |
+| **Request**      | `{ decision: "approve" \| "reject", note?: string }`                              |
+| **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
+| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. Decisions are audit-logged (PROMPT 8.7). |
+
+### Students, Professors & Archive
+
+#### `POST /admin/students/import`
+
+CSV roster import — creates NEW student records (wireframes.md 4.3).
+Columns: `student_id, first_name, middle_name, last_name, email, program_code, section, year_level`.
+
+|                  |                                                                             |
+| ---------------- | --------------------------------------------------------------------------- |
+| **Request**      | `multipart/form-data` CSV file                                               |
+| **Response 200** | `{ imported, duplicates, errors: [{ line, reason }] }`                       |
+
+#### `POST /admin/professors/import`
+
+CSV professor import — creates new records (wireframes.md 4.4).
+Columns: `first_name, middle_name, last_name, email, department`.
+
+|                  |                                                              |
+| ---------------- | ------------------------------------------------------------ |
+| **Request**      | `multipart/form-data` CSV file                                |
+| **Response 200** | `{ imported, duplicates, errors: [{ line, reason }] }`        |
+
+#### `GET /admin/students/import/template`
+
+CSV template download for the import screen (wireframes.md 4.3 Step 1).
+Columns: `student_id, first_name, middle_name, last_name, email, program_code, section, year_level`.
+
+|                  |                       |
+| ---------------- | --------------------- |
+| **Response 200** | CSV file download     |
+
+#### `DELETE /admin/students/{id}/archive`
+
+Permanent delete — allowed only on archived (`is_active=false`) students
+(wireframes.md 4.10).
+
+|                  |                          |
+| ---------------- | ------------------------ |
+| **Response 204** | No content               |
+| **Errors**       | 409 `not_archived`       |
+
+#### `DELETE /admin/professors/{id}/archive`
+
+Same semantics as the student archive delete, for professors.
+
+#### `GET /admin/students`
+
+List students with search and filters (wireframes.md 4.2).
+
+|                  |                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?search?&program_id?&year_level_id?&section?&is_active?&sort_by?&sort_dir?&page=1&size=20`                                  |
+| **Response 200** | `{ items: [{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count }], total, page, size }` |
+| **Notes**        | `search` matches `student_id`/name/email; `face_enrolled`/`created_at`/`scan_count` feed the roster + profile (wireframes.md 2.10). |
+
+#### `POST /admin/students`
+
+Create a student (wireframes.md 4.2 -> Create Student).
+
+|                  |                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section, username?: string }`                        |
+| **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
+| **Notes**        | Optional `username` captures the claim slot used at self-registration; omitted = auto-generated at claim. Email is unique across users.       |
+
+#### `GET /admin/students/{id}`
+
+Single student detail.
+
+|                  |                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| **Response 200** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, created_at, scan_count, face_enrolled: bool, face_enrolled_at?, face_embedding_version? }` |
+
+#### `PATCH /admin/students/{id}`
+
+Update student fields (program/year-level/sections; clears face enrollment on identity change).
+
+|                  |                                                       |
+| ---------------- | ----------------------------------------------------- |
+| **Request**      | `{ first_name?, last_name?, email?, program_id?, year_level_id?, section?, is_active? }` |
+| **Response 200** | Updated student                                      |
+| **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). |
+
+#### `GET /admin/professors`
+
+List professors with claim status (wireframes.md 4.4).
+
+|                  |                                                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?search?&department?&is_active?&sort_by?&sort_dir?&page=1&size=20`                                              |
+| **Response 200** | `{ items: [{ id, first_name, middle_name, last_name, email, department, is_active, claim_status: "Unclaimed" \| "Claimed", assigned_courses: [{ offering_id, course_code }] }], total, page, size }` |
+
+#### `POST /admin/professors`
+
+Create a professor (wireframes.md 4.4).
+
+|                  |                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Request**      | `{ first_name, middle_name?, last_name, email, department, username?: string, courses?: [offering_id] }`                   |
+| **Response 201** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status }`                                   |
+| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. |
+
+#### `GET /admin/professors/{id}`
+
+Single professor detail.
+
+|                  |                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Response 200** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status, assigned_courses, created_at }`        |
+
+#### `PATCH /admin/professors/{id}`
+
+Update professor fields + course assignments.
+
+|                  |                                                                       |
+| ---------------- | --------------------------------------------------------------------- |
+| **Request**      | `{ first_name?, last_name?, email?, department?, is_active?, courses?: [offering_id] }` |
+| **Response 200** | Updated professor                                                    |
+| **Notes**        | `courses` replaces the assignment set (removes missing; keeps provided). |
+
+---
+
+### Admin Users & Reset
+
+Admin accounts are never self-registered (wireframes.md 4.13). Super Admins manage
+admins; admins manage students/professors. Password resets set a temp password
+(returned once) and force `must_change_password=true`.
+
+| Method | Path                                    | Purpose                                            | Role        |
+| ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
+| GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin |
+| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin |
+| PATCH  | `/admin/users/{id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin |
+| POST   | `/admin/users/{id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin |
+| POST   | `/admin/students/{id}/reset-password`   | Reset linked student-account password (temp once)  | admin        |
+| POST   | `/admin/professors/{id}/reset-password` | Reset linked professor-account password (temp once)| admin        |
+
+**Reset response:** `{ temp_password: string }` — shown once. All resets audited.
+
+---
+
 ## PROFESSOR Endpoints
 
 ### Courses
@@ -445,8 +677,8 @@ List professor's active course assignments with program/year badges.
 |                  |                                                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | professor                                                                                                                                      |
-| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to }], ... }` |
-| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. |
+| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to, units, enrolled_count }], ... }` |
+| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. `units` comes from `courses.units`; `enrolled_count` is the active-enrollment count (wireframes.md 3.6 cards). |
 
 ---
 
@@ -477,8 +709,8 @@ Live session detail with dual timers.
 
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, offering, session_code, scan_window_remaining, scheduled_end_time, status, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
-| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns). `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. |
+| **Response 200** | `{ id, offering, session_code, scan_window_remaining, scheduled_end_time, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
+| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns). `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). |
 
 #### `POST /professor/sessions/{id}/close`
 
@@ -558,18 +790,19 @@ Query attendance records with filters.
 
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?offering_id?&section?&status?&from?&to?&page=1&size=20`                                                                                       |
+| **Query**        | `?course_id?&offering_id?&section?&session_id?&status?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
 | **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
-| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. |
+| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. `sort_by` accepts `date`/`student`/`section`/`status`/`time` (wireframes.md 3.4 column headers). |
 
 #### `GET /professor/sessions/history`
 
 Session history with filters.
 
-|                  |                                                 |
-| ---------------- | ----------------------------------------------- |
-| **Query**        | `?offering_id?&section?&from?&to?&page=1&size=20` |
-| **Response 200** | `{ items: [SessionSummary], ... }`              |
+|                  |                                                            |
+| ---------------- | ---------------------------------------------------------- |
+| **Query**        | `?offering_id?&section?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, offering_id, session_code, created_at, expires_at, present_count, late_count, absent_count, compliance_rate, participation_rate }], ... }` |
+| **Notes**        | Per-session `present_count`/`late_count`/`absent_count` + both rates feed the 3.5 columns and the compliance/participation tooltip (D36). |
 
 ---
 
@@ -602,6 +835,17 @@ Multi-series trend data.
 | **Query**        | `?course_ids?&metric=compliance                            | participation&granularity=daily | weekly | monthly&date_from?&date_to?` |
 | **Response 200** | `{ items: [{ date, course_id, course_code, rate }], ... }` |
 
+#### `POST /professor/reports/export`
+
+Export attendance for the professor's own assigned courses (wireframes.md 3.7/3.8). Mirrors the admin analytics export shape, scoped + professor-only.
+
+|                  |                                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv" \| "pdf", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus] }` |
+| **Response 200** | Generated file (download)                                                                                             |
+
+**Scope note:** Excel/Print are frontend concerns — backend emits CSV or PDF only.
+
 ---
 
 ### Profile
@@ -612,8 +856,8 @@ Read-only profile.
 
 |                  |                                                                                                                         |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, first_name, middle_name, last_name, email, department, assigned_courses: [...], claim_status }` |
-| **Notes**        | No `employee_number` column exists on `professors` — omitted. `claim_status` is a computed DTO derived from `professors.user_id` non-null. |
+| **Response 200** | `{ id, first_name, middle_name, last_name, email, department, assigned_courses: [{ offering_id, course_code, course_name, program_code, year_level_label, is_primary }], claim_status, created_at, session_count }` |
+| **Notes**        | No `employee_number` column exists on `professors` — omitted. `claim_status` is a computed DTO derived from `professors.user_id` non-null; `session_count`/`created_at` feed the 3.9 "Account · Sessions" line. |
 
 #### `PATCH /professor/profile/password`
 
@@ -656,8 +900,21 @@ Submit attendance scan (online or queued for offline sync).
 | **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
 | **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 410 `session_expired`                                                                                                                                                     |
-| **Notes**        | `student_number` maps `students.student_id`. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. |
+| **Notes**        | `student_number` maps `students.student_id`. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): `"qr_camera"` when submitted from a QR scan of the session/student-ID QR, `"manual_code"` when the session code was typed via verify-code. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
+
+#### `POST /student/attendance/precheck`
+
+Scan Step 2 gate (wireframes.md 2.2b) — resolves the student and checks enrollment +
+duplicate BEFORE GPS/face are captured. **Never writes attendance.**
+
+|                  |                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| **Role**         | student                                                                               |
+| **Request**      | `{ session_id: int, student_number: string }`                                         |
+| **Response 200** | `{ enrolled: true, already_scanned: false, student: { student_id, name, section } }` |
+| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 403 `not_enrolled` · 409 `duplicate_scan` |
+| **Notes**        | Read-only gate — the full submission still goes through `POST /student/attendance/scan`; duplicate-scan is re-checked atomically at submit time. |
 
 ---
 
@@ -667,8 +924,18 @@ Submit attendance scan (online or queued for offline sync).
 
 |                  |                                                                                                                                                                                                                                                           |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?program_id?&year_level_id?&semester?&status?&page=1&size=20`                                                                                                                                                                                            |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_id?&status?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20`                                                                                                                                          |
 | **Response 200** | `{ items: [{ id, session_id, course_code, course_name, status, original_status?, excuse_reason?, scanned_at, scanned_via }], total, page, size, summary: { compliance_rate, participation_rate, counts: { present, late, absent, excused, rejected } } }` |
+| **Notes**        | `course_id`/`date_from`/`date_to` match the 2.7 filters; `sort_by` accepts `date`/`course`/`section`/`status`/`time`. |
+
+#### `GET /student/attendance/history/export`
+
+CSV export of the filtered history — **all rows** (not just the page). Same filters
+as the list endpoint.
+
+|                  |                       |
+| ---------------- | --------------------- |
+| **Response 200** | CSV file download     |
 
 ---
 
@@ -730,7 +997,8 @@ Read-only identity fields.
 
 |                  |                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ student_number, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool }` |
+| **Response 200** | `{ student_number, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count, face_enrolled_at?, face_embedding_version }` |
+| **Notes**        | `created_at` (Account date) + `scan_count` + face-enrollment meta feed wireframes.md 2.10 ("Account: Jun 2026 · Scans: 42", "Enrolled (vN)"). |
 
 #### `PATCH /student/profile/password`
 
@@ -738,25 +1006,87 @@ Same contract as professor password change.
 
 ---
 
+## Dashboard Summaries
+
+One-call stat summaries for the three dashboards (wireframes.md 2.1/3.1/4.1). Each is
+a single aggregate query set — no new tables — so the frontend renders the stat cards
+and primary lists without composing several calls.
+
+#### `GET /student/dashboard`
+
+|                  |                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| **Role**         | student                                                                                             |
+| **Response 200** | `{ compliance_rate, scans_today, total_scans, today_schedule: [...], recent_activity: [...] }`      |
+
+#### `GET /professor/dashboard`
+
+|                  |                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| **Role**         | professor                                                                           |
+| **Response 200** | `{ sessions_today, sessions_completed, total_students, avg_rate, today_sessions: [{ offering, scanned, enrolled }] }` |
+
+#### `GET /admin/dashboard`
+
+|                  |                                                                  |
+| ---------------- | ---------------------------------------------------------------- |
+| **Role**         | admin                                                             |
+| **Response 200** | `{ student_count, professor_count, program_count, avg_rate, scans_today, pending_sync, recent_scans: [...] }` |
+
+---
+
 ## SHARED Auth Endpoints
 
-Phase 2 auth surface. Schemas live in `backend/src/features/auth/schema.py`; see
-`backend-prompts.txt` Phase 2 for the register (exact-one roster match), MFA
-(preauth-gated login), refresh (body), and lockout behaviors.
+Phase 2 auth surface. Schemas live in `backend/src/features/auth/schema.py`.
+The register is an exact-one roster match and captures the security question;
+login applies the MFA preauth gate; refresh returns tokens in the body; accounts
+lock after 5 failed attempts.
 
-| Method | Path                    | Purpose                              |
-| ------ | ----------------------- | ------------------------------------ |
-| POST   | `/auth/otp/request`     | Request 6-digit OTP (email)          |
-| POST   | `/auth/otp/verify`      | Verify OTP code                      |
-| POST   | `/auth/register`        | Claim-based registration (OTP)       |
-| POST   | `/auth/login`           | Email/password login (+ MFA gate)    |
-| POST   | `/auth/refresh`         | Refresh-token rotation               |
-| POST   | `/auth/forgot-password` | Request OTP password reset           |
-| POST   | `/auth/reset-password`  | Reset password with OTP              |
-| POST   | `/auth/change-password` | Change password (authenticated)      |
-| GET    | `/auth/me`              | Current user info                    |
-| POST   | `/auth/mfa/setup`       | Generate TOTP secret                 |
-| POST   | `/auth/mfa/verify`      | Verify TOTP (login exchange or setup) |
+| Method | Path                               | Purpose                                              |
+| ------ | ---------------------------------- | ---------------------------------------------------- |
+| POST   | `/auth/otp/request`                | Request 6-digit OTP (email)                          |
+| POST   | `/auth/otp/verify`                 | Verify OTP code                                      |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question) |
+| POST   | `/auth/login`                      | Email/password login (+ MFA gate)                    |
+| POST   | `/auth/refresh`                    | Refresh-token rotation                               |
+| POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question |
+| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock)    |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP                     |
+| POST   | `/auth/change-password`            | Change password (authenticated)                      |
+| POST   | `/auth/security-question`          | Set/update security question (authenticated)         |
+| POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once)           |
+| GET    | `/auth/mfa/backup-codes`           | Backup-code summary (total/remaining)                |
+| GET    | `/auth/me`                         | Current user info (role + security/MFA state)      |
+| POST   | `/auth/mfa/setup`                  | Generate TOTP secret                                 |
+| POST   | `/auth/mfa/verify`                 | Verify TOTP or backup code (login exchange or setup) |
+| POST   | `/auth/mfa/disable`                | Disable MFA (password required; clears backup codes) |
+
+**Forgot-password flow (wireframes.md:152-260, ADR-052):** Step 1 (`/auth/forgot-password`,
+email, responds identically for unknown emails to avoid enumeration) → Step 2
+(`/auth/forgot-password/verify`, answer hash-checked with Argon2id; max 3 attempts
+per email then the recovery attempt locks) → Step 3 OTP (`/auth/otp/request` with
+purpose `forget_password`) → Step 4 (`/auth/reset-password`). The security question
+is mandatory and set at claim registration (`/auth/register`).
+
+**Captcha (ADR-053):** `LoginRequest` and `ForgotPasswordStep1Request`
+carry an optional `turnstile_token`. Server calls Cloudflare `siteverify` via
+`shared/captcha.py`; when `TURNSTILE_SECRET_KEY` is unset the check passes
+through (captcha disabled in dev/test/prod-until-key-set).
+
+**MFA backup codes (ADR-054):** `POST /auth/mfa/backup-codes` returns
+`{codes: [10×, shown once], remaining: 10}` and invalidates unconsumed codes; codes
+hash-checked single-use in `/auth/mfa/verify` (preauth exchange or setup). Each code
+is a 10-char base32 string (e.g. `X4T7-K9M2-PL`) — the 1.6 login/mfa input strips
+separators before verification. `POST /auth/mfa/disable` verifies the current
+password, sets `mfa_enabled=false`, clears the TOTP secret, and invalidates all
+unconsumed backup codes.
+
+**GET /auth/me (role + security state):** returns
+`{ id, role, first_name, last_name, email, mfa_enabled, security_question_set,
+must_change_password, last_login? }` plus role-scoped context — student:
+`face_enrolled`/`face_enrolled_at?`/`face_embedding_version`/`scan_count`;
+professor: `claim_status`; admin: `role` (is `super_admin`/`admin`). Feeds the
+status lines on 2.10/2.11/3.9/4.11 and the client auth guard.
 
 ---
 
@@ -779,3 +1109,6 @@ Phase 2 auth surface. Schemas live in `backend/src/features/auth/schema.py`; see
 | Professor reports All Courses aggregate             | D37                |
 | Backup trigger endpoint                             | D39                |
 | Academic structure audit log                        | D38                |
+| Forgot-password 4-step + security question          | ADR-052            |
+| Turnstile `turnstile_token` fields                  | ADR-053            |
+| MFA backup-code endpoints                          | ADR-054            |

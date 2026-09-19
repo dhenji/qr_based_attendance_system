@@ -313,8 +313,8 @@ distribution patterns to create realistic risk scenarios:
 | 24-0001    | Perfect attendance                          | low                 | 0% absence                                                      |
 | 24-0002    | Perfect attendance                          | low                 | 0% absence                                                      |
 | 24-0003    | 1 absence in 12 sessions                    | low                 | absence_rate = 0.08                                             |
-| 24-0004    | 2 absences in 12 sessions                   | low                 | absence_rate = 0.17 (just above medium threshold but no streak) |
-| 24-0005    | 4 absences in 12 sessions                   | medium              | absence_rate = 0.33 (>0.30 = high)                              |
+| 24-0004    | 2 absences in 12 sessions                   | medium              | absence_rate = 0.17 (>0.15 = medium) no streak                 |
+| 24-0005    | 4 absences in 12 sessions                   | high                | absence_rate = 0.33 (>0.30 = high)                              |
 | 24-0006    | 5 absences in 12 sessions                   | high                | absence_rate = 0.42; streak=3                                   |
 | 24-0007    | 3 consecutive absences (weeks 4–6)          | high                | streak >= 3                                                     |
 | 24-0008    | 2 absences, 3 pending syncs                 | medium              | sync_lag >= 5 (combined with absences)                          |
@@ -323,7 +323,7 @@ distribution patterns to create realistic risk scenarios:
 | 24-0011    | All 12 sessions present                     | low                 | perfect attendance                                              |
 | 24-0012    | 3 absences, no streak                       | medium              | absence_rate = 0.25                                             |
 | 24-0013    | 1 absence, 2 late                           | low                 | absence_rate = 0.08                                             |
-| 24-0014    | 2 absences, 1 excused                       | low                 | absence_rate = 0.17                                             |
+| 24-0014    | 2 absences, 1 excused                       | medium              | effective absent = 2/12 = 0.17 (>0.15 = medium)                |
 
 ### Additional Sessions for CS101-BSCS-Y1-1st (BSCS-only, to test program-filtered analytics)
 
@@ -430,7 +430,8 @@ analytics/at-risk tab display without waiting for nightly batch.
 | 24-0009    | 0.68             | high       | 2026-07-09 02:00 |
 | 24-0012    | 0.28             | medium     | 2026-07-09 02:00 |
 
-Students not listed above have risk_level=low with probability < 0.15.
+Students not listed above default to `risk_level=low` unless the nightly batch computes
+higher (see §9 Student Risk Profiles — e.g. 24-0004/24-0014 evaluate to medium when run).
 
 ---
 
@@ -440,7 +441,7 @@ Seed 1 backup log entry for display in admin settings:
 
 | filename                          | kind | size_bytes | sha256                                                           | storage_backend | encryption_key_version | status  |
 | --------------------------------- | ---- | ---------- | ---------------------------------------------------------------- | --------------- | ---------------------- | ------- |
-| backup_20260708_020000.pgdump.enc | full | 5242880    | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | local           | 1                      | completed |
+| backup_20260708_020000.sql.gz.enc | full | 5242880 | baf1770718fda5f6d1cee88285ec19d4a9273e00080f0bdd0f6b147abf7b4b4a | local | 1 | completed |
 
 ---
 
@@ -455,7 +456,6 @@ Seed 1 backup log entry for display in admin settings:
 cd backend && python test_seed_data.py
 
 # Scaled seed for performance benchmarks (§3 of performance-benchmarks.md):
-cd backend && python test_seed_data.py --scale 10k     # 10,000 students, 25k enrollments
 cd backend && python test_seed_data.py --scale small    # 50 students (dev)
 cd backend && python test_seed_data.py --scale medium   # 500 students (pilot)
 cd backend && python test_seed_data.py --scale large    # 10,000 students

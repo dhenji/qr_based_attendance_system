@@ -46,10 +46,12 @@ attendance-system/
 │   │   │   └── system/               # model.py: BackupLog (model only)
 │   │   │
 │   │   └── tests/                    # (planned) Unit & integration tests
-│   │       ├── test_students.py
-│   │       ├── test_attendance.py
-│   │       ├── test_cache.py
-│   │       └── test_sessions.py
+│   │       ├── conftest.py
+│   │       ├── test_auth.py
+│   │       ├── test_program.py
+│   │       ├── test_student.py
+│   │       ├── test_session.py
+│   │       └── test_attendance.py
 │   │
 │   ├── alembic/                      # Database migration files
 │   │   └── versions/                 # initial_schema (users, students, courses, …)
@@ -102,7 +104,7 @@ attendance-system/
 │
 ├── docs/                             # Documentation
 │   ├── project/
-│   │   ├── decision-log.md           # ADR-format decision log (D1–D48)
+│   │   ├── decision-log.md           # ADR-format decision log (D1–D54)
 │   │   └── glossary.md               # Term definitions
 │   ├── proposals/
 │   │   ├── proposal.md               # Full project proposal
@@ -121,7 +123,6 @@ attendance-system/
 │   │   ├── deployment-workflow.md    # Deployment guide
 │   │   └── backup-strategy.md        # Backup pipeline (Phase 3)
 │   ├── design/
-│   │   ├── frontend-architecture.md  # Clean copy of frontend structure
 │   │   ├── database-er.md            # ERD diagrams
 │   │   └── wireframes.md             # Wireframes
 │   └── presentations/                # Slides + deck (.pptx, .pdf)

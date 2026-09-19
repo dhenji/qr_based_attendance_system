@@ -15,7 +15,9 @@ Returns basic liveness check:
 ```
 
 - **200**: API is running and database connection succeeded (verified at startup via `SELECT 1`)
-- **500**: Database unreachable (FastAPI lifespan fails to boot if DB is down)
+- **Unreachable** (no response — neither 500 nor 503): if the DB is down the lifespan
+  fails and the process exits, so `/health` never answers. Use the container/health-probe
+  status + DB connectivity checks below to detect this.
 
 ### Database connectivity
 

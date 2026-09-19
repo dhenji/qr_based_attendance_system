@@ -69,7 +69,7 @@
 │                    │      Welcome Back        │                 │
 │                    │   Sign in to account     │                 │
 │                    │                          │                 │
-│                    │  Email / Username        │                 │
+│                    │  Email                 │                 │
 │                    │  ┌─────────────────┐     │                 │
 │                    │  │ student@...     │     │                 │
 │                    │  └─────────────────┘     │                 │
@@ -79,12 +79,10 @@
 │                    │  │ ••••••••••••    │     │                 │
 │                    │  └─────────────────┘     │                 │
 │                    │                          │                 │
-│                    │  Captcha (Turnstile)     │                 │
-│                    │  ┌──────────┐  ┌───┐     │                 │
-│                    │  │ 4F7K2Q   │  │↻  │     │                 │
-│                    │  └──────────┘  └───┘     │                 │
+│                    │  Captcha (Turnstile,     │                 │
+│                    │  invisible — auto)       │                 │
 │                    │  ┌─────────────────┐     │                 │
-│                    │  │ Enter code above│     │                 │
+│                    │  │ [✓ Turnstile]   │     │                 │
 │                    │  └─────────────────┘     │                 │
 │                    │                          │                 │
 │                    │  ┌─────────────────┐     │                 │
@@ -407,7 +405,9 @@ Four-step flow. Each step advances after verification.
 ```
 
 > **Session QR payload** (D18): `{\"v\":1,\"code\":\"A7X-9K2M\",\"offering\":123,
-\"radius\":30,\"pw\":5,\"lw\":10}` — versioned for future migration.
+> \"radius\":30,\"pw\":5,\"lw\":10}` — **illustrative** values only. `radius` mirrors
+> the session's `classroom_radius_meters`; the system default is **50 m** (DB default),
+> configurable per offering/session.
 > Student ID-card QR contains **student number only** (D19); course
 > context always comes from the verified session.
 
@@ -476,6 +476,8 @@ Four-step flow. Each step advances after verification.
 
 > GPS uses Haversine formula vs offering/session radius. If session has
 > override coordinates (D17), those are used; otherwise offering defaults.
+> `Required radius: 30m` in the mock is an example professor setting — the system
+> default (`classroom_radius_meters`) is **50 m** (configurable when opening a session).
 
 #### 2.2d Face Check — `/student/scan/step/4`
 
@@ -1425,6 +1427,10 @@ assignment.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> `Geofence radius: 30m` is a mock value — the system default (`classroom_radius_meters`)
+> is **50 m**, configurable per offering/session. Same applies to the 2.2c "Required
+> radius: 30m" label.
+
 > **Professor assignment** (D7–D9): many-to-many via `course_professors`
 > with `is_primary`, `effective_from`, `effective_to` (nullable = ongoing),
 > `semester`, `assigned_by`, `assigned_at`. Professors CAN be changed
@@ -1616,7 +1622,7 @@ assignment.
 
 Same as Student Profile (2.10). Fields: Name (First/Middle/Last), Email, Role (Super Admin / Admin), Last Login.
 
-### 4.12 Admin Liveness Review — `/admin/liveness/review`
+### 4.12 Admin Liveness Review — `/admin/attendance/liveness-review`
 
 ```
 ┌────────────┬────────────────────────────────────────────────────┐
@@ -1876,7 +1882,7 @@ Partial failure:
 | 40  | System Settings          | `/admin/system/settings`                    | Admin     |
 | 41  | Archive                  | `/admin/students/archive`                   | Admin     |
 | 42  | Profile                  | `/admin/profile`                            | Admin     |
-| 43  | Liveness Review          | `/admin/liveness/review`                    | Admin     |
+| 43  | Liveness Review          | `/admin/attendance/liveness-review`                | Admin     |
 | 44  | Admin Users              | `/admin/users`                              | Admin     |
 | 45  | Face Enrollment          | `/admin/face-enrollment/{student_id}`       | Admin     |
 | 46  | 404 Error                | `/+error`                                   | Global    |

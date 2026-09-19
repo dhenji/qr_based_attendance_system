@@ -56,8 +56,9 @@ cd backend
 alembic upgrade head
 ```
 
-> **Note:** `alembic upgrade head` creates the full target schema (16 tables with correct
-> columns, constraints, and FKs). See [migration-strategy.md](../architecture/migration-strategy.md)
+> **Note:** `alembic upgrade head` applies the 16-table baseline migration
+> (`679a319c12d6`). Further model changes (e.g. locking, audit, settings tables)
+> are added via new revisions on top. See [migration-strategy.md](../architecture/migration-strategy.md)
 > for the target schema reference.
 
 ### 5. Run the server
@@ -76,15 +77,20 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-Test directory structure:
+Test directory structure (target — files land with backend-prompts Phase 9; test deps `pytest`,
+`pytest-asyncio`, and `httpx` are not yet in `requirements.txt`):
 
 ```
 backend/src/tests/
 ├── __init__.py
-├── test_students.py
+├── conftest.py
+├── test_auth.py
+├── test_program.py
+├── test_student.py
+├── test_session.py
 ├── test_attendance.py
-├── test_cache.py
-└── test_sessions.py
+├── test_excuse.py
+└── test_analytics.py
 ```
 
 ---

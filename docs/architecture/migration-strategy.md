@@ -1,9 +1,14 @@
 # Migration Strategy: Target Schema
 
 > Target schema reference (§6) and rollback guide. This project is **greenfield** — the
-> baseline migration (`679a319c12d6`) creates all 16 tables directly. `alembic upgrade head`
-> on a fresh database produces the full target schema with correct columns, constraints,
+> baseline migration (`679a319c12d6`) creates the current 16 tables directly. `alembic upgrade head`
+> on a fresh database produces the current target schema with correct columns, constraints,
 > and FKs. **No backfill functions or data migration scripts are needed.**
+>
+> **Forward-looking:** three tables land with later backend-phases —
+> `mfa_backup_codes` (Phase 2.11), `audit_logs` (Phases 8.5/8.7), `app_settings` (Phase
+> 12.0) — bringing the baseline to a **19-table** target schema. Each addition gets its
+> own `alembic revision --autogenerate`.
 >
 > **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in
 > `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py`
@@ -39,7 +44,11 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 
 Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `excuse_requests`, `student_risk_scores`, `backup_log`, `sync_queue`
 
-The baseline migration creates all 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
+The baseline migration creates these 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
+
+> **Target grows to 19 tables** as the three planned tables are added: `mfa_backup_codes`
+> (Phase 2.11), `audit_logs` (Phases 8.5/8.7), `app_settings` (Phase 12.0). All three
+> need their models imported into `backend/alembic/env.py` before autogenerate.
 
 ---
 
@@ -268,6 +277,8 @@ class Session(Base):
 
     # @property computed_expires_at:
     #   return min(created_at + timedelta(minutes=duration_minutes), scheduled_end_time)
+    #   NOTE: the model docstring cites a "-12s clock-skew buffer", but the property
+    #   does NOT subtract it — expires_at is written verbatim (D49; documented, unchanged).
     # Service sets: session.expires_at = session.computed_expires_at
 ```
 

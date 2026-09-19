@@ -326,9 +326,9 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 
 **Steps**:
 
-1. Decrypt: `openssl enc -d -aes-256-gcm -K <key> -iv <iv> -in backup.dump.gz.enc -out backup.dump.gz`
-2. Decompress: `gunzip backup.dump.gz`
-3. Restore: `pg_restore -d <target_db> backup.dump`
+1. Decrypt: `openssl enc -d -aes-256-gcm -salt -pbkdf2 -in backup_<TIMESTAMP>.sql.gz.enc -out backup_<TIMESTAMP>.sql.gz -pass env:BACKUP_ENCRYPTION_KEY`
+2. Decompress: `gunzip backup_<TIMESTAMP>.sql.gz`
+3. Restore: `pg_restore --verbose --clean --no-acl --no-owner -d <target_db> backup_<TIMESTAMP>.sql`
 4. Verify: Run integrity checks (row counts, foreign keys, `backup_log` entry)
 5. Promote to production after verification
 
@@ -345,7 +345,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | **Attendance Overview**  | `/admin/attendance/overview`          | Cross-course attendance summary                       |
 | **Audit Logs**           | `/admin/audit-logs`                   | System-wide action log with filters                   |
 | **Archive**              | `/admin/students/archive`             | View/restore/permanently delete archived students     |
-| **Liveness Review**      | `/admin/liveness/review`              | Manual review of flagged scans (GPS/face review band) |
+| **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged scans (GPS/face review band) |
 | **Admin Users**          | `/admin/users`                        | Manage admin accounts (Super Admin only)              |
 | **Face Enrollment**      | `/admin/face-enrollment/{student_id}` | Capture 3-angle photos for _embedding_ generation     |
 
