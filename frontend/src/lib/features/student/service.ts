@@ -36,55 +36,17 @@ export const updateProfile = async (updates: Partial<Student>): Promise<Student>
 	return { ...MOCK_STUDENT, ...updates };
 };
 
-// Schedule
+// Schedule — no subjects enrolled yet (empty state)
 export const getSchedule = async (): Promise<Course[]> => {
-	if (MOCK) {
-		return [
-			{
-				id: 1,
-				courseCode: 'CS-101',
-				courseName: 'Introduction to Computing',
-				units: 3,
-				semesterWeeks: 18,
-				scheduleDays: ['Monday', 'Wednesday'],
-				scheduleStartTime: '08:00',
-				scheduleEndTime: '09:30',
-				classroomName: 'Room A101',
-				defaultPresentWindowMinutes: 15,
-				defaultLateWindowMinutes: 5,
-				isActive: true,
-			},
-		];
-	}
 	return [];
 };
 
-// Session history
+// Session history — no attendance records yet (empty state)
 export const getSessionHistory = async (_params?: {
 	programId?: number;
 	yearLevelId?: number;
 	status?: string;
 }) => {
-	if (MOCK) {
-		return {
-			items: [
-				{
-					id: 1,
-					courseId: 1,
-					code: 'CS-101',
-					courseName: 'Intro to Computing',
-					status: 'present' as const,
-					originalStatus: undefined,
-					excuseReason: undefined,
-					scannedAt: new Date(Date.now() - 86400000).toISOString(),
-					scannedVia: 'qr' as const,
-				},
-			],
-			total: 1,
-			page: 1,
-			size: 20,
-		};
-	}
 	return { items: [], total: 0, page: 1, size: 20 };
 };
 

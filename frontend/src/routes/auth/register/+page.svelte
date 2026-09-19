@@ -145,7 +145,7 @@
 
 		<div class="card">
 			{#if error}
-				<div class="error-banner">⚠️ {error}</div>
+				<div class="error-banner">{error}</div>
 			{/if}
 
 			{#if step === 'form'}
@@ -296,13 +296,13 @@
 
 <style>
 	main.auth {
-		min-height: 100vh;
+		min-height: calc(100vh - 3.75rem);
 		background: #f5f7fb;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		padding: 2rem;
-		font-family: 'DM Sans', system-ui, sans-serif;
+		font-family: system-ui, sans-serif;
 	}
 
 	.wrapper {
@@ -318,7 +318,7 @@
 	.logo-tile {
 		width: 52px;
 		height: 52px;
-		background: linear-gradient(135deg, #1e3a5f, #0d9488);
+		background: #1e3a5f;
 		border-radius: 14px;
 		display: flex;
 		align-items: center;
@@ -334,7 +334,7 @@
 	}
 
 	h1 {
-		font-family: 'DM Sans', sans-serif;
+		font-family: system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
 		color: #1e3a5f;
@@ -537,7 +537,7 @@
 		height: 52px;
 		text-align: center;
 		font-size: 1.25rem;
-		font-family: 'JetBrains Mono', monospace;
+		font-family: monospace;
 		font-weight: 700;
 		color: #1e3a5f;
 		border: 1.5px solid #d1d5db;
@@ -592,7 +592,7 @@
 		padding: 0.75rem;
 		border: none;
 		border-radius: 8px;
-		background: #2563eb;
+		background: #1e3a5f;
 		color: white;
 		font-size: 1rem;
 		font-weight: 600;
@@ -601,7 +601,7 @@
 	}
 
 	.btn-primary:hover {
-		background: #1d4ed8;
+		background: #16324f;
 	}
 
 	.back-btn {

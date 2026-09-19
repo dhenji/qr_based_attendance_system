@@ -57,18 +57,67 @@
 <div class="qr-scanner">
 	{#if isScanning}
 		<div id="qr-reader" class="qr-reader-box"></div>
-		<p>Scanning... Position QR code within the frame</p>
-		<button onclick={stopScanning}>Cancel</button>
+		<p>Scanning. Position the QR code within the frame.</p>
+		<button class="btn btn-ghost" onclick={stopScanning}>Cancel</button>
 	{:else if scannedCode}
 		<div class="scan-success">
-			<p>Scan successful!</p>
+			<p>Scan successful</p>
 			<p>Code: {scannedCode}</p>
-			<button onclick={() => { scannedCode = null; }}>Another Scan</button>
+			<button class="btn" onclick={() => { scannedCode = null; }}>Scan another code</button>
 		</div>
 	{:else}
-		<button onclick={startScanning}>Scan Session QR</button>
+		<button class="btn" onclick={startScanning}>Start camera scanner</button>
 		{#if scanError}
 			<p class="error">{scanError}</p>
 		{/if}
 	{/if}
 </div>
+
+<style>
+	.qr-scanner {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.875rem;
+		width: 100%;
+	}
+
+	.qr-reader-box {
+		width: 100%;
+		max-width: 320px;
+	}
+
+	.btn {
+		padding: 0.625rem 1.125rem;
+		border-radius: 8px;
+		border: 1px solid #1d4ed8;
+		background: #1d4ed8;
+		color: white;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	.btn:hover {
+		background: #1e40af;
+		border-color: #1e40af;
+	}
+
+	.btn-ghost {
+		background: white;
+		border-color: #cbd5e1;
+		color: #0f172a;
+	}
+
+	.btn-ghost:hover {
+		background: #f1f5f9;
+		border-color: #cbd5e1;
+	}
+
+	.error {
+		color: #b91c1c;
+		font-size: 0.875rem;
+		margin: 0;
+	}
+</style>

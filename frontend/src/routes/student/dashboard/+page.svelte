@@ -1,130 +1,136 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { studentState, initStudent, complianceRate, participationRate } from '$lib/features/student/store.svelte';
-	import { formatPercentage } from '$lib/shared/utils/format';
+	import { studentState, initStudent } from '$lib/features/student/store.svelte';
+	import DashboardStats from '$lib/features/student/components/DashboardStats.svelte';
+	import { Routes } from '$lib/shared/constants/routes';
 
 	onMount(() => {
 		initStudent();
 	});
+
+	const firstName = $derived(
+		studentState.student ? studentState.student.firstName : 'Student'
+	);
+
+	const today = $derived(
+		new Date().toLocaleDateString(undefined, {
+			weekday: 'long',
+			year: 'numeric',
+			month: 'long',
+			day: 'numeric',
+		})
+	);
 </script>
 
-<main class="dashboard">
-	<header>
-		<h1>Student Dashboard</h1>
-		<nav>
-			<a href="/student/dashboard" aria-current="page">Dashboard</a>
-			<a href="/student/scan">Scan</a>
-			<a href="/">Home</a>
-		</nav>
+<div class="dashboard">
+	<header class="header">
+<div>
+			<h1>Student Dashboard</h1>
+			<p class="muted">{today}</p>
+		</div>
 	</header>
 
-	{#if studentState.loading}
-		<p class="muted">Loading profile…</p>
-	{:else if studentState.student}
-		<section class="grid">
-			<div class="card">
-				<h2>Profile</h2>
-				<p><strong>{studentState.student.firstName} {studentState.student.lastName}</strong></p>
-				<p>{studentState.student.studentNumber}</p>
-				<p>{studentState.student.programCode} · {studentState.student.yearLevelLabel} · Section {studentState.student.section}</p>
-				<p>Face enrolled: {studentState.student.faceEnrolled ? 'Yes' : 'No'}</p>
-			</div>
+	<section class="hero">
+		<DashboardStats />
+	</section>
 
-			<div class="card">
-				<h2>Statistics</h2>
-				<p>Compliance rate: <strong>{formatPercentage(complianceRate())}</strong></p>
-				<p>Participation rate: <strong>{formatPercentage(participationRate())}</strong></p>
-			</div>
-		</section>
+	<a class="scan-btn" href={Routes.SCAN}>Scan QR Attendance</a>
 
-		{#if studentState.courses.length > 0}
-			<section class="card">
-				<h2>My Courses</h2>
-				<ul>
-					{#each studentState.courses as course}
-						<li>
-							<strong>{course.courseCode}</strong> — {course.courseName}
-							<span class="muted">
-								({course.scheduleDays.join(', ')} {course.scheduleStartTime}–{course.scheduleEndTime})
-							</span>
-						</li>
-					{/each}
-				</ul>
-			</section>
+	<section class="card">
+		<h2 class="section-title">Today's Schedule</h2>
+		{#if studentState.loading}
+			<p class="muted">Loading…</p>
+		{:else if studentState.courses.length > 0}
+			<ul>
+				{#each studentState.courses as course}
+					<li>
+						<strong>{course.courseCode}</strong> — {course.courseName}
+						<span class="muted">
+							({course.scheduleDays.join(', ')} {course.scheduleStartTime}–{course.scheduleEndTime})
+						</span>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="empty">No classes scheduled yet. Your enrolled subjects will appear here.</p>
 		{/if}
-
-		{#if studentState.history.length > 0}
-			<section class="card">
-				<h2>Recent Attendance</h2>
-				<table>
-					<thead>
-						<tr><th>Course</th><th>Status</th><th>Via</th><th>Time</th></tr>
-					</thead>
-					<tbody>
-						{#each studentState.history as record}
-							<tr>
-								<td>{record.courseName}</td>
-								<td>{record.status}</td>
-								<td>{record.scannedVia}</td>
-								<td>{new Date(record.scannedAt).toLocaleString()}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</section>
-		{/if}
-	{:else}
-		<p class="muted">No profile found. Please complete registration.</p>
-	{/if}
+	</section>
 
 	{#if studentState.error}
 		<p class="error">{studentState.error}</p>
 	{/if}
-</main>
+</div>
 
 <style>
 	.dashboard {
+		display: flex;
+		flex-direction: column;
+		gap: 2rem;
 		font-family: system-ui, sans-serif;
-		max-width: 800px;
-		margin: 0 auto;
-		padding: 2rem 1rem;
 	}
 
-	header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		flex-wrap: wrap;
-		gap: 1rem;
+	.header h1 {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 0.25rem;
 	}
 
-	nav {
-		display: flex;
-		gap: 0.75rem;
+	.muted {
+		color: #64748b;
+		font-size: 0.875rem;
+		margin: 0;
 	}
 
-	nav a {
-		color: #2563eb;
-		text-decoration: none;
-		font-weight: 500;
-	}
-
-	nav a[aria-current='page'] {
-		text-decoration: underline;
-	}
-
-	.grid {
+	.hero {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 1rem;
-		margin: 1.5rem 0;
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.scan-btn {
+		display: block;
+		width: 100%;
+		padding: 1.125rem;
+		background: #1e3a5f;
+		color: white;
+		border: none;
+		border-radius: 8px;
+		font-size: 1rem;
+		font-weight: 700;
+		font-family: system-ui, sans-serif;
+		text-align: center;
+		text-decoration: none;
+		cursor: pointer;
+		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.25);
+		transition: box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
+	}
+
+	.scan-btn:hover {
+		background: #16324f;
+		transform: translateY(-1px);
+		box-shadow: 0 6px 18px rgba(30, 58, 95, 0.3);
 	}
 
 	.card {
 		background: white;
-		border: 1px solid #e5e7eb;
-		border-radius: 12px;
-		padding: 1.5rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 2rem;
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		transition: box-shadow 0.15s ease;
+	}
+
+	.card:hover {
+		box-shadow: 0 6px 24px rgba(15, 23, 42, 0.1);
+	}
+
+	.section-title {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.0625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 1rem;
 	}
 
 	ul {
@@ -134,28 +140,26 @@
 	}
 
 	li {
-		padding: 0.5rem 0;
-		border-bottom: 1px solid #f3f4f6;
+		padding: 0.75rem;
+		border-bottom: 1px solid #f1f5f9;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem 0.5rem;
+		align-items: baseline;
 	}
 
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.95rem;
+	li:last-child {
+		border-bottom: none;
 	}
 
-	th,
-	td {
-		text-align: left;
-		padding: 0.5rem;
-		border-bottom: 1px solid #f3f4f6;
-	}
-
-	.muted {
-		color: #6b7280;
+	.empty {
+		color: #64748b;
+		font-size: 0.9375rem;
+		margin: 0;
 	}
 
 	.error {
 		color: #dc2626;
+		margin: 0;
 	}
 </style>
