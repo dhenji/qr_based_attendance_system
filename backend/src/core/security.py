@@ -7,7 +7,8 @@ import jwt
 
 from core.config import Settings, get_settings
 
-REFRESH_TOKEN_TYPE = "refresh"
+REFRESH_TOKEN_TYPE: str = "refresh"
+PREAUTH_TOKEN_TYPE: str = "preauth"
 
 _hasher = argon2.PasswordHasher()
 
@@ -21,6 +22,20 @@ def verify_password(plain: str, hashed: str) -> bool:
         return _hasher.verify(hashed, plain)
     except (argon2.exceptions.VerificationError, argon2.exceptions.InvalidHash):
         return False
+
+
+def create_preauth_token(user_id: int, settings: Settings | None = None) -> str:
+    settings = settings or get_settings()
+    now: datetime = datetime.now(timezone.utc)
+
+    payload: dict[str, Any] = {
+        "sub": str(user_id),
+        "type": PREAUTH_TOKEN_TYPE,
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.preauth_token_expire_minutes),
+    }
+
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
 def create_access_token(
