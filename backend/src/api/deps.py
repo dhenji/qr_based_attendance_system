@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
 from core.database import database
+from core.exceptions import AppException
 from core.security import decode_access_token, extract_user_id
 from features.auth.model import User
 from shared.enums import UserRole
@@ -17,7 +18,12 @@ security = HTTPBearer(auto_error=False)
 
 async def get_db() -> AsyncIterator[AsyncSession]:
     async with database.get_session() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except AppException:
+            await session.rollback()
+            raise
 
 
 async def get_current_user(
@@ -34,6 +40,9 @@ async def get_current_user(
     )
 
     if payload is None:
+        raise _unauthorized("invalid_token", "Invalid or expired token")
+
+    if payload.get("type") is not None:
         raise _unauthorized("invalid_token", "Invalid or expired token")
 
     try:
