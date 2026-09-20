@@ -7,6 +7,10 @@ from features.auth.constants import (
     OTP_CODE_LENGTH,
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
+    SECURITY_ANSWER_MAX_LENGTH,
+    SECURITY_ANSWER_MIN_LENGTH,
+    SECURITY_QUESTION_MAX_LENGTH,
+    SECURITY_QUESTION_MIN_LENGTH,
     USERNAME_MAX_LENGTH,
     USERNAME_MIN_LENGTH,
 )
@@ -38,6 +42,13 @@ class RegisterRequest(OTPRequest, _OTPCodeRequest):
         min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
     )
 
+    security_question: str = Field(
+        min_length=SECURITY_QUESTION_MIN_LENGTH, max_length=SECURITY_QUESTION_MAX_LENGTH
+    )
+    security_answer: str = Field(
+        min_length=SECURITY_ANSWER_MIN_LENGTH, max_length=SECURITY_ANSWER_MAX_LENGTH
+    )
+
     @field_validator("password")
     @classmethod
     def _password_policy(cls, value: str) -> str:
@@ -47,6 +58,10 @@ class RegisterRequest(OTPRequest, _OTPCodeRequest):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class TokenResponse(BaseModel):
@@ -98,3 +113,21 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MeResponse(BaseModel):
+    id: int
+    role: UserRole
+    first_name: str | None = None
+    last_name: str | None = None
+    email: EmailStr
+    mfa_enabled: bool
+    security_question_set: bool
+    must_change_password: bool
+    last_login: datetime | None = None
+
+    face_enrolled: bool | None = None
+    face_enrolled_at: datetime | None = None
+    face_embedding_version: int | None = None
+
+    claim_status: str | None = None

@@ -11,12 +11,14 @@ from core.database import database
 from core.exceptions import AppException
 from core.security import decode_access_token, extract_user_id
 from features.auth.model import User
+from features.auth.service import AuthService
 from shared.enums import UserRole
 
+settings: Settings = get_settings()
 security = HTTPBearer(auto_error=False)
 
 
-async def get_db() -> AsyncIterator[AsyncSession]:
+async def _get_db() -> AsyncIterator[AsyncSession]:
     async with database.get_session() as session:
         try:
             yield session
@@ -26,14 +28,12 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             raise
 
 
-async def get_current_user(
+async def _get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: Annotated[AsyncSession, Depends(_get_db)],
 ) -> User:
     if credentials is None:
         raise _unauthorized("missing_token", "Authentication required")
-
-    settings: Settings = get_settings()
 
     payload: dict[str, Any] | None = decode_access_token(
         credentials.credentials, settings
@@ -58,6 +58,28 @@ async def get_current_user(
     return user
 
 
+async def _get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> User | None:
+    if credentials is None or credentials.credentials is None:
+        return None
+
+    payload: dict[str, Any] | None = decode_access_token(
+        credentials.credentials, settings
+    )
+
+    if payload is None or payload.get("type") is not None:
+        return None
+
+    try:
+        user_id: int = extract_user_id(payload)
+    except PyJWTError:
+        return None
+
+    return await _get_active_user(session, user_id)
+
+
 async def _get_active_user(session: AsyncSession, user_id: int) -> User | None:
     user = await session.get(entity=User, ident=user_id)
 
@@ -71,8 +93,8 @@ def _unauthorized(code: str, message: str) -> HTTPException:
     )
 
 
-def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
-    async def role_guard(user: Annotated[User, Depends(get_current_user)]) -> User:
+def _require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
+    async def role_guard(user: Annotated[User, Depends(_get_current_user)]) -> User:
         if user.role not in {role.value for role in roles}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -85,3 +107,15 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
         return user
 
     return role_guard
+
+
+async def _get_auth_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> AuthService:
+    return AuthService(session)
+
+
+AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
+
+CurrentUserDep = Annotated[User, Depends(_get_current_user)]
+OptionalUserDep = Annotated[User | None, Depends(_get_optional_current_user)]
