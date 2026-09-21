@@ -8,7 +8,7 @@
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Scan', path: Routes.SCAN, enabled: true, icon: 'scan' },
-		{ label: 'History', path: Routes.HISTORY, enabled: false, icon: 'history' },
+		{ label: 'History', path: Routes.HISTORY, enabled: true, icon: 'history' },
 		{ label: 'Schedule', path: Routes.SCHEDULE, enabled: false, icon: 'schedule' },
 		{ label: 'Profile', path: Routes.PROFILE, enabled: false, icon: 'profile' },
 		{ label: 'Settings', path: Routes.SETTINGS, enabled: false, icon: 'settings' },
@@ -26,7 +26,7 @@
 			'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
 	};
 
-	let collapsed = $state(false);
+	let collapsed = $state(true);
 
 	const isActive = (path: string) => page.url.pathname === path;
 </script>
@@ -105,12 +105,14 @@
 		min-height: 100vh;
 		font-family: system-ui, sans-serif;
 		background: #f8fafc;
+		overflow-x: hidden;
 	}
 
 	.topbar {
 		position: sticky;
 		top: 0;
 		z-index: 10;
+		width: 100%;
 		display: flex;
 		align-items: center;
 		gap: 0.875rem;
@@ -145,6 +147,7 @@
 		align-items: center;
 		gap: 0.625rem;
 		text-decoration: none;
+		min-width: 0;
 	}
 
 	.brand-logo {
@@ -157,6 +160,10 @@
 		color: white;
 		font-weight: 700;
 		font-size: 1.125rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		min-width: 0;
 	}
 
 	.topbar-spacer {
@@ -170,6 +177,7 @@
 	.body {
 		display: flex;
 		min-height: calc(100vh - 64px);
+		min-width: 0;
 	}
 
 	.sidebar {
@@ -242,9 +250,27 @@
 
 	.content {
 		flex: 1 1 auto;
+		min-width: 0;
 		width: 100%;
 		max-width: 1100px;
 		margin-inline: auto;
 		padding: 2rem 2rem 3rem;
+	}
+
+	@media (max-width: 640px) {
+		.topbar {
+			padding: 0.625rem 0.875rem;
+			gap: 0.5rem;
+		}
+
+		.content {
+			padding: 1.25rem 1.25rem 2.5rem;
+		}
+	}
+
+	@media (max-width: 360px) {
+		.brand-name {
+			display: none;
+		}
 	}
 </style>

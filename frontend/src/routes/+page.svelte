@@ -96,7 +96,6 @@
 					<a class="btn-ghost" href="/auth/register">Create an account</a>
 				{/if}
 			</div>
-			<p class="hero-note">Runs in the browser as a PWA. No app store installation required.</p>
 		</div>
 
 		<div class="hero-visual">

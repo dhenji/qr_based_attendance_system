@@ -1,0 +1,452 @@
+<script lang="ts">
+	type Status = 'present' | 'absent' | 'pending';
+	type Row = { date: string; course: string; status: Status; time: string };
+	type SortKey = 'date' | 'course' | 'status' | 'time';
+
+	const rows: Row[] = [];
+
+	const courseOptions = $derived([...new Set(rows.map((r) => r.course))]);
+	const STATUSES: Status[] = ['present', 'absent', 'pending'];
+
+	let sortKey: SortKey = $state('date');
+	let sortAsc = $state(false);
+	let filterCourse = $state('All');
+	let filterStatus = $state('All');
+	let search = $state('');
+	let page = $state(1);
+
+	const PER_PAGE = 5;
+
+	const handleSort = (key: SortKey) => {
+		if (sortKey === key) {
+			sortAsc = !sortAsc;
+		} else {
+			sortKey = key;
+			sortAsc = true;
+		}
+	};
+
+	const sortGlyph = (key: SortKey): string =>
+		sortKey === key ? (sortAsc ? '▲' : '▼') : '⇅';
+
+	const badgeLabel = (status: Status): string =>
+		status.charAt(0).toUpperCase() + status.slice(1);
+
+	const filtered = $derived(
+		rows
+			.filter((r) => {
+				if (filterCourse !== 'All' && r.course !== filterCourse) return false;
+				if (filterStatus !== 'All' && r.status !== filterStatus) return false;
+				if (
+					search &&
+					!r.course.toLowerCase().includes(search.toLowerCase()) &&
+					!r.date.toLowerCase().includes(search.toLowerCase())
+				) {
+					return false;
+				}
+				return true;
+			})
+			.sort((a, b) => {
+				const av = a[sortKey];
+				const bv = b[sortKey];
+				const v = av > bv ? 1 : av < bv ? -1 : 0;
+				return sortAsc ? v : -v;
+			})
+	);
+
+	const pages = $derived(Math.max(1, Math.ceil(filtered.length / PER_PAGE)));
+	const paged = $derived(filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE));
+
+	const exportCsv = () => {
+		if (filtered.length === 0) {
+			alert('No records to export.');
+			return;
+		}
+		const header = 'Date,Course,Status,Time';
+		const body = filtered
+			.map((r) => [r.date, r.course, r.status, r.time].join(','))
+			.join('\r\n');
+		const blob = new Blob([`${header}\r\n${body}`], { type: 'text/csv;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = 'attendance-history.csv';
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+
+	const doPrint = () => {
+		window.print();
+	};
+</script>
+
+<div class="page">
+	<header class="header">
+		<h1>Attendance History</h1>
+		<p class="subtitle">Semester: 1st Sem 2026</p>
+	</header>
+
+	<div class="card filters">
+		<div class="search-wrap">
+			<input
+				class="form-input search-input"
+				placeholder="Search..."
+				value={search}
+				oninput={(e) => {
+					search = (e.target as HTMLInputElement).value;
+				}}
+			/>
+		</div>
+
+		<select
+			class="form-input select-input"
+			value={filterCourse}
+			onchange={(e) => {
+				filterCourse = (e.target as HTMLSelectElement).value;
+				page = 1;
+			}}
+		>
+			<option value="All">All Courses</option>
+			{#each courseOptions as course}
+				<option value={course}>{course}</option>
+			{/each}
+		</select>
+
+		<select
+			class="form-input select-input"
+			value={filterStatus}
+			onchange={(e) => {
+				filterStatus = (e.target as HTMLSelectElement).value;
+				page = 1;
+			}}
+		>
+			<option value="All">All Statuses</option>
+			{#each STATUSES as status}
+				<option value={status}>{badgeLabel(status)}</option>
+			{/each}
+		</select>
+
+		<div class="actions">
+			<button class="btn-ghost" onclick={doPrint}>Print</button>
+			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
+		</div>
+	</div>
+
+	<div class="card table-card">
+		<div class="scroll">
+			<table>
+				<thead>
+					<tr>
+						<th><button class="th-btn" onclick={() => handleSort('date')}>Date<span class="sort-glyph">{sortGlyph('date')}</span></button></th>
+						<th><button class="th-btn" onclick={() => handleSort('course')}>Course<span class="sort-glyph">{sortGlyph('course')}</span></button></th>
+						<th><button class="th-btn" onclick={() => handleSort('status')}>Status<span class="sort-glyph">{sortGlyph('status')}</span></button></th>
+						<th><button class="th-btn" onclick={() => handleSort('time')}>Time<span class="sort-glyph">{sortGlyph('time')}</span></button></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#if filtered.length === 0}
+						<tr>
+							<td class="empty-row" colspan="4">No matching records</td>
+						</tr>
+					{:else}
+						{#each paged as r (r.date + r.course)}
+							<tr>
+								<td class="mono">{r.date}</td>
+								<td><span class="course">{r.course}</span></td>
+								<td>
+									<span
+										class="badge"
+										class:present={r.status === 'present'}
+										class:absent={r.status === 'absent'}
+										class:pending={r.status === 'pending'}
+									>
+										{badgeLabel(r.status)}
+									</span>
+								</td>
+								<td class="mono">{r.time}</td>
+							</tr>
+						{/each}
+					{/if}
+				</tbody>
+			</table>
+		</div>
+
+		<div class="pagination">
+			<button
+				class="page-btn"
+				onclick={() => (page = Math.max(1, page - 1))}
+				disabled={page === 1}
+				aria-label="Previous page"
+			>
+				‹
+			</button>
+			{#each Array.from({ length: pages }, (_, i) => i + 1) as p (p)}
+				<button class="page-btn" class:active={p === page} onclick={() => (page = p)} aria-current={p === page ? 'page' : undefined}>
+					{p}
+				</button>
+			{/each}
+			<button
+				class="page-btn"
+				onclick={() => (page = Math.min(pages, page + 1))}
+				disabled={page === pages}
+				aria-label="Next page"
+			>
+				›
+			</button>
+		</div>
+	</div>
+</div>
+
+<style>
+	.page {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		font-family: system-ui, sans-serif;
+		width: 100%;
+		min-width: 0;
+	}
+
+	.header h1 {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 0.25rem;
+	}
+
+	.subtitle {
+		color: #64748b;
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	.card {
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		min-width: 0;
+	}
+
+	.filters {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		align-items: center;
+		padding: 1rem 1.25rem;
+		min-width: 0;
+	}
+
+	.search-wrap {
+		flex: 0 0 auto;
+		max-width: 100%;
+	}
+
+	.search-input {
+		width: 200px;
+	}
+
+	.select-input {
+		width: auto;
+	}
+
+	.filters .select-input {
+		min-width: 0;
+	}
+
+	.form-input {
+		padding: 0.625rem 0.875rem;
+		border: 1.5px solid #d1d5db;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-family: inherit;
+		color: #0f172a;
+		outline: none;
+		transition: border-color 0.15s;
+		background: white;
+	}
+
+	.form-input:focus {
+		border-color: #2563eb;
+	}
+
+	.actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-left: auto;
+	}
+
+	.btn-ghost {
+		background: white;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: inherit;
+		color: #1e3a5f;
+		cursor: pointer;
+		transition: background 0.15s ease;
+	}
+
+	.btn-ghost:hover {
+		background: #f1f5f9;
+	}
+
+	.table-card {
+		overflow: hidden;
+		min-width: 0;
+	}
+
+	.scroll {
+		overflow-x: auto;
+		max-width: 100%;
+	}
+
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		min-width: 480px;
+	}
+
+	th {
+		text-align: left;
+		padding: 0;
+		border-bottom: 1px solid #e2e8f0;
+		background: #f8fafc;
+	}
+
+	.th-btn {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.75rem 1rem;
+		width: 100%;
+		border: none;
+		background: none;
+		font-family: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: #64748b;
+		cursor: pointer;
+	}
+
+	.th-btn:hover {
+		color: #1e3a5f;
+	}
+
+	.sort-glyph {
+		margin-left: 4px;
+	}
+
+	td {
+		padding: 0.75rem 1rem;
+		border-top: 1px solid #f1f5f9;
+		font-size: 0.9375rem;
+		color: #1e293b;
+	}
+
+	.mono {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8125rem;
+	}
+
+	.course {
+		font-weight: 600;
+	}
+
+	.badge {
+		display: inline-block;
+		padding: 0.125rem 0.625rem;
+		border-radius: 999px;
+		font-size: 0.8125rem;
+		font-weight: 600;
+	}
+
+	.badge.present {
+		color: #15803d;
+		background: #f0fdf4;
+		border: 1px solid #bbf7d0;
+	}
+
+	.badge.absent {
+		color: #b91c1c;
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+	}
+
+	.badge.pending {
+		color: #b45309;
+		background: #fffbeb;
+		border: 1px solid #fde68a;
+	}
+
+	.empty-row {
+		text-align: center;
+		color: #64748b;
+		padding: 2rem 1rem;
+	}
+
+	.pagination {
+		padding: 0.75rem 1rem;
+		border-top: 1px solid #e2e8f0;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.page-btn {
+		background: none;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+		padding: 0.25rem 0.625rem;
+		font-family: inherit;
+		font-size: 0.875rem;
+		color: #1e3a5f;
+		cursor: pointer;
+	}
+
+	.page-btn:hover:not(:disabled) {
+		background: #f1f5f9;
+	}
+
+	.page-btn.active {
+		background: #1e3a5f;
+		color: white;
+		font-weight: 700;
+		border-color: #1e3a5f;
+	}
+
+	.page-btn:disabled {
+		color: #94a3b8;
+		cursor: not-allowed;
+	}
+
+	:global(.page :is(button, input, select):focus-visible) {
+		outline: 2px solid #2563eb;
+		outline-offset: 2px;
+	}
+
+	@media (max-width: 640px) {
+		.select-input {
+			width: 100%;
+		}
+
+		.search-input {
+			width: 100%;
+		}
+
+		.search-wrap {
+			flex: 1 1 100%;
+		}
+
+		.actions {
+			margin-left: 0;
+			width: 100%;
+		}
+
+		.btn-ghost {
+			flex: 1;
+		}
+	}
+</style>

@@ -13,6 +13,7 @@
 <style>
 	:global(html) {
 		box-sizing: border-box;
+		overflow-x: hidden;
 	}
 	:global(*, *::before, *::after) {
 		box-sizing: inherit;
