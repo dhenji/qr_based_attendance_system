@@ -69,6 +69,7 @@ class TokenResponse(BaseModel):
     refresh_token: str | None = None
     mfa_pending: bool = False
     preauth_token: str | None = None  # grant no access; exchanged via /auth/mfa/verify
+    must_change_password: bool = False
 
 
 class _NewPasswordRequest(BaseModel):

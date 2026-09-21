@@ -176,6 +176,7 @@ class AuthService:
             return TokenResponse(
                 mfa_pending=True,
                 preauth_token=create_preauth_token(user.id, self._settings),
+                must_change_password=user.must_change_password,
             )
 
         return self._build_tokens(user)
@@ -315,6 +316,7 @@ class AuthService:
         return TokenResponse(
             access_token=create_access_token(user.id, user.role, self._settings),
             refresh_token=create_refresh_token(user.id, self._settings),
+            must_change_password=user.must_change_password,
         )
 
     @staticmethod
