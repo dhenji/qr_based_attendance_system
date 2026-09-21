@@ -33,7 +33,7 @@ from features.auth.exceptions import (
     UserAlreadyClaimedException,
 )
 from features.auth.model import OtpCodes, User
-from features.auth.schema import MFASetupResponse, TokenResponse
+from features.auth.schema import MeResponse, MFASetupResponse, TokenResponse
 from features.professor.model import Professor
 from features.student.model import Student
 from shared.base import BaseCRUD
@@ -176,6 +176,7 @@ class AuthService:
             return TokenResponse(
                 mfa_pending=True,
                 preauth_token=create_preauth_token(user.id, self._settings),
+                must_change_password=user.must_change_password,
             )
 
         return self._build_tokens(user)
@@ -275,10 +276,47 @@ class AuthService:
 
         return self._build_tokens(user)
 
+    async def get_me(self, user: User) -> MeResponse:
+        student: Student | None = await self._student.get_by(user_id=user.id)
+        professor: Professor | None = await self._professor.get_by(user_id=user.id)
+
+        first_name: str | None = None
+        last_name: str | None = None
+
+        if student is not None:
+            first_name, last_name = student.first_name, student.last_name
+        elif professor is not None:
+            first_name, last_name = professor.first_name, professor.last_name
+
+        claim_status: str | None = None
+        if professor is not None:
+            claim_status = "claimed" if professor.user_id is not None else "unclaimed"
+
+        return MeResponse(
+            id=user.id,
+            role=UserRole(user.role),
+            first_name=first_name,
+            last_name=last_name,
+            email=user.email,
+            mfa_enabled=user.mfa_enabled,
+            security_question_set=user.security_question_hash is not None,
+            must_change_password=user.must_change_password,
+            last_login=user.last_login,
+            face_enrolled=(
+                student.face_enrolled_at is not None if student is not None else None
+            ),
+            face_enrolled_at=student.face_enrolled_at if student is not None else None,
+            face_embedding_version=(
+                student.face_embedding_version if student is not None else None
+            ),
+            claim_status=claim_status,
+        )
+
     def _build_tokens(self, user: User) -> TokenResponse:
         return TokenResponse(
             access_token=create_access_token(user.id, user.role, self._settings),
             refresh_token=create_refresh_token(user.id, self._settings),
+            must_change_password=user.must_change_password,
         )
 
     @staticmethod
