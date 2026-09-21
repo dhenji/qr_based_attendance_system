@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
 from api.deps import AuthServiceDep, CurrentUserDep, OptionalUserDep
 from features.auth.schema import (
@@ -16,6 +16,7 @@ from features.auth.schema import (
     ResetPasswordRequest,
     TokenResponse,
 )
+from shared.rate_limit import rate_limit
 
 router = APIRouter()
 
@@ -25,7 +26,11 @@ router = APIRouter()
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Request a 6-digit OTP",
 )
-async def request_otp(payload: OTPRequest, service: AuthServiceDep) -> None:
+async def request_otp(
+    payload: OTPRequest,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(5, 60, key="email")),
+) -> None:
     await service.request_otp(payload.email)
 
 
@@ -59,7 +64,12 @@ async def register(payload: RegisterRequest, service: AuthServiceDep) -> TokenRe
     response_model=TokenResponse,
     summary="Email/password login (with MFA gate)",
 )
-async def login(payload: LoginRequest, service: AuthServiceDep) -> TokenResponse:
+async def login(
+    payload: LoginRequest,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(20, 60, key="ip")),
+    _rl_email: None = Depends(rate_limit(5, 60, key="email")),
+) -> TokenResponse:
     return await service.login(payload.email, payload.password)
 
 
@@ -73,7 +83,9 @@ async def refresh(payload: RefreshRequest, service: AuthServiceDep) -> TokenResp
     summary="Forgot-password step 1 - returns security_question state",
 )
 async def forgot_password(
-    payload: OTPRequest, service: AuthServiceDep
+    payload: OTPRequest,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(5, 60, key="email")),
 ) -> dict[str, Any]:
     return await service.forgot_password(payload.email)
 
