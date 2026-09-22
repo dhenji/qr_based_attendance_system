@@ -1,10 +1,11 @@
 // features/session/service.ts
 // Professor-facing service: open/close sessions, live feed, session codes
 
-// MOCK flag
+// MOCK flag — swap to false when professor session endpoints land
 const MOCK = true;
 
-// Mock sessions
+// Mock data
+// One pre-seeded active session so the professor UI has something to render.
 const MOCK_SESSIONS = [
 	{
 		id: 1,
@@ -29,7 +30,8 @@ const MOCK_SESSIONS = [
 	},
 ];
 
-// List sessions
+// listSessions
+// Paginated list of sessions, optionally filtered by date range/course.
 export const listSessions = async (_params?: {
 	from?: string;
 	to?: string;
@@ -46,7 +48,9 @@ export const listSessions = async (_params?: {
 	return { items: [], total: 0, page: 1, size: 20 };
 };
 
-// Open new session
+// openSession
+// Create a new attendance session. qrPayload is what gets rendered into the
+// QR code students scan; windows default to 15min present / 5min late.
 export const openSession = async (
 	courseId: number,
 	options?: {
@@ -97,7 +101,8 @@ export const openSession = async (
 	};
 };
 
-// Close session
+// closeSession
+// Mark a session closed; students can no longer scan against it.
 export const closeSession = async (sessionId: number) => {
 	if (MOCK) {
 		return { id: sessionId, status: 'closed' as const };
@@ -105,7 +110,9 @@ export const closeSession = async (sessionId: number) => {
 	return { id: sessionId, status: 'closed' as const };
 };
 
-// Get active session detail
+// getActiveSession
+// Fetch one session's live feed: enrolled students with scan status and the
+// running present/late/absent/excused/pending counts.
 export const getActiveSession = async (sessionId: number) => {
 	if (MOCK) {
 		return {

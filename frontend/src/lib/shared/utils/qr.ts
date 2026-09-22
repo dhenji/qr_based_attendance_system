@@ -3,6 +3,9 @@
 
 import { Html5Qrcode } from 'html5-qrcode';
 
+// initQRScanner
+// Attach html5-qrcode to the #qr-reader element using the rear camera. Decoded
+// codes are forwarded via onScan and the scanner stops itself on success.
 export const initQRScanner = (onScan: (data: string) => void): void => {
 	const html5QrCode = new Html5Qrcode('qr-reader');
 
@@ -23,6 +26,7 @@ export const initQRScanner = (onScan: (data: string) => void): void => {
 		});
 };
 
+// Debug stub hooks for scan outcomes (replace with real UI messaging later).
 export const handleScanSuccess = (payload: string): void => {
 	console.log('Scan successful:', payload);
 };

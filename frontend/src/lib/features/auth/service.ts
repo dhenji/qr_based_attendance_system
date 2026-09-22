@@ -7,7 +7,8 @@ import { browser } from '$app/environment';
 // MOCK flag — swap to false when backend endpoints land
 const MOCK = true;
 
-// Mock users (matches features/auth/model.py patterns)
+// Mock data
+// Hard-coded users mirroring the backend roles so login works offline.
 const MOCK_USERS = {
 	student: {
 		id: 'user-1',
@@ -26,7 +27,9 @@ const MOCK_USERS = {
 	},
 };
 
-// Login (email/password)
+// Login
+// Email/password login. Maps known test emails to mock users; anything else
+// throws so the UI can show the error state.
 export const login = async (email: string, _password: string): Promise<{ user: User; accessToken: string }> => {
 	if (MOCK) {
 		if (email === 'student@test.com') {
@@ -44,7 +47,9 @@ export const login = async (email: string, _password: string): Promise<{ user: U
 	return { user: MOCK_USERS.student, accessToken: 'mock-jwt-token' };
 };
 
-// Register (claim-based with OTP)
+// Register & OTP
+// Claim-based registration: user provides email + student number, then confirms
+// via OTP. Both endpoints return the newly created user in mock mode.
 export const register = async (email: string, _studentNumber: string): Promise<User> => {
 	if (MOCK) {
 		return {
@@ -76,13 +81,15 @@ export const verifyOTP = async (email: string, _otpCode: string): Promise<User> 
 	};
 };
 
-// Logout
+// Session helpers
+// Logout clears auth state (real API call once backend is wired up).
 export const logout = async (): Promise<void> => {
 	// Clear mock auth state (real API call when backend ready)
 	return;
 };
 
-// Get current user from stored token
+// me
+// Resolve the current user from the token stored in localStorage.
 export const me = async (): Promise<User | null> => {
 	if (MOCK) {
 		const token = browser ? localStorage.getItem('auth_token') : null;

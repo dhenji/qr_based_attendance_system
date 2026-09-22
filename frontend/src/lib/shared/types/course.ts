@@ -1,3 +1,6 @@
+// course.ts
+// Course offering a student is enrolled in; classroom_* fields define the
+// geofence center used during scans.
 export interface Course {
   id: number;
   courseCode: string;

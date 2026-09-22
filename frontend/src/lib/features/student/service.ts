@@ -4,10 +4,11 @@
 import type { Student, Course } from '$lib/shared/types';
 import { isWithinGeofence } from '$lib/shared/utils/geo';
 
-// MOCK flag
+// MOCK flag — swap to false when backend student endpoints land
 const MOCK = true;
 
-// Mock current student
+// Mock data
+// Hard-coded, face-enrolled student so the dashboard renders immediately.
 const MOCK_STUDENT: Student = {
 	id: 'student-1',
 	userId: 'user-1',
@@ -23,12 +24,13 @@ const MOCK_STUDENT: Student = {
 };
 
 // Profile
+// Fetch the current user's student profile.
 export const getProfile = async (): Promise<Student> => {
 	if (MOCK) return MOCK_STUDENT;
 	return MOCK_STUDENT;
 };
 
-// Update profile (partial)
+// Partial profile updates (merged over the existing record).
 export const updateProfile = async (updates: Partial<Student>): Promise<Student> => {
 	if (MOCK) {
 		return { ...MOCK_STUDENT, ...updates };
@@ -50,7 +52,9 @@ export const getSessionHistory = async (_params?: {
 	return { items: [], total: 0, page: 1, size: 20 };
 };
 
-// Attendance scan (online or queued for offline)
+// Attendance scan
+// Submit a full scan (QR + GPS + liveness). Mock mode randomizes the outcome
+// so every UI branch (present/late/rejected) can be exercised.
 export const submitScan = async (scanData: {
 	sessionId: number;
 	qrStudentNumber: string;

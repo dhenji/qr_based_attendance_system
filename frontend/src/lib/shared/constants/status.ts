@@ -1,3 +1,5 @@
+// status.ts
+// Attendance + offline-sync status enums, mirroring src/shared/enums.py.
 export const AttendanceStatus = {
   PRESENT: "present" as const,
   LATE: "late" as const,

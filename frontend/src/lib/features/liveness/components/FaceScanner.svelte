@@ -1,4 +1,8 @@
 <script lang="ts">
+	// FaceScanner
+	// Liveness check via MediaPipe FaceLandmarker (478 landmarks).
+	// Tracks the user's blink in real time and fires `onBlink` once a single
+	// blink is confirmed (D31: Eye Aspect Ratio below 0.25 across N frames).
 	import { onDestroy } from 'svelte';
 	import type { NormalizedLandmark, DrawingOptions } from '@mediapipe/tasks-vision';
 
@@ -18,6 +22,7 @@
 	let status = $state<FaceStatus>('initializing');
 	let error = $state<string | null>(null);
 
+	// Live handles: landmarker for detection, drawing for the overlay renderer.
 	let landmarker: {
 		detectForVideo(video: HTMLVideoElement, now: number): FaceResult;
 		close(): void;
@@ -42,19 +47,22 @@
 		faceLandmarks?: NormalizedLandmark[][];
 	}
 
+	// Blink math (Eye Aspect Ratio)
 	// MediaPipe FaceLandmarker (478 landmarks) EAR indices
 	const LEFT_EYE = [362, 385, 387, 263, 373, 380];
 	const RIGHT_EYE = [33, 160, 158, 133, 153, 144];
 	const EAR_THRESHOLD = 0.25; // D31: EAR < 0.25 counts as eye closed
 	const CLOSED_FRAMES_REQUIRED = 3;
 
+	// Euclidean distance between two landmarks.
 	const pointDist = (lm: Array<{ x: number; y: number }>, i: number, j: number) =>
 		Math.hypot(lm[i].x - lm[j].x, lm[i].y - lm[j].y);
 
-	// EAR = (d(p1,p5) + d(p2,p4)) / (2 * d(p0,p3))
+	// EAR = (d(p1,p5) + d(p2,p4)) / (2 * d(p0,p3)) — ratio shrinks when the eye closes.
 	const eyeEar = (lm: Array<{ x: number; y: number }>, eye: number[]) =>
 		(pointDist(lm, eye[1], eye[5]) + pointDist(lm, eye[2], eye[4])) / (2 * pointDist(lm, eye[0], eye[3]));
 
+	// Per-status instruction shown to the user.
 	const hintText = $derived.by(() => {
 		switch (status) {
 			case 'initializing':
@@ -72,6 +80,7 @@
 		}
 	});
 
+	// Start/stop the scanner when the `active` prop toggles.
 	$effect(() => {
 		if (active) {
 			start();
@@ -80,10 +89,14 @@
 		}
 	});
 
+	// Guarantee no camera/model leaks when the component is removed.
 	onDestroy(() => {
 		stop();
 	});
 
+	// start
+	// Boot sequence: load MediaPipe (lazy import), create the landmarker with a
+	// GPU->CPU fallback, open the front camera, then loop detection per frame.
 	const start = async () => {
 		error = null;
 		blinkFired = false;
@@ -95,6 +108,7 @@
 			const mod = await import('@mediapipe/tasks-vision');
 			const { FilesetResolver, FaceLandmarker, DrawingUtils } = mod;
 
+			// Landmark index sets shipped by MediaPipe for drawing the wireframe.
 			faceOval = FaceLandmarker.FACE_LANDMARKS_FACE_OVAL;
 			leftEye = FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
 			rightEye = FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE;
@@ -111,12 +125,14 @@
 					minTrackingConfidence: 0.5,
 				});
 
+			// Prefer the GPU delegate; some devices throw, so fall back to CPU.
 			try {
 				landmarker = await createWithDelegate('GPU');
 			} catch {
 				landmarker = await createWithDelegate('CPU');
 			}
 
+			// Front-facing selfie camera, no audio.
 			stream = await navigator.mediaDevices.getUserMedia({
 				video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
 				audio: false,
@@ -124,11 +140,13 @@
 			video.srcObject = stream;
 			await video.play();
 
+			// Per-frame render loop: only detect when fresh frame data arrives.
 			const tick = () => {
 				if (!landmarker || video.readyState < 2) {
 					rafId = requestAnimationFrame(tick);
 					return;
 				}
+				// Size the canvas + overlay once the stream dimensions are known.
 				if (video.videoWidth && canvas.width !== video.videoWidth) {
 					canvas.width = video.videoWidth;
 					canvas.height = video.videoHeight;
@@ -157,6 +175,8 @@
 		}
 	};
 
+	// draw
+	// Overlay the detected face oval + eyes onto the canvas as a wireframe.
 	const draw = (result: FaceResult) => {
 		if (!result.faceLandmarks?.length || !drawing) return;
 		const ctx = canvas.getContext('2d');
@@ -168,6 +188,9 @@
 		drawing.drawConnectors(lm, rightEye, { color: '#4f9cf9', lineWidth: 2 });
 	};
 
+	// evaluate
+	// Blink detection state machine: track consecutive closed-eye frames; once
+	// the required count is reached, fire onBlink() exactly once.
 	const evaluate = (result: FaceResult) => {
 		if (!result.faceLandmarks?.length) {
 			closedFrames = 0;
@@ -191,6 +214,8 @@
 		}
 	};
 
+	// stop
+	// Tear down everything: animation loop, camera stream, model, and renderer.
 	const stop = () => {
 		cancelAnimationFrame(rafId);
 		rafId = 0;

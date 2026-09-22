@@ -1,3 +1,5 @@
+// user.ts
+// Authenticated user shape (mirrors backend auth.User); iat/exp come from JWT.
 export interface User {
   id: string;
   email: string;

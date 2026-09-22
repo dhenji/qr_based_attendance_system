@@ -12,6 +12,9 @@ const fake = {
 	sentence: () => 'Sample reason for absence',
 };
 
+// Fake-data helpers
+// Generate realistic-looking entities for mocks/fixtures. Each generator
+// accepts overrides that are spread last, so callers can force specific values.
 export const generateStudent = (overrides?: Partial<Student>): Student => ({
 	id: Math.random().toString(36).substring(2, 9),
 	userId: Math.random().toString(36).substring(2, 9),

@@ -5,20 +5,24 @@ import type { User } from '$lib/shared/types';
 import { browser } from '$app/environment';
 import { login, logout } from '$lib/features/auth/service';
 
-// Auth state as a single reactive object
+// Auth state (rune-store)
+// Single reactive object holding the current user, loading flag, and last error.
 export const authState = $state({
 	user: null as User | null,
 	loading: false,
 	error: null as string | null,
 });
 
-// Derived flags (functions — module-scope $derived cannot be exported)
+// Derived role helpers
+// Plain functions (module-scope $derived cannot be exported) used to guard UI.
 export const isAuthenticated = () => !!authState.user;
 export const isStudent = () => authState.user?.role === 'student';
 export const isProfessor = () => authState.user?.role === 'professor';
 export const isAdmin = () => authState.user?.role === 'admin';
 
-// Restore session from localStorage on first load (browser only)
+// Session restore & persistence (browser only)
+// On server/first load we have no session; in the browser we rehydrate the user
+// from localStorage so a refresh keeps you logged in.
 if (browser) {
 	const stored = localStorage.getItem('auth_user');
 	if (stored) {
@@ -41,6 +45,7 @@ const persistUser = () => {
 };
 
 // Actions
+// doLogin calls the auth service, then caches the user locally on success.
 export const doLogin = async (email: string, password: string): Promise<void> => {
 	authState.loading = true;
 	authState.error = null;

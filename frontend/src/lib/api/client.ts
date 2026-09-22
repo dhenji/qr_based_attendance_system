@@ -105,6 +105,7 @@ const apiCall = async <T>(
 };
 
 // Convenience exports
+// Thin wrappers that map each HTTP verb onto apiCall().
 export const get = <T>(endpoint: keyof typeof endpoints, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'GET', params });
 
