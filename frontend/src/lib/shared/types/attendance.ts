@@ -1,3 +1,6 @@
+// attendance.ts
+// One scan result. scannedVia tells how it was captured; gps + optional
+// faceMatchScore back the proof stored with the record.
 export interface AttendanceRecord {
   id: number;
   sessionId: number;

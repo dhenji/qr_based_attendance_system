@@ -1,4 +1,7 @@
 <script lang="ts">
+	// AppIcon
+	// Inline SVG icon set (Lucide-style paths): camera, QR, shield, offline.
+	// Renders whichever icon is named by the `name` prop at the given `size`.
 	type IconName = 'camera' | 'qr' | 'shield' | 'offline';
 
 	let { name, size = 24 }: { name: IconName; size?: number } = $props();
@@ -15,6 +18,8 @@
 	stroke-linejoin="round"
 	aria-hidden="true"
 >
+	<!-- Icon paths: first three branches match their name explicitly; -->
+	<!-- the trailing {:else} branch is the default 'offline' icon. -->
 	{#if name === 'camera'}
 		<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
 		<circle cx="12" cy="13.5" r="3.5" />

@@ -1,3 +1,7 @@
+// geo.ts
+// Geofence math: Haversine distance between two coordinates, then a radius check.
+
+// Great-circle distance between (lat1, lng1) and (lat2, lng2) in km.
 export const calculateDistance = (
   lat1: number,
   lng1: number,
@@ -14,6 +18,7 @@ export const calculateDistance = (
   return R * c; // Returns km
 };
 
+// True when the student's position is within the classroom's radius (metres).
 export const isWithinGeofence = (
   studentLat: number,
   studentLng: number,

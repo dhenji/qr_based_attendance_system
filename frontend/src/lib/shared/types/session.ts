@@ -1,3 +1,6 @@
+// session.ts
+// Attendance session a professor opens. qrPayload is embedded in the QR code;
+// pw/lw are the present and late windows. `students` is the live scan feed.
 export interface Session {
   id: number;
   courseId: number;

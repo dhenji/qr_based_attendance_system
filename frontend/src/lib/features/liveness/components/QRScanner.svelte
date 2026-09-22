@@ -1,4 +1,7 @@
 <script lang="ts">
+	// QRScanner
+	// Show/hide of the camera view is driven by the `active` prop; every
+	// successful decode hands the raw code back via the `onScanned` callback.
 	import { onDestroy } from 'svelte';
 	import { Html5Qrcode } from 'html5-qrcode';
 	import { initiateQRScan } from '$lib/features/liveness/service';
@@ -11,6 +14,7 @@
 	let scanError = $state<string | null>(null);
 	let qrCode: Html5Qrcode | null = null;
 
+	// React to the `active` prop: start the camera when shown, release it when hidden.
 	$effect(() => {
 		if (active) {
 			startScanning();
@@ -19,6 +23,7 @@
 		}
 	});
 
+	// Clean up the camera when the component is destroyed.
 	onDestroy(() => {
 		stopScanning();
 	});
@@ -35,6 +40,8 @@
 			}
 			// Auto-initiate scan flow
 			await initiateQRScan(1);
+			// Rear camera, 10fps, 250x250 scan box. The first decoded string
+			// stops the scanner and reports the code to the parent page.
 			await qrCode.start(
 				{ facingMode: 'environment' },
 				{ fps: 10, qrbox: { width: 250, height: 250 } },
@@ -51,6 +58,7 @@
 		}
 	};
 
+	// Stop the stream and wipe any rendered overlay from the DOM.
 	const stopScanning = () => {
 		qrCode?.stop().catch(() => undefined);
 		qrCode?.clear();

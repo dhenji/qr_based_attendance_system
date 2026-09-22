@@ -1,10 +1,12 @@
 // features/attendance/service.ts
 // Attendance evidence submission, records listing
 
-// MOCK flag
+// MOCK flag — swap to false when the backend attendance endpoints land
 const MOCK = true;
 
-// Submit attendance evidence (photo + GPS + liveness)
+// submitEvidence
+// Submit a complete attendance scan: photo/proof via GPS location and liveness
+// checks. In mock mode we return a random result so the UI can exercise all paths.
 export const submitEvidence = async (evidence: {
 	sessionId: number;
 	studentId: string;
@@ -44,7 +46,9 @@ export const submitEvidence = async (evidence: {
 	};
 };
 
-// List attendance records (professor view)
+// listRecords
+// Fetch attendance records, optionally filtered by session/status/date range
+// (professor-facing view). Returns a paginated response shape.
 export const listRecords = async (_params?: {
 	sessionId?: number;
 	status?: string;

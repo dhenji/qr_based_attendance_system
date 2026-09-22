@@ -4,10 +4,12 @@
 import type { LivenessEvidence } from '$lib/shared/types';
 import { isWithinGeofence } from '$lib/shared/utils/geo';
 
-// MOCK flag
+// MOCK flag — swap to false when backend liveness endpoints land
 const MOCK = true;
 
-// QR scan initiation
+// initiateQRScan
+// Kicks off a session scan: returns a freshly generated session code along with
+// the course + geofence context and when the code expires (5 min in mock).
 export const initiateQRScan = async (courseId: number, geofenceRadius = 50) => {
 	if (MOCK) {
 		return {
@@ -25,7 +27,9 @@ export const initiateQRScan = async (courseId: number, geofenceRadius = 50) => {
 	};
 };
 
-// GPS validation
+// validateGPS
+// Delegates the check to the Haversine-based geofence util: is the student
+// within `radiusMetres` of the classroom center?
 export const validateGPS = (
 	studentLat: number,
 	studentLng: number,
@@ -36,7 +40,9 @@ export const validateGPS = (
 	return isWithinGeofence(studentLat, studentLng, centerLat, centerLng, radiusMetres);
 };
 
-// Face challenge result
+// submitFaceChallenge
+// Face-match result: "passed" requires both a sufficient liveness score
+// (>70, D31-style threshold) and that a blink was actually detected.
 export const submitFaceChallenge = async (
 	faceMatchScore: number,
 	livenessEvidence: LivenessEvidence

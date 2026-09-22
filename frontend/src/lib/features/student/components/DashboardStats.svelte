@@ -1,4 +1,8 @@
 <script lang="ts">
+	// DashboardStats
+	// Attendance-rate summary card. Currently shows an empty-state placeholder
+	// ("No data") because there are no real scans yet; once history exists this
+	// will render the computed compliance rate from the student store.
 	const hasData = $derived(false);
 </script>
 

@@ -3,10 +3,12 @@
 
 import type { SyncQueueRecord } from '$lib/shared/types';
 
-// MOCK flag
+// MOCK flag — swap to false when IndexedDB sync (docs/architecture/offline-first.md) is implemented
 const MOCK = true;
 
-// Queue store (IndexedDB wrapper mock)
+// queue
+// Offline sync queue stored in IndexedDB. Every method returns mock data while
+// MOCK is true, and is a no-op/placeholder once the real IndexedDB wrapper lands.
 export const queue = {
 	// Enqueue a record for offline sync
 	enqueue: async (

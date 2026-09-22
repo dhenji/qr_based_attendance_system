@@ -150,7 +150,8 @@ export const AuthRegisterEndpoint: EndpointDef<{
 	}),
 };
 
-// Export typed endpoints object
+// Endpoint registry
+// Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
 	// Session QR
 	sessionQR: SessionQREndpoint,

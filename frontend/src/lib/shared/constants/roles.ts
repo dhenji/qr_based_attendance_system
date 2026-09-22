@@ -1,3 +1,5 @@
+// roles.ts
+// System role keys shared across route guards and the auth store.
 export const Roles = {
   SUPER_ADMIN: "super_admin" as const,
   ADMIN: "admin" as const,

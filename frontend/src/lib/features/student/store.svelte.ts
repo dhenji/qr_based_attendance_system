@@ -23,6 +23,9 @@ export type SessionHistoryItem = {
 	scannedVia: 'qr' | 'manual';
 };
 
+// Student state
+// Profile + schedule + session history in one reactive object. Renders the
+// dashboard and backs the scan flow.
 export const studentState = $state({
 	student: null as Student | null,
 	courses: [] as Course[],
@@ -32,14 +35,17 @@ export const studentState = $state({
 	scanLoading: false,
 });
 
-// Derived (functions — module-scope $derived cannot be exported)
+// Derived stats
+// Read-only helpers for the dashboard UI (module-scope $derived can't be
+// exported, hence functions reading studentState).
 export const complianceRate = () =>
 	studentState.student ? Math.round((studentState.student as Record<string, number> & Student).attendanceRate ?? 0) : 0;
 export const participationRate = () =>
 	studentState.student ? Math.round((studentState.student as Record<string, number> & Student).participationRate ?? 0) : 0;
 export const isLoading = () => studentState.loading || studentState.scanLoading;
 
-// Initialize on first load
+// init
+// One-shot bootstrap: loads profile, schedule, and history into the state.
 export const initStudent = async (): Promise<void> => {
 	studentState.loading = true;
 	studentState.error = null;
@@ -56,6 +62,7 @@ export const initStudent = async (): Promise<void> => {
 };
 
 // Actions
+// doUpdateProfile: apply partial profile edits and reflect them in state.
 export const doUpdateProfile = async (updates: Partial<Student>): Promise<void> => {
 	studentState.loading = true;
 	studentState.error = null;
@@ -68,6 +75,8 @@ export const doUpdateProfile = async (updates: Partial<Student>): Promise<void> 
 	}
 };
 
+// doSubmitScan: submits a scan, then refreshes history so the dashboard is in
+// sync with the latest records.
 export const doSubmitScan = async (scanData: {
 	sessionId: number;
 	qrStudentNumber: string;

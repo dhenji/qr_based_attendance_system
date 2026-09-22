@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { initFaceModel } from '$lib/features/liveness/model';
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import { submitFaceChallenge } from '$lib/features/liveness/service';
@@ -22,6 +23,12 @@
 
 	onDestroy(() => {
 		if (countdownTimerId) clearInterval(countdownTimerId);
+	});
+
+	// Warm up the MediaPipe face model while the student is still on the entry
+	// screen, so it's ready by the time the face liveness camera opens.
+	onMount(() => {
+		void initFaceModel();
 	});
 
 	const handleVerifyCode = () => {
