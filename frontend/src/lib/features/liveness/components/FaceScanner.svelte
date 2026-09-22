@@ -5,6 +5,7 @@
 	// blink is confirmed (D31: Eye Aspect Ratio below 0.25 across N frames).
 	import { onDestroy } from 'svelte';
 	import type { NormalizedLandmark, DrawingOptions } from '@mediapipe/tasks-vision';
+	import { initFaceModel, type LoadedFaceModel } from '$lib/features/liveness/model';
 
 	interface FaceConnection {
 		start: number;
@@ -17,10 +18,38 @@
 	let video: HTMLVideoElement;
 	let canvas: HTMLCanvasElement;
 
-	type FaceStatus = 'initializing' | 'no_face' | 'looking' | 'detecting' | 'passed';
+	type FaceStatus =
+		| 'initializing'
+		| 'no_face'
+		| 'too_far'
+		| 'center_face'
+		| 'looking'
+		| 'detecting'
+		| 'passed';
 
 	let status = $state<FaceStatus>('initializing');
 	let error = $state<string | null>(null);
+
+	// Face-guide oval position/size in normalized video space (0..1).
+	// MediaPipe landmarks are normalized over the video, and the video fills
+	// the stage 1:1 (object-fit: fill), so the same coordinates work for both.
+	const GUIDE_CX = 0.5;
+	const GUIDE_CY = 0.5;
+	const GUIDE_RX = 0.275;
+	const GUIDE_RY = 0.4;
+
+	// Distance cap: a face smaller than this is treated as too far to read.
+	// Monocular cameras can't give an exact metric distance, so this uses the
+	// pinhole model (distance = IPD / (2 * eyeSpread * tan(HFOV / 2))). IPD is
+	// the average adult inter-pupillary distance and HFOV is a typical phone
+	// front camera's horizontal field of view — both tunable per device.
+	const IPD_M = 0.063;
+	const FRONT_CAM_HFOV_DEG = 70;
+	const MAX_FACE_DISTANCE_M = 0.5;
+
+	let countdown = $state(0);
+	let beginDetection = $state(false);
+	let countdownTimerId: ReturnType<typeof setInterval> | null = null;
 
 	// Live handles: landmarker for detection, drawing for the overlay renderer.
 	let landmarker: {
@@ -34,6 +63,8 @@
 			style?: DrawingOptions
 		): void;
 	} | null = null;
+	// Canvas-overlay renderer constructor, shared with the warm model.
+	let drawingCtor: LoadedFaceModel['DrawingUtils'] | null = null;
 	let faceOval: FaceConnection[] = [];
 	let leftEye: FaceConnection[] = [];
 	let rightEye: FaceConnection[] = [];
@@ -42,6 +73,12 @@
 	let lastVideoTime = -1;
 	let closedFrames = 0;
 	let blinkFired = false;
+	// EMA-smoothed EAR; damps single-frame landmark jitter.
+	let smoothedEar = 1;
+	// Per-user open-eye baseline and closing-phase bookkeeping for blink math.
+	let earBaseline: number | null = null;
+	let idleFrames = 0;
+	let blinkMinEar = 1;
 
 	interface FaceResult {
 		faceLandmarks?: NormalizedLandmark[][];
@@ -51,8 +88,12 @@
 	// MediaPipe FaceLandmarker (478 landmarks) EAR indices
 	const LEFT_EYE = [362, 385, 387, 263, 373, 380];
 	const RIGHT_EYE = [33, 160, 158, 133, 153, 144];
-	const EAR_THRESHOLD = 0.25; // D31: EAR < 0.25 counts as eye closed
-	const CLOSED_FRAMES_REQUIRED = 3;
+	const EYE_SMOOTH = 0.5; // light smoothing (was a heavy 0.7 EMA)
+	const BLINK_DEPTH = 0.55; // closure = EAR below baseline x 0.55
+	const RECOVER_LEVEL = 0.85; // reopen = EAR above baseline x 0.85
+	const MIN_CLOSED_FRAMES = 2; // min sampled closure frames
+	const MAX_BLINK_FRAMES = 20; // ~0.7s: longer closure = squint, reset
+	const ARMING_FRAMES = 8; // idle frames before the baseline is trusted
 
 	// Euclidean distance between two landmarks.
 	const pointDist = (lm: Array<{ x: number; y: number }>, i: number, j: number) =>
@@ -62,23 +103,75 @@
 	const eyeEar = (lm: Array<{ x: number; y: number }>, eye: number[]) =>
 		(pointDist(lm, eye[1], eye[5]) + pointDist(lm, eye[2], eye[4])) / (2 * pointDist(lm, eye[0], eye[3]));
 
+	// Centroid of the full 478-point face mesh.
+	const faceCenter = (lm: Array<{ x: number; y: number }>) => {
+		let cx = 0;
+		let cy = 0;
+		for (const p of lm) {
+			cx += p.x;
+			cy += p.y;
+		}
+		return { x: cx / lm.length, y: cy / lm.length };
+	};
+
+	// Elliptical containment test: face is "in the guide" when its center
+	// sits inside the oval. Blink detection is skipped otherwise.
+	const isInsideGuide = (lm: Array<{ x: number; y: number }>) => {
+		const c = faceCenter(lm);
+		const dx = (c.x - GUIDE_CX) / GUIDE_RX;
+		const dy = (c.y - GUIDE_CY) / GUIDE_RY;
+		return dx * dx + dy * dy <= 1;
+	};
+
+	// Estimated face-to-camera distance in meters from the inter-eye spread in
+	// the frame (landmarks 33 and 263 are the outer eye corners). Monocular
+	// depth is ambiguous without a known focal length, so the horizontal field
+	// of view is assumed — see FRONT_CAM_HFOV_DEG.
+	const faceDistanceM = (lm: Array<{ x: number; y: number }>) => {
+		const eyeSpread = Math.abs(lm[263].x - lm[33].x);
+		const halfFovRad = (FRONT_CAM_HFOV_DEG * Math.PI) / 360;
+		return IPD_M / (2 * eyeSpread * Math.tan(halfFovRad));
+	};
+
+	// Per-status instruction shown to the user before detection begins.
+	const preHintText = $derived(countdown > 0 ? `Get ready \u2026 ${countdown}` : 'Face model loading\u2026');
+
 	// Per-status instruction shown to the user.
 	const hintText = $derived.by(() => {
+		if (!beginDetection) {
+			switch (status) {
+				case 'initializing':
+					return 'Loading face model\u2026';
+				default:
+					return preHintText;
+			}
+		}
 		switch (status) {
-			case 'initializing':
-				return 'Loading face model\u2026';
 			case 'no_face':
 				return 'Look at the camera: face not detected';
+			case 'too_far':
+				return 'Move closer to the camera (max ~0.5 m)';
+			case 'center_face':
+				return 'Center your face in the oval';
 			case 'looking':
 				return 'Look at the camera and blink once';
 			case 'detecting':
-				return 'Blink detected \u2014 verifying\u2026';
+				return 'Eyes closing \u2014 blink fully\u2026';
 			case 'passed':
 				return 'Verified';
 			default:
 				return '';
 		}
 	});
+
+	// True once the face is tracked inside the guide oval — turns the guide green.
+	const aligned = $derived(
+		beginDetection &&
+			status !== 'no_face' &&
+			status !== 'too_far' &&
+			status !== 'center_face' &&
+			status !== 'initializing'
+	);
 
 	// Start/stop the scanner when the `active` prop toggles.
 	$effect(() => {
@@ -91,46 +184,54 @@
 
 	// Guarantee no camera/model leaks when the component is removed.
 	onDestroy(() => {
+		clearCountdown();
 		stop();
 	});
 
+	const clearCountdown = () => {
+		if (countdownTimerId) {
+			clearInterval(countdownTimerId);
+			countdownTimerId = null;
+		}
+	};
+
+	const startCountdown = () => {
+		clearCountdown();
+		beginDetection = false;
+		countdown = 3;
+		countdownTimerId = setInterval(() => {
+			countdown -= 1;
+			if (countdown <= 0) {
+				clearCountdown();
+				beginDetection = true;
+			}
+		}, 1000);
+	};
+
 	// start
-	// Boot sequence: load MediaPipe (lazy import), create the landmarker with a
-	// GPU->CPU fallback, open the front camera, then loop detection per frame.
+	// Boot sequence: reuse the shared warm landmarker, open the front camera,
+	// then loop detection per frame.
 	const start = async () => {
 		error = null;
 		blinkFired = false;
 		closedFrames = 0;
+		smoothedEar = 1;
+		earBaseline = null;
+		idleFrames = 0;
+		blinkMinEar = 1;
 		lastVideoTime = -1;
 		status = 'initializing';
+		beginDetection = false;
+		clearCountdown();
 
 		try {
-			const mod = await import('@mediapipe/tasks-vision');
-			const { FilesetResolver, FaceLandmarker, DrawingUtils } = mod;
-
-			// Landmark index sets shipped by MediaPipe for drawing the wireframe.
-			faceOval = FaceLandmarker.FACE_LANDMARKS_FACE_OVAL;
-			leftEye = FaceLandmarker.FACE_LANDMARKS_LEFT_EYE;
-			rightEye = FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE;
-
-			const fileset = await FilesetResolver.forVisionTasks('/wasm');
-
-			const createWithDelegate = (delegate: 'GPU' | 'CPU') =>
-				FaceLandmarker.createFromOptions(fileset, {
-					baseOptions: { modelAssetPath: '/models/face_landmarker.task', delegate },
-					runningMode: 'VIDEO',
-					numFaces: 1,
-					minFaceDetectionConfidence: 0.5,
-					minFacePresenceConfidence: 0.5,
-					minTrackingConfidence: 0.5,
-				});
-
-			// Prefer the GPU delegate; some devices throw, so fall back to CPU.
-			try {
-				landmarker = await createWithDelegate('GPU');
-			} catch {
-				landmarker = await createWithDelegate('CPU');
-			}
+			// Grab the pre-warmed model instance — no re-download or re-compile.
+			const loaded = await initFaceModel();
+			landmarker = loaded.landmarker;
+			faceOval = loaded.connections.faceOval;
+			leftEye = loaded.connections.leftEye;
+			rightEye = loaded.connections.rightEye;
+			drawingCtor = loaded.DrawingUtils;
 
 			// Front-facing selfie camera, no audio.
 			stream = await navigator.mediaDevices.getUserMedia({
@@ -151,20 +252,23 @@
 					canvas.width = video.videoWidth;
 					canvas.height = video.videoHeight;
 					stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-					if (!drawing) {
-						drawing = new DrawingUtils(canvas.getContext('2d') as CanvasRenderingContext2D);
-					}
+if (!drawing && drawingCtor) {
+					drawing = new drawingCtor(canvas.getContext('2d') as CanvasRenderingContext2D);
+				}
 				}
 				if (video.currentTime !== lastVideoTime) {
 					lastVideoTime = video.currentTime;
 					const result = landmarker.detectForVideo(video, performance.now());
-					draw(result);
-					evaluate(result);
+					if (beginDetection) {
+						draw(result);
+						evaluate(result);
+					}
 				}
 				rafId = requestAnimationFrame(tick);
 			};
 			rafId = requestAnimationFrame(tick);
 			status = 'no_face';
+			startCountdown();
 		} catch (err) {
 			stop();
 			if (err instanceof Error && err.name === 'NotAllowedError') {
@@ -189,42 +293,103 @@
 	};
 
 	// evaluate
-	// Blink detection state machine: track consecutive closed-eye frames; once
-	// the required count is reached, fire onBlink() exactly once.
+	// Blink state machine: smooth the EAR, then require a genuine close -> open
+	// transition before firing. A blink closes for a few frames and reopens;
+	// a held squint exceeds MAX_BLINK_FRAMES and resets without ever firing.
 	const evaluate = (result: FaceResult) => {
 		if (!result.faceLandmarks?.length) {
 			closedFrames = 0;
+			earBaseline = null;
+			idleFrames = 0;
 			status = 'no_face';
 			return;
 		}
 		const lm = result.faceLandmarks[0];
-		const avgEar = (eyeEar(lm, LEFT_EYE) + eyeEar(lm, RIGHT_EYE)) / 2;
 
-		if (avgEar < EAR_THRESHOLD) {
-			closedFrames += 1;
-			status = 'detecting';
-			if (!blinkFired && closedFrames >= CLOSED_FRAMES_REQUIRED) {
+		// Reject faces outside the guide or too far away — never analyze those.
+		if (!isInsideGuide(lm)) {
+			closedFrames = 0;
+			status = 'center_face';
+			return;
+		}
+		if (faceDistanceM(lm) > MAX_FACE_DISTANCE_M) {
+			closedFrames = 0;
+			status = 'too_far';
+			return;
+		}
+
+		const avgEar = (eyeEar(lm, LEFT_EYE) + eyeEar(lm, RIGHT_EYE)) / 2;
+		// Light smoothing damps jitter without filtering out a real blink.
+		smoothedEar = smoothedEar * (1 - EYE_SMOOTH) + avgEar * EYE_SMOOTH;
+
+		// Idle: adapt the open-eye baseline, then wait for a deep enough dip.
+		if (closedFrames === 0) {
+			idleFrames += 1;
+			if (earBaseline === null) {
+				earBaseline = smoothedEar;
+			} else {
+				earBaseline = earBaseline * (1 - 0.08) + smoothedEar * 0.08;
+			}
+			// Give the baseline a couple frames to settle before trusting it.
+			if (idleFrames < ARMING_FRAMES) {
+				status = 'looking';
+				return;
+			}
+			if (smoothedEar < earBaseline * BLINK_DEPTH) {
+				closedFrames = 1;
+				blinkMinEar = smoothedEar;
+				status = 'detecting';
+			} else {
+				status = 'looking';
+			}
+			return;
+		}
+
+		// Closing phase: hold while still below the recovery level, tracking the
+		// deepest point so even a brief/partial blink counts once it reopens.
+		blinkMinEar = Math.min(blinkMinEar, smoothedEar);
+		closedFrames += 1;
+		if (closedFrames > MAX_BLINK_FRAMES) {
+			// Stayed closed far too long to be a blink (squint) — drop it.
+			earBaseline = smoothedEar;
+			idleFrames = 0;
+			closedFrames = 0;
+			blinkMinEar = 1;
+			status = 'looking';
+			return;
+		}
+		if (smoothedEar > earBaseline! * RECOVER_LEVEL) {
+			// Reopened: a blink only if it truly dipped and lasted long enough.
+			const isBlink = closedFrames >= MIN_CLOSED_FRAMES && blinkMinEar <= earBaseline! * BLINK_DEPTH;
+			earBaseline = smoothedEar;
+			idleFrames = 0;
+			closedFrames = 0;
+			blinkMinEar = 1;
+			status = isBlink ? 'passed' : 'looking';
+			if (isBlink && !blinkFired) {
 				blinkFired = true;
-				status = 'passed';
 				onBlink();
 			}
-		} else {
-			closedFrames = 0;
-			status = 'looking';
+			return;
 		}
+		status = 'detecting';
 	};
 
 	// stop
-	// Tear down everything: animation loop, camera stream, model, and renderer.
+	// Tear down everything: animation loop, camera stream, and renderer.
 	const stop = () => {
+		clearCountdown();
 		cancelAnimationFrame(rafId);
 		rafId = 0;
+		countdown = 0;
+		beginDetection = false;
 		stream?.getTracks().forEach((t) => t.stop());
 		stream = null;
 		if (video) video.srcObject = null;
-		landmarker?.close();
+		// The landmarker is shared and stays warm — only drop our references.
 		landmarker = null;
 		drawing = null;
+		drawingCtor = null;
 		faceOval = [];
 		leftEye = [];
 		rightEye = [];
@@ -235,8 +400,15 @@
 	<div class="stage" bind:this={stage}>
 		<video bind:this={video} autoplay muted playsinline></video>
 		<canvas bind:this={canvas}></canvas>
+		<!-- Static guide oval: user must keep their face inside this dashed ellipse. -->
+		<div class="face-guide" class:aligned aria-hidden="true"></div>
 		{#if !error}
-			<div class="hint" class:passed={status === 'passed'}>{hintText}</div>
+			<div class="hint" class:passed={status === 'passed' && beginDetection}>{hintText}</div>
+		{/if}
+		{#if countdown > 0}
+			<div class="countdown-overlay" aria-live="polite">
+				<span class="countdown-number">{countdown}</span>
+			</div>
 		{/if}
 	</div>
 	{#if error}
@@ -271,6 +443,27 @@
 		border-radius: 10px;
 	}
 
+	/* Static alignment guide: dashed oval the face must stay inside. */
+	.face-guide {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: 55%;
+		height: 80%;
+		transform: translate(-50%, -50%);
+		border-radius: 50%;
+		border: 2px dashed rgba(148, 163, 184, 0.75);
+		background: rgba(37, 99, 235, 0.06);
+		box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12) inset;
+		pointer-events: none;
+		transition: border-color 0.2s ease, background 0.2s ease;
+	}
+
+	.face-guide.aligned {
+		border-color: rgba(34, 197, 94, 0.9);
+		background: rgba(34, 197, 94, 0.08);
+	}
+
 	.hint {
 		position: absolute;
 		left: 0;
@@ -291,6 +484,45 @@
 		background: rgba(22, 163, 74, 0.85);
 		color: white;
 		font-weight: 600;
+	}
+
+	.countdown-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(15, 23, 42, 0.35);
+		border-radius: 10px;
+		pointer-events: none;
+	}
+
+	.countdown-number {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 6rem;
+		font-weight: 700;
+		color: white;
+		line-height: 1;
+		text-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+		animation: pulse 1s ease-in-out infinite;
+	}
+
+	@keyframes pulse {
+		0%,
+		100% {
+			transform: scale(1);
+			opacity: 1;
+		}
+		50% {
+			transform: scale(1.15);
+			opacity: 0.85;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.countdown-number {
+			animation: none;
+		}
 	}
 
 	.error {
