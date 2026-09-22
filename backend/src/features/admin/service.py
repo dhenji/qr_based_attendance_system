@@ -6,6 +6,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password
+from features.admin.constants import DEFAULT_USERNAME_MAX_LENGTH, TEMP_PASSWORD_LENGTH
 from features.admin.exceptions import (
     AdminUserNotFound,
     EmailAlreadyExists,
@@ -45,7 +46,7 @@ class AdminService:
         if await self._users.get_by(username=username) is not None:
             raise UsernameAlreadyExists()
 
-        temp_password: str = secrets.token_urlsafe(12)
+        temp_password: str = secrets.token_urlsafe(TEMP_PASSWORD_LENGTH)
 
         user: User = await self._users.create(
             username=username,
@@ -177,4 +178,6 @@ class AdminService:
 
     @staticmethod
     def _default_username(first_name: str, last_name: str) -> str:
-        return f"{first_name[0].lower()}{last_name.lower()}"[:20]
+        return f"{first_name[0].lower()}{last_name.lower()}"[
+            :DEFAULT_USERNAME_MAX_LENGTH
+        ]
