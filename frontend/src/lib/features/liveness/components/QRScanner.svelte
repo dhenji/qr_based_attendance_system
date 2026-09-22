@@ -1,25 +1,30 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { Html5Qrcode } from 'html5-qrcode';
 	import { initiateQRScan } from '$lib/features/liveness/service';
 
-	let isScanning = $state(false);
-	let scannedCode = $state<string | null>(null);
+	let { active, onScanned } = $props<{
+		active: boolean;
+		onScanned: (code: string) => void;
+	}>();
+
 	let scanError = $state<string | null>(null);
 	let qrCode: Html5Qrcode | null = null;
 
-	onMount(() => {
-		return () => {
-			if (qrCode) {
-				qrCode.stop().catch(() => undefined);
-				qrCode.clear();
-			}
-		};
+	$effect(() => {
+		if (active) {
+			startScanning();
+		} else {
+			stopScanning();
+		}
+	});
+
+	onDestroy(() => {
+		stopScanning();
 	});
 
 	const startScanning = async () => {
 		scanError = null;
-		isScanning = true;
 
 		// Small wait for the DOM element to render
 		await new Promise((r) => setTimeout(r, 100));
@@ -34,9 +39,8 @@
 				{ facingMode: 'environment' },
 				{ fps: 10, qrbox: { width: 250, height: 250 } },
 				(decodedText) => {
-					scannedCode = decodedText;
-					isScanning = false;
-					qrCode?.stop().catch(() => undefined);
+					stopScanning();
+					onScanned(decodedText);
 				},
 				() => {
 					// Ignore frame-read errors (happens between successful scans)
@@ -44,80 +48,56 @@
 			);
 		} catch (err) {
 			scanError = err instanceof Error ? err.message : 'Failed to start camera';
-			isScanning = false;
 		}
 	};
 
 	const stopScanning = () => {
-		isScanning = false;
 		qrCode?.stop().catch(() => undefined);
+		qrCode?.clear();
 	};
 </script>
 
 <div class="qr-scanner">
-	{#if isScanning}
-		<div id="qr-reader" class="qr-reader-box"></div>
-		<p>Scanning. Position the QR code within the frame.</p>
-		<button class="btn btn-ghost" onclick={stopScanning}>Cancel</button>
-	{:else if scannedCode}
-		<div class="scan-success">
-			<p>Scan successful</p>
-			<p>Code: {scannedCode}</p>
-			<button class="btn" onclick={() => { scannedCode = null; }}>Scan another code</button>
-		</div>
-	{:else}
-		<button class="btn" onclick={startScanning}>Start camera scanner</button>
-		{#if scanError}
-			<p class="error">{scanError}</p>
-		{/if}
+	<div id="qr-reader" class="qr-reader-box"></div>
+	{#if scanError}
+		<p class="error">{scanError}</p>
 	{/if}
 </div>
 
 <style>
 	.qr-scanner {
+		width: 100%;
+		height: 100%;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0.875rem;
-		width: 100%;
+		justify-content: center;
 	}
 
 	.qr-reader-box {
 		width: 100%;
-		max-width: 320px;
+		height: 100%;
+		overflow: hidden;
 	}
 
-	.btn {
-		padding: 0.625rem 1.125rem;
-		border-radius: 8px;
-		border: 1px solid #1d4ed8;
-		background: #1d4ed8;
-		color: white;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
+	:global(#qr-reader) {
+		border: none;
 	}
 
-	.btn:hover {
-		background: #1e40af;
-		border-color: #1e40af;
+	:global(#qr-reader video) {
+		width: 100% !important;
+		height: 100% !important;
+		object-fit: cover;
 	}
 
-	.btn-ghost {
-		background: white;
-		border-color: #cbd5e1;
-		color: #0f172a;
-	}
-
-	.btn-ghost:hover {
-		background: #f1f5f9;
-		border-color: #cbd5e1;
+	:global(#qr-reader .qr-canvas) {
+		display: none;
 	}
 
 	.error {
-		color: #b91c1c;
+		color: #dc2626;
 		font-size: 0.875rem;
 		margin: 0;
+		text-align: center;
 	}
 </style>
