@@ -10,6 +10,7 @@ from core.config import Settings, get_settings
 from core.database import database
 from core.exceptions import AppException
 from core.security import decode_access_token, extract_user_id
+from features.admin.service import AdminService
 from features.auth.model import User
 from features.auth.service import AuthService
 from shared.enums import UserRole
@@ -93,9 +94,21 @@ def _unauthorized(code: str, message: str) -> HTTPException:
     )
 
 
-def _require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
+def _role_matches(user_role: str, required: UserRole) -> bool:
+    """True when ``user_role`` satisfies the ``required`` role.
+
+    ``super_admin`` is a superset of ``admin``: a super_admin passess admin-only checks.
+    """
+
+    if user_role == required.value:
+        return True
+
+    return user_role == UserRole.SUPER_ADMIN.value and required == UserRole.ADMIN
+
+
+def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
     async def role_guard(user: Annotated[User, Depends(_get_current_user)]) -> User:
-        if user.role not in {role.value for role in roles}:
+        if not any(_role_matches(user.role, role) for role in roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -115,7 +128,14 @@ async def _get_auth_service(
     return AuthService(session)
 
 
+async def _get_admin_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> AdminService:
+    return AdminService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
+AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 
 CurrentUserDep = Annotated[User, Depends(_get_current_user)]
 OptionalUserDep = Annotated[User | None, Depends(_get_optional_current_user)]
