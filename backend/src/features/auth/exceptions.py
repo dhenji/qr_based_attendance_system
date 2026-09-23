@@ -137,3 +137,28 @@ class MfaAlreadyEnabledException(AuthDomainException):
 
     def __init__(self) -> None:
         super().__init__(message="MFA is already enabled")
+
+
+class SecurityAnswerInvalidException(AuthDomainException):
+    """400 - security-question answer does not match."""
+
+    status_code: int = 400
+    code: str = "security_answer_invalid"
+
+    def __init__(self) -> None:
+        super().__init__(message="Security answer is incorrect")
+
+
+class RecoveryLockedException(AuthDomainException):
+    """423 - recovery aborted after too many failed answer attempts."""
+
+    status_code: int = 423
+    code: str = "recovery_locked"
+
+    def __init__(self, retry_after_minutes: int) -> None:
+        super().__init__(
+            message=(
+                "Recovery is temporarily locked due to too many failed "
+                f"attempts. Try again in {retry_after_minutes} minutes"
+            )
+        )
