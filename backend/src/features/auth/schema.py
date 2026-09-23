@@ -59,6 +59,7 @@ class RegisterRequest(OTPRequest, _OTPCodeRequest):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    turnstile_token: str | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -89,7 +90,7 @@ class SecurityQuestionResponse(BaseModel):
 
 
 class ForgotPasswordStep1Request(OTPRequest):
-    pass
+    turnstile_token: str | None = None
 
 
 class ForgotPasswordStep2Request(BaseModel):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
 from api.deps import AuthServiceDep, CurrentUserDep, OptionalUserDep
 from features.auth.schema import (
@@ -18,6 +18,7 @@ from features.auth.schema import (
     SetSecurityQuestionRequest,
     TokenResponse,
 )
+from shared.captcha import verify_turnstile_token
 from shared.rate_limit import rate_limit
 
 router = APIRouter()
@@ -68,10 +69,16 @@ async def register(payload: RegisterRequest, service: AuthServiceDep) -> TokenRe
 )
 async def login(
     payload: LoginRequest,
+    request: Request,
     service: AuthServiceDep,
     _: None = Depends(rate_limit(20, 60, key="ip")),
     _rl_email: None = Depends(rate_limit(5, 60, key="email")),
 ) -> TokenResponse:
+    await verify_turnstile_token(
+        payload.turnstile_token,
+        client_ip=request.client.host if request.client is not None else None,
+    )
+
     return await service.login(payload.email, payload.password)
 
 
@@ -86,9 +93,15 @@ async def refresh(payload: RefreshRequest, service: AuthServiceDep) -> TokenResp
 )
 async def forgot_password(
     payload: ForgotPasswordStep1Request,
+    request: Request,
     service: AuthServiceDep,
     _: None = Depends(rate_limit(5, 60, key="email")),
 ) -> SecurityQuestionResponse:
+    await verify_turnstile_token(
+        payload.turnstile_token,
+        client_ip=request.client.host if request.client is not None else None,
+    )
+
     return await service.forgot_password(payload.email)
 
 
