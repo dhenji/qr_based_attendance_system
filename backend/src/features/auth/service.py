@@ -20,6 +20,7 @@ from core.security import (
 )
 from core.security import verify_otp as verify_otp_hash
 from core.security import verify_password
+from features.auth.constants import SECURITY_RECOVERY_MAX_ATTEMPTS
 from features.auth.exceptions import (
     AccountLockedException,
     AmbiguousAccountException,
@@ -29,16 +30,26 @@ from features.auth.exceptions import (
     MfaVerifyException,
     OtpExpiredException,
     OtpInvalidException,
+    RecoveryLockedException,
+    SecurityAnswerInvalidException,
     UnrecognizedEmailException,
     UserAlreadyClaimedException,
 )
 from features.auth.model import OtpCodes, User
-from features.auth.schema import MeResponse, MFASetupResponse, TokenResponse
+from features.auth.schema import (
+    MeResponse,
+    MFASetupResponse,
+    SecurityQuestionResponse,
+    TokenResponse,
+)
 from features.professor.model import Professor
 from features.student.model import Student
 from shared.base import BaseCRUD
 from shared.email import send_otp_email
 from shared.enums import OtpPurpose, UserRole
+from shared.rate_limit import FixedWindowLimiter
+
+_recovery_limiter = FixedWindowLimiter()
 
 
 class AuthService:
@@ -123,7 +134,9 @@ class AuthService:
             password_hash=hash_password(password),
             security_question_hash=security_question,
             security_answer_hash=(
-                hash_password(security_answer) if security_answer else None
+                hash_password(self._normalize_answer(security_answer))
+                if security_answer
+                else None
             ),
             role=role.value,
         )
@@ -194,16 +207,43 @@ class AuthService:
 
         return self._build_tokens(user)
 
-    async def forgot_password(self, email: str) -> dict[str, Any]:
-        user: User | None = await self._users.get_by(email=email)
+    async def forgot_password(self, email: str) -> SecurityQuestionResponse:
+        user: User | None = await self._users.get_by(email=email.lower())
 
         if user is None or user.security_question_hash is None:
-            return {"security_question_set": False}
+            return SecurityQuestionResponse(question=None, set=False)
 
-        return {
-            "security_question_set": True,
-            "question": user.security_question_hash,
-        }
+        return SecurityQuestionResponse(question=user.security_question_hash, set=True)
+
+    async def forgot_password_step2(self, email: str, answer: str) -> None:
+        normalized: str = email.lower()
+
+        if not await _recovery_limiter.hit(
+            f"forgot_password|{normalized}",
+            SECURITY_RECOVERY_MAX_ATTEMPTS,
+            self._settings.lockout_duration_minutes * 60,
+        ):
+            raise RecoveryLockedException(self._settings.lockout_duration_minutes)
+
+        user: User | None = await self._users.get_by(email=normalized)
+
+        if (
+            user is None
+            or user.security_answer_hash is None
+            or not verify_password(
+                self._normalize_answer(answer), user.security_answer_hash
+            )
+        ):
+            await self._session.flush()
+            raise SecurityAnswerInvalidException()
+
+    async def set_security_question(
+        self, user: User, question: str, answer: str
+    ) -> None:
+        user.security_question_hash = question
+        user.security_answer_hash = hash_password(self._normalize_answer(answer))
+
+        await self._session.flush()
 
     async def reset_password(
         self, email: str, otp_code: str, new_password: str
@@ -339,3 +379,7 @@ class AuthService:
         )
 
         return student, professor
+
+    @staticmethod
+    def _normalize_answer(answer: str) -> str:
+        return answer.strip().casefold()

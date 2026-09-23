@@ -1,10 +1,10 @@
-from typing import Any
-
 from fastapi import APIRouter, Depends, status
 
 from api.deps import AuthServiceDep, CurrentUserDep, OptionalUserDep
 from features.auth.schema import (
     ChangePasswordRequest,
+    ForgotPasswordStep1Request,
+    ForgotPasswordStep2Request,
     LoginRequest,
     MeResponse,
     MFASetupResponse,
@@ -14,6 +14,8 @@ from features.auth.schema import (
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    SecurityQuestionResponse,
+    SetSecurityQuestionRequest,
     TokenResponse,
 )
 from shared.rate_limit import rate_limit
@@ -31,7 +33,7 @@ async def request_otp(
     service: AuthServiceDep,
     _: None = Depends(rate_limit(5, 60, key="email")),
 ) -> None:
-    await service.request_otp(payload.email)
+    await service.request_otp(payload.email, payload.purpose)
 
 
 @router.post(
@@ -40,7 +42,7 @@ async def request_otp(
     summary="Verify a 6-digit OTP",
 )
 async def otp_verify(payload: OTPVerifyRequest, service: AuthServiceDep) -> None:
-    await service.verify_otp(payload.email, payload.code)
+    await service.verify_otp(payload.email, payload.code, payload.purpose)
 
 
 @router.post(
@@ -83,11 +85,24 @@ async def refresh(payload: RefreshRequest, service: AuthServiceDep) -> TokenResp
     summary="Forgot-password step 1 - returns security_question state",
 )
 async def forgot_password(
-    payload: OTPRequest,
+    payload: ForgotPasswordStep1Request,
     service: AuthServiceDep,
     _: None = Depends(rate_limit(5, 60, key="email")),
-) -> dict[str, Any]:
+) -> SecurityQuestionResponse:
     return await service.forgot_password(payload.email)
+
+
+@router.post(
+    "/forgot-password/verify",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Forgot-password step 2 - verify security answer (3-attempt cap)",
+)
+async def forgot_password_verify(
+    payload: ForgotPasswordStep2Request,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(5, 60, key="email")),
+) -> None:
+    await service.forgot_password_step2(payload.email, payload.answer)
 
 
 @router.post(
@@ -148,3 +163,16 @@ async def mfa_verify(
     return await service.verify_mfa(
         code=payload.code, preauth_token=payload.preauth_token, user=current_user
     )
+
+
+@router.post(
+    "/security-question",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Set/update security question (authenticated)",
+)
+async def security_question(
+    payload: SetSecurityQuestionRequest,
+    current_user: CurrentUserDep,
+    service: AuthServiceDep,
+) -> None:
+    await service.set_security_question(current_user, payload.question, payload.answer)

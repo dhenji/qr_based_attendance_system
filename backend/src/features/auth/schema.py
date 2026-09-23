@@ -14,12 +14,13 @@ from features.auth.constants import (
     USERNAME_MAX_LENGTH,
     USERNAME_MIN_LENGTH,
 )
-from shared.enums import UserRole
+from shared.enums import OtpPurpose, UserRole
 from shared.validators import password_strength
 
 
 class OTPRequest(BaseModel):
     email: EmailStr
+    purpose: OtpPurpose = OtpPurpose.CLAIM
 
 
 class _CodeRequest(BaseModel):
@@ -70,6 +71,32 @@ class TokenResponse(BaseModel):
     mfa_pending: bool = False
     preauth_token: str | None = None  # grant no access; exchanged via /auth/mfa/verify
     must_change_password: bool = False
+
+
+class SetSecurityQuestionRequest(BaseModel):
+    question: str = Field(
+        min_length=SECURITY_QUESTION_MIN_LENGTH, max_length=SECURITY_QUESTION_MAX_LENGTH
+    )
+
+    answer: str = Field(
+        min_length=SECURITY_ANSWER_MIN_LENGTH, max_length=SECURITY_ANSWER_MAX_LENGTH
+    )
+
+
+class SecurityQuestionResponse(BaseModel):
+    question: str | None = None
+    set: bool = False
+
+
+class ForgotPasswordStep1Request(OTPRequest):
+    pass
+
+
+class ForgotPasswordStep2Request(BaseModel):
+    email: EmailStr
+    answer: str = Field(
+        min_length=SECURITY_ANSWER_MIN_LENGTH, max_length=SECURITY_ANSWER_MAX_LENGTH
+    )
 
 
 class _NewPasswordRequest(BaseModel):
