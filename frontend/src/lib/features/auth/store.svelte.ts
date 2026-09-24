@@ -3,6 +3,8 @@
 
 import type { User } from '$lib/shared/types';
 import { browser } from '$app/environment';
+import { goto } from '$app/navigation';
+import { Routes } from '$lib/shared/constants/routes';
 import { login, logout } from '$lib/features/auth/service';
 
 // Auth state (rune-store)
@@ -65,4 +67,5 @@ export const doLogout = async (): Promise<void> => {
 	await logout();
 	authState.user = null;
 	persistUser();
+	await goto(Routes.HOME);
 };

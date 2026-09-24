@@ -46,8 +46,9 @@
 				{ facingMode: 'environment' },
 				{ fps: 10, qrbox: { width: 250, height: 250 } },
 				(decodedText) => {
-					stopScanning();
-					onScanned(decodedText);
+					// Release the camera first, then hand the code back — liveness
+					// only mounts once the QR stream is fully closed.
+					void stopScanning().finally(() => onScanned(decodedText));
 				},
 				() => {
 					// Ignore frame-read errors (happens between successful scans)
@@ -59,9 +60,26 @@
 	};
 
 	// Stop the stream and wipe any rendered overlay from the DOM.
+	// Resolves once the camera is actually released. `qrCode` is cleared
+	// synchronously so repeat stop calls (effect re-run, onDestroy) are no-ops —
+	// html5-qrcode throws "Cannot stop" if stop() is called while not scanning.
 	const stopScanning = () => {
-		qrCode?.stop().catch(() => undefined);
-		qrCode?.clear();
+		const scanner = qrCode;
+		qrCode = null;
+		if (!scanner) return Promise.resolve();
+		let stopPromise: Promise<void> | null = null;
+		try {
+			stopPromise = Promise.resolve(scanner.stop());
+		} catch {
+			stopPromise = Promise.resolve();
+		}
+		return stopPromise.catch(() => undefined).then(() => {
+			try {
+				scanner.clear();
+			} catch {
+				// Already stopped — nothing left to tear down.
+			}
+		});
 	};
 </script>
 
