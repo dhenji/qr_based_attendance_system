@@ -72,26 +72,20 @@ uvicorn main:app --app-dir src --reload
 
 ## Running Tests
 
+Run the backend tests in an isolated Docker Compose service:
+
+```bash
+docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
+```
+
+Run them locally without Docker:
+
 ```bash
 cd backend
 python -m pytest src/tests/ -v
 ```
 
-Test directory structure (target — files land with backend-prompts Phase 9; test deps `pytest`,
-`pytest-asyncio`, and `httpx` are not yet in `requirements.txt`):
-
-```
-backend/src/tests/
-├── __init__.py
-├── conftest.py
-├── test_auth.py
-├── test_program.py
-├── test_student.py
-├── test_session.py
-├── test_attendance.py
-├── test_excuse.py
-└── test_analytics.py
-```
+The current suite contains 13 unit tests under `backend/src/tests/`. It uses fake sessions and does not require a database. `pytest` and `httpx` are listed in `backend/requirements.txt`; add `pytest-asyncio` when async integration tests are introduced.
 
 ---
 

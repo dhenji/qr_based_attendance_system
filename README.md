@@ -147,50 +147,50 @@ npm run dev            # http://localhost:5173
 
 Backend (`backend/.env.example`):
 
-| Variable                        | Default                                                                | Purpose                                                             |
-| ------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `APP_NAME`                      | `QR Attendance System API`                                             | API name                                                            |
-| `DEBUG`                         | `false`                                                                | Enables SQL echo; skips JWT_SECRET validation when `true`           |
-| `DATABASE_URL`                  | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection                                         |
-| `CORS_ORIGINS`                  | `http://localhost:5173`                                                | Allowed browser origins                                             |
-| `HMAC_SECRET_KEY`               | _(empty)_                                                              | Used for secure session codes                                       |
-| `JWT_SECRET`                    | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32` |
-| `JWT_ALGORITHM`                 | `HS256`                                                                | JWT signing algorithm                                               |
-| `ACCESS_TOKEN_EXPIRE_MINUTES`   | `15`                                                                   | Access token TTL                                                    |
-| `REFRESH_TOKEN_EXPIRE_DAYS`     | `7`                                                                    | Refresh token TTL                                                   |
-| `LOCKOUT_ATTEMPTS`              | `5`                                                                    | Failed login attempts before lockout                                |
-| `LOCKOUT_DURATION_MINUTES`      | `15`                                                                   | Lockout duration after failed attempts                              |
-| `FACE_MATCH_THRESHOLD`          | `0.70`                                                                 | Face-match similarity threshold                                     |
-| `FACE_REVIEW_BAND_LOW`          | `0.65`                                                                 | Lower band requiring manual review                                  |
-| `FACE_EMBEDDING_VERSION`        | `1`                                                                    | Face embedding format version                                       |
-| `DEFAULT_PRESENT_WINDOW_MINUTES`| `5`                                                                    | Default present window for sessions                                 |
-| `DEFAULT_LATE_WINDOW_MINUTES`   | `10`                                                                   | Default late window for sessions                                    |
-| `DEFAULT_GEOFENCE_RADIUS_METERS`| `50`                                                                   | Default classroom geofence radius                                   |
-| `OTP_EXPIRES_MINUTES`           | `5`                                                                    | OTP code TTL                                                        |
-| `BACKUP_STORAGE_TYPE`           | `local`                                                                | Backup backend: `local` or `s3`                                     |
-| `BACKUP_LOCAL_DIR`              | `./backups`                                                            | Local backup directory                                              |
-| `BACKUP_S3_BUCKET`              | _(empty)_                                                              | S3 bucket (when using S3)                                           |
-| `BACKUP_S3_ENDPOINT`            | _(empty)_                                                              | S3-compatible endpoint                                              |
-| `BACKUP_S3_PREFIX`              | `backups/`                                                             | S3 key prefix                                                       |
-| `BACKUP_ENCRYPTION_KEY`         | _(empty)_                                                              | Backup encryption key                                               |
-| `BACKUP_ENCRYPTION_KEY_VERSION` | `1`                                                                    | Encryption key version                                              |
-| `BACKUP_RETENTION_DAILY`        | `30`                                                                   | Daily backups to retain                                             |
-| `BACKUP_RETENTION_MONTHLY`      | `12`                                                                   | Monthly backups to retain                                           |
-| `BACKUP_EXCLUDE_OTP_CODES`      | `false`                                                                | Exclude OTP codes from backups                                      |
-| `BACKUP_COMPRESSION_LEVEL`      | `6`                                                                    | pg_dump compression level                                           |
-| `RISK_ABSENCE_RATE_HIGH`        | `0.30`                                                                 | Absence rate threshold for high risk scoring                        |
-| `RISK_ABSENCE_RATE_MEDIUM`      | `0.15`                                                                 | Absence rate threshold for medium risk scoring                      |
-| `RISK_STREAK_GAPS_HIGH`         | `3`                                                                    | Consecutive missed sessions that trigger high risk                  |
-| `RISK_SYNC_LAG_HIGH`            | `5`                                                                    | Days of unsynced records that trigger high risk                     |
-| `RISK_TREND_NEGATIVE`           | `-0.05`                                                               | Negative attendance trend slope threshold                           |
-| `RISK_BATCH_CRON`               | `0 2 * * *`                                                           | Cron schedule for the risk-scoring batch job                        |
-| `RISK_BATCH_CHUNK_SIZE`         | `1000`                                                                 | Risk batch chunk size                                               |
-| `RISK_BATCH_WORKERS`            | `4`                                                                    | Concurrent risk batch workers                                       |
-| `RISK_BATCH_DRY_RUN`            | `false`                                                                | Dry-run flag for risk batch job                                     |
-| `ATTACHMENTS_STORAGE_TYPE`      | `local`                                                                | Excuse attachment storage backend                                   |
-| `ATTACHMENTS_MAX_BYTES`         | `5242880`                                                              | Maximum upload size for excuse attachments                          |
-| `TURNSTILE_SECRET_KEY`          | _(empty)_                                                              | Cloudflare Turnstile captcha secret (optional)                      |
-| `BENCHMARK_MODE`                | `false`                                                                | Enables performance-benchmark endpoint                              |
+| Variable                         | Default                                                                | Purpose                                                             |
+| -------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `APP_NAME`                       | `QR Attendance System API`                                             | API name                                                            |
+| `DEBUG`                          | `false`                                                                | Enables SQL echo; skips JWT_SECRET validation when `true`           |
+| `DATABASE_URL`                   | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection                                         |
+| `CORS_ORIGINS`                   | `http://localhost:5173`                                                | Allowed browser origins                                             |
+| `HMAC_SECRET_KEY`                | _(empty)_                                                              | Used for secure session codes                                       |
+| `JWT_SECRET`                     | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32` |
+| `JWT_ALGORITHM`                  | `HS256`                                                                | JWT signing algorithm                                               |
+| `ACCESS_TOKEN_EXPIRE_MINUTES`    | `15`                                                                   | Access token TTL                                                    |
+| `REFRESH_TOKEN_EXPIRE_DAYS`      | `7`                                                                    | Refresh token TTL                                                   |
+| `LOCKOUT_ATTEMPTS`               | `5`                                                                    | Failed login attempts before lockout                                |
+| `LOCKOUT_DURATION_MINUTES`       | `15`                                                                   | Lockout duration after failed attempts                              |
+| `FACE_MATCH_THRESHOLD`           | `0.70`                                                                 | Face-match similarity threshold                                     |
+| `FACE_REVIEW_BAND_LOW`           | `0.65`                                                                 | Lower band requiring manual review                                  |
+| `FACE_EMBEDDING_VERSION`         | `1`                                                                    | Face embedding format version                                       |
+| `DEFAULT_PRESENT_WINDOW_MINUTES` | `5`                                                                    | Default present window for sessions                                 |
+| `DEFAULT_LATE_WINDOW_MINUTES`    | `10`                                                                   | Default late window for sessions                                    |
+| `DEFAULT_GEOFENCE_RADIUS_METERS` | `50`                                                                   | Default classroom geofence radius                                   |
+| `OTP_EXPIRES_MINUTES`            | `5`                                                                    | OTP code TTL                                                        |
+| `BACKUP_STORAGE_TYPE`            | `local`                                                                | Backup backend: `local` or `s3`                                     |
+| `BACKUP_LOCAL_DIR`               | `./backups`                                                            | Local backup directory                                              |
+| `BACKUP_S3_BUCKET`               | _(empty)_                                                              | S3 bucket (when using S3)                                           |
+| `BACKUP_S3_ENDPOINT`             | _(empty)_                                                              | S3-compatible endpoint                                              |
+| `BACKUP_S3_PREFIX`               | `backups/`                                                             | S3 key prefix                                                       |
+| `BACKUP_ENCRYPTION_KEY`          | _(empty)_                                                              | Backup encryption key                                               |
+| `BACKUP_ENCRYPTION_KEY_VERSION`  | `1`                                                                    | Encryption key version                                              |
+| `BACKUP_RETENTION_DAILY`         | `30`                                                                   | Daily backups to retain                                             |
+| `BACKUP_RETENTION_MONTHLY`       | `12`                                                                   | Monthly backups to retain                                           |
+| `BACKUP_EXCLUDE_OTP_CODES`       | `false`                                                                | Exclude OTP codes from backups                                      |
+| `BACKUP_COMPRESSION_LEVEL`       | `6`                                                                    | pg_dump compression level                                           |
+| `RISK_ABSENCE_RATE_HIGH`         | `0.30`                                                                 | Absence rate threshold for high risk scoring                        |
+| `RISK_ABSENCE_RATE_MEDIUM`       | `0.15`                                                                 | Absence rate threshold for medium risk scoring                      |
+| `RISK_STREAK_GAPS_HIGH`          | `3`                                                                    | Consecutive missed sessions that trigger high risk                  |
+| `RISK_SYNC_LAG_HIGH`             | `5`                                                                    | Days of unsynced records that trigger high risk                     |
+| `RISK_TREND_NEGATIVE`            | `-0.05`                                                                | Negative attendance trend slope threshold                           |
+| `RISK_BATCH_CRON`                | `0 2 * * *`                                                            | Cron schedule for the risk-scoring batch job                        |
+| `RISK_BATCH_CHUNK_SIZE`          | `1000`                                                                 | Risk batch chunk size                                               |
+| `RISK_BATCH_WORKERS`             | `4`                                                                    | Concurrent risk batch workers                                       |
+| `RISK_BATCH_DRY_RUN`             | `false`                                                                | Dry-run flag for risk batch job                                     |
+| `ATTACHMENTS_STORAGE_TYPE`       | `local`                                                                | Excuse attachment storage backend                                   |
+| `ATTACHMENTS_MAX_BYTES`          | `5242880`                                                              | Maximum upload size for excuse attachments                          |
+| `TURNSTILE_SECRET_KEY`           | _(empty)_                                                              | Cloudflare Turnstile captcha secret (optional)                      |
+| `BENCHMARK_MODE`                 | `false`                                                                | Enables performance-benchmark endpoint                              |
 
 Frontend (`frontend/.env.example`):
 
@@ -200,15 +200,25 @@ Frontend (`frontend/.env.example`):
 
 ## Verification
 
-```bash
-# Frontend typecheck (runs svelte-kit sync automatically)
-cd frontend && npm run check
+Backend tests:
 
-# Watch mode
+```bash
+docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
+```
+
+Frontend typecheck (runs svelte-kit sync automatically):
+
+```bash
+cd frontend && npm run check
+```
+
+Frontend watch mode:
+
+```bash
 cd frontend && npm run check:watch
 ```
 
-There are no linters, formatters, or backend tests yet.
+There are no linters or formatters configured. The backend suite currently contains 13 unit tests.
 
 ## Deployment
 
@@ -288,10 +298,10 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 Shared infrastructure is complete — **Phase 0** of the [13-phase roadmap](docs/project/roadmap.md) is **[Done]**. The 16-table model layer covers **Phase 1** (Database & Academic Structure), and current work (auth schemas, JWT deps, OTP/MFA/lockout config) is building out **Phase 2** (Auth, Claims & User Management). **Phase 12** is flagged as a **[gap]** in the roadmap.
 
-| Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security, exceptions, base CRUD, pagination, email, validators, 13 enums); `api/deps.py` with `get_db`, `get_current_user` (JWT/HTTPBearer), `require_role(*roles)`; 13 feature slices / 16 model classes; 5 of 7 router stubs mounted under `/api` (auth→`/api/auth`, student→`/api/student`, session→`/api/professor`, attendance→`/api/student`, professor→`/api/professor`; course & enrollment routers exist but are unmounted); 1 baseline Alembic migration `679a319c12d6` creating the 16-table target schema; multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
-| Frontend | Mock-first feature-slice implementation — routes for landing, auth (login/register/forgot-password), student (dashboard/scan), professor (sessions); mock feature services + runes stores (auth, student) + components (DashboardStats, QRScanner); shared types/utils/constants; typed `api/client.ts` (`MOCK = true`) + mock `api/endpoints.ts`; Svelte 5 runes mode forced in `vite.config.ts`                                                                                                                                                                                                                                                                            |
-| Features | Model layer complete for all 13 slices; `auth/schema.py` (Pydantic) and `course_professor/service.py` are the only service/schema layers so far; router stubs exist for 7 slices (course_professor, excuse, analytics, program, sync, system have no router file yet); `liveness` is frontend-only                                                                                                                                                                                                                                                                                                                                                                          |
-| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `mfa_backup_codes`, `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                           |
-| Tests    | Frontend `npm run check` only; backend `tests/` is an empty scaffold                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Frontend | Mock-first feature-slice implementation — routes for landing, auth (login/register/forgot-password), student (dashboard/scan), professor (sessions); mock feature services + runes stores (auth, student) + components (DashboardStats, QRScanner); shared types/utils/constants; typed `api/client.ts` (`MOCK = true`) + mock `api/endpoints.ts`; Svelte 5 runes mode forced in `vite.config.ts`                                                                                                                                                                                                                                                                                                                                                               |
+| Features | Model layer complete for all 13 slices; `auth/schema.py` (Pydantic) and `course_professor/service.py` are the only service/schema layers so far; router stubs exist for 7 slices (course_professor, excuse, analytics, program, sync, system have no router file yet); `liveness` is frontend-only                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `mfa_backup_codes`, `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                                                                                                                                                                                                                                              |
+| Tests    | 13 backend unit tests run through the `api-test` Compose service; frontend verification uses `npm run check`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

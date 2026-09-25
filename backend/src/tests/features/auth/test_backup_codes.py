@@ -11,7 +11,10 @@ from features.auth.service import AuthService
 
 
 def _settings() -> Settings:
-    return Settings(debug=True)
+    return Settings(
+        debug=True,
+        jwt_secret="test-jwt-secret-for-unit-tests-000000",
+    )
 
 
 def _user(**kwargs):
