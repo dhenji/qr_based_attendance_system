@@ -290,10 +290,7 @@ api_router.include_router(program_router)
 
 ### 7. Backend Tests (`backend/src/tests/test_{feature}.py`)
 
-> **Aspirational:** no test runner is configured yet — `backend/src/tests/`
-> exists as empty scaffolding (`__init__.py` only; `pytest`/`httpx` are not
-> dependencies). The example below is the intended shape once a runnable suite
-> is added.
+> The backend suite is run with pytest. The `api-test` Compose service runs the suite in a one-shot container. The example below is the target shape for async API tests; add `pytest-asyncio` and the required database fixtures when implementing those tests.
 
 ```python
 import pytest
@@ -333,7 +330,7 @@ async def test_list_programs(client):
 
 - [ ] Happy-path tests for each endpoint
 - [ ] Edge cases tested (404, validation errors)
-- [ ] Run: `cd backend && python -m pytest src/tests/ -v`
+- [ ] Run: `docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test` or `cd backend && python -m pytest src/tests/ -v`
 
 ---
 

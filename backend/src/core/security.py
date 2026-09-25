@@ -1,3 +1,4 @@
+import base64
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -100,3 +101,13 @@ def hash_otp(otp: str) -> str:
 
 def verify_otp(plain: str, hashed: str) -> bool:
     return verify_password(plain, hashed)
+
+
+# Backup-code utilities
+def generate_backup_code() -> str:
+    raw: bytes = secrets.token_bytes(7)
+    return base64.b32encode(raw).decode("ascii").rstrip("=")[:10]
+
+
+def normalize_backup_code(code: str) -> str:
+    return "".join(ch for ch in code.upper() if ch.isalnum())
