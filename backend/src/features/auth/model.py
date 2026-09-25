@@ -57,3 +57,14 @@ class OtpCodes(CreatedAtMixin, Base):
     )
 
     user: Mapped[User | None] = relationship()
+
+
+class MfaBackupCodes(CreatedAtMixin, Base):
+    __tablename__ = "mfa_backup_codes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(255))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

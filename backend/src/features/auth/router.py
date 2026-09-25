@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, Request, status
 
 from api.deps import AuthServiceDep, CurrentUserDep, OptionalUserDep
 from features.auth.schema import (
+    BackupCodesResponse,
+    BackupCodesSummaryResponse,
     ChangePasswordRequest,
     ForgotPasswordStep1Request,
     ForgotPasswordStep2Request,
@@ -163,6 +165,28 @@ async def mfa_setup(
     current_user: CurrentUserDep, service: AuthServiceDep
 ) -> MFASetupResponse:
     return await service.setup_mfa(current_user)
+
+
+@router.post(
+    "/mfa/backup-codes",
+    response_model=BackupCodesResponse,
+    summary="Generate 10 backup codes (returned plaintext once)",
+)
+async def generate_backup_codes(
+    current_user: CurrentUserDep, service: AuthServiceDep
+) -> BackupCodesResponse:
+    return await service.generate_backup_codes(current_user)
+
+
+@router.get(
+    "/mfa/backup-codes",
+    response_model=BackupCodesSummaryResponse,
+    summary="Backup-code summary (total/remaining, never returns hashes)",
+)
+async def list_backup_codes(
+    current_user: CurrentUserDep, service: AuthServiceDep
+) -> BackupCodesSummaryResponse:
+    return await service.list_backup_codes(current_user)
 
 
 @router.post(

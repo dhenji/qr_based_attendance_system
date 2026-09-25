@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,13 +15,20 @@ from core.security import (
     create_refresh_token,
     decode_access_token,
     extract_user_id,
+    generate_backup_code,
     generate_otp,
     hash_otp,
     hash_password,
+    normalize_backup_code,
 )
 from core.security import verify_otp as verify_otp_hash
 from core.security import verify_password
-from features.auth.constants import SECURITY_RECOVERY_MAX_ATTEMPTS
+from features.auth.constants import (
+    BACKUP_CODE_COUNT,
+    BACKUP_CODE_GROUPS,
+    BACKUP_CODE_LENGTH,
+    SECURITY_RECOVERY_MAX_ATTEMPTS,
+)
 from features.auth.exceptions import (
     AccountLockedException,
     AmbiguousAccountException,
@@ -35,8 +43,10 @@ from features.auth.exceptions import (
     UnrecognizedEmailException,
     UserAlreadyClaimedException,
 )
-from features.auth.model import OtpCodes, User
+from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.auth.schema import (
+    BackupCodesResponse,
+    BackupCodesSummaryResponse,
     MeResponse,
     MFASetupResponse,
     SecurityQuestionResponse,
@@ -61,6 +71,8 @@ class AuthService:
         self._otp: BaseCRUD[OtpCodes] = BaseCRUD(OtpCodes, session)
         self._student: BaseCRUD[Student] = BaseCRUD(Student, session)
         self._professor: BaseCRUD[Professor] = BaseCRUD(Professor, session)
+
+        self._backup_codes: BaseCRUD[MfaBackupCodes] = BaseCRUD(MfaBackupCodes, session)
 
     async def request_otp(
         self, email: str, purpose: OtpPurpose = OtpPurpose.CLAIM
@@ -291,6 +303,78 @@ class AuthService:
             secret=secret, qr_url=otpauth_url, manual_entry_key=secret
         )
 
+    async def generate_backup_codes(self, user: User) -> BackupCodesResponse:
+        now: datetime = datetime.now(timezone.utc)
+
+        stale: Sequence[MfaBackupCodes] = (
+            await self._session.scalars(
+                select(MfaBackupCodes).where(
+                    MfaBackupCodes.user_id == user.id, MfaBackupCodes.used_at.is_(None)
+                )
+            )
+        ).all()
+
+        for record in stale:
+            record.used_at = now
+
+        plaintext: list[str] = []
+        for _ in range(BACKUP_CODE_COUNT):
+            code: str = generate_backup_code()
+            plaintext.append(self._format_backup_code(code))
+
+            await self._backup_codes.create(
+                user_id=user.id, code_hash=hash_password(code)
+            )
+
+        return BackupCodesResponse(codes=plaintext, remaining=BACKUP_CODE_COUNT)
+
+    async def list_backup_codes(self, user: User) -> BackupCodesSummaryResponse:
+        rows: Sequence[MfaBackupCodes] = (
+            await self._session.scalars(
+                select(MfaBackupCodes)
+                .where(MfaBackupCodes.user_id == user.id)
+                .order_by(MfaBackupCodes.created_at.desc())
+            )
+        ).all()
+
+        if not rows:
+            return BackupCodesSummaryResponse(
+                total=0, remaining=0, last_generated_at=None
+            )
+
+        latest_generated_at: datetime = rows[0].created_at
+        latest_batch: list[MfaBackupCodes] = [
+            record for record in rows if record.created_at == latest_generated_at
+        ]
+
+        return BackupCodesSummaryResponse(
+            total=len(latest_batch),
+            remaining=sum(1 for r in latest_batch if r.used_at is None),
+            last_generated_at=latest_generated_at,
+        )
+
+    async def verify_backup_code(self, user: User, code: str) -> bool:
+        normalized: str = normalize_backup_code(code)
+
+        if len(normalized) != BACKUP_CODE_LENGTH:
+            return False
+
+        rows: Sequence[MfaBackupCodes] = (
+            await self._session.scalars(
+                select(MfaBackupCodes).where(
+                    MfaBackupCodes.user_id == user.id, MfaBackupCodes.used_at.is_(None)
+                )
+            )
+        ).all()
+
+        for record in rows:
+            if verify_password(normalized, record.code_hash):
+                record.used_at = datetime.now(timezone.utc)
+                await self._session.flush()
+                return True
+
+        return False
+
     async def verify_mfa(
         self, code: str, preauth_token: str | None = None, user: User | None = None
     ) -> TokenResponse:
@@ -307,7 +391,13 @@ class AuthService:
             if user is None or not user.is_active:
                 raise InvalidCredentialsException()
 
-        if user is None or not user.mfa_secret or not self._valid_mfa_code(user, code):
+        if user is None:
+            raise MfaVerifyException()
+
+        is_totp: bool = bool(user.mfa_secret) and self._valid_mfa_code(user, code)
+        is_backup: bool = not is_totp and await self.verify_backup_code(user, code)
+
+        if not is_totp and not is_backup:
             raise MfaVerifyException()
 
         if not user.mfa_enabled:
@@ -383,3 +473,14 @@ class AuthService:
     @staticmethod
     def _normalize_answer(answer: str) -> str:
         return answer.strip().casefold()
+
+    @staticmethod
+    def _format_backup_code(code: str) -> str:
+        chunks: list[str] = []
+        index: int = 0
+
+        for size in BACKUP_CODE_GROUPS:
+            chunks.append(code[index : index + size])
+            index += size
+
+        return "-".join(chunks)
