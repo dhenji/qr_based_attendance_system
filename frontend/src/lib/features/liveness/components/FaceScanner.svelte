@@ -1,18 +1,20 @@
 <script lang="ts">
 	// FaceScanner
 	// Liveness check via MediaPipe FaceLandmarker (478 landmarks).
-	// Tracks the user's blink in real time and fires `onBlink` once a single
-	// blink is confirmed (D31: Eye Aspect Ratio below 0.25 across N frames).
 	import { onDestroy } from 'svelte';
-	import type { NormalizedLandmark, DrawingOptions } from '@mediapipe/tasks-vision';
+	import type { DrawingOptions, Matrix, NormalizedLandmark } from '@mediapipe/tasks-vision';
 	import { initFaceModel, type LoadedFaceModel } from '$lib/features/liveness/model';
+	import type { LivenessEvidence } from '$lib/shared/types';
 
 	interface FaceConnection {
 		start: number;
 		end: number;
 	}
 
-	let { active, onBlink } = $props<{ active: boolean; onBlink: () => void }>();
+	let { active, onComplete } = $props<{
+		active: boolean;
+		onComplete: (evidence: LivenessEvidence) => void;
+	}>();
 
 	let stage: HTMLDivElement;
 	let video: HTMLVideoElement;
@@ -27,7 +29,11 @@
 		| 'detecting'
 		| 'passed';
 
+	type ChallengeStage = 'blink' | 'left' | 'left_center' | 'right' | 'right_center' | 'complete';
+
 	let status = $state<FaceStatus>('initializing');
+	let challengeStage = $state<ChallengeStage>('blink');
+	let challengeMessage = $state('');
 	let error = $state<string | null>(null);
 
 	// Face-guide oval position/size in normalized video space (0..1).
@@ -73,6 +79,17 @@
 	let lastVideoTime = -1;
 	let closedFrames = 0;
 	let blinkFired = false;
+	let earSamples: number[] = [];
+	let yawSamples: number[] = [];
+	let yawBaseline: number | null = null;
+	let yawSource: 'matrix' | 'landmarks' | null = null;
+	let lastYaw = 0;
+	let peakLeftYaw = 0;
+	let peakRightYaw = 0;
+	let poseHoldFrames = 0;
+	let centerHoldFrames = 0;
+	let stageStartedAt = 0;
+	let completionSent = false;
 	// EMA-smoothed EAR; damps single-frame landmark jitter.
 	let smoothedEar = 1;
 	// Per-user open-eye baseline and closing-phase bookkeeping for blink math.
@@ -82,6 +99,7 @@
 
 	interface FaceResult {
 		faceLandmarks?: NormalizedLandmark[][];
+		facialTransformationMatrixes?: Matrix[];
 	}
 
 	// Blink math (Eye Aspect Ratio)
@@ -94,6 +112,13 @@
 	const MIN_CLOSED_FRAMES = 2; // min sampled closure frames
 	const MAX_BLINK_FRAMES = 20; // ~0.7s: longer closure = squint, reset
 	const ARMING_FRAMES = 8; // idle frames before the baseline is trusted
+	const POSE_HOLD_FRAMES = 8;
+	const CENTER_HOLD_FRAMES = 5;
+	const LEFT_YAW_THRESHOLD = -15;
+	const RIGHT_YAW_THRESHOLD = 15;
+	const CENTER_YAW_THRESHOLD = 5;
+	const STAGE_TIMEOUT_MS = 12000;
+	const MAX_POSE_SAMPLES = 120;
 
 	// Euclidean distance between two landmarks.
 	const pointDist = (lm: Array<{ x: number; y: number }>, i: number, j: number) =>
@@ -116,10 +141,10 @@
 
 	// Elliptical containment test: face is "in the guide" when its center
 	// sits inside the oval. Blink detection is skipped otherwise.
-	const isInsideGuide = (lm: Array<{ x: number; y: number }>) => {
+	const isInsideGuide = (lm: Array<{ x: number; y: number }>, scale = 1) => {
 		const c = faceCenter(lm);
-		const dx = (c.x - GUIDE_CX) / GUIDE_RX;
-		const dy = (c.y - GUIDE_CY) / GUIDE_RY;
+		const dx = (c.x - GUIDE_CX) / (GUIDE_RX * scale);
+		const dy = (c.y - GUIDE_CY) / (GUIDE_RY * scale);
 		return dx * dx + dy * dy <= 1;
 	};
 
@@ -133,8 +158,55 @@
 		return IPD_M / (2 * eyeSpread * Math.tan(halfFovRad));
 	};
 
+	const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+	const yawFromMatrix = (matrix: Matrix | undefined) => {
+		if (!matrix || matrix.rows < 3 || matrix.columns < 3) return null;
+		const data = Array.from(matrix.data ?? []);
+		const at = (row: number, column: number) => Number(data[column * matrix.rows + row] ?? 0);
+		const rotation = [
+			[at(0, 0), at(0, 1), at(0, 2)],
+			[at(1, 0), at(1, 1), at(1, 2)],
+			[at(2, 0), at(2, 1), at(2, 2)]
+		];
+		for (let column = 0; column < 3; column += 1) {
+			const scale = Math.hypot(
+				rotation[0][column],
+				rotation[1][column],
+				rotation[2][column]
+			) || 1;
+			rotation[0][column] /= scale;
+			rotation[1][column] /= scale;
+			rotation[2][column] /= scale;
+		}
+		const yaw = Math.asin(clamp(-rotation[2][0], -1, 1));
+		return -(yaw * 180) / Math.PI;
+	};
+
+	const yawFromLandmarks = (lm: Array<{ x: number; y: number }>) => {
+		const eyeSpan = Math.abs(lm[263].x - lm[33].x);
+		if (eyeSpan < 0.001) return null;
+		const eyeCenter = (lm[33].x + lm[263].x) / 2;
+		return -((lm[1].x - eyeCenter) / eyeSpan) * 45;
+	};
+
+	const relativeYaw = (result: FaceResult, lm: Array<{ x: number; y: number }>) => {
+		const matrixYaw = yawFromMatrix(result.facialTransformationMatrixes?.[0]);
+		const source = matrixYaw === null ? 'landmarks' : 'matrix';
+		const rawYaw = matrixYaw ?? yawFromLandmarks(lm);
+		if (rawYaw === null) return null;
+		if (yawSource !== source) {
+			yawSource = source;
+			yawBaseline = null;
+		}
+		if (yawBaseline === null) yawBaseline = rawYaw;
+		return rawYaw - yawBaseline;
+	};
+
 	// Per-status instruction shown to the user before detection begins.
-	const preHintText = $derived(countdown > 0 ? `Get ready \u2026 ${countdown}` : 'Face model loading\u2026');
+	const preHintText = $derived(
+		countdown > 0 ? `${challengeMessage || 'Get ready'} \u2026 ${countdown}` : 'Face model loading\u2026'
+	);
 
 	// Per-status instruction shown to the user.
 	const hintText = $derived.by(() => {
@@ -154,9 +226,22 @@
 			case 'center_face':
 				return 'Center your face in the oval';
 			case 'looking':
-				return 'Look at the camera and blink once';
+				switch (challengeStage) {
+					case 'left':
+						return 'Turn your head to your left';
+					case 'left_center':
+						return 'Return your head to center';
+					case 'right':
+						return 'Turn your head to your right';
+					case 'right_center':
+						return 'Return your head to center';
+					case 'complete':
+						return 'Verified';
+					default:
+						return 'Look at the camera and blink once';
+				}
 			case 'detecting':
-				return 'Eyes closing \u2014 blink fully\u2026';
+				return challengeStage === 'blink' ? 'Eyes closing \u2014 blink fully\u2026' : 'Hold still\u2026';
 			case 'passed':
 				return 'Verified';
 			default:
@@ -195,8 +280,9 @@
 		}
 	};
 
-	const startCountdown = () => {
+	const startCountdown = (message = '') => {
 		clearCountdown();
+		challengeMessage = message;
 		beginDetection = false;
 		countdown = 3;
 		countdownTimerId = setInterval(() => {
@@ -204,8 +290,35 @@
 			if (countdown <= 0) {
 				clearCountdown();
 				beginDetection = true;
+				challengeMessage = '';
+				stageStartedAt = performance.now();
+				status = 'looking';
 			}
 		}, 1000);
+	};
+
+	const resetChallenge = () => {
+		challengeStage = 'blink';
+		challengeMessage = '';
+		blinkFired = false;
+		closedFrames = 0;
+		earSamples = [];
+		smoothedEar = 1;
+		earBaseline = null;
+		idleFrames = 0;
+		blinkMinEar = 1;
+		yawSamples = [];
+		yawBaseline = null;
+		yawSource = null;
+		lastYaw = 0;
+		peakLeftYaw = 0;
+		peakRightYaw = 0;
+		poseHoldFrames = 0;
+		centerHoldFrames = 0;
+		stageStartedAt = 0;
+		completionSent = false;
+		status = 'no_face';
+		startCountdown('Challenge timed out — starting again');
 	};
 
 	// start
@@ -213,12 +326,25 @@
 	// then loop detection per frame.
 	const start = async () => {
 		error = null;
+		challengeStage = 'blink';
+		challengeMessage = '';
 		blinkFired = false;
 		closedFrames = 0;
+		earSamples = [];
 		smoothedEar = 1;
 		earBaseline = null;
 		idleFrames = 0;
 		blinkMinEar = 1;
+		yawSamples = [];
+		yawBaseline = null;
+		yawSource = null;
+		lastYaw = 0;
+		peakLeftYaw = 0;
+		peakRightYaw = 0;
+		poseHoldFrames = 0;
+		centerHoldFrames = 0;
+		stageStartedAt = 0;
+		completionSent = false;
 		lastVideoTime = -1;
 		status = 'initializing';
 		beginDetection = false;
@@ -252,7 +378,7 @@
 					canvas.width = video.videoWidth;
 					canvas.height = video.videoHeight;
 					stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-if (!drawing && drawingCtor) {
+					if (!drawing && drawingCtor) {
 					drawing = new drawingCtor(canvas.getContext('2d') as CanvasRenderingContext2D);
 				}
 				}
@@ -292,87 +418,164 @@ if (!drawing && drawingCtor) {
 		drawing.drawConnectors(lm, rightEye, { color: '#4f9cf9', lineWidth: 2 });
 	};
 
-	// evaluate
-	// Blink state machine: smooth the EAR, then require a genuine close -> open
-	// transition before firing. A blink closes for a few frames and reopens;
-	// a held squint exceeds MAX_BLINK_FRAMES and resets without ever firing.
 	const evaluate = (result: FaceResult) => {
+		if (beginDetection && stageStartedAt > 0 && performance.now() - stageStartedAt > STAGE_TIMEOUT_MS) {
+			resetChallenge();
+			return;
+		}
+
 		if (!result.faceLandmarks?.length) {
 			closedFrames = 0;
 			earBaseline = null;
 			idleFrames = 0;
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
 			status = 'no_face';
 			return;
 		}
 		const lm = result.faceLandmarks[0];
-
-		// Reject faces outside the guide or too far away — never analyze those.
-		if (!isInsideGuide(lm)) {
+		const guideScale = challengeStage === 'blink' ? 1 : 1.25;
+		if (!isInsideGuide(lm, guideScale)) {
 			closedFrames = 0;
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
 			status = 'center_face';
 			return;
 		}
 		if (faceDistanceM(lm) > MAX_FACE_DISTANCE_M) {
 			closedFrames = 0;
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
 			status = 'too_far';
 			return;
 		}
 
+		const yaw = relativeYaw(result, lm);
+		if (yaw !== null) {
+			lastYaw = yaw;
+			if (yawSamples.length >= MAX_POSE_SAMPLES) yawSamples.shift();
+			yawSamples.push(Number(yaw.toFixed(2)));
+			if (yaw < 0) peakLeftYaw = Math.min(peakLeftYaw, yaw);
+			if (yaw > 0) peakRightYaw = Math.max(peakRightYaw, yaw);
+		}
+
 		const avgEar = (eyeEar(lm, LEFT_EYE) + eyeEar(lm, RIGHT_EYE)) / 2;
-		// Light smoothing damps jitter without filtering out a real blink.
+		if (earSamples.length >= 120) earSamples.shift();
+		earSamples.push(Number(avgEar.toFixed(4)));
 		smoothedEar = smoothedEar * (1 - EYE_SMOOTH) + avgEar * EYE_SMOOTH;
 
-		// Idle: adapt the open-eye baseline, then wait for a deep enough dip.
-		if (closedFrames === 0) {
-			idleFrames += 1;
-			if (earBaseline === null) {
-				earBaseline = smoothedEar;
-			} else {
-				earBaseline = earBaseline * (1 - 0.08) + smoothedEar * 0.08;
+		if (challengeStage === 'blink') {
+			if (closedFrames === 0) {
+				idleFrames += 1;
+				if (earBaseline === null) {
+					earBaseline = smoothedEar;
+				} else {
+					earBaseline = earBaseline * (1 - 0.08) + smoothedEar * 0.08;
+				}
+				if (idleFrames < ARMING_FRAMES) {
+					status = 'looking';
+					return;
+				}
+				if (smoothedEar < earBaseline * BLINK_DEPTH) {
+					closedFrames = 1;
+					blinkMinEar = smoothedEar;
+					status = 'detecting';
+				} else {
+					status = 'looking';
+				}
+				return;
 			}
-			// Give the baseline a couple frames to settle before trusting it.
-			if (idleFrames < ARMING_FRAMES) {
+
+			blinkMinEar = Math.min(blinkMinEar, smoothedEar);
+			closedFrames += 1;
+			if (closedFrames > MAX_BLINK_FRAMES) {
+				earBaseline = smoothedEar;
+				idleFrames = 0;
+				closedFrames = 0;
+				blinkMinEar = 1;
 				status = 'looking';
 				return;
 			}
-			if (smoothedEar < earBaseline * BLINK_DEPTH) {
-				closedFrames = 1;
-				blinkMinEar = smoothedEar;
-				status = 'detecting';
-			} else {
+			if (smoothedEar > earBaseline! * RECOVER_LEVEL) {
+				const isBlink = closedFrames >= MIN_CLOSED_FRAMES && blinkMinEar <= earBaseline! * BLINK_DEPTH;
+				earBaseline = smoothedEar;
+				idleFrames = 0;
+				closedFrames = 0;
+				blinkMinEar = 1;
 				status = 'looking';
+				if (isBlink && !blinkFired) {
+					blinkFired = true;
+					challengeStage = 'left';
+					poseHoldFrames = 0;
+					centerHoldFrames = 0;
+					stageStartedAt = performance.now();
+				}
+				return;
 			}
+			status = 'detecting';
 			return;
 		}
 
-		// Closing phase: hold while still below the recovery level, tracking the
-		// deepest point so even a brief/partial blink counts once it reopens.
-		blinkMinEar = Math.min(blinkMinEar, smoothedEar);
-		closedFrames += 1;
-		if (closedFrames > MAX_BLINK_FRAMES) {
-			// Stayed closed far too long to be a blink (squint) — drop it.
-			earBaseline = smoothedEar;
-			idleFrames = 0;
-			closedFrames = 0;
-			blinkMinEar = 1;
+		if (yaw === null) {
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
 			status = 'looking';
 			return;
 		}
-		if (smoothedEar > earBaseline! * RECOVER_LEVEL) {
-			// Reopened: a blink only if it truly dipped and lasted long enough.
-			const isBlink = closedFrames >= MIN_CLOSED_FRAMES && blinkMinEar <= earBaseline! * BLINK_DEPTH;
-			earBaseline = smoothedEar;
-			idleFrames = 0;
-			closedFrames = 0;
-			blinkMinEar = 1;
-			status = isBlink ? 'passed' : 'looking';
-			if (isBlink && !blinkFired) {
-				blinkFired = true;
-				onBlink();
-			}
+
+		const isCenter = Math.abs(yaw) <= CENTER_YAW_THRESHOLD;
+		if (isCenter) {
+			centerHoldFrames += 1;
+			poseHoldFrames = 0;
+		} else {
+			centerHoldFrames = 0;
+			const meetsTurn =
+				(challengeStage === 'left' && yaw <= LEFT_YAW_THRESHOLD) ||
+				(challengeStage === 'right' && yaw >= RIGHT_YAW_THRESHOLD);
+			poseHoldFrames = meetsTurn ? poseHoldFrames + 1 : 0;
+		}
+		status = poseHoldFrames > 0 || centerHoldFrames > 0 ? 'detecting' : 'looking';
+
+		if (challengeStage === 'left' && poseHoldFrames >= POSE_HOLD_FRAMES) {
+			challengeStage = 'left_center';
+			status = 'looking';
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
+			stageStartedAt = performance.now();
 			return;
 		}
-		status = 'detecting';
+		if (challengeStage === 'right' && poseHoldFrames >= POSE_HOLD_FRAMES) {
+			challengeStage = 'right_center';
+			status = 'looking';
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
+			stageStartedAt = performance.now();
+			return;
+		}
+		if (
+			(challengeStage === 'left_center' || challengeStage === 'right_center') &&
+			centerHoldFrames >= CENTER_HOLD_FRAMES
+		) {
+			challengeStage = 'complete';
+			status = 'passed';
+			if (!completionSent) {
+				completionSent = true;
+				onComplete({
+					blinkDetected: true,
+					headTurnLeft: true,
+					headTurnRight: true,
+					earSamples: [...earSamples],
+					pnpEvidence: {
+						source: yawSource ?? 'landmarks',
+						baseline_yaw: Number((yawBaseline ?? 0).toFixed(2)),
+						yaw: Number(lastYaw.toFixed(2)),
+						peak_left_yaw: Number(peakLeftYaw.toFixed(2)),
+						peak_right_yaw: Number(peakRightYaw.toFixed(2)),
+						yaw_samples: [...yawSamples],
+					},
+				});
+			}
+		}
 	};
 
 	// stop
@@ -383,6 +586,9 @@ if (!drawing && drawingCtor) {
 		rafId = 0;
 		countdown = 0;
 		beginDetection = false;
+		blinkFired = false;
+		closedFrames = 0;
+		earSamples = [];
 		stream?.getTracks().forEach((t) => t.stop());
 		stream = null;
 		if (video) video.srcObject = null;

@@ -138,7 +138,7 @@
 		align-items: center;
 		gap: 0.875rem;
 		padding: 0.75rem 1.5rem;
-		background: #1e293b;
+		background: #1e3a5f;
 		box-shadow: 0 2px 12px rgba(15, 23, 42, 0.25);
 	}
 

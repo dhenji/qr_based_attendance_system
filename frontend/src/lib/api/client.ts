@@ -25,9 +25,14 @@ export class APIError extends Error {
 
 // API response error shape (matches backend contract)
 export interface APIResponseError {
-	code: string;
-	message: string;
+	code?: string;
+	message?: string;
 	field?: string;
+	detail?: {
+		code?: string;
+		message?: string;
+		field?: string;
+	};
 }
 
 // Auth token injector — set via the auth store when a user logs in
@@ -49,7 +54,7 @@ const fetchWithAuth = async (
 	headers.set('Content-Type', 'application/json');
 
 	const url = typeof input === 'string' ? input : input.toString();
-	const response = await fetch(`${BASE_URL}${url}`, {
+	const response = await fetch(url, {
 		...init,
 		headers,
 		credentials: 'include',
@@ -93,7 +98,8 @@ const apiCall = async <T>(
 	});
 
 	if (!response.ok) {
-		const errorData: APIResponseError = await response.json();
+		const errorBody = (await response.json().catch(() => ({}))) as APIResponseError;
+		const errorData = errorBody.detail ?? errorBody;
 		throw new APIError(
 			errorData.code || 'UNKNOWN_ERROR',
 			errorData.message || 'Request failed',

@@ -4,7 +4,6 @@
 	// successful decode hands the raw code back via the `onScanned` callback.
 	import { onDestroy } from 'svelte';
 	import { Html5Qrcode } from 'html5-qrcode';
-	import { initiateQRScan } from '$lib/features/liveness/service';
 
 	let { active, onScanned } = $props<{
 		active: boolean;
@@ -38,8 +37,6 @@
 			if (!qrCode) {
 				qrCode = new Html5Qrcode('qr-reader');
 			}
-			// Auto-initiate scan flow
-			await initiateQRScan(1);
 			// Rear camera, 10fps, 250x250 scan box. The first decoded string
 			// stops the scanner and reports the code to the parent page.
 			await qrCode.start(
