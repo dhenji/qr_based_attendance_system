@@ -47,6 +47,28 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  api-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: runtime
+    profiles:
+      - test
+    working_dir: /app
+    environment:
+      DEBUG: "true"
+      PYTHONPATH: /app/src
+    volumes:
+      - ./backend/src:/app/src
+    command:
+      - python
+      - -m
+      - pytest
+      - -p
+      - no:cacheprovider
+      - src/tests
+      - -v
+
   app:
     build:
       context: ./frontend
