@@ -7,35 +7,17 @@ import { isWithinGeofence } from '$lib/shared/utils/geo';
 // MOCK flag — swap to false when backend student endpoints land
 const MOCK = true;
 
-// Mock data
-// Hard-coded, face-enrolled student so the dashboard renders immediately.
-const MOCK_STUDENT: Student = {
-	id: 'student-1',
-	userId: 'user-1',
-	studentNumber: 'STU-001',
-	firstName: 'John',
-	middleName: 'Michael',
-	lastName: 'Doe',
-	programCode: 'BSIT',
-	yearLevelLabel: '3rd',
-	section: 'A',
-	faceEnrolled: true,
-	isActive: true,
-};
-
 // Profile
-// Fetch the current user's student profile.
-export const getProfile = async (): Promise<Student> => {
-	if (MOCK) return MOCK_STUDENT;
-	return MOCK_STUDENT;
+// Fetch the current user's student profile. Returns null until the backend
+// GET /student/profile endpoint lands — no fabricated identity data.
+export const getProfile = async (): Promise<Student | null> => {
+	return null;
 };
 
 // Partial profile updates (merged over the existing record).
-export const updateProfile = async (updates: Partial<Student>): Promise<Student> => {
-	if (MOCK) {
-		return { ...MOCK_STUDENT, ...updates };
-	}
-	return { ...MOCK_STUDENT, ...updates };
+// Read-only per D32; returns null until the backend supports profile edits.
+export const updateProfile = async (_updates: Partial<Student>): Promise<Student | null> => {
+	return null;
 };
 
 // Schedule — no subjects enrolled yet (empty state)

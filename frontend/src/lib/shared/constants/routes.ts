@@ -1,9 +1,11 @@
 // routes.ts
 // Central URL map so pages navigate with named constants instead of raw strings.
 export const Routes = {
+  HOME: "/",
   AUTH: "/auth",
   LOGIN: "/auth/login",
   REGISTER: "/auth/register",
+  FORGOT_PASSWORD: "/auth/forgot-password",
   STUDENT: "/student",
   DASHBOARD: "/student/dashboard",
   SCAN: "/student/scan",

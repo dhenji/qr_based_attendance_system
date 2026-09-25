@@ -9,9 +9,9 @@
 		{ label: 'Dashboard', path: Routes.DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Scan', path: Routes.SCAN, enabled: true, icon: 'scan' },
 		{ label: 'History', path: Routes.HISTORY, enabled: true, icon: 'history' },
-		{ label: 'Schedule', path: Routes.SCHEDULE, enabled: false, icon: 'schedule' },
-		{ label: 'Profile', path: Routes.PROFILE, enabled: false, icon: 'profile' },
-		{ label: 'Settings', path: Routes.SETTINGS, enabled: false, icon: 'settings' },
+		{ label: 'Schedule', path: Routes.SCHEDULE, enabled: true, icon: 'schedule' },
+		{ label: 'Profile', path: Routes.PROFILE, enabled: true, icon: 'profile' },
+		{ label: 'Settings', path: Routes.SETTINGS, enabled: true, icon: 'settings' },
 	] as const;
 
 	const iconPaths: Record<string, string> = {
@@ -27,8 +27,14 @@
 	};
 
 	let collapsed = $state(true);
+	let logoutOpen = $state(false);
 
 	const isActive = (path: string) => page.url.pathname === path;
+
+	const onConfirmLogout = async () => {
+		logoutOpen = false;
+		await doLogout();
+	};
 </script>
 
 <div class="shell">
@@ -58,7 +64,7 @@
 			</svg>
 		</button>
 
-		<button class="icon-btn logout" data-testid="logout" onclick={doLogout} aria-label="Logout">
+		<button class="icon-btn logout" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 				<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
 				<path d="m16 17 5-5-5-5" />
@@ -99,6 +105,21 @@
 		</main>
 	</div>
 </div>
+
+<svelte:window onkeydown={(e) => { if (logoutOpen && e.key === 'Escape') logoutOpen = false; }} />
+
+{#if logoutOpen}
+	<div class="modal-overlay" role="presentation">
+		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title" tabindex={-1}>
+			<h2 id="logout-dialog-title" class="modal-title">Log out?</h2>
+			<p class="modal-text">Are you sure you want to logout?</p>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (logoutOpen = false)}>Cancel</button>
+				<button class="btn btn-danger" data-testid="confirm-logout" onclick={onConfirmLogout}>Logout</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.shell {
@@ -255,6 +276,76 @@
 		max-width: 1100px;
 		margin-inline: auto;
 		padding: 2rem 2rem 3rem;
+	}
+
+	.modal-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		background: rgba(15, 23, 42, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+	}
+
+	.modal {
+		width: 100%;
+		max-width: 360px;
+		background: white;
+		border-radius: 12px;
+		box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+		padding: 1.75rem 1.5rem;
+		text-align: center;
+		font-family: system-ui, sans-serif;
+	}
+
+	.modal-title {
+		margin: 0 0 0.375rem;
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: #1e293b;
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: #475569;
+	}
+
+	.modal-actions {
+		display: flex;
+		gap: 0.75rem;
+		justify-content: center;
+	}
+
+	.btn {
+		padding: 0.625rem 1.25rem;
+		border: none;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		font-family: system-ui, sans-serif;
+		cursor: pointer;
+		transition: background 0.15s ease, color 0.15s ease;
+	}
+
+	.btn-ghost {
+		background: #f1f5f9;
+		color: #334155;
+	}
+
+	.btn-ghost:hover {
+		background: #e2e8f0;
+	}
+
+	.btn-danger {
+		background: #dc2626;
+		color: white;
+	}
+
+	.btn-danger:hover {
+		background: #b91c1c;
 	}
 
 	@media (max-width: 640px) {

@@ -9,7 +9,7 @@
 	import { Routes } from '$lib/shared/constants/routes';
 
 	let sessionCode = $state('');
-	let step = $state<'entry' | 'liveness'>('entry');
+	let step = $state<'entry' | 'qr' | 'liveness'>('entry');
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
@@ -33,7 +33,7 @@
 
 	const handleVerifyCode = () => {
 		if (!sessionCode) return;
-		startLiveness();
+		goToQr();
 	};
 
 	const handleScanned = (code: string) => {
@@ -41,15 +41,34 @@
 		startLiveness();
 	};
 
+	// Step 1 -> 2: open the QR scanner, guarded by the camera permission modal.
+	const goToQr = () => {
+		qrActive = false;
+		livenessActive = false;
+		step = 'qr';
+		showPermission = true;
+	};
+
+	// Step 2 -> 3: QR decoded, move on to the face liveness check.
 	const startLiveness = () => {
 		qrActive = false;
 		step = 'liveness';
 		livenessActive = true;
 	};
 
-	const backToEntry = () => {
-		step = 'entry';
+	// Step 3 -> 2: reopen the QR camera (permission already granted once).
+	const backToQr = () => {
 		livenessActive = false;
+		step = 'qr';
+		qrActive = true;
+	};
+
+	// Step 2 -> 1: release the camera and return to manual code entry.
+	const backToEntry = () => {
+		qrActive = false;
+		livenessActive = false;
+		showPermission = false;
+		step = 'entry';
 	};
 
 	const handleBlink = () => {
@@ -113,6 +132,19 @@
 				</div>
 			</section>
 
+			<p class="footnote">
+				Verify the session code to open the QR scanner, then face liveness (blink).
+			</p>
+		</div>
+	{:else if step === 'qr'}
+		<div class="page">
+			<div class="page-header">
+				<button class="back-btn" onclick={backToEntry}>
+					← <span>Back</span>
+				</button>
+				<h1>QR Scanner</h1>
+			</div>
+
 			<!-- QR Camera Scanner -->
 			<section class="card">
 				<h2 class="section-title">QR Camera Scanner</h2>
@@ -147,21 +179,18 @@
 					>
 						{qrActive ? 'Stop Camera' : 'Start Camera'}
 					</button>
-					<button class="btn-outline" onclick={() => goto(Routes.SCAN)}>
-						Scan My ID Card
-					</button>
 				</div>
-			</section>
 
-			<p class="footnote">
-				After scanning a QR or verifying the session code, face liveness (blink) activates automatically.
-			</p>
+				<p class="footnote">
+					Scan the QR code shown on the projector — face liveness (blink) opens automatically.
+				</p>
+			</section>
 		</div>
 	{:else}
 		<!-- Face Liveness step: camera with face/eye outline + blink detection -->
 		<div class="page">
 			<div class="page-header">
-				<button class="back-btn" onclick={backToEntry}>
+				<button class="back-btn" onclick={backToQr}>
 					← <span>Back</span>
 				</button>
 				<h1>Face Liveness</h1>
@@ -194,7 +223,7 @@
 				>
 					Allow Camera
 				</button>
-				<button class="modal-link" onclick={() => (showPermission = false)}>
+				<button class="modal-link" onclick={backToEntry}>
 					No thanks, enter manually
 				</button>
 			</div>
@@ -342,7 +371,6 @@
 
 	.btn-primary,
 	.btn-secondary,
-	.btn-outline,
 	.btn-danger {
 		padding: 0.625rem 1.125rem;
 		border-radius: 8px;
@@ -374,16 +402,6 @@
 	}
 
 	.btn-secondary:hover {
-		background: #f1f5f9;
-	}
-
-	.btn-outline {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #1e3a5f;
-	}
-
-	.btn-outline:hover {
 		background: #f1f5f9;
 	}
 
