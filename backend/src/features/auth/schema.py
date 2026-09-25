@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from pydantic.fields import Field
 
 from features.auth.constants import (
+    BACKUP_CODE_MAX_INPUT_LENGTH,
     OTP_CODE_LENGTH,
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
@@ -24,7 +25,9 @@ class OTPRequest(BaseModel):
 
 
 class _CodeRequest(BaseModel):
-    code: str = Field(min_length=OTP_CODE_LENGTH, max_length=OTP_CODE_LENGTH)
+    code: str = Field(
+        min_length=OTP_CODE_LENGTH, max_length=BACKUP_CODE_MAX_INPUT_LENGTH
+    )
 
 
 class _OTPCodeRequest(BaseModel):
@@ -129,6 +132,17 @@ class MFAVerifyRequest(_CodeRequest):
     preauth_token: str | None = (
         None  # present during login exchange, absent during setup
     )
+
+
+class BackupCodesResponse(BaseModel):
+    codes: list[str]
+    remaining: int
+
+
+class BackupCodesSummaryResponse(BaseModel):
+    total: int
+    remaining: int
+    last_generated_at: datetime | None = None
 
 
 class UserResponse(BaseModel):
