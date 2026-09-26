@@ -1,0 +1,803 @@
+<script lang="ts">
+	import { page } from '$app/state';
+	import AppIcon from '$lib/components/AppIcon.svelte';
+	import { PROFESSOR_COURSES, type ProfessorCourse } from '$lib/features/professor/mock';
+	import { openSession, SESSION_CODE_SAMPLE } from '$lib/features/session/service';
+
+	// D11: two entry points, one page. Arriving from a My Courses card carries
+	// ?offering=, which locks the course and hides the selector. Arriving from
+	// the dashboard's "New Session" omits it, so the selector shows and defaults
+	// to the first active assignment. Wireframe 3.2a / 3.2b.
+	const lockedOfferingId = $derived.by(() => {
+		const raw = page.url.searchParams.get('offering');
+		if (raw === null) return null;
+		const parsed = Number(raw);
+		return Number.isInteger(parsed) ? parsed : null;
+	});
+
+	const isLocked = $derived(lockedOfferingId !== null);
+
+	let selectedOfferingId = $state<number | null>(null);
+
+	const selected = $derived.by<ProfessorCourse | null>(() => {
+		const wanted = lockedOfferingId ?? selectedOfferingId;
+		if (wanted === null) return null;
+		return PROFESSOR_COURSES.find((course) => course.offeringId === wanted) ?? null;
+	});
+
+	// Reseed the per-offering form fields whenever the resolved course changes,
+	// so switching in the selector variant never leaves another course's numbers
+	// behind. The form returns to the offering defaults on every change.
+	let radius = $state(50);
+	let durationMinutes = $state(0);
+	let presentWindow = $state(0);
+	let lateWindow = $state(0);
+	let classroomOverride = $state('');
+	// D17: an override moves the geofence, so it needs coordinates as well as a
+	// name. Svelte's number binding yields undefined for an empty input, which is
+	// why the validity check below uses a loose null comparison.
+	let classroomLat = $state<number | null>(null);
+	let classroomLng = $state<number | null>(null);
+
+	let lastSeededOfferingId = $state<number | null>(null);
+
+	$effect(() => {
+		const course = selected;
+		if (course === null || course.offeringId === lastSeededOfferingId) return;
+
+		lastSeededOfferingId = course.offeringId;
+		radius = 50;
+		// Prefill with the scheduled class length (wireframe 3.2a).
+		durationMinutes = course.scheduledMinutes;
+		// D44: the window defaults live on the offering.
+		presentWindow = course.defaultPresentWindowMinutes;
+		lateWindow = course.defaultLateWindowMinutes;
+		classroomOverride = '';
+		// Start the override on the course's own coordinates, so enabling it is a
+		// nudge rather than a retype.
+		classroomLat = course.classroomLat;
+		classroomLng = course.classroomLng;
+	});
+
+	// D17: a blank override name means "keep the offering defaults", and nothing
+	// is sent for the classroom.
+	const overrideActive = $derived(classroomOverride.trim() !== '');
+
+	// What the geofence will actually use, which is what the callout displays.
+	const effectiveRoom = $derived(
+		overrideActive ? classroomOverride.trim() : (selected?.classroomName ?? 'Room TBA')
+	);
+
+	const effectiveLat = $derived(
+		overrideActive ? classroomLat : (selected?.classroomLat ?? null)
+	);
+
+	const effectiveLng = $derived(
+		overrideActive ? classroomLng : (selected?.classroomLng ?? null)
+	);
+
+	const coordsInvalid = $derived(
+		overrideActive &&
+			(classroomLat == null || classroomLng == null || Number.isNaN(classroomLat) || Number.isNaN(classroomLng))
+	);
+
+	// D13: present + late must fit inside the duration. The backend answers
+	// windows_exceed_duration (422) for the same condition.
+	const windowsFit = $derived(presentWindow + lateWindow <= durationMinutes);
+
+	const durationInvalid = $derived(durationMinutes <= 0);
+	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
+
+	// The offering's schedule times are display strings ("10:30 AM"). Treat them
+	// as today so the D12 preview and the posted scheduled_end_time are real
+	// instants rather than unparseable text.
+	const todayAt = (clock: string): Date => {
+		const [time, meridiem] = clock.trim().split(/\s+/);
+		const [rawHours, minutes] = time.split(':');
+		let hours = Number(rawHours);
+		if (meridiem === 'PM' && hours < 12) hours += 12;
+		if (meridiem === 'AM' && hours === 12) hours = 0;
+
+		const date = new Date();
+		date.setHours(hours, Number(minutes), 0, 0);
+		return date;
+	};
+
+	// D12: expires_at = min(now + duration_minutes, scheduled_end_time).
+	const expiryPreview = $derived.by(() => {
+		const course = selected;
+		if (course === null || durationInvalid) return null;
+
+		const durationEnd = new Date(Date.now() + durationMinutes * 60 * 1000);
+		const scheduledEnd = todayAt(course.scheduleEndTime);
+		const capped = durationEnd.getTime() > scheduledEnd.getTime();
+
+		return {
+			at: capped ? scheduledEnd : durationEnd,
+			capped
+		};
+	});
+
+	const RADII = [10, 20, 30, 50, 100] as const;
+
+	let submitting = $state(false);
+	let generatedCode = $state<string | null>(null);
+	let generatedExpiry = $state<string | null>(null);
+	let error = $state<string | null>(null);
+
+	const canSubmit = $derived(
+		selected !== null &&
+			windowsFit &&
+			!durationInvalid &&
+			!windowsInvalid &&
+			!coordsInvalid &&
+			!submitting
+	);
+
+	const handleGenerate = async () => {
+		const course = selected;
+		if (course === null || !canSubmit) return;
+
+		submitting = true;
+		error = null;
+
+		try {
+			const created = await openSession(course.offeringId, {
+				durationMinutes,
+				presentWindowMinutes: presentWindow,
+				lateWindowMinutes: lateWindow,
+				geofenceRadius: radius,
+				// D17: blank means "keep the offering default", so only send the
+				// override when the professor actually typed one.
+				classroomName: overrideActive ? classroomOverride.trim() : undefined,
+				classroomLat: overrideActive ? (classroomLat ?? undefined) : undefined,
+				classroomLng: overrideActive ? (classroomLng ?? undefined) : undefined,
+				scheduledEndTime: todayAt(course.scheduleEndTime).toISOString()
+			});
+
+			generatedCode = created.qrPayload.code;
+			generatedExpiry = new Date(created.expiresAt).toLocaleTimeString(undefined, {
+				hour: 'numeric',
+				minute: '2-digit'
+			});
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to open session';
+		} finally {
+			submitting = false;
+		}
+	};
+
+	const scheduleText = (course: ProfessorCourse) =>
+		`${course.scheduleDays} ${course.scheduleStartTime}–${course.scheduleEndTime}`;
+
+	const roomText = (course: ProfessorCourse) => course.classroomName ?? 'Room TBA';
+
+	const clockText = (date: Date) =>
+		date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+</script>
+
+<div class="create">
+	<header class="header">
+		<div>
+			<h1>Open New Session</h1>
+			<p class="muted">Configure and generate a session code for attendance</p>
+		</div>
+	</header>
+
+	{#if selected === null}
+		<section class="card">
+			<p class="empty">
+				{isLocked
+					? 'That course assignment could not be found. Open a session from My Courses instead.'
+					: 'No course assignments available to open a session for.'}
+			</p>
+		</section>
+	{:else}
+		<section class="card">
+			{#if isLocked}
+				<div class="field">
+					<span class="form-label">Course</span>
+					<div class="locked-course">
+						<div class="locked-head">
+							<span class="locked-name">
+								{selected.courseCode} — {selected.courseName}
+							</span>
+							<AppIcon name="lock" size={14} />
+						</div>
+						<span class="locked-meta">
+							{selected.programCode}·{selected.shortYear} · Section {selected.section}
+						</span>
+						<span class="locked-meta">
+							{scheduleText(selected)} · {roomText(selected)}
+						</span>
+					</div>
+				</div>
+			{:else}
+				<div class="field">
+					<label class="form-label" for="offering">Select Course</label>
+					<select
+						id="offering"
+						class="form-input"
+						value={selected.offeringId}
+						onchange={(e) => (selectedOfferingId = Number(e.currentTarget.value))}
+					>
+						{#each PROFESSOR_COURSES as course (course.offeringId)}
+							<option value={course.offeringId}>
+								{course.courseCode} — {course.courseName} ({course.programCode}·{course.shortYear})
+							</option>
+						{/each}
+					</select>
+					<p class="hint">Your active assignments this term.</p>
+				</div>
+			{/if}
+
+			<div class="location" class:overridden={overrideActive}>
+				<AppIcon name="pin" size={16} />
+				<span>
+					{effectiveRoom}
+					{#if effectiveLat !== null && effectiveLng !== null}
+						({effectiveLat.toFixed(4)}°N, {effectiveLng.toFixed(4)}°E)
+					{/if}
+				</span>
+				{#if overrideActive}
+					<span class="location-tag">Override</span>
+				{/if}
+			</div>
+
+			<div class="field">
+				<span class="form-label">Geofence Radius</span>
+				<div class="radius-group" role="group" aria-label="Geofence radius">
+					{#each RADII as option (option)}
+						<button
+							class="radius-btn"
+							class:selected={radius === option}
+							aria-pressed={radius === option}
+							onclick={() => (radius = option)}
+						>
+							{option}m
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<div class="field">
+				<label class="form-label" for="duration">Duration (minutes)</label>
+				<input
+					id="duration"
+					class="form-input"
+					class:invalid={durationInvalid}
+					type="number"
+					min="1"
+					bind:value={durationMinutes}
+				/>
+				{#if expiryPreview}
+					<p class="hint" class:warn={expiryPreview.capped}>
+						Expires min(now + {durationMinutes}m, {selected.scheduleEndTime} scheduled)
+						→ <strong>{clockText(expiryPreview.at)}</strong>
+						{#if expiryPreview.capped}
+							· capped by class end (D12)
+						{/if}
+					</p>
+				{/if}
+			</div>
+
+			<div class="field-row">
+				<div class="field">
+					<label class="form-label" for="present">Present window (min)</label>
+					<input
+						id="present"
+						class="form-input"
+						class:invalid={windowsInvalid}
+						type="number"
+						min="0"
+						bind:value={presentWindow}
+					/>
+				</div>
+				<div class="field">
+					<label class="form-label" for="late">Late window (min)</label>
+					<input
+						id="late"
+						class="form-input"
+						class:invalid={windowsInvalid}
+						type="number"
+						min="0"
+						bind:value={lateWindow}
+					/>
+				</div>
+			</div>
+
+			<div class="check" class:bad={!windowsFit} role="status">
+				<span class="check-math">
+					Present {presentWindow} + Late {lateWindow} ≤ Duration {durationMinutes}
+				</span>
+				<AppIcon name={windowsFit ? 'check' : 'alert'} size={18} />
+			</div>
+
+			<div class="field">
+				<label class="form-label" for="classroom">Classroom override</label>
+				<input
+					id="classroom"
+					class="form-input"
+					type="text"
+					placeholder={selected.classroomName ?? 'Course classroom'}
+					bind:value={classroomOverride}
+				/>
+				<p class="hint">Blank uses the course classroom (D17).</p>
+
+				{#if overrideActive}
+					<div class="override-box">
+						<div class="field-row">
+							<div class="field">
+								<label class="form-label" for="override-lat">Latitude</label>
+								<input
+									id="override-lat"
+									class="form-input"
+									class:invalid={coordsInvalid}
+									type="number"
+									step="0.0001"
+									bind:value={classroomLat}
+								/>
+							</div>
+							<div class="field">
+								<label class="form-label" for="override-lng">Longitude</label>
+								<input
+									id="override-lng"
+									class="form-input"
+									class:invalid={coordsInvalid}
+									type="number"
+									step="0.0001"
+									bind:value={classroomLng}
+								/>
+							</div>
+						</div>
+						<p class="hint">
+							The geofence centers here instead of the course classroom. Pre-filled with
+							the course coordinates.
+						</p>
+						{#if coordsInvalid}
+							<p class="field-error">Both coordinates are required for a classroom override.</p>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<div class="preview" class:generated={generatedCode !== null}>
+				<span class="preview-label">HMAC Preview · Session Code</span>
+				{#if generatedCode}
+					<span class="preview-code">{generatedCode}</span>
+					<p class="preview-hint">
+						Scan window closes at {generatedExpiry}. Show this on the projector for
+						students to scan.
+					</p>
+				{:else}
+					<span class="preview-code pending">{SESSION_CODE_SAMPLE}</span>
+					<p class="preview-hint">Generated when you open the session.</p>
+				{/if}
+			</div>
+
+			{#if error}
+				<p class="error">{error}</p>
+			{/if}
+
+			<div class="actions">
+				<button
+					class="btn btn-primary"
+					data-testid="generate-code"
+					disabled={!canSubmit}
+					onclick={handleGenerate}
+				>
+					<AppIcon name="qr" size={18} />
+					{submitting ? 'Generating…' : 'Generate Session Code'}
+				</button>
+				<button class="btn btn-secondary" disabled title="Projector mode is the next page">
+					<AppIcon name="shield" size={18} />
+					View Live Session
+				</button>
+			</div>
+		</section>
+	{/if}
+</div>
+
+<style>
+	.create {
+		display: flex;
+		flex-direction: column;
+		gap: 2rem;
+		font-family: system-ui, sans-serif;
+		/* The layout's content column is 1100px, so a fixed-width form has to
+		   center itself or it hugs the left edge on wide screens. */
+		max-width: 700px;
+		margin: 0 auto;
+	}
+
+	.header h1 {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 0.25rem;
+	}
+
+	.muted {
+		color: #64748b;
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	.card {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 2rem;
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+	}
+
+	/* --- Fields -------------------------------------------------------------- */
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4375rem;
+	}
+
+	.field-row {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.form-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: #334155;
+	}
+
+	.form-input {
+		padding: 0.625rem 0.75rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-family: inherit;
+		color: #0f172a;
+		background: white;
+	}
+
+	.form-input:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 1px;
+		border-color: #2563eb;
+	}
+
+	.form-input.invalid {
+		border-color: #dc2626;
+	}
+
+	.hint {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: #64748b;
+	}
+
+	.hint.warn {
+		color: #b45309;
+	}
+
+	/* A blocking reason, not a suggestion — this is what silently disables
+	   Generate, so it has to be visible rather than just a red border. */
+	.field-error {
+		margin: 0;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: #b91c1c;
+	}
+
+	/* --- Locked course panel (D11) ------------------------------------------- */
+
+	.locked-course {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 1rem;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+	}
+
+	.locked-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		color: #1e293b;
+	}
+
+	.locked-head :global(svg) {
+		color: #64748b;
+	}
+
+	.locked-name {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1rem;
+		font-weight: 700;
+	}
+
+	.locked-meta {
+		font-size: 0.8125rem;
+		color: #64748b;
+	}
+
+	/* --- Location callout ---------------------------------------------------- */
+
+	.location {
+		display: flex;
+		align-items: center;
+		/* The room/coordinate string plus the Override tag can exceed a narrow
+		   viewport, and overflow-x: hidden would clip it. */
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		padding: 0.75rem;
+		background: #f0f9ff;
+		border: 1px solid #bae6fd;
+		border-radius: 8px;
+		font-size: 0.8125rem;
+		color: #0369a1;
+	}
+
+	/* Once overridden, the callout is reporting the session's geofence rather
+	   than the course's, so it gets the amber treatment to say so. */
+	.location.overridden {
+		background: #fffbeb;
+		border-color: #fcd34d;
+		color: #b45309;
+	}
+
+	.location-tag {
+		margin-left: auto;		padding: 0.125rem 0.5rem;
+		border-radius: 6px;
+		background: #fef3c7;
+		border: 1px solid #fcd34d;
+		color: #b45309;
+		font-size: 0.6875rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		flex-shrink: 0;
+	}
+
+	/* --- Classroom override -------------------------------------------------- */
+
+	.override-box {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4375rem;
+		margin-top: 0.25rem;
+		padding: 1rem;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+	}
+
+	/* --- Radius toggle group ------------------------------------------------- */
+
+	.radius-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.radius-btn {
+		padding: 0.5rem 1rem;
+		border-radius: 8px;
+		border: 1px solid #cbd5e1;
+		background: white;
+		color: #0f172a;
+		font-family: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	}
+
+	.radius-btn:hover {
+		background: #f1f5f9;
+	}
+
+	.radius-btn:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 2px;
+	}
+
+	.radius-btn.selected {
+		background: #1e3a5f;
+		border-color: #1e3a5f;
+		color: white;
+	}
+
+	/* --- D13 window check ---------------------------------------------------- */
+
+	.check {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.75rem 1rem;
+		border-radius: 8px;
+		background: #f0fdf4;
+		border: 1px solid #bbf7d0;
+		color: #15803d;
+	}
+
+	.check.bad {
+		background: #fef2f2;
+		border-color: #fecaca;
+		color: #b91c1c;
+	}
+
+	.check-math {
+		font-size: 0.8125rem;
+		font-weight: 600;
+	}
+
+	/* --- Code preview -------------------------------------------------------- */
+
+	.preview {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 1.5rem;
+		border-radius: 12px;
+		background: #f8fafc;
+		border: 2px dashed #cbd5e1;
+		text-align: center;
+		/* Query container so .preview-code can size itself against the width it
+		   actually has, rather than against the viewport. */
+		container-type: inline-size;
+	}
+
+	.preview.generated {
+		background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+		border: 2px solid #22c55e;
+		border-style: solid;
+	}
+
+	.preview-label {
+		font-size: 0.75rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #64748b;
+	}
+
+	.preview.generated .preview-label {
+		color: #16a34a;
+	}
+
+	/* Sized from the container, not the viewport. The code is `XX-XXXX` — seven
+	   monospace glyphs plus 0.15em of tracking each, so ~5.25em of width. At
+	   16cqw that is 84cqw of the box, which leaves room at any screen size
+	   instead of overflowing and being clipped by the root layout's
+	   overflow-x: hidden. */
+	.preview-code {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: min(2.5rem, 16cqw);
+		font-weight: 700;
+		letter-spacing: 0.15em;
+		line-height: 1;
+		color: #1e3a5f;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+	}
+
+	/* The placeholder is a shape preview only, so it stays visibly inert. */
+	.preview-code.pending {
+		color: #94a3b8;
+	}
+
+	.preview-hint {
+		margin: 0.25rem 0 0;
+		font-size: 0.8125rem;
+		color: #64748b;
+	}
+
+	/* --- Actions ------------------------------------------------------------- */
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.75rem 1.25rem;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		font-family: inherit;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+	}
+
+	.btn:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 2px;
+	}
+
+	.btn-primary {
+		flex: 1 1 auto;
+		background: #1e3a5f;
+		border: 1px solid #1e3a5f;
+		color: white;
+		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
+	}
+
+	.btn-primary:hover:not(:disabled) {
+		background: #16324f;
+		border-color: #16324f;
+		transform: translateY(-1px);
+	}
+
+	.btn-secondary {
+		background: white;
+		border: 1px solid #cbd5e1;
+		color: #0f172a;
+	}
+
+	.btn:disabled {
+		color: #94a3b8;
+		background: #f8fafc;
+		border-color: #e2e8f0;
+		cursor: not-allowed;
+		box-shadow: none;
+	}
+
+	.error {
+		margin: 0;
+		color: #dc2626;
+		font-size: 0.875rem;
+	}
+
+	.empty {
+		color: #64748b;
+		font-size: 0.9375rem;
+		margin: 0;
+	}
+
+	@media (max-width: 640px) {
+		.card {
+			padding: 1.25rem;
+		}
+
+		/* Reclaim horizontal room for the code itself. */
+		.preview {
+			padding: 1.25rem 0.75rem;
+		}
+
+		.field-row {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.actions .btn {
+			flex: 1 1 auto;
+		}
+
+		.preview-code {
+			letter-spacing: 0.08em;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.radius-btn,
+		.btn {
+			transition: none;
+		}
+	}
+</style>

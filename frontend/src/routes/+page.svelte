@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { isAuthenticated, isStudent, isProfessor, isAdmin, doLogout, authState, defaultRouteFor } from '$lib/features/auth/store.svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import { Routes } from '$lib/shared/constants/routes';
 
 	const features = [
 		{ icon: 'qr', title: 'Session QR codes', desc: 'Every session gets a unique code, so each meeting can only be joined once.' },
@@ -35,8 +36,8 @@
 		{
 			label: 'Professor portal',
 			desc: 'Create sessions and review attendance for every meeting.',
-			path: '/professor/sessions',
-			cta: 'Open sessions',
+			path: Routes.PROFESSOR_DASHBOARD,
+			cta: 'Open dashboard',
 			ready: true,
 		},
 		{
