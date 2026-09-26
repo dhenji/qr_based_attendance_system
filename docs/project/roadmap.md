@@ -19,11 +19,12 @@
 - Shared exceptions taxonomy (`core/exceptions.py` — `AppException`/`DomainException`/`DatabaseException`)
 - `core/security.py` — Argon2id hashing, JWT access/refresh tokens, HMAC session codes, 6-digit OTP
 - `shared/enums.py`, `shared/mixins.py`, `shared/pagination.py`, `shared/base.py` (BaseCRUD), `shared/email.py` (debug stub)
-- `api/deps.py` — `get_db`, `get_current_user`, `require_role(*roles)`
-- Alembic baseline migration `679a319c12d6` (16 tables)
+- `api/deps.py` — `_get_db`, `_get_current_user`, `require_role(*roles)`, plus `AuthServiceDep`/`AdminServiceDep` (the session dependency is `_get_db`; there is no public `get_db`)
+- Alembic baseline migration `679a319c12d6` (16 tables), + `2a437ca93c53` and `33eabbfbfa6a` in Phase 2 (`mfa_backup_codes` + fingerprint index) → 17 tables
 
-> **Forward-looking:** `mfa_backup_codes`, `audit_logs`, `app_settings` land in Phases
-> 2/8/12 → 19-table target. See [migration-strategy.md](../architecture/migration-strategy.md).
+> **Forward-looking:** `audit_logs`, `app_settings` land in Phases 8/12 → 19-table
+> target. `mfa_backup_codes` landed in Phase 2 (ADR-054). See
+> [migration-strategy.md](../architecture/migration-strategy.md).
 
 ### Prerequisite Docs
 

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     preauth_token_expire_minutes: int = 5
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    recovery_token_expire_minutes: int = 5
 
     # Account lockout fields
     lockout_attempts: int = 5

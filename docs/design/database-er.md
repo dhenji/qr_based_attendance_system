@@ -3,8 +3,16 @@
 > Crow's-foot notation for the QR-based attendance system — **Target Schema** (canonical ERD).
 > Source: `docs/project/migration-strategy.md` steps 1–9.
 > New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`.
-> **Planned tables** (land with backend-phases 2.11/8.5/8.7/12.0): `mfa_backup_codes`,
-> `audit_logs`, `app_settings` — the 16-table baseline becomes a 19-table target.
+> `mfa_backup_codes` landed in Phase 2 (ADR-054), so the 16-table baseline is now 17.
+> **Planned tables** (land with backend-phases 8.5/8.7/12.0): `audit_logs`,
+> `app_settings` — the 17-table state becomes a 19-table target.
+
+> **Column note — `users.security_question_hash` (ADR-056):** despite the `_hash`
+> suffix, this column stores the security **question in readable plaintext**. Only
+> `security_answer_hash` is Argon2id-hashed. Step 1 of forgot-password
+> (`/auth/forgot-password`) must return the question for the user to read, which a
+> hash cannot satisfy; the question is non-secret by design, being drawn from a small
+> preset pool. The name is retained for schema compatibility.
 
 ---
 
@@ -12,7 +20,8 @@
 
 | Table                 | Attributes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`               | id (PK), role (super_admin/admin/professor/student), username, email, password_hash (Argon2id), security_question_hash, security_answer_hash, mfa_enabled, mfa_secret, failed_login_attempts, must_change_password, is_active, is_locked (DEF false), locked_at (NULL), created_at, last_login                                                                                                                                                                                                                                                |
+| `users`               | id (PK), role (super_admin/admin/professor/student), username, email, password_hash (Argon2id), security_question_hash (**readable plaintext** — ADR-056), security_answer_hash (Argon2id), mfa_enabled, mfa_secret, failed_login_attempts, must_change_password, is_active, is_locked (DEF false), locked_at (NULL), created_at, last_login                                                                                                                                                                                                                                                |
+| `mfa_backup_codes`    | id (PK), user_id (FK → users CASCADE), code_hash (Argon2id, **never plaintext**), code_fingerprint (HMAC-SHA256, indexed — single-lookup verify), used_at (NULL = unconsumed), created_at                                                                                                                                                                                                                                                |
 | `otp_codes`           | id (PK), email (index), purpose (claim/forget_password), otp_hash (Argon2id), expires_at (5-min TTL), consumed_at (single-use), user_id (FK → users, nullable), created_at, index `ix_otp_codes_email_purpose` (email, purpose)                                                                                                                                                                                                                                                                                                                           |
 | `programs`            | id (PK), code (UK), name, description, total_years, is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `year_levels`         | id (PK), program_id (FK → programs CASCADE), year_number, label, term_structure (JSONB), sort_order, UNIQUE(program_id, year_number)                                                                                                                                                                                                                                                                                                                                                               |
@@ -36,6 +45,7 @@
 ```mermaid
 erDiagram
     users ||--o{ otp_codes : "receives"
+    users ||--o{ mfa_backup_codes : "holds"
     users ||--o| students : "claims"
     users ||--o| professors : "claims"
     professors ||--o{ sessions : "opens"
@@ -78,6 +88,14 @@ erDiagram
         timestamp locked_at
         timestamp created_at
         timestamp last_login
+    }
+    mfa_backup_codes {
+        bigint id PK
+        bigint user_id FK
+        varchar code_hash
+        varchar code_fingerprint
+        timestamp used_at
+        timestamp created_at
     }
     otp_codes {
         bigint id PK

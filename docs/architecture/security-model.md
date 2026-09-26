@@ -79,6 +79,10 @@ Student scans QR or types code → server verifies
 - Refresh token: 7-day expiry, returned in `TokenResponse` body (D51); httpOnly cookie form deferred to Phase 10 (same-origin HTTPS)
 - MFA login gating (D51): if `user.mfa_enabled`, `POST /auth/login` returns `{mfa_pending: true, preauth_token}` (5-min JWT `type="preauth"`, grants no access); `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for full token pair
 - Forgot-password (ADR-052, supersedes D51's OTP-only deferral): mandatory 4-step — email → security question (Argon2id-hashed answer, 3-attempt cap then lock) → OTP via `OtpPurpose.FORGET_PASSWORD` → new password. Turnstile on step 1 was deferred in ADR-052; it is now implemented as key-gated siteverify (ADR-053).
+- Recovery-flow hardening (ADR-056):
+  - **Step 1 does not leak account existence.** Unknown emails receive a *deterministic* decoy question (HMAC of the normalized email over `SECURITY_QUESTION_POOL`) and `set: true`, so a given address always returns the same question and the response shape matches the known-email case. This mitigates enumeration rather than eliminating it — the decoy text differs from a real question. Emailing the question instead of returning it would close the gap; deferred.
+  - **Steps 3–4 are gated by a signed grant.** Step 2 returns a 5-minute `type="recovery"` JWT. `forget_password` OTP issuance requires it; otherwise `400 invalid_credentials` with a generic message. The grant is rejected by the access-token dependency, so it cannot be replayed for API access.
+  - **Only the answer is hashed.** `users.security_question_hash` is readable plaintext under a legacy column name, because step 1 must display the question. The question is non-secret by design (drawn from a small preset pool); the answer is the secret.
 - Role-based access: `Depends(require_role(Role.admin))` in FastAPI
 
 ### Role Hierarchy
@@ -101,7 +105,7 @@ Student scans QR or types code → server verifies
 | MFA                    | TOTP (RFC 6238) via authenticator app |
 | Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
 | `must_change_password` | Flag on first login / admin reset     |
-| Security question      | Stored hashed, used for recovery      |
+| Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056) |
 
 ---
 

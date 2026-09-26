@@ -83,7 +83,16 @@ from features.student.model import Student
 ### 1.6 Service Conventions
 
 - Services are **module-level async functions**: `async def create_foo(session: AsyncSession, ...)`.
-- No service classes. The legacy class in `features/course_professor/service.py` is slated for conversion to module functions.
+- **No service classes by default** — with one sanctioned exception: a service may be a
+  class when `__init__` builds per-request collaborators that every method would
+  otherwise re-derive (composed `BaseCRUD` handles, settings, rate limiters).
+  `AuthService` (5 `BaseCRUD` handles + settings) and `AdminService` (3 handles)
+  are the clear cases; `CourseProfessorService` is retained as a borderline one
+  that would not justify a new sibling. A session alone does **not** qualify —
+  prefer a function for a new single-method service. See ADR-055 in
+  [decision-log.md](../project/decision-log.md).
+- A service class must hold no state across requests; its `__init__` may only
+  build per-request handles.
 - Business logic lives in services, not routers.
 - Services call `BaseCRUD` for database operations.
 - Raise `HTTPException` or domain exceptions, never raw `ValueError`.
@@ -91,9 +100,19 @@ from features.student.model import Student
 
 ### 1.7 Router Conventions
 
-- One `APIRouter` per feature, prefixed with role (`/admin/`, `/professor/`, `/student/`).
+- **One `APIRouter` per (feature, mount point).** A router's prefix is its full
+  contract path and is baked into the `APIRouter(...)`; `api/router.py` passes no
+  `prefix=` argument. A feature whose endpoints span two prefixes declares a
+  second `APIRouter` in its own module (e.g. `features/student/admin_router.py`
+  at `/admin/students`, alongside `features/student/router.py` at `/student`).
+  Several routers may share one mount point — `professor` and `session` both
+  prefix `/professor`, `student` and `attendance` both prefix `/student` — so
+  their inner paths must not collide. Never mount the same `APIRouter` twice:
+  paths inside are relative to its prefix, so mounting `student/router.py` at
+  `/api/admin` would also expose `/api/admin/profile`.
 - Mount all feature routers in `api/router.py`.
-- Dependencies: `get_db` for session, role-guard dependencies for authorization.
+- Dependencies: `_get_db` for session (there is no public `get_db`), role-guard
+  dependencies for authorization via `require_role(*UserRole)`.
 - Use `response_model` on endpoint decorators.
 - Paginated responses: `{items, total, page, size}`.
 

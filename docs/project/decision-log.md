@@ -571,3 +571,189 @@
   password-recovery path; backup codes are MFA-recovery only.
 - **Supersedes:** (none).
 
+### ADR-055: Stateful Service Classes Are a Sanctioned Exception
+
+- **Decision (D55):** Allow a service to be implemented as a class when it is
+  stateful — when `__init__` builds per-request collaborators that every method
+  would otherwise re-derive: composed `BaseCRUD` handles, settings, rate
+  limiters. `AuthService` (`features/auth/service.py`) and `AdminService`
+  (`features/admin/service.py`) are the clear cases; `CourseProfessorService`
+  (`features/course_professor/service.py`) is retained as a borderline one
+  (below). Module-level `async def` functions remain the default for everything
+  else. The class is constructed per request in `api/deps.py` and reached through
+  an annotated dependency (`AuthServiceDep`, `AdminServiceDep`) that receives
+  `_get_db` — so the transaction boundary is unchanged and the session is still
+  request-scoped.
+- **Date:** 2026-09-26
+- **Status:** Accepted
+- **Context:** `backend-prompts.txt:346` and `coding-standards.md` §1.6 mandated
+  module-level functions with `AsyncSession` as the first parameter and no
+  service classes. All three Phase 1/2 services were implemented as classes
+  anyway. The mandate is not arbitrary: it exists to keep services free of
+  hidden state and to make the session dependency obvious at the call site.
+  Measured against that intent, the three differ in how well they justify
+  themselves. `AuthService.__init__` builds five `BaseCRUD` handles plus a
+  settings object, and its methods reach for them constantly — as module
+  functions every signature and call site would carry five extra arguments, which
+  is a real readability cost, so the class earns its place. `AdminService` is the
+  same shape with three handles. `CourseProfessorService` is the weakest case:
+  its `__init__` stores only the session and it exposes a single `check_overlap`
+  query, so a module-level function would be a near-exact drop-in. It is kept as
+  a class because converting it would be a purely cosmetic change to
+  contract-tested code, not because it needs the form.
+- **Consequences:** `coding-standards.md` §1.6 records the exception and keeps
+  module-level functions as the default, so new slices are unaffected, and the
+  line calling `course_professor/service.py` "legacy" is corrected to
+  "sanctioned". No ADR reverses the "no hidden state" intent: a service class
+  must not cache anything across requests, and its `__init__` may only build
+  per-request handles. Reviewers should prefer module-level functions unless
+  `__init__` genuinely has collaborators to compose — a session alone does not
+  qualify, so a new single-method service should be written as a function even
+  though this one is not.
+- **Supersedes:** the "no service classes" clause of `coding-standards.md` §1.6
+  and `backend-prompts.txt:346`, which also described
+  `features/course_professor/service.py` as legacy and slated for conversion.
+
+### ADR-056: Recovery Security-Question Storage and Enumeration Hardening
+
+- **Decision (D56):** Three related corrections to the ADR-052 recovery flow.
+  **(a) Storage.** `users.security_question_hash` stores the question **in
+  readable plaintext**; only `users.security_answer_hash` is Argon2id-hashed.
+  The column name is retained for schema compatibility despite holding no hash.
+  **(b) Step-1 non-enumeration.** `POST /auth/forgot-password` returns a
+  deterministic decoy question drawn from `SECURITY_QUESTION_POOL` for unknown
+  emails instead of a null question, and always reports `set: true`.
+  **(c) Step gating.** Forgot-password step 2 now returns a short-lived signed
+  `type="recovery"` grant (`recovery_token`, 5-minute expiry) and a
+  `forget_password` OTP cannot be minted without it.
+- **Date:** 2026-09-26
+- **Status:** Accepted
+- **Context:** ADR-052 mandated a 4-step recovery flow and said the answer is
+  "Argon2id-hashed", but the docs were internally inconsistent.
+  `security-model.md` and `database-er.md` implied the *question* was hashed
+  too, and `backend-prompts.txt:481` said "never store the question or answer in
+  plaintext" — yet `wireframes.md:195` and `api-contracts.md:1052` require step 1
+  to return the question so the user can read it at step 2. A hash cannot satisfy
+  that, so one of the two requirements had to give. Independently, the original
+  step 1 returned `{question: null, set: false}` for unknown emails and the real
+  question for known ones, which `api-contracts.md:1064` explicitly forbids
+  ("responds identically for unknown emails to avoid enumeration") — same shape,
+  different content, so still enumerable. Separately, nothing enforced that step 2
+  had been passed: step 3 (`/auth/otp/request` with `purpose=forget_password`) was
+  ungated and step 4 accepted the OTP alone, so the "mandatory" security-question
+  gate and its 3-attempt cap could both be skipped by anyone with inbox access.
+- **Rationale for (a):** the answer is the secret, not the question. The question
+  is non-secret by design — it is displayed to the user and is drawn from a small
+  preset pool in the settings UI (`wireframes.md:292-294`). Hashing it would
+  protect nothing and would make step 2 impossible, so the plaintext question is
+  accepted as a documented exception and the misleading column name is called out
+  in `database-er.md` instead.
+- **Rationale for (b):** the decoy is keyed with an HMAC of the normalized email
+  over `SECURITY_QUESTION_POOL`, so it is **deterministic, not random**. A random
+  decoy would itself become a reliable enumeration oracle, because repeated
+  requests to one address would return different questions while a real account's
+  question stays fixed; it would also change under a legitimate user who retried
+  after a typo. `set` is now always `true` because ADR-052 made the question
+  mandatory at registration, so the "no question on file" population is empty in
+  greenfield and the field was only a leak channel. Users who mistype their email
+  now get three identical `security_answer_invalid` errors instead of a "no
+  question on file" message, which is no worse and closes the oracle.
+- **Rationale for (c):** possession of the `forget_password` OTP is what
+  authorises step 4, so minting the OTP is the only point the gate must be
+  enforced — this keeps `/auth/reset-password` unchanged. The grant carries a
+  `type` claim and is therefore already rejected by the access-token dependency,
+  so it cannot be replayed for API access. A bad or mismatched grant returns the
+  generic `invalid_credentials` 400 rather than a distinct error, so the gate is
+  not itself probeable.
+- **Consequences:** `RecoveryGrantResponse` is a new response schema and
+  `/auth/forgot-password/verify` returns 200 instead of 204; `api-contracts.md`
+  and `security-model.md` are updated to match. `users.security_question_hash` is
+  annotated in `database-er.md` as readable-by-design. The `set` field of
+  `SecurityQuestionResponse` no longer carries information. Rejected at the gate
+  is reported with the generic message to preserve non-enumeration.
+- **Deferred:** sending the question by email instead of returning it would close
+  the enumeration surface completely, since step 1's response could then be a
+  constant. That is the stronger design and is worth revisiting, but it changes
+  the step-2 screen in `wireframes.md:184-209`, so it is out of scope here.
+- **Supersedes:** the "stored hashed" claim for the security question in
+  `security-model.md:104`, and the "never store the question ... in plaintext"
+  clause of `backend-prompts.txt:481`.
+
+### ADR-057: Phase 3 Admin Routing, Enrollment Mount, and Archive Delete
+
+- **Decision (D57):** Four corrections to `backend-prompts.txt` Phase 3, made
+  during Phase 1/2 verification, each overriding the prompt's original wording.
+  **(a) No re-mounting of student/professor routers.** Admin student and professor
+  CRUD go in NEW modules `features/student/admin_router.py`
+  (`APIRouter(prefix="/admin/students")`) and `features/professor/admin_router.py`
+  (`APIRouter(prefix="/admin/professors")`). The existing
+  `features/student/router.py` (`/student`) and `features/professor/router.py`
+  (`/professor`) stay mounted and keep their prefixes.
+  **(b) `features/enrollment/router.py` stays permanently unmounted.** Bulk-enroll
+  and the offering roster read are routes of the offerings router, since the
+  contract nests both under `/admin/offerings/{oid}`. The stub is retained for
+  slice-count parity and carries a comment saying so.
+  **(c) Face enrollment becomes its own slice**, `features/face_enrollment/` at
+  `/admin/face-enrollment`, with no `model.py` and no migration.
+  **(d) Archive hard delete gains a has-records guard** returning
+  `409 student_has_records` / `409 professor_has_records`; the RESTRICT foreign
+  keys are left alone.
+- **Date:** 2026-09-26
+- **Status:** Accepted
+- **Context:** Phase 3 (PROMPTS 3.1-3.9) is the first phase to add routers under
+  `/api/admin/*`, and its wording was written before the Phase 1/2 routers were
+  mounted, so it no longer matched the code. Four concrete failures would follow
+  from implementing it literally. (1) PROMPT 3.7 says to mount "the student,
+  professor ... routers" — but `student/router.py` and `professor/router.py` are
+  already mounted, and because paths inside a router are relative to its own
+  prefix, mounting them again under `/api/admin` would publish
+  `/api/admin/profile`, `/api/admin/schedule`, `/api/admin/courses` and
+  `/api/admin/sessions`, none of which the contract defines. (2) PROMPT 3.7 also
+  says to mount the `enrollment` router, but the contract has no enrollment mount
+  point at all; both enrollment endpoints are nested under offerings. (3) PROMPT
+  3.8 calls face enrollment "additions to the student feature", yet
+  `/admin/face-enrollment` is a third mount point that fits neither the student
+  router nor the admin student router. (4) PROMPT 3.9's permanent delete checks
+  only `is_active`, but `enrollments`, `attendance_records` and `excuse_requests`
+  all reference `students.id` with `ondelete="RESTRICT"` (as does `sessions` ->
+  `professors`), so deleting almost any real archived student raises a PostgreSQL
+  FK violation and returns 500 — a state the contract does not document.
+- **Rationale for (a):** the router-per-mount-point rule from ADR-055's sibling
+  guidance already covers this, but the prompt named the wrong module, and the
+  failure is silent — FastAPI raises no error for a duplicated mount, it just
+  serves the wrong paths. Guard comments in the two mounted modules and an
+  explicit six-router list in PROMPT 3.7 make the intent unmissable.
+- **Rationale for (b):** inventing `/api/enrollments` would create an undocumented
+  surface that no contract, wireframe, or test covers. Deleting the stub was
+  rejected because the 14-slice layout is referenced in `AGENTS.md` and
+  `project-structure.md`; an inert, clearly-commented stub is the lower-cost
+  option.
+- **Rationale for (c):** a slice with no model is already precedented —
+  `course_professor` owns only a join table's logic, and Phase 3's face work is
+  entirely derived from `Student.face_embedding`/`face_enrolled_at`/
+  `face_embedding_version`. Because there is no model, no
+  `import features.face_enrollment.model` line is added to `alembic/env.py`.
+  Enrollment status is read as `face_embedding IS NULL`, since soft-archive
+  (3.4) already nulls that column.
+- **Rationale for (d):** relaxing the FKs to `CASCADE` would make the delete
+  succeed by destroying `attendance_records` — unacceptable for an attendance
+  system, where those rows are the audit trail. An honest 409 tells the admin why
+  the record cannot be removed; the RESTRICT constraints stay as the last line of
+  defence even if the guard is bypassed.
+- **Consequences:** `backend-prompts.txt` Phase 3 carries inline `CORRECTION
+  (ADR-057)` notes on 3.4, 3.5, 3.7, 3.8 and 3.9 plus a routing-rules block in the
+  phase header. `course/router.py` gains `prefix="/admin/courses"` and documents
+  its sibling `course/offering_router.py`; `enrollment/router.py`, `student/router.py`
+  and `professor/router.py` carry "do not re-mount" comments. Phase 3 needs **no
+  migration** — every column it reads already exists. The new
+  `student_has_records` / `professor_has_records` error codes are added to
+  `api-contracts.md` in 3.9, which currently documents only `409 not_archived`.
+- **Deferred:** `scan_count`, `course_count`, `year_level_count`, `terms_count` and
+  `enrolled_count` are all computed per request. At Phase 3 volumes this is fine,
+  but if the offerings or admin student lists grow large these become N+1 sources
+  and should move to a cached aggregate (the `shared/cache.py` helper already
+  exists) or a materialised view. Note `terms_count` reads the `"terms"` key of
+  the `term_structure` JSONB column, whose shape is `{terms: [{code, label}]}`.
+- **Supersedes:** PROMPT 3.7's router list, PROMPT 3.8's "additions to the student
+  feature" placement, and PROMPT 3.9's archive-delete guard as written in
+  `backend-prompts.txt`.

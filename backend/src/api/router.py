@@ -9,9 +9,13 @@ from features.student.router import router as student_router
 
 api_router = APIRouter(prefix="/api")
 
-api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
-api_router.include_router(student_router, prefix="/student", tags=["student"])
-api_router.include_router(session_router, prefix="/professor", tags=["session"])
-api_router.include_router(attendance_router, prefix="/student", tags=["attendance"])
-api_router.include_router(professor_router, prefix="/professor", tags=["professor"])
-api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
+# feature-template.md section 6: each feature router bakes its own contract path
+# into its prefix, so nothing is passed here. One APIRouter per mount point - a
+# feature folder that spans two prefixes (e.g. course -> /admin/courses and
+# /admin/offerings) declares a second APIRouter in its own module.
+api_router.include_router(auth_router, tags=["auth"])
+api_router.include_router(student_router, tags=["student"])
+api_router.include_router(session_router, tags=["session"])
+api_router.include_router(attendance_router, tags=["attendance"])
+api_router.include_router(professor_router, tags=["professor"])
+api_router.include_router(admin_router, tags=["admin"])

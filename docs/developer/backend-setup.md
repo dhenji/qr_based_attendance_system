@@ -85,7 +85,7 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-The current suite contains 13 unit tests under `backend/src/tests/`. It uses fake sessions and does not require a database. `pytest` and `httpx` are listed in `backend/requirements.txt`; add `pytest-asyncio` when async integration tests are introduced.
+The current suite contains 56 unit tests under `backend/src/tests/`. It uses fake sessions and does not require a database. `pytest` and `httpx` are listed in `backend/requirements.txt`; add `pytest-asyncio` when async integration tests are introduced.
 
 ---
 
