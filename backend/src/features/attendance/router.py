@@ -1,3 +1,4 @@
 from fastapi import APIRouter
 
-router = APIRouter()
+# Prefix baked in here; mounted without a prefix argument in api/router.py.
+router = APIRouter(prefix="/student")

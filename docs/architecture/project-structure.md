@@ -11,24 +11,26 @@ attendance-system/
 │   │   │   ├── __init__.py
 │   │   │   ├── config.py             # App settings, environment variables
 │   │   │   ├── database.py           # Async SQLAlchemy engine + session factory + Base
-│   │   │   ├── security.py           # (planned) HMAC signing, Argon2id hashing, TOTP
-│   │   │   └── exceptions.py         # (planned) Domain exceptions + error handlers
+│   │   │   ├── security.py           # Argon2id hashing, JWT access/refresh/recovery tokens, OTP, backup-code fingerprints
+│   │   │   └── exceptions.py         # AppException/DomainException/DatabaseException + error handler
 │   │   │
 │   │   ├── shared/                   # Cross-feature helpers
 │   │   │   ├── __init__.py
 │   │   │   ├── enums.py              # UserRole, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SyncStatus, QueueStatus
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
-│   │   │   ├── dependencies.py       # (planned) get_db, pagination dependencies
-│   │   │   ├── otp.py                # (planned) 6-digit OTP generate/verify vs otp_codes table
-│   │   │   ├── captcha.py            # (planned) Cloudflare Turnstile siteverify
-│   │   │   ├── email.py              # (planned) SMTP sender (OTP emails)
-│   │   │   ├── cache.py              # (planned) LRU cache (O(1) student lookup)
-│   │   │   └── base.py               # (planned) shared schemas
+│   │   │   ├── dependencies.py       # pagination + reusable annotated deps
+│   │   │   ├── captcha.py            # Cloudflare Turnstile siteverify (key-gated no-op when unset)
+│   │   │   ├── email.py              # SMTP sender (OTP emails)
+│   │   │   ├── cache.py              # LRU cache (O(1) student lookup)
+│   │   │   ├── rate_limit.py         # in-process sliding-window limiter
+│   │   │   ├── validators.py         # password policy, email/ID normalization
+│   │   │   ├── pagination.py         # page/size + PaginatedResponse
+│   │   │   └── base.py               # BaseCRUD[T] generic
 │   │   │
 │   │   ├── api/                      # Router aggregation
 │   │   │   ├── __init__.py
-│   │   │   ├── router.py             # mounts auth, student, session, attendance, professor; course & enrollment routers exist unmounted
-│   │   │   └── deps.py               # Dependency injection helpers
+│   │   │   ├── router.py             # mounts auth, admin/users, student, attendance, session, professor; course & enrollment routers exist unmounted
+│   │   │   └── deps.py               # _get_db, _get_current_user, require_role, AuthServiceDep/AdminServiceDep
 │   │   │
 │   │   ├── features/                 # Vertical slices — one folder per domain
 │   │   │   ├── auth/                 # model.py: User, OtpCodes (router mounted)
@@ -104,7 +106,7 @@ attendance-system/
 │
 ├── docs/                             # Documentation
 │   ├── project/
-│   │   ├── decision-log.md           # ADR-format decision log (D1–D54)
+│   │   ├── decision-log.md           # ADR-format decision log (D1–D57)
 │   │   └── glossary.md               # Term definitions
 │   ├── proposals/
 │   │   ├── proposal.md               # Full project proposal

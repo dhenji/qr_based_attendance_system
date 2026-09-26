@@ -54,7 +54,7 @@ class Program(TimestampMixin, Base):
     )
 
 
-class YearLevel(TimestampMixin, Base):
+class YearLevel(Base):
     __tablename__ = "year_levels"
     __table_args__ = (
         UniqueConstraint("program_id", "year_number", name="uq_program_year"),
@@ -67,10 +67,14 @@ class YearLevel(TimestampMixin, Base):
     year_number: Mapped[int] = mapped_column(Integer)
     label: Mapped[str] = mapped_column(String(50))
     term_structure: Mapped[dict] = mapped_column(JSONB)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, server_default=text("0"))
 
     program: Mapped["Program"] = relationship(back_populates="year_levels")
 ```
+
+> `YearLevel` is a plain `Base` subclass, **not** `TimestampMixin` — the real
+> table has no `updated_at`. Check the target schema in
+> [database-er.md](../design/database-er.md) before adding mixins.
 
 **Conventions:**
 
@@ -182,8 +186,8 @@ async def create_program(session: AsyncSession, *, code: str, name: str,
                          total_years: int) -> Program:
     program = Program(code=code, name=name, total_years=total_years)
     session.add(program)
-    await session.commit()
-    await session.refresh(program)
+    await session.flush()
+
     return program
 
 
@@ -201,15 +205,21 @@ async def list_programs(session: AsyncSession) -> list[Program]:
 
 - Functions are `async`, receive `AsyncSession` as first param
 - Use `select()` + `where()` (SQLAlchemy 2.0 query style)
-- `session.commit()` + `session.refresh()` after writes
+- **`await session.flush()` after writes — never `commit()` and never `refresh()`**
 - Raise domain exceptions (not HTTP exceptions) for business rule violations
 - Keep functions focused — one operation per function
+
+> **Do not call `session.commit()` in a service.** The single `commit()` lives in
+> the `_get_db` dependency (`backend/src/api/deps.py`), which commits on success
+> and rolls back on any `AppException`. A service-level commit breaks that
+> rollback contract and makes `flush`-then-raise patterns silently persist.
 
 **Done:**
 
 - [ ] CRUD operations implemented
 - [ ] Business rules enforced (not in router)
 - [ ] Database session passed as parameter (not global)
+- [ ] No `commit()` / `refresh()` in the service
 
 ---
 
@@ -218,20 +228,25 @@ async def list_programs(session: AsyncSession) -> list[Program]:
 FastAPI router with endpoint definitions.
 
 ```python
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_db
+from api.deps import _get_db, require_role
 from features.program.schema import ProgramCreate, ProgramRead
 from features.program import service
+from shared.enums import UserRole
 
+# The full contract path lives here, not in api/router.py.
 router = APIRouter(prefix="/admin/programs", tags=["programs"])
 
 
 @router.post("/", response_model=ProgramRead)
 async def create_program(
     payload: ProgramCreate,
-    session: AsyncSession = Depends(get_db),
+    _admin: Annotated[object, Depends(require_role(UserRole.ADMIN))],
+    session: Annotated[AsyncSession, Depends(_get_db)],
 ) -> ProgramRead:
     program = await service.create_program(
         session,
@@ -244,7 +259,7 @@ async def create_program(
 
 @router.get("/", response_model=list[ProgramRead])
 async def list_programs(
-    session: AsyncSession = Depends(get_db),
+    session: Annotated[AsyncSession, Depends(_get_db)],
 ) -> list[ProgramRead]:
     programs = await service.list_programs(session)
     return [ProgramRead.model_validate(p) for p in programs]
@@ -253,7 +268,7 @@ async def list_programs(
 @router.get("/{program_id}", response_model=ProgramRead)
 async def get_program(
     program_id: int,
-    session: AsyncSession = Depends(get_db),
+    session: Annotated[AsyncSession, Depends(_get_db)],
 ) -> ProgramRead:
     program = await service.get_program(session, program_id)
     if not program:
@@ -263,8 +278,10 @@ async def get_program(
 
 **Conventions:**
 
-- Prefix matches [API contract](../architecture/api-contracts.md)
-- `Depends(get_db)` for session injection
+- Prefix matches [API contract](../architecture/api-contracts.md) and is **baked
+  into the router**; `api/router.py` must not pass a `prefix=` argument
+- The session dependency is **`_get_db`** — there is no public `get_db`
+- `Depends(_get_db)` for session injection
 - Response model is the Read schema
 - Errors: `HTTPException` with appropriate status codes
 - Tags group endpoints in Swagger UI
@@ -275,6 +292,40 @@ async def get_program(
 - [ ] Request/response schemas used correctly
 - [ ] Error responses consistent (`{detail: {code, message}}`)
 
+#### One `APIRouter` per (feature, mount point)
+
+A router's prefix is its full contract path, so **one `APIRouter` serves exactly
+one mount point**. Most features need only one router. When a single feature's
+endpoints span two prefixes, declare a **second `APIRouter` in its own module**
+rather than mounting the same router twice:
+
+| Feature module | Router prefix | Mounted at |
+| --- | --- | --- |
+| `features/auth/router.py` | `/auth` | `/api/auth` |
+| `features/admin/router.py` | `/admin/users` | `/api/admin/users` |
+| `features/course/router.py` | `/admin/courses` | `/api/admin/courses` |
+| `features/course/offering_router.py` | `/admin/offerings` | `/api/admin/offerings` |
+| `features/student/router.py` | `/student` | `/api/student` |
+| `features/student/admin_router.py` | `/admin/students` | `/api/admin/students` |
+| `features/attendance/router.py` | `/student` | `/api/student` |
+| `features/attendance/admin_router.py` | `/admin/attendance` | `/api/admin/attendance` |
+| `features/professor/router.py` | `/professor` | `/api/professor` |
+| `features/session/router.py` | `/professor` | `/api/professor` |
+| `features/professor/admin_router.py` | `/admin/professors` | `/api/admin/professors` |
+
+Two things follow from the table:
+
+- **Several routers may share one mount point.** `professor` and `session` both
+  prefix `/professor`, and `student` and `attendance` both prefix `/student` — a
+  mount point is a namespace, not an owner. Their route paths inside the shared
+  prefix must not collide (`/professor/sessions` from `session`, not
+  `/professor/professor/sessions`).
+- **Never mount the same `APIRouter` at two prefixes.** Paths inside it are
+  relative to its own prefix, so mounting `student/router.py` at `/api/admin`
+  would also expose `/api/admin/profile` and `/api/admin/schedule`. This is why
+  student and professor each need a separate `admin_router.py` — their
+  student-facing and admin-facing routes are distinct contracts.
+
 ---
 
 ### 6. Mount Router in `api/router.py`
@@ -282,9 +333,16 @@ async def get_program(
 ```python
 from features.program.router import router as program_router
 
-# Add alongside existing router includes:
+# The prefix is already inside the router, so pass no prefix= here.
 api_router.include_router(program_router)
 ```
+
+**Done:**
+
+- [ ] Imported the router object from the feature module
+- [ ] `include_router` called with **no** `prefix=` argument
+- [ ] Each `APIRouter` is mounted at exactly one prefix
+- [ ] A feature spanning two prefixes exports a second router (see §5)
 
 ---
 
@@ -308,7 +366,8 @@ async def client():
 
 @pytest.mark.asyncio
 async def test_create_program(client):
-    response = await client.post("/admin/programs/", json={
+    # api_router carries prefix="/api", so the real path is /api/admin/programs/
+    response = await client.post("/api/admin/programs/", json={
         "code": "BSCS",
         "name": "Bachelor of Science in Computer Science",
         "total_years": 4,
@@ -321,7 +380,7 @@ async def test_create_program(client):
 
 @pytest.mark.asyncio
 async def test_list_programs(client):
-    response = await client.get("/admin/programs/")
+    response = await client.get("/api/admin/programs/")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 ```
@@ -413,9 +472,9 @@ export async function fetchPrograms() {
 3. alembic revision      → generate migration
 4. alembic upgrade       → apply migration
 5. schema.py             → write Pydantic schemas
-6. service.py            → write business logic
-7. router.py             → write endpoints
-8. api/router.py         → mount router
+6. service.py            → write business logic (flush, never commit)
+7. router.py             → write endpoints, prefix baked in
+8. api/router.py         → mount router (no prefix= argument)
 9. tests                 → write tests (aspirational — no test runner yet)
 10. frontend/            → feature slice
 11. docs/                → update wireframes, contracts, structure
@@ -425,16 +484,19 @@ export async function fetchPrograms() {
 
 ## Naming Conventions
 
-| Item             | Convention               | Example                                         |
-| ---------------- | ------------------------ | ----------------------------------------------- |
-| Feature folder   | lowercase, singular      | `program/`, `excuse/`, `analytics/`             |
-| Model class      | PascalCase               | `Program`, `YearLevel`, `ExcuseRequest`         |
-| Table name       | snake_case, plural       | `programs`, `year_levels`, `excuse_requests`    |
-| Schema class     | PascalCase + suffix      | `ProgramCreate`, `ProgramRead`, `ProgramUpdate` |
-| Router prefix    | matches API contract     | `/admin/programs`                               |
-| Frontend store   | `$state` in `.svelte.ts` | `programs.svelte.ts`                            |
-| Frontend service | camelCase functions      | `fetchPrograms()`, `createProgram()`            |
-| Frontend schema  | Zod                      | `programSchema`, `programCreateSchema`          |
+| Item             | Convention                                                                                                                  | Example                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Feature folder   | lowercase, singular                                                                                                         | `program/`, `excuse/`, `analytics/`             |
+| Model class      | PascalCase                                                                                                                  | `Program`, `YearLevel`, `ExcuseRequest`         |
+| Table name       | snake_case, plural                                                                                                          | `programs`, `year_levels`, `excuse_requests`    |
+| Schema class     | PascalCase + suffix                                                                                                         | `ProgramCreate`, `ProgramRead`, `ProgramUpdate` |
+| Router prefix    | matches API contract, baked into the router; mounted with no `prefix=`                                                      | `/admin/programs`                               |
+| Second prefix    | feature spans two mounts → second `APIRouter` in its own module (`admin_router.py`, `offering_router.py`)                    | `features/student/admin_router.py`              |
+| Session dep      | `_get_db` (there is no public `get_db`)                                                                                     | `Depends(_get_db)`                              |
+| Transactions     | `flush()` in services; the single `commit()` lives in `_get_db`                                                              | —                                               |
+| Frontend store   | `$state` in `.svelte.ts`                                                                                                    | `programs.svelte.ts`                            |
+| Frontend service | camelCase functions                                                                                                         | `fetchPrograms()`, `createProgram()`            |
+| Frontend schema  | Zod                                                                                                                         | `programSchema`, `programCreateSchema`          |
 
 ---
 

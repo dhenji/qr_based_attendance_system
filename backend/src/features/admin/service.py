@@ -10,6 +10,7 @@ from features.admin.constants import DEFAULT_USERNAME_MAX_LENGTH, TEMP_PASSWORD_
 from features.admin.exceptions import (
     AdminUserNotFound,
     EmailAlreadyExists,
+    RosterLinkImpossible,
     SelfDeactivationForbidden,
     UsernameAlreadyExists,
 )
@@ -57,9 +58,13 @@ class AdminService:
         )
 
         if payload.role is UserRole.STUDENT:
-            await self._link_student(normalized, user.id)
+            await self._link_roster(
+                self._students, email=normalized, user_id=user.id, role="student"
+            )
         elif payload.role is UserRole.PROFESSOR:
-            await self._link_professor(normalized, user.id)
+            await self._link_roster(
+                self._professors, email=normalized, user_id=user.id, role="professor"
+            )
 
         return AdminUserCreateResponse(
             id=user.id,
@@ -160,21 +165,29 @@ class AdminService:
         user.is_active = False
         await self._session.flush()
 
-    async def _link_student(self, email: str, user_id: int) -> None:
-        student: Student | None = await self._students.get_by(
+    async def _link_roster(
+        self,
+        roster: BaseCRUD[Student] | BaseCRUD[Professor],
+        *,
+        email: str,
+        user_id: int,
+        role: str,
+    ) -> None:
+        """Attach a freshly created account to its active, unclaimed roster row.
+
+        Raises RosterLinkImpossible (409) rather than leaving the user unlinked,
+        which would make /auth/me unable to resolve first/last name or claim
+        status and would block the claim-based /auth/register flow.
+        """
+
+        record: Student | Professor | None = await roster.get_by(
             email=email, is_active=True
         )
 
-        if student is not None and student.user_id is None:
-            student.user_id = user_id
+        if record is None or record.user_id is not None:
+            raise RosterLinkImpossible(role)
 
-    async def _link_professor(self, email: str, user_id: int) -> None:
-        professor: Professor | None = await self._professors.get_by(
-            email=email, is_active=True
-        )
-
-        if professor is not None and professor.user_id is None:
-            professor.user_id = user_id
+        record.user_id = user_id
 
     @staticmethod
     def _default_username(first_name: str, last_name: str) -> str:

@@ -90,12 +90,12 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot, AppException handler)
 │   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP), exceptions.py
-│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py
-│   │   ├── api/          # deps.py (get_db, get_current_user, require_role) + router.py (mounts 5 of 7 routers under /api)
-│   │   ├── features/     # 13 slices: analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system
-│   │   │   └── */        # model.py per slice (16 classes); router.py stubs for 7; auth/schema.py + auth/constants.py; course_professor/service.py
-│   │   └── tests/        # Empty scaffold — no backend tests yet
-│   ├── alembic/          # env.py imports all 13 feature models; 1 baseline migration (679a319c12d6) creating the 16-table target schema
+│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py
+│   │   ├── api/          # deps.py (_get_db, _get_current_user, require_role) + router.py (mounts 6 of 8 routers under /api)
+│   │   ├── features/     # 14 slices: analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system
+│   │   │   └── */        # model.py per slice (17 classes); router.py per slice (auth + admin implemented, 6 prefix-only stubs); auth/ and admin/ have schema+service+router; course_professor/service.py
+│   │   └── tests/        # pytest suite — 56 tests (hand-rolled fakes, no DB); requires DEBUG=true + JWT_SECRET
+│   ├── alembic/          # env.py imports all 13 feature models; 3 migrations — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index) → 17 tables
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
 ├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend
 └── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, presentations, project, testing
@@ -206,6 +206,23 @@ Backend tests:
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
+Or directly against the local venv (no Docker, no database — the suite uses
+hand-rolled fakes and never opens a connection):
+
+```bash
+cd backend
+DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
+```
+
+`DEBUG=true` and a dummy `JWT_SECRET` are required, otherwise `Settings`
+validation fails at import time. There is no `conftest.py`.
+
+Schema drift check (requires a reachable Postgres and `alembic`):
+
+```bash
+cd backend && alembic check    # expect: "No new upgrade operations detected"
+```
+
 Frontend typecheck (runs svelte-kit sync automatically):
 
 ```bash
@@ -218,7 +235,7 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite currently contains 13 unit tests.
+There are no linters or formatters configured. The backend suite currently contains 56 unit tests.
 
 ## Deployment
 
@@ -254,7 +271,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ### Design
 
-- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (16-table target schema)
+- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (19-table target; 17 landed)
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
 
 ### Developer
@@ -280,7 +297,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D54)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D57)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -300,7 +317,7 @@ Shared infrastructure is complete — **Phase 0** of the [13-phase roadmap](docs
 
 | Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security, exceptions, base CRUD, pagination, email, validators, 13 enums); `api/deps.py` with `get_db`, `get_current_user` (JWT/HTTPBearer), `require_role(*roles)`; 13 feature slices / 16 model classes; 5 of 7 router stubs mounted under `/api` (auth→`/api/auth`, student→`/api/student`, session→`/api/professor`, attendance→`/api/student`, professor→`/api/professor`; course & enrollment routers exist but are unmounted); 1 baseline Alembic migration `679a319c12d6` creating the 16-table target schema; multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
+| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security, exceptions, base CRUD, pagination, email, validators, captcha, rate limiting, cache, 13 enums); `api/deps.py` with `_get_db`, `_get_current_user` (JWT/HTTPBearer), `require_role(*roles)`; 14 feature slices / 17 model classes; 6 of 8 router stubs mounted under `/api` (auth→`/api/auth`, admin→`/api/admin/users`, student→`/api/student`, attendance→`/api/student`, session→`/api/professor`, professor→`/api/professor`; course & enrollment routers exist but are unmounted); 3 Alembic migrations — `679a319c12d6` (16-table baseline) + `2a437ca93c53` + `33eabbfbfa6a` (`mfa_backup_codes` + indexed fingerprint) → 17 tables; 56-test pytest suite; multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
 | Frontend | Mock-first feature-slice implementation — routes for landing, auth (login/register/forgot-password), student (dashboard/scan), professor (sessions); mock feature services + runes stores (auth, student) + components (DashboardStats, QRScanner); shared types/utils/constants; typed `api/client.ts` (`MOCK = true`) + mock `api/endpoints.ts`; Svelte 5 runes mode forced in `vite.config.ts`                                                                                                                                                                                                                                                                                                                                                               |
 | Features | Model layer complete for all 13 slices; `auth/schema.py` (Pydantic) and `course_professor/service.py` are the only service/schema layers so far; router stubs exist for 7 slices (course_professor, excuse, analytics, program, sync, system have no router file yet); `liveness` is frontend-only                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `mfa_backup_codes`, `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                                                                                                                                                                                                                                              |

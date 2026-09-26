@@ -67,4 +67,9 @@ class MfaBackupCodes(CreatedAtMixin, Base):
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     code_hash: Mapped[str] = mapped_column(String(255))
+    # Keyed digest of the normalized code. Lets verify_backup_code resolve the one
+    # candidate row with an indexed lookup instead of Argon2id-verifying all ten,
+    # which kept ~10 sequential 64MB/t=3 hashes on the MFA login path. code_hash
+    # remains the authoritative Argon2id check (ADR-054); this is lookup sugar.
+    code_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

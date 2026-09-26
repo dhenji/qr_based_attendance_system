@@ -503,7 +503,7 @@ Latest scans feed for the admin dashboard (wireframes.md 4.1).
 Queue of attendance records flagged for manual review — records whose
 `face_match_score` fell in the review band
 `[FACE_REVIEW_BAND_LOW, FACE_MATCH_THRESHOLD)` (0.65–0.70) submitted with
-`liveness_evidence.review=true` and `validation_status=pending` (PROMPT 5.2).
+`liveness_evidence.review=true` and `validation_status=pending`.
 
 #### `GET /admin/attendance/liveness-review`
 
@@ -523,7 +523,7 @@ Approve or reject a flagged record.
 | ---------------- | --------------------------------------------------------------------------------- |
 | **Request**      | `{ decision: "approve" \| "reject", note?: string }`                              |
 | **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
-| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. Decisions are audit-logged (PROMPT 8.7). |
+| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. Decisions are audit-logged. |
 
 ### Students, Professors & Archive
 
@@ -564,11 +564,20 @@ Permanent delete — allowed only on archived (`is_active=false`) students
 |                  |                          |
 | ---------------- | ------------------------ |
 | **Response 204** | No content               |
-| **Errors**       | 409 `not_archived`       |
+| **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `student_has_records` (enrollments / attendance_records / excuse_requests still reference this student — ADR-057) |
+
+> The `is_active` check alone is not sufficient. `enrollments`,
+> `attendance_records` and `excuse_requests` all reference `students.id` with
+> `ondelete="RESTRICT"`, so a hard delete of any student who has ever enrolled or
+> scanned would otherwise raise a foreign-key violation and return 500. The
+> has-records guard returns 409 instead. The FKs stay `RESTRICT` on purpose:
+> cascading them would silently destroy the attendance audit trail (ADR-057).
 
 #### `DELETE /admin/professors/{id}/archive`
 
-Same semantics as the student archive delete, for professors.
+Same semantics as the student archive delete, for professors, including
+`409 professor_has_records` when `sessions` still reference the professor
+(`course_professors` is CASCADE, `sessions` is RESTRICT).
 
 #### `GET /admin/students`
 
@@ -1050,7 +1059,7 @@ lock after 5 failed attempts.
 | POST   | `/auth/login`                      | Email/password login (+ MFA gate)                    |
 | POST   | `/auth/refresh`                    | Refresh-token rotation                               |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question |
-| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock)    |
+| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` |
 | POST   | `/auth/reset-password`             | Step 4 — reset password with OTP                     |
 | POST   | `/auth/change-password`            | Change password (authenticated)                      |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated)         |
@@ -1061,12 +1070,41 @@ lock after 5 failed attempts.
 | POST   | `/auth/mfa/verify`                 | Verify TOTP or backup code (login exchange or setup) |
 | POST   | `/auth/mfa/disable`                | Disable MFA (password required; clears backup codes) |
 
-**Forgot-password flow (wireframes.md:152-260, ADR-052):** Step 1 (`/auth/forgot-password`,
-email, responds identically for unknown emails to avoid enumeration) → Step 2
-(`/auth/forgot-password/verify`, answer hash-checked with Argon2id; max 3 attempts
-per email then the recovery attempt locks) → Step 3 OTP (`/auth/otp/request` with
-purpose `forget_password`) → Step 4 (`/auth/reset-password`). The security question
-is mandatory and set at claim registration (`/auth/register`).
+**Forgot-password flow (wireframes.md:152-260, ADR-052, hardened by ADR-056):**
+Step 1 (`/auth/forgot-password`, email) → Step 2 (`/auth/forgot-password/verify`,
+answer hash-checked with Argon2id; max 3 attempts per email then the recovery
+attempt locks) → Step 3 OTP (`/auth/otp/request` with purpose `forget_password`) →
+Step 4 (`/auth/reset-password`). The security question is mandatory and set at
+claim registration (`/auth/register`).
+
+Non-enumeration (ADR-056): step 1 returns `{question, set: true}` for every email.
+For an unknown address the question is a **deterministic** decoy — an HMAC of the
+normalized email over `SECURITY_QUESTION_POOL` — so a given address always yields
+the same question and a real account's question never changes between requests.
+`set` is always `true` and carries no information. The response shape, status, and
+timing are identical to the known-email case, so step 1 is not an enumeration
+oracle; an unknown address simply fails at step 2 with the same
+`security_answer_invalid` error. Note this is *not* byte-identical output — the
+decoy text differs from a real question — so it mitigates rather than fully
+prevents enumeration. Emailing the question instead of returning it would close
+the gap; that is deferred (ADR-056).
+
+Step gating (ADR-056): step 2 returns **200** with a `RecoveryGrantResponse`
+carrying `recovery_token`, a signed JWT with `type="recovery"`, the account's
+email, and a 5-minute expiry. Step 3 will not mint a `forget_password` OTP without
+a valid grant — a missing, malformed, expired, or email-mismatched grant returns
+`400 invalid_credentials` with a generic message, so the gate is not itself
+probeable. The grant is rejected by the access-token dependency (it carries a
+`type` claim) and so cannot be replayed for API access. `/auth/reset-password` is
+unchanged.
+
+**Security-question storage (ADR-056):** only the **answer** is hashed
+(`users.security_answer_hash`, Argon2id). `users.security_question_hash` stores the
+question in **readable plaintext** under a legacy column name, because step 1 must
+return it for the user to read. The question is non-secret by design — it is drawn
+from a small preset pool in the settings UI. See
+[security-model.md](security-model.md) and
+[database-er.md](../design/database-er.md).
 
 **Captcha (ADR-053):** `LoginRequest` and `ForgotPasswordStep1Request`
 carry an optional `turnstile_token`. Server calls Cloudflare `siteverify` via
@@ -1112,3 +1150,9 @@ status lines on 2.10/2.11/3.9/4.11 and the client auth guard.
 | Forgot-password 4-step + security question          | ADR-052            |
 | Turnstile `turnstile_token` fields                  | ADR-053            |
 | MFA backup-code endpoints                          | ADR-054            |
+| Recovery grant gating steps 3–4                     | ADR-056            |
+| Deterministic decoy question on step 1              | ADR-056            |
+| Security-question plaintext storage (answer only hashed) | ADR-056        |
+| Admin routing: separate `admin_router.py` per feature | ADR-057            |
+| No `/admin/enrollments` mount; bulk-enroll lives under offerings | ADR-057 |
+| Archive delete 409 `student_has_records` / `professor_has_records` | ADR-057 |

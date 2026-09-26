@@ -22,6 +22,9 @@ from shared.validators import password_strength
 class OTPRequest(BaseModel):
     email: EmailStr
     purpose: OtpPurpose = OtpPurpose.CLAIM
+    # Required only when purpose=forget_password: proves step 2 of the recovery
+    # flow was passed, so the mandatory security-question gate cannot be skipped.
+    recovery_token: str | None = None
 
 
 class _CodeRequest(BaseModel):
@@ -90,6 +93,12 @@ class SetSecurityQuestionRequest(BaseModel):
 class SecurityQuestionResponse(BaseModel):
     question: str | None = None
     set: bool = False
+
+
+class RecoveryGrantResponse(BaseModel):
+    """Returned by forgot-password step 2; unlocks the FORGET_PASSWORD OTP."""
+
+    recovery_token: str
 
 
 class ForgotPasswordStep1Request(OTPRequest):

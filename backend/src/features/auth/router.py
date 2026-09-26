@@ -13,6 +13,7 @@ from features.auth.schema import (
     MFAVerifyRequest,
     OTPRequest,
     OTPVerifyRequest,
+    RecoveryGrantResponse,
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -23,7 +24,8 @@ from features.auth.schema import (
 from shared.captcha import verify_turnstile_token
 from shared.rate_limit import rate_limit
 
-router = APIRouter()
+# Prefix baked in here; mounted without a prefix argument in api/router.py.
+router = APIRouter(prefix="/auth")
 
 
 @router.post(
@@ -36,7 +38,7 @@ async def request_otp(
     service: AuthServiceDep,
     _: None = Depends(rate_limit(5, 60, key="email")),
 ) -> None:
-    await service.request_otp(payload.email, payload.purpose)
+    await service.request_otp(payload.email, payload.purpose, payload.recovery_token)
 
 
 @router.post(
@@ -44,7 +46,11 @@ async def request_otp(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Verify a 6-digit OTP",
 )
-async def otp_verify(payload: OTPVerifyRequest, service: AuthServiceDep) -> None:
+async def otp_verify(
+    payload: OTPVerifyRequest,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(5, 300, key="email")),
+) -> None:
     await service.verify_otp(payload.email, payload.code, payload.purpose)
 
 
@@ -109,15 +115,15 @@ async def forgot_password(
 
 @router.post(
     "/forgot-password/verify",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Forgot-password step 2 - verify security answer (3-attempt cap)",
+    response_model=RecoveryGrantResponse,
+    summary="Forgot-password step 2 - verify security answer, get recovery grant",
 )
 async def forgot_password_verify(
     payload: ForgotPasswordStep2Request,
     service: AuthServiceDep,
     _: None = Depends(rate_limit(5, 60, key="email")),
-) -> None:
-    await service.forgot_password_step2(payload.email, payload.answer)
+) -> RecoveryGrantResponse:
+    return await service.forgot_password_step2(payload.email, payload.answer)
 
 
 @router.post(
