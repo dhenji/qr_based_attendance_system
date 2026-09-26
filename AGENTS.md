@@ -90,7 +90,7 @@ npm run check                      # typecheck (runs svelte-kit sync first; watc
 |------|--------|
 | DB connection | FastAPI lifespan runs `SELECT 1` at startup — container fails if Postgres not ready. Compose handles via `depends_on: condition: service_healthy`. |
 | Alembic model imports | `alembic/env.py` imports models using `features.*.model` (not `src.features...`). Must `cd backend` so imports resolve. All 13 feature models are already imported and the single baseline migration exists — only autogenerate if you actually add/change a model, and remember to add the new `import features.X.model`. |
-| Service classes | `AuthService`/`AdminService`/`CourseProfessorService` are classes, sanctioned by ADR-055 as an exception to the module-level-function default. New slices should use module functions. |
+| Service classes | Admin CRUD slices (`/admin/*`: program, course, student-admin, professor-admin) implement `class <Feature>Service` with one `BaseCRUD` handle per model, reached via `<Feature>ServiceDep` in `api/deps.py` — a standing rule, not a per-slice argument (ADR-058). Everything else (`face_enrollment`, `shared/csv_import.py`) stays module-level functions (ADR-055); `course_professor/service.py` is a retained borderline class, not a precedent. |
 | Recovery flow | Step 2 of forgot-password returns a 5-min `type="recovery"` grant; a `forget_password` OTP cannot be minted without it. Unknown emails get a **deterministic** decoy question (ADR-056). |
 | Security question | Only the answer is Argon2id-hashed; `users.security_question_hash` holds the question in readable plaintext under a legacy name (ADR-056). Do not "fix" this without revisiting step 1's contract. |
 | Frontend mock mode | `MOCK = true` in `src/lib/api/client.ts`. All API calls return mock data. No real backend integration yet. |
@@ -101,7 +101,8 @@ npm run check                      # typecheck (runs svelte-kit sync first; watc
 | Unmounted routers | `course` and `enrollment` routers exist in `src/features/{course,enrollment}/router.py` but are not imported in `src/api/router.py`. |
 | Trailing slashes | Collection routes use `@router.get("")`/`@router.post("")` so the path matches the contract exactly (`/api/admin/users`, not `/api/admin/users/`). Using `"/"` adds a redirect. |
 | Phase 3 routing | Phase 3 adds 6 new mounts and must NOT re-mount `student/router.py` or `professor/router.py` (already live at `/api/student`, `/api/professor`) — it needs `student/admin_router.py` + `professor/admin_router.py` instead. `features/course/` needs two routers (`router.py` → `/admin/courses`, `offering_router.py` → `/admin/offerings`). `enrollment/router.py` stays unmounted. Face enrollment is its own slice with no model/migration. Full rationale in ADR-057. |
-| Phase 3 aggregates | `scan_count`, `course_count`, `year_level_count`, `terms_count`, `enrolled_count` are derived per request, not columns. `terms_count` = `sum(len(yl.term_structure["terms"]))` — the JSONB shape is `{terms:[{code,label}]}`, so bare `len(term_structure)` silently returns 1. |
+| Phase 3 aggregates | `scan_count`, `course_count`, `year_level_count`, `terms_count`, `enrolled_count` are derived per request, not columns. `terms_count` = `sum(len(yl.term_structure["terms"]))` — the JSONB shape is `{terms:[{code,label}]}`, so bare `len(term_structure)` silently returns 1. `course_count` has no `courses.program_id` to count (D44) — it is `COUNT(DISTINCT course_offerings.course_id)` per program. The resulting N+1 is accepted at Phase 3 volumes (ADR-057/058). |
+| Phase 3 soft archive | `DELETE /admin/programs/{id}` flips `programs.is_active` **only** — `year_levels` has no `is_active` column and `courses` has no program FK (D44), so the contract's old "cascades year-levels/courses inactive" line is stale; there is nothing to cascade to (ADR-058). Do not invent a cascade. |
 | Phase 3 hard delete | `DELETE /admin/{students,professors}/{id}/archive` needs a has-records guard (409) — `enrollments`/`attendance_records`/`excuse_requests`/`sessions` are `ondelete=RESTRICT`, so the `is_active` check alone 500s. Do not relax them to CASCADE (ADR-057). |
 | Frontend typecheck | `npm run check` generates `.svelte-kit/` (gitignored) via `svelte-kit sync`. |
 
@@ -127,7 +128,7 @@ Key docs an agent is likely to need (README.md links the full inventory):
 - `docs/project/roadmap.md` — 13-phase implementation roadmap (Phase 0 done, 12 is a gap)
 
 ### Decision tracking & ops
-- `docs/project/decision-log.md` — authoritative decision log (D1–D57, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing)
+- `docs/project/decision-log.md` — authoritative decision log (D1–D58, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing, ADR-058 admin CRUD slice template)
 - `docs/operations/runbooks.md` — restore, rollback, unlock, re-enroll, key rotation
 - `docs/testing/test-plan.md` — portal×feature matrix & decision coverage
 - `docs/deployment/production-checklist.md` — secrets, CORS, storage, first-admin seeding

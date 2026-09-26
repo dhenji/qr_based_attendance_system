@@ -5,12 +5,18 @@ from fastapi import HTTPException, Query
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.pagination import paginate_query, paginated_response
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    paginate_query,
+    paginated_response,
+)
 
 
 async def pagination_params(
-    page: Annotated[int, Query(ge=1)] = 1,
-    size: Annotated[int, Query(ge=1, le=100)] = 50,
+    page: Annotated[int, Query(ge=1)] = DEFAULT_PAGE,
+    size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
 ) -> dict[str, int]:
     """FastAPI dependency: validated ``?page=&size`` query params."""
 

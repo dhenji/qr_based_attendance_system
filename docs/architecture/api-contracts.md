@@ -113,9 +113,11 @@ List all programs (with year-level counts).
 |                  |                                                                                                                   |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------- |
 | **Role**         | admin                                                                                                             |
-| **Query**        | `?is_active=true&page=1&size=20`                                                                                  |
+| **Query**        | `?search=&is_active=true&page=1&size=20`                                                                          |
 | **Response 200** | `{ items: [{ id, code, name, description, total_years, is_active, course_count, year_level_count, terms_count, created_at, updated_at }], total, page, size }` |
 | **Notes**        | `course_count`/`year_level_count`/`terms_count` are aggregate DTOs for the Programs table (wireframes.md 4.5a: Years / Terms / Courses columns). |
+|                  | `search` is optional and matches `code` or `name` case-insensitively (wireframes 4.5a search box).                 |
+|                  | All three aggregates are **derived per request**, not stored columns: `year_level_count` = rows in `year_levels`, `terms_count` = `sum(len(term_structure["terms"]))`, and `course_count` = `COUNT(DISTINCT course_offerings.course_id)` over that program's active offerings — `courses` carries no `program_id` (D44), so offerings are the only path. |
 
 #### `POST /admin/programs`
 
@@ -143,11 +145,13 @@ Create a new program.
 
 #### `DELETE /admin/programs/{id}`
 
-Archive program (sets `is_active=false`). Cascades year-levels/courses inactive.
+Archive program (sets `is_active=false` on the program row only). PATCH the same row with
+`is_active: true` to reactivate.
 
 |                  |            |
 | ---------------- | ---------- |
 | **Response 204** | No content |
+| **Notes**        | No cascade. An earlier version of this contract said archiving "cascades year-levels/courses inactive"; that predates D44 and cannot be implemented — `year_levels` has no `is_active` column and `courses` is a standalone template with no program FK (the program FK lives on `course_offerings`). `course_offerings` rows are left untouched. See ADR-058. |
 
 ---
 
@@ -1156,3 +1160,6 @@ status lines on 2.10/2.11/3.9/4.11 and the client auth guard.
 | Admin routing: separate `admin_router.py` per feature | ADR-057            |
 | No `/admin/enrollments` mount; bulk-enroll lives under offerings | ADR-057 |
 | Archive delete 409 `student_has_records` / `professor_has_records` | ADR-057 |
+| `GET /admin/programs` optional `?search=` filter | ADR-058            |
+| Program aggregates derived per request (`terms_count` via the `terms` JSONB key, `course_count` via `course_offerings`) | ADR-058 |
+| Program archive is program-row-only (no cascade)    | ADR-058            |

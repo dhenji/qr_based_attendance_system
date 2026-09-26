@@ -609,6 +609,10 @@
   `__init__` genuinely has collaborators to compose — a session alone does not
   qualify, so a new single-method service should be written as a function even
   though this one is not.
+  > **Amended by ADR-058** — the "prefer a function" default is unchanged for
+  > non-CRUD slices, but CRUD slices under `/admin/*` are now required to take the
+  > class form with a `<Feature>ServiceDep`. Read this paragraph together with
+  > ADR-058 rather than as a per-slice judgement call.
 - **Supersedes:** the "no service classes" clause of `coding-standards.md` §1.6.
 
 ### ADR-056: Recovery Security-Question Storage and Enumeration Hardening
@@ -755,3 +759,100 @@
   router list, the "additions to the student feature" placement of face
   enrollment, and the archive-delete guard — as realised in `src/api/router.py`
   and the archive-delete error codes in `api-contracts.md` §ADMIN Endpoints.
+
+### ADR-058: Admin CRUD Slice Template
+
+- **Decision (D58):** The `/api/admin/*` CRUD slices of Phase 3 are built from one
+  template instead of each prompt restating the shape.
+  **(a) Service classes are the standing form for CRUD slices.** A slice whose job is
+  create/read/update/archive for one or two models (`program`, `course`,
+  student-admin, professor-admin) implements `class <Feature>Service` whose `__init__`
+  takes the request `AsyncSession` and builds one `BaseCRUD` handle per model it
+  touches, and is reached through an annotated `<Feature>ServiceDep` in
+  `api/deps.py`. It is a rule about the slice family, not a judgement call to
+  re-argue per slice. Non-CRUD slices keep module-level functions.
+  **(b) Each slice carries a `constants.py`.** Slice-specific field bounds live
+  there; the list-query bounds (`DEFAULT_PAGE`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE`,
+  `SEARCH_MAX_LENGTH`) live in `shared/pagination.py` and are imported rather than
+  restated per slice. `features/admin/constants.py` re-exports the four so the existing
+  admin routes keep their imports.
+  **(c) A list endpoint may add one optional filter the contract omits.** Programs
+  gets `?search=` (ilike over `code`/`name`) for the wireframe 4.5a search box. It
+  must be optional, default `None`, length-capped, and recorded in
+  `api-contracts.md`; a *required* undocumented parameter is not allowed.
+  **(d) A soft archive touches only its own row.** `DELETE /admin/programs/{id}` sets
+  `programs.is_active = False` and nothing else.
+  **(e) Derived aggregates are computed per request in Python**, one query per parent
+  row, with the N+1 accepted at Phase 3 volumes (already deferred by ADR-057).
+  **(f) A slice is not mounted in its own session** — `api/router.py` is edited once,
+  by PROMPT 3.7.
+- **Date:** 2026-09-26
+- **Status:** Accepted
+- **Context:** The Phase 3 prompt file gave two conflicting instructions about service
+  form. Its phase header said to copy `AdminService` ("class-based `AdminService`
+  holding a `BaseCRUD` per model"), which describes a class, while ADR-055 and
+  `coding-standards.md` §1.6 recorded module-level functions as the default for new
+  slices and told new slices to prefer functions. Five sibling slices (3.1-3.5) were
+  about to be implemented by five different sessions, so leaving the choice open would
+  have produced a different answer in each one and a codebase split down the middle.
+  The same header also listed a `constants.py` only in passing, said nothing about the
+  wireframe search box, and inherited a contract sentence that cannot be implemented.
+- **Rationale for (a):** ADR-055's criterion — a class earns its place when `__init__`
+  builds per-request collaborators every method would otherwise re-derive — is met by
+  every one of these slices: each composes `BaseCRUD` handles for the models it
+  touches. Generalising the rule from "judge each slice" to "CRUD slices take this
+  form, other slices take the other form" makes the choice mechanical, and ADR-055's
+  default is preserved everywhere it actually applies. `CourseProfessorService` stays a
+  class as ADR-055 already retained it; the new rule does not require reverting it,
+  because ADR-055 explicitly declines cosmetic changes to contract-tested code.
+- **Rationale for (b):** pagination limits apply to every list route in the app, so they
+  do not belong to a feature slice. The first draft of this ADR pointed at
+  `features/admin/constants.py` — where the bounds already lived — on the reasoning that
+  reusing them beat writing three copies of `MAX_PAGE_SIZE` that could drift apart. That
+  was half right: it avoided the duplication and made the `admin` slice the de-facto shared
+  module for a cross-cutting concern, which is the wrong dependency direction and would have
+  been repeated by all five Phase 3 slices. Moving the four bounds to `shared/pagination.py`
+  — next to `PaginatedResponse` and `paginate_query`, which already speak that vocabulary —
+  and re-importing them in `admin/constants.py` gives one home, zero route edits, and no
+  feature-to-feature import. `NAME_MIN_LENGTH` / `NAME_MAX_LENGTH` were deliberately left in
+  `admin/constants.py`: they are not cross-cutting yet, and promoting them is the trigger for
+  a `shared/constants.py` rather than something to do pre-emptively. The same review removed
+  `shared/dependencies.pagination_params`' private `le=100` ceiling, which silently
+  disagreed with admin's 200 — the two constants now have one value.
+- **Rationale for (c):** the wireframes show a search box on the Programs table that
+  the contract's query line omits. Dropping the filter would have left the documented
+  screen unbuildable; adding it as a required parameter would have invented a contract.
+  One optional, documented filter is the smallest thing that satisfies both, and the
+  cap reuses `SEARCH_MAX_LENGTH` so a `?search=` cannot become an unbounded `ilike`.
+- **Rationale for (d):** `api-contracts.md:146` said the program archive "cascades
+  year-levels/courses inactive", but that sentence predates D44: `year_levels` has no
+  `is_active` column, and `courses` is a decoupled template with no program FK at all
+  (the program FK lives on `course_offerings`). The only implementable action is
+  flipping the program's own flag, and archiving the program's offerings was rejected
+  because the contract never says so and an admin who archives a program to hide it
+  from a picker would not expect the term's offerings to disappear. The contract line is
+  corrected rather than implemented, because writing a cascade would be inventing
+  behaviour the schema cannot express.
+- **Rationale for (e):** the aggregates are `COUNT`/`len` over related rows, computed
+  per request. Building a grouped aggregate query now would add JSONB shape assumptions
+  (the `{"terms": [...]}` key) to SQL before the first data exists to justify them, and
+  a materialised view needs a backfill plus a refresh path. ADR-057 already deferred this
+  to the point where the lists grow; the trigger for revisiting is unchanged — a cached
+  aggregate via `shared/cache.py`, or a materialised view.
+- **Consequences:** `coding-standards.md` gains §1.8 (the template) and rewritten
+  §1.5-§1.7; `AGENTS.md`'s service-class and Phase 3 rows follow it; the Phase 3 header
+  in `prompts/backend-prompts.txt` and PROMPT 3.1 state the same rules; and
+  `api-contracts.md`'s Programs section gains `?search=`, the aggregate-derivation note,
+  and a corrected archive description. `api/deps.py` gains one `_get_<feature>_service`
+  plus one `<Feature>ServiceDep` alias per slice. No migration, and no change to
+  ADR-055's default outside the CRUD family.
+- **Deferred:** `terms_count` and `course_count` remain per-request; the revisit
+  trigger is the same as ADR-057's, plus one more — once every Phase 3 slice ships,
+  the derived-aggregate code is a candidate for a single shared helper, since the shape
+  (count + page + per-row aggregates) is identical across slices.
+- **Extends:** ADR-055 (service classes) and ADR-057 (Phase 3 routing, aggregates,
+  archive semantics). ADR-055's module-level default continues to govern every
+  non-CRUD slice.
+- **Supersedes:** the stale "cascades year-levels/courses inactive" sentence in
+  `api-contracts.md` §Programs, and the implicit permission to re-decide service form
+  per Phase 3 slice in `prompts/backend-prompts.txt`.
