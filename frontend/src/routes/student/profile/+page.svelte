@@ -57,6 +57,10 @@
 				</span>
 				<span class="field">Year Level</span>
 				<span>{student.yearLevelLabel}</span>
+				{#if student.section}
+					<span class="field">Section</span>
+					<span>{student.section}</span>
+				{/if}
 				<span class="field">Email</span>
 				<span>{student.email || '—'}</span>
 			</div>
@@ -85,8 +89,10 @@
 		<div class="admin-note">Changes to your profile are handled by your administrator.</div>
 
 		<p class="meta muted">Account: {accountLabel} · Scans: {student.scanCount ?? 0}</p>
+	{:else if studentState.error}
+		<p class="empty">Could not load your profile: {studentState.error}</p>
 	{:else}
-		<p class="empty">No profile data yet. Your profile will appear here once the backend is connected.</p>
+		<p class="empty">No profile data available for this account.</p>
 	{/if}
 </div>
 

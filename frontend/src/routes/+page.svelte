@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { isAuthenticated, isStudent, isProfessor, isAdmin, doLogout } from '$lib/features/auth/store.svelte';
+	import { isAuthenticated, isStudent, isProfessor, isAdmin, doLogout, authState, defaultRouteFor } from '$lib/features/auth/store.svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 
 	const features = [
@@ -30,18 +30,22 @@
 			desc: 'Scan, view your schedule, and track your attendance rate.',
 			path: '/student/dashboard',
 			cta: 'Open dashboard',
+			ready: true,
 		},
 		{
 			label: 'Professor portal',
 			desc: 'Create sessions and review attendance for every meeting.',
 			path: '/professor/sessions',
 			cta: 'Open sessions',
+			ready: true,
 		},
 		{
+			// The admin portal is still being built — linking to it would 404.
 			label: 'Admin portal',
 			desc: 'Manage rosters, courses, and attendance records.',
-			path: '/admin/students',
-			cta: 'Open admin',
+			path: '',
+			cta: 'Coming soon',
+			ready: false,
 		},
 	];
 
@@ -51,17 +55,14 @@
 		{ label: 'Cookies', path: '/cookies' },
 	];
 
-	const authLink = () => {
-		if (isStudent()) return '/student/dashboard';
-		if (isProfessor()) return '/professor/sessions';
-		if (isAdmin()) return '/admin/students';
-		return '/auth/login';
-	};
+	// Single source of truth for where a signed-in user lands, so the header
+	// can't drift from what the login page does after authenticating.
+	const authLink = () => defaultRouteFor(authState.user);
 
 	const authLabel = () => {
 		if (isStudent()) return 'Student Dashboard';
 		if (isProfessor()) return 'Professor Sessions';
-		if (isAdmin()) return 'Admin Panel';
+		if (isAdmin()) return 'Home';
 		return 'Login';
 	};
 </script>
@@ -175,17 +176,25 @@
 		<h2>Made for students, professors, and admins.</h2>
 		<div class="portal-grid">
 			{#each portals as portal}
-				<a class="portal-card" href={portal.path}>
-					<h3>{portal.label}</h3>
-					<p>{portal.desc}</p>
-					<span class="portal-cta">
-						{portal.cta}
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M5 12h14" />
-							<path d="m13 6 6 6-6 6" />
-						</svg>
-					</span>
-				</a>
+				{#if portal.ready}
+					<a class="portal-card" href={portal.path}>
+						<h3>{portal.label}</h3>
+						<p>{portal.desc}</p>
+						<span class="portal-cta">
+							{portal.cta}
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M5 12h14" />
+								<path d="m13 6 6 6-6 6" />
+							</svg>
+						</span>
+					</a>
+				{:else}
+					<div class="portal-card is-disabled" aria-disabled="true">
+						<h3>{portal.label}</h3>
+						<p>{portal.desc}</p>
+						<span class="portal-cta">{portal.cta}</span>
+					</div>
+				{/if}
 			{/each}
 		</div>
 	</section>
@@ -345,12 +354,6 @@
 	.btn-ghost:hover {
 		background: #f1f5f9;
 		transform: translateY(-1px);
-	}
-
-	.hero-note {
-		font-size: 0.875rem;
-		color: #64748b;
-		margin: 1.25rem 0 0;
 	}
 
 	.hero-visual {
@@ -617,6 +620,13 @@
 		box-shadow: 0 12px 28px rgba(30, 58, 95, 0.3);
 	}
 
+	/* Portals that don't exist yet — no hover lift, muted so it reads as inert. */
+	.portal-card.is-disabled {
+		background: #475569;
+		box-shadow: none;
+		cursor: default;
+	}
+
 	.portal-card h3 {
 		font-size: 1.125rem;
 		font-weight: 700;
@@ -717,10 +727,6 @@
 		.btn-primary,
 		.btn-ghost {
 			width: 100%;
-		}
-
-		.hero-note {
-			margin-top: 1rem;
 		}
 	}
 

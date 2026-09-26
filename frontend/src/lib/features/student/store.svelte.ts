@@ -1,12 +1,13 @@
 // features/student/store.svelte.ts
 // Student dashboard + scan state using Svelte 5 runes ($state object store)
 
-import type { Student, Course } from '$lib/shared/types';
+import type { Course, Student, StudentDashboardResponse } from '$lib/shared/types';
 import {
 	getProfile,
 	updateProfile,
 	getSchedule,
 	getSessionHistory,
+	getDashboard,
 	submitScan,
 } from '$lib/features/student/service';
 
@@ -23,11 +24,20 @@ export type SessionHistoryItem = {
 	scannedVia: 'qr' | 'manual';
 };
 
+const EMPTY_DASHBOARD: StudentDashboardResponse = {
+	compliance_rate: 0,
+	scans_today: 0,
+	total_scans: 0,
+	today_schedule: [],
+	recent_activity: [],
+};
+
 // Student state
-// Profile + schedule + session history in one reactive object. Renders the
-// dashboard and backs the scan flow.
+// Profile + dashboard + schedule + session history in one reactive object.
+// Renders the dashboard and backs the scan flow.
 export const studentState = $state({
 	student: null as Student | null,
+	dashboard: { ...EMPTY_DASHBOARD } as StudentDashboardResponse,
 	courses: [] as Course[],
 	history: [] as SessionHistoryItem[],
 	loading: false,
@@ -38,24 +48,35 @@ export const studentState = $state({
 // Derived stats
 // Read-only helpers for the dashboard UI (module-scope $derived can't be
 // exported, hence functions reading studentState).
-export const complianceRate = () =>
-	studentState.student ? Math.round((studentState.student as Record<string, number> & Student).attendanceRate ?? 0) : 0;
-export const participationRate = () =>
-	studentState.student ? Math.round((studentState.student as Record<string, number> & Student).participationRate ?? 0) : 0;
+//
+// The compliance rate comes from GET /student/dashboard, which computes it as
+// present / total_expected_sessions. An empty dashboard has no data yet, so
+// `hasData` distinguishes "0%" from "nothing to report".
+export const hasDashboardData = () => studentState.dashboard.total_scans > 0;
+export const complianceRate = () => Math.round(studentState.dashboard.compliance_rate);
+export const scansToday = () => studentState.dashboard.scans_today;
+export const totalScans = () => studentState.dashboard.total_scans;
 export const isLoading = () => studentState.loading || studentState.scanLoading;
 
+const toMessage = (e: unknown, fallback: string) =>
+	e instanceof Error && e.message ? e.message : fallback;
+
 // init
-// One-shot bootstrap: loads profile, schedule, and history into the state.
+// One-shot bootstrap: loads the profile, dashboard summary, schedule, and
+// history into state. The profile and dashboard run together; schedule and
+// history are still empty placeholders.
 export const initStudent = async (): Promise<void> => {
 	studentState.loading = true;
 	studentState.error = null;
 	try {
-		studentState.student = await getProfile();
+		const [profile, dashboard] = await Promise.all([getProfile(), getDashboard()]);
+		studentState.student = profile;
+		studentState.dashboard = dashboard;
 		studentState.courses = await getSchedule();
 		const res = await getSessionHistory();
-		studentState.history = res.items;
+		studentState.history = res.items as SessionHistoryItem[];
 	} catch (e: unknown) {
-		studentState.error = e instanceof Error ? e.message : 'Failed to load student data';
+		studentState.error = toMessage(e, 'Failed to load student data');
 	} finally {
 		studentState.loading = false;
 	}
@@ -69,7 +90,7 @@ export const doUpdateProfile = async (updates: Partial<Student>): Promise<void> 
 	try {
 		studentState.student = await updateProfile(updates);
 	} catch (e: unknown) {
-		studentState.error = e instanceof Error ? e.message : 'Failed to update profile';
+		studentState.error = toMessage(e, 'Failed to update profile');
 	} finally {
 		studentState.loading = false;
 	}
@@ -96,10 +117,10 @@ export const doSubmitScan = async (scanData: {
 	try {
 		const result = await submitScan(scanData);
 		const res = await getSessionHistory();
-		studentState.history = res.items;
+		studentState.history = res.items as SessionHistoryItem[];
 		return result;
 	} catch (e: unknown) {
-		studentState.error = e instanceof Error ? e.message : 'Scan failed';
+		studentState.error = toMessage(e, 'Scan failed');
 		throw e;
 	} finally {
 		studentState.scanLoading = false;

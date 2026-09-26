@@ -14,11 +14,11 @@ export const Routes = {
   PROFILE: "/student/profile",
   SETTINGS: "/student/settings",
   PROFESSOR: "/professor",
+  PROFESSOR_SESSIONS: "/professor/sessions",
+  // No /admin route exists yet (admin portal is Phase 3) — kept for future use.
   ADMIN: "/admin",
 
   ABOUT: "/about",
   PRIVACY_POLICY: "/privacy-policy",
   COOKIES: "/cookies",
-
-  //ADD AS MORE AS NEEDED
 };

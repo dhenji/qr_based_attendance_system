@@ -1,9 +1,23 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { doLogout } from '$lib/features/auth/store.svelte';
+	import { goto } from '$app/navigation';
+	import { authState, doLogout, isAuthenticated, restoreSession } from '$lib/features/auth/store.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	let { children } = $props();
+
+	// Until the session is verified we can't tell whether to render the portal or
+	// bounce to login, so hold the UI behind a loading state.
+	let sessionChecked = $state(false);
+
+	onMount(async () => {
+		const user = await restoreSession();
+		sessionChecked = true;
+		if (!user) {
+			await goto(Routes.LOGIN);
+		}
+	});
 
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.DASHBOARD, enabled: true, icon: 'dashboard' },
@@ -31,6 +45,14 @@
 
 	const isActive = (path: string) => page.url.pathname === path;
 
+	// Greeting in the sidebar, from the session the layout just restored.
+	const displayName = $derived(
+		authState.user
+			? [authState.user.firstName, authState.user.lastName].filter(Boolean).join(' ') ||
+				authState.user.email
+			: ''
+	);
+
 	const onConfirmLogout = async () => {
 		logoutOpen = false;
 		await doLogout();
@@ -56,6 +78,10 @@
 		</a>
 
 		<div class="topbar-spacer"></div>
+
+		{#if displayName}
+			<span class="who" title={authState.user?.email ?? displayName}>{displayName}</span>
+		{/if}
 
 		<button class="icon-btn" aria-label="Notifications" title="No notifications yet">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -101,7 +127,11 @@
 		</aside>
 
 		<main class="content">
-			{@render children()}
+			{#if !sessionChecked}
+				<p class="session-pending">Checking your session…</p>
+			{:else if isAuthenticated()}
+				{@render children()}
+			{/if}
 		</main>
 	</div>
 </div>
@@ -189,6 +219,21 @@
 
 	.topbar-spacer {
 		flex: 1;
+	}
+
+	.who {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: rgba(255, 255, 255, 0.9);
+		max-width: 12rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.session-pending {
+		color: #64748b;
+		font-size: 0.875rem;
 	}
 
 	.logout:hover {
