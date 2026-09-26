@@ -1,15 +1,27 @@
 <script lang="ts">
-	// DashboardStats
-	// Attendance-rate summary card. Currently shows an empty-state placeholder
-	// ("No data") because there are no real scans yet; once history exists this
-	// will render the computed compliance rate from the student store.
-	const hasData = $derived(false);
+	import { formatPercentage } from '$lib/shared/utils/format';
+
+	interface Props {
+		// 0–100 from GET /student/dashboard.
+		complianceRate: number;
+		// False while the student has no scans, so we can say "No data" instead of
+		// implying a genuine 0% attendance record.
+		hasData: boolean;
+	}
+
+	let { complianceRate, hasData }: Props = $props();
 </script>
 
 <div class="attendance-rate">
-	<span class="rate-value" class:placeholder={!hasData}>{hasData ? '0%' : 'No data'}</span>
+	<span class="rate-value" class:placeholder={!hasData}>
+		{hasData ? formatPercentage(complianceRate) : 'No data'}
+	</span>
 	<span class="rate-label">Attendance Rate</span>
-	<span class="rate-hint">Your rate will appear after your first scans.</span>
+	<span class="rate-hint">
+		{hasData
+			? 'Present scans across all expected sessions.'
+			: 'Your rate will appear after your first scans.'}
+	</span>
 </div>
 
 <style>

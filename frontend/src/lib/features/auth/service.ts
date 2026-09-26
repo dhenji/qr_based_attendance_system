@@ -1,102 +1,124 @@
 // features/auth/service.ts
-// Mock-first auth service: login, register, OTP, logout
+// Auth calls against the real backend (mounted under /api/auth).
+//
+// Every function maps camelCase in, camelCase out, and translates the backend's
+// snake_case on the wire — the same pattern features/liveness/service.ts uses.
+// Domain errors arrive as APIError with a stable `code` (e.g. 'otp_expired',
+// 'user_exists'); callers branch on that rather than on the message.
 
-import type { User } from '$lib/shared/types';
-import { browser } from '$app/environment';
+import { APIError, get, isMockMode, post } from '$lib/api/client';
+import type {
+	ChangePasswordRequest,
+	LoginRequest,
+	MeResponse,
+	MfaVerifyRequest,
+	OtpRequest,
+	OtpVerifyRequest,
+	OtpPurpose,
+	RegisterRequest,
+	TokenResponse,
+} from '$lib/shared/types';
+import {
+	mockLogin,
+	mockMe,
+	mockMfaVerify,
+	mockNoop,
+	mockRegister,
+} from '$lib/features/auth/mock';
 
-// MOCK flag — swap to false when backend endpoints land
-const MOCK = true;
+// Send a 6-digit OTP. `claim` proves ownership of a roster email before the
+// account is created; `forget_password` additionally requires a recovery grant
+// obtained from the security-question step.
+export const requestOtp = async (email: string, purpose: OtpPurpose = 'claim'): Promise<void> => {
+	if (isMockMode()) return mockNoop();
 
-// Mock data
-// Hard-coded users mirroring the backend roles so login works offline.
-const MOCK_USERS = {
-	student: {
-		id: 'user-1',
-		email: 'student@test.com',
-		role: 'student' as const,
-	},
-	professor: {
-		id: 'user-2',
-		email: 'prof@test.com',
-		role: 'professor' as const,
-	},
-	admin: {
-		id: 'user-3',
-		email: 'admin@test.com',
-		role: 'admin' as const,
-	},
+	const body: OtpRequest = { email: email.trim().toLowerCase(), purpose };
+	await post<void>('authOtpRequest', body);
 };
 
-// Login
-// Email/password login. Maps known test emails to mock users; anything else
-// throws so the UI can show the error state.
-export const login = async (email: string, _password: string): Promise<{ user: User; accessToken: string }> => {
-	if (MOCK) {
-		if (email === 'student@test.com') {
-			return { user: MOCK_USERS.student, accessToken: 'mock-jwt-token-student' };
-		}
-		if (email === 'prof@test.com') {
-			return { user: MOCK_USERS.professor, accessToken: 'mock-jwt-token-professor' };
-		}
-		if (email === 'admin@test.com') {
-			return { user: MOCK_USERS.admin, accessToken: 'mock-jwt-token-admin' };
-		}
-		throw new Error('Invalid credentials');
-	}
+// Standalone OTP check. Registration verifies the code itself, so this is only
+// needed where a flow wants to confirm an address before continuing.
+export const verifyOtp = async (
+	email: string,
+	code: string,
+	purpose: OtpPurpose = 'claim'
+): Promise<void> => {
+	if (isMockMode()) return mockNoop();
 
-	return { user: MOCK_USERS.student, accessToken: 'mock-jwt-token' };
-};
-
-// Register & OTP
-// Claim-based registration: user provides email + student number, then confirms
-// via OTP. Both endpoints return the newly created user in mock mode.
-export const register = async (email: string, _studentNumber: string): Promise<User> => {
-	if (MOCK) {
-		return {
-			id: Math.random().toString(36).substring(2, 9),
-			email,
-			role: 'student',
-		};
-	}
-	return {
-		id: Math.random().toString(36).substring(2, 9),
-		email,
-		role: 'student',
+	const body: OtpVerifyRequest = {
+		email: email.trim().toLowerCase(),
+		purpose,
+		code: code.trim(),
 	};
+	await post<void>('authOtpVerify', body);
 };
 
-// OTP verification
-export const verifyOTP = async (email: string, _otpCode: string): Promise<User> => {
-	if (MOCK) {
-		return {
-			id: Math.random().toString(36).substring(2, 9),
-			email,
-			role: 'student',
-		};
-	}
-	return {
-		id: Math.random().toString(36).substring(2, 9),
-		email,
-		role: 'student',
+// Claim-based registration. The backend verifies the CLAIM OTP, matches the
+// email against the student/professor roster and links the account, so the role
+// is never sent from here.
+//
+// Throws APIError: 'unrecognized_email' (404, no roster row), 'user_exists'
+// (409), 'otp_invalid' / 'otp_expired' (400).
+export const register = async (input: {
+	email: string;
+	otpCode: string;
+	username: string;
+	password: string;
+	securityQuestion: string;
+	securityAnswer: string;
+}): Promise<TokenResponse> => {
+	if (isMockMode()) return mockRegister();
+
+	const body: RegisterRequest = {
+		email: input.email.trim().toLowerCase(),
+		purpose: 'claim',
+		otp_code: input.otpCode.trim(),
+		username: input.username.trim(),
+		password: input.password,
+		security_question: input.securityQuestion.trim(),
+		security_answer: input.securityAnswer.trim(),
 	};
+	return post<TokenResponse>('authRegister', body);
 };
 
-// Session helpers
-// Logout clears auth state (real API call once backend is wired up).
-export const logout = async (): Promise<void> => {
-	// Clear mock auth state (real API call when backend ready)
-	return;
+export const login = async (email: string, password: string): Promise<TokenResponse> => {
+	if (isMockMode()) return mockLogin(email);
+
+	const body: LoginRequest = { email: email.trim().toLowerCase(), password };
+	return post<TokenResponse>('authLogin', body);
 };
 
-// me
-// Resolve the current user from the token stored in localStorage.
-export const me = async (): Promise<User | null> => {
-	if (MOCK) {
-		const token = browser ? localStorage.getItem('auth_token') : null;
-		if (token === 'mock-jwt-token-student') return MOCK_USERS.student;
-		if (token === 'mock-jwt-token-professor') return MOCK_USERS.professor;
-		if (token === 'mock-jwt-token-admin') return MOCK_USERS.admin;
-		return null;
+// Current identity. Returns null when the token is missing, expired beyond
+// refresh, or the account is inactive.
+export const me = async (): Promise<MeResponse | null> => {
+	if (isMockMode()) return mockMe();
+
+	try {
+		return await get<MeResponse>('authMe');
+	} catch (error) {
+		if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+			return null;
+		}
+		throw error;
 	}
-	return null;
+};
+
+// Exchange a preauth token (or a live session) plus a TOTP / backup code for a
+// real token pair. Used to finish an MFA-gated login.
+export const verifyMfa = async (code: string, preauthToken?: string | null): Promise<TokenResponse> => {
+	if (isMockMode()) return mockMfaVerify();
+
+	const body: MfaVerifyRequest = { code: code.trim() };
+	if (preauthToken) body.preauth_token = preauthToken;
+	return post<TokenResponse>('authMfaVerify', body);
+};
+
+export const changePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
+	if (isMockMode()) return mockNoop();
+
+	const body: ChangePasswordRequest = {
+		current_password: currentPassword,
+		new_password: newPassword,
+	};
+	await post<void>('authChangePassword', body);
 };

@@ -1,16 +1,23 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
-	import { SECURITY_QUESTIONS, saveSecurityQA } from '$lib/features/auth/security';
+	import { Routes } from '$lib/shared/constants/routes';
+	import { toAuthMessage } from '$lib/features/auth/errors';
+	import { requestOtp } from '$lib/features/auth/service';
+	import { authState, defaultRouteFor, doRegister } from '$lib/features/auth/store.svelte';
+	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
+
+	// Mirrors the backend's claim flow: prove you own the roster email with an
+	// OTP, then set the credentials. POST /auth/register consumes the CLAIM OTP
+	// itself, so it has to be collected before the final step.
+	type Step = 'email' | 'otp' | 'details';
+	let step = $state<Step>('email');
 
 	let email = $state('');
+	let otp = $state<string[]>(['', '', '', '', '', '']);
+	let username = $state('');
 	let password = $state('');
 	let confirm = $state('');
-	let role = $state<'student' | 'professor'>('student');
-	let step = $state<'form' | 'security' | 'otp'>('form');
-	let otp = $state<string[]>(['', '', '', '', '', '']);
-	let error = $state('');
-
 	let securityQuestion = $state('');
 	let securityAnswer = $state('');
 	let questionOpen = $state(false);
@@ -18,28 +25,30 @@
 
 	let showPwd = $state(false);
 	let showConfirmPwd = $state(false);
-	let roleOpen = $state(false);
-	let roleMenu: HTMLDivElement | undefined = $state();
+	let submitting = $state(false);
+	let error = $state('');
+
+	let otpInputs: HTMLInputElement[] = $state([]);
+	let countdown = $state(300);
+	let intervalId: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
 		function onDocClick(e: MouseEvent) {
-			if (!roleMenu?.contains(e.target as Node)) roleOpen = false;
 			if (!questionMenu?.contains(e.target as Node)) questionOpen = false;
 		}
 		document.addEventListener('click', onDocClick);
 		return () => document.removeEventListener('click', onDocClick);
 	});
 
-	let otpInputs: HTMLInputElement[] = $state([]);
-	let countdown = $state(300);
-	let intervalId: ReturnType<typeof setInterval> | null = null;
-
+	// Mirrors shared/validators.py:password_strength plus the 8-char minimum.
+	// The symbol rule excludes whitespace, because the backend counts a symbol as
+	// "not alphanumeric and not a space" — a bare space must not satisfy it.
 	const passwordChecks = $derived({
 		length: password.length >= 8,
 		upper: /[A-Z]/.test(password),
 		lower: /[a-z]/.test(password),
 		number: /\d/.test(password),
-		symbol: /[^A-Za-z0-9]/.test(password),
+		symbol: /[^A-Za-z0-9\s]/.test(password),
 	});
 	const passwordOk = $derived(
 		passwordChecks.length && passwordChecks.upper && passwordChecks.lower &&
@@ -51,6 +60,8 @@
 		const s = countdown % 60;
 		return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 	});
+
+	const canResend = $derived(countdown <= 0);
 
 	onDestroy(() => {
 		if (intervalId) clearInterval(intervalId);
@@ -68,45 +79,108 @@
 		}, 1000);
 	}
 
-	function handleRegister() {
-		if (!email) {
-			error = 'Email is required';
+	// Step 1 -> 2: ask the backend to email a CLAIM OTP.
+	const handleEmail = async (event: SubmitEvent) => {
+		event.preventDefault();
+		error = '';
+
+		const trimmed = email.trim();
+		if (!trimmed) {
+			error = 'Email is required.';
+			return;
+		}
+
+		submitting = true;
+		try {
+			await requestOtp(trimmed, 'claim');
+			email = trimmed;
+			otp = ['', '', '', '', '', ''];
+			step = 'otp';
+			startCountdown();
+		} catch (e: unknown) {
+			error = toAuthMessage(e, 'Could not send the verification code. Please try again.');
+		} finally {
+			submitting = false;
+		}
+	};
+
+	// Requesting again invalidates the previous code server-side, so the user
+	// has to use the newest one.
+	const resend = async () => {
+		error = '';
+		submitting = true;
+		try {
+			await requestOtp(email, 'claim');
+			otp = ['', '', '', '', '', ''];
+			startCountdown();
+			otpInputs[0]?.focus();
+		} catch (e: unknown) {
+			error = toAuthMessage(e, 'Could not resend the code. Please try again.');
+		} finally {
+			submitting = false;
+		}
+	};
+
+	// Step 2 -> 3: the code isn't checked yet, it travels with the final request.
+	const continueToDetails = (event: SubmitEvent) => {
+		event.preventDefault();
+		error = '';
+		if (otp.some((d) => !d)) {
+			error = 'Enter all 6 digits.';
+			return;
+		}
+		step = 'details';
+	};
+
+	const handleRegister = async (event: SubmitEvent) => {
+		event.preventDefault();
+		error = '';
+
+		if (!username.trim()) {
+			error = 'Username is required.';
+			return;
+		}
+		if (username.trim().length < 3 || username.trim().length > 20) {
+			error = 'Username must be 3–20 characters.';
 			return;
 		}
 		if (!passwordOk) {
-			error = 'Password does not meet requirements';
+			error = 'Password does not meet all requirements.';
 			return;
 		}
 		if (password !== confirm) {
-			error = 'Passwords do not match';
+			error = 'Passwords do not match.';
 			return;
 		}
-		error = '';
-		step = 'security';
-	}
-
-	function handleSecurity() {
 		if (!securityQuestion) {
-			error = 'Please select a security question';
+			error = 'Please select a security question.';
 			return;
 		}
 		if (!securityAnswer.trim()) {
-			error = 'Security answer is required';
+			error = 'Security answer is required.';
 			return;
 		}
-		error = '';
-		saveSecurityQA(email, securityQuestion, securityAnswer);
-		step = 'otp';
-		startCountdown();
-	}
 
-	function handleOtp() {
-		if (otp.some((d) => !d)) {
-			error = 'Enter all 6 digits';
-			return;
+		submitting = true;
+		try {
+			const user = await doRegister({
+				email,
+				otpCode: otp.join(''),
+				username: username.trim(),
+				password,
+				securityQuestion,
+				securityAnswer,
+			});
+			await goto(defaultRouteFor(user));
+		} catch (e: unknown) {
+			// A rejected OTP belongs on the code step, everything else on this one.
+			const message = toAuthMessage(e, 'Registration failed. Please try again.');
+			error = message;
+			if (/code/i.test(message)) step = 'otp';
+		} finally {
+			submitting = false;
 		}
-		goto('/auth/login');
-	}
+	};
 
 	function onOtpInput(i: number, value: string) {
 		const v = value.replace(/\D/g, '').slice(-1);
@@ -121,175 +195,185 @@
 		}
 	}
 
-	function resend() {
-		startCountdown();
+	const back = (to: Step) => {
+		step = to;
 		error = '';
-	}
+	};
 </script>
 
 <main class="auth">
 	<div class="wrapper">
 		<div class="header">
 			<div class="logo-tile"><img src="/qr-attend-logo.svg" alt="Attendly" /></div>
-			{#if step === 'form'}
+			{#if step === 'email'}
 				<h1>Create Account</h1>
-				<p class="subtitle">Email must match admin-seeded roster</p>
-			{:else if step === 'security'}
-				<h1>Security Question</h1>
-				<p class="subtitle">Choose a question and answer to recover your account</p>
-			{:else}
+				<p class="subtitle">Use the university email on your roster record.</p>
+			{:else if step === 'otp'}
 				<h1>Verify Email</h1>
 				<p class="subtitle">A 6-digit code was sent to <strong>{email}</strong></p>
+			{:else}
+				<h1>Finish Setting Up</h1>
+				<p class="subtitle">Pick a username and password to finish claiming your account.</p>
 			{/if}
 		</div>
+
+		<ol class="steps" aria-label="Registration progress">
+			<li class:active={step === 'email'} class:done={step !== 'email'}>Email</li>
+			<li class:active={step === 'otp'} class:done={step === 'details'}>Verify</li>
+			<li class:active={step === 'details'}>Details</li>
+		</ol>
 
 		<div class="card">
 			{#if error}
 				<div class="error-banner">{error}</div>
 			{/if}
 
-			{#if step === 'form'}
-				<div class="field">
-					<label class="form-label" for="reg-email">Email</label>
-					<input class="form-input" id="reg-email" type="email" placeholder="universityemail@isu.edu.ph"
-						value={email} oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
-				</div>
-
-				<div class="field">
-					<label class="form-label" for="reg-password">Password</label>
-					<div class="pwd-wrap">
-						<input class="form-input" id="reg-password" type={showPwd ? 'text' : 'password'}
-							placeholder="••••••••" value={password}
-							oninput={(e) => { password = (e.target as HTMLInputElement).value; }}
-							style="padding-right: 2.5rem;" />
-						<button class="pwd-toggle" onclick={() => { showPwd = !showPwd; }}
-							aria-label={showPwd ? 'Hide password' : 'Show password'}>
-							{#if showPwd}
-								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
-							{:else}
-								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
-							{/if}
-						</button>
+			{#if step === 'email'}
+				<form onsubmit={handleEmail}>
+					<div class="field">
+						<label class="form-label" for="reg-email">University email</label>
+						<input class="form-input" id="reg-email" type="email" required
+							autocomplete="email" placeholder="jose.rizal@isu.edu.ph"
+							value={email}
+							oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
+						<p class="hint">Your name, program and section come from your roster record —
+							there is nothing to type here. Accounts cannot be created for an email
+							that isn't on the roster.</p>
 					</div>
-				</div>
 
-				<div class="field">
-					<label class="form-label" for="reg-confirm">Confirm Password</label>
-					<div class="pwd-wrap">
-						<input class="form-input" id="reg-confirm" type={showConfirmPwd ? 'text' : 'password'}
-							placeholder="••••••••" value={confirm}
-							oninput={(e) => { confirm = (e.target as HTMLInputElement).value; }}
-							style="padding-right: 2.5rem;" />
-						<button class="pwd-toggle" onclick={() => { showConfirmPwd = !showConfirmPwd; }}
-							aria-label={showConfirmPwd ? 'Hide password' : 'Show password'}>
-							{#if showConfirmPwd}
-								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
-							{:else}
-								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
-							{/if}
-						</button>
+					<button class="btn-primary" type="submit" disabled={submitting}>
+						{submitting ? 'Sending code…' : 'Send verification code'}
+					</button>
+				</form>
+			{:else if step === 'otp'}
+				<form onsubmit={continueToDetails}>
+					<div class="otp-row">
+						{#each otp as digit, i}
+							<input class="otp-input" maxlength="1" inputmode="numeric"
+								aria-label={`Digit ${i + 1}`} value={digit}
+								bind:this={otpInputs[i]}
+								oninput={(e) => onOtpInput(i, (e.target as HTMLInputElement).value)}
+								onkeydown={(e) => onOtpKeydown(i, e)} />
+						{/each}
 					</div>
-				</div>
 
-				<div class="field">
-					<label class="form-label" for="reg-role" id="reg-role-label">Role</label>
-					<div class="dropdown" bind:this={roleMenu}>
-						<button id="reg-role" class="dropdown-toggle" onclick={() => { roleOpen = !roleOpen; }}
-							aria-haspopup="listbox" aria-expanded={roleOpen}>
-							<span>{role === 'student' ? 'Student' : 'Professor'}</span>
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-						</button>
-						{#if roleOpen}
-							<ul class="dropdown-menu" role="listbox" aria-labelledby="reg-role-label">
-								<li>
-									<button class="dropdown-item {role === 'student' ? 'selected' : ''}"
-										onclick={() => { role = 'student'; roleOpen = false; }}>
-										<span>Student</span>
-										{#if role === 'student'}<span class="check">✓</span>{/if}
-									</button>
-								</li>
-								<li>
-									<button class="dropdown-item {role === 'professor' ? 'selected' : ''}"
-										onclick={() => { role = 'professor'; roleOpen = false; }}>
-										<span>Professor</span>
-										{#if role === 'professor'}<span class="check">✓</span>{/if}
-									</button>
-								</li>
-							</ul>
-						{/if}
+					<div class="expiry">
+						Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong> ·
+						<button type="button" class="resend-btn" onclick={resend}
+							disabled={!canResend || submitting}>Resend code</button>
 					</div>
-				</div>
 
-				<div class="req-list">
-					<div class="req-title">Password requirements</div>
-					<div class="req-item {passwordChecks.length ? 'met' : ''}">{passwordChecks.length ? '✔' : '✘'} 8+ characters</div>
-					<div class="req-item {passwordChecks.upper ? 'met' : ''}">{passwordChecks.upper ? '✔' : '✘'} 1 uppercase letter</div>
-					<div class="req-item {passwordChecks.lower ? 'met' : ''}">{passwordChecks.lower ? '✔' : '✘'} 1 lowercase letter</div>
-					<div class="req-item {passwordChecks.number ? 'met' : ''}">{passwordChecks.number ? '✔' : '✘'} 1 number</div>
-					<div class="req-item {passwordChecks.symbol ? 'met' : ''}">{passwordChecks.symbol ? '✔' : '✘'} 1 symbol</div>
-				</div>
-
-				<button class="btn-primary" onclick={handleRegister}>Continue</button>
-
-				<div class="links">
-					<span class="login-hint">
-						Already have an account?
-						<button class="link-btn" onclick={() => goto('/auth/login')}>Login</button>
-					</span>
-				</div>
-			{:else if step === 'security'}
-				<div class="field">
-					<label class="form-label" for="reg-question" id="reg-question-label">Security Question</label>
-					<div class="dropdown" bind:this={questionMenu}>
-						<button id="reg-question" class="dropdown-toggle {!securityQuestion ? 'placeholder' : ''}"
-							onclick={() => { questionOpen = !questionOpen; }}
-							aria-haspopup="listbox" aria-expanded={questionOpen}>
-							<span>{securityQuestion || 'Select a question…'}</span>
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-						</button>
-						{#if questionOpen}
-							<ul class="dropdown-menu" role="listbox" aria-labelledby="reg-question-label">
-								{#each SECURITY_QUESTIONS as q}
-									<li>
-										<button class="dropdown-item {securityQuestion === q ? 'selected' : ''}"
-											onclick={() => { securityQuestion = q; questionOpen = false; }}>
-											<span>{q}</span>
-											{#if securityQuestion === q}<span class="check">✓</span>{/if}
-										</button>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
-				</div>
-
-				<div class="field">
-					<label class="form-label" for="reg-answer">Your Answer</label>
-					<input class="form-input" id="reg-answer" placeholder="Your answer..."
-						value={securityAnswer} oninput={(e) => { securityAnswer = (e.target as HTMLInputElement).value; }} />
-				</div>
-
-				<button class="btn-primary" onclick={handleSecurity}>Continue</button>
-				<button class="back-btn" onclick={() => { step = 'form'; error = ''; }}>← Back</button>
+					<button class="btn-primary" type="submit" disabled={submitting}>Continue</button>
+					<button type="button" class="back-btn" onclick={() => back('email')}>← Back</button>
+				</form>
 			{:else}
-				<div class="otp-row">
-					{#each otp as digit, i}
-						<input class="otp-input" maxlength="1" inputmode="numeric"
-							aria-label={`Digit ${i + 1}`} value={digit}
-							bind:this={otpInputs[i]}
-							oninput={(e) => onOtpInput(i, (e.target as HTMLInputElement).value)}
-							onkeydown={(e) => onOtpKeydown(i, e)} />
-					{/each}
-				</div>
+				<form onsubmit={handleRegister}>
+					<div class="field">
+						<label class="form-label" for="reg-username">Username</label>
+						<input class="form-input" id="reg-username" required minlength="3" maxlength="20"
+							autocomplete="username" placeholder="jrizal" value={username}
+							oninput={(e) => { username = (e.target as HTMLInputElement).value; }} />
+						<p class="hint">3–20 characters. Must be unique across all accounts.</p>
+					</div>
 
-				<div class="expiry">
-					Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong> ·
-					<button class="resend-btn" onclick={resend} disabled={countdown > 0 && countdown < 300}>Resend code</button>
-				</div>
+					<div class="field">
+						<label class="form-label" for="reg-password">Password</label>
+						<div class="pwd-wrap">
+							<input class="form-input" id="reg-password" type={showPwd ? 'text' : 'password'}
+								required autocomplete="new-password" placeholder="••••••••"
+								value={password}
+								oninput={(e) => { password = (e.target as HTMLInputElement).value; }}
+								style="padding-right: 2.5rem;" />
+							<button type="button" class="pwd-toggle" onclick={() => { showPwd = !showPwd; }}
+								aria-label={showPwd ? 'Hide password' : 'Show password'}>
+								{#if showPwd}
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+								{:else}
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+								{/if}
+							</button>
+						</div>
+					</div>
 
-				<button class="btn-primary" onclick={handleOtp}>Verify & Create Account</button>
-				<button class="back-btn" onclick={() => { step = 'security'; error = ''; }}>← Back</button>
+					<div class="field">
+						<label class="form-label" for="reg-confirm">Confirm Password</label>
+						<div class="pwd-wrap">
+							<input class="form-input" id="reg-confirm" type={showConfirmPwd ? 'text' : 'password'}
+								required autocomplete="new-password" placeholder="••••••••"
+								value={confirm}
+								oninput={(e) => { confirm = (e.target as HTMLInputElement).value; }}
+								style="padding-right: 2.5rem;" />
+							<button type="button" class="pwd-toggle"
+								onclick={() => { showConfirmPwd = !showConfirmPwd; }}
+								aria-label={showConfirmPwd ? 'Hide password' : 'Show password'}>
+								{#if showConfirmPwd}
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+								{:else}
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+								{/if}
+							</button>
+						</div>
+					</div>
+
+					<div class="req-list">
+						<div class="req-title">Password requirements</div>
+						<div class="req-item {passwordChecks.length ? 'met' : ''}">{passwordChecks.length ? '✔' : '✘'} 8+ characters</div>
+						<div class="req-item {passwordChecks.upper ? 'met' : ''}">{passwordChecks.upper ? '✔' : '✘'} 1 uppercase letter</div>
+						<div class="req-item {passwordChecks.lower ? 'met' : ''}">{passwordChecks.lower ? '✔' : '✘'} 1 lowercase letter</div>
+						<div class="req-item {passwordChecks.number ? 'met' : ''}">{passwordChecks.number ? '✔' : '✘'} 1 number</div>
+						<div class="req-item {passwordChecks.symbol ? 'met' : ''}">{passwordChecks.symbol ? '✔' : '✘'} 1 symbol</div>
+					</div>
+
+					<div class="field">
+						<label class="form-label" for="reg-question" id="reg-question-label">Security Question</label>
+						<div class="dropdown" bind:this={questionMenu}>
+							<button type="button" id="reg-question"
+								class="dropdown-toggle {!securityQuestion ? 'placeholder' : ''}"
+								onclick={() => { questionOpen = !questionOpen; }}
+								aria-haspopup="listbox" aria-expanded={questionOpen}>
+								<span>{securityQuestion || 'Select a question…'}</span>
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+							</button>
+							{#if questionOpen}
+								<ul class="dropdown-menu" role="listbox" aria-labelledby="reg-question-label">
+									{#each SECURITY_QUESTIONS as q}
+										<li>
+											<button type="button"
+												class="dropdown-item {securityQuestion === q ? 'selected' : ''}"
+												onclick={() => { securityQuestion = q; questionOpen = false; }}>
+												<span>{q}</span>
+												{#if securityQuestion === q}<span class="check">✓</span>{/if}
+											</button>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					</div>
+
+					<div class="field">
+						<label class="form-label" for="reg-answer">Your Answer</label>
+						<input class="form-input" id="reg-answer" required minlength="2" maxlength="100"
+							placeholder="Your answer..." value={securityAnswer}
+							oninput={(e) => { securityAnswer = (e.target as HTMLInputElement).value; }} />
+						<p class="hint">You'll need this to recover your account if you forget your
+							password. Answers are compared case-insensitively.</p>
+					</div>
+
+					<button class="btn-primary" type="submit" disabled={submitting || authState.loading}>
+						{submitting ? 'Creating account…' : 'Create account'}
+					</button>
+					<button type="button" class="back-btn" onclick={() => back('otp')}>← Back</button>
+				</form>
 			{/if}
+
+			<div class="links">
+				<span class="login-hint">
+					Already have an account?
+					<button type="button" class="link-btn"
+						onclick={() => goto(Routes.LOGIN)}>Login</button>
+				</span>
+			</div>
 		</div>
 	</div>
 </main>
@@ -312,7 +396,35 @@
 
 	.header {
 		text-align: center;
-		margin-bottom: 2rem;
+		margin-bottom: 1.25rem;
+	}
+
+	.steps {
+		display: flex;
+		justify-content: center;
+		gap: 0.375rem;
+		list-style: none;
+		padding: 0;
+		margin: 0 0 1.25rem;
+		font-size: 0.75rem;
+		color: #9ca3af;
+	}
+
+	.steps li {
+		padding: 0.1875rem 0.625rem;
+		border-radius: 999px;
+		background: #e5e7eb;
+	}
+
+	.steps li.active {
+		background: #1e3a5f;
+		color: white;
+		font-weight: 600;
+	}
+
+	.steps li.done {
+		background: #d1fae5;
+		color: #047857;
 	}
 
 	.logo-tile {
@@ -395,6 +507,12 @@
 		border-color: #2563eb;
 	}
 
+	.hint {
+		color: #6b7280;
+		font-size: 0.75rem;
+		margin: 0.375rem 0 0;
+	}
+
 	.dropdown {
 		position: relative;
 	}
@@ -442,6 +560,8 @@
 		border-radius: 8px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 		z-index: 10;
+		max-height: 16rem;
+		overflow-y: auto;
 	}
 
 	.dropdown-item {
@@ -577,7 +697,7 @@
 		padding: 0;
 	}
 
-	.resend-btn:hover {
+	.resend-btn:hover:not(:disabled) {
 		text-decoration: underline;
 	}
 
@@ -600,8 +720,13 @@
 		cursor: pointer;
 	}
 
-	.btn-primary:hover {
+	.btn-primary:hover:not(:disabled) {
 		background: #16324f;
+	}
+
+	.btn-primary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.back-btn {

@@ -1,71 +1,245 @@
 // features/auth/store.svelte.ts
-// Auth session state using Svelte 5 runes ($state object store)
+// Auth session state using Svelte 5 runes ($state object store).
+//
+// This module owns the whole signed-in lifecycle: it persists the token pair,
+// resolves the current user from GET /auth/me, and clears everything on
+// logout. Pages call the do* actions and read authState; they never touch
+// tokens or storage directly.
 
-import type { User } from '$lib/shared/types';
+import type { MeResponse, TokenResponse, User } from '$lib/shared/types';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import { Routes } from '$lib/shared/constants/routes';
-import { login, logout } from '$lib/features/auth/service';
+import { changePassword, login, me, register, verifyMfa } from '$lib/features/auth/service';
+import {
+	clearTokens,
+	hasTokens,
+	hydrateTokens,
+	setTokens,
+} from '$lib/features/auth/tokens';
+
+export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous';
 
 // Auth state (rune-store)
-// Single reactive object holding the current user, loading flag, and last error.
+// Single reactive object holding the current user, the session status, any
+// pending MFA challenge, and the last error.
 export const authState = $state({
 	user: null as User | null,
+	status: 'idle' as AuthStatus,
+	// True while a do* action is in flight, for button/spinner state.
 	loading: false,
+	// True when login succeeded at the password step but MFA is still required.
+	mfaPending: false,
+	// Single-use token that /auth/mfa/verify exchanges for a real session.
+	preauthToken: null as string | null,
+	mustChangePassword: false,
 	error: null as string | null,
 });
 
 // Derived role helpers
 // Plain functions (module-scope $derived cannot be exported) used to guard UI.
-export const isAuthenticated = () => !!authState.user;
+export const isAuthenticated = () => authState.status === 'authenticated' && !!authState.user;
 export const isStudent = () => authState.user?.role === 'student';
 export const isProfessor = () => authState.user?.role === 'professor';
-export const isAdmin = () => authState.user?.role === 'admin';
+export const isAdmin = () =>
+	authState.user?.role === 'admin' || authState.user?.role === 'super_admin';
 
-// Session restore & persistence (browser only)
-// On server/first load we have no session; in the browser we rehydrate the user
-// from localStorage so a refresh keeps you logged in.
-if (browser) {
-	const stored = localStorage.getItem('auth_user');
-	if (stored) {
-		try {
-			authState.user = JSON.parse(stored);
-		} catch {
-			localStorage.removeItem('auth_user');
-		}
-	}
-}
-
-// Persist user to localStorage (browser only) — explicit, call after mutations.
-const persistUser = () => {
-	if (!browser) return;
-	if (authState.user) {
-		localStorage.setItem('auth_user', JSON.stringify(authState.user));
-	} else {
-		localStorage.removeItem('auth_user');
+// Where to send a freshly authenticated user.
+//
+// Only students and professors have a portal today; the admin portal lands in
+// Phase 3, so admins go home rather than to a route that would 404.
+export const defaultRouteFor = (user: User | null): string => {
+	switch (user?.role) {
+		case 'student':
+			return Routes.DASHBOARD;
+		case 'professor':
+			return Routes.PROFESSOR_SESSIONS;
+		default:
+			return Routes.HOME;
 	}
 };
 
+const toMessage = (error: unknown, fallback: string): string =>
+	error instanceof Error && error.message ? error.message : fallback;
+
+// Map a /auth/me payload onto the view-model the UI holds. Lives here rather
+// than in the service so the wire types stay confined to the API layer.
+const toUser = (me: MeResponse): User => ({
+	id: String(me.id),
+	email: me.email,
+	role: me.role,
+	firstName: me.first_name,
+	lastName: me.last_name,
+	mfaEnabled: me.mfa_enabled,
+	mustChangePassword: me.must_change_password,
+});
+
+const reset = () => {
+	authState.user = null;
+	authState.status = 'anonymous';
+	authState.mfaPending = false;
+	authState.preauthToken = null;
+	authState.mustChangePassword = false;
+	authState.error = null;
+};
+
+// Persist a token response and resolve the signed-in user.
+//
+// The backend's TokenResponse carries no identity, so /auth/me is always the
+// source of truth. A null result means the tokens are unusable — clear them
+// rather than leaving a half-established session behind.
+const establishSession = async (tokens: TokenResponse): Promise<User> => {
+	setTokens({ access: tokens.access_token, refresh: tokens.refresh_token });
+
+	const current = await me();
+	if (!current) {
+		clearTokens();
+		reset();
+		throw new Error('Your session could not be verified. Please sign in again.');
+	}
+
+	const user = toUser(current);
+	authState.user = user;
+	authState.status = 'authenticated';
+	authState.mustChangePassword = tokens.must_change_password || current.must_change_password;
+	authState.error = null;
+	return user;
+};
+
+// Single-flight session restore, so concurrent guards share one /auth/me call.
+let restoreInFlight: Promise<User | null> | null = null;
+
+// Re-attach an existing session after a page load.
+//
+// Deliberately re-fetches /auth/me rather than trusting a cached user blob, so a
+// deactivated account or a role change takes effect immediately.
+export const restoreSession = (): Promise<User | null> => {
+	if (!browser) return Promise.resolve(null);
+	if (isAuthenticated()) return Promise.resolve(authState.user);
+	if (restoreInFlight) return restoreInFlight;
+
+	hydrateTokens();
+
+	if (!hasTokens()) {
+		authState.status = 'anonymous';
+		return Promise.resolve(null);
+	}
+
+	authState.status = 'loading';
+	restoreInFlight = me()
+		.then((current) => {
+			if (!current) {
+				clearTokens();
+				reset();
+				return null;
+			}
+			authState.user = toUser(current);
+			authState.status = 'authenticated';
+			authState.mustChangePassword = current.must_change_password;
+			return authState.user;
+		})
+		.catch(() => {
+			// The request itself failed (offline, API down) rather than coming back
+			// 401/403 — those resolve to null and clear the tokens above. Keep the
+			// token pair here so a later page load can still restore the session,
+			// and just report "not signed in" for this attempt.
+			authState.status = 'anonymous';
+			return null;
+		})
+		.finally(() => {
+			restoreInFlight = null;
+		});
+
+	return restoreInFlight;
+};
+
 // Actions
-// doLogin calls the auth service, then caches the user locally on success.
-export const doLogin = async (email: string, password: string): Promise<void> => {
+//
+// doLogin resolves to the signed-in user, or to null when the password was
+// accepted but a second factor is still required (authState.mfaPending is then
+// true and holds the preauth token). Real failures reject.
+export const doLogin = async (email: string, password: string): Promise<User | null> => {
 	authState.loading = true;
 	authState.error = null;
 	try {
-		const result = await login(email, password);
-		authState.user = result.user;
-		persistUser();
-	} catch (e: unknown) {
-		authState.error = e instanceof Error ? e.message : 'Login failed';
-		throw e;
+		const tokens = await login(email, password);
+
+		if (tokens.mfa_pending) {
+			// Password accepted but a second factor is required. Hold the preauth
+			// token and let the caller collect the code; there is no session yet.
+			clearTokens();
+			authState.mfaPending = true;
+			authState.preauthToken = tokens.preauth_token;
+			authState.status = 'anonymous';
+			return null;
+		}
+
+		return await establishSession(tokens);
+	} catch (error: unknown) {
+		authState.error = toMessage(error, 'Login failed. Please try again.');
+		throw error;
+	} finally {
+		authState.loading = false;
+	}
+};
+
+// Complete an MFA-gated login with a 6-digit TOTP or a backup code.
+export const doMfaVerify = async (code: string): Promise<User> => {
+	authState.loading = true;
+	authState.error = null;
+	try {
+		const tokens = await verifyMfa(code, authState.preauthToken);
+		authState.mfaPending = false;
+		authState.preauthToken = null;
+		return await establishSession(tokens);
+	} catch (error: unknown) {
+		authState.error = toMessage(error, 'Verification failed. Please try again.');
+		throw error;
+	} finally {
+		authState.loading = false;
+	}
+};
+
+export const doRegister = async (input: {
+	email: string;
+	otpCode: string;
+	username: string;
+	password: string;
+	securityQuestion: string;
+	securityAnswer: string;
+}): Promise<User> => {
+	authState.loading = true;
+	authState.error = null;
+	try {
+		return await establishSession(await register(input));
+	} catch (error: unknown) {
+		authState.error = toMessage(error, 'Registration failed. Please try again.');
+		throw error;
+	} finally {
+		authState.loading = false;
+	}
+};
+
+export const doChangePassword = async (
+	currentPassword: string,
+	newPassword: string
+): Promise<void> => {
+	authState.loading = true;
+	authState.error = null;
+	try {
+		await changePassword(currentPassword, newPassword);
+		if (authState.user) authState.user.mustChangePassword = false;
+		authState.mustChangePassword = false;
+	} catch (error: unknown) {
+		authState.error = toMessage(error, 'Password change failed.');
+		throw error;
 	} finally {
 		authState.loading = false;
 	}
 };
 
 export const doLogout = async (): Promise<void> => {
-	await logout();
-	authState.user = null;
-	persistUser();
+	clearTokens();
+	reset();
 	await goto(Routes.HOME);
 };

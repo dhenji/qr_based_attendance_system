@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { studentState, initStudent } from '$lib/features/student/store.svelte';
+	import {
+		studentState,
+		initStudent,
+		complianceRate,
+		hasDashboardData,
+		scansToday,
+		totalScans,
+	} from '$lib/features/student/store.svelte';
 	import DashboardStats from '$lib/features/student/components/DashboardStats.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
 
@@ -8,9 +15,7 @@
 		initStudent();
 	});
 
-	const firstName = $derived(
-		studentState.student ? studentState.student.firstName : 'Student'
-	);
+	const firstName = $derived(studentState.student?.firstName ?? 'Student');
 
 	const today = $derived(
 		new Date().toLocaleDateString(undefined, {
@@ -24,14 +29,29 @@
 
 <div class="dashboard">
 	<header class="header">
-<div>
-			<h1>Student Dashboard</h1>
+		<div>
+			<h1>Welcome, {firstName}</h1>
 			<p class="muted">{today}</p>
 		</div>
 	</header>
 
+	{#if studentState.error}
+		<p class="error">{studentState.error}</p>
+	{/if}
+
 	<section class="hero">
-		<DashboardStats />
+		<DashboardStats complianceRate={complianceRate()} hasData={hasDashboardData()} />
+	</section>
+
+	<section class="kpis">
+		<div class="kpi">
+			<span class="kpi-value">{studentState.loading ? '—' : scansToday()}</span>
+			<span class="kpi-label">Scans today</span>
+		</div>
+		<div class="kpi">
+			<span class="kpi-value">{studentState.loading ? '—' : totalScans()}</span>
+			<span class="kpi-label">Total scans</span>
+		</div>
 	</section>
 
 	<a class="scan-btn" href={Routes.SCAN}>Scan QR Attendance</a>
@@ -55,10 +75,6 @@
 			<p class="empty">No classes scheduled yet. Your enrolled subjects will appear here.</p>
 		{/if}
 	</section>
-
-	{#if studentState.error}
-		<p class="error">{studentState.error}</p>
-	{/if}
 </div>
 
 <style>
@@ -86,6 +102,35 @@
 	.hero {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.kpis {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.kpi {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 1.25rem;
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+	}
+
+	.kpi-value {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.75rem;
+		font-weight: 700;
+		color: #1e293b;
+		line-height: 1;
+	}
+
+	.kpi-label {
+		font-size: 0.8125rem;
+		color: #64748b;
 	}
 
 	.scan-btn {

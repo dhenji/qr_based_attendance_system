@@ -1,47 +1,121 @@
 <script lang="ts">
-	import { doLogin, authState } from '$lib/features/auth/store.svelte';
 	import { goto } from '$app/navigation';
+	import { Routes } from '$lib/shared/constants/routes';
+	import { toAuthMessage } from '$lib/features/auth/errors';
+	import type { User } from '$lib/shared/types';
+	import {
+		authState,
+		defaultRouteFor,
+		doChangePassword,
+		doLogin,
+		doMfaVerify,
+	} from '$lib/features/auth/store.svelte';
+
+	// 'credentials' -> 'mfa' (when the account has MFA enabled) -> 'change-password'
+	// (when an admin issued a temporary password).
+	type Stage = 'credentials' | 'mfa' | 'change-password';
+	let stage = $state<Stage>('credentials');
 
 	let email = $state('');
 	let password = $state('');
-	let captchaInput = $state('');
 	let showPwd = $state(false);
-	let captchaCode = $state('4F7K2Q');
+	let mfaCode = $state('');
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let confirmPassword = $state('');
 	let error = $state('');
-	let attempts = $state(0);
 
-	function refreshCaptcha() {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-		let code = '';
-		for (let i = 0; i < 6; i++) {
-			code += chars[Math.floor(Math.random() * chars.length)];
-		}
-		captchaCode = code;
-	}
+	// Same policy the backend enforces in shared/validators.password_strength:
+	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.
+	const passwordReq = $derived({
+		length: newPassword.length >= 8,
+		upper: /[A-Z]/.test(newPassword),
+		lower: /[a-z]/.test(newPassword),
+		number: /\d/.test(newPassword),
+		symbol: /[^A-Za-z0-9]/.test(newPassword),
+	});
+	const passwordOk = $derived(Object.values(passwordReq).every(Boolean));
+	const passwordsMatch = $derived(newPassword === confirmPassword);
 
-	const handleLogin = async () => {
-		if (!email || !password || !captchaInput) {
-			error = 'All fields are required.';
-			return;
-		}
-		if (captchaInput.toUpperCase() !== captchaCode) {
-			attempts += 1;
-			const remaining = 5 - attempts;
-			error = remaining > 0
-				? `Captcha incorrect. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`
-				: 'Too many failed attempts. Please refresh the captcha.';
-			return;
-		}
+	const describe = (e: unknown, fallback: string) => toAuthMessage(e, fallback);
+
+	const handleLogin = async (event: SubmitEvent) => {
+		event.preventDefault();
 		error = '';
-		try {
-			await doLogin(email, password);
-			const role = authState.user?.role;
-			if (role === 'professor') goto('/professor/sessions');
-			else if (role === 'admin') goto('/admin/students');
-			else goto('/student/dashboard');
-		} catch {
-			// error shown via authState.error
+
+		if (!email.trim() || !password) {
+			error = 'Email and password are required.';
+			return;
 		}
+
+		try {
+			const user = await doLogin(email, password);
+			if (!user) {
+				// Password accepted, second factor required.
+				stage = 'mfa';
+				mfaCode = '';
+				return;
+			}
+			await finishLogin(user);
+		} catch (e: unknown) {
+			error = describe(e, 'Login failed. Please try again.');
+		}
+	};
+
+	const handleMfa = async (event: SubmitEvent) => {
+		event.preventDefault();
+		error = '';
+
+		if (!mfaCode.trim()) {
+			error = 'Enter the 6-digit code from your authenticator app.';
+			return;
+		}
+
+		try {
+			const user = await doMfaVerify(mfaCode);
+			await finishLogin(user);
+		} catch (e: unknown) {
+			error = describe(e, 'Verification failed. Please try again.');
+		}
+	};
+
+	const handleChangePassword = async (event: SubmitEvent) => {
+		event.preventDefault();
+		error = '';
+
+		if (!currentPassword) {
+			error = 'Enter your current password.';
+			return;
+		}
+		if (!passwordOk) {
+			error = 'New password does not meet all requirements.';
+			return;
+		}
+		if (!passwordsMatch) {
+			error = 'Passwords do not match.';
+			return;
+		}
+
+		try {
+			await doChangePassword(currentPassword, newPassword);
+			await finishLogin(authState.user);
+		} catch (e: unknown) {
+			error = describe(e, 'Password change failed.');
+		}
+	};
+
+	const finishLogin = async (user: User | null) => {
+		if (authState.mustChangePassword) {
+			stage = 'change-password';
+			return;
+		}
+		await goto(defaultRouteFor(user));
+	};
+
+	const backToCredentials = () => {
+		stage = 'credentials';
+		error = '';
+		mfaCode = '';
 	};
 </script>
 
@@ -49,8 +123,16 @@
 	<div class="wrapper">
 		<div class="header">
 			<div class="logo-tile"><img src="/qr-attend-logo.svg" alt="Attendly" /></div>
-			<h1>Log In</h1>
-			<p class="subtitle">Enter your registered email and password.</p>
+			{#if stage === 'credentials'}
+				<h1>Log In</h1>
+				<p class="subtitle">Enter your registered email and password.</p>
+			{:else if stage === 'mfa'}
+				<h1>Two-Factor Authentication</h1>
+				<p class="subtitle">Enter the 6-digit code for {email}.</p>
+			{:else}
+				<h1>Set a New Password</h1>
+				<p class="subtitle">Your temporary password must be replaced before you continue.</p>
+			{/if}
 		</div>
 
 		<div class="card">
@@ -58,53 +140,115 @@
 				<div class="error-banner">{error}</div>
 			{/if}
 
-			<div class="field">
-				<label class="form-label" for="email">Email / Username</label>
-				<input class="form-input" id="email" type="email" placeholder="universityemail@isu.edu.ph"
-					value={email} oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
-			</div>
+			{#if stage === 'credentials'}
+				<form onsubmit={handleLogin}>
+					<div class="field">
+						<label class="form-label" for="email">Email</label>
+						<input class="form-input" id="email" type="email" required
+							autocomplete="email" placeholder="universityemail@isu.edu.ph"
+							value={email}
+							oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
+					</div>
 
-			<div class="field">
-				<label class="form-label" for="password">Password</label>
-				<div class="pwd-wrap">
-					<input class="form-input" id="password" type={showPwd ? 'text' : 'password'}
-						placeholder="••••••••••••" value={password}
-						oninput={(e) => { password = (e.target as HTMLInputElement).value; }}
-						style="padding-right: 2.5rem;" />
-					<button class="pwd-toggle" onclick={() => { showPwd = !showPwd; }} aria-label={showPwd ? 'Hide password' : 'Show password'}>
-						{#if showPwd}
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
-						{:else}
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
-						{/if}
+					<div class="field">
+						<label class="form-label" for="password">Password</label>
+						<div class="pwd-wrap">
+							<input class="form-input" id="password" type={showPwd ? 'text' : 'password'}
+								required autocomplete="current-password" placeholder="••••••••••••"
+								value={password}
+								oninput={(e) => { password = (e.target as HTMLInputElement).value; }}
+								style="padding-right: 2.5rem;" />
+							<button type="button" class="pwd-toggle"
+								onclick={() => { showPwd = !showPwd; }}
+								aria-label={showPwd ? 'Hide password' : 'Show password'}>
+								{#if showPwd}
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+								{:else}
+									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+								{/if}
+							</button>
+						</div>
+					</div>
+
+					<button class="btn-primary" type="submit" disabled={authState.loading}>
+						{authState.loading ? 'Signing in…' : 'Login'}
 					</button>
-				</div>
-			</div>
+				</form>
+			{:else if stage === 'mfa'}
+				<form onsubmit={handleMfa}>
+					<div class="field">
+						<label class="form-label" for="mfa">Authenticator code</label>
+						<input class="form-input mono" id="mfa" required inputmode="numeric"
+							autocomplete="one-time-code" maxlength="16" placeholder="000000"
+							value={mfaCode}
+							oninput={(e) => { mfaCode = (e.target as HTMLInputElement).value; }} />
+						<p class="hint">Enter the 6-digit TOTP, or one of your backup codes
+							(formatted <span class="mono">XXXX-XXXX-XX</span>).</p>
+					</div>
 
-			<div class="field captcha-field">
-				<label class="form-label" for="captcha">Captcha</label>
-				<div class="captcha-row">
-					<div class="captcha-display">{captchaCode}</div>
-					<button class="captcha-refresh" onclick={refreshCaptcha}>↻</button>
-				</div>
-				<input class="form-input" id="captcha" placeholder="Enter code above"
-					value={captchaInput} oninput={(e) => { captchaInput = (e.target as HTMLInputElement).value; }} />
-			</div>
+					<button class="btn-primary" type="submit" disabled={authState.loading}>
+						{authState.loading ? 'Verifying…' : 'Verify'}
+					</button>
+					<button type="button" class="link-btn block" onclick={backToCredentials}>
+						Back to sign in
+					</button>
+				</form>
+			{:else}
+				<form onsubmit={handleChangePassword}>
+					<div class="field">
+						<label class="form-label" for="current-password">Current password</label>
+						<input class="form-input" id="current-password" type="password" required
+							autocomplete="current-password" value={currentPassword}
+							oninput={(e) => { currentPassword = (e.target as HTMLInputElement).value; }} />
+					</div>
 
-			<button class="btn-primary" onclick={handleLogin}>Login</button>
+					<div class="field">
+						<label class="form-label" for="new-password">New password</label>
+						<input class="form-input" id="new-password" type="password" required
+							autocomplete="new-password" value={newPassword}
+							oninput={(e) => { newPassword = (e.target as HTMLInputElement).value; }} />
+					</div>
 
-			<div class="links">
-				<button class="link-btn" onclick={() => goto('/auth/forgot-password')}>Forgot Password?</button>
-				<div class="divider">
-					<div class="divider-line"></div>
-					<span class="divider-text">OR</span>
-					<div class="divider-line"></div>
+					<ul class="req-list">
+						<li class:met={passwordReq.length}>At least 8 characters</li>
+						<li class:met={passwordReq.upper}>One uppercase letter</li>
+						<li class:met={passwordReq.lower}>One lowercase letter</li>
+						<li class:met={passwordReq.number}>One number</li>
+						<li class:met={passwordReq.symbol}>One symbol</li>
+					</ul>
+
+					<div class="field">
+						<label class="form-label" for="confirm-password">Confirm new password</label>
+						<input class="form-input" id="confirm-password" type="password" required
+							autocomplete="new-password" value={confirmPassword}
+							oninput={(e) => { confirmPassword = (e.target as HTMLInputElement).value; }} />
+						{#if confirmPassword && !passwordsMatch}
+							<p class="hint warn">Passwords do not match.</p>
+						{/if}
+					</div>
+
+					<button class="btn-primary" type="submit" disabled={authState.loading}>
+						{authState.loading ? 'Saving…' : 'Set password and continue'}
+					</button>
+				</form>
+			{/if}
+
+			{#if stage === 'credentials'}
+				<div class="links">
+					<button type="button" class="link-btn"
+						onclick={() => goto(Routes.FORGOT_PASSWORD)}>Forgot Password?</button>
+					<div class="divider">
+						<div class="divider-line"></div>
+						<span class="divider-text">OR</span>
+						<div class="divider-line"></div>
+					</div>
+					<span class="register-hint">
+						Don't have an account?
+						<button type="button" class="link-btn"
+							onclick={() => goto(Routes.REGISTER)}>Register</button>
+					</span>
 				</div>
-				<span class="register-hint">
-					Don't have an account?
-					<button class="link-btn" onclick={() => goto('/auth/register')}>Register</button>
-				</span>
-			</div>
+			{/if}
 		</div>
 	</div>
 </main>
@@ -207,6 +351,23 @@
 		border-color: #2563eb;
 	}
 
+	.form-input.mono {
+		font-family: monospace;
+		font-size: 1.125rem;
+		letter-spacing: 0.2em;
+		text-align: center;
+	}
+
+	.hint {
+		color: #6b7280;
+		font-size: 0.75rem;
+		margin: 0.375rem 0 0;
+	}
+
+	.hint.warn {
+		color: #dc2626;
+	}
+
 	.pwd-wrap {
 		position: relative;
 	}
@@ -229,51 +390,26 @@
 		color: #374151;
 	}
 
-	.captcha-field {
-		margin-bottom: 1.5rem;
+	.req-list {
+		list-style: none;
+		padding: 0;
+		margin: -0.5rem 0 1.25rem;
+		font-size: 0.75rem;
+		color: #9ca3af;
+		display: grid;
+		gap: 0.1875rem;
 	}
 
-	.captcha-row {
-		display: flex;
-		gap: 0.5rem;
-		margin-bottom: 0.5rem;
+	.req-list li::before {
+		content: '✘ ';
 	}
 
-	.captcha-display {
-		flex: 1;
-		background: #f1f5f9;
-		border: 1.5px solid #d1d5db;
-		border-radius: 8px;
-		padding: 0.625rem 0.875rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-family: monospace;
-		font-weight: 700;
-		font-size: 1.125rem;
-		letter-spacing: 0.3em;
-		color: #1e3a5f;
-		user-select: none;
-		text-decoration: line-through;
-		text-decoration-style: wavy;
-		text-decoration-color: rgba(30, 58, 95, 0.3);
+	.req-list li.met {
+		color: #16a34a;
 	}
 
-	.captcha-refresh {
-		background: #f3f4f6;
-		border: 1.5px solid #d1d5db;
-		border-radius: 8px;
-		width: 44px;
-		cursor: pointer;
-		font-size: 1.125rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-	}
-
-	.captcha-refresh:hover {
-		background: #e5e7eb;
+	.req-list li.met::before {
+		content: '✔ ';
 	}
 
 	.btn-primary {
@@ -290,8 +426,13 @@
 		margin-bottom: 1rem;
 	}
 
-	.btn-primary:hover {
+	.btn-primary:hover:not(:disabled) {
 		background: #16324f;
+	}
+
+	.btn-primary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.links {
@@ -310,6 +451,11 @@
 		font-weight: 600;
 		font-family: inherit;
 		padding: 0;
+	}
+
+	.link-btn.block {
+		display: block;
+		width: 100%;
 	}
 
 	.link-btn:hover {

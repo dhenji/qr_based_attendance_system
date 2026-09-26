@@ -1,22 +1,33 @@
 // api/client.ts
-// Fetch wrapper with MOCK flag, error types, and auth header injection
+// Fetch wrapper: auth header injection, automatic token refresh, typed errors,
+// and an opt-in mock mode for UI work without a running backend.
 
 import { endpoints } from './endpoints';
 
 // Base API URL — from Vite env with localhost fallback
-const BASE_URL =
-	(import.meta.env.PUBLIC_API_URL as string | undefined) || 'http://localhost:8000';
+const BASE_URL = (
+	(import.meta.env.PUBLIC_API_URL as string | undefined) || 'http://localhost:8000'
+).replace(/\/+$/, '');
 
-// MOCK flag — set to true for mock-first development,
-// swap to false when backend endpoints are ready
-const MOCK = true;
+// Every backend router is mounted under /api (backend/src/api/router.py), so the
+// urls in endpoints.ts are stored relative to that prefix.
+const API_PREFIX = '/api';
+
+// Mock mode — opt in with PUBLIC_MOCK_MODE=true to run the UI without a backend.
+// Defaults to real API calls.
+const MOCK = import.meta.env.PUBLIC_MOCK_MODE === 'true';
+
+export const isMockMode = () => MOCK;
 
 // Error shape types
 export class APIError extends Error {
 	constructor(
 		public code: string,
 		public message: string,
-		public field?: string
+		public field?: string,
+		// HTTP status, when the failure came from a response. Absent for network
+		// failures, which surface as plain TypeErrors instead.
+		public status?: number
 	) {
 		super(message);
 		this.name = 'APIError';
@@ -35,11 +46,29 @@ export interface APIResponseError {
 	};
 }
 
-// Auth token injector — set via the auth store when a user logs in
+type JsonRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is JsonRecord =>
+	typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// Auth token injector — set by features/auth/tokens.ts whenever tokens change
 let authToken: string | null = null;
 
 export const setAuthToken = (token: string | null) => {
 	authToken = token;
+};
+
+export const getAuthToken = () => authToken;
+
+// Invoked when a request comes back 401. Should return a fresh access token, or
+// null if the session cannot be recovered. Registered by features/auth/tokens.ts
+// to keep this module free of a circular import.
+type UnauthorizedHandler = () => Promise<string | null>;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export const setUnauthorizedHandler = (handler: UnauthorizedHandler | null) => {
+	unauthorizedHandler = handler;
 };
 
 // Configured fetch with auth headers
@@ -51,16 +80,76 @@ const fetchWithAuth = async (
 	if (authToken) {
 		headers.set('Authorization', `Bearer ${authToken}`);
 	}
-	headers.set('Content-Type', 'application/json');
+	// Only declare a JSON body when there is one — setting Content-Type on a
+	// bodyless request forces a needless CORS preflight.
+	if (init.body !== undefined && init.body !== null) {
+		headers.set('Content-Type', 'application/json');
+	}
 
-	const url = typeof input === 'string' ? input : input.toString();
-	const response = await fetch(url, {
+	return fetch(input, {
 		...init,
 		headers,
 		credentials: 'include',
 	});
+};
 
-	return response;
+// Turn an error response into an APIError.
+//
+// The backend has three distinct error envelopes and they need different unwrapping:
+//   1. AppException  -> {"detail": {"code", "message", "field"}}  (main.py handler)
+//   2. FastAPI 422   -> {"detail": [{loc, msg, type}, ...]}
+//   3. HTTPException -> {"detail": "some string"}
+const parseError = async (response: Response): Promise<APIError> => {
+	const body: unknown = await response.json().catch(() => ({}));
+	const detail = isRecord(body) ? body.detail : undefined;
+	const { status } = response;
+
+	if (isRecord(detail)) {
+		const code = typeof detail.code === 'string' ? detail.code : 'request_failed';
+		const message = typeof detail.message === 'string' ? detail.message : 'Request failed';
+		const field = typeof detail.field === 'string' ? detail.field : undefined;
+		return new APIError(code, message, field, status);
+	}
+
+	if (Array.isArray(detail) && detail.length > 0) {
+		const first = isRecord(detail[0]) ? detail[0] : undefined;
+		const loc = first && Array.isArray(first.loc) ? first.loc : [];
+		// loc is ["body", "password"] — the trailing entry is the offending field
+		const field = loc.length > 1 ? String(loc[loc.length - 1]) : undefined;
+		const message = first && typeof first.msg === 'string' ? first.msg : 'Validation failed';
+		return new APIError('validation_error', message, field, status);
+	}
+
+	if (typeof detail === 'string') {
+		return new APIError('request_failed', detail, undefined, status);
+	}
+
+	return new APIError('request_failed', `Request failed (${status})`, undefined, status);
+};
+
+// One request/response round trip, with one transparent retry after a 401 when
+// the registered handler can mint a new access token.
+const request = async <T>(url: string, init: RequestInit, alreadyRetried: boolean): Promise<T> => {
+	const response = await fetchWithAuth(url, init);
+
+	if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
+		const freshToken = await unauthorizedHandler();
+		if (freshToken) {
+			authToken = freshToken;
+			return request<T>(url, init, true);
+		}
+	}
+
+	if (!response.ok) {
+		throw await parseError(response);
+	}
+
+	// 204 No Content (e.g. POST /auth/otp/request) — response.json() would throw
+	if (response.status === 204) {
+		return undefined as T;
+	}
+
+	return response.json() as Promise<T>;
 };
 
 // Generic API call handler
@@ -84,30 +173,19 @@ const apiCall = async <T>(
 		return {} as unknown as T;
 	}
 
-	// Real API call
-	const url = new URL(endpointDef.url, BASE_URL);
+	const url = new URL(`${API_PREFIX}${endpointDef.url}`, BASE_URL);
 	if (params) {
 		Object.entries(params).forEach(([key, value]) => {
 			url.searchParams.append(key, value);
 		});
 	}
 
-	const response = await fetchWithAuth(url.toString(), {
+	const init: RequestInit = {
 		method,
-		body: body ? JSON.stringify(body) : undefined,
-	});
+		body: body === undefined ? undefined : JSON.stringify(body),
+	};
 
-	if (!response.ok) {
-		const errorBody = (await response.json().catch(() => ({}))) as APIResponseError;
-		const errorData = errorBody.detail ?? errorBody;
-		throw new APIError(
-			errorData.code || 'UNKNOWN_ERROR',
-			errorData.message || 'Request failed',
-			errorData.field
-		);
-	}
-
-	return response.json() as Promise<T>;
+	return request<T>(url.toString(), init, false);
 };
 
 // Convenience exports
@@ -115,10 +193,10 @@ const apiCall = async <T>(
 export const get = <T>(endpoint: keyof typeof endpoints, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'GET', params });
 
-export const post = <T>(endpoint: keyof typeof endpoints, body: unknown, params?: Record<string, string>) =>
+export const post = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'POST', body, params });
 
-export const put = <T>(endpoint: keyof typeof endpoints, body: unknown, params?: Record<string, string>) =>
+export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'PUT', body, params });
 
 export const del = <T>(endpoint: keyof typeof endpoints, params?: Record<string, string>) =>
