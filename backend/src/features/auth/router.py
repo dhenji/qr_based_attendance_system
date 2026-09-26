@@ -24,7 +24,7 @@ from features.auth.schema import (
 from shared.captcha import verify_turnstile_token
 from shared.rate_limit import rate_limit
 
-# Prefix baked in per feature-template.md section 5; mounted without a prefix in api/router.py.
+# Prefix baked in here; mounted without a prefix argument in api/router.py.
 router = APIRouter(prefix="/auth")
 
 

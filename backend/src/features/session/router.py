@@ -1,4 +1,5 @@
 from fastapi import APIRouter
 
-# Session routes are professor-scoped. Prefix baked in per feature-template.md section 5.
+# Session routes are professor-scoped; the prefix is baked in here and the
+# router is mounted without a prefix argument in api/router.py.
 router = APIRouter(prefix="/professor")

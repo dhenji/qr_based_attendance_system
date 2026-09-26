@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-# INTENTIONALLY UNMOUNTED (ADR-057).
+# INTENTIONALLY UNMOUNTED.
 #
 # The contract defines NO enrollment mount point. Both enrollment endpoints are
 # nested under the offerings router:
@@ -12,5 +12,5 @@ from fastapi import APIRouter
 # create an undocumented /api/enrollments surface.
 #
 # This stub is kept so the file inventory matches the 14-slice layout, and is
-# listed as unmounted in AGENTS.md alongside features/course.
+# listed as unmounted alongside features/course.
 router = APIRouter()

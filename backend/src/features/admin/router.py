@@ -18,10 +18,10 @@ from features.auth.model import User
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-# feature-template.md section 5: the full contract path is baked into the router
-# and mounted without a prefix argument (api/router.py). This module owns the
-# admin *user* endpoints only; sibling features mount their own routers under
-# /api/admin/... (programs, courses, students, ...) - one APIRouter per mount point.
+# The full contract path is baked into the router and mounted without a prefix
+# argument (api/router.py). This module owns the admin *user* endpoints only;
+# sibling features mount their own routers under /api/admin/... (programs,
+# courses, students, ...) - one APIRouter per mount point.
 router = APIRouter(prefix="/admin/users")
 
 
