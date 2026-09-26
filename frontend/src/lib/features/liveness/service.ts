@@ -1,35 +1,35 @@
-// features/liveness/service.ts
-// QR/GPS/Face challenge state machine
-
+import { post } from '$lib/api/client';
+import type { AttendanceScanResponse, SessionVerificationResponse } from '$lib/api/endpoints';
 import type { LivenessEvidence } from '$lib/shared/types';
 import { isWithinGeofence } from '$lib/shared/utils/geo';
 
-// MOCK flag — swap to false when backend liveness endpoints land
-const MOCK = true;
+export interface SessionVerification {
+	sessionId: number;
+	courseCode: string;
+	courseName: string;
+	expiresAt: string;
+	geofence: { radius: number; lat: number; lng: number };
+}
 
-// initiateQRScan
-// Kicks off a session scan: returns a freshly generated session code along with
-// the course + geofence context and when the code expires (5 min in mock).
-export const initiateQRScan = async (courseId: number, geofenceRadius = 50) => {
-	if (MOCK) {
-		return {
-			sessionCode: `SESSION-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-			courseId,
-			geofenceRadius,
-			expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-		};
-	}
+export interface AttendanceScanResult {
+	id: number;
+	status: 'present' | 'late' | 'rejected';
+	scannedAt: string;
+	expiresAt: string;
+}
+
+export const verifySessionCode = async (code: string): Promise<SessionVerification> => {
+	const response = await post<SessionVerificationResponse>('sessionQR', { code: code.trim() });
+
 	return {
-		sessionCode: `SESSION-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-		courseId,
-		geofenceRadius,
-		expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+		sessionId: response.session_id,
+		courseCode: response.course_code,
+		courseName: response.course_name,
+		expiresAt: response.expires_at,
+		geofence: response.geofence,
 	};
 };
 
-// validateGPS
-// Delegates the check to the Haversine-based geofence util: is the student
-// within `radiusMetres` of the classroom center?
 export const validateGPS = (
 	studentLat: number,
 	studentLng: number,
@@ -40,21 +40,33 @@ export const validateGPS = (
 	return isWithinGeofence(studentLat, studentLng, centerLat, centerLng, radiusMetres);
 };
 
-// submitFaceChallenge
-// Face-match result: "passed" requires both a sufficient liveness score
-// (>70, D31-style threshold) and that a blink was actually detected.
-export const submitFaceChallenge = async (
-	faceMatchScore: number,
-	livenessEvidence: LivenessEvidence
-) => {
-	if (MOCK) {
-		return {
-			passed: faceMatchScore > 70 && livenessEvidence.blinkDetected,
-			score: faceMatchScore,
-		};
-	}
+export const submitAttendanceScan = async (input: {
+	sessionId: number;
+	studentNumber: string;
+	gps: { lat: number; lng: number; accuracy: number };
+	livenessEvidence: LivenessEvidence;
+	faceMatchScore?: number;
+	scannedAt: string;
+}): Promise<AttendanceScanResult> => {
+	const response = await post<AttendanceScanResponse>('attendanceScan', {
+		session_id: input.sessionId,
+		student_number: input.studentNumber,
+		gps: input.gps,
+		liveness_evidence: {
+			blink_detected: input.livenessEvidence.blinkDetected,
+			head_turn_left: input.livenessEvidence.headTurnLeft,
+			head_turn_right: input.livenessEvidence.headTurnRight,
+			ear_samples: input.livenessEvidence.earSamples,
+			pnp_evidence: input.livenessEvidence.pnpEvidence,
+		},
+		...(input.faceMatchScore === undefined ? {} : { face_match_score: input.faceMatchScore }),
+		scanned_at: input.scannedAt,
+	});
+
 	return {
-		passed: faceMatchScore > 70 && livenessEvidence.blinkDetected,
-		score: faceMatchScore,
+		id: response.id,
+		status: response.status,
+		scannedAt: response.scanned_at,
+		expiresAt: response.expires_at,
 	};
 };

@@ -2,7 +2,28 @@
 // Typed endpoint map mirroring backend API contracts
 // (from docs/architecture/api-contracts.md)
 
-type ScanStatus = 'present' | 'late' | 'rejected';
+export type ScanStatus = 'present' | 'late' | 'rejected';
+
+export interface SessionVerificationResponse {
+	session_id: number;
+	offering_id: number;
+	course_code: string;
+	course_name: string;
+	program_code: string;
+	year_level_label: string;
+	expires_at: string;
+	scheduled_end_time: string;
+	geofence: { radius: number; lat: number; lng: number };
+	present_window_minutes: number;
+	late_window_minutes: number;
+}
+
+export interface AttendanceScanResponse {
+	id: number;
+	status: ScanStatus;
+	scanned_at: string;
+	expires_at: string;
+}
 
 interface EndpointDef<T> {
 	url: string;
@@ -11,25 +32,17 @@ interface EndpointDef<T> {
 }
 
 // Session QR payload (D18)
-export const SessionQREndpoint: EndpointDef<{
-	session_id: number;
-	course_id: number;
-	course_code: string;
-	course_name: string;
-	expires_at: string;
-	scheduled_end_time: string;
-	geofence: { radius: number; lat: number; lng: number };
-	present_window_minutes: number;
-	late_window_minutes: number;
-}> = {
+export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 	url: '/student/sessions/verify-code',
 	method: 'POST',
 	mock: () => ({
-		session_id: Math.floor(Math.random() * 1000) + 1,
-		course_id: Math.floor(Math.random() * 50) + 1,
-		course_code: `COURSE-${Math.floor(Math.random() * 20) + 1}`,
-		course_name: `Course ${Math.floor(Math.random() * 20) + 1}`,
-		expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+		session_id: 1,
+		offering_id: 1,
+		course_code: 'CS101',
+		course_name: 'Software Engineering 1',
+		program_code: 'BSCS',
+		year_level_label: 'Year 1',
+		expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
 		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
 		geofence: {
 			radius: 50,
@@ -42,19 +55,14 @@ export const SessionQREndpoint: EndpointDef<{
 };
 
 // Attendance scan (D18)
-export const AttendanceScanEndpoint: EndpointDef<{
-	attendance_id: number;
-	status: ScanStatus;
-	scanned_at: string;
-	expires_at: string;
-}> = {
+export const AttendanceScanEndpoint: EndpointDef<AttendanceScanResponse> = {
 	url: '/student/attendance/scan',
 	method: 'POST',
 	mock: () => ({
-		attendance_id: Math.floor(Math.random() * 10000) + 1,
-		status: (['present', 'late', 'rejected'] as ScanStatus[])[Math.floor(Math.random() * 3)],
+		id: 1,
+		status: 'present',
 		scanned_at: new Date().toISOString(),
-		expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+		expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
 	}),
 };
 

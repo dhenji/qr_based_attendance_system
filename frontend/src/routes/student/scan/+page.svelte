@@ -4,93 +4,210 @@
 	import { initFaceModel } from '$lib/features/liveness/model';
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
-	import { submitFaceChallenge } from '$lib/features/liveness/service';
+	import {
+		submitAttendanceScan,
+		validateGPS,
+		verifySessionCode,
+		type SessionVerification
+	} from '$lib/features/liveness/service';
 	import { studentState } from '$lib/features/student/store.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { formatTime } from '$lib/shared/utils/format';
+	import type { LivenessEvidence } from '$lib/shared/types';
+
+	type Step = 'entry' | 'qr' | 'liveness';
 
 	let sessionCode = $state('');
-	let step = $state<'entry' | 'qr' | 'liveness'>('entry');
+	let session = $state<SessionVerification | null>(null);
+	let step = $state<Step>('entry');
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
 	let showSuccess = $state(false);
 	let showFailure = $state(false);
+	let verifying = $state(false);
+	let submitting = $state(false);
 	let offline = $state(false);
+	let scanError = $state<string | null>(null);
+	let rejectionReason = $state('');
+	let resultStatus = $state<'present' | 'late'>('present');
+	let scannedAt = $state('');
 	let countdown = $state(0);
 	let countdownTimerId: ReturnType<typeof setInterval> | null = null;
 
-	const studentName = $derived(studentState.student?.firstName ?? 'John Doe');
+	const studentName = $derived(studentState.student?.firstName ?? 'Student');
+	const studentNumber = $derived(studentState.student?.studentNumber ?? '');
+
+	const clearCountdown = () => {
+		if (countdownTimerId) clearInterval(countdownTimerId);
+		countdownTimerId = null;
+		countdown = 0;
+	};
+
+	const getErrorMessage = (error: unknown, fallback: string) =>
+		error instanceof Error ? error.message : fallback;
 
 	onDestroy(() => {
-		if (countdownTimerId) clearInterval(countdownTimerId);
+		clearCountdown();
 	});
 
-	// Warm up the MediaPipe face model while the student is still on the entry
-	// screen, so it's ready by the time the face liveness camera opens.
 	onMount(() => {
 		void initFaceModel();
 	});
 
+	const verifyCode = async (code: string, openScanner: boolean) => {
+		const normalizedCode = code.trim();
+		if (!normalizedCode || verifying) return;
+
+		verifying = true;
+		scanError = null;
+		try {
+			const verifiedSession = await verifySessionCode(normalizedCode);
+			sessionCode = normalizedCode;
+			session = verifiedSession;
+			showFailure = false;
+			rejectionReason = '';
+			if (openScanner) goToQr();
+			else startLiveness();
+		} catch (error) {
+			scanError = getErrorMessage(error, 'Unable to verify the session code');
+		} finally {
+			verifying = false;
+		}
+	};
+
 	const handleVerifyCode = () => {
-		if (!sessionCode) return;
-		goToQr();
+		void verifyCode(sessionCode, true);
 	};
 
 	const handleScanned = (code: string) => {
-		sessionCode = code;
-		startLiveness();
+		void verifyCode(code, false);
 	};
 
-	// Step 1 -> 2: open the QR scanner, guarded by the camera permission modal.
 	const goToQr = () => {
 		qrActive = false;
 		livenessActive = false;
+		showSuccess = false;
+		showFailure = false;
 		step = 'qr';
 		showPermission = true;
 	};
 
-	// Step 2 -> 3: QR decoded, move on to the face liveness check.
 	const startLiveness = () => {
 		qrActive = false;
+		showPermission = false;
+		showSuccess = false;
+		showFailure = false;
+		scannedAt = '';
 		step = 'liveness';
 		livenessActive = true;
 	};
 
-	// Step 3 -> 2: reopen the QR camera (permission already granted once).
 	const backToQr = () => {
 		livenessActive = false;
 		step = 'qr';
 		qrActive = true;
 	};
 
-	// Step 2 -> 1: release the camera and return to manual code entry.
 	const backToEntry = () => {
 		qrActive = false;
 		livenessActive = false;
 		showPermission = false;
+		showSuccess = false;
+		showFailure = false;
+		session = null;
+		scanError = null;
+		rejectionReason = '';
+		scannedAt = '';
 		step = 'entry';
 	};
 
-	const handleBlink = () => {
-		livenessActive = false;
-		void submitFaceChallenge(98, {
-			blinkDetected: true,
-			headTurnLeft: false,
-			headTurnRight: false,
-			earSamples: [],
-			pnpEvidence: {},
-		});
-		showSuccess = true;
-		countdown = 3;
-		countdownTimerId = setInterval(() => {
-			countdown -= 1;
-			if (countdown <= 0) {
-				if (countdownTimerId) clearInterval(countdownTimerId);
-				countdownTimerId = null;
-				showSuccess = false;
-				goto(Routes.DASHBOARD);
+	const retryLiveness = () => {
+		showFailure = false;
+		rejectionReason = '';
+		scanError = null;
+		startLiveness();
+	};
+
+	const getCurrentPosition = () =>
+		new Promise<{ lat: number; lng: number; accuracy: number }>((resolve, reject) => {
+			if (!navigator.geolocation) {
+				reject(new Error('Location services are unavailable'));
+				return;
 			}
-		}, 1000);
+
+			navigator.geolocation.getCurrentPosition(
+				({ coords }) =>
+					resolve({
+						lat: coords.latitude,
+						lng: coords.longitude,
+						accuracy: coords.accuracy,
+					}),
+				() => reject(new Error('Location permission is required')),
+				{ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+			);
+		});
+
+	const handleLivenessComplete = async (livenessEvidence: LivenessEvidence) => {
+		if (submitting) return;
+		if (!session) {
+			rejectionReason = 'Verify the session before starting face liveness';
+			showFailure = true;
+			return;
+		}
+
+		livenessActive = false;
+		submitting = true;
+		showSuccess = false;
+		showFailure = false;
+		scanError = null;
+
+		try {
+			const gps = await getCurrentPosition();
+			if (
+				!validateGPS(
+					gps.lat,
+					gps.lng,
+					session.geofence.lat,
+					session.geofence.lng,
+					session.geofence.radius
+				)
+			) {
+				throw new Error('You are outside the attendance geofence');
+			}
+
+			const result = await submitAttendanceScan({
+				sessionId: session.sessionId,
+				studentNumber,
+				gps,
+				livenessEvidence,
+				scannedAt: new Date().toISOString(),
+			});
+
+			if (result.status === 'rejected') {
+				rejectionReason = 'The attendance scan was rejected';
+				showFailure = true;
+				return;
+			}
+
+			resultStatus = result.status;
+			scannedAt = result.scannedAt;
+			showSuccess = true;
+			countdown = 3;
+			countdownTimerId = setInterval(() => {
+				countdown -= 1;
+				if (countdown <= 0) {
+					clearCountdown();
+					showSuccess = false;
+					goto(Routes.DASHBOARD);
+				}
+			}, 1000);
+		} catch (error) {
+			rejectionReason = getErrorMessage(error, 'Unable to submit the attendance scan');
+			showFailure = true;
+		} finally {
+			submitting = false;
+		}
 	};
 
 	const toggleQr = () => {
@@ -105,6 +222,10 @@
 			You are offline · Records will sync when connected.
 			<span class="offline-count">3 pending</span>
 		</div>
+	{/if}
+
+	{#if scanError}
+		<p class="error" role="alert">{scanError}</p>
 	{/if}
 
 	{#if step === 'entry'}
@@ -126,14 +247,18 @@
 						value={sessionCode}
 						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value.toUpperCase(); }}
 					/>
-					<button class="btn-secondary" onclick={handleVerifyCode}>
-						Verify Code
+					<button
+						class="btn-secondary"
+						disabled={verifying}
+						onclick={() => void handleVerifyCode()}
+					>
+						{verifying ? 'Verifying…' : 'Verify Code'}
 					</button>
 				</div>
 			</section>
 
 			<p class="footnote">
-				Verify the session code to open the QR scanner, then face liveness (blink).
+				Verify the session code to open the QR scanner, then complete face liveness.
 			</p>
 		</div>
 	{:else if step === 'qr'}
@@ -182,12 +307,11 @@
 				</div>
 
 				<p class="footnote">
-					Scan the QR code shown on the projector — face liveness (blink) opens automatically.
+					Scan the session QR code shown on the projector. Face liveness opens after verification.
 				</p>
 			</section>
 		</div>
 	{:else}
-		<!-- Face Liveness step: camera with face/eye outline + blink detection -->
 		<div class="page">
 			<div class="page-header">
 				<button class="back-btn" onclick={backToQr}>
@@ -197,14 +321,17 @@
 			</div>
 
 			<section class="card">
-				<h2 class="section-title">Blink to Verify</h2>
+				<h2 class="section-title">Complete Liveness Check</h2>
 				<div class="viewport">
-					<FaceScanner active={livenessActive} onBlink={handleBlink} />
+					<FaceScanner active={livenessActive} onComplete={handleLivenessComplete} />
 				</div>
 				<p class="footnote">
-					Look at the camera and blink once — a real blink is detected and attendance is
-					recorded automatically.
+					Blink once, then turn your head left, return to center, turn right, and return to center.
+					Your result is submitted to the attendance service for verification.
 				</p>
+				{#if submitting}
+					<p class="footnote">Submitting attendance…</p>
+				{/if}
 			</section>
 		</div>
 	{/if}
@@ -234,10 +361,15 @@
 	{#if showSuccess}
 		<div class="overlay">
 			<div class="result">
-				<h3 class="result-title">Attendance Recorded!</h3>
+				<h3 class="result-title">Attendance {resultStatus === 'late' ? 'Recorded Late' : 'Recorded!'}</h3>
 				<p class="result-line">{studentName}</p>
-				<p class="result-line">CS101 — 9:02 AM</p>
-				<p class="verified">Face liveness verified (blink)</p>
+				<p class="result-line">
+					{session?.courseCode ?? 'Session'} — {session?.courseName ?? ''}
+				</p>
+				{#if scannedAt}
+					<p class="result-line">{formatTime(scannedAt)}</p>
+				{/if}
+				<p class="verified">Liveness evidence accepted</p>
 				<p class="auto-dismiss">Auto-dismissing in {countdown}s...</p>
 			</div>
 		</div>
@@ -248,11 +380,11 @@
 		<div class="overlay">
 			<div class="result">
 				<h3 class="result-title">Attendance Rejected</h3>
-				<div class="reject-reason">Already scanned session</div>
+				<div class="reject-reason">{rejectionReason || 'The scan could not be accepted'}</div>
 				<p class="reject-desc">
-					Possible reasons: duplicate scan, outside geofence, QR/face liveness failed
+					The attendance service rejected this scan. You can try again.
 				</p>
-				<button class="btn-primary try-again" onclick={() => (showFailure = false)}>
+				<button class="btn-primary try-again" onclick={retryLiveness}>
 					Try Again
 				</button>
 			</div>

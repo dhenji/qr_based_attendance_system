@@ -44,6 +44,7 @@ const load = async (): Promise<LoadedFaceModel> => {
 			baseOptions: { modelAssetPath: '/models/face_landmarker.task', delegate },
 			runningMode: 'VIDEO',
 			numFaces: 1,
+			outputFacialTransformationMatrixes: true,
 			minFaceDetectionConfidence: 0.5,
 			minFacePresenceConfidence: 0.5,
 			minTrackingConfidence: 0.5,
