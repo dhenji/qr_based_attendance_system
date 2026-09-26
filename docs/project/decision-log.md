@@ -586,9 +586,8 @@
   request-scoped.
 - **Date:** 2026-09-26
 - **Status:** Accepted
-- **Context:** `backend-prompts.txt:346` and `coding-standards.md` §1.6 mandated
-  module-level functions with `AsyncSession` as the first parameter and no
-  service classes. All three Phase 1/2 services were implemented as classes
+- **Context:** `coding-standards.md` §1.6 mandated module-level functions with
+  `AsyncSession` as the first parameter and no service classes. All three Phase 1/2 services were implemented as classes
   anyway. The mandate is not arbitrary: it exists to keep services free of
   hidden state and to make the session dependency obvious at the call site.
   Measured against that intent, the three differ in how well they justify
@@ -610,9 +609,7 @@
   `__init__` genuinely has collaborators to compose — a session alone does not
   qualify, so a new single-method service should be written as a function even
   though this one is not.
-- **Supersedes:** the "no service classes" clause of `coding-standards.md` §1.6
-  and `backend-prompts.txt:346`, which also described
-  `features/course_professor/service.py` as legacy and slated for conversion.
+- **Supersedes:** the "no service classes" clause of `coding-standards.md` §1.6.
 
 ### ADR-056: Recovery Security-Question Storage and Enumeration Hardening
 
@@ -631,9 +628,8 @@
 - **Context:** ADR-052 mandated a 4-step recovery flow and said the answer is
   "Argon2id-hashed", but the docs were internally inconsistent.
   `security-model.md` and `database-er.md` implied the *question* was hashed
-  too, and `backend-prompts.txt:481` said "never store the question or answer in
-  plaintext" — yet `wireframes.md:195` and `api-contracts.md:1052` require step 1
-  to return the question so the user can read it at step 2. A hash cannot satisfy
+  too, while `wireframes.md:195` and `api-contracts.md:1052` require step 1 to
+  return the question so the user can read it at step 2. A hash cannot satisfy
   that, so one of the two requirements had to give. Independently, the original
   step 1 returned `{question: null, set: false}` for unknown emails and the real
   question for known ones, which `api-contracts.md:1064` explicitly forbids
@@ -676,13 +672,13 @@
   constant. That is the stronger design and is worth revisiting, but it changes
   the step-2 screen in `wireframes.md:184-209`, so it is out of scope here.
 - **Supersedes:** the "stored hashed" claim for the security question in
-  `security-model.md:104`, and the "never store the question ... in plaintext"
-  clause of `backend-prompts.txt:481`.
+  `security-model.md:104`.
 
 ### ADR-057: Phase 3 Admin Routing, Enrollment Mount, and Archive Delete
 
-- **Decision (D57):** Four corrections to `backend-prompts.txt` Phase 3, made
-  during Phase 1/2 verification, each overriding the prompt's original wording.
+- **Decision (D57):** Four routing and deletion decisions for the Phase 3
+  `/api/admin/*` mounts, made during Phase 1/2 verification after the original
+  Phase 3 plan was found to conflict with the routers already mounted.
   **(a) No re-mounting of student/professor routers.** Admin student and professor
   CRUD go in NEW modules `features/student/admin_router.py`
   (`APIRouter(prefix="/admin/students")`) and `features/professor/admin_router.py`
@@ -700,29 +696,30 @@
   keys are left alone.
 - **Date:** 2026-09-26
 - **Status:** Accepted
-- **Context:** Phase 3 (PROMPTS 3.1-3.9) is the first phase to add routers under
-  `/api/admin/*`, and its wording was written before the Phase 1/2 routers were
+- **Context:** Phase 3 is the first phase to add routers under `/api/admin/*`,
+  and the original plan's wording was written before the Phase 1/2 routers were
   mounted, so it no longer matched the code. Four concrete failures would follow
-  from implementing it literally. (1) PROMPT 3.7 says to mount "the student,
+  from implementing it literally. (1) It says to mount "the student,
   professor ... routers" — but `student/router.py` and `professor/router.py` are
   already mounted, and because paths inside a router are relative to its own
   prefix, mounting them again under `/api/admin` would publish
   `/api/admin/profile`, `/api/admin/schedule`, `/api/admin/courses` and
-  `/api/admin/sessions`, none of which the contract defines. (2) PROMPT 3.7 also
-  says to mount the `enrollment` router, but the contract has no enrollment mount
-  point at all; both enrollment endpoints are nested under offerings. (3) PROMPT
-  3.8 calls face enrollment "additions to the student feature", yet
+  `/api/admin/sessions`, none of which the contract defines. (2) It also says to
+  mount the `enrollment` router, but the contract has no enrollment mount point
+  at all; both enrollment endpoints are nested under offerings. (3) It calls face
+  enrollment "additions to the student feature", yet
   `/admin/face-enrollment` is a third mount point that fits neither the student
-  router nor the admin student router. (4) PROMPT 3.9's permanent delete checks
-  only `is_active`, but `enrollments`, `attendance_records` and `excuse_requests`
+  router nor the admin student router. (4) Its permanent delete checks only
+  `is_active`, but `enrollments`, `attendance_records` and `excuse_requests`
   all reference `students.id` with `ondelete="RESTRICT"` (as does `sessions` ->
   `professors`), so deleting almost any real archived student raises a PostgreSQL
   FK violation and returns 500 — a state the contract does not document.
 - **Rationale for (a):** the router-per-mount-point rule from ADR-055's sibling
-  guidance already covers this, but the prompt named the wrong module, and the
+  guidance already covers this, but the plan named the wrong module, and the
   failure is silent — FastAPI raises no error for a duplicated mount, it just
-  serves the wrong paths. Guard comments in the two mounted modules and an
-  explicit six-router list in PROMPT 3.7 make the intent unmissable.
+  serves the wrong paths. Guard comments in the two mounted modules and the
+  explicit six-router mount list in `src/api/router.py` make the intent
+  unmissable.
 - **Rationale for (b):** inventing `/api/enrollments` would create an undocumented
   surface that no contract, wireframe, or test covers. Deleting the stub was
   rejected because the 14-slice layout is referenced in `AGENTS.md` and
@@ -733,27 +730,28 @@
   entirely derived from `Student.face_embedding`/`face_enrolled_at`/
   `face_embedding_version`. Because there is no model, no
   `import features.face_enrollment.model` line is added to `alembic/env.py`.
-  Enrollment status is read as `face_embedding IS NULL`, since soft-archive
-  (3.4) already nulls that column.
+  Enrollment status is read as `face_embedding IS NULL`, because archiving a
+  student is a revocation step: it sets `face_embedding = NULL` and bumps
+  `face_embedding_version`.
 - **Rationale for (d):** relaxing the FKs to `CASCADE` would make the delete
   succeed by destroying `attendance_records` — unacceptable for an attendance
   system, where those rows are the audit trail. An honest 409 tells the admin why
   the record cannot be removed; the RESTRICT constraints stay as the last line of
   defence even if the guard is bypassed.
-- **Consequences:** `backend-prompts.txt` Phase 3 carries inline `CORRECTION
-  (ADR-057)` notes on 3.4, 3.5, 3.7, 3.8 and 3.9 plus a routing-rules block in the
-  phase header. `course/router.py` gains `prefix="/admin/courses"` and documents
+- **Consequences:** `course/router.py` gains `prefix="/admin/courses"` and documents
   its sibling `course/offering_router.py`; `enrollment/router.py`, `student/router.py`
   and `professor/router.py` carry "do not re-mount" comments. Phase 3 needs **no
   migration** — every column it reads already exists. The new
   `student_has_records` / `professor_has_records` error codes are added to
-  `api-contracts.md` in 3.9, which currently documents only `409 not_archived`.
+  `api-contracts.md` in the ADMIN Endpoints archive-delete sections, which
+  documented only `409 not_archived`.
 - **Deferred:** `scan_count`, `course_count`, `year_level_count`, `terms_count` and
   `enrolled_count` are all computed per request. At Phase 3 volumes this is fine,
   but if the offerings or admin student lists grow large these become N+1 sources
   and should move to a cached aggregate (the `shared/cache.py` helper already
   exists) or a materialised view. Note `terms_count` reads the `"terms"` key of
   the `term_structure` JSONB column, whose shape is `{terms: [{code, label}]}`.
-- **Supersedes:** PROMPT 3.7's router list, PROMPT 3.8's "additions to the student
-  feature" placement, and PROMPT 3.9's archive-delete guard as written in
-  `backend-prompts.txt`.
+- **Supersedes:** the original Phase 3 routing plan for `/api/admin/*` — the
+  router list, the "additions to the student feature" placement of face
+  enrollment, and the archive-delete guard — as realised in `src/api/router.py`
+  and the archive-delete error codes in `api-contracts.md` §ADMIN Endpoints.

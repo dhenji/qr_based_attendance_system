@@ -503,7 +503,7 @@ Latest scans feed for the admin dashboard (wireframes.md 4.1).
 Queue of attendance records flagged for manual review — records whose
 `face_match_score` fell in the review band
 `[FACE_REVIEW_BAND_LOW, FACE_MATCH_THRESHOLD)` (0.65–0.70) submitted with
-`liveness_evidence.review=true` and `validation_status=pending` (PROMPT 5.2).
+`liveness_evidence.review=true` and `validation_status=pending`.
 
 #### `GET /admin/attendance/liveness-review`
 
@@ -523,7 +523,7 @@ Approve or reject a flagged record.
 | ---------------- | --------------------------------------------------------------------------------- |
 | **Request**      | `{ decision: "approve" \| "reject", note?: string }`                              |
 | **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
-| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. Decisions are audit-logged (PROMPT 8.7). |
+| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. Decisions are audit-logged. |
 
 ### Students, Professors & Archive
 

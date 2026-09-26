@@ -361,8 +361,7 @@
 
 ## Phase 12: Frontend-Readiness Roundup [gap]
 
-**Goal:** Backend endpoints that exist solely to power the frontend wireframe audit
-(in backend-prompts.txt as PROMPT 12.0 [S54]).
+**Goal:** Backend endpoints that exist solely to power the frontend wireframe audit.
 
 ### Deliverables
 
@@ -373,7 +372,7 @@
 - `POST /auth/mfa/disable` (password required; clears backup codes)
 - Dashboard summaries ×3 (`/student/dashboard`, `/professor/dashboard`, `/admin/dashboard`)
 - CSV export/template ×3 (student history, attendance overview, roster template)
-- `GET /auth/me` + profile enrichments (prompts 2.3/4.4/5.7)
+- `GET /auth/me` + profile enrichments
 
 ### Prerequisite Docs
 
