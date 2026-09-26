@@ -47,3 +47,24 @@ class UsernameAlreadyExists(AdminDomainException):
 
     def __init__(self) -> None:
         super().__init__(message="This username is already taken")
+
+
+class RosterLinkImpossible(AdminDomainException):
+    """409 - the account cannot be linked to an active, unclaimed roster record.
+
+    Creating a student/professor account for an email that has no active roster
+    row (or whose row is already claimed by another user) would mint an account
+    that /auth/me and the profile endpoints cannot resolve, so we reject it
+    instead of silently leaving the user unlinked.
+    """
+
+    status_code: int = 409
+    code: str = "roster_link_impossible"
+
+    def __init__(self, role: str) -> None:
+        super().__init__(
+            message=(
+                f"No active unclaimed {role} roster record matches this email; "
+                "create the roster record first"
+            )
+        )

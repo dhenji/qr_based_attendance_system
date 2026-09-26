@@ -150,7 +150,7 @@ class SecurityAnswerInvalidException(AuthDomainException):
 
 
 class RecoveryLockedException(AuthDomainException):
-    """423 - recovery aborted after too many failed answer attempts."""
+    """423 - too many security-answer attempts for this email."""
 
     status_code: int = 423
     code: str = "recovery_locked"
@@ -162,3 +162,17 @@ class RecoveryLockedException(AuthDomainException):
                 f"attempts. Try again in {retry_after_minutes} minutes"
             )
         )
+
+
+class RecoveryGrantRequiredException(AuthDomainException):
+    """400 - a FORGET_PASSWORD OTP was requested without passing step 2.
+
+    Reported with the generic invalid-credentials message so a caller cannot probe
+    for valid recovery grants.
+    """
+
+    status_code: int = 400
+    code: str = "invalid_credentials"
+
+    def __init__(self) -> None:
+        super().__init__(message="Invalid email or password")

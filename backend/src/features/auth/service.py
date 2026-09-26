@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,10 +12,14 @@ from core.config import Settings, get_settings
 from core.security import (
     PREAUTH_TOKEN_TYPE,
     REFRESH_TOKEN_TYPE,
+    RECOVERY_TOKEN_TYPE,
+    backup_code_fingerprint,
     create_access_token,
     create_preauth_token,
     create_refresh_token,
+    create_recovery_token,
     decode_access_token,
+    decode_recovery_token,
     extract_user_id,
     generate_backup_code,
     generate_otp,
@@ -27,6 +33,7 @@ from features.auth.constants import (
     BACKUP_CODE_COUNT,
     BACKUP_CODE_GROUPS,
     BACKUP_CODE_LENGTH,
+    SECURITY_QUESTION_POOL,
     SECURITY_RECOVERY_MAX_ATTEMPTS,
 )
 from features.auth.exceptions import (
@@ -38,6 +45,7 @@ from features.auth.exceptions import (
     MfaVerifyException,
     OtpExpiredException,
     OtpInvalidException,
+    RecoveryGrantRequiredException,
     RecoveryLockedException,
     SecurityAnswerInvalidException,
     UnrecognizedEmailException,
@@ -49,6 +57,7 @@ from features.auth.schema import (
     BackupCodesSummaryResponse,
     MeResponse,
     MFASetupResponse,
+    RecoveryGrantResponse,
     SecurityQuestionResponse,
     TokenResponse,
 )
@@ -60,6 +69,29 @@ from shared.enums import OtpPurpose, UserRole
 from shared.rate_limit import FixedWindowLimiter
 
 _recovery_limiter = FixedWindowLimiter()
+
+
+def _decoy_question(email: str, settings: Settings) -> str:
+    """Pick a stable decoy question for an unknown email (ADR-056).
+
+    Keyed on the normalized email with HMAC_SECRET_KEY (falling back to
+    JWT_SECRET) so the same address always maps to the same question. Never
+    returns the address itself, which would defeat the purpose.
+    """
+
+    secret: str = settings.hmac_secret_key or settings.jwt_secret
+
+    if not secret:
+        return SECURITY_QUESTION_POOL[0]
+
+    index: int = int(
+        hmac.new(
+            secret.encode("utf-8"), email.encode("utf-8"), hashlib.sha256
+        ).hexdigest(),
+        16,
+    ) % len(SECURITY_QUESTION_POOL)
+
+    return SECURITY_QUESTION_POOL[index]
 
 
 class AuthService:
@@ -75,19 +107,70 @@ class AuthService:
         self._backup_codes: BaseCRUD[MfaBackupCodes] = BaseCRUD(MfaBackupCodes, session)
 
     async def request_otp(
-        self, email: str, purpose: OtpPurpose = OtpPurpose.CLAIM
+        self,
+        email: str,
+        purpose: OtpPurpose = OtpPurpose.CLAIM,
+        recovery_token: str | None = None,
     ) -> None:
+        normalized: str = email.lower()
+        now: datetime = datetime.now(timezone.utc)
+
+        if purpose is OtpPurpose.FORGET_PASSWORD:
+            self._assert_recovery_grant(normalized, recovery_token)
+
+        # Resending must not leave a second code valid: burn any unconsumed OTP
+        # for the same (email, purpose) so only the newest one can be verified.
+        await self._consume_active_otps(normalized, purpose, now)
+
         code: str = generate_otp()
 
         await self._otp.create(
-            email=email.lower(),
+            email=normalized,
             purpose=purpose.value,
             otp_hash=hash_otp(code),
-            expires_at=datetime.now(timezone.utc)
+            expires_at=now
             + timedelta(minutes=self._settings.otp_expires_minutes),
         )
 
         send_otp_email(email, code)
+
+    def _assert_recovery_grant(
+        self, email: str, recovery_token: str | None
+    ) -> None:
+        """Gate step 3 on a valid step-2 grant for the same address.
+
+        Holding the OTP is what authorises step 4, so minting one is the only place
+        the security-answer gate has to be enforced. A bad or mismatched grant is
+        reported as a plain invalid-credentials 400 rather than a distinct error so
+        this path stays indistinguishable from any other auth failure.
+        """
+
+        if not recovery_token:
+            raise RecoveryGrantRequiredException()
+
+        payload: dict[str, Any] | None = decode_recovery_token(
+            recovery_token, self._settings
+        )
+
+        if payload is None or payload.get("email") != email:
+            raise RecoveryGrantRequiredException()
+
+    async def _consume_active_otps(
+        self, email: str, purpose: OtpPurpose, now: datetime
+    ) -> None:
+        stmt: Select[tuple[OtpCodes]] = select(OtpCodes).where(
+            OtpCodes.email == email,
+            OtpCodes.purpose == purpose.value,
+            OtpCodes.consumed_at.is_(None),
+        )
+
+        stale: Sequence[OtpCodes] = (await self._session.scalars(stmt)).all()
+
+        for record in stale:
+            record.consumed_at = now
+
+        if stale:
+            await self._session.flush()
 
     async def verify_otp(
         self, email: str, code: str, purpose: OtpPurpose = OtpPurpose.CLAIM
@@ -220,14 +303,38 @@ class AuthService:
         return self._build_tokens(user)
 
     async def forgot_password(self, email: str) -> SecurityQuestionResponse:
-        user: User | None = await self._users.get_by(email=email.lower())
+        """Return the security question for step 2 of the recovery flow.
+
+        api-contracts.md requires an identical response for unknown emails so the
+        endpoint cannot be used to enumerate registered accounts, so an unknown
+        email gets a deterministic decoy from SECURITY_QUESTION_POOL rather than a
+        null question. The choice is keyed on the email (not random) because a
+        varying decoy would itself become a reliable enumeration oracle, and it
+        would change under a legitimate user who retried after a typo.
+        """
+
+        normalized: str = email.lower()
+        user: User | None = await self._users.get_by(email=normalized)
 
         if user is None or user.security_question_hash is None:
-            return SecurityQuestionResponse(question=None, set=False)
+            return SecurityQuestionResponse(
+                question=_decoy_question(normalized, self._settings), set=True
+            )
 
         return SecurityQuestionResponse(question=user.security_question_hash, set=True)
 
-    async def forgot_password_step2(self, email: str, answer: str) -> None:
+    async def forgot_password_step2(
+        self, email: str, answer: str
+    ) -> RecoveryGrantResponse:
+        """Verify the security answer and issue a short-lived recovery grant.
+
+        The grant is what gates step 3: without it a FORGET_PASSWORD OTP cannot be
+        minted, so the mandatory security-question gate and its 3-attempt cap
+        cannot be skipped. Unknown emails and wrong answers return the identical
+        error and consume the same attempt budget, so this endpoint is not an
+        enumeration oracle either.
+        """
+
         normalized: str = email.lower()
 
         if not await _recovery_limiter.hit(
@@ -248,6 +355,10 @@ class AuthService:
         ):
             await self._session.flush()
             raise SecurityAnswerInvalidException()
+
+        return RecoveryGrantResponse(
+            recovery_token=create_recovery_token(user.id, user.email, self._settings)
+        )
 
     async def set_security_question(
         self, user: User, question: str, answer: str
@@ -320,10 +431,13 @@ class AuthService:
         plaintext: list[str] = []
         for _ in range(BACKUP_CODE_COUNT):
             code: str = generate_backup_code()
+            normalized: str = self._normalize_backup_code(code)
             plaintext.append(self._format_backup_code(code))
 
             await self._backup_codes.create(
-                user_id=user.id, code_hash=hash_password(code)
+                user_id=user.id,
+                code_hash=hash_password(normalized),
+                code_fingerprint=backup_code_fingerprint(normalized, self._settings),
             )
 
         return BackupCodesResponse(codes=plaintext, remaining=BACKUP_CODE_COUNT)
@@ -354,26 +468,29 @@ class AuthService:
         )
 
     async def verify_backup_code(self, user: User, code: str) -> bool:
-        normalized: str = normalize_backup_code(code)
+        normalized: str = self._normalize_backup_code(code)
 
         if len(normalized) != BACKUP_CODE_LENGTH:
             return False
 
-        rows: Sequence[MfaBackupCodes] = (
-            await self._session.scalars(
-                select(MfaBackupCodes).where(
-                    MfaBackupCodes.user_id == user.id, MfaBackupCodes.used_at.is_(None)
-                )
+        # Resolve the single candidate row via the indexed fingerprint so we pay
+        # for at most one Argon2id verify, then treat code_hash as authoritative.
+        record: MfaBackupCodes | None = await self._session.scalar(
+            select(MfaBackupCodes).where(
+                MfaBackupCodes.user_id == user.id,
+                MfaBackupCodes.used_at.is_(None),
+                MfaBackupCodes.code_fingerprint
+                == backup_code_fingerprint(normalized, self._settings),
             )
-        ).all()
+        )
 
-        for record in rows:
-            if verify_password(normalized, record.code_hash):
-                record.used_at = datetime.now(timezone.utc)
-                await self._session.flush()
-                return True
+        if record is None or not verify_password(normalized, record.code_hash):
+            return False
 
-        return False
+        record.used_at = datetime.now(timezone.utc)
+        await self._session.flush()
+
+        return True
 
     async def verify_mfa(
         self, code: str, preauth_token: str | None = None, user: User | None = None
@@ -473,6 +590,10 @@ class AuthService:
     @staticmethod
     def _normalize_answer(answer: str) -> str:
         return answer.strip().casefold()
+
+    @staticmethod
+    def _normalize_backup_code(code: str) -> str:
+        return normalize_backup_code(code)
 
     @staticmethod
     def _format_backup_code(code: str) -> str:
