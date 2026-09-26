@@ -4,6 +4,19 @@
 // MOCK flag — swap to false when professor session endpoints land
 const MOCK = true;
 
+// Mock stand-in for the server-side HMAC code (D12). The shape is two base36
+// chars, a dash, then four more — `XX-XXXX`.
+export const mockSessionCode = (): string =>
+	`${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random()
+		.toString(36)
+		.substring(2, 6)
+		.toUpperCase()}`;
+
+// A frozen sample in the exact shape mockSessionCode() returns. The create page
+// imports this for its inert placeholder so the two cannot drift apart — they
+// did once, and the wider placeholder silently overflowed its card on mobile.
+export const SESSION_CODE_SAMPLE = '7X-9K2M';
+
 // Mock data
 // One pre-seeded active session so the professor UI has something to render.
 const MOCK_SESSIONS = [
@@ -49,55 +62,56 @@ export const listSessions = async (_params?: {
 };
 
 // openSession
-// Create a new attendance session. qrPayload is what gets rendered into the
-// QR code students scan; windows default to 15min present / 5min late.
+// Create a new attendance session against a course offering. qrPayload is what
+// gets rendered into the QR code students scan.
 export const openSession = async (
-	courseId: number,
+	offeringId: number,
 	options?: {
 		durationMinutes?: number;
 		presentWindowMinutes?: number;
 		lateWindowMinutes?: number;
 		geofenceRadius?: number;
+		// D17: a classroom override replaces the offering defaults when set.
 		classroomName?: string;
+		classroomLat?: number;
+		classroomLng?: number;
+		// D12: the scheduled class end, which caps the computed expiry. ISO 8601.
+		scheduledEndTime?: string;
 	}
 ) => {
-	if (MOCK) {
-		return {
-			id: MOCK_SESSIONS.length + 1,
-			courseId,
-			code: `SESSION-${Date.now().toString(36)}`,
-			qrPayload: {
-				v: 1,
-				code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random()
-					.toString(36)
-					.substring(2, 4).toUpperCase()}`,
-				course: courseId,
-				radius: options?.geofenceRadius || 50,
-				pw: options?.presentWindowMinutes || 15,
-				lw: options?.lateWindowMinutes || 5,
-			},
-			expiresAt: new Date(
-				Date.now() + (options?.durationMinutes || 90) * 60 * 1000
-			).toISOString(),
-			scheduledEndTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-		};
-	}
+	const durationMinutes = options?.durationMinutes ?? 90;
+	const presentWindowMinutes = options?.presentWindowMinutes ?? 15;
+	const lateWindowMinutes = options?.lateWindowMinutes ?? 5;
+	const geofenceRadius = options?.geofenceRadius ?? 50;
+
+	// D12: expires_at = min(created_at + duration_minutes, scheduled_end_time),
+	// so a session can never outlive the scheduled class.
+	const durationEnd = Date.now() + durationMinutes * 60 * 1000;
+	const scheduledEnd = options?.scheduledEndTime
+		? new Date(options.scheduledEndTime).getTime()
+		: Number.POSITIVE_INFINITY;
+
+	// The real code is HMAC-derived server-side; in mock mode it is a random
+	// stand-in so the projector card has something to render.
+	const code = MOCK ? mockSessionCode() : '';
+
 	return {
 		id: MOCK_SESSIONS.length + 1,
-		courseId,
+		offeringId,
 		code: `SESSION-${Date.now().toString(36)}`,
 		qrPayload: {
 			v: 1,
-			code: 'A7X-9K2M',
-			course: courseId,
-			radius: options?.geofenceRadius || 50,
-			pw: options?.presentWindowMinutes || 15,
-			lw: options?.lateWindowMinutes || 5,
+			code,
+			course: offeringId,
+			radius: geofenceRadius,
+			pw: presentWindowMinutes,
+			lw: lateWindowMinutes,
 		},
-		expiresAt: new Date(
-			Date.now() + (options?.durationMinutes || 90) * 60 * 1000
-		).toISOString(),
-		scheduledEndTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+		classroomName: options?.classroomName,
+		classroomLat: options?.classroomLat,
+		classroomLng: options?.classroomLng,
+		expiresAt: new Date(Math.min(durationEnd, scheduledEnd)).toISOString(),
+		scheduledEndTime: options?.scheduledEndTime,
 	};
 };
 
@@ -121,7 +135,7 @@ export const getActiveSession = async (sessionId: number) => {
 			code: 'SESSION-2024-001',
 			qrPayload: {
 				v: 1,
-				code: 'A7X-9K2M',
+			code: SESSION_CODE_SAMPLE,
 				course: 1,
 				radius: 50,
 				pw: 15,

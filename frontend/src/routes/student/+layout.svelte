@@ -1,22 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { authState, doLogout, isAuthenticated, restoreSession } from '$lib/features/auth/store.svelte';
+	import { authState, doLogout, restoreSession } from '$lib/features/auth/store.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	let { children } = $props();
 
-	// Until the session is verified we can't tell whether to render the portal or
-	// bounce to login, so hold the UI behind a loading state.
-	let sessionChecked = $state(false);
-
+	// TODO(auth): the student portal is reachable without a session for now, so
+	// the dashboard can be reviewed before login is wired up. Once auth lands,
+	// restore the guard here: bounce anonymous visitors to Routes.LOGIN and hold
+	// the pages behind a session-checked gate.
+	//
+	// restoreSession() still runs so the topbar shows the signed-in name when
+	// there is one; it just no longer gates rendering.
 	onMount(async () => {
-		const user = await restoreSession();
-		sessionChecked = true;
-		if (!user) {
-			await goto(Routes.LOGIN);
-		}
+		await restoreSession();
 	});
 
 	const navItems = [
@@ -127,11 +125,7 @@
 		</aside>
 
 		<main class="content">
-			{#if !sessionChecked}
-				<p class="session-pending">Checking your session…</p>
-			{:else if isAuthenticated()}
-				{@render children()}
-			{/if}
+			{@render children()}
 		</main>
 	</div>
 </div>
@@ -229,11 +223,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-
-	.session-pending {
-		color: #64748b;
-		font-size: 0.875rem;
 	}
 
 	.logout:hover {

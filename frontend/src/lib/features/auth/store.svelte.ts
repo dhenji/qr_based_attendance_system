@@ -53,7 +53,7 @@ export const defaultRouteFor = (user: User | null): string => {
 		case 'student':
 			return Routes.DASHBOARD;
 		case 'professor':
-			return Routes.PROFESSOR_SESSIONS;
+			return Routes.PROFESSOR_DASHBOARD;
 		default:
 			return Routes.HOME;
 	}
