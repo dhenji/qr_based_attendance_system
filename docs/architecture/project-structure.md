@@ -106,7 +106,7 @@ attendance-system/
 │
 ├── docs/                             # Documentation
 │   ├── project/
-│   │   ├── decision-log.md           # ADR-format decision log (D1–D57)
+│   │   ├── decision-log.md           # ADR-format decision log (D1–D58)
 │   │   └── glossary.md               # Term definitions
 │   ├── proposals/
 │   │   ├── proposal.md               # Full project proposal

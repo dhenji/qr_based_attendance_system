@@ -79,22 +79,51 @@ from features.student.model import Student
 - Response models: use `model_config = ConfigDict(from_attributes=True)`.
 - Never return ORM objects directly — serialize via response schema.
 - Use `Annotated` with `Field()` for validation rules.
+- **Field bounds come from the slice's `constants.py`**, never inline literals. Reuse the shared
+  value if one exists (`NAME_MIN_LENGTH`, `NAME_MAX_LENGTH` in `features/admin/constants.py`;
+  `MAX_PAGE_SIZE`, `SEARCH_MAX_LENGTH` in `shared/pagination.py`) instead of redeclaring it.
+- **Input normalization is a `field_validator`**, not service logic: e.g. `ProgramCreate.code`
+  strips whitespace and upper-cases, so the service compares one canonical form.
+- **`FooUpdate` lists only the fields the contract's PATCH body accepts.** Immutable identity
+  fields (`Program.code`, `Program.total_years`) are absent, not `Optional[...]`-ed.
+- **Derived aggregates live on the read schema, defaulting to `0`** — `course_count`,
+  `year_level_count`, `terms_count`, `enrolled_count`, `scan_count`. They are computed per
+  request and are never model columns (see §1.8).
+- **Nested reads get a `FooDetail(FooRead)`** that adds the child collection, e.g.
+  `ProgramDetail.year_levels: list[YearLevelRead]`. A create response may reuse `FooRead`
+  with the aggregates at their `0` default — correct for a brand-new row, and one model
+  instead of two.
 
 ### 1.6 Service Conventions
 
-- Services are **module-level async functions**: `async def create_foo(session: AsyncSession, ...)`.
-- **No service classes by default** — with one sanctioned exception: a service may be a
-  class when `__init__` builds per-request collaborators that every method would
-  otherwise re-derive (composed `BaseCRUD` handles, settings, rate limiters).
-  `AuthService` (5 `BaseCRUD` handles + settings) and `AdminService` (3 handles)
-  are the clear cases; `CourseProfessorService` is retained as a borderline one
-  that would not justify a new sibling. A session alone does **not** qualify —
-  prefer a function for a new single-method service. See ADR-055 in
+- **CRUD slices under `/admin/*` are classes.** A slice whose job is create/read/update/archive
+  for one or two models (`program`, `course`, student-admin, professor-admin) implements
+  `features/<slice>/service.py` as `class <Feature>Service`, whose `__init__` takes the
+  request `AsyncSession` and builds one `BaseCRUD` handle per model it touches. The router
+  never constructs it: `api/deps.py` holds `_get_<feature>_service` plus the annotated
+  `Annotated[<Feature>Service, Depends(_get_<feature>_service)]` alias
+  (`<Feature>ServiceDep`), which receives `_get_db`, so the transaction boundary is unchanged.
+  This is a standing rule, not a per-slice re-argument — see ADR-055 and ADR-058 in
   [decision-log.md](../project/decision-log.md).
-- A service class must hold no state across requests; its `__init__` may only
-  build per-request handles.
+- **Everything else is module-level async functions**: `async def create_foo(session: AsyncSession, ...)`.
+  That covers the non-CRUD slices — the `face_enrollment` slice (no model, pure logic over
+  `Student.face_embedding`) and pure helpers such as `shared/csv_import.py` — where a
+  class would have nothing to compose. A session alone does **not** justify a class; a
+  composed set of per-request handles does. `CourseProfessorService` (Phase 1.3) is the one
+  borderline holdover: it is a class that would be a near-exact drop-in as a function and is
+  retained as-is because ADR-055 declined a cosmetic change to contract-tested code. Do not
+  treat it as precedent for a new slice.
+- A service class must hold no state across requests; its `__init__` may only build
+  per-request handles. Services call `BaseCRUD` for database operations.
+- **Services return read schemas.** Building `ProgramRead(...)` in the service is the norm
+  when the response carries derived aggregates — `model_validate(program)` cannot see them.
+- **Relationship access in async must be explicit.** `Program.year_levels` declares no
+  `lazy=`, so reading `program.year_levels` after a query raises `MissingGreenlet`. Either
+  pass `selectinload(Program.year_levels)` (or `joinedload`) in the query, or issue a second
+  explicit query for the children — never read the attribute implicitly. Prefer the second
+  query when the same children are also needed per row in `list`, so both paths share one
+  helper.
 - Business logic lives in services, not routers.
-- Services call `BaseCRUD` for database operations.
 - Raise `HTTPException` or domain exceptions, never raw `ValueError`.
 - Transactions: flush within service methods; commit managed by the router/dependency.
 
@@ -110,11 +139,130 @@ from features.student.model import Student
   their inner paths must not collide. Never mount the same `APIRouter` twice:
   paths inside are relative to its prefix, so mounting `student/router.py` at
   `/api/admin` would also expose `/api/admin/profile`.
+- **Collection routes are declared `""`, never `"/"`.** `@router.get("")` registers
+  `/admin/programs` exactly; `"/"` adds a trailing-slash redirect the contract
+  does not have.
+- **The admin CRUD route set** is `GET ""`, `POST ""`, `GET /{id}`, `PATCH /{id}`,
+  `DELETE /{id}` — in that order in the module, each with a one-line `summary=`.
+- **Every admin route carries its own role guard**: a
+  `_: Annotated[User, Depends(require_role(UserRole.ADMIN))]` parameter. `super_admin`
+  passes automatically (`_role_matches` treats it as a superset of `admin`), so routes
+  never need to name both roles.
+- **Pagination is declared per route, not via a dependency**, so the bounds are visible
+  in the OpenAPI schema: `page: int = Query(default=DEFAULT_PAGE, ge=1)` and
+  `size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)`, with the
+  constants coming from `shared/pagination.py`.
+- **A list endpoint may add one optional filter the contract omits** — e.g. `?search=`
+  (`ilike` across the human-readable columns) for a wireframe search box. It must stay
+  optional, default to `None`, be length-capped by `SEARCH_MAX_LENGTH`, and be recorded
+  in [api-contracts.md](../architecture/api-contracts.md) so the contract stays the
+  source of truth. Adding a *required* undocumented parameter is not allowed.
+- **204 responses declare `status_code=status.HTTP_204_NO_CONTENT` and return `None`** —
+  never a body, and never a status code the contract does not document.
 - Mount all feature routers in `api/router.py`.
 - Dependencies: `_get_db` for session (there is no public `get_db`), role-guard
-  dependencies for authorization via `require_role(*UserRole)`.
-- Use `response_model` on endpoint decorators.
+  dependencies for authorization via `require_role(*UserRole)`, `<Feature>ServiceDep` for
+  a class-based service.
+- Use `response_model` on endpoint decorators (`PaginatedResponse[FooRead]` for lists).
 - Paginated responses: `{items, total, page, size}`.
+
+### 1.8 Admin CRUD Slice Template
+
+A CRUD slice under `/api/admin/*` is exactly these files, beside the `model.py` that
+already exists. `features/program/` is the reference implementation.
+
+```
+features/program/
+  model.py         # already exists — Phase 3 adds NO migrations
+  constants.py     # field bounds + re-used pagination bounds
+  exceptions.py    # <Slice>Exception / <Slice>DomainException + concrete codes
+  schema.py        # FooCreate, FooRead, FooUpdate (+ FooDetail when nested)
+  service.py       # class FooService
+  router.py        # APIRouter(prefix="/admin/<things>")
+```
+
+**`exceptions.py`** — one umbrella extending `AppException`, one `<Slice>DomainException`
+extending it plus `DomainException` (422), then one class per documented code carrying
+`status_code` and `code`, mirroring the shape in `features/admin/exceptions.py`. Codes come
+from the contract (`409 program_code_exists`, `404 year_level_not_found`, …) and are never
+invented. A 409 duplicates an existing class name (`EmailAlreadyExists`,
+`OverlappingAssignmentException`); a 404 class may take the id and fold it into the message.
+
+**`constants.py`** — the slice's own field bounds (`CODE_MAX_LENGTH` mirroring the column
+`String(20)`, `TOTAL_YEARS_MAX`…); a bound that is not specific to the slice is imported
+rather than restated. The list-query bounds live in `shared/pagination.py`:
+
+```python
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    SEARCH_MAX_LENGTH,
+)
+```
+
+`NAME_MIN_LENGTH` / `NAME_MAX_LENGTH` still come from `features/admin/constants.py`, which
+re-exports the four `shared.pagination` names so the existing admin routes are unaffected.
+That re-export is the temporary shape: if a third slice needs the name bounds, they get
+their own `shared/constants.py` rather than a growing feature-to-feature import.
+
+**`service.py` + `api/deps.py`** — see §1.6. `api/deps.py` is the only file outside the
+slice folder that changes, and only additively:
+
+```python
+async def _get_program_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> ProgramService:
+    return ProgramService(session)
+
+
+ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
+```
+
+**Derived aggregates are computed per request, in Python, one query per parent.** This is
+an accepted N+1 at Phase 3 volumes (ADR-057 "Deferred"); do not build a grouped-JSONB
+aggregate query or a materialised view yet, and never add the count as a column.
+
+```python
+terms_count = sum(len(yl.term_structure.get("terms") or []) for yl in program.year_levels)
+```
+
+Two traps this shape hides:
+
+- `term_structure` is `{"terms": [{"code", "label"}]}`, so a bare `len(term_structure)`
+  returns `1` per year level. Always read the `"terms"` key.
+- `course_count` has **no** `courses.program_id` to count — D44 moved program FKs to
+  `course_offerings`, so it is `COUNT(DISTINCT course_offerings.course_id)` restricted to
+  the program (and to `is_active` offerings). There is no other path.
+
+**Archive vs hard delete** — which route a slice gets is decided by the contract, not by
+pattern-matching the other slices:
+
+| Slice                        | Soft archive                                    | Hard delete                             |
+| ---------------------------- | ----------------------------------------------- | --------------------------------------- |
+| programs, year levels, courses, offerings | `DELETE /{id}` → `is_active = False`  | none                                     |
+| students, professors         | `PATCH /{id}` with `is_active` (archive/reactivate) | `DELETE /{id}/archive`, archived rows only, plus a has-records 409 |
+
+- A soft archive touches **only its own row**. `DELETE /admin/programs/{id}` sets
+  `programs.is_active = False` and nothing else: `year_levels` has no `is_active` column
+  and `courses` is a decoupled template, so there is nothing to cascade to. Do not invent
+  a cascade, and do not re-activate archived offerings as a side effect.
+- Reactivation is the same `PATCH` with `is_active: true`; slices that have no `DELETE
+  /{id}` reach `archive()`/`reactivate()` from the PATCH handler.
+- The hard delete needs **two** guards, not one: `is_active = False` (else
+  `409 not_archived`) *and* a child-row check (`409 student_has_records` /
+  `professor_has_records`), because `enrollments`, `attendance_records` and
+  `excuse_requests` reference `students.id` with `ondelete="RESTRICT"` (and `sessions`
+  references `professors.id`). The FKs stay RESTRICT as the last line of defence — never
+  relax them to CASCADE to make the delete succeed.
+- A slice that documents no delete route gets none. Adding `DELETE /{id}` "to match the
+  pattern" creates an undocumented surface.
+
+**A slice is not mounted when it is written.** `api/router.py` is edited once, in
+PROMPT 3.7, by the session that owns the whole mount list. Until then, verify a new router
+by importing it and reading `router.routes`, and never add an `include_router` call in the
+slice's own session.
+
 
 ---
 
@@ -204,8 +352,13 @@ features/
 | Columns   | snake_case                           | `student_id`, `created_at`         |
 | Models    | PascalCase                           | `Student`, `AttendanceRecord`      |
 | Schemas   | PascalCase + suffix                  | `StudentCreate`, `SessionResponse` |
-| Services  | PascalCase + suffix                  | `StudentService`, `SessionService` |
-| Routers   | snake_case                           | `student_router`, `session_router` |
+| Services  | PascalCase + suffix (admin CRUD)     | `ProgramService`                   |
+| Service fns | snake_case, `session` first arg   | `check_overlap()`                  |
+| Routers   | snake_case, prefix baked in          | `student_router`, `session_router` |
+| Router modules | snake_case, one per mount point | `admin_router.py`, `offering_router.py` |
+| Service deps | `<Feature>ServiceDep` in `api/deps.py` | `ProgramServiceDep`             |
+| Exceptions | `<Feature>Exception` / `<Feature>DomainException` | `ProgramCodeExistsException` |
+| Slice constants | UPPER_SNAKE in `<slice>/constants.py` | `MAX_PAGE_SIZE`             |
 | Functions | snake_case                           | `get_student_by_id()`              |
 | Constants | UPPER_SNAKE_CASE                     | `FACE_MATCH_THRESHOLD`             |
 | Enums     | PascalCase class, UPPER_SNAKE values | `UserRole.STUDENT`                 |
