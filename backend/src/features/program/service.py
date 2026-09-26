@@ -8,6 +8,9 @@ from features.course.model import CourseOffering
 from features.program.exceptions import (
     ProgramCodeExistsException,
     ProgramNotFoundException,
+    YearLevelHasCoursesException,
+    YearLevelNotFoundException,
+    YearLevelNumberExistsException,
 )
 from features.program.model import Program, YearLevel
 from features.program.schema import (
@@ -15,7 +18,9 @@ from features.program.schema import (
     ProgramDetail,
     ProgramRead,
     ProgramUpdate,
+    YearLevelCreate,
     YearLevelRead,
+    YearLevelUpdate,
 )
 from shared.base import BaseCRUD
 from shared.pagination import PaginatedResponse
@@ -25,6 +30,7 @@ class ProgramService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._programs: BaseCRUD[Program] = BaseCRUD(Program, session)
+        self._years: BaseCRUD[YearLevel] = BaseCRUD(YearLevel, session)
 
     async def create(self, *, payload: ProgramCreate) -> ProgramRead:
         if await self._programs.get_by(code=payload.code) is not None:
@@ -117,6 +123,99 @@ class ProgramService:
         program.is_active = False
         await self._session.flush()
 
+    async def list_years(
+        self, *, program_id: int, page: int, size: int
+    ) -> PaginatedResponse[YearLevelRead]:
+        await self._get_or_404(program_id)
+
+        stmt: Select[tuple[YearLevel]] = select(YearLevel).where(
+            YearLevel.program_id == program_id
+        )
+
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
+
+        rows: Sequence[YearLevel] = (
+            await self._session.scalars(
+                stmt.order_by(YearLevel.year_number)
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+
+        return PaginatedResponse[YearLevelRead](
+            items=[YearLevelRead.model_validate(row) for row in rows],
+            total=total,
+            page=page,
+            size=size,
+        )
+
+    async def create_year(
+        self, *, program_id: int, payload: YearLevelCreate
+    ) -> YearLevelRead:
+        await self._get_or_404(program_id)
+
+        if (
+            await self._years.get_by(
+                program_id=program_id, year_number=payload.year_number
+            )
+            is not None
+        ):
+            raise YearLevelNumberExistsException(payload.year_number, program_id)
+
+        year_level: YearLevel = await self._years.create(
+            program_id=program_id,
+            year_number=payload.year_number,
+            label=payload.label,
+            term_structure=payload.term_structure.model_dump(),
+            sort_order=(
+                payload.sort_order
+                if payload.sort_order is not None
+                else payload.year_number
+            ),
+        )
+
+        return YearLevelRead.model_validate(year_level)
+
+    async def get_year(self, *, program_id: int, year_id: int) -> YearLevelRead:
+        return YearLevelRead.model_validate(
+            await self._get_year_or_404(program_id, year_id)
+        )
+
+    async def update_year(
+        self, *, program_id: int, year_id: int, payload: YearLevelUpdate
+    ) -> YearLevelRead:
+        year_level: YearLevel = await self._get_year_or_404(program_id, year_id)
+
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            setattr(year_level, field, value)
+
+        await self._session.flush()
+
+        return YearLevelRead.model_validate(year_level)
+
+    async def delete_year(self, *, program_id: int, year_id: int) -> None:
+        year_level: YearLevel = await self._get_year_or_404(program_id, year_id)
+
+        offering_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseOffering)
+                .where(CourseOffering.year_level_id == year_id)
+            )
+            or 0
+        )
+
+        if offering_count > 0:
+            raise YearLevelHasCoursesException(year_id)
+
+        await self._session.delete(year_level)
+        await self._session.flush()
+
     async def _get_or_404(self, program_id: int) -> Program:
         program: Program | None = await self._programs.get(program_id)
 
@@ -124,6 +223,16 @@ class ProgramService:
             raise ProgramNotFoundException(program_id)
 
         return program
+
+    async def _get_year_or_404(self, program_id: int, year_id: int) -> YearLevel:
+        await self._get_or_404(program_id)
+
+        year_level: YearLevel | None = await self._years.get(year_id)
+
+        if year_level is None or year_level.program_id != program_id:
+            raise YearLevelNotFoundException(year_id, program_id)
+
+        return year_level
 
     async def _year_levels(self, program_id: int) -> Sequence[YearLevel]:
         return (
