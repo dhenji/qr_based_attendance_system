@@ -13,6 +13,7 @@ from core.security import decode_access_token, extract_user_id
 from features.admin.service import AdminService
 from features.auth.model import User
 from features.auth.service import AuthService
+from features.course.service import CourseService
 from features.program.service import ProgramService
 from shared.enums import UserRole
 
@@ -141,9 +142,16 @@ async def _get_program_service(
     return ProgramService(session)
 
 
+async def _get_course_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> CourseService:
+    return CourseService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
+CourseServiceDep = Annotated[CourseService, Depends(_get_course_service)]
 
 CurrentUserDep = Annotated[User, Depends(_get_current_user)]
 OptionalUserDep = Annotated[User | None, Depends(_get_optional_current_user)]
