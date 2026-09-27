@@ -125,6 +125,32 @@ export const SessionCreateEndpoint: EndpointDef<{
 	}),
 };
 
+// Session history (professor) — wireframe 3.5, GET /professor/sessions/history
+export const SessionHistoryEndpoint: EndpointDef<Paginated<unknown>> = {
+	url: '/professor/sessions/history',
+	method: 'GET',
+	mock: () => ({
+		items: [],
+		total: 0,
+		page: 1,
+		size: 20,
+	}),
+};
+
+// Live session detail (professor projector view)
+export const SessionActiveEndpoint: EndpointDef<unknown> = {
+	url: '/professor/sessions/active',
+	method: 'GET',
+	mock: () => ({}),
+};
+
+// Close session (professor)
+export const SessionCloseEndpoint: EndpointDef<unknown> = {
+	url: '/professor/sessions/close',
+	method: 'POST',
+	mock: () => ({ id: 0, status: 'closed' }),
+};
+
 // Attendance records (professor)
 export const AttendanceListEndpoint: EndpointDef<Paginated<unknown>> = {
 	url: '/professor/attendance',
@@ -257,6 +283,9 @@ export const endpoints = {
 	// Session CRUD
 	sessionList: SessionListEndpoint,
 	sessionCreate: SessionCreateEndpoint,
+	sessionHistory: SessionHistoryEndpoint,
+	sessionActive: SessionActiveEndpoint,
+	sessionClose: SessionCloseEndpoint,
 	// Attendance
 	attendanceList: AttendanceListEndpoint,
 	// Auth
