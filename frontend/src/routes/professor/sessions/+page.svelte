@@ -13,10 +13,15 @@
 
 	type SessionSummary = Awaited<ReturnType<typeof listSessions>>['items'][number];
 
+	type SortKey = 'date' | 'code' | 'course' | 'pla';
+	type SortDirection = 'asc' | 'desc';
+
 	let summaries = $state<SessionSummary[] | null>(null);
 	let loadError = $state<string | null>(null);
 	let offeringFilter = $state<number | null>(null);
 	let refreshing = $state(false);
+	let sortKey = $state<SortKey>('date');
+	let sortDirection = $state<SortDirection>('desc');
 
 	const today = $derived(
 		new Date().toLocaleDateString(undefined, {
@@ -31,10 +36,32 @@
 		if (!summaries) return [];
 		const rows =
 			offeringFilter === null
-				? summaries
+				? [...summaries]
 				: summaries.filter((session) => session.offeringId === offeringFilter);
-		// Newest first; the mock store is in creation order.
-		return [...rows].reverse();
+		const direction = sortDirection === 'asc' ? 1 : -1;
+		rows.sort((a, b) => {
+			switch (sortKey) {
+				case 'code':
+					return a.session_code.localeCompare(b.session_code) * direction;
+				case 'course':
+					return (
+						(a.course_code.localeCompare(b.course_code) ||
+							a.createdAt.localeCompare(b.createdAt)) *
+						direction
+					);
+				case 'pla':
+					return (
+						(a.presentCount - b.presentCount ||
+							a.lateCount - b.lateCount ||
+							a.createdAt.localeCompare(b.createdAt)) *
+						direction
+					);
+				case 'date':
+				default:
+					return a.createdAt.localeCompare(b.createdAt) * direction;
+			}
+		});
+		return rows;
 	});
 
 	const activeSessions = $derived(filtered.filter((session) => session.status === 'active'));
@@ -58,6 +85,30 @@
 	const viewLive = (id: number) => void goto(professorActiveSession(id));
 	const goCreate = () => void goto(Routes.PROFESSOR_SESSIONS_CREATE);
 	const goHistory = () => void goto(Routes.PROFESSOR_SESSIONS_HISTORY);
+
+	const setSort = (key: SortKey) => {
+		if (sortKey === key) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+		else {
+			sortKey = key;
+			// Dates read newest-first; everything else reads A-to-Z / low-to-high.
+			sortDirection = key === 'date' ? 'desc' : 'asc';
+		}
+	};
+
+	const sortArrow = (key: SortKey): string => {
+		if (sortKey !== key) return '↕';
+		return sortDirection === 'asc' ? '▲' : '▼';
+	};
+
+	const sortLabel = (key: SortKey, label: string): string => {
+		if (sortKey !== key) return `Sort by ${label.toLowerCase()} ascending`;
+		return `Sort by ${label.toLowerCase()} ${sortDirection === 'asc' ? 'descending' : 'ascending'}`;
+	};
+
+	const ariaSort = (key: SortKey): 'ascending' | 'descending' | 'none' => {
+		if (sortKey !== key) return 'none';
+		return sortDirection === 'asc' ? 'ascending' : 'descending';
+	};
 
 	const plaText = (session: SessionSummary): string =>
 		`${session.presentCount} / ${session.lateCount} / ${session.absentCount}`;
@@ -167,10 +218,58 @@
 						<table>
 							<thead>
 								<tr>
-									<th scope="col">Date</th>
-									<th scope="col">Code</th>
-									<th scope="col">Course</th>
-									<th scope="col">P / L / A</th>
+									<th scope="col" aria-sort={ariaSort('date')}>
+										<button
+											class="sort"
+											type="button"
+											onclick={() => setSort('date')}
+											aria-label={sortLabel('date', 'Date')}
+										>
+											<span>Date</span>
+											<span class="sort-arrow" class:active={sortKey === 'date'} aria-hidden="true">
+												{sortArrow('date')}
+											</span>
+										</button>
+									</th>
+									<th scope="col" aria-sort={ariaSort('code')}>
+										<button
+											class="sort"
+											type="button"
+											onclick={() => setSort('code')}
+											aria-label={sortLabel('code', 'Code')}
+										>
+											<span>Code</span>
+											<span class="sort-arrow" class:active={sortKey === 'code'} aria-hidden="true">
+												{sortArrow('code')}
+											</span>
+										</button>
+									</th>
+									<th scope="col" aria-sort={ariaSort('course')}>
+										<button
+											class="sort"
+											type="button"
+											onclick={() => setSort('course')}
+											aria-label={sortLabel('course', 'Course')}
+										>
+											<span>Course</span>
+											<span class="sort-arrow" class:active={sortKey === 'course'} aria-hidden="true">
+												{sortArrow('course')}
+											</span>
+										</button>
+									</th>
+									<th scope="col" aria-sort={ariaSort('pla')}>
+										<button
+											class="sort"
+											type="button"
+											onclick={() => setSort('pla')}
+											aria-label={sortLabel('pla', 'Present / Late / Absent')}
+										>
+											<span>P / L / A</span>
+											<span class="sort-arrow" class:active={sortKey === 'pla'} aria-hidden="true">
+												{sortArrow('pla')}
+											</span>
+										</button>
+									</th>
 									<th scope="col">Status</th>
 									<th scope="col"><span class="sr-only">Action</span></th>
 								</tr>
@@ -456,6 +555,42 @@
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: #64748b;
+	}
+
+	.sort {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.25rem 0.375rem;
+		margin: -0.25rem -0.375rem;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		letter-spacing: inherit;
+		text-transform: inherit;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.sort:hover {
+		background: #eef2f7;
+		color: #0f172a;
+	}
+
+	.sort:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 1px;
+	}
+
+	.sort-arrow {
+		color: #94a3b8;
+		font-size: 0.6875rem;
+	}
+
+	.sort-arrow.active {
+		color: #1e3a5f;
 	}
 
 	tbody tr:last-child td {
