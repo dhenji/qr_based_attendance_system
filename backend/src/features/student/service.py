@@ -1,10 +1,13 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.attendance.model import Attendance
+from features.enrollment.model import Enrollment
+from features.excuse.model import ExcuseRequest
 from features.program.exceptions import (
     ProgramNotFoundException,
     YearLevelNotFoundException,
@@ -12,7 +15,9 @@ from features.program.exceptions import (
 from features.program.model import Program, YearLevel
 from features.student.exceptions import (
     StudentEmailExistsException,
+    StudentHasRecordsException,
     StudentIdExistsException,
+    StudentNotArchivedException,
     StudentNotFoundException,
     YearLevelMismatchException,
 )
@@ -20,17 +25,131 @@ from features.student.model import Student
 from features.student.schema import (
     StudentCreate,
     StudentDetail,
+    StudentImportError,
+    StudentImportResult,
     StudentRead,
     StudentUpdate,
 )
 from shared.base import BaseCRUD
+from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
+
+ROSTER_CSV_COLUMNS: tuple[str, ...] = (
+    "student_id",
+    "first_name",
+    "middle_name",
+    "last_name",
+    "email",
+    "program_code",
+    "section",
+    "year_level",
+)
+
+
+@dataclass
+class _RosterRow:
+    line: int
+    student_id: str
+    first_name: str
+    middle_name: str | None
+    last_name: str
+    email: str
+    program_code: str
+    section: str | None
+    year_level: str
+
+
+def parse_roster_csv(
+    content: bytes,
+) -> tuple[list[_RosterRow], list[StudentImportError]]:
+    """Parse the roster-import CSV upload.
+
+    Returns (valid_rows, errors). Never raises on bad rows — every problem is
+    reported as a StudentImportError with its 1-based line number (header = 1).
+    Values are normalized the same way as StudentCreate (student_id upper,
+    email lower) so duplicate detection agrees with single-create.
+    """
+    raw_rows, structural_errors = parse_csv(content, ROSTER_CSV_COLUMNS)
+
+    errors: list[StudentImportError] = [
+        StudentImportError(line=e.line, reason=e.reason)
+        for e in structural_errors
+    ]
+
+    if structural_errors:
+        return [], errors
+
+    rows: list[_RosterRow] = []
+
+    for raw in raw_rows:
+        lineno = raw.line
+        cell = raw.values.get
+
+        student_id: str = (cell("student_id") or "").strip().upper()
+
+        if not student_id:
+            errors.append(
+                StudentImportError(line=lineno, reason="missing student_id")
+            )
+            continue
+
+        first_name = (cell("first_name") or "").strip()
+        last_name = (cell("last_name") or "").strip()
+        email = (cell("email") or "").strip().lower()
+
+        if not first_name or not last_name or not email:
+            errors.append(
+                StudentImportError(
+                    line=lineno,
+                    reason=f"missing required field for student {student_id}",
+                )
+            )
+            continue
+
+        if not is_valid_email(email):
+            errors.append(
+                StudentImportError(
+                    line=lineno,
+                    reason=f"invalid email for student {student_id}",
+                )
+            )
+            continue
+
+        program_code = (cell("program_code") or "").strip().upper()
+        year_level = (cell("year_level") or "").strip()
+
+        if not program_code or not year_level:
+            errors.append(
+                StudentImportError(
+                    line=lineno,
+                    reason=f"missing program_code/year_level for student {student_id}",
+                )
+            )
+            continue
+
+        rows.append(
+            _RosterRow(
+                line=lineno,
+                student_id=student_id,
+                first_name=first_name,
+                middle_name=(cell("middle_name") or "").strip() or None,
+                last_name=last_name,
+                email=email,
+                program_code=program_code,
+                section=(cell("section") or "").strip() or None,
+                year_level=year_level,
+            )
+        )
+
+    return rows, errors
 
 
 class StudentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._students: BaseCRUD[Student] = BaseCRUD(Student, session)
+        self._programs: BaseCRUD[Program] = BaseCRUD(Program, session)
+        self._years: BaseCRUD[YearLevel] = BaseCRUD(YearLevel, session)
 
     async def create(self, *, payload: StudentCreate) -> StudentRead:
         if await self._students.get_by(student_id=payload.student_id) is not None:
@@ -180,6 +299,106 @@ class StudentService:
 
         return await self._to_read(student)
 
+    async def import_roster(self, *, content: bytes) -> StudentImportResult:
+        """Create NEW roster students from a CSV upload.
+
+        Unlike offering bulk-enroll (which attaches existing students),
+        every valid row inserts a student. Rows whose student_id or email
+        already exists — in the database or earlier in the same file — are
+        counted as duplicates, not errors.
+        """
+        rows, errors = parse_roster_csv(content)
+        imported = 0
+        duplicates = 0
+        seen_ids: set[str] = set()
+        seen_emails: set[str] = set()
+
+        for row in rows:
+            if (
+                row.student_id in seen_ids
+                or row.email in seen_emails
+                or await self._students.get_by(student_id=row.student_id)
+                is not None
+                or await self._students.get_by(email=row.email) is not None
+            ):
+                duplicates += 1
+                seen_ids.add(row.student_id)
+                seen_emails.add(row.email)
+                continue
+
+            seen_ids.add(row.student_id)
+            seen_emails.add(row.email)
+
+            program: Program | None = await self._programs.get_by(
+                code=row.program_code
+            )
+
+            if program is None:
+                errors.append(
+                    StudentImportError(
+                        line=row.line,
+                        reason=f"unknown program_code {row.program_code}",
+                    )
+                )
+                continue
+
+            year_level: YearLevel | None = await self._resolve_import_year_level(
+                program.id, row.year_level
+            )
+
+            if year_level is None:
+                errors.append(
+                    StudentImportError(
+                        line=row.line,
+                        reason=f"unknown year_level {row.year_level} for program {row.program_code}",
+                    )
+                )
+                continue
+
+            self._session.add(
+                Student(
+                    student_id=row.student_id,
+                    first_name=row.first_name,
+                    middle_name=row.middle_name,
+                    last_name=row.last_name,
+                    email=row.email,
+                    year_level_id=year_level.id,
+                    section=row.section,
+                )
+            )
+            imported += 1
+
+        await self._session.flush()
+
+        errors.sort(key=lambda e: e.line)
+
+        return StudentImportResult(
+            imported=imported, duplicates=duplicates, errors=errors
+        )
+
+    async def hard_delete(self, *, student_id: int) -> None:
+        """Permanently delete an archived student with no referencing rows."""
+        student: Student = await self._get_or_404(student_id)
+
+        if student.is_active:
+            raise StudentNotArchivedException(student.id)
+
+        for model in (Enrollment, Attendance, ExcuseRequest):
+            count: int = (
+                await self._session.scalar(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.student_id == student.id)
+                )
+                or 0
+            )
+
+            if count:
+                raise StudentHasRecordsException(student.id)
+
+        await self._session.delete(student)
+        await self._session.flush()
+
     async def _get_or_404(self, student_id: int) -> Student:
         student: Student | None = await self._students.get(student_id)
 
@@ -217,6 +436,33 @@ class StudentService:
             raise YearLevelMismatchException(year_level_id, program_id)
 
         return year_level, program
+
+    async def _resolve_import_year_level(
+        self, program_id: int, raw: str
+    ) -> YearLevel | None:
+        """Match a CSV year_level cell to a YearLevel of the program.
+
+        Accepts a year_number ("1") or a label ("1st Year",
+        case-insensitive). Returns None when nothing matches so the caller
+        can report a per-line error.
+        """
+        levels: Sequence[YearLevel] = await self._years.list(program_id=program_id)
+        text: str = raw.strip()
+
+        if text.isdigit():
+            for level in levels:
+                if level.year_number == int(text):
+                    return level
+
+            return None
+
+        lowered: str = text.lower()
+
+        for level in levels:
+            if level.label.lower() == lowered:
+                return level
+
+        return None
 
     async def _scan_count(self, student_pk: int) -> int:
         return (

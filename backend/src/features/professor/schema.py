@@ -120,3 +120,14 @@ class ProfessorUpdate(BaseModel):
                 raise ValueError(f"{field} cannot be null")
 
         return self
+
+
+class ProfessorImportError(BaseModel):
+    line: int
+    reason: str
+
+
+class ProfessorImportResult(BaseModel):
+    imported: int
+    duplicates: int
+    errors: list[ProfessorImportError] = Field(default_factory=list)

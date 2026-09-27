@@ -85,3 +85,36 @@ class YearLevelMismatchException(StudentDomainException):
                 f"does not belong to program {program_id}"
             )
         )
+
+
+class StudentNotArchivedException(StudentDomainException):
+    """409 - permanent delete attempted on a record that is still active.
+
+    Only archived (`is_active=false`) students may be hard-deleted.
+    """
+
+    status_code: int = 409
+    code: str = "not_archived"
+
+    def __init__(self, student_id: int) -> None:
+        super().__init__(
+            message=f"Student {student_id} is still active and cannot be permanently deleted"
+        )
+
+
+class StudentHasRecordsException(StudentDomainException):
+    """409 - the archived student still has referencing rows.
+
+    `enrollments`, `attendance_records` and `excuse_requests` reference
+    `students.id` with `ondelete="RESTRICT"`, so the delete is rejected
+    before the FK violation surfaces as a 500. The FKs stay `RESTRICT` on
+    purpose: cascading them would silently destroy attendance history.
+    """
+
+    status_code: int = 409
+    code: str = "student_has_records"
+
+    def __init__(self, student_id: int) -> None:
+        super().__init__(
+            message=f"Student {student_id} has records and cannot be permanently deleted"
+        )

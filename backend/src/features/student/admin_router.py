@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from api.deps import StudentServiceDep, require_role
 from features.auth.model import User
@@ -14,9 +14,11 @@ from features.student.constants import (
 from features.student.schema import (
     StudentCreate,
     StudentDetail,
+    StudentImportResult,
     StudentRead,
     StudentUpdate,
 )
+from features.student.service import ROSTER_CSV_COLUMNS
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
@@ -83,6 +85,37 @@ async def create_student(
     return await service.create(payload=payload)
 
 
+# Static import/template routes are declared before /{student_id} so they
+# are not captured as student ids.
+@router.post(
+    "/import",
+    response_model=StudentImportResult,
+    summary="Import new student records from a CSV upload",
+)
+async def import_students(
+    file: Annotated[UploadFile, File(description="students.csv")],
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: StudentServiceDep,
+) -> StudentImportResult:
+    content: bytes = await file.read()
+
+    return await service.import_roster(content=content)
+
+
+@router.get(
+    "/import/template",
+    summary="Download the student import CSV template",
+)
+async def download_import_template(
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+) -> Response:
+    return Response(
+        content=",".join(ROSTER_CSV_COLUMNS) + "\n",
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=students_template.csv"},
+    )
+
+
 @router.get(
     "/{student_id}",
     response_model=StudentDetail,
@@ -108,3 +141,16 @@ async def update_student(
     service: StudentServiceDep,
 ) -> StudentRead:
     return await service.update(student_id=student_id, payload=payload)
+
+
+@router.delete(
+    "/{student_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Permanently delete an archived student with no records",
+)
+async def hard_delete_student(
+    student_id: int,
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: StudentServiceDep,
+) -> None:
+    await service.hard_delete(student_id=student_id)

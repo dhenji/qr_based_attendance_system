@@ -47,3 +47,35 @@ class ProfessorEmailExistsException(ProfessorDomainException):
 
     def __init__(self, email: str) -> None:
         super().__init__(message=f"Professor email {email} already exists")
+
+
+class ProfessorNotArchivedException(ProfessorDomainException):
+    """409 - permanent delete attempted on a record that is still active.
+
+    Only archived (`is_active=false`) professors may be hard-deleted.
+    """
+
+    status_code: int = 409
+    code: str = "not_archived"
+
+    def __init__(self, professor_id: int) -> None:
+        super().__init__(
+            message=f"Professor {professor_id} is still active and cannot be permanently deleted"
+        )
+
+
+class ProfessorHasRecordsException(ProfessorDomainException):
+    """409 - the archived professor still has sessions referencing them.
+
+    `sessions.professor_id` is `ondelete="RESTRICT"` (`course_professors` is
+    CASCADE and needs no guard), so the delete is rejected before the FK
+    violation surfaces as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "professor_has_records"
+
+    def __init__(self, professor_id: int) -> None:
+        super().__init__(
+            message=f"Professor {professor_id} has sessions and cannot be permanently deleted"
+        )
