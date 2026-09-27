@@ -1,20 +1,26 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import { PROFESSOR_COURSES, type ProfessorCourse } from '$lib/features/professor/mock';
+	import { professorState, initProfessorCourses } from '$lib/features/professor/store.svelte';
+	import type { ProfessorCourseSummary } from '$lib/shared/types';
 	import { professorReport, professorSessionCreate } from '$lib/shared/constants/routes';
+
+	onMount(() => {
+		initProfessorCourses();
+	});
 
 	type ProgramGroup = {
 		code: string;
-		courses: ProfessorCourse[];
+		courses: ProfessorCourseSummary[];
 	};
 
-	const courses: ProfessorCourse[] = PROFESSOR_COURSES;
+	const courses = $derived(professorState.courses);
 
 	// Program-grouped (D6): buckets keyed by program code, kept in first-seen
 	// order so the grouping follows the assignment order, not an alphabetical one.
 	const groups: ProgramGroup[] = $derived.by(() => {
-		const buckets = new Map<string, ProfessorCourse[]>();
+		const buckets = new Map<string, ProfessorCourseSummary[]>();
 
 		for (const course of courses) {
 			const bucket = buckets.get(course.programCode);
@@ -41,21 +47,28 @@
 
 	const totalCourses = $derived(courses.length);
 	const totalPrograms = $derived(groups.length);
-	const activeSessionCount = $derived(courses.filter((c) => c.hasActiveSession).length);
 
-	const scheduleText = (course: ProfessorCourse) =>
-		`${course.scheduleDays} ${course.scheduleStartTime}–${course.scheduleEndTime}`;
+	// Badge abbreviation for free-form year labels ("1st Year" -> "Y1").
+	// Presentation-only: no contract field backs it.
+	const shortYear = (label: string) => {
+		const match = label.match(/^(\d+)/);
+		if (match) return `Y${match[1]}`;
+		return label.slice(0, 2).toUpperCase();
+	};
+
+	// `sections` is the derived set of student sections across the offering's
+	// enrollments — an array, and empty when nothing is enrolled yet.
+	const sectionText = (course: ProfessorCourseSummary) =>
+		course.sections.length > 0 ? `Section ${course.sections.join(', ')}` : 'No section assigned';
 
 	// Credit load, spelled out: the "3u" shorthand in the wireframe is too terse
 	// to stand on its own next to the course name.
 	const unitsText = (units: number) => `${units} ${units === 1 ? 'unit' : 'units'}`;
 
-	const enrollmentText = (course: ProfessorCourse) =>
+	const enrollmentText = (course: ProfessorCourseSummary) =>
 		`${course.enrolledCount} ${course.enrolledCount === 1 ? 'student' : 'students'}`;
 
-	const roomText = (course: ProfessorCourse) => course.classroomName ?? 'Room TBA';
-
-	const termText = (course: ProfessorCourse) => `${course.academicYear} · ${course.semester}`;
+	const termText = (course: ProfessorCourseSummary) => `${course.academicYear} · ${course.semester}`;
 
 	const today = $derived(
 		new Date().toLocaleDateString(undefined, {
@@ -75,7 +88,15 @@
 		</div>
 	</header>
 
-	{#if courses.length === 0}
+	{#if professorState.coursesLoading}
+		<section class="card">
+			<p class="muted">Loading…</p>
+		</section>
+	{:else if professorState.coursesError}
+		<section class="card">
+			<p class="error">Could not load your courses: {professorState.coursesError}</p>
+		</section>
+	{:else if courses.length === 0}
 		<section class="card">
 			<p class="empty">
 				No course assignments yet. Offerings assigned to you will appear here, grouped
@@ -111,17 +132,20 @@
 								<span class="course-units">({unitsText(course.units)})</span>
 							</h2>
 
-							<div class="course-badges">
-								<span class="cohort-badge">
-									{course.programCode}·{course.shortYear}
-									<AppIcon name="lock" size={12} />
-								</span>
-							</div>
+						<div class="course-badges">
+							<span class="cohort-badge">
+								{course.programCode}·{shortYear(course.yearLevelLabel)}
+								<AppIcon name="lock" size={12} />
+							</span>
+							<span class="role-badge" class:primary={course.isPrimary}>
+								{course.isPrimary ? 'Primary' : 'Assistant'}
+							</span>
+						</div>
 
-							<p class="course-meta">
-								{scheduleText(course)} · {roomText(course)} · {enrollmentText(course)}
-							</p>
-							<p class="course-term">{termText(course)} · Section {course.section}</p>
+						<p class="course-meta">
+							{enrollmentText(course)} · Room TBA
+						</p>
+						<p class="course-term">{termText(course)} · {sectionText(course)}</p>
 
 							<div class="course-actions">
 								<button
@@ -149,8 +173,6 @@
 
 		<footer class="tally">
 			<span>Total: {totalCourses} courses across {totalPrograms} programs</span>
-			<span class="tally-dot" aria-hidden="true">·</span>
-			<span>Active session: {activeSessionCount}</span>
 		</footer>
 	{/if}
 </div>
@@ -304,6 +326,26 @@
 		color: #64748b;
 	}
 
+	/* The role rides the assignment: a primary and an assistant can both
+	open sessions (D9), so this is informational only. */
+	.role-badge {
+		display: inline-block;
+		padding: 0.1875rem 0.5rem;
+		border-radius: 6px;
+		background: #f1f5f9;
+		border: 1px solid #e2e8f0;
+		color: #64748b;
+		font-size: 0.75rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+
+	.role-badge.primary {
+		background: #dcfce7;
+		border-color: #bbf7d0;
+		color: #16a34a;
+	}
+
 	.course-meta {
 		margin: 0.25rem 0 0;
 		font-size: 0.875rem;
@@ -382,8 +424,10 @@
 		color: #64748b;
 	}
 
-	.tally-dot {
-		color: #94a3b8;
+	.error {
+		color: #dc2626;
+		font-size: 0.9375rem;
+		margin: 0;
 	}
 
 	.card {

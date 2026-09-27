@@ -1,0 +1,463 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { authState, doChangePassword } from '$lib/features/auth/store.svelte';
+	import { SECURITY_QUESTIONS, saveSecurityQA, loadSecurityQA } from '$lib/features/auth/security';
+	import {
+		DEFAULT_PREFS,
+		getPrefs,
+		savePrefs,
+		type SettingsPrefs,
+	} from '$lib/features/settings/service';
+
+	const prefs = $state<SettingsPrefs>({ ...DEFAULT_PREFS });
+
+	onMount(() => {
+		const loaded = getPrefs();
+		Object.assign(prefs, loaded);
+		applyTheme(loaded.theme);
+	});
+
+	function applyTheme(theme: 'light' | 'dark') {
+		if (typeof document !== 'undefined') {
+			document.documentElement.dataset.theme = theme;
+		}
+	}
+
+	function setTheme(theme: 'light' | 'dark') {
+		prefs.theme = theme;
+		savePrefs({ ...prefs });
+		applyTheme(theme);
+	}
+
+	function flip<K extends 'pushNotifications' | 'emailNotifications' | 'shareGps' | 'cameraScanning'>(key: K) {
+		prefs[key] = !prefs[key];
+		savePrefs({ ...prefs });
+	}
+
+	// Change Password — wired to the real API via doChangePassword
+	// (POST /auth/change-password, same auth_service.change_password logic as
+	// PATCH /professor/profile/password).
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let passwordError = $state('');
+	let passwordMsg = $state('');
+	let passwordBusy = $state(false);
+
+	async function onChangePassword() {
+		passwordError = '';
+		passwordMsg = '';
+		if (!currentPassword) {
+			passwordError = 'Current password is required';
+			return;
+		}
+		if (!newPassword) {
+			passwordError = 'New password is required';
+			return;
+		}
+		passwordBusy = true;
+		try {
+			await doChangePassword(currentPassword, newPassword);
+			passwordMsg = 'Password updated.';
+			currentPassword = '';
+			newPassword = '';
+		} catch (e: unknown) {
+			passwordError = e instanceof Error && e.message ? e.message : 'Password change failed.';
+		} finally {
+			passwordBusy = false;
+		}
+	}
+
+	// Security Question (same device-local pattern as student settings)
+	let questionOpen = $state(false);
+	const email = $derived(authState.user?.email ?? 'local');
+	const existingQuestion = $derived(loadSecurityQA(email)?.question ?? null);
+	let question = $state('');
+	let answer = $state('');
+	let securityError = $state('');
+	let securityMsg = $state('');
+
+	function onSaveQuestion() {
+		securityError = '';
+		securityMsg = '';
+		if (!question) {
+			securityError = 'Please choose a security question';
+			return;
+		}
+		if (!answer.trim()) {
+			securityError = 'Security answer is required';
+			return;
+		}
+		saveSecurityQA(email, question, answer.trim());
+		securityMsg = 'Security question saved.';
+		questionOpen = false;
+		answer = '';
+	}
+
+	// MFA status comes from the restored session (GET /auth/me).
+	const mfaConfigured = $derived(authState.user?.mfaEnabled === true);
+</script>
+
+<div class="wrap">
+	<header class="header">
+		<h1>Settings</h1>
+		<p class="muted">Preferences are stored on this device.</p>
+	</header>
+
+	<section class="card">
+		<h2 class="section-title">Appearance</h2>
+		<div class="row">
+			<span class="row-label">Theme</span>
+			<div class="segmented">
+				<button class="segment" class:active={prefs.theme === 'light'} onclick={() => setTheme('light')}>
+					Light
+				</button>
+				<button class="segment" class:active={prefs.theme === 'dark'} onclick={() => setTheme('dark')}>
+					Dark
+				</button>
+			</div>
+		</div>
+		<p class="muted note">Dark mode preview only — full styling arrives later.</p>
+	</section>
+
+	<section class="card">
+		<h2 class="section-title">Notifications</h2>
+		<label class="switch-row">
+			<span class="row-label">Push notifications</span>
+			<span class="switch">
+				<input type="checkbox" checked={prefs.pushNotifications} onchange={() => flip('pushNotifications')} />
+				<span class="slider"></span>
+			</span>
+		</label>
+		<label class="switch-row">
+			<span class="row-label">Email notifications</span>
+			<span class="switch">
+				<input type="checkbox" checked={prefs.emailNotifications} onchange={() => flip('emailNotifications')} />
+				<span class="slider"></span>
+			</span>
+		</label>
+	</section>
+
+	<section class="card">
+		<h2 class="section-title">Privacy</h2>
+		<label class="switch-row">
+			<span class="row-label">Share GPS for attendance</span>
+			<span class="switch">
+				<input type="checkbox" checked={prefs.shareGps} onchange={() => flip('shareGps')} />
+				<span class="slider"></span>
+			</span>
+		</label>
+		<label class="switch-row">
+			<span class="row-label">Enable camera scanning</span>
+			<span class="switch">
+				<input type="checkbox" checked={prefs.cameraScanning} onchange={() => flip('cameraScanning')} />
+				<span class="slider"></span>
+			</span>
+		</label>
+	</section>
+
+	<section class="card">
+		<h2 class="section-title">Security</h2>
+
+		<h3 class="sub-title">Change Password</h3>
+		<p class="muted hint">Password policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol</p>
+		<div class="field">
+			<label for="current-password">Current password</label>
+			<input id="current-password" type="password" bind:value={currentPassword} autocomplete="current-password" />
+		</div>
+		<div class="field">
+			<label for="new-password">New password</label>
+			<input id="new-password" type="password" bind:value={newPassword} autocomplete="new-password" />
+		</div>
+		{#if passwordError}<p class="error">{passwordError}</p>{/if}
+		{#if passwordMsg}<p class="success">{passwordMsg}</p>{/if}
+		<button class="btn" onclick={onChangePassword} disabled={passwordBusy}>
+			{passwordBusy ? 'Updating…' : 'Change Password'}
+		</button>
+
+		<hr class="divider" />
+
+		<h3 class="sub-title">Two-Factor Auth</h3>
+		<p class="muted">Status: {mfaConfigured ? 'Configured' : 'Not configured'}</p>
+
+		<hr class="divider" />
+
+		<h3 class="sub-title">Security Question</h3>
+		{#if existingQuestion || securityMsg}
+			<p class="muted">
+				Current: {existingQuestion ?? 'Saved'}
+			</p>
+		{/if}
+		{#if !questionOpen}
+			<button class="btn ghost" onclick={() => (questionOpen = true)}>
+				{existingQuestion ? 'Change Security Question' : 'Set Security Question'}
+			</button>
+			{#if securityMsg && !questionOpen}<p class="success">{securityMsg}</p>{/if}
+		{:else}
+			<div class="field">
+				<label for="security-question">Question</label>
+				<select id="security-question" bind:value={question}>
+					<option value="" disabled>Choose a question…</option>
+					{#each SECURITY_QUESTIONS as q (q)}
+						<option value={q}>{q}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label for="security-answer">Answer</label>
+				<input id="security-answer" bind:value={answer} placeholder="Your answer" />
+			</div>
+			{#if securityError}<p class="error">{securityError}</p>{/if}
+			<div class="action-row">
+				<button class="btn" onclick={onSaveQuestion}>Save</button>
+				<button class="btn ghost" onclick={() => (questionOpen = false)}>Cancel</button>
+			</div>
+		{/if}
+	</section>
+
+	<p class="meta muted">App version: 1.0.0</p>
+</div>
+
+<style>
+	.wrap {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		max-width: 720px;
+		margin-inline: auto;
+		font-family: system-ui, sans-serif;
+	}
+
+	.header h1 {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 0.25rem;
+	}
+
+	.muted {
+		color: #64748b;
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	.note {
+		font-size: 0.8125rem;
+		margin-top: 0.75rem;
+	}
+
+	.hint {
+		margin-bottom: 0.75rem;
+	}
+
+	.card {
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 1.5rem;
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+	}
+
+	.section-title {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.0625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 1rem;
+	}
+
+	.sub-title {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 0.9375rem;
+		font-weight: 700;
+		color: #334155;
+		margin: 0 0 0.75rem;
+	}
+
+	.row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.row-label {
+		font-size: 0.9375rem;
+		color: #334155;
+	}
+
+	.segmented {
+		display: inline-flex;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.segment {
+		border: none;
+		background: white;
+		color: #64748b;
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: system-ui, sans-serif;
+		cursor: pointer;
+	}
+
+	.segment.active {
+		background: #1e3a5f;
+		color: white;
+	}
+
+	.switch-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		cursor: pointer;
+	}
+
+	.switch-row + .switch-row {
+		margin-top: 0.75rem;
+	}
+
+	.switch {
+		position: relative;
+		display: inline-block;
+		width: 42px;
+		height: 24px;
+		flex-shrink: 0;
+	}
+
+	.switch input {
+		opacity: 0;
+		width: 0;
+		height: 0;
+	}
+
+	.slider {
+		position: absolute;
+		inset: 0;
+		background: #cbd5e1;
+		border-radius: 999px;
+		transition: background 0.15s ease;
+	}
+
+	.slider::before {
+		content: '';
+		position: absolute;
+		width: 18px;
+		height: 18px;
+		left: 3px;
+		top: 3px;
+		background: white;
+		border-radius: 50%;
+		transition: transform 0.15s ease;
+	}
+
+	.switch input:checked + .slider {
+		background: #2563eb;
+	}
+
+	.switch input:checked + .slider::before {
+		transform: translateX(18px);
+	}
+
+	.switch input:focus-visible + .slider {
+		outline: 2px solid #2563eb;
+		outline-offset: 2px;
+	}
+
+	.field {
+		margin-bottom: 0.75rem;
+	}
+
+	.field label {
+		display: block;
+		font-size: 0.8125rem;
+		font-weight: 700;
+		color: #64748b;
+		margin-bottom: 0.375rem;
+	}
+
+	.field input,
+	.field select {
+		width: 100%;
+		padding: 0.625rem 0.75rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		background: white;
+		color: #334155;
+		font-size: 0.9375rem;
+		font-family: system-ui, sans-serif;
+	}
+
+	.field input:focus-visible,
+	.field select:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: -1px;
+	}
+
+	.btn {
+		display: inline-block;
+		padding: 0.625rem 1.25rem;
+		border: none;
+		border-radius: 8px;
+		background: #1e3a5f;
+		color: white;
+		font-size: 0.9375rem;
+		font-weight: 700;
+		font-family: system-ui, sans-serif;
+		text-decoration: none;
+		cursor: pointer;
+		transition: background 0.15s ease, box-shadow 0.15s ease;
+	}
+
+	.btn:hover:not(:disabled) {
+		background: #16324f;
+	}
+
+	.btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.btn.ghost {
+		background: white;
+		color: #1e3a5f;
+		border: 1px solid #cbd5e1;
+	}
+
+	.btn.ghost:hover {
+		background: #f8fafc;
+	}
+
+	.divider {
+		border: none;
+		border-top: 1px solid #f1f5f9;
+		margin: 1.25rem 0;
+	}
+
+	.action-row {
+		display: flex;
+		gap: 0.75rem;
+	}
+
+	.error {
+		color: #dc2626;
+		font-size: 0.875rem;
+		margin: 0 0 0.75rem;
+	}
+
+	.success {
+		color: #16a34a;
+		font-size: 0.875rem;
+		margin: 0.75rem 0 0;
+	}
+
+	.meta {
+		text-align: center;
+		font-size: 0.8125rem;
+	}
+</style>

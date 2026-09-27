@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 	import {
 		buildCsv,
-		defaultReportRange,
-		getReportFilterOptions
+		defaultReportRange
 	} from '$lib/features/report/service';
+	import {
+		initProfessorCourses,
+		professorState
+	} from '$lib/features/professor/store.svelte';
 	import {
 		listSessionHistory,
 		type SessionHistorySortBy,
@@ -19,8 +22,11 @@
 
 	const PAGE_SIZE = 10;
 
-	const filterOptions = getReportFilterOptions();
 	const initialRange = defaultReportRange();
+
+	onMount(() => {
+		initProfessorCourses();
+	});
 
 	let course = $state('All');
 	let section = $state('All');
@@ -38,19 +44,24 @@
 	let reloadToken = $state(0);
 	let exporting = $state(false);
 
+	// Course options deduped by code; sections join from the live courses
+	// store (the history rows carry no section identity of their own, and the
+	// backend sorts date/code/rate only — hence no section sort header).
+	const courseOptions = $derived(
+		[...new Map(professorState.courses.map((item) => [item.courseCode, item.courseName])).entries()].map(
+			([code, name]) => ({ code, name })
+		)
+	);
+
 	// Sections narrow to the selected course so the filter cannot select a
 	// section the course is never taught in.
-	const availableSections = $derived(
-		course === 'All'
-			? filterOptions.sections
-			: [
-					...new Set(
-						PROFESSOR_COURSES.filter((item) => item.courseCode === course).map(
-							(item) => item.section
-						)
-					)
-				]
-	);
+	const availableSections = $derived([
+		...new Set(
+			professorState.courses
+				.filter((item) => course === 'All' || item.courseCode === course)
+				.flatMap((item) => item.sections)
+		)
+	]);
 
 	$effect(() => {
 		if (section !== 'All' && !availableSections.includes(section)) {
@@ -179,7 +190,7 @@
 					row.present_count,
 					row.late_count,
 					row.absent_count,
-					row.enrolled_count,
+					row.enrolled_count ?? '—',
 					Math.round(row.compliance_rate * 100),
 					Math.round(row.participation_rate * 100)
 				])
@@ -225,7 +236,7 @@
 					onchange={() => (currentPage = 1)}
 				>
 					<option value="All">All courses</option>
-					{#each filterOptions.courses as option (option.code)}
+					{#each courseOptions as option (option.code)}
 						<option value={option.code}>{option.code} — {option.name}</option>
 					{/each}
 				</select>
@@ -317,20 +328,8 @@
 									</span>
 								</button>
 							</th>
-							<th scope="col" aria-sort={ariaSort('section')}>
-								<button
-									class="sort"
-									type="button"
-									onclick={() => setSort('section')}
-									aria-label={sortLabel('section', 'Section')}
-								>
-									<span>Section</span>
-									<span class="sort-arrow" class:active={sortBy === 'section'} aria-hidden="true">
-										{sortArrow('section')}
-									</span>
-								</button>
-							</th>
-							<th scope="col">P / L / A</th>
+						<th scope="col">Section</th>
+						<th scope="col">P / L / A</th>
 							<th scope="col" aria-sort={ariaSort('rate')}>
 								<button
 									class="sort"

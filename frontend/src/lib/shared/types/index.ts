@@ -3,6 +3,7 @@
 export * from "./auth";
 export * from "./user";
 export * from "./student";
+export * from "./professor";
 export * from "./course";
 export * from "./enrollment";
 export * from "./session";

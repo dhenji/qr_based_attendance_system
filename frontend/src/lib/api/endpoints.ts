@@ -13,6 +13,16 @@ import type {
 	StudentDashboardResponse,
 	StudentProfileResponse,
 } from '$lib/shared/types';
+import type { ProfessorProfileResponse } from '$lib/shared/types';
+import type { ProfessorAssignedOffering } from '$lib/shared/types';
+import type {
+	ProfessorAttendanceItemResponse,
+	SessionActiveResponse,
+	SessionCloseResponse,
+	SessionHistoryItemResponse,
+	SessionListItemResponse,
+	SessionReadResponse,
+} from '$lib/shared/types';
 
 export type ScanStatus = 'present' | 'late' | 'rejected';
 
@@ -86,47 +96,59 @@ export const AttendanceScanEndpoint: EndpointDef<AttendanceScanResponse> = {
 	}),
 };
 
-// Session CRUD (professor)
-export const SessionListEndpoint: EndpointDef<Paginated<unknown>> = {
+// Session CRUD (professor) — real routes on features/session/router.py.
+//
+// The live QR payload keys the offering as `offering` (backend QRPayload);
+// course display names are joined client-side from GET /professor/courses.
+export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>> = {
 	url: '/professor/sessions',
 	method: 'GET',
 	mock: () => ({
-		items: [],
-		total: 0,
+		items: [
+			{
+				id: 1,
+				offering_id: 1,
+				session_code: '7X-9K2M',
+				created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+				expires_at: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+				duration_minutes: 60,
+				present_count: 15,
+				late_count: 3,
+				absent_count: 2,
+				status: 'active',
+			},
+		],
+		total: 1,
 		page: 1,
 		size: 20,
 	}),
 };
 
-export const SessionCreateEndpoint: EndpointDef<{
-	id: number;
-	course_id: number;
-	code: string;
-	qr_payload: { v: number; code: string; course: number; radius: number; pw: number; lw: number };
-	expires_at: string;
-	scheduled_end_time: string;
-}> = {
+export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
 	mock: () => ({
 		id: Math.floor(Math.random() * 1000) + 1,
-		course_id: 1,
-		code: `SESSION-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+		session_code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+		offering_id: 1,
 		qr_payload: {
 			v: 1,
-			code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 4).toUpperCase()}`,
-			course: 1,
+			code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+			offering: 1,
 			radius: 50,
 			pw: 15,
 			lw: 5,
 		},
 		expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+		created_at: new Date().toISOString(),
 	}),
 };
 
-// Session history (professor) — wireframe 3.5, GET /professor/sessions/history
-export const SessionHistoryEndpoint: EndpointDef<Paginated<unknown>> = {
+// Session history (professor) — wireframe 3.5, GET /professor/sessions/history.
+// Rates ride the rows; averages are derived client-side (the envelope carries
+// items/total/page/size only).
+export const SessionHistoryEndpoint: EndpointDef<Paginated<SessionHistoryItemResponse>> = {
 	url: '/professor/sessions/history',
 	method: 'GET',
 	mock: () => ({
@@ -137,22 +159,41 @@ export const SessionHistoryEndpoint: EndpointDef<Paginated<unknown>> = {
 	}),
 };
 
-// Live session detail (professor projector view)
-export const SessionActiveEndpoint: EndpointDef<unknown> = {
+// Live session detail (professor projector view).
+// The session id rides the path: GET /professor/sessions/active/{id} —
+// callers pass it via the client's `suffix` option.
+// Poll-friendly: unscanned students read as absent server-side.
+export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 	url: '/professor/sessions/active',
 	method: 'GET',
-	mock: () => ({}),
+	mock: () => ({
+		id: 1,
+		offering: 1,
+		session_code: '7X-9K2M',
+		scan_window_remaining: 2400,
+		scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+		status: 'active',
+		enrolled_count: 30,
+		remaining: 12,
+		pending_sync_count: 0,
+		students: [],
+		counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
+	}),
 };
 
-// Close session (professor)
-export const SessionCloseEndpoint: EndpointDef<unknown> = {
-	url: '/professor/sessions/close',
+// Close session (professor).
+// The session id rides the path: POST /professor/sessions/{id}/close —
+// callers pass it via the client's `suffix` option.
+export const SessionCloseEndpoint: EndpointDef<SessionCloseResponse> = {
+	url: '/professor/sessions',
 	method: 'POST',
-	mock: () => ({ id: 0, status: 'closed' }),
+	mock: () => ({ id: 0, status: 'closed' as const, final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 } }),
 };
 
-// Attendance records (professor)
-export const AttendanceListEndpoint: EndpointDef<Paginated<unknown>> = {
+// Attendance records (professor) — GET /professor/attendance.
+// Filtered by course_id/offering_id (not course code); course display names
+// join client-side from GET /professor/courses.
+export const AttendanceListEndpoint: EndpointDef<Paginated<ProfessorAttendanceItemResponse>> = {
 	url: '/professor/attendance',
 	method: 'GET',
 	mock: () => ({
@@ -273,6 +314,129 @@ export const StudentDashboardEndpoint: EndpointDef<StudentDashboardResponse> = {
 	}),
 };
 
+// --- Professor --------------------------------------------------------------
+//
+// GET /professor/profile is fully implemented on the backend
+// (professor/router.py -> ProfessorService.get_self_profile). Password change
+// reuses POST /auth/change-password (authChangePassword above) — it calls the
+// same auth_service.change_password logic as PATCH /professor/profile/password,
+// so no separate endpoint def is needed.
+
+export const ProfessorProfileEndpoint: EndpointDef<ProfessorProfileResponse> = {
+	url: '/professor/profile',
+	method: 'GET',
+	mock: () => ({
+		id: 1,
+		first_name: 'John',
+		middle_name: 'A',
+		last_name: 'Smith',
+		email: 'jsmith@university.edu',
+		department: 'Computer Science',
+		assigned_courses: [
+			{
+				offering_id: 1,
+				course_id: 1,
+				course_code: 'CS101',
+				course_name: 'Software Engineering 1',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem',
+				academic_year: '2025-2026',
+				section: ['A'],
+				is_primary: true,
+				enrolled_count: 30,
+			},
+			{
+				offering_id: 2,
+				course_id: 2,
+				course_code: 'MATH202',
+				course_name: 'Calculus 2',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem',
+				academic_year: '2025-2026',
+				section: ['A'],
+				is_primary: true,
+				enrolled_count: 35,
+			},
+			{
+				offering_id: 3,
+				course_id: 1,
+				course_code: 'CS101',
+				course_name: 'Software Engineering 1',
+				program_code: 'BSIT',
+				year_level_label: '1st Year',
+				semester: '1st Sem',
+				academic_year: '2025-2026',
+				section: ['B'],
+				is_primary: false,
+				enrolled_count: 25,
+			},
+		],
+		claim_status: 'Claimed',
+		created_at: new Date().toISOString(),
+		session_count: 87,
+	}),
+};
+
+// GET /professor/courses — own active assignments, paginated. The wire rows
+// carry no schedule clock-times, classroom, or window defaults (those columns
+// live on courses/offerings per D44, not on the assignment), so cards render
+// those slots as TBA until the contract grows them.
+export const ProfessorCoursesEndpoint: EndpointDef<Paginated<ProfessorAssignedOffering>> = {
+	url: '/professor/courses',
+	method: 'GET',
+	mock: () => ({
+		items: [
+			{
+				offering_id: 1,
+				course_id: 1,
+				course_code: 'CS101',
+				course_name: 'Software Engineering 1',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem',
+				academic_year: '2025-2026',
+				section: ['A'],
+				is_primary: true,
+				enrolled_count: 30,
+				units: 3,
+			},
+			{
+				offering_id: 2,
+				course_id: 2,
+				course_code: 'MATH202',
+				course_name: 'Calculus 2',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem',
+				academic_year: '2025-2026',
+				section: ['A'],
+				is_primary: true,
+				enrolled_count: 35,
+				units: 4,
+			},
+			{
+				offering_id: 3,
+				course_id: 1,
+				course_code: 'CS101',
+				course_name: 'Software Engineering 1',
+				program_code: 'BSIT',
+				year_level_label: '1st Year',
+				semester: '1st Sem',
+				academic_year: '2025-2026',
+				section: ['B'],
+				is_primary: false,
+				enrolled_count: 25,
+				units: 3,
+			},
+		],
+		total: 3,
+		page: 1,
+		size: 50,
+	}),
+};
+
 // Endpoint registry
 // Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
@@ -300,4 +464,7 @@ export const endpoints = {
 	// Student
 	studentProfile: StudentProfileEndpoint,
 	studentDashboard: StudentDashboardEndpoint,
+	// Professor
+	professorProfile: ProfessorProfileEndpoint,
+	professorCourses: ProfessorCoursesEndpoint,
 };

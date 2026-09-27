@@ -1,11 +1,13 @@
 // features/professor/mock.ts
-// Shared fixture for the professor portal's course assignments.
+// Shared fixture for the professor portal's remaining mock-driven pages.
 //
-// `GET /professor/courses` is still a prefix-only router stub on the backend
-// (features/professor/service.py does not exist yet), so both pages that need
-// this data — My Courses and Open Session — read it from here. Kept in its own
-// module so the page call sites stay readable, and so there is exactly one
-// source of truth for the offering ids the session-create page links against.
+// My Courses (/professor/courses) now reads GET /professor/courses via
+// features/professor/service.ts, and the sessions loop (list/create/live/
+// history) plus the attendance ledger read their real endpoints via
+// features/session/service.ts and features/attendance/service.ts — this
+// fixture no longer backs any of those. Reports and excuse-requests still
+// read it from here until their slices connect (neither has a backend route
+// yet). Kept in its own module so the remaining call sites stay readable.
 // The field set mirrors the GET /professor/courses contract
 // (docs/architecture/api-contracts.md) in camelCase, plus the offering columns
 // the session-create form needs (D44 moved the window defaults here from

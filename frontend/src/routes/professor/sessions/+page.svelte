@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+	import { initProfessorCourses, professorState } from '$lib/features/professor/store.svelte';
 	import { listSessions } from '$lib/features/session/service';
 	import {
 		Routes,
@@ -42,10 +42,10 @@
 		rows.sort((a, b) => {
 			switch (sortKey) {
 				case 'code':
-					return a.session_code.localeCompare(b.session_code) * direction;
+					return a.sessionCode.localeCompare(b.sessionCode) * direction;
 				case 'course':
 					return (
-						(a.course_code.localeCompare(b.course_code) ||
+						(a.courseCode.localeCompare(b.courseCode) ||
 							a.createdAt.localeCompare(b.createdAt)) *
 						direction
 					);
@@ -80,7 +80,10 @@
 		}
 	};
 
-	onMount(() => void load());
+	onMount(() => {
+		void initProfessorCourses();
+		void load();
+	});
 
 	const viewLive = (id: number) => void goto(professorActiveSession(id));
 	const goCreate = () => void goto(Routes.PROFESSOR_SESSIONS_CREATE);
@@ -159,9 +162,9 @@
 					{#each activeSessions as session (session.id)}
 						<article class="card active-card">
 							<span class="code-label">Live · Show on projector</span>
-							<span class="code">{session.session_code}</span>
+							<span class="code">{session.sessionCode}</span>
 							<p class="active-meta">
-								{session.course_code} — {session.course_name} · Section {session.section}
+								{session.courseCode} — {session.courseName} · Section {session.section}
 							</p>
 							<p class="muted">
 								Present {session.presentCount} · Late {session.lateCount} · Absent {session.absentCount}
@@ -191,9 +194,9 @@
 						}}
 					>
 						<option value="">All courses</option>
-						{#each PROFESSOR_COURSES as course (course.offeringId)}
+						{#each professorState.courses as course (course.offeringId)}
 							<option value={course.offeringId}>
-								{course.courseCode} · Section {course.section}
+								{course.courseCode} · Section {course.sections.length > 0 ? course.sections.join(', ') : '—'}
 							</option>
 						{/each}
 					</select>
@@ -278,9 +281,9 @@
 								{#each recentSessions as session (session.id)}
 									<tr>
 										<td>{formatDate(session.createdAt)}</td>
-										<td class="mono">{session.session_code}</td>
+										<td class="mono">{session.sessionCode}</td>
 										<td>
-											<div class="course-name">{session.course_code}</div>
+											<div class="course-name">{session.courseCode}</div>
 											<div class="course-sub">Section {session.section}</div>
 										</td>
 										<td class="numeric">{plaText(session)}</td>
@@ -290,7 +293,7 @@
 												class="mini"
 												type="button"
 												onclick={() => viewLive(session.id)}
-												aria-label={`View session ${session.session_code}`}
+												aria-label={`View session ${session.sessionCode}`}
 											>
 												View
 											</button>
