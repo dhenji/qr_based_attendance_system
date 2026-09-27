@@ -763,7 +763,7 @@
 ### ADR-058: Admin CRUD Slice Template
 
 - **Decision (D58):** The `/api/admin/*` CRUD slices of Phase 3 are built from one
-  template instead of each prompt restating the shape.
+  template instead of restating the shape per slice.
   **(a) Service classes are the standing form for CRUD slices.** A slice whose job is
   create/read/update/archive for one or two models (`program`, `course`,
   student-admin, professor-admin) implements `class <Feature>Service` whose `__init__`
@@ -785,10 +785,10 @@
   **(e) Derived aggregates are computed per request in Python**, one query per parent
   row, with the N+1 accepted at Phase 3 volumes (already deferred by ADR-057).
   **(f) A slice is not mounted in its own session** — `api/router.py` is edited once,
-  by PROMPT 3.7.
+  by the mount session.
 - **Date:** 2026-09-26
 - **Status:** Accepted
-- **Context:** The Phase 3 prompt file gave two conflicting instructions about service
+- **Context:** The Phase 3 work plan gave two conflicting instructions about service
   form. Its phase header said to copy `AdminService` ("class-based `AdminService`
   holding a `BaseCRUD` per model"), which describes a class, while ADR-055 and
   `coding-standards.md` §1.6 recorded module-level functions as the default for new
@@ -840,8 +840,8 @@
   to the point where the lists grow; the trigger for revisiting is unchanged — a cached
   aggregate via `shared/cache.py`, or a materialised view.
 - **Consequences:** `coding-standards.md` gains §1.8 (the template) and rewritten
-  §1.5-§1.7; `AGENTS.md`'s service-class and Phase 3 rows follow it; the Phase 3 header
-  in `prompts/backend-prompts.txt` and PROMPT 3.1 state the same rules; and
+  §1.5-§1.7;   `AGENTS.md`'s service-class and Phase 3 rows follow it; the Phase 3 header
+  in the work plan states the same rules; and
   `api-contracts.md`'s Programs section gains `?search=`, the aggregate-derivation note,
   and a corrected archive description. `api/deps.py` gains one `_get_<feature>_service`
   plus one `<Feature>ServiceDep` alias per slice. No migration, and no change to
@@ -855,4 +855,39 @@
   non-CRUD slice.
 - **Supersedes:** the stale "cascades year-levels/courses inactive" sentence in
   `api-contracts.md` §Programs, and the implicit permission to re-decide service form
-  per Phase 3 slice in `prompts/backend-prompts.txt`.
+  per Phase 3 slice in the work plan.
+
+### ADR-059: Face Enrollment Takes the Class Form
+
+- **Decision (D59):** The `face_enrollment` slice implements
+  `class FaceEnrollmentService` — `__init__` takes the request `AsyncSession` plus
+  an optional `Settings` (falling back to `get_settings()`) — reached through
+  `FaceEnrollmentServiceDep` in `api/deps.py`, with the long method names kept
+  (`get_face_enrollment_status`, `enroll_face`, `revoke_face_enrollment`).
+- **Date:** 2026-09-27
+- **Status:** Accepted
+- **Context:** ADR-055 allows a class when `__init__` composes per-request
+  collaborators every method would otherwise re-derive (its examples: composed
+  `BaseCRUD` handles, settings, rate limiters), and ADR-058 kept module-level
+  functions as the default for non-CRUD slices. The slice was first sketched in
+  the functional form, but every one of its methods reads request-scoped settings
+  (upload size caps, the stub embedding version), so the functional form threaded
+  a settings argument through every signature and call site — the same readability
+  cost ADR-055 accepted for `AuthService` — while every mounted admin router
+  already speaks the `*ServiceDep` form.
+- **Rationale:** the class earns its place under ADR-055's own criterion: settings
+  composition, not the session alone, is what qualifies it. Keeping the long
+  method names preserves the slice's public vocabulary and keeps the router and
+  tests a mechanical call-shape change. Generalising further (e.g. re-deciding
+  other non-CRUD slices) is out of scope: this is a per-slice exception taken at
+  explicit direction, and the module-function default stands everywhere else.
+- **Consequences:** `coding-standards.md` §1.6 drops `face_enrollment` from the
+  module-function examples and records the exception; `AGENTS.md`'s service-class
+  row follows. `api/deps.py` gains `_get_face_enrollment_service` plus the
+  `FaceEnrollmentServiceDep` alias. No migration, no mount change, no contract
+  change.
+- **Extends:** ADR-055 (service classes) and ADR-058 (admin CRUD slice template).
+  ADR-055's module-level default continues to govern the remaining non-CRUD
+  slices (`shared/csv_import.py` and any future ones).
+- **Supersedes:** the application of ADR-058 (a)'s "non-CRUD slices keep
+  module-level functions" clause to `face_enrollment` only.

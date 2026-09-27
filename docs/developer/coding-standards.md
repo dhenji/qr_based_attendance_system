@@ -106,13 +106,15 @@ from features.student.model import Student
   This is a standing rule, not a per-slice re-argument — see ADR-055 and ADR-058 in
   [decision-log.md](../project/decision-log.md).
 - **Everything else is module-level async functions**: `async def create_foo(session: AsyncSession, ...)`.
-  That covers the non-CRUD slices — the `face_enrollment` slice (no model, pure logic over
-  `Student.face_embedding`) and pure helpers such as `shared/csv_import.py` — where a
+  That covers pure helpers such as `shared/csv_import.py` — where a
   class would have nothing to compose. A session alone does **not** justify a class; a
-  composed set of per-request handles does. `CourseProfessorService` (Phase 1.3) is the one
+  composed set of per-request handles does. `FaceEnrollmentService` is the one
+  sanctioned non-CRUD exception: it holds the session plus `Settings` (upload caps,
+  embedding version) that every method reads, and is reached via
+  `FaceEnrollmentServiceDep` (ADR-059). `CourseProfessorService` (Phase 1.3) is the one
   borderline holdover: it is a class that would be a near-exact drop-in as a function and is
   retained as-is because ADR-055 declined a cosmetic change to contract-tested code. Do not
-  treat it as precedent for a new slice.
+  treat either as precedent for a new slice.
 - A service class must hold no state across requests; its `__init__` may only build
   per-request handles. Services call `BaseCRUD` for database operations.
 - **Services return read schemas.** Building `ProgramRead(...)` in the service is the norm
@@ -258,8 +260,8 @@ pattern-matching the other slices:
 - A slice that documents no delete route gets none. Adding `DELETE /{id}` "to match the
   pattern" creates an undocumented surface.
 
-**A slice is not mounted when it is written.** `api/router.py` is edited once, in
-PROMPT 3.7, by the session that owns the whole mount list. Until then, verify a new router
+**A slice is not mounted when it is written.** `api/router.py` is edited once,
+by the session that owns the whole mount list (the mount session). Until then, verify a new router
 by importing it and reading `router.routes`, and never add an `include_router` call in the
 slice's own session.
 
