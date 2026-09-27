@@ -67,7 +67,7 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 | Frontend  | SvelteKit 2 (Svelte 5 runes) + TypeScript (strict)           |
 | Database  | PostgreSQL 16                                                |
 | Platform  | Progressive Web App (works on any device; planned)           |
-| Tooling   | Docker / docker-compose, html5-qrcode, zod, chart.js         |
+| Tooling   | Docker / docker-compose, html5-qrcode, zod, @mediapipe/tasks-vision |
 
 ## Prerequisites
 
@@ -79,25 +79,25 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 
 ```
 ├── .gitignore            # Root-level ignores (env/venv, node, docker data, build output)
-├── frontend/             # SvelteKit app — mock-first feature slices + routes
+├── frontend/             # SvelteKit app — feature slices + routes (real API by default, opt-in mock)
 │   ├── Dockerfile.dev    # Vite dev server on :5173 (node:22-alpine)
-│   ├── src/routes/       # landing, auth (login/register/forgot-password), student (dashboard/scan), professor/sessions
+│   ├── src/routes/       # landing (Attendly), about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/reports/sessions + create/history/active/[id])
 │   └── src/lib/
-│       ├── api/          # client.ts (fetch wrapper, MOCK=true) + endpoints.ts (typed mock endpoint map)
-│       ├── features/     # auth, student, session, attendance, liveness, sync — mock services + runes stores ($state) + components (DashboardStats, QRScanner)
-│       └── shared/       # types/, constants/ (routes/status/roles), utils/ (qr/geo/format/gen), index.ts
+│       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (18 typed EndpointDefs with mock fixtures)
+│       ├── features/     # auth, student, session, attendance, liveness, sync, report, professor, settings — services + runes stores (auth, student) + components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart)
+│       └── shared/       # types/ (auth/user/student/session/attendance/course/enrollment/liveness/sync), constants/ (routes/status/roles), utils/ (qr/geo/format/gen), index.ts
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot, AppException handler)
-│   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP), exceptions.py
-│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py
-│   │   ├── api/          # deps.py (_get_db, _get_current_user, require_role) + router.py (mounts 6 of 8 routers under /api)
-│   │   ├── features/     # 14 slices: analytics, attendance, auth, course, course_professor, enrollment, excuse, professor, program, session, student, sync, system
-│   │   │   └── */        # model.py per slice (17 classes); router.py per slice (auth + admin implemented, 6 prefix-only stubs); auth/ and admin/ have schema+service+router; course_professor/service.py
-│   │   └── tests/        # pytest suite — 56 tests (hand-rolled fakes, no DB); requires DEBUG=true + JWT_SECRET
-│   ├── alembic/          # env.py imports all 13 feature models; 3 migrations — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index) → 17 tables
+│   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP/recovery-grant/backup-code fingerprint), exceptions.py
+│   │   ├── shared/       # enums.py (13 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py
+│   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep) + router.py (12 routers mounted under /api, no prefix= arg)
+│   │   ├── features/     # 15 slices: admin, analytics, attendance, auth, course, course_professor, enrollment, excuse, face_enrollment, professor, program, session, student, sync, system
+│   │   │   └── */        # model.py in 13 slices (17 classes; admin + face_enrollment are model-less); 8 with routes (auth/admin/program/course/offering/student-admin/professor-admin/face-enrollment), 4 prefix-only stubs (student/professor/session/attendance), enrollment intentionally unmounted; service.py ×8, schema.py ×7, exceptions.py ×11, constants.py ×6
+│   │   └── tests/        # pytest suite — 102 test functions (105 cases with parametrization) in 11 files (hand-rolled fakes, no DB); requires DEBUG=true + JWT_SECRET
+│   ├── alembic/          # env.py imports all 13 feature models; 4 migrations — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at) → 17 tables
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
-├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend
+├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend (+ api-test under profile: test)
 └── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, presentations, project, testing
 ```
 
@@ -109,12 +109,13 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-This starts four services:
+This starts five services (four always-on plus one test profile):
 
 - **Database**: PostgreSQL on `localhost:5432` (`attendance_sys`)
 - **Migrations**: builds the `migrate` target of `backend/Dockerfile.dev` and runs `alembic upgrade head` once, applying the schema before the API boots
 - **API**: builds the `runtime` target of `backend/Dockerfile.dev` — http://localhost:8000, health check at `/health`
 - **Frontend (app)**: builds `frontend/Dockerfile.dev` — Vite dev server at http://localhost:5173 with HMR, source mounted for live reload
+- **api-test** (only with `--profile test`): runs the pytest suite, e.g. `docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test`
 
 The backend image is multi-stage: a `builder` stage creates a virtualenv at `/opt/venv` and installs dependencies, a `runtime` stage copies it in for the API, and a `migrate` stage reuses the runtime image with `alembic upgrade head` as its command.
 
@@ -156,6 +157,8 @@ Backend (`backend/.env.example`):
 | `HMAC_SECRET_KEY`                | _(empty)_                                                              | Used for secure session codes                                       |
 | `JWT_SECRET`                     | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32` |
 | `JWT_ALGORITHM`                  | `HS256`                                                                | JWT signing algorithm                                               |
+| `PREAUTH_TOKEN_EXPIRE_MINUTES`   | `5`                                                                    | Pre-auth (claim) token TTL                                          |
+| `RECOVERY_TOKEN_EXPIRE_MINUTES`  | `5`                                                                    | Forgot-password recovery-grant TTL (in `config.py`; missing from `backend/.env.example`) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`    | `15`                                                                   | Access token TTL                                                    |
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | `7`                                                                    | Refresh token TTL                                                   |
 | `LOCKOUT_ATTEMPTS`               | `5`                                                                    | Failed login attempts before lockout                                |
@@ -194,9 +197,10 @@ Backend (`backend/.env.example`):
 
 Frontend (`frontend/.env.example`):
 
-| Variable         | Default                 | Purpose                             |
-| ---------------- | ----------------------- | ----------------------------------- |
-| `PUBLIC_API_URL` | `http://localhost:8000` | Backend base URL exposed to browser |
+| Variable           | Default                 | Purpose                                              |
+| ------------------ | ----------------------- | ---------------------------------------------------- |
+| `PUBLIC_API_URL`   | `http://localhost:8000` | Backend base URL exposed to browser                  |
+| `PUBLIC_MOCK_MODE` | `false`                 | `true` serves fixtures instead of calling the API; defaults to real requests |
 
 ## Verification
 
@@ -235,7 +239,7 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite currently contains 56 unit tests.
+There are no linters or formatters configured, and no CI workflows (no `.github/workflows`). The backend suite currently contains 102 test functions (105 cases with parametrization).
 
 ## Deployment
 
@@ -277,7 +281,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Developer
 
 - [`docs/developer/backend-setup.md`](docs/developer/backend-setup.md) — Docker Compose, env setup, Alembic, seed script
-- [`docs/developer/frontend-setup.md`](docs/developer/frontend-setup.md) — Node, runes mode, Chart.js, service worker
+- [`docs/developer/frontend-setup.md`](docs/developer/frontend-setup.md) — Node, runes mode, service worker
 - [`docs/developer/coding-standards.md`](docs/developer/coding-standards.md) — Python, TypeScript/Svelte, git conventions
 - [`docs/developer/feature-template.md`](docs/developer/feature-template.md) — vertical-slice checklist (model→router→frontend)
 
@@ -297,7 +301,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D58)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D58, ADR-055–ADR-059)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -313,12 +317,12 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ## Project Status
 
-Shared infrastructure is complete — **Phase 0** of the [13-phase roadmap](docs/project/roadmap.md) is **[Done]**. The 16-table model layer covers **Phase 1** (Database & Academic Structure), and current work (auth schemas, JWT deps, OTP/MFA/lockout config) is building out **Phase 2** (Auth, Claims & User Management). **Phase 12** is flagged as a **[gap]** in the roadmap.
+Shared infrastructure is complete — **Phase 0** of the [13-phase roadmap](docs/project/roadmap.md) is **[Done]**. The 17-table model layer covers **Phase 1** (Database & Academic Structure), **Phase 2** (Auth, Claims & User Management: JWT deps, OTP/MFA incl. backup-code fingerprint, lockout, recovery grants, Turnstile) has landed, and **Phase 3** (Admin CRUD: programs/year-levels, course templates, course offerings, student/professor admin with roster CSV import + archive guards, face enrollment) has landed through `#79`–`#92`. Auth + student portal are wired to the real API; the frontend calls the backend by default (`PUBLIC_MOCK_MODE=false`). **Phase 12** is flagged as a **[gap]** in the roadmap.
 
-| Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security, exceptions, base CRUD, pagination, email, validators, captcha, rate limiting, cache, 13 enums); `api/deps.py` with `_get_db`, `_get_current_user` (JWT/HTTPBearer), `require_role(*roles)`; 14 feature slices / 17 model classes; 6 of 8 router stubs mounted under `/api` (auth→`/api/auth`, admin→`/api/admin/users`, student→`/api/student`, attendance→`/api/student`, session→`/api/professor`, professor→`/api/professor`; course & enrollment routers exist but are unmounted); 3 Alembic migrations — `679a319c12d6` (16-table baseline) + `2a437ca93c53` + `33eabbfbfa6a` (`mfa_backup_codes` + indexed fingerprint) → 17 tables; 56-test pytest suite; multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
-| Frontend | Mock-first feature-slice implementation — routes for landing, auth (login/register/forgot-password), student (dashboard/scan), professor (sessions); mock feature services + runes stores (auth, student) + components (DashboardStats, QRScanner); shared types/utils/constants; typed `api/client.ts` (`MOCK = true`) + mock `api/endpoints.ts`; Svelte 5 runes mode forced in `vite.config.ts`                                                                                                                                                                                                                                                                                                                                                               |
-| Features | Model layer complete for all 13 slices; `auth/schema.py` (Pydantic) and `course_professor/service.py` are the only service/schema layers so far; router stubs exist for 7 slices (course_professor, excuse, analytics, program, sync, system have no router file yet); `liveness` is frontend-only                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Schema   | 16 of 16 target tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log); baseline migration `679a319c12d6` creates the full target schema ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `mfa_backup_codes`, `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                                                                                                                                                                                                                                              |
-| Tests    | 13 backend unit tests run through the `api-test` Compose service; frontend verification uses `npm run check`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security, exceptions, base CRUD, pagination, email, validators, captcha, rate limiting, cache, csv_import, 13 enums); `api/deps.py` with `_get_db`, `_get_current_user`/`_get_optional_current_user` (JWT/HTTPBearer), `require_role(*roles)`, plus `Auth/Admin/Program/Course/Student/Professor/FaceEnrollmentServiceDep`; 15 feature slices / 17 model classes; 12 routers mounted under `/api` with 8 carrying routes — auth(15)→`/api/auth`, admin(3)→`/api/admin/users`, program(10)→`/api/admin/programs`, course(5)→`/api/admin/courses`, offering(10)→`/api/admin/offerings`, student-admin(7)→`/api/admin/students`, professor-admin(6)→`/api/admin/professors`, face-enrollment(2)→`/api/admin/face-enrollment` — plus 4 prefix-only stubs (student+attendance share `/api/student`, session+professor share `/api/professor`; `enrollment/router.py` intentionally unmounted); 4 Alembic migrations — `679a319c12d6` (16-table baseline) + `2a437ca93c53` + `33eabbfbfa6a` (`mfa_backup_codes` + indexed fingerprint) + `c3e913d02be0` (`enrollments.created_at`) → 17 tables; 102-test pytest suite; multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
+| Frontend | Real-API-by-default feature-slice implementation (mock only when `PUBLIC_MOCK_MODE=true`) — 20 pages: landing (Attendly), about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/reports/sessions + create/history/active/[id]); 9 feature slices (auth, student, session, attendance, liveness, sync, report, professor, settings) + runes stores (auth, student) + components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart); typed `api/client.ts` (BASE_URL + `/api` prefix, auth header, 401-refresh retry, 3-envelope unwrapping) + 18-entry `api/endpoints.ts` registry with mock fixtures; Svelte 5 runes mode forced in `vite.config.ts` (function form, `node_modules` exempt) |
+| Features | Model layer complete (17 classes); service layer landed for auth, admin, program, course, student, professor, face_enrollment (+ `course_professor` borderline class, `shared/csv_import.py` module-level fns); schema layer for the same minus `course_professor`; `session`/`attendance`/`enrollment` remain model + stub-router only; `sync`/`excuse`/`analytics`/`system` remain model-only; `liveness` is frontend-only (+ `face_enrollment` backend slice with no model)                                                                                                                                                                                                                                                                                                                                                          |
+| Schema   | 17 tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log, mfa_backup_codes); migrations at head `c3e913d02be0` ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                                                                                                                                                                                                                                                                         |
+| Tests    | 102 backend test functions (105 cases with parametrization, 11 files) run through the `api-test` Compose service (`--profile test`); frontend verification uses `npm run check`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
