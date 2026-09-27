@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pytest
@@ -12,9 +12,43 @@ from features.professor.service import ProfessorService
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
 ROWS = [
-    (11, "CS101", "Intro to CS", "BSCS", "1st Year", True),
-    (12, "CS102", "Data Structures", "BSCS", "2nd Year", False),
+    (
+        11,
+        101,
+        "CS101",
+        "Intro to CS",
+        201,
+        "BSCS",
+        301,
+        "1st Year",
+        "1st Sem",
+        "2025-2026",
+        True,
+        date(2025, 8, 4),
+        None,
+        3,
+    ),
+    (
+        12,
+        102,
+        "CS102",
+        "Data Structures",
+        201,
+        "BSCS",
+        302,
+        "2nd Year",
+        "1st Sem",
+        "2025-2026",
+        False,
+        date(2025, 8, 4),
+        None,
+        4,
+    ),
 ]
+
+COUNTS = [(11, 30), (12, 35)]
+
+SECTIONS = [(11, "A"), (11, "B"), (12, "A")]
 
 
 class _FakeResult:
@@ -30,10 +64,14 @@ class _FakeResult:
 
 
 class _FakeSession:
-    def __init__(self, *, professor=None, assignments=(), counts=None):
+    def __init__(
+        self, *, professor=None, assignments=(), counts=(), sections=(), scalar_counts=None
+    ):
         self.professor = professor
         self.assignments = list(assignments)
-        self.counts = list(counts or [])
+        self.count_rows = list(counts)
+        self.section_rows = list(sections)
+        self.scalar_counts = list(scalar_counts or [])
 
     async def get(self, model, ident):
         return None
@@ -47,9 +85,17 @@ class _FakeSession:
         return _FakeResult([])
 
     async def scalar(self, stmt):
-        return self.counts.pop(0) if self.counts else 0
+        return self.scalar_counts.pop(0) if self.scalar_counts else 0
 
     async def execute(self, stmt):
+        compiled = str(stmt)
+
+        if "students" in compiled:
+            return _FakeResult(list(self.section_rows))
+
+        if "count" in compiled:
+            return _FakeResult(list(self.count_rows))
+
         return _FakeResult(list(self.assignments))
 
     async def flush(self):
@@ -97,7 +143,9 @@ def test_resolve_professor_id_unclaimed_raises_404() -> None:
 
 
 def test_list_assigned_offerings_shape_and_pagination() -> None:
-    session = _FakeSession(professor=_professor(), assignments=ROWS)
+    session = _FakeSession(
+        professor=_professor(), assignments=ROWS, counts=COUNTS, sections=SECTIONS
+    )
 
     page = _run(
         ProfessorService(session).list_assigned_offerings(
@@ -110,10 +158,22 @@ def test_list_assigned_offerings_shape_and_pagination() -> None:
     first = page.items[0]
     assert first.offering_id == 11 and first.course_code == "CS101"
     assert first.course_name == "Intro to CS"
-    assert first.program_code == "BSCS" and first.year_level_label == "1st Year"
+    assert first.course_id == 101
+    assert first.program_id == 201
+    assert first.program_code == "BSCS"
+    assert first.year_level_id == 301
+    assert first.year_level_label == "1st Year"
+    assert first.semester == "1st Sem" and first.academic_year == "2025-2026"
     assert first.is_primary is True
+    assert first.effective_from == date(2025, 8, 4)
+    assert first.effective_to is None
+    assert first.units == 3
+    assert first.enrolled_count == 30
+    assert first.section == ["A", "B"]
 
-    session = _FakeSession(professor=_professor(), assignments=ROWS)
+    session = _FakeSession(
+        professor=_professor(), assignments=ROWS, counts=COUNTS, sections=SECTIONS
+    )
 
     second = _run(
         ProfessorService(session).list_assigned_offerings(
@@ -123,11 +183,18 @@ def test_list_assigned_offerings_shape_and_pagination() -> None:
 
     assert len(second.items) == 1 and second.items[0].offering_id == 12
     assert second.items[0].is_primary is False
+    assert second.items[0].units == 4
+    assert second.items[0].enrolled_count == 35
+    assert second.items[0].section == ["A"]
 
 
 def test_get_self_profile_enrichment() -> None:
     session = _FakeSession(
-        professor=_professor(), assignments=ROWS, counts=[87]
+        professor=_professor(),
+        assignments=ROWS,
+        counts=COUNTS,
+        sections=SECTIONS,
+        scalar_counts=[87],
     )
 
     profile = _run(ProfessorService(session).get_self_profile(user_id=42))
@@ -137,3 +204,6 @@ def test_get_self_profile_enrichment() -> None:
     assert profile.created_at == NOW
     assert profile.session_count == 87
     assert len(profile.assigned_courses) == 2
+    assert profile.assigned_courses[0].units == 3
+    assert profile.assigned_courses[0].enrolled_count == 30
+    assert profile.assigned_courses[0].section == ["A", "B"]
