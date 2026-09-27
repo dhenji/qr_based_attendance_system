@@ -29,11 +29,10 @@ from shared.pagination import PaginatedResponse
 # /api/professor/... instead of /api/admin/professors/... (ADR-057).
 #
 # Prefix baked in here; mounted with no prefix= argument in api/router.py
-# (PROMPT 3.7 owns that mount — do NOT add an include_router call here).
+# (the mount lives there — do NOT add an include_router call here).
 # Collection routes use "" not "/" so the registered path matches the contract
 # exactly. There is NO DELETE /{id} route: soft archive/reactivate is PATCH
-# with is_active, and the only DELETE is the hard DELETE /{id}/archive that
-# PROMPT 3.9 adds.
+# with is_active; the only DELETE is the hard DELETE /{id}/archive.
 router = APIRouter(prefix="/admin/professors")
 
 
