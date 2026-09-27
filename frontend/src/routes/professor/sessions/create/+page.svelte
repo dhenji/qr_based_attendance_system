@@ -1,8 +1,14 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { PROFESSOR_COURSES, type ProfessorCourse } from '$lib/features/professor/mock';
+	import {
+		resolveNextClassMeeting,
+		type ClassMeeting
+	} from '$lib/features/professor/schedule';
 	import { openSession, SESSION_CODE_SAMPLE } from '$lib/features/session/service';
+	import { professorActiveSession } from '$lib/shared/constants/routes';
 
 	// D11: two entry points, one page. Arriving from a My Courses card carries
 	// ?offering=, which locks the course and hides the selector. Arriving from
@@ -57,6 +63,12 @@
 		// nudge rather than a retype.
 		classroomLat = course.classroomLat;
 		classroomLng = course.classroomLng;
+		// A generated session belongs to the previous offering. Clear it so View
+		// Live Session cannot open stale projector data after switching courses.
+		generatedSessionId = null;
+		generatedCode = null;
+		generatedExpiry = null;
+		error = null;
 	});
 
 	// D17: a blank override name means "keep the offering defaults", and nothing
@@ -88,55 +100,55 @@
 	const durationInvalid = $derived(durationMinutes <= 0);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
-	// The offering's schedule times are display strings ("10:30 AM"). Treat them
-	// as today so the D12 preview and the posted scheduled_end_time are real
-	// instants rather than unparseable text.
-	const todayAt = (clock: string): Date => {
-		const [time, meridiem] = clock.trim().split(/\s+/);
-		const [rawHours, minutes] = time.split(':');
-		let hours = Number(rawHours);
-		if (meridiem === 'PM' && hours < 12) hours += 12;
-		if (meridiem === 'AM' && hours === 12) hours = 0;
+	// The fixture schedule is recurring: resolve it to the next meeting that has
+	// not ended yet. Blindly using today's date can select a past meeting and,
+	// through D12, create an instantly expired session.
+	const scheduledMeeting = $derived.by<ClassMeeting | null>(() => {
+		const course = selected;
+		if (course === null) return null;
+		return resolveNextClassMeeting(course, new Date());
+	});
+	const scheduleInvalid = $derived(selected !== null && scheduledMeeting === null);
 
-		const date = new Date();
-		date.setHours(hours, Number(minutes), 0, 0);
-		return date;
-	};
-
-	// D12: expires_at = min(now + duration_minutes, scheduled_end_time).
+	// D12: expires_at = min(now + duration_minutes, next scheduled_end_time).
 	const expiryPreview = $derived.by(() => {
 		const course = selected;
-		if (course === null || durationInvalid) return null;
+		const meeting = scheduledMeeting;
+		if (course === null || meeting === null || durationInvalid) return null;
 
 		const durationEnd = new Date(Date.now() + durationMinutes * 60 * 1000);
-		const scheduledEnd = todayAt(course.scheduleEndTime);
-		const capped = durationEnd.getTime() > scheduledEnd.getTime();
+		const capped = durationEnd.getTime() > meeting.end.getTime();
 
 		return {
-			at: capped ? scheduledEnd : durationEnd,
-			capped
+			at: capped ? meeting.end : durationEnd,
+			capped,
+			meeting
 		};
 	});
 
 	const RADII = [10, 20, 30, 50, 100] as const;
 
 	let submitting = $state(false);
+	let generatedSessionId = $state<number | null>(null);
 	let generatedCode = $state<string | null>(null);
 	let generatedExpiry = $state<string | null>(null);
 	let error = $state<string | null>(null);
 
 	const canSubmit = $derived(
 		selected !== null &&
+			scheduledMeeting !== null &&
 			windowsFit &&
 			!durationInvalid &&
 			!windowsInvalid &&
 			!coordsInvalid &&
+			!scheduleInvalid &&
 			!submitting
 	);
 
 	const handleGenerate = async () => {
 		const course = selected;
-		if (course === null || !canSubmit) return;
+		const meeting = scheduledMeeting;
+		if (course === null || meeting === null || !canSubmit) return;
 
 		submitting = true;
 		error = null;
@@ -152,19 +164,22 @@
 				classroomName: overrideActive ? classroomOverride.trim() : undefined,
 				classroomLat: overrideActive ? (classroomLat ?? undefined) : undefined,
 				classroomLng: overrideActive ? (classroomLng ?? undefined) : undefined,
-				scheduledEndTime: todayAt(course.scheduleEndTime).toISOString()
+				scheduledEndTime: meeting.end.toISOString()
 			});
 
+			generatedSessionId = created.id;
 			generatedCode = created.qrPayload.code;
-			generatedExpiry = new Date(created.expiresAt).toLocaleTimeString(undefined, {
-				hour: 'numeric',
-				minute: '2-digit'
-			});
+			generatedExpiry = dateTimeText(new Date(created.expiresAt));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to open session';
 		} finally {
 			submitting = false;
 		}
+	};
+
+	const viewLiveSession = () => {
+		if (generatedSessionId === null) return;
+		void goto(professorActiveSession(generatedSessionId));
 	};
 
 	const scheduleText = (course: ProfessorCourse) =>
@@ -174,6 +189,21 @@
 
 	const clockText = (date: Date) =>
 		date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+	const dateText = (date: Date) =>
+		date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+	const dateTimeText = (date: Date): string => {
+		const today = new Date();
+		const day = date.toDateString() === today.toDateString() ? 'Today' : dateText(date);
+		return `${day}, ${clockText(date)}`;
+	};
+
+	const meetingText = (meeting: ClassMeeting): string => {
+		const startDay = dateText(meeting.start);
+		const endDay = meeting.end.toDateString() === meeting.start.toDateString() ? '' : `${dateText(meeting.end)} `;
+		return `${startDay} ${clockText(meeting.start)}–${endDay}${clockText(meeting.end)}`;
+	};
 </script>
 
 <div class="create">
@@ -270,10 +300,16 @@
 					min="1"
 					bind:value={durationMinutes}
 				/>
-				{#if expiryPreview}
+				{#if scheduleInvalid}
+					<p class="field-error">
+						This course has no upcoming scheduled meeting, so a live session cannot be
+						opened yet.
+					</p>
+				{:else if expiryPreview}
+					<p class="hint">Next meeting: {meetingText(expiryPreview.meeting)}</p>
 					<p class="hint" class:warn={expiryPreview.capped}>
-						Expires min(now + {durationMinutes}m, {selected.scheduleEndTime} scheduled)
-						→ <strong>{clockText(expiryPreview.at)}</strong>
+						Expires min(now + {durationMinutes}m, {clockText(expiryPreview.meeting.end)} scheduled)
+						→ <strong>{dateTimeText(expiryPreview.at)}</strong>
 						{#if expiryPreview.capped}
 							· capped by class end (D12)
 						{/if}
@@ -389,11 +425,19 @@
 					<AppIcon name="qr" size={18} />
 					{submitting ? 'Generating…' : 'Generate Session Code'}
 				</button>
-				<button class="btn btn-secondary" disabled title="Projector mode is the next page">
+				<button
+					class="btn btn-secondary"
+					disabled={generatedSessionId === null}
+					title={generatedSessionId === null ? 'Generate a session code first' : undefined}
+					onclick={viewLiveSession}
+				>
 					<AppIcon name="shield" size={18} />
 					View Live Session
 				</button>
 			</div>
+			{#if generatedSessionId === null}
+				<p class="hint">Generate a session code to unlock the live projector view.</p>
+			{/if}
 		</section>
 	{/if}
 </div>

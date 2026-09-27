@@ -44,3 +44,11 @@ export const professorSessionCreate = (offeringId?: number): string =>
   offeringId === undefined
     ? Routes.PROFESSOR_SESSIONS_CREATE
     : `${Routes.PROFESSOR_SESSIONS_CREATE}?offering=${offeringId}`;
+
+// My Courses deep-links Reports to one offering. The offering disambiguates
+// the same course across cohorts; the reports page resolves it to that course
+// and section.
+export const professorReport = (offeringId?: number): string =>
+  offeringId === undefined
+    ? Routes.PROFESSOR_REPORTS
+    : `${Routes.PROFESSOR_REPORTS}?offering=${offeringId}`;

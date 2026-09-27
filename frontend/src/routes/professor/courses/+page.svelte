@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { PROFESSOR_COURSES, type ProfessorCourse } from '$lib/features/professor/mock';
-	import { professorSessionCreate } from '$lib/shared/constants/routes';
+	import { professorReport, professorSessionCreate } from '$lib/shared/constants/routes';
 
 	type ProgramGroup = {
 		code: string;
@@ -134,8 +134,8 @@
 								</button>
 								<button
 									class="btn btn-secondary"
-									disabled
-									title="Reports arrive in Phase 7"
+									data-testid="reports-{course.offeringId}"
+									onclick={() => goto(professorReport(course.offeringId))}
 								>
 									<AppIcon name="chart" size={18} />
 									Reports
@@ -363,7 +363,7 @@
 		color: #0f172a;
 	}
 
-	/* Reports is inert until that page lands (Phase 7). */
+	/* Reports deep-links to the offering-prefiltered reports page. */
 	.btn:disabled {
 		color: #94a3b8;
 		background: #f8fafc;
