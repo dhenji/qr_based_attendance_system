@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -183,3 +184,63 @@ def backup_code_fingerprint(
     return hmac.new(
         secret.encode("utf-8"), normalized_code.encode("utf-8"), hashlib.sha256
     ).hexdigest()
+
+
+_BASE62_ALPHABET: str = (
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+SESSION_CODE_LENGTH: int = 8
+
+
+def _resolve_hmac_secret(settings: Settings | None = None) -> str:
+    current: Settings = settings or get_settings()
+    secret: str = current.hmac_secret_key or current.jwt_secret
+
+    if not secret:
+        raise ValueError(
+            "HMAC_SECRET_KEY or JWT_SECRET must be set to generate session codes"
+        )
+
+    return secret
+
+
+def generate_session_code(
+    session_id: int, settings: Settings | None = None
+) -> str:
+    secret: str = _resolve_hmac_secret(settings)
+    digest: bytes = hmac.new(
+        secret.encode("utf-8"), str(session_id).encode("utf-8"), hashlib.sha256
+    ).digest()
+
+    return "".join(
+        _BASE62_ALPHABET[b % 62] for b in digest[:SESSION_CODE_LENGTH]
+    )
+
+
+def verify_session_code(
+    code: str, session_id: int, settings: Settings | None = None
+) -> bool:
+    return hmac.compare_digest(code, generate_session_code(session_id, settings))
+
+
+def build_qr_payload(
+    session_id: int,
+    code: str,
+    offering_id: int,
+    radius: int,
+    present_window: int,
+    late_window: int,
+) -> str:
+    # session_id is the HMAC input for the code; the payload identifies the
+    # session by code per the Session QR Payload contract.
+    _ = session_id
+    payload: dict[str, int | str] = {
+        "v": 1,
+        "code": code,
+        "offering": offering_id,
+        "radius": radius,
+        "pw": present_window,
+        "lw": late_window,
+    }
+
+    return json.dumps(payload, separators=(",", ":"))
