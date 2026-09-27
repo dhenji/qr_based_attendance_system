@@ -17,6 +17,7 @@ from features.course.service import CourseService
 from features.face_enrollment.service import FaceEnrollmentService
 from features.professor.service import ProfessorService
 from features.program.service import ProgramService
+from features.session.service import SessionService
 from features.student.service import StudentService
 from shared.enums import UserRole
 
@@ -169,12 +170,19 @@ async def _get_face_enrollment_service(
     return FaceEnrollmentService(session)
 
 
+async def _get_session_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> SessionService:
+    return SessionService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
 CourseServiceDep = Annotated[CourseService, Depends(_get_course_service)]
 StudentServiceDep = Annotated[StudentService, Depends(_get_student_service)]
 ProfessorServiceDep = Annotated[ProfessorService, Depends(_get_professor_service)]
+SessionServiceDep = Annotated[SessionService, Depends(_get_session_service)]
 FaceEnrollmentServiceDep = Annotated[
     FaceEnrollmentService, Depends(_get_face_enrollment_service)
 ]

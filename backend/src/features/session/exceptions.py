@@ -13,6 +13,16 @@ class SessionDatabaseException(SessionException, DatabaseException):
     pass
 
 
+class SessionNotFoundException(SessionDomainException):
+    """404 - the target session does not exist."""
+
+    status_code: int = 404
+    code: str = "session_not_found"
+
+    def __init__(self, session_id: int) -> None:
+        super().__init__(message=f"Session {session_id} not found")
+
+
 class SessionExpiredException(SessionDomainException):
     """410 - session past its expiration time."""
 

@@ -72,8 +72,7 @@ def parse_roster_csv(
     raw_rows, structural_errors = parse_csv(content, ROSTER_CSV_COLUMNS)
 
     errors: list[StudentImportError] = [
-        StudentImportError(line=e.line, reason=e.reason)
-        for e in structural_errors
+        StudentImportError(line=e.line, reason=e.reason) for e in structural_errors
     ]
 
     if structural_errors:
@@ -88,9 +87,7 @@ def parse_roster_csv(
         student_id: str = (cell("student_id") or "").strip().upper()
 
         if not student_id:
-            errors.append(
-                StudentImportError(line=lineno, reason="missing student_id")
-            )
+            errors.append(StudentImportError(line=lineno, reason="missing student_id"))
             continue
 
         first_name = (cell("first_name") or "").strip()
@@ -251,7 +248,9 @@ class StudentService:
         year_level_id: int | None = values.pop("year_level_id", None)
 
         if "email" in values and values["email"] != student.email:
-            existing: Student | None = await self._students.get_by(email=values["email"])
+            existing: Student | None = await self._students.get_by(
+                email=values["email"]
+            )
 
             if existing is not None and existing.id != student.id:
                 raise StudentEmailExistsException(values["email"])
@@ -317,8 +316,7 @@ class StudentService:
             if (
                 row.student_id in seen_ids
                 or row.email in seen_emails
-                or await self._students.get_by(student_id=row.student_id)
-                is not None
+                or await self._students.get_by(student_id=row.student_id) is not None
                 or await self._students.get_by(email=row.email) is not None
             ):
                 duplicates += 1
@@ -329,9 +327,7 @@ class StudentService:
             seen_ids.add(row.student_id)
             seen_emails.add(row.email)
 
-            program: Program | None = await self._programs.get_by(
-                code=row.program_code
-            )
+            program: Program | None = await self._programs.get_by(code=row.program_code)
 
             if program is None:
                 errors.append(
@@ -408,9 +404,7 @@ class StudentService:
         return student
 
     async def _year_level(self, year_level_id: int) -> YearLevel:
-        year_level: YearLevel | None = await self._session.get(
-            YearLevel, year_level_id
-        )
+        year_level: YearLevel | None = await self._session.get(YearLevel, year_level_id)
 
         if year_level is None:
             raise YearLevelNotFoundException(year_level_id)
@@ -420,9 +414,7 @@ class StudentService:
     async def _resolve_cohort(
         self, year_level_id: int, program_id: int
     ) -> tuple[YearLevel, Program]:
-        year_level: YearLevel | None = await self._session.get(
-            YearLevel, year_level_id
-        )
+        year_level: YearLevel | None = await self._session.get(YearLevel, year_level_id)
 
         if year_level is None:
             raise YearLevelNotFoundException(year_level_id, program_id)
@@ -476,7 +468,9 @@ class StudentService:
 
     async def _to_read(self, student: Student) -> StudentRead:
         year_level: YearLevel = await self._year_level(student.year_level_id)
-        program: Program | None = await self._session.get(Program, year_level.program_id)
+        program: Program | None = await self._session.get(
+            Program, year_level.program_id
+        )
 
         return StudentRead(
             id=student.id,
