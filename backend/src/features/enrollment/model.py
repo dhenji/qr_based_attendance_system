@@ -4,9 +4,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from core.database import Base
 from features.course.model import CourseOffering
 from features.student.model import Student
+from shared.mixins import CreatedAtMixin
 
 
-class Enrollment(Base):
+class Enrollment(CreatedAtMixin, Base):
     __tablename__ = "enrollments"
     __table_args__ = (
         UniqueConstraint(
