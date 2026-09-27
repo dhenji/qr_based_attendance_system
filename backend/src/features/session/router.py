@@ -32,8 +32,8 @@ from shared.pagination import (
 # but their inner paths must not collide, so do not add profile paths here:
 # /professor/profile* belongs to the professor module.
 #
-# NOTE: GET /courses returns the minimal row shape; a follow-up enriches each
-# row with units, enrolled_count and the derived section. Keep single
+# NOTE: GET /courses returns the enriched row shape (units, enrolled_count
+# and the derived section set alongside the assignment columns). Keep single
 # ownership here.
 router = APIRouter(prefix="/professor")
 

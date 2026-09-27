@@ -11,6 +11,7 @@ from features.course.model import Course, CourseOffering
 from features.course_professor.exceptions import OverlappingAssignmentException
 from features.course_professor.model import CourseProfessor
 from features.course_professor.service import CourseProfessorService
+from features.enrollment.model import Enrollment
 from features.professor.exceptions import (
     ProfessorEmailExistsException,
     ProfessorHasRecordsException,
@@ -31,6 +32,7 @@ from features.professor.schema import (
 )
 from features.program.model import Program, YearLevel
 from features.session.model import Session
+from features.student.model import Student
 from shared.base import BaseCRUD
 from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
@@ -320,11 +322,11 @@ class ProfessorService:
     async def list_assigned_offerings(
         self, *, user_id: int, page: int = 1, size: int = 50
     ) -> PaginatedResponse[AssignedOfferingItem]:
-        """Own active assignments in the minimal shape.
+        """Own active assignments with course-card enrichment.
 
         Active means the course_professors effective window covers today and
-        the offering itself is active. A follow-up enriches each row with
-        units, enrolled_count and the derived section.
+        the offering itself is active. Each row carries units, enrolled_count
+        and the derived section set for the course cards.
         """
         professor: Professor = await self._get_professor_by_user_or_404(user_id)
         items: Sequence[AssignedOfferingItem] = await self._assigned_offerings(
@@ -333,6 +335,7 @@ class ProfessorService:
         window: list[AssignedOfferingItem] = list(
             items[(page - 1) * size : page * size]
         )
+        await self._enrich_assigned_offerings(window)
 
         return PaginatedResponse[AssignedOfferingItem](
             items=window, total=len(items), page=page, size=size
@@ -348,6 +351,7 @@ class ProfessorService:
         assigned: list[AssignedOfferingItem] = list(
             await self._assigned_offerings(professor.id)
         )
+        await self._enrich_assigned_offerings(assigned)
         session_count: int = (
             await self._session.scalar(
                 select(func.count())
@@ -395,17 +399,25 @@ class ProfessorService:
     async def _assigned_offerings(
         self, professor_id: int
     ) -> Sequence[AssignedOfferingItem]:
-        """Active assignments ordered by offering id (minimal columns)."""
+        """Active assignments ordered by offering id (base columns only)."""
         today: date = date.today()
         rows = (
             await self._session.execute(
                 select(
                     CourseOffering.id,
+                    CourseOffering.course_id,
                     Course.course_code,
                     Course.course_name,
+                    CourseOffering.program_id,
                     Program.code,
+                    CourseOffering.year_level_id,
                     YearLevel.label,
+                    CourseOffering.semester,
+                    CourseOffering.academic_year,
                     CourseProfessor.is_primary,
+                    CourseProfessor.effective_from,
+                    CourseProfessor.effective_to,
+                    Course.units,
                 )
                 .join(
                     CourseProfessor,
@@ -427,24 +439,98 @@ class ProfessorService:
             )
         ).all()
 
-        return [
+        items: list[AssignedOfferingItem] = [
             AssignedOfferingItem(
                 offering_id=offering_id,
+                course_id=course_id,
                 course_code=course_code,
                 course_name=course_name,
+                program_id=program_id,
                 program_code=program_code,
+                year_level_id=year_level_id,
                 year_level_label=year_level_label,
+                semester=semester,
+                academic_year=academic_year,
                 is_primary=bool(is_primary),
+                effective_from=effective_from,
+                effective_to=effective_to,
+                units=int(units),
             )
             for (
                 offering_id,
+                course_id,
                 course_code,
                 course_name,
+                program_id,
                 program_code,
+                year_level_id,
                 year_level_label,
+                semester,
+                academic_year,
                 is_primary,
+                effective_from,
+                effective_to,
+                units,
             ) in rows
         ]
+
+        return items
+
+    async def _enrich_assigned_offerings(
+        self, items: Sequence[AssignedOfferingItem]
+    ) -> None:
+        """Fill enrolled_count and section for one page of assignments.
+
+        Both aggregates run as a single GROUP BY query each over the page's
+        offering ids, so enrichment stays constant-query regardless of page
+        size. `section` is the distinct set of `students.section` across the
+        offering's enrollments (derived — no stored column backs it).
+        """
+        if not items:
+            return
+
+        offering_ids: list[int] = [item.offering_id for item in items]
+        by_offering: dict[int, AssignedOfferingItem] = {
+            item.offering_id: item for item in items
+        }
+
+        counts = (
+            await self._session.execute(
+                select(Enrollment.offering_id, func.count())
+                .where(Enrollment.offering_id.in_(offering_ids))
+                .group_by(Enrollment.offering_id)
+            )
+        ).all()
+
+        for offering_id, count in counts:
+            item = by_offering.get(offering_id)
+
+            if item is not None:
+                item.enrolled_count = int(count)
+
+        section_rows = (
+            await self._session.execute(
+                select(Enrollment.offering_id, Student.section)
+                .join(Student, Student.id == Enrollment.student_id)
+                .where(
+                    Enrollment.offering_id.in_(offering_ids),
+                    Student.section.is_not(None),
+                )
+                .group_by(Enrollment.offering_id, Student.section)
+                .order_by(Student.section.asc())
+            )
+        ).all()
+
+        grouped: dict[int, list[str]] = {}
+
+        for offering_id, section in section_rows:
+            grouped.setdefault(offering_id, []).append(section)
+
+        for offering_id, sections in grouped.items():
+            item = by_offering.get(offering_id)
+
+            if item is not None:
+                item.section = sections
 
     async def _get_offering_or_404(self, offering_id: int) -> CourseOffering:
         offering: CourseOffering | None = await self._session.get(

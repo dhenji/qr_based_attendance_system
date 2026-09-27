@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
@@ -133,18 +133,30 @@ class ProfessorImportResult(BaseModel):
 
 
 class AssignedOfferingItem(BaseModel):
-    """Minimal assigned-offering row for GET /professor/courses.
+    """Assigned offering for GET /professor/courses.
 
-    A follow-up enriches this shape with units, enrolled_count and the
-    derived section — the envelope stays PaginatedResponse either way.
+    `section` is the distinct set of `students.section` values across the
+    offering's enrollments (derived, not a stored column); `units` comes
+    from `courses.units` and `enrolled_count` counts the offering's
+    enrollment rows. The envelope stays PaginatedResponse either way.
     """
 
     offering_id: int
+    course_id: int
     course_code: str
     course_name: str
+    program_id: int
     program_code: str
+    year_level_id: int
     year_level_label: str
+    semester: str
+    academic_year: str
+    section: list[str] = Field(default_factory=list)
     is_primary: bool
+    effective_from: date
+    effective_to: date | None = None
+    units: int = 0
+    enrolled_count: int = 0
 
 
 class ProfessorProfileRead(BaseModel):
