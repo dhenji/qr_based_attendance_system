@@ -23,3 +23,13 @@ class AssignmentNotFoundException(ProfessorDomainException):
         super().__init__(
             message=f"No assignment found for professor {professor_id} on course {course_id}"
         )
+
+
+class ProfessorNotFoundException(ProfessorDomainException):
+    """404 - the target professor does not exist."""
+
+    status_code: int = 404
+    code: str = "professor_not_found"
+
+    def __init__(self, professor_id: int) -> None:
+        super().__init__(message=f"Professor {professor_id} not found")
