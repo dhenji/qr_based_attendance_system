@@ -17,13 +17,14 @@
 		await restoreSession();
 	});
 
-	// Dashboard, My Courses, and Reports exist so far. The rest are declared disabled so
-	// the sidebar shows the shape of the portal without offering dead links.
+	// Dashboard, My Courses, Sessions, History, and Reports exist so far. The
+	// rest are declared disabled so the sidebar shows the shape of the portal
+	// without offering dead links.
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.PROFESSOR_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'My Courses', path: Routes.PROFESSOR_COURSES, enabled: true, icon: 'courses' },
-		{ label: 'Sessions', path: Routes.PROFESSOR_SESSIONS, enabled: false, icon: 'sessions' },
-		{ label: 'History', path: Routes.PROFESSOR_SESSIONS_HISTORY, enabled: false, icon: 'history' },
+		{ label: 'Sessions', path: Routes.PROFESSOR_SESSIONS, enabled: true, icon: 'sessions' },
+		{ label: 'History', path: Routes.PROFESSOR_SESSIONS_HISTORY, enabled: true, icon: 'history' },
 		{ label: 'Attendance', path: Routes.PROFESSOR_ATTENDANCE, enabled: false, icon: 'attendance' },
 		{ label: 'Excuses', path: Routes.PROFESSOR_EXCUSE_REQUESTS, enabled: false, icon: 'excuses' },
 		{ label: 'Reports', path: Routes.PROFESSOR_REPORTS, enabled: true, icon: 'reports' },

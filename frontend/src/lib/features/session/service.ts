@@ -2,6 +2,7 @@
 // Professor-facing service: open/close sessions, live feed, session codes
 
 import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+import { REPORT_SESSIONS, type ReportSessionRecord } from '$lib/features/report/mock';
 
 // MOCK flag — swap to false when professor session endpoints land
 const MOCK = true;
@@ -238,7 +239,8 @@ const normalizeNotes = (notes?: string): string | undefined => {
 };
 
 const findMockSession = (sessionId: number): MockSession => {
-	const session = MOCK_SESSIONS.find((item) => item.id === sessionId);
+	const session =
+		MOCK_SESSIONS.find((item) => item.id === sessionId) ?? HISTORY_SESSIONS.get(sessionId);
 	if (!session) throw new Error(`Session ${sessionId} was not found.`);
 	return session;
 };
@@ -314,11 +316,19 @@ const toLiveOffering = (session: MockSession) => {
 
 const toLegacySummary = (session: MockSession) => {
 	const counts = countStatuses(session);
+	const offering = resolveOffering(session.offeringId);
 	return {
 		id: session.id,
 		offeringId: session.offeringId,
 		courseId: session.courseId,
 		code: session.internalCode,
+		// The projector shows session_code (the D12 HMAC stand-in); `code` is
+		// the internal row label. Expose both so list rows and the live view
+		// cannot disagree.
+		session_code: session.sessionCode,
+		course_code: offering.courseCode,
+		course_name: offering.courseName,
+		section: offering.section,
 		createdAt: session.createdAt,
 		expiresAt: session.expiresAt,
 		presentCount: counts.present,
@@ -330,16 +340,24 @@ const toLegacySummary = (session: MockSession) => {
 
 
 // listSessions
-// Paginated list of sessions, optionally filtered by date range/course.
+// Recent/live sessions, optionally filtered by date range/offering/course.
 export const listSessions = async (_params?: {
 	from?: string;
 	to?: string;
 	courseId?: number;
+	offeringId?: number;
 }) => {
 	if (MOCK) {
-		const items = MOCK_SESSIONS.filter(
-			(session) => _params?.courseId === undefined || session.courseId === _params.courseId
-		).map(toLegacySummary);
+		const fromTime = _params?.from ? new Date(_params.from).getTime() : Number.NEGATIVE_INFINITY;
+		const toTime = _params?.to ? new Date(_params.to).getTime() : Number.POSITIVE_INFINITY;
+		const items = MOCK_SESSIONS.filter((session) => {
+			if (_params?.offeringId !== undefined && session.offeringId !== _params.offeringId)
+				return false;
+			if (_params?.courseId !== undefined && session.courseId !== _params.courseId)
+				return false;
+			const created = new Date(session.createdAt).getTime();
+			return created >= fromTime && created <= toTime;
+		}).map(toLegacySummary);
 		return {
 			items,
 			total: items.length,
@@ -439,7 +457,8 @@ export const openSession = async (
 export const closeSession = async (sessionId: number) => {
 	if (!MOCK) return { id: sessionId, status: 'closed' as const, final_counts: null };
 
-	const session = MOCK_SESSIONS.find((item) => item.id === sessionId);
+	const session =
+		MOCK_SESSIONS.find((item) => item.id === sessionId) ?? HISTORY_SESSIONS.get(sessionId);
 	if (!session) {
 		return {
 			id: sessionId,
@@ -589,7 +608,12 @@ export const excuseAllAbsent = async (
 export const getActiveSession = async (sessionId: number) => {
 	if (!MOCK) return null;
 
-	const session = MOCK_SESSIONS.find((item) => item.id === sessionId);
+	// History rows materialize into closed sessions on demand, so every row on
+	// the history page opens a real projector view (already closed, with its
+	// counts intact) instead of a "not found" error.
+	const session =
+		MOCK_SESSIONS.find((item) => item.id === sessionId) ??
+		materializeHistorySession(sessionId);
 	if (!session) return null;
 
 	const now = Date.now();
@@ -625,5 +649,238 @@ export const getActiveSession = async (sessionId: number) => {
 		})),
 		counts
 	};
+};
+
+// Session history (wireframe 3.5 / GET /professor/sessions/history).
+// The live store only holds current activity, so completed-session history is
+// derived from the deterministic report fixtures — the same rows behind the
+// Reports tabs, so filters, tables, charts and CSV exports agree. Each row's
+// numeric id is HISTORY_ID_BASE + its fixture index. Delete with the mock.
+
+const HISTORY_ID_BASE = 100000;
+
+export type SessionHistorySortBy = 'date' | 'code' | 'section' | 'rate';
+export type SessionHistorySortDir = 'asc' | 'desc';
+
+export type SessionHistoryRow = {
+	id: number;
+	offering_id: number;
+	course_code: string;
+	course_name: string;
+	section: string;
+	session_code: string;
+	created_at: string;
+	expires_at: string;
+	present_count: number;
+	late_count: number;
+	absent_count: number;
+	enrolled_count: number;
+	compliance_rate: number;
+	participation_rate: number;
+	status: MockSessionStatus;
+};
+
+export type SessionHistoryFilters = {
+	offeringId?: number;
+	course?: string;
+	section?: string;
+	from?: string;
+	to?: string;
+	sortBy?: SessionHistorySortBy;
+	sortDir?: SessionHistorySortDir;
+	page?: number;
+	size?: number;
+};
+
+const hashSeed = (value: string): number => {
+	let hash = 2166136261;
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 16777619);
+	}
+	return hash >>> 0;
+};
+
+// Deterministic XX-XXXX stand-in in the mockSessionCode() shape, so history
+// rows render the same code on every load. Delete with the mock.
+const historyCodeFor = (sessionId: string): string => {
+	const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+	const pick = (length: number, salt: number): string => {
+		let state = (hashSeed(sessionId) + Math.imul(salt, 2654435761)) >>> 0;
+		let out = '';
+		for (let i = 0; i < length; i += 1) {
+			state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+			out += alphabet[state % alphabet.length];
+		}
+		return out;
+	};
+	return `${pick(2, 1)}-${pick(4, 2)}`;
+};
+
+// Fixture times are display strings like "9:00 AM"; combine one with its date
+// key into an ISO timestamp for the history row.
+const parseHistoryTime = (dateKey: string, timeText: string): string => {
+	const [year, month, day] = dateKey.split('-').map(Number);
+	const match = /^(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(timeText.trim());
+	const date = new Date(year, month - 1, day, 12, 0, 0);
+	if (match) {
+		let hours = Number(match[1]) % 12;
+		if (match[3].toUpperCase() === 'PM') hours += 12;
+		date.setHours(hours, Number(match[2]), 0, 0);
+	}
+	return date.toISOString();
+};
+
+// D36: compliance = present / enrolled;
+// participation = (present + late + excused) / enrolled.
+const toHistoryRow = (record: ReportSessionRecord, index: number): SessionHistoryRow => {
+	const compliance = record.enrolled === 0 ? 0 : record.present / record.enrolled;
+	const participation =
+		record.enrolled === 0 ? 0 : (record.present + record.late + record.excused) / record.enrolled;
+	return {
+		id: HISTORY_ID_BASE + index,
+		offering_id: record.offeringId,
+		course_code: record.courseCode,
+		course_name: record.courseName,
+		section: record.section,
+		session_code: historyCodeFor(record.sessionId),
+		created_at: parseHistoryTime(record.date, record.startTime),
+		expires_at: parseHistoryTime(record.date, record.endTime),
+		present_count: record.present,
+		late_count: record.late,
+		absent_count: record.absent,
+		enrolled_count: record.enrolled,
+		compliance_rate: compliance,
+		participation_rate: participation,
+		status: 'closed'
+	};
+};
+
+// listSessionHistory
+// Paginated completed-session history (contract: GET /professor/sessions/history
+// with ?offering_id&section&date_from&date_to). Sorted newest-first by default,
+// matching the wireframe's Jul29-first table.
+export const listSessionHistory = async (params?: SessionHistoryFilters) => {
+	if (!MOCK)
+		return { items: [], total: 0, page: 1, size: 20, avg_compliance: 0, total_sessions: 0 };
+
+	let start = params?.from ?? '';
+	let end = params?.to ?? '';
+	if (start && end && start > end) [start, end] = [end, start];
+
+	const rows = REPORT_SESSIONS.map((record, index) => ({ record, index })).filter(
+		({ record }) =>
+			(params?.offeringId === undefined || record.offeringId === params.offeringId) &&
+			(params?.course === undefined || record.courseCode === params.course) &&
+			(params?.section === undefined || record.section === params.section) &&
+			(!start || record.date >= start) &&
+			(!end || record.date <= end)
+	);
+
+	const items = rows.map(({ record, index }) => toHistoryRow(record, index));
+
+	const sortBy = params?.sortBy ?? 'date';
+	const direction = (params?.sortDir ?? 'desc') === 'asc' ? 1 : -1;
+	items.sort((a, b) => {
+		if (sortBy === 'code') return a.session_code.localeCompare(b.session_code) * direction;
+		if (sortBy === 'section')
+			return (
+				(a.section.localeCompare(b.section) || a.created_at.localeCompare(b.created_at)) *
+				direction
+			);
+		if (sortBy === 'rate') return (a.compliance_rate - b.compliance_rate) * direction;
+		return a.created_at.localeCompare(b.created_at) * direction;
+	});
+
+	const size = Math.min(Math.max(params?.size ?? 20, 1), 100);
+	const pageCount = Math.max(1, Math.ceil(items.length / size));
+	const page = Math.min(Math.max(params?.page ?? 1, 1), pageCount);
+	const avg_compliance =
+		items.length === 0
+			? 0
+			: items.reduce((total, row) => total + row.compliance_rate, 0) / items.length;
+
+	return {
+		items: items.slice((page - 1) * size, page * size),
+		total: items.length,
+		page,
+		size,
+		avg_compliance,
+		total_sessions: items.length
+	};
+};
+
+// Materialize a history fixture into a closed MockSession on first access so
+// getActiveSession (and the excuse actions) work for history ids exactly like
+// live ones. Statuses are dealt out present → late → excused → absent so the
+// projector counts match the history row; the excused reason is a mock
+// placeholder — the contracts expose no per-student excuse text for completed
+// sessions. Delete with the mock.
+const HISTORY_SESSIONS = new Map<number, MockSession>();
+
+const materializeHistorySession = (sessionId: number): MockSession | null => {
+	const cached = HISTORY_SESSIONS.get(sessionId);
+	if (cached) return cached;
+	if (!Number.isInteger(sessionId)) return null;
+
+	const index = sessionId - HISTORY_ID_BASE;
+	const record = REPORT_SESSIONS[index];
+	if (!record || index < 0) return null;
+
+	const row = toHistoryRow(record, index);
+	const createdAt = new Date(row.created_at).getTime();
+	const offering = resolveOffering(record.offeringId);
+
+	const students: MockRosterStudent[] = [];
+	for (let i = 0; i < record.enrolled; i += 1) {
+		const status: MockAttendanceStatus =
+			i < record.present
+				? 'present'
+				: i < record.present + record.late
+					? 'late'
+					: i < record.present + record.late + record.excused
+						? 'excused'
+						: 'absent';
+		const scanned = status === 'present' || status === 'late';
+		students.push({
+			studentNumber: `H${record.offeringId}-${record.date.replaceAll('-', '')}-${String(i + 1).padStart(3, '0')}`,
+			name: rosterName(i),
+			section: record.section,
+			status,
+			scannedAt: scanned
+				? new Date(createdAt + (i + 1) * 2 * 60 * 1000).toISOString()
+				: undefined,
+			excuseReason: status === 'excused' ? 'Excused (recorded for a prior session)' : undefined,
+			gps: scanned ? 'in' : null
+		});
+	}
+
+	const session: MockSession = {
+		id: row.id,
+		offeringId: record.offeringId,
+		courseId: record.courseId,
+		internalCode: `SESSION-${record.date}-${record.offeringId}`,
+		sessionCode: row.session_code,
+		qrPayload: {
+			v: 1,
+			code: row.session_code,
+			course: record.offeringId,
+			radius: 50,
+			pw: 15,
+			lw: 5
+		},
+		createdAt: row.created_at,
+		expiresAt: row.expires_at,
+		scheduledEndTime: row.expires_at,
+		status: 'closed',
+		presentWindowMinutes: 15,
+		lateWindowMinutes: 5,
+		enrolledCount: record.enrolled,
+		pendingSyncCount: 0,
+		classroomName: offering.room,
+		students
+	};
+	HISTORY_SESSIONS.set(sessionId, session);
+	return session;
 };
 
