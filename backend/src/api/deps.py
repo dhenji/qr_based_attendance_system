@@ -14,6 +14,7 @@ from features.admin.service import AdminService
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.course.service import CourseService
+from features.professor.service import ProfessorService
 from features.program.service import ProgramService
 from features.student.service import StudentService
 from shared.enums import UserRole
@@ -155,11 +156,18 @@ async def _get_student_service(
     return StudentService(session)
 
 
+async def _get_professor_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> ProfessorService:
+    return ProfessorService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
 CourseServiceDep = Annotated[CourseService, Depends(_get_course_service)]
 StudentServiceDep = Annotated[StudentService, Depends(_get_student_service)]
+ProfessorServiceDep = Annotated[ProfessorService, Depends(_get_professor_service)]
 
 CurrentUserDep = Annotated[User, Depends(_get_current_user)]
 OptionalUserDep = Annotated[User | None, Depends(_get_optional_current_user)]
