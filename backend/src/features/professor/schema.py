@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
-
 from features.professor.constants import (
     DEPARTMENT_MAX_LENGTH,
     EMAIL_MAX_LENGTH,
@@ -131,3 +130,43 @@ class ProfessorImportResult(BaseModel):
     imported: int
     duplicates: int
     errors: list[ProfessorImportError] = Field(default_factory=list)
+
+
+class AssignedOfferingItem(BaseModel):
+    """Minimal assigned-offering row for GET /professor/courses.
+
+    A follow-up enriches this shape with units, enrolled_count and the
+    derived section — the envelope stays PaginatedResponse either way.
+    """
+
+    offering_id: int
+    course_code: str
+    course_name: str
+    program_code: str
+    year_level_label: str
+    is_primary: bool
+
+
+class ProfessorProfileRead(BaseModel):
+    """Self profile for GET /professor/profile (wireframes 3.9).
+
+    claim_status derives from professors.user_id non-null; session_count and
+    created_at feed the "Account ... - Sessions ..." line.
+    """
+
+    id: int
+    first_name: str
+    middle_name: str | None = None
+    last_name: str
+    email: str
+    department: str | None = None
+    assigned_courses: list[AssignedOfferingItem] = Field(default_factory=list)
+    claim_status: Literal["Claimed", "Unclaimed"]
+    created_at: datetime
+    session_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MessageResponse(BaseModel):
+    message: str

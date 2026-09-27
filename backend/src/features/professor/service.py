@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Row, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.course.exceptions import OfferingNotFoundException
@@ -20,13 +20,16 @@ from features.professor.exceptions import (
 from features.professor.model import Professor
 from features.professor.schema import (
     AssignedCourse,
+    AssignedOfferingItem,
     ProfessorCreate,
     ProfessorDetail,
     ProfessorImportError,
     ProfessorImportResult,
+    ProfessorProfileRead,
     ProfessorRead,
     ProfessorUpdate,
 )
+from features.program.model import Program, YearLevel
 from features.session.model import Session
 from shared.base import BaseCRUD
 from shared.csv_import import is_valid_email, parse_csv
@@ -64,8 +67,7 @@ def parse_professor_roster_csv(
     raw_rows, structural_errors = parse_csv(content, ROSTER_CSV_COLUMNS)
 
     errors: list[ProfessorImportError] = [
-        ProfessorImportError(line=e.line, reason=e.reason)
-        for e in structural_errors
+        ProfessorImportError(line=e.line, reason=e.reason) for e in structural_errors
     ]
 
     if structural_errors:
@@ -311,6 +313,63 @@ class ProfessorService:
         await self._session.delete(professor)
         await self._session.flush()
 
+    async def resolve_professor_id(self, *, user_id: int) -> int:
+        """Map a user id to its claimed professor row; 404 when unclaimed."""
+        return (await self._get_professor_by_user_or_404(user_id)).id
+
+    async def list_assigned_offerings(
+        self, *, user_id: int, page: int = 1, size: int = 50
+    ) -> PaginatedResponse[AssignedOfferingItem]:
+        """Own active assignments in the minimal shape.
+
+        Active means the course_professors effective window covers today and
+        the offering itself is active. A follow-up enriches each row with
+        units, enrolled_count and the derived section.
+        """
+        professor: Professor = await self._get_professor_by_user_or_404(user_id)
+        items: Sequence[AssignedOfferingItem] = await self._assigned_offerings(
+            professor.id
+        )
+        window: list[AssignedOfferingItem] = list(
+            items[(page - 1) * size : page * size]
+        )
+
+        return PaginatedResponse[AssignedOfferingItem](
+            items=window, total=len(items), page=page, size=size
+        )
+
+    async def get_self_profile(self, *, user_id: int) -> ProfessorProfileRead:
+        """Self profile for the account header (wireframes 3.9).
+
+        ``claim_status`` derives from ``professors.user_id`` non-null and
+        ``session_count`` counts every session row owned by the professor.
+        """
+        professor: Professor = await self._get_professor_by_user_or_404(user_id)
+        assigned: list[AssignedOfferingItem] = list(
+            await self._assigned_offerings(professor.id)
+        )
+        session_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Session)
+                .where(Session.professor_id == professor.id)
+            )
+            or 0
+        )
+
+        return ProfessorProfileRead(
+            id=professor.id,
+            first_name=professor.first_name,
+            middle_name=professor.middle_name,
+            last_name=professor.last_name,
+            email=professor.email,
+            department=professor.department,
+            assigned_courses=assigned,
+            claim_status="Claimed" if professor.user_id is not None else "Unclaimed",
+            created_at=professor.created_at,
+            session_count=session_count,
+        )
+
     async def _archive_row(self, professor: Professor) -> None:
         # Soft archive touches only its own row (ADR-058): no cascade to
         # course_professors / sessions / users.
@@ -324,6 +383,68 @@ class ProfessorService:
             raise ProfessorNotFoundException(professor_id)
 
         return professor
+
+    async def _get_professor_by_user_or_404(self, user_id: int) -> Professor:
+        professor: Professor | None = await self._professors.get_by(user_id=user_id)
+
+        if professor is None:
+            raise ProfessorNotFoundException(user_id)
+
+        return professor
+
+    async def _assigned_offerings(
+        self, professor_id: int
+    ) -> Sequence[AssignedOfferingItem]:
+        """Active assignments ordered by offering id (minimal columns)."""
+        today: date = date.today()
+        rows = (
+            await self._session.execute(
+                select(
+                    CourseOffering.id,
+                    Course.course_code,
+                    Course.course_name,
+                    Program.code,
+                    YearLevel.label,
+                    CourseProfessor.is_primary,
+                )
+                .join(
+                    CourseProfessor,
+                    CourseProfessor.offering_id == CourseOffering.id,
+                )
+                .join(Course, Course.id == CourseOffering.course_id)
+                .join(Program, Program.id == CourseOffering.program_id)
+                .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
+                .where(
+                    CourseProfessor.professor_id == professor_id,
+                    CourseProfessor.effective_from <= today,
+                    or_(
+                        CourseProfessor.effective_to.is_(None),
+                        CourseProfessor.effective_to >= today,
+                    ),
+                    CourseOffering.is_active.is_(True),
+                )
+                .order_by(CourseOffering.id.asc())
+            )
+        ).all()
+
+        return [
+            AssignedOfferingItem(
+                offering_id=offering_id,
+                course_code=course_code,
+                course_name=course_name,
+                program_code=program_code,
+                year_level_label=year_level_label,
+                is_primary=bool(is_primary),
+            )
+            for (
+                offering_id,
+                course_code,
+                course_name,
+                program_code,
+                year_level_label,
+                is_primary,
+            ) in rows
+        ]
 
     async def _get_offering_or_404(self, offering_id: int) -> CourseOffering:
         offering: CourseOffering | None = await self._session.get(
@@ -399,7 +520,7 @@ class ProfessorService:
             )
 
     async def _assigned_courses(self, professor_id: int) -> Sequence[AssignedCourse]:
-        rows: Sequence[tuple[int, str]] = (
+        rows: Sequence[Row[tuple[int, str]]] = (
             await self._session.execute(
                 select(CourseOffering.id, Course.course_code)
                 .join(CourseProfessor, CourseProfessor.offering_id == CourseOffering.id)
@@ -424,7 +545,7 @@ class ProfessorService:
             department=professor.department,
             is_active=professor.is_active,
             claim_status="Claimed" if professor.user_id is not None else "Unclaimed",
-            assigned_courses=await self._assigned_courses(professor.id),
+            assigned_courses=list(await self._assigned_courses(professor.id)),
             created_at=professor.created_at,
         )
 
