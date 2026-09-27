@@ -212,7 +212,11 @@
 			<AppIcon name="plus" size={18} />
 			New Session
 		</button>
-		<button class="btn btn-secondary" disabled title="Reports arrive in Phase 7">
+		<button
+			class="btn btn-secondary"
+			data-testid="export-report"
+			onclick={() => goto(Routes.PROFESSOR_REPORTS)}
+		>
 			<AppIcon name="file" size={18} />
 			Export Report
 		</button>
