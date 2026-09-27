@@ -91,6 +91,7 @@
 	});
 
 	const pageCount = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+	const pageNumbers = $derived(Array.from({ length: pageCount }, (_, index) => index + 1));
 	const rangeText = $derived.by(() => {
 		if (total === 0) return '0 of 0 requests';
 		const start = (currentPage - 1) * PAGE_SIZE + 1;
@@ -348,7 +349,7 @@
 			</div>
 			<div class="table-foot">
 				<p class="average">{summaryText}</p>
-				<nav class="pages" aria-label="Excuse pages">
+				<nav class="pages no-print" aria-label="Excuse pages">
 					<button
 						class="page"
 						type="button"
@@ -358,7 +359,19 @@
 					>
 						Previous
 					</button>
-					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
+					{#each pageNumbers as pageNumber (pageNumber)}
+						<button
+							class="page"
+							class:current={pageNumber === currentPage}
+							type="button"
+							disabled={pageNumber === currentPage}
+							onclick={() => (currentPage = pageNumber)}
+							aria-label={`Go to excuse page ${pageNumber}`}
+							aria-current={pageNumber === currentPage ? 'page' : undefined}
+						>
+							{pageNumber}
+						</button>
+					{/each}
 					<button
 						class="page"
 						type="button"
@@ -805,35 +818,37 @@
 	}
 
 	.table-foot {
-		padding: 0.75rem 1rem;
-		border-top: 1px solid #e2e8f0;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
+		flex-direction: column;
 		gap: 1rem;
-		flex-wrap: wrap;
+		padding: 1.25rem 1.5rem;
+		border-top: 1px solid #f1f5f9;
 	}
 
 	.average {
 		margin: 0;
-		font-size: 0.875rem;
-		color: #64748b;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		color: #334155;
 	}
 
 	.pages {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.375rem;
 	}
 
 	.page {
-		background: none;
-		border: 1px solid #e2e8f0;
-		border-radius: 6px;
-		padding: 0.25rem 0.625rem;
-		font-family: inherit;
-		font-size: 0.875rem;
-		color: #1e3a5f;
+		min-width: 2.375rem;
+		padding: 0.4375rem 0.625rem;
+		border-radius: 8px;
+		border: 1px solid #cbd5e1;
+		background: white;
+		color: #0f172a;
+		font: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
 		cursor: pointer;
 	}
 
@@ -841,14 +856,22 @@
 		background: #f1f5f9;
 	}
 
-	.page:disabled {
-		color: #94a3b8;
-		cursor: not-allowed;
+	.page:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 1px;
 	}
 
-	.page-count {
-		font-size: 0.875rem;
-		color: #64748b;
+	.page.current {
+		background: #1e3a5f;
+		border-color: #1e3a5f;
+		color: white;
+	}
+
+	.page:disabled:not(.current) {
+		color: #94a3b8;
+		background: #f8fafc;
+		border-color: #e2e8f0;
+		cursor: not-allowed;
 	}
 
 	.sr-only {
