@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
 from api.deps import ProfessorServiceDep, require_role
 from features.auth.model import User
@@ -14,6 +14,7 @@ from features.professor.constants import (
 from features.professor.schema import (
     ProfessorCreate,
     ProfessorDetail,
+    ProfessorImportResult,
     ProfessorRead,
     ProfessorUpdate,
 )
@@ -79,6 +80,23 @@ async def create_professor(
     return await service.create(payload=payload, assigned_by=user.id)
 
 
+# The static import route is declared before /{professor_id} so it is not
+# captured as a professor id.
+@router.post(
+    "/import",
+    response_model=ProfessorImportResult,
+    summary="Import new professor records from a CSV upload",
+)
+async def import_professors(
+    file: Annotated[UploadFile, File(description="professors.csv")],
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProfessorServiceDep,
+) -> ProfessorImportResult:
+    content: bytes = await file.read()
+
+    return await service.import_roster(content=content)
+
+
 @router.get(
     "/{professor_id}",
     response_model=ProfessorDetail,
@@ -106,3 +124,16 @@ async def update_professor(
     return await service.update(
         professor_id=professor_id, payload=payload, assigned_by=user.id
     )
+
+
+@router.delete(
+    "/{professor_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Permanently delete an archived professor with no sessions",
+)
+async def hard_delete_professor(
+    professor_id: int,
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProfessorServiceDep,
+) -> None:
+    await service.hard_delete(professor_id=professor_id)

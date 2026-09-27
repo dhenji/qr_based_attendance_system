@@ -107,3 +107,14 @@ class StudentUpdate(BaseModel):
                 raise ValueError(f"{field} cannot be null")
 
         return self
+
+
+class StudentImportError(BaseModel):
+    line: int
+    reason: str
+
+
+class StudentImportResult(BaseModel):
+    imported: int
+    duplicates: int
+    errors: list[StudentImportError] = Field(default_factory=list)

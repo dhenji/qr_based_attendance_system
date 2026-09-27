@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -12,6 +13,8 @@ from features.course_professor.model import CourseProfessor
 from features.course_professor.service import CourseProfessorService
 from features.professor.exceptions import (
     ProfessorEmailExistsException,
+    ProfessorHasRecordsException,
+    ProfessorNotArchivedException,
     ProfessorNotFoundException,
 )
 from features.professor.model import Professor
@@ -19,11 +22,95 @@ from features.professor.schema import (
     AssignedCourse,
     ProfessorCreate,
     ProfessorDetail,
+    ProfessorImportError,
+    ProfessorImportResult,
     ProfessorRead,
     ProfessorUpdate,
 )
+from features.session.model import Session
 from shared.base import BaseCRUD
+from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
+
+ROSTER_CSV_COLUMNS: tuple[str, ...] = (
+    "first_name",
+    "middle_name",
+    "last_name",
+    "email",
+    "department",
+)
+
+
+@dataclass
+class _RosterRow:
+    line: int
+    first_name: str
+    middle_name: str | None
+    last_name: str
+    email: str
+    department: str | None
+
+
+def parse_professor_roster_csv(
+    content: bytes,
+) -> tuple[list[_RosterRow], list[ProfessorImportError]]:
+    """Parse the professor roster-import CSV upload.
+
+    Returns (valid_rows, errors). Never raises on bad rows — every problem
+    is reported as a ProfessorImportError with its 1-based line number
+    (header = 1). Emails are lowercased so duplicate detection agrees with
+    single-create.
+    """
+    raw_rows, structural_errors = parse_csv(content, ROSTER_CSV_COLUMNS)
+
+    errors: list[ProfessorImportError] = [
+        ProfessorImportError(line=e.line, reason=e.reason)
+        for e in structural_errors
+    ]
+
+    if structural_errors:
+        return [], errors
+
+    rows: list[_RosterRow] = []
+
+    for raw in raw_rows:
+        lineno = raw.line
+        cell = raw.values.get
+
+        first_name = (cell("first_name") or "").strip()
+        last_name = (cell("last_name") or "").strip()
+        email = (cell("email") or "").strip().lower()
+
+        if not first_name or not last_name or not email:
+            errors.append(
+                ProfessorImportError(
+                    line=lineno,
+                    reason=f"missing required field for professor {email or 'on line'}",
+                )
+            )
+            continue
+
+        if not is_valid_email(email):
+            errors.append(
+                ProfessorImportError(
+                    line=lineno,
+                    reason=f"invalid email for professor {email}",
+                )
+            )
+            continue
+
+        rows.append(
+            _RosterRow(
+                line=lineno,
+                first_name=first_name,
+                middle_name=(cell("middle_name") or "").strip() or None,
+                last_name=last_name,
+                email=email,
+                department=(cell("department") or "").strip() or None,
+            )
+        )
+
+    return rows, errors
 
 
 class ProfessorService:
@@ -160,6 +247,69 @@ class ProfessorService:
         await self._session.flush()
 
         return await self._to_read(professor)
+
+    async def import_roster(self, *, content: bytes) -> ProfessorImportResult:
+        """Create NEW professor records from a CSV upload.
+
+        Rows whose email already exists — in the database or earlier in the
+        same file — are counted as duplicates, not errors. No user rows are
+        created: imports stay Unclaimed until self-registration.
+        """
+        rows, errors = parse_professor_roster_csv(content)
+        imported = 0
+        duplicates = 0
+        seen_emails: set[str] = set()
+
+        for row in rows:
+            if (
+                row.email in seen_emails
+                or await self._professors.get_by(email=row.email) is not None
+            ):
+                duplicates += 1
+                seen_emails.add(row.email)
+                continue
+
+            seen_emails.add(row.email)
+            self._session.add(
+                Professor(
+                    first_name=row.first_name,
+                    middle_name=row.middle_name,
+                    last_name=row.last_name,
+                    email=row.email,
+                    department=row.department,
+                )
+            )
+            imported += 1
+
+        await self._session.flush()
+
+        errors.sort(key=lambda e: e.line)
+
+        return ProfessorImportResult(
+            imported=imported, duplicates=duplicates, errors=errors
+        )
+
+    async def hard_delete(self, *, professor_id: int) -> None:
+        """Permanently delete an archived professor with no sessions."""
+        professor: Professor = await self._get_or_404(professor_id)
+
+        if professor.is_active:
+            raise ProfessorNotArchivedException(professor.id)
+
+        session_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Session)
+                .where(Session.professor_id == professor.id)
+            )
+            or 0
+        )
+
+        if session_count:
+            raise ProfessorHasRecordsException(professor.id)
+
+        await self._session.delete(professor)
+        await self._session.flush()
 
     async def _archive_row(self, professor: Professor) -> None:
         # Soft archive touches only its own row (ADR-058): no cascade to
