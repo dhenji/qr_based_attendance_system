@@ -52,3 +52,34 @@ class YearLevelNotFoundException(ProgramDomainException):
         super().__init__(
             message=f"Year level {year_level_id} not found under program {program_id}"
         )
+
+
+class YearLevelNumberExistsException(ProgramDomainException):
+    """409 - this program already has a year level with this year_number.
+
+    `(program_id, year_number)` carries the `uq_program_year_number` unique
+    constraint, so the duplicate is rejected before the INSERT instead of letting the unique violation surface as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "year_number_exists"
+
+    def __init__(self, year_number: int, program_id: int) -> None:
+        super().__init__(
+            message=f"Year level {year_number} already exists under program {program_id}"
+        )
+
+
+class YearLevelHasCoursesException(ProgramDomainException):
+    """409 - the year level still has course offerings referencing it.
+
+    `course_offerings.year_level_id` is `ondelete="RESTRICT"`, so the delete is rejected before the FK violation surfaces as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "year_has_courses"
+
+    def __init__(self, year_level_id: int) -> None:
+        super().__init__(
+            message=f"Year level {year_level_id} has courses and cannot be deleted"
+        )
