@@ -1,5 +1,3 @@
-import csv
-import io
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -43,6 +41,7 @@ from features.program.exceptions import (
 from features.program.model import Program, YearLevel
 from features.student.model import Student
 from shared.base import BaseCRUD
+from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
 
 BULK_CSV_COLUMNS: tuple[str, ...] = (
@@ -76,40 +75,32 @@ def parse_enrollment_csv(content: bytes) -> tuple[list[_CsvRow], list[BulkEnroll
     Returns (valid_rows, errors). Never raises on bad rows — every problem is
     reported as a BulkEnrollError with its 1-based line number (header = 1).
     """
-    try:
-        text: str = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return [], [BulkEnrollError(line=1, reason="file is not valid UTF-8")]
+    raw_rows, structural_errors = parse_csv(content, BULK_CSV_COLUMNS)
 
-    if not text.strip():
-        return [], [BulkEnrollError(line=1, reason="empty file")]
+    errors: list[BulkEnrollError] = [
+        BulkEnrollError(line=e.line, reason=e.reason) for e in structural_errors
+    ]
 
-    reader = csv.DictReader(io.StringIO(text))
-
-    if reader.fieldnames is None:
-        return [], [BulkEnrollError(line=1, reason="missing header row")]
-
-    header: set[str] = {(name or "").strip() for name in reader.fieldnames}
-    missing: list = sorted(set(BULK_CSV_COLUMNS) - header)
-
-    if missing:
-        return [], [
-            BulkEnrollError(line=1, reason=f"missing columns: {', '.join(missing)}")
-        ]
+    if structural_errors:
+        return [], errors
 
     rows: list[_CsvRow] = []
-    errors: list[BulkEnrollError] = []
 
-    for lineno, raw in enumerate(reader, start=2):
-        cell = lambda key: (raw.get(key) or "").strip()  # noqa: E731
+    for raw in raw_rows:
+        lineno = raw.line
+        cell = raw.values.get
 
-        student_id: str = cell("student_id")
+        student_id: str = (cell("student_id") or "").strip()
 
         if not student_id:
             errors.append(BulkEnrollError(line=lineno, reason="missing student_id"))
             continue
 
-        if not cell("first_name") or not cell("last_name") or not cell("email"):
+        first_name = (cell("first_name") or "").strip()
+        last_name = (cell("last_name") or "").strip()
+        email = (cell("email") or "").strip()
+
+        if not first_name or not last_name or not email:
             errors.append(
                 BulkEnrollError(
                     line=lineno,
@@ -118,7 +109,19 @@ def parse_enrollment_csv(content: bytes) -> tuple[list[_CsvRow], list[BulkEnroll
             )
             continue
 
-        if not cell("program_code") or not cell("year_level"):
+        if not is_valid_email(email):
+            errors.append(
+                BulkEnrollError(
+                    line=lineno,
+                    reason=f"invalid email for student {student_id}",
+                )
+            )
+            continue
+
+        program_code = (cell("program_code") or "").strip()
+        year_level = (cell("year_level") or "").strip()
+
+        if not program_code or not year_level:
             errors.append(
                 BulkEnrollError(
                     line=lineno,
@@ -127,17 +130,20 @@ def parse_enrollment_csv(content: bytes) -> tuple[list[_CsvRow], list[BulkEnroll
             )
             continue
 
+        middle_name = (cell("middle_name") or "").strip() or None
+        section = (cell("section") or "").strip() or None
+
         rows.append(
             _CsvRow(
                 line=lineno,
                 student_id=student_id,
-                first_name=cell("first_name"),
-                middle_name=cell("middle_name") or None,
-                last_name=cell("last_name"),
-                email=cell("email"),
-                program_code=cell("program_code"),
-                year_level=cell("year_level"),
-                section=cell("section") or None,
+                first_name=first_name,
+                middle_name=middle_name,
+                last_name=last_name,
+                email=email,
+                program_code=program_code,
+                year_level=year_level,
+                section=section,
             )
         )
 
@@ -457,6 +463,7 @@ class CourseService:
         rows, errors = parse_enrollment_csv(content)
         enrolled = 0
         skipped = 0
+        seen: set[str] = set()
 
         for row in rows:
             student: Student | None = await self._students.get_by(
@@ -490,6 +497,10 @@ class CourseService:
                 )
                 continue
 
+            if row.student_id in seen:
+                skipped += 1
+                continue
+
             if (
                 await self._enrollments.get_by(
                     student_id=student.id,
@@ -498,9 +509,11 @@ class CourseService:
                 )
                 is not None
             ):
+                seen.add(row.student_id)
                 skipped += 1
                 continue
 
+            seen.add(row.student_id)
             self._session.add(
                 Enrollment(
                     student_id=student.id,
