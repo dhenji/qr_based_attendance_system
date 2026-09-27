@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import { PROFESSOR_COURSES, type ProfessorCourse } from '$lib/features/professor/mock';
 	import {
-		resolveNextClassMeeting,
-		type ClassMeeting
-	} from '$lib/features/professor/schedule';
+		initProfessorCourses,
+		professorState
+	} from '$lib/features/professor/store.svelte';
+	import type { ProfessorCourseSummary } from '$lib/shared/types';
 	import { openSession, SESSION_CODE_SAMPLE } from '$lib/features/session/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
 
@@ -25,23 +26,41 @@
 
 	let selectedOfferingId = $state<number | null>(null);
 
-	const selected = $derived.by<ProfessorCourse | null>(() => {
+	onMount(() => {
+		void (async () => {
+			await initProfessorCourses();
+			if (lockedOfferingId === null && selectedOfferingId === null) {
+				selectedOfferingId = professorState.courses[0]?.offeringId ?? null;
+			}
+		})();
+	});
+
+	const selected = $derived.by<ProfessorCourseSummary | null>(() => {
 		const wanted = lockedOfferingId ?? selectedOfferingId;
 		if (wanted === null) return null;
-		return PROFESSOR_COURSES.find((course) => course.offeringId === wanted) ?? null;
+		return professorState.courses.find((course) => course.offeringId === wanted) ?? null;
 	});
 
 	// Reseed the per-offering form fields whenever the resolved course changes,
 	// so switching in the selector variant never leaves another course's numbers
-	// behind. The form returns to the offering defaults on every change.
+	// behind.
+	//
+	// The assignment contract carries no schedule, classroom, or window
+	// defaults, so the form seeds sane constants instead of offering prefill:
+	// 90-minute duration with 15/5 present/late windows on a 50m geofence.
+	// Anything left at these values is sent explicitly, and the server applies
+	// the offering/app fallbacks for fields the form does not cover
+	// (classroom name/coords when no override is typed).
 	let radius = $state(50);
-	let durationMinutes = $state(0);
-	let presentWindow = $state(0);
-	let lateWindow = $state(0);
+	let durationMinutes = $state(90);
+	let presentWindow = $state(15);
+	let lateWindow = $state(5);
 	let classroomOverride = $state('');
 	// D17: an override moves the geofence, so it needs coordinates as well as a
-	// name. Svelte's number binding yields undefined for an empty input, which is
-	// why the validity check below uses a loose null comparison.
+	// name — the contract exposes no course coordinates to inherit, so both
+	// are required when the override is active. Svelte's number binding yields
+	// undefined for an empty input, which is why the validity check below uses
+	// a loose null comparison.
 	let classroomLat = $state<number | null>(null);
 	let classroomLng = $state<number | null>(null);
 
@@ -53,16 +72,12 @@
 
 		lastSeededOfferingId = course.offeringId;
 		radius = 50;
-		// Prefill with the scheduled class length (wireframe 3.2a).
-		durationMinutes = course.scheduledMinutes;
-		// D44: the window defaults live on the offering.
-		presentWindow = course.defaultPresentWindowMinutes;
-		lateWindow = course.defaultLateWindowMinutes;
+		durationMinutes = 90;
+		presentWindow = 15;
+		lateWindow = 5;
 		classroomOverride = '';
-		// Start the override on the course's own coordinates, so enabling it is a
-		// nudge rather than a retype.
-		classroomLat = course.classroomLat;
-		classroomLng = course.classroomLng;
+		classroomLat = null;
+		classroomLng = null;
 		// A generated session belongs to the previous offering. Clear it so View
 		// Live Session cannot open stale projector data after switching courses.
 		generatedSessionId = null;
@@ -76,17 +91,15 @@
 	const overrideActive = $derived(classroomOverride.trim() !== '');
 
 	// What the geofence will actually use, which is what the callout displays.
+	// Without an override the server falls back to the offering classroom,
+	// whose name the contract does not expose — hence the generic label.
 	const effectiveRoom = $derived(
-		overrideActive ? classroomOverride.trim() : (selected?.classroomName ?? 'Room TBA')
+		overrideActive ? classroomOverride.trim() : 'Offering default classroom'
 	);
 
-	const effectiveLat = $derived(
-		overrideActive ? classroomLat : (selected?.classroomLat ?? null)
-	);
+	const effectiveLat = $derived(overrideActive ? classroomLat : null);
 
-	const effectiveLng = $derived(
-		overrideActive ? classroomLng : (selected?.classroomLng ?? null)
-	);
+	const effectiveLng = $derived(overrideActive ? classroomLng : null);
 
 	const coordsInvalid = $derived(
 		overrideActive &&
@@ -100,30 +113,12 @@
 	const durationInvalid = $derived(durationMinutes <= 0);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
-	// The fixture schedule is recurring: resolve it to the next meeting that has
-	// not ended yet. Blindly using today's date can select a past meeting and,
-	// through D12, create an instantly expired session.
-	const scheduledMeeting = $derived.by<ClassMeeting | null>(() => {
-		const course = selected;
-		if (course === null) return null;
-		return resolveNextClassMeeting(course, new Date());
-	});
-	const scheduleInvalid = $derived(selected !== null && scheduledMeeting === null);
-
-	// D12: expires_at = min(now + duration_minutes, next scheduled_end_time).
+	// The server sets scheduled_end = now + duration (no class timetable feeds
+	// it), so the scan window always closes exactly at now + duration. The
+	// preview below is exact, not an estimate.
 	const expiryPreview = $derived.by(() => {
-		const course = selected;
-		const meeting = scheduledMeeting;
-		if (course === null || meeting === null || durationInvalid) return null;
-
-		const durationEnd = new Date(Date.now() + durationMinutes * 60 * 1000);
-		const capped = durationEnd.getTime() > meeting.end.getTime();
-
-		return {
-			at: capped ? meeting.end : durationEnd,
-			capped,
-			meeting
-		};
+		if (durationInvalid) return null;
+		return { at: new Date(Date.now() + durationMinutes * 60 * 1000) };
 	});
 
 	const RADII = [10, 20, 30, 50, 100] as const;
@@ -136,19 +131,16 @@
 
 	const canSubmit = $derived(
 		selected !== null &&
-			scheduledMeeting !== null &&
 			windowsFit &&
 			!durationInvalid &&
 			!windowsInvalid &&
 			!coordsInvalid &&
-			!scheduleInvalid &&
 			!submitting
 	);
 
 	const handleGenerate = async () => {
 		const course = selected;
-		const meeting = scheduledMeeting;
-		if (course === null || meeting === null || !canSubmit) return;
+		if (course === null || !canSubmit) return;
 
 		submitting = true;
 		error = null;
@@ -163,13 +155,13 @@
 				// override when the professor actually typed one.
 				classroomName: overrideActive ? classroomOverride.trim() : undefined,
 				classroomLat: overrideActive ? (classroomLat ?? undefined) : undefined,
-				classroomLng: overrideActive ? (classroomLng ?? undefined) : undefined,
-				scheduledEndTime: meeting.end.toISOString()
+				classroomLng: overrideActive ? (classroomLng ?? undefined) : undefined
 			});
 
 			generatedSessionId = created.id;
 			generatedCode = created.qrPayload.code;
-			generatedExpiry = dateTimeText(new Date(created.expiresAt));
+			generatedExpiry =
+				created.expiresAt === null ? null : dateTimeText(new Date(created.expiresAt));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to open session';
 		} finally {
@@ -182,11 +174,6 @@
 		void goto(professorActiveSession(generatedSessionId));
 	};
 
-	const scheduleText = (course: ProfessorCourse) =>
-		`${course.scheduleDays} ${course.scheduleStartTime}–${course.scheduleEndTime}`;
-
-	const roomText = (course: ProfessorCourse) => course.classroomName ?? 'Room TBA';
-
 	const clockText = (date: Date) =>
 		date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
@@ -197,12 +184,6 @@
 		const today = new Date();
 		const day = date.toDateString() === today.toDateString() ? 'Today' : dateText(date);
 		return `${day}, ${clockText(date)}`;
-	};
-
-	const meetingText = (meeting: ClassMeeting): string => {
-		const startDay = dateText(meeting.start);
-		const endDay = meeting.end.toDateString() === meeting.start.toDateString() ? '' : `${dateText(meeting.end)} `;
-		return `${startDay} ${clockText(meeting.start)}–${endDay}${clockText(meeting.end)}`;
 	};
 </script>
 
@@ -235,10 +216,10 @@
 							<AppIcon name="lock" size={14} />
 						</div>
 						<span class="locked-meta">
-							{selected.programCode}·{selected.shortYear} · Section {selected.section}
+							{selected.programCode} · {selected.academicYear} · {selected.semester}
 						</span>
 						<span class="locked-meta">
-							{scheduleText(selected)} · {roomText(selected)}
+							{selected.sections.length > 0 ? `Section ${selected.sections.join(', ')}` : 'No section assigned'} · {selected.enrolledCount} enrolled
 						</span>
 					</div>
 				</div>
@@ -251,9 +232,9 @@
 						value={selected.offeringId}
 						onchange={(e) => (selectedOfferingId = Number(e.currentTarget.value))}
 					>
-						{#each PROFESSOR_COURSES as course (course.offeringId)}
+						{#each professorState.courses as course (course.offeringId)}
 							<option value={course.offeringId}>
-								{course.courseCode} — {course.courseName} ({course.programCode}·{course.shortYear})
+								{course.courseCode} — {course.courseName} ({course.programCode})
 							</option>
 						{/each}
 					</select>
@@ -300,19 +281,9 @@
 					min="1"
 					bind:value={durationMinutes}
 				/>
-				{#if scheduleInvalid}
-					<p class="field-error">
-						This course has no upcoming scheduled meeting, so a live session cannot be
-						opened yet.
-					</p>
-				{:else if expiryPreview}
-					<p class="hint">Next meeting: {meetingText(expiryPreview.meeting)}</p>
-					<p class="hint" class:warn={expiryPreview.capped}>
-						Expires min(now + {durationMinutes}m, {clockText(expiryPreview.meeting.end)} scheduled)
-						→ <strong>{dateTimeText(expiryPreview.at)}</strong>
-						{#if expiryPreview.capped}
-							· capped by class end (D12)
-						{/if}
+				{#if expiryPreview}
+					<p class="hint">
+						Scan window closes {dateTimeText(expiryPreview.at)} ({durationMinutes}m from now)
 					</p>
 				{/if}
 			</div>
@@ -355,10 +326,10 @@
 					id="classroom"
 					class="form-input"
 					type="text"
-					placeholder={selected.classroomName ?? 'Course classroom'}
+					placeholder="Offering default classroom"
 					bind:value={classroomOverride}
 				/>
-				<p class="hint">Blank uses the course classroom (D17).</p>
+				<p class="hint">Blank uses the offering default classroom (D17).</p>
 
 				{#if overrideActive}
 					<div class="override-box">
@@ -387,8 +358,8 @@
 							</div>
 						</div>
 						<p class="hint">
-							The geofence centers here instead of the course classroom. Pre-filled with
-							the course coordinates.
+							The geofence centers here instead of the offering default. Both
+							coordinates are required.
 						</p>
 						{#if coordsInvalid}
 							<p class="field-error">Both coordinates are required for a classroom override.</p>
@@ -524,10 +495,6 @@
 		margin: 0;
 		font-size: 0.8125rem;
 		color: #64748b;
-	}
-
-	.hint.warn {
-		color: #b45309;
 	}
 
 	/* A blocking reason, not a suggestion — this is what silently disables

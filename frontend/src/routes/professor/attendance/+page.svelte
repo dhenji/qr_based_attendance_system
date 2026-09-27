@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		listRecords,
@@ -7,11 +8,13 @@
 		type AttendanceLedgerSortDir,
 		type ProfessorAttendanceStatus
 	} from '$lib/features/attendance/service';
-	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+	import {
+		initProfessorCourses,
+		professorState
+	} from '$lib/features/professor/store.svelte';
 	import {
 		buildCsv,
-		defaultReportRange,
-		getReportFilterOptions
+		defaultReportRange
 	} from '$lib/features/report/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
@@ -21,8 +24,11 @@
 	const PAGE_SIZE = 10;
 	const EXPORT_PAGE_SIZE = 100;
 
-	const filterOptions = getReportFilterOptions();
 	const initialRange = defaultReportRange();
+
+	onMount(() => {
+		initProfessorCourses();
+	});
 
 	const statusOptions: Array<'All' | ProfessorAttendanceStatus> = [
 		'All',
@@ -51,6 +57,14 @@
 	let reloadToken = $state(0);
 	let exporting = $state(false);
 
+	// Course options deduped by code, sections joined from the live courses
+	// store. The ledger only queries once both are picked.
+	const courseOptions = $derived(
+		[...new Map(professorState.courses.map((item) => [item.courseCode, item.courseName])).entries()].map(
+			([code, name]) => ({ code, name })
+		)
+	);
+
 	// Course → section cascade: sections narrow to the chosen course, and the
 	// ledger only queries once both are picked. Dates + status reveal after.
 	const availableSections = $derived(
@@ -58,9 +72,9 @@
 			? []
 			: [
 					...new Set(
-						PROFESSOR_COURSES.filter((item) => item.courseCode === course).map(
-							(item) => item.section
-						)
+						professorState.courses
+							.filter((item) => item.courseCode === course)
+							.flatMap((item) => item.sections)
 					)
 				]
 	);
@@ -298,7 +312,7 @@
 					onchange={() => (currentPage = 1)}
 				>
 					<option value="">Select a course…</option>
-					{#each filterOptions.courses as option (option.code)}
+					{#each courseOptions as option (option.code)}
 						<option value={option.code}>{option.code} — {option.name}</option>
 					{/each}
 				</select>

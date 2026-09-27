@@ -4,23 +4,20 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		closeSession,
-		editStudentExcuse,
-		excuseAllAbsent,
-		excuseStudent,
-		getActiveSession,
-		revokeStudentExcuse
+		getActiveSession
 	} from '$lib/features/session/service';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
 
-	type LiveSession = NonNullable<Awaited<ReturnType<typeof getActiveSession>>>;
+	type LiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 
 	const POLL_MS = 3000;
 	const TICK_MS = 1000;
 	const EXPIRING_SOON_SECONDS = 5 * 60;
 	const PAGE_SIZE = 10;
-	const EXCUSE_MIN_REASON_LENGTH = 10;
 
-	type SortKey = 'time' | 'name' | 'status' | 'gps' | 'action';
+	// No excuse actions: there are no excuse endpoints on the backend yet, so
+	// the feed is read-only and the Action column is gone with them.
+	type SortKey = 'time' | 'name' | 'status';
 	type SortDirection = 'asc' | 'desc';
 	type FeedRow = LiveSession['students'][number];
 
@@ -29,7 +26,8 @@
 		late: 1,
 		excused: 2,
 		pending: 3,
-		absent: 4
+		absent: 4,
+		rejected: 5
 	};
 
 	const sessionId = $derived.by(() => {
@@ -53,29 +51,6 @@
 	let sortDirection = $state<SortDirection>('asc');
 	let currentPage = $state(1);
 	let tableScroller = $state<HTMLDivElement | undefined>(undefined);
-	type ExcuseTarget = {
-		studentNumber: string;
-		name: string;
-		status: FeedRow['status'];
-	};
-	let excuseTarget = $state<ExcuseTarget | null>(null);
-	let excuseMode = $state<'create' | 'edit'>('create');
-	let excuseReason = $state('');
-	let excuseNotes = $state('');
-	let excuseError = $state<string | null>(null);
-	let excuseBusy = $state(false);
-	let bulkOpen = $state(false);
-	let bulkReason = $state('');
-	let bulkNotes = $state('');
-	let bulkError = $state<string | null>(null);
-	let bulkBusy = $state(false);
-	let revokeTarget = $state<ExcuseTarget | null>(null);
-	let revokeError = $state<string | null>(null);
-	let revokeBusy = $state(false);
-	let actionNotice = $state<string | null>(null);
-	let excuseDialog = $state<HTMLDivElement | undefined>(undefined);
-	let bulkDialog = $state<HTMLDivElement | undefined>(undefined);
-	let revokeDialog = $state<HTMLDivElement | undefined>(undefined);
 
 	$effect(() => {
 		const id = sessionId;
@@ -104,21 +79,16 @@
 				const live = await getActiveSession(id);
 				if (cancelled) return;
 
-				if (!live) {
-					session = null;
-					loadError = `Session ${id} was not found. It may have been removed.`;
-				} else {
-					session = live;
-					// Anchor the countdown to when the server snapshot was requested,
-					// not when the promise resolved. Otherwise every poll adds fetch
-					// latency back into the displayed timer. Seeding now here also
-					// prevents the first paint from calculating against its zero value.
-					scanSnapshotAt = requestStartedAt;
-					scanSnapshotRemaining = live.scan_window_remaining;
-					now = Date.now();
-					loadError = null;
-					refreshError = null;
-				}
+				session = live;
+				// Anchor the countdown to when the server snapshot was requested,
+				// not when the promise resolved. Otherwise every poll adds fetch
+				// latency back into the displayed timer. Seeding now here also
+				// prevents the first paint from calculating against its zero value.
+				scanSnapshotAt = requestStartedAt;
+				scanSnapshotRemaining = live.scanWindowRemaining;
+				now = Date.now();
+				loadError = null;
+				refreshError = null;
 			} catch {
 				if (cancelled) return;
 				if (session === null) loadError = 'The live session could not be loaded.';
@@ -141,19 +111,7 @@
 		};
 	});
 
-	$effect(() => {
-		if (excuseTarget) excuseDialog?.focus();
-	});
-
-	$effect(() => {
-		if (bulkOpen) bulkDialog?.focus();
-	});
-
-	$effect(() => {
-		if (revokeTarget) revokeDialog?.focus();
-	});
-
-	// scan_window_remaining is a server-computed snapshot rather than an absolute
+	// scanWindowRemaining is a server-computed snapshot rather than an absolute
 	// expiry. Rebuild the absolute expiry from the moment the snapshot was
 	// requested, then count down from the current clock every second. This keeps
 	// the visible timer monotonic between polls and correct after tab throttling.
@@ -167,7 +125,7 @@
 		return Math.max(0, Math.floor((scanExpiresAt - now) / 1000));
 	});
 
-	const classEndsAt = $derived(session ? new Date(session.scheduled_end_time).getTime() : null);
+	const classEndsAt = $derived(session ? new Date(session.scheduledEndTime).getTime() : null);
 	const classRemainingSeconds = $derived.by(() => {
 		if (classEndsAt === null) return null;
 		return Math.max(0, Math.floor((classEndsAt - now) / 1000));
@@ -206,22 +164,6 @@
 
 	const scanEndedText = $derived(scanExpiresAt === null ? null : formatDateTime(scanExpiresAt));
 
-	const gpsText = (gps: LiveSession['students'][number]['gps']): string =>
-		gps === 'in' ? 'In' : gps === 'out' ? 'Out' : 'Not recorded';
-
-	const canExcuse = (status: FeedRow['status']): boolean =>
-		status === 'absent' || status === 'late';
-
-	const canManageExcuse = (status: FeedRow['status']): boolean => status === 'excused';
-
-	const actionRank = (status: FeedRow['status']): number => {
-		if (canExcuse(status)) return 0;
-		if (canManageExcuse(status)) return 1;
-		return 2;
-	};
-
-	const absentCount = $derived(session?.counts.absent ?? 0);
-
 	const sortedStudents = $derived.by<FeedRow[]>(() => {
 		if (!session) return [];
 		const direction = sortDirection === 'asc' ? 1 : -1;
@@ -243,26 +185,14 @@
 				}
 				case 'name':
 					return byName(a, b) * direction;
-				case 'status':
-					return (
-						(STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
-							byTime(a) - byTime(b) ||
-							byName(a, b)) * direction
-					);
-				case 'gps': {
-					const rank = (gps: FeedRow['gps']): number =>
-						gps === 'in' ? 0 : gps === 'out' ? 1 : 2;
-					return (rank(a.gps) - rank(b.gps) || byName(a, b)) * direction;
-				}
-				case 'action': {
-					return (
-						(actionRank(a.status) - actionRank(b.status) ||
-							STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
-							byName(a, b)) * direction
-					);
-				}
-			}
-		});
+			case 'status':
+				return (
+					(STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
+						byTime(a) - byTime(b) ||
+						byName(a, b)) * direction
+				);
+		}
+	});
 
 		return rows;
 	});
@@ -314,11 +244,6 @@
 		return sortDirection === 'asc' ? 'ascending' : 'descending';
 	};
 
-	const excuseReasonValid = $derived(
-		excuseReason.trim().length >= EXCUSE_MIN_REASON_LENGTH
-	);
-	const bulkReasonValid = $derived(bulkReason.trim().length >= EXCUSE_MIN_REASON_LENGTH);
-
 	const refreshSession = async (): Promise<boolean> => {
 		const id = sessionId;
 		if (id === null) return false;
@@ -326,14 +251,9 @@
 		try {
 			const requestStartedAt = Date.now();
 			const live = await getActiveSession(id);
-			if (!live) {
-				session = null;
-				loadError = `Session ${id} was not found. It may have been removed.`;
-				return false;
-			}
 			session = live;
 			scanSnapshotAt = requestStartedAt;
-			scanSnapshotRemaining = live.scan_window_remaining;
+			scanSnapshotRemaining = live.scanWindowRemaining;
 			now = Date.now();
 			loadError = null;
 			refreshError = null;
@@ -341,185 +261,6 @@
 		} catch {
 			refreshError = 'The live feed failed to refresh. Showing the last update.';
 			return false;
-		}
-	};
-
-	const closeExcuseModal = () => {
-		if (excuseBusy) return;
-		excuseTarget = null;
-		excuseError = null;
-	};
-
-	const openExcuse = (student: FeedRow) => {
-		if (!canExcuse(student.status)) return;
-		bulkOpen = false;
-		revokeTarget = null;
-		excuseTarget = {
-			studentNumber: student.studentNumber,
-			name: student.name,
-			status: student.status
-		};
-		excuseMode = 'create';
-		excuseReason = '';
-		excuseNotes = '';
-		excuseError = null;
-		excuseBusy = false;
-	};
-
-	const openEditExcuse = (student: FeedRow) => {
-		if (!canManageExcuse(student.status)) return;
-		bulkOpen = false;
-		revokeTarget = null;
-		excuseTarget = {
-			studentNumber: student.studentNumber,
-			name: student.name,
-			status: student.status
-		};
-		excuseMode = 'edit';
-		excuseReason = student.excuseReason ?? '';
-		excuseNotes = student.excuse_notes ?? '';
-		excuseError = null;
-		excuseBusy = false;
-	};
-
-	const openRevokeExcuse = (student: FeedRow) => {
-		if (!canManageExcuse(student.status)) return;
-		excuseTarget = null;
-		bulkOpen = false;
-		revokeTarget = {
-			studentNumber: student.studentNumber,
-			name: student.name,
-			status: student.status
-		};
-		revokeError = null;
-		revokeBusy = false;
-	};
-
-	const closeRevokeModal = () => {
-		if (revokeBusy) return;
-		revokeTarget = null;
-		revokeError = null;
-	};
-
-	const openBulkExcuse = () => {
-		if (absentCount === 0) return;
-		excuseTarget = null;
-		revokeTarget = null;
-		bulkOpen = true;
-		bulkReason = '';
-		bulkNotes = '';
-		bulkError = null;
-		bulkBusy = false;
-	};
-
-	const closeBulkModal = () => {
-		if (bulkBusy) return;
-		bulkOpen = false;
-		bulkError = null;
-	};
-
-	const closeExcuseOnOverlay = (event: MouseEvent) => {
-		if (event.target === event.currentTarget) closeExcuseModal();
-	};
-
-	const closeBulkOnOverlay = (event: MouseEvent) => {
-		if (event.target === event.currentTarget) closeBulkModal();
-	};
-
-	const closeRevokeOnOverlay = (event: MouseEvent) => {
-		if (event.target === event.currentTarget) closeRevokeModal();
-	};
-
-	const closeOpenModalOnEscape = (event: KeyboardEvent) => {
-		if (event.key !== 'Escape') return;
-		closeExcuseModal();
-		closeBulkModal();
-		closeRevokeModal();
-	};
-
-	const submitExcuse = async () => {
-		const id = sessionId;
-		const target = excuseTarget;
-		if (id === null || !target || excuseBusy) return;
-		if (!excuseReasonValid) {
-			excuseError = `Reason must be at least ${EXCUSE_MIN_REASON_LENGTH} characters.`;
-			return;
-		}
-
-		excuseBusy = true;
-		excuseError = null;
-		try {
-			if (excuseMode === 'create') {
-				await excuseStudent(id, target.studentNumber, {
-					reason: excuseReason,
-					notes: excuseNotes
-				});
-			} else {
-				await editStudentExcuse(id, target.studentNumber, {
-					reason: excuseReason,
-					notes: excuseNotes
-				});
-			}
-			const refreshed = await refreshSession();
-			if (refreshed) {
-				actionNotice =
-					excuseMode === 'create'
-						? `${target.name} was marked excused.`
-						: `The excuse for ${target.name} was updated.`;
-				excuseTarget = null;
-			}
-		} catch (e) {
-			excuseError = e instanceof Error ? e.message : 'The excuse could not be saved.';
-		} finally {
-			excuseBusy = false;
-		}
-	};
-
-	const submitRevoke = async () => {
-		const id = sessionId;
-		const target = revokeTarget;
-		if (id === null || !target || revokeBusy) return;
-
-		revokeBusy = true;
-		revokeError = null;
-		try {
-			const result = await revokeStudentExcuse(id, target.studentNumber);
-			const refreshed = await refreshSession();
-			if (refreshed) {
-				actionNotice = `The excuse for ${target.name} was revoked; status restored to ${result.reverted_to}.`;
-				revokeTarget = null;
-			}
-		} catch (e) {
-			revokeError = e instanceof Error ? e.message : 'The excuse could not be revoked.';
-		} finally {
-			revokeBusy = false;
-		}
-	};
-
-	const submitBulkExcuse = async () => {
-		const id = sessionId;
-		if (id === null || bulkBusy) return;
-		if (!bulkReasonValid) {
-			bulkError = `Reason must be at least ${EXCUSE_MIN_REASON_LENGTH} characters.`;
-			return;
-		}
-
-		bulkBusy = true;
-		bulkError = null;
-		try {
-			const result = await excuseAllAbsent(id, { reason: bulkReason, notes: bulkNotes });
-			const refreshed = await refreshSession();
-			if (refreshed) {
-				actionNotice =
-					result.excused_count === 0
-						? 'No students were still absent, so nothing changed.'
-						: `${result.excused_count} absent ${result.excused_count === 1 ? 'student was' : 'students were'} excused.`;
-				bulkOpen = false;
-			}
-		} catch (e) {
-			bulkError = e instanceof Error ? e.message : 'The bulk excuse could not be saved.';
-		} finally {
-			bulkBusy = false;
 		}
 	};
 
@@ -543,12 +284,10 @@
 			await closeSession(id);
 			closedNotice = true;
 			const live = await getActiveSession(id);
-			if (live) {
-				session = live;
-				scanSnapshotAt = requestStartedAt;
-				scanSnapshotRemaining = live.scan_window_remaining;
-				now = Date.now();
-			}
+			session = live;
+			scanSnapshotAt = requestStartedAt;
+			scanSnapshotRemaining = live.scanWindowRemaining;
+			now = Date.now();
 		} catch {
 			refreshError = 'The session could not be closed.';
 		} finally {
@@ -557,16 +296,14 @@
 	};
 </script>
 
-<svelte:window onkeydown={closeOpenModalOnEscape} />
-
 <div class="live">
 	<header class="header">
 		<button class="btn btn-ghost" type="button" onclick={goBack}>Back</button>
 		{#if session}
 			<div class="title">
-				<h1>Active: {session.offering.course_code} — {session.offering.course_name}</h1>
+				<h1>Active: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offering.section} · {session.offering.room} · Code {session.session_code}
+					Section {session.offeringSections} · Code {session.sessionCode}
 				</p>
 			</div>
 			<button
@@ -603,13 +340,10 @@
 		{#if closedNotice}
 			<p class="notice" role="status">Session closed. New scans are blocked.</p>
 		{/if}
-		{#if actionNotice}
-			<p class="notice" role="status">{actionNotice}</p>
-		{/if}
 
 		<section class="card code-card" aria-label="Projector session code">
 			<span class="code-label">Session Code · Show on projector</span>
-			<span class="code">{session.session_code}</span>
+			<span class="code">{session.sessionCode}</span>
 			<div class="timers">
 				<div class="timer" class:urgent={expiringSoon || scanExpired}>
 					<span class="timer-label">Scan window</span>
@@ -618,14 +352,14 @@
 				<div class="timer">
 					<span class="timer-label">Class ends in</span>
 					<span class="timer-value">{formatCountdown(classRemainingSeconds)}</span>
-					<span class="timer-sub">at {formatClock(session.scheduled_end_time)}</span>
+					<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
 				</div>
 			</div>
 		</section>
 
 		<section class="tiles" aria-label="Session totals">
 			<article class="tile">
-				<span class="tile-value">{session.enrolled_count}</span>
+				<span class="tile-value">{session.enrolledCount}</span>
 				<span class="tile-label">Enrolled</span>
 			</article>
 			<article class="tile">
@@ -670,75 +404,29 @@
 									<span class="sort-arrow" class:active={sortKey === 'name'} aria-hidden="true">{sortArrow('name')}</span>
 								</button>
 							</th>
-							<th scope="col" aria-sort={ariaSort('status')}>
-								<button class="sort" type="button" onclick={() => setSort('status')} aria-label={sortLabel('status', 'Status')}>
-									<span>Status</span>
-									<span class="sort-arrow" class:active={sortKey === 'status'} aria-hidden="true">{sortArrow('status')}</span>
-								</button>
-							</th>
-							<th scope="col" aria-sort={ariaSort('gps')}>
-								<button class="sort" type="button" onclick={() => setSort('gps')} aria-label={sortLabel('gps', 'GPS')}>
-									<span>GPS</span>
-									<span class="sort-arrow" class:active={sortKey === 'gps'} aria-hidden="true">{sortArrow('gps')}</span>
-								</button>
-							</th>
-							<th scope="col" aria-sort={ariaSort('action')}>
-								<button class="sort" type="button" onclick={() => setSort('action')} aria-label={sortLabel('action', 'Action')}>
-									<span>Action</span>
-									<span class="sort-arrow" class:active={sortKey === 'action'} aria-hidden="true">{sortArrow('action')}</span>
-								</button>
-							</th>
+						<th scope="col" aria-sort={ariaSort('status')}>
+							<button class="sort" type="button" onclick={() => setSort('status')} aria-label={sortLabel('status', 'Status')}>
+								<span>Status</span>
+								<span class="sort-arrow" class:active={sortKey === 'status'} aria-hidden="true">{sortArrow('status')}</span>
+							</button>
+						</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each pagedStudents as student (student.studentNumber)}
+						<tr>
+							<td>{student.scannedAt ? formatClock(student.scannedAt) : '—'}</td>
+							<td>
+								<div class="student-name">{student.name}</div>
+								<div class="student-id">{student.studentNumber} · Section {student.section ?? '—'}</div>
+								{#if student.excuseReason}
+									<div class="student-id">{student.excuseReason}</div>
+								{/if}
+							</td>
+							<td><span class="status status-{student.status}">{student.status}</span></td>
 						</tr>
-					</thead>
-					<tbody>
-						{#each pagedStudents as student (student.studentNumber)}
-							<tr>
-								<td>{student.scannedAt ? formatClock(student.scannedAt) : '—'}</td>
-								<td>
-									<div class="student-name">{student.name}</div>
-									<div class="student-id">{student.studentNumber} · Section {student.section}</div>
-									{#if student.excuseReason}
-										<div class="student-id">{student.excuseReason}</div>
-									{/if}
-								</td>
-								<td><span class="status status-{student.status}">{student.status}</span></td>
-								<td>{gpsText(student.gps)}</td>
-								<td>
-									{#if canExcuse(student.status)}
-										<button
-											class="mini"
-											type="button"
-											onclick={() => openExcuse(student)}
-											aria-label={`Excuse ${student.name}`}
-										>
-											Excuse
-										</button>
-									{:else if canManageExcuse(student.status)}
-										<div class="action-buttons">
-											<button
-												class="mini"
-												type="button"
-												onclick={() => openEditExcuse(student)}
-												aria-label={`Edit excuse for ${student.name}`}
-											>
-												Edit
-											</button>
-											<button
-												class="mini mini-danger"
-												type="button"
-												onclick={() => openRevokeExcuse(student)}
-												aria-label={`Revoke excuse for ${student.name}`}
-											>
-												Revoke
-											</button>
-										</div>
-									{:else}
-										<span aria-hidden="true">—</span>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
+					{/each}
+				</tbody>
 				</table>
 			</div>
 			<nav class="pages" aria-label="Live feed pages">
@@ -785,7 +473,7 @@
 						{#if expiredSession && scanEndedText}
 							Scan window ended at {scanEndedText} ·
 						{/if}
-						Waiting for offline syncs · {session.pending_sync_count} records pending sync
+						Waiting for offline syncs · {session.pendingSyncCount} records pending sync
 					</span>
 				</div>
 			</section>
@@ -793,28 +481,13 @@
 
 		<section class="card excuse-all">
 			<div>
-				<h2 class="section-title">Excuse all absent</h2>
+				<h2 class="section-title">Excuse actions</h2>
 				<p class="muted">
-					{#if absentCount === 0}
-						{#if isClosed || scanExpired}
-							No absent students right now.
-						{:else}
-							No absent students yet ({session.counts.pending} pending). Close the session to finalize unscanned students, or wait until the scan window ends.
-						{/if}
-					{:else}
-						Bulk excuse needs one reason and applies only to currently absent students.
-					{/if}
+					Quick-excuse, editing, revoking, and bulk excuse need excuse endpoints,
+					which the backend does not expose yet. The feed above stays read-only
+					until that slice lands.
 				</p>
 			</div>
-			<button
-				class="btn btn-secondary"
-				type="button"
-				disabled={absentCount === 0}
-				title={absentCount === 0 ? 'No absent students to excuse' : 'Excuse all absent students'}
-				onclick={openBulkExcuse}
-			>
-				Excuse All Absent
-			</button>
 		</section>
 
 		<div class="footer">
@@ -831,143 +504,12 @@
 				<button
 					class="btn btn-primary"
 					type="button"
-					onclick={() => goto(professorSessionCreate(closedSession.offering.id))}
+					onclick={() => goto(professorSessionCreate(closedSession.offeringId))}
 				>
 					Open another session
 				</button>
 			{/if}
 		</div>
-
-		{#if excuseTarget}
-			<div class="modal-overlay" role="presentation" onclick={closeExcuseOnOverlay}>
-				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="excuse-dialog-title" bind:this={excuseDialog} tabindex={-1}>
-					<h2 id="excuse-dialog-title" class="modal-title">
-						{excuseMode === 'create' ? `Excuse ${excuseTarget.name}` : `Edit excuse for ${excuseTarget.name}`}
-					</h2>
-					<p class="muted">
-						Current status: {excuseTarget.status}. A reason of at least {EXCUSE_MIN_REASON_LENGTH} characters is required.
-					</p>
-					<div class="modal-field">
-						<label class="form-label" for="excuse-reason">Reason</label>
-						<textarea
-							id="excuse-reason"
-							class="modal-input"
-							rows={4}
-							bind:value={excuseReason}
-							disabled={excuseBusy}
-							aria-describedby="excuse-reason-help"
-						></textarea>
-						<p id="excuse-reason-help" class="hint">
-							{excuseReason.trim().length}/{EXCUSE_MIN_REASON_LENGTH} minimum characters
-						</p>
-					</div>
-					<div class="modal-field">
-						<label class="form-label" for="excuse-notes">Internal notes <span class="muted">(optional)</span></label>
-						<textarea
-							id="excuse-notes"
-							class="modal-input"
-							rows={3}
-							bind:value={excuseNotes}
-							disabled={excuseBusy}
-						></textarea>
-					</div>
-					{#if excuseError}
-						<p class="field-error" role="alert">{excuseError}</p>
-					{/if}
-					<div class="modal-actions">
-						<button class="btn btn-secondary" type="button" disabled={excuseBusy} onclick={closeExcuseModal}>
-							Cancel
-						</button>
-						<button
-							class="btn btn-primary"
-							type="button"
-							disabled={!excuseReasonValid || excuseBusy}
-							onclick={submitExcuse}
-						>
-							{excuseBusy ? 'Saving…' : excuseMode === 'create' ? 'Save excuse' : 'Save changes'}
-						</button>
-					</div>
-				</div>
-			</div>
-		{/if}
-
-		{#if bulkOpen}
-			<div class="modal-overlay" role="presentation" onclick={closeBulkOnOverlay}>
-				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="bulk-excuse-dialog-title" bind:this={bulkDialog} tabindex={-1}>
-					<h2 id="bulk-excuse-dialog-title" class="modal-title">
-						Excuse all absent
-					</h2>
-					<p class="muted">
-						This will excuse {absentCount} currently {absentCount === 1 ? 'absent student' : 'absent students'}.
-						Repeating the same reason later affects only students who are still absent.
-					</p>
-					<div class="modal-field">
-						<label class="form-label" for="bulk-excuse-reason">Reason</label>
-						<textarea
-							id="bulk-excuse-reason"
-							class="modal-input"
-							rows={4}
-							bind:value={bulkReason}
-							disabled={bulkBusy}
-							aria-describedby="bulk-excuse-reason-help"
-						></textarea>
-						<p id="bulk-excuse-reason-help" class="hint">
-							{bulkReason.trim().length}/{EXCUSE_MIN_REASON_LENGTH} minimum characters
-						</p>
-					</div>
-					<div class="modal-field">
-						<label class="form-label" for="bulk-excuse-notes">Internal notes <span class="muted">(optional)</span></label>
-						<textarea
-							id="bulk-excuse-notes"
-							class="modal-input"
-							rows={3}
-							bind:value={bulkNotes}
-							disabled={bulkBusy}
-						></textarea>
-					</div>
-					{#if bulkError}
-						<p class="field-error" role="alert">{bulkError}</p>
-					{/if}
-					<div class="modal-actions">
-						<button class="btn btn-secondary" type="button" disabled={bulkBusy} onclick={closeBulkModal}>
-							Cancel
-						</button>
-						<button
-							class="btn btn-primary"
-							type="button"
-							disabled={!bulkReasonValid || bulkBusy || absentCount === 0}
-							onclick={submitBulkExcuse}
-						>
-							{bulkBusy ? 'Saving…' : `Excuse ${absentCount} absent`}
-						</button>
-					</div>
-				</div>
-			</div>
-		{/if}
-
-		{#if revokeTarget}
-			<div class="modal-overlay" role="presentation" onclick={closeRevokeOnOverlay}>
-				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="revoke-excuse-dialog-title" bind:this={revokeDialog} tabindex={-1}>
-					<h2 id="revoke-excuse-dialog-title" class="modal-title">
-						Revoke excuse?
-					</h2>
-					<p class="muted">
-						{revokeTarget.name} will return to the pre-excuse attendance status.
-					</p>
-					{#if revokeError}
-						<p class="field-error" role="alert">{revokeError}</p>
-					{/if}
-					<div class="modal-actions">
-						<button class="btn btn-secondary" type="button" disabled={revokeBusy} onclick={closeRevokeModal}>
-							Cancel
-						</button>
-						<button class="btn btn-danger" type="button" disabled={revokeBusy} onclick={submitRevoke}>
-							{revokeBusy ? 'Revoking…' : 'Revoke excuse'}
-						</button>
-					</div>
-				</div>
-			</div>
-		{/if}
 	{/if}
 </div>
 

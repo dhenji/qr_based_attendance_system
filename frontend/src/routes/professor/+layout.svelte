@@ -17,9 +17,10 @@
 		await restoreSession();
 	});
 
-	// Dashboard, My Courses, Sessions, History, Attendance, Excuses, and
-	// Reports exist so far. The rest are declared disabled so the sidebar shows
-	// the shape of the portal without offering dead links.
+	// Dashboard, My Courses, Sessions, History, Attendance, Excuses,
+	// Reports, Profile, and Settings exist so far. The rest are declared
+	// disabled so the sidebar shows the shape of the portal without offering
+	// dead links.
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.PROFESSOR_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'My Courses', path: Routes.PROFESSOR_COURSES, enabled: true, icon: 'courses' },
@@ -28,8 +29,8 @@
 		{ label: 'Attendance', path: Routes.PROFESSOR_ATTENDANCE, enabled: true, icon: 'attendance' },
 		{ label: 'Excuses', path: Routes.PROFESSOR_EXCUSE_REQUESTS, enabled: true, icon: 'excuses' },
 		{ label: 'Reports', path: Routes.PROFESSOR_REPORTS, enabled: true, icon: 'reports' },
-		{ label: 'Profile', path: Routes.PROFESSOR_PROFILE, enabled: false, icon: 'profile' },
-		{ label: 'Settings', path: Routes.PROFESSOR_SETTINGS, enabled: false, icon: 'settings' },
+		{ label: 'Profile', path: Routes.PROFESSOR_PROFILE, enabled: true, icon: 'profile' },
+		{ label: 'Settings', path: Routes.PROFESSOR_SETTINGS, enabled: true, icon: 'settings' },
 	] as const;
 
 	const iconPaths: Record<string, string> = {

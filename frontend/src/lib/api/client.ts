@@ -159,9 +159,12 @@ const apiCall = async <T>(
 		method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
 		body?: unknown;
 		params?: Record<string, string>;
+		// Extra path segment for id-in-path routes, e.g. `/active/${id}` or
+		// `/${id}/close` for the professor session detail/close endpoints.
+		suffix?: string;
 	} = {}
 ): Promise<T> => {
-	const { method = 'GET', body, params } = options;
+	const { method = 'GET', body, params, suffix = '' } = options;
 	const endpointDef = endpoints[endpoint];
 
 	// Mock mode — return mock data
@@ -173,7 +176,7 @@ const apiCall = async <T>(
 		return {} as unknown as T;
 	}
 
-	const url = new URL(`${API_PREFIX}${endpointDef.url}`, BASE_URL);
+	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix}`, BASE_URL);
 	if (params) {
 		Object.entries(params).forEach(([key, value]) => {
 			url.searchParams.append(key, value);
@@ -189,12 +192,20 @@ const apiCall = async <T>(
 };
 
 // Convenience exports
-// Thin wrappers that map each HTTP verb onto apiCall().
-export const get = <T>(endpoint: keyof typeof endpoints, params?: Record<string, string>) =>
-	apiCall<T>(endpoint, { method: 'GET', params });
+// Thin wrappers that map each HTTP verb onto apiCall(). `suffix` appends an
+// id-in-path segment (e.g. `/active/${id}`).
+export const get = <T>(
+	endpoint: keyof typeof endpoints,
+	params?: Record<string, string>,
+	suffix?: string
+) => apiCall<T>(endpoint, { method: 'GET', params, suffix });
 
-export const post = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
-	apiCall<T>(endpoint, { method: 'POST', body, params });
+export const post = <T>(
+	endpoint: keyof typeof endpoints,
+	body?: unknown,
+	params?: Record<string, string>,
+	suffix?: string
+) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix });
 
 export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'PUT', body, params });
