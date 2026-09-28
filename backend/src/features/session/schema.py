@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
@@ -9,6 +9,8 @@ from features.session.constants import (
     DURATION_MINUTES_MIN,
     RADIUS_METERS_MAX,
     RADIUS_METERS_MIN,
+    SESSION_CODE_MAX_LENGTH,
+    SESSION_CODE_MIN_LENGTH,
     WINDOW_MINUTES_MAX,
     WINDOW_MINUTES_MIN,
 )
@@ -149,3 +151,43 @@ class ProfessorAttendanceItem(BaseModel):
     scanned_at: datetime
     scanned_via: str | None = None
     face_match_score: float | None = None
+
+
+class VerifyCodeRequest(BaseModel):
+    """Typed session code (verify-code) or code scanned from the session QR."""
+
+    code: str = Field(
+        min_length=SESSION_CODE_MIN_LENGTH, max_length=SESSION_CODE_MAX_LENGTH
+    )
+
+    @field_validator("code")
+    @classmethod
+    def _strip_code(cls, v: str) -> str:
+        v = v.strip()
+
+        if not v:
+            raise ValueError("code must not be blank")
+
+        return v
+
+
+class VerifyGeofence(BaseModel):
+    """Geofence config; keys map to Session classroom columns."""
+
+    radius: int
+    lat: float | None = None
+    lng: float | None = None
+
+
+class VerifyCodeResponse(BaseModel):
+    session_id: int
+    offering_id: int
+    course_code: str
+    course_name: str
+    program_code: str
+    year_level_label: str
+    expires_at: datetime | None = None
+    scheduled_end_time: datetime
+    geofence: VerifyGeofence
+    present_window_minutes: int
+    late_window_minutes: int
