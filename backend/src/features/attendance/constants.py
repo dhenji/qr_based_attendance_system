@@ -29,3 +29,11 @@ SCAN_RATE_LIMIT_MAX_CALLS: int = 30
 SCAN_RATE_LIMIT_WINDOW_SECONDS: int = 60
 
 SYNC_STALE_SECONDS: int = 60
+
+HISTORY_SORT_FIELDS: frozenset[str] = frozenset(
+    {"date", "course", "section", "status", "time"}
+)
+HISTORY_SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
+
+HISTORY_DEFAULT_SORT_BY: str = "time"
+HISTORY_DEFAULT_SORT_DIR: str = "desc"

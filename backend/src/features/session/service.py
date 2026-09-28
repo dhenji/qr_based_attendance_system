@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
@@ -44,6 +44,7 @@ from features.sync.model import SyncQueue
 from shared.base import BaseCRUD
 from shared.enums import QueueStatus, ValidationStatus
 from shared.pagination import MAX_PAGE_SIZE, PaginatedResponse
+from shared.query import apply_if
 
 
 def _utcnow() -> datetime:
@@ -52,19 +53,6 @@ def _utcnow() -> datetime:
 
 def _normalize_page(page: int, size: int) -> tuple[int, int]:
     return max(page, 1), min(max(size, 1), MAX_PAGE_SIZE)
-
-
-def _apply_if(
-    stmt: Select[Any],
-    value: Any,
-    build: Callable[[Any], ColumnElement[bool]],
-) -> Select[Any]:
-    """Append a WHERE criterion only when its filter value was provided.
-
-    The criterion is built lazily: comparisons like ``>=`` reject ``None``
-    at construction time, so it must not be built for missing filters.
-    """
-    return stmt.where(build(value)) if value is not None else stmt
 
 
 _STATUS_COUNT_FIELDS: dict[str, str] = {
@@ -381,11 +369,11 @@ class SessionService:
         stmt: Select[tuple[Session]] = select(Session).where(
             Session.professor_id == professor_id
         )
-        stmt = _apply_if(
+        stmt = apply_if(
             stmt, offering_id, lambda v: Session.offering_id == v
         )
-        stmt = _apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = _apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         total: int = (
             await self._session.scalar(
@@ -449,11 +437,11 @@ class SessionService:
         stmt: Select[tuple[Session]] = select(Session).where(
             Session.professor_id == professor_id
         )
-        stmt = _apply_if(
+        stmt = apply_if(
             stmt, offering_id, lambda v: Session.offering_id == v
         )
-        stmt = _apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = _apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         rows: Sequence[Session] = (
             await self._session.scalars(stmt.order_by(Session.id.asc()))
@@ -533,16 +521,16 @@ class SessionService:
                 CourseOffering, CourseOffering.id == Session.offering_id
             ).where(CourseOffering.course_id == course_id)
 
-        stmt = _apply_if(
+        stmt = apply_if(
             stmt, offering_id, lambda v: Session.offering_id == v
         )
-        stmt = _apply_if(stmt, section, lambda v: Student.section == v)
-        stmt = _apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
-        stmt = _apply_if(
+        stmt = apply_if(stmt, section, lambda v: Student.section == v)
+        stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
+        stmt = apply_if(
             stmt, status, lambda v: Attendance.validation_status == v
         )
-        stmt = _apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = _apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
 
         total: int = (
             await self._session.scalar(
