@@ -46,14 +46,17 @@ export const isAdmin = () =>
 
 // Where to send a freshly authenticated user.
 //
-// Only students and professors have a portal today; the admin portal lands in
-// Phase 3, so admins go home rather than to a route that would 404.
+// Students and professors go to their portals; admins go to the admin
+// dashboard (Phase 3 MVP shell + roster).
 export const defaultRouteFor = (user: User | null): string => {
 	switch (user?.role) {
 		case 'student':
 			return Routes.DASHBOARD;
 		case 'professor':
 			return Routes.PROFESSOR_DASHBOARD;
+		case 'admin':
+		case 'super_admin':
+			return Routes.ADMIN_DASHBOARD;
 		default:
 			return Routes.HOME;
 	}

@@ -183,7 +183,7 @@
 
 					<div class="field">
 						<label class="form-label" for="fp-email">Email</label>
-						<input class="form-input" id="fp-email" type="email" placeholder="your@email.com"
+						<input class="form-input" id="fp-email" type="email" placeholder="juan.delacruz@isu.edu.ph"
 							value={email} oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
 					</div>
 

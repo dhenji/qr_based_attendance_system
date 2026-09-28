@@ -24,8 +24,13 @@ export const Routes = {
   PROFESSOR_REPORTS: "/professor/reports",
   PROFESSOR_PROFILE: "/professor/profile",
   PROFESSOR_SETTINGS: "/professor/settings",
-  // No /admin route exists yet (admin portal is Phase 3) — kept for future use.
+  // Admin portal (Phase 3 MVP: shell + students + professors).
   ADMIN: "/admin",
+  ADMIN_DASHBOARD: "/admin/dashboard",
+  ADMIN_STUDENTS: "/admin/students",
+  ADMIN_STUDENTS_IMPORT: "/admin/students/import",
+  ADMIN_PROFESSORS: "/admin/professors",
+  ADMIN_PROFILE: "/admin/profile",
 
   ABOUT: "/about",
   PRIVACY_POLICY: "/privacy-policy",

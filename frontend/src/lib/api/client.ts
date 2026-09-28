@@ -156,7 +156,7 @@ const request = async <T>(url: string, init: RequestInit, alreadyRetried: boolea
 const apiCall = async <T>(
 	endpoint: keyof typeof endpoints,
 	options: {
-		method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+		method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 		body?: unknown;
 		params?: Record<string, string>;
 		// Extra path segment for id-in-path routes, e.g. `/active/${id}` or
@@ -210,5 +210,107 @@ export const post = <T>(
 export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'PUT', body, params });
 
-export const del = <T>(endpoint: keyof typeof endpoints, params?: Record<string, string>) =>
-	apiCall<T>(endpoint, { method: 'DELETE', params });
+export const patch = <T>(
+	endpoint: keyof typeof endpoints,
+	body?: unknown,
+	params?: Record<string, string>,
+	suffix?: string
+) => apiCall<T>(endpoint, { method: 'PATCH', body, params, suffix });
+
+export const del = <T>(
+	endpoint: keyof typeof endpoints,
+	params?: Record<string, string>,
+	suffix?: string
+) => apiCall<T>(endpoint, { method: 'DELETE', params, suffix });
+
+// Multipart upload for CSV roster imports (POST /admin/students/import,
+// POST /admin/professors/import). Sends FormData without a JSON Content-Type
+// so the browser sets the multipart boundary; auth + 401-retry reuse
+// fetchWithAuth/request. Mock mode returns the endpoint's mock payload.
+export const postForm = async <T>(
+	endpoint: keyof typeof endpoints,
+	form: FormData,
+	params?: Record<string, string>,
+	suffix?: string
+): Promise<T> => {
+	const endpointDef = endpoints[endpoint];
+
+	if (MOCK) {
+		if (endpointDef.mock) {
+			return endpointDef.mock() as unknown as T;
+		}
+		return {} as unknown as T;
+	}
+
+	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix ?? ''}`, BASE_URL);
+	if (params) {
+		Object.entries(params).forEach(([key, value]) => {
+			url.searchParams.append(key, value);
+		});
+	}
+
+	const headers = new Headers();
+	if (authToken) {
+		headers.set('Authorization', `Bearer ${authToken}`);
+	}
+
+	const doFetch = async (alreadyRetried: boolean): Promise<T> => {
+		const response = await fetch(url.toString(), {
+			method: 'POST',
+			headers,
+			body: form,
+			credentials: 'include',
+		});
+
+		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
+			const freshToken = await unauthorizedHandler();
+			if (freshToken) {
+				authToken = freshToken;
+				headers.set('Authorization', `Bearer ${freshToken}`);
+				return doFetch(true);
+			}
+		}
+
+		if (!response.ok) {
+			throw await parseError(response);
+		}
+
+		if (response.status === 204) {
+			return undefined as T;
+		}
+
+		return response.json() as Promise<T>;
+	};
+
+	return doFetch(false);
+};
+
+// Raw-text download for CSV templates (GET /admin/students/import/template).
+// The template route has no endpoint def (it returns text/csv, not JSON), so
+// the path is passed directly. Returns the CSV text for client-side download.
+export const getText = async (path: string): Promise<string> => {
+	if (MOCK) {
+		return 'student_id,first_name,middle_name,last_name,email,program_code,section,year_level\n';
+	}
+
+	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
+	const response = await fetchWithAuth(url.toString(), { method: 'GET' });
+
+	if (response.status === 401 && unauthorizedHandler) {
+		const freshToken = await unauthorizedHandler();
+		if (freshToken) {
+			authToken = freshToken;
+			const retry = await fetchWithAuth(url.toString(), { method: 'GET' });
+			if (!retry.ok) {
+				throw await parseError(retry);
+			}
+			return retry.text();
+		}
+	}
+
+	if (!response.ok) {
+		throw await parseError(response);
+	}
+
+	return response.text();
+};
