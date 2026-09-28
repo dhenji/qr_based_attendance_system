@@ -18,8 +18,10 @@ from features.course.exceptions import (
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
+from features.program.model import Program, YearLevel
 from features.session.exceptions import (
     SessionAlreadyActiveException,
+    SessionExpiredException,
     SessionNotFoundException,
 )
 from features.session.model import Session
@@ -34,6 +36,8 @@ from features.session.schema import (
     SessionHistoryItem,
     SessionListItem,
     SessionRead,
+    VerifyCodeResponse,
+    VerifyGeofence,
 )
 from features.student.model import Student
 from features.sync.model import SyncQueue
@@ -301,6 +305,66 @@ class SessionService:
         counts, _ = _summarize(await self._attendance_rows(session_id))
 
         return SessionCloseResponse(id=row.id, final_counts=counts)
+
+    async def verify_code(self, *, code: str) -> VerifyCodeResponse:
+        """Resolve a student-typed/scanned session code to its session config.
+
+        404 when the code matches no session, 410 when the session's window
+        has closed (a missing expiry reads as closed, mirroring
+        ``_session_status``).
+        """
+        row: Session | None = (
+            await self._session.scalars(
+                select(Session)
+                .where(Session.session_code == code.strip())
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if row is None:
+            raise SessionNotFoundException(code)
+
+        now: datetime = _utcnow()
+
+        if row.expires_at is None or row.expires_at <= now:
+            raise SessionExpiredException(row.id)
+
+        offering: CourseOffering = await self._get_offering_or_404(
+            row.offering_id
+        )
+        course: Course | None = await self._session.get(
+            Course, offering.course_id
+        )
+        program: Program | None = await self._session.get(
+            Program, offering.program_id
+        )
+        year_level: YearLevel | None = await self._session.get(
+            YearLevel, offering.year_level_id
+        )
+
+        if course is None or program is None or year_level is None:
+            # Unreachable against a real database (RESTRICT FKs); a broken
+            # graph reads as unresolvable rather than 500ing on attribute
+            # access.
+            raise SessionNotFoundException(row.id)
+
+        return VerifyCodeResponse(
+            session_id=row.id,
+            offering_id=row.offering_id,
+            course_code=course.course_code,
+            course_name=course.course_name,
+            program_code=program.code,
+            year_level_label=year_level.label,
+            expires_at=row.expires_at,
+            scheduled_end_time=row.scheduled_end_time,
+            geofence=VerifyGeofence(
+                radius=row.classroom_radius_meters,
+                lat=row.classroom_lat,
+                lng=row.classroom_lng,
+            ),
+            present_window_minutes=row.present_window_minutes,
+            late_window_minutes=row.late_window_minutes,
+        )
 
     async def list_professor_sessions(
         self,

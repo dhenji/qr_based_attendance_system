@@ -19,7 +19,7 @@ class SessionNotFoundException(SessionDomainException):
     status_code: int = 404
     code: str = "session_not_found"
 
-    def __init__(self, session_id: int) -> None:
+    def __init__(self, session_id: int | str) -> None:
         super().__init__(message=f"Session {session_id} not found")
 
 
