@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from features.attendance.constants import (
     EAR_SAMPLES_MAX_COUNT,
@@ -19,7 +19,7 @@ from features.attendance.constants import (
     STUDENT_NUMBER_MAX_LENGTH,
     STUDENT_NUMBER_MIN_LENGTH,
 )
-from shared.enums import ScannedVia
+from shared.enums import ScannedVia, ValidationStatus
 
 
 class GPSInput(BaseModel):
@@ -84,3 +84,41 @@ class ScanResponse(BaseModel):
     expires_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HistoryItem(BaseModel):
+    """Row for GET /student/attendance/history; names map attendance/course columns."""
+
+    id: int
+    session_id: int
+    course_code: str
+    course_name: str
+    status: ValidationStatus
+    original_status: ValidationStatus | None = None
+    excuse_reason: str | None = None
+    scanned_at: datetime
+    scanned_via: str | None = None
+
+
+class HistoryCounts(BaseModel):
+    present: int = 0
+    late: int = 0
+    absent: int = 0
+    excused: int = 0
+    rejected: int = 0
+
+
+class HistorySummary(BaseModel):
+    compliance_rate: float = 0.0
+    participation_rate: float = 0.0
+    counts: HistoryCounts = Field(default_factory=HistoryCounts)
+
+
+class HistoryResponse(BaseModel):
+    """Paginated history plus summary over the FULL filter set (not just the page)."""
+
+    items: list[HistoryItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    size: int = 50
+    summary: HistorySummary = Field(default_factory=HistorySummary)
