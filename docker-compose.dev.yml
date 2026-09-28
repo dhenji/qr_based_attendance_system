@@ -23,6 +23,9 @@ services:
       target: migrate
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/attendance_sys
+      DEBUG: "true"
+      JWT_SECRET: "dev-only-secret-0123456789abcdef"
+      CORS_ORIGINS: "http://localhost:5173"
     volumes:
       - ./backend:/app
     depends_on:
@@ -39,6 +42,9 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/attendance_sys
+      DEBUG: "true"
+      JWT_SECRET: "dev-only-secret-0123456789abcdef"
+      CORS_ORIGINS: "http://localhost:5173"
     volumes:
       - ./backend:/app
     depends_on:

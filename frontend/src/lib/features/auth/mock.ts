@@ -28,7 +28,7 @@ const MOCK_PROFESSOR: MeResponse = {
 	role: 'professor',
 	first_name: 'Maria',
 	last_name: 'Dela Cruz',
-	email: 'prof.delacruz@uni.edu',
+	email: 'maria.delacruz@isu.edu.ph',
 	face_enrolled: null,
 	face_enrolled_at: null,
 	face_embedding_version: null,

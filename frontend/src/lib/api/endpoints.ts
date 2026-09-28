@@ -13,6 +13,13 @@ import type {
 	StudentDashboardResponse,
 	StudentProfileResponse,
 } from '$lib/shared/types';
+import type {
+	AdminProfessorResponse,
+	AdminStudentDetailResponse,
+	AdminStudentResponse,
+	ProfessorImportResult,
+	StudentImportResult,
+} from '$lib/shared/types';
 import type { ProfessorProfileResponse } from '$lib/shared/types';
 import type { ProfessorAssignedOffering } from '$lib/shared/types';
 import type {
@@ -330,7 +337,7 @@ export const ProfessorProfileEndpoint: EndpointDef<ProfessorProfileResponse> = {
 		first_name: 'John',
 		middle_name: 'A',
 		last_name: 'Smith',
-		email: 'jsmith@university.edu',
+		email: 'john.smith@isu.edu.ph',
 		department: 'Computer Science',
 		assigned_courses: [
 			{
@@ -437,6 +444,131 @@ export const ProfessorCoursesEndpoint: EndpointDef<Paginated<ProfessorAssignedOf
 	}),
 };
 
+// --- Admin (Phase 3 MVP: students + professors) -------------------------------
+//
+// Live routes on student/admin_router.py and professor/admin_router.py.
+// Collection routes use "" on the backend (no trailing slash), so callers must
+// not append "/" — list/create hit the bare url, detail routes pass the id via
+// the client's `suffix` option (e.g. `/123`, `/123/archive`, `/import`).
+
+const MOCK_ADMIN_STUDENTS: Paginated<AdminStudentResponse> = {
+	items: [
+		{
+			id: 1,
+			student_id: '2021-001',
+			first_name: 'Alice',
+			middle_name: 'M',
+			last_name: 'Santos',
+			email: 'alice.santos@isu.edu.ph',
+			program_code: 'BSCS',
+			year_level_label: '3rd Year',
+			section: 'A',
+			is_active: true,
+			face_enrolled: true,
+			created_at: new Date().toISOString(),
+			scan_count: 42,
+		},
+		{
+			id: 2,
+			student_id: '2022-002',
+			first_name: 'Bob',
+			middle_name: null,
+			last_name: 'Cruz',
+			email: 'bob.cruz@isu.edu.ph',
+			program_code: 'BSIT',
+			year_level_label: '2nd Year',
+			section: 'B',
+			is_active: true,
+			face_enrolled: false,
+			created_at: new Date().toISOString(),
+			scan_count: 18,
+		},
+	],
+	total: 2,
+	page: 1,
+	size: 20,
+};
+
+export const AdminStudentsEndpoint: EndpointDef<Paginated<AdminStudentResponse>> = {
+	url: '/admin/students',
+	method: 'GET',
+	mock: () => MOCK_ADMIN_STUDENTS,
+};
+
+export const AdminStudentCreateEndpoint: EndpointDef<AdminStudentResponse> = {
+	url: '/admin/students',
+	method: 'POST',
+	mock: () => MOCK_ADMIN_STUDENTS.items[0],
+};
+
+export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse> = {
+	url: '/admin/students',
+	method: 'GET',
+	mock: () => ({ ...MOCK_ADMIN_STUDENTS.items[0], face_enrolled_at: null, face_embedding_version: 1 }),
+};
+
+export const AdminStudentImportEndpoint: EndpointDef<StudentImportResult> = {
+	url: '/admin/students/import',
+	method: 'POST',
+	mock: () => ({ imported: 25, duplicates: 0, errors: [] }),
+};
+
+const MOCK_ADMIN_PROFESSORS: Paginated<AdminProfessorResponse> = {
+	items: [
+		{
+			id: 1,
+			first_name: 'John',
+			middle_name: 'A',
+			last_name: 'Smith',
+			email: 'john.smith@isu.edu.ph',
+			department: 'Computer Science',
+			is_active: true,
+			claim_status: 'Claimed',
+			assigned_courses: [{ offering_id: 1, course_code: 'CS101' }],
+			created_at: new Date().toISOString(),
+		},
+		{
+			id: 2,
+			first_name: 'Maria',
+			middle_name: null,
+			last_name: 'Garcia',
+			email: 'maria.garcia@isu.edu.ph',
+			department: 'Mathematics',
+			is_active: true,
+			claim_status: 'Unclaimed',
+			assigned_courses: [],
+			created_at: new Date().toISOString(),
+		},
+	],
+	total: 2,
+	page: 1,
+	size: 20,
+};
+
+export const AdminProfessorsEndpoint: EndpointDef<Paginated<AdminProfessorResponse>> = {
+	url: '/admin/professors',
+	method: 'GET',
+	mock: () => MOCK_ADMIN_PROFESSORS,
+};
+
+export const AdminProfessorCreateEndpoint: EndpointDef<AdminProfessorResponse> = {
+	url: '/admin/professors',
+	method: 'POST',
+	mock: () => MOCK_ADMIN_PROFESSORS.items[0],
+};
+
+export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> = {
+	url: '/admin/professors',
+	method: 'GET',
+	mock: () => MOCK_ADMIN_PROFESSORS.items[0],
+};
+
+export const AdminProfessorImportEndpoint: EndpointDef<ProfessorImportResult> = {
+	url: '/admin/professors/import',
+	method: 'POST',
+	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+};
+
 // Endpoint registry
 // Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
@@ -467,4 +599,13 @@ export const endpoints = {
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
+	// Admin (students + professors)
+	adminStudents: AdminStudentsEndpoint,
+	adminStudentCreate: AdminStudentCreateEndpoint,
+	adminStudentDetail: AdminStudentDetailEndpoint,
+	adminStudentImport: AdminStudentImportEndpoint,
+	adminProfessors: AdminProfessorsEndpoint,
+	adminProfessorCreate: AdminProfessorCreateEndpoint,
+	adminProfessorDetail: AdminProfessorDetailEndpoint,
+	adminProfessorImport: AdminProfessorImportEndpoint,
 };
