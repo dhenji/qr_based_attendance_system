@@ -11,6 +11,7 @@ from core.database import database
 from core.exceptions import AppException
 from core.security import decode_access_token, extract_user_id
 from features.admin.service import AdminService
+from features.attendance.service import AttendanceService
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.course.service import CourseService
@@ -164,6 +165,12 @@ async def _get_professor_service(
     return ProfessorService(session)
 
 
+async def _get_attendance_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> AttendanceService:
+    return AttendanceService(session)
+
+
 async def _get_face_enrollment_service(
     session: Annotated[AsyncSession, Depends(_get_db)],
 ) -> FaceEnrollmentService:
@@ -183,6 +190,9 @@ CourseServiceDep = Annotated[CourseService, Depends(_get_course_service)]
 StudentServiceDep = Annotated[StudentService, Depends(_get_student_service)]
 ProfessorServiceDep = Annotated[ProfessorService, Depends(_get_professor_service)]
 SessionServiceDep = Annotated[SessionService, Depends(_get_session_service)]
+AttendanceServiceDep = Annotated[AttendanceService, Depends(_get_attendance_service)]
+
+
 FaceEnrollmentServiceDep = Annotated[
     FaceEnrollmentService, Depends(_get_face_enrollment_service)
 ]

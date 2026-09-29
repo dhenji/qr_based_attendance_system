@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
@@ -18,8 +18,10 @@ from features.course.exceptions import (
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
+from features.program.model import Program, YearLevel
 from features.session.exceptions import (
     SessionAlreadyActiveException,
+    SessionExpiredException,
     SessionNotFoundException,
 )
 from features.session.model import Session
@@ -34,12 +36,15 @@ from features.session.schema import (
     SessionHistoryItem,
     SessionListItem,
     SessionRead,
+    VerifyCodeResponse,
+    VerifyGeofence,
 )
 from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.base import BaseCRUD
 from shared.enums import QueueStatus, ValidationStatus
 from shared.pagination import MAX_PAGE_SIZE, PaginatedResponse
+from shared.query import apply_if
 
 
 def _utcnow() -> datetime:
@@ -48,19 +53,6 @@ def _utcnow() -> datetime:
 
 def _normalize_page(page: int, size: int) -> tuple[int, int]:
     return max(page, 1), min(max(size, 1), MAX_PAGE_SIZE)
-
-
-def _apply_if(
-    stmt: Select[Any],
-    value: Any,
-    build: Callable[[Any], ColumnElement[bool]],
-) -> Select[Any]:
-    """Append a WHERE criterion only when its filter value was provided.
-
-    The criterion is built lazily: comparisons like ``>=`` reject ``None``
-    at construction time, so it must not be built for missing filters.
-    """
-    return stmt.where(build(value)) if value is not None else stmt
 
 
 _STATUS_COUNT_FIELDS: dict[str, str] = {
@@ -302,6 +294,66 @@ class SessionService:
 
         return SessionCloseResponse(id=row.id, final_counts=counts)
 
+    async def verify_code(self, *, code: str) -> VerifyCodeResponse:
+        """Resolve a student-typed/scanned session code to its session config.
+
+        404 when the code matches no session, 410 when the session's window
+        has closed (a missing expiry reads as closed, mirroring
+        ``_session_status``).
+        """
+        row: Session | None = (
+            await self._session.scalars(
+                select(Session)
+                .where(Session.session_code == code.strip())
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if row is None:
+            raise SessionNotFoundException(code)
+
+        now: datetime = _utcnow()
+
+        if row.expires_at is None or row.expires_at <= now:
+            raise SessionExpiredException(row.id)
+
+        offering: CourseOffering = await self._get_offering_or_404(
+            row.offering_id
+        )
+        course: Course | None = await self._session.get(
+            Course, offering.course_id
+        )
+        program: Program | None = await self._session.get(
+            Program, offering.program_id
+        )
+        year_level: YearLevel | None = await self._session.get(
+            YearLevel, offering.year_level_id
+        )
+
+        if course is None or program is None or year_level is None:
+            # Unreachable against a real database (RESTRICT FKs); a broken
+            # graph reads as unresolvable rather than 500ing on attribute
+            # access.
+            raise SessionNotFoundException(row.id)
+
+        return VerifyCodeResponse(
+            session_id=row.id,
+            offering_id=row.offering_id,
+            course_code=course.course_code,
+            course_name=course.course_name,
+            program_code=program.code,
+            year_level_label=year_level.label,
+            expires_at=row.expires_at,
+            scheduled_end_time=row.scheduled_end_time,
+            geofence=VerifyGeofence(
+                radius=row.classroom_radius_meters,
+                lat=row.classroom_lat,
+                lng=row.classroom_lng,
+            ),
+            present_window_minutes=row.present_window_minutes,
+            late_window_minutes=row.late_window_minutes,
+        )
+
     async def list_professor_sessions(
         self,
         *,
@@ -317,11 +369,11 @@ class SessionService:
         stmt: Select[tuple[Session]] = select(Session).where(
             Session.professor_id == professor_id
         )
-        stmt = _apply_if(
+        stmt = apply_if(
             stmt, offering_id, lambda v: Session.offering_id == v
         )
-        stmt = _apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = _apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         total: int = (
             await self._session.scalar(
@@ -385,11 +437,11 @@ class SessionService:
         stmt: Select[tuple[Session]] = select(Session).where(
             Session.professor_id == professor_id
         )
-        stmt = _apply_if(
+        stmt = apply_if(
             stmt, offering_id, lambda v: Session.offering_id == v
         )
-        stmt = _apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = _apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         rows: Sequence[Session] = (
             await self._session.scalars(stmt.order_by(Session.id.asc()))
@@ -469,16 +521,16 @@ class SessionService:
                 CourseOffering, CourseOffering.id == Session.offering_id
             ).where(CourseOffering.course_id == course_id)
 
-        stmt = _apply_if(
+        stmt = apply_if(
             stmt, offering_id, lambda v: Session.offering_id == v
         )
-        stmt = _apply_if(stmt, section, lambda v: Student.section == v)
-        stmt = _apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
-        stmt = _apply_if(
+        stmt = apply_if(stmt, section, lambda v: Student.section == v)
+        stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
+        stmt = apply_if(
             stmt, status, lambda v: Attendance.validation_status == v
         )
-        stmt = _apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = _apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
 
         total: int = (
             await self._session.scalar(
