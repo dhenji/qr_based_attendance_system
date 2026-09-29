@@ -30,6 +30,9 @@ export const Routes = {
   ADMIN_STUDENTS: "/admin/students",
   ADMIN_STUDENTS_IMPORT: "/admin/students/import",
   ADMIN_PROFESSORS: "/admin/professors",
+  ADMIN_PROGRAMS: "/admin/programs",
+  ADMIN_COURSES: "/admin/courses",
+  ADMIN_OFFERINGS: "/admin/offerings",
   ADMIN_PROFILE: "/admin/profile",
 
   ABOUT: "/about",
@@ -41,6 +44,9 @@ export const Routes = {
 // gets a builder rather than a constant.
 export const professorActiveSession = (id: number): string =>
   `${Routes.PROFESSOR_SESSIONS}/active/${id}`;
+
+// The admin program detail route is parameterised by program id.
+export const adminProgram = (id: number): string => `${Routes.ADMIN_PROGRAMS}/${id}`;
 
 // The create form has two variants (D11): the locked one is entered from a
 // course card and arrives with the offering pre-selected and read-only; the
