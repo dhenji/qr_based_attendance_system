@@ -20,6 +20,11 @@ import type {
 	ProfessorImportResult,
 	StudentImportResult,
 } from '$lib/shared/types';
+import type {
+	ProgramDetailResponse,
+	ProgramResponse,
+	YearLevelResponse,
+} from '$lib/shared/types';
 import type { ProfessorProfileResponse } from '$lib/shared/types';
 import type { ProfessorAssignedOffering } from '$lib/shared/types';
 import type {
@@ -569,6 +574,107 @@ export const AdminProfessorImportEndpoint: EndpointDef<ProfessorImportResult> = 
 	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
 };
 
+// --- Admin programs (Phase A: 4.5a + 4.5b) ----------------------------------
+//
+// Live routes on program/router.py (/api/admin/programs). Collection routes
+// use "" on the backend (no trailing slash); detail/year routes pass path
+// segments via the client's `suffix` option (e.g. `/3`, `/3/years`,
+// `/3/years/12`). Aggregates on ProgramResponse (course_count,
+// year_level_count, terms_count) are derived per request server-side.
+
+const MOCK_PROGRAMS: Paginated<ProgramResponse> = {
+	items: [
+		{
+			id: 1,
+			code: 'BSCS',
+			name: 'BS Computer Science',
+			description: null,
+			total_years: 4,
+			is_active: true,
+			course_count: 24,
+			year_level_count: 4,
+			terms_count: 9,
+			created_at: new Date().toISOString(),
+			updated_at: new Date().toISOString(),
+		},
+		{
+			id: 2,
+			code: 'BSIT',
+			name: 'BS Information Technology',
+			description: null,
+			total_years: 4,
+			is_active: true,
+			course_count: 20,
+			year_level_count: 4,
+			terms_count: 8,
+			created_at: new Date().toISOString(),
+			updated_at: new Date().toISOString(),
+		},
+	],
+	total: 2,
+	page: 1,
+	size: 20,
+};
+
+const MOCK_YEARS: YearLevelResponse[] = [
+	{
+		id: 1,
+		program_id: 1,
+		year_number: 1,
+		label: '1st Year',
+		term_structure: {
+			terms: [
+				{ code: '1st', label: '1st Semester' },
+				{ code: '2nd', label: '2nd Semester' },
+			],
+		},
+		sort_order: 1,
+	},
+	{
+		id: 2,
+		program_id: 1,
+		year_number: 2,
+		label: '2nd Year',
+		term_structure: {
+			terms: [
+				{ code: '1st', label: '1st Semester' },
+				{ code: '2nd', label: '2nd Semester' },
+			],
+		},
+		sort_order: 2,
+	},
+];
+
+export const AdminProgramsEndpoint: EndpointDef<Paginated<ProgramResponse>> = {
+	url: '/admin/programs',
+	method: 'GET',
+	mock: () => MOCK_PROGRAMS,
+};
+
+export const AdminProgramCreateEndpoint: EndpointDef<ProgramResponse> = {
+	url: '/admin/programs',
+	method: 'POST',
+	mock: () => MOCK_PROGRAMS.items[0],
+};
+
+export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
+	url: '/admin/programs',
+	method: 'GET',
+	mock: () => ({ ...MOCK_PROGRAMS.items[0], year_levels: MOCK_YEARS }),
+};
+
+export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
+	url: '/admin/programs',
+	method: 'GET',
+	mock: () => ({ items: MOCK_YEARS, total: MOCK_YEARS.length, page: 1, size: 50 }),
+};
+
+export const AdminYearLevelDetailEndpoint: EndpointDef<YearLevelResponse> = {
+	url: '/admin/programs',
+	method: 'GET',
+	mock: () => MOCK_YEARS[0],
+};
+
 // Endpoint registry
 // Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
@@ -608,4 +714,10 @@ export const endpoints = {
 	adminProfessorCreate: AdminProfessorCreateEndpoint,
 	adminProfessorDetail: AdminProfessorDetailEndpoint,
 	adminProfessorImport: AdminProfessorImportEndpoint,
+	// Admin programs (Phase A)
+	adminPrograms: AdminProgramsEndpoint,
+	adminProgramCreate: AdminProgramCreateEndpoint,
+	adminProgramDetail: AdminProgramDetailEndpoint,
+	adminYearLevels: AdminYearLevelsEndpoint,
+	adminYearLevelDetail: AdminYearLevelDetailEndpoint,
 };

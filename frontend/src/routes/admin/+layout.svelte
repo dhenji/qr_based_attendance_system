@@ -24,14 +24,16 @@
 		}
 	});
 
-	// MVP nav: Dashboard, Students, Professors are live. Programs, Analytics,
-	// Audit and Settings are declared disabled so the sidebar shows the portal
-	// shape without offering dead links.
+	// MVP nav: Dashboard, Students, Professors, Programs are live. Courses,
+	// Offerings, Analytics, Audit and Settings are declared disabled so the
+	// sidebar shows the portal shape without offering dead links.
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
 		{ label: 'Professors', path: Routes.ADMIN_PROFESSORS, enabled: true, icon: 'professors' },
-		{ label: 'Programs', path: Routes.ADMIN, enabled: false, icon: 'programs' },
+		{ label: 'Programs', path: Routes.ADMIN_PROGRAMS, enabled: true, icon: 'programs' },
+		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: false, icon: 'courses' },
+		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: false, icon: 'offerings' },
 		{ label: 'Analytics', path: Routes.ADMIN, enabled: false, icon: 'reports' },
 		{ label: 'Audit Logs', path: Routes.ADMIN, enabled: false, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN, enabled: false, icon: 'settings' },
@@ -46,6 +48,10 @@
 			'<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5Z"/>',
 		programs:
 			'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>',
+		courses:
+			'<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5Z"/>',
+		offerings:
+			'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4"/><path d="M3 10h18"/>',
 		reports:
 			'<path d="M4 20h16"/><path d="M7 20v-6"/><path d="M12 20V6"/><path d="M17 20v-9"/>',
 		audit:
