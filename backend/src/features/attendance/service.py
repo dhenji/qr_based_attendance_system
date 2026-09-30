@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -66,6 +67,24 @@ from shared.query import apply_if
 EARTH_RADIUS_METERS: float = 6371000.0
 
 _IDEMPOTENCY_STORE: dict[str, ScanResponse] = {}
+
+
+@dataclass(frozen=True)
+class _HistoryFilters:
+    """The one filter set shared by the record, enrolled, and scanned queries.
+
+    `status` narrows the record query only — the enrolled/scanned denominators
+    are deliberately status-agnostic, which is why the whole set is passed
+    rather than each helper taking the subset it happens to use.
+    """
+
+    program_id: int | None = None
+    year_level_id: int | None = None
+    semester: str | None = None
+    course_id: int | None = None
+    status: str | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
 
 
 def _utcnow() -> datetime:
@@ -484,9 +503,7 @@ class AttendanceService:
         page, size = self._normalize_history_paging(page, size)
         student = await self._history_student(user_id)
         sort_key, desc = self._history_sort(sort_by, sort_dir)
-
-        filtered = self._apply_history_filters(
-            self._history_base(student.id),
+        filters = _HistoryFilters(
             program_id=program_id,
             year_level_id=year_level_id,
             semester=semester,
@@ -496,28 +513,14 @@ class AttendanceService:
             date_to=date_to,
         )
 
+        filtered = self._apply_history_filters(self._history_base(student.id), filters)
         total = await self._history_total(filtered)
         tallies = await self._history_tallies(filtered)
-        enrolled = await self._history_enrolled(
-            student.id,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-            date_from=date_from,
-            date_to=date_to,
+        summary = self._summarize_history(
+            tallies,
+            await self._history_enrolled(student.id, filters),
+            await self._history_scanned(student.id, filters),
         )
-        scanned = await self._history_scanned(
-            student.id,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-            date_from=date_from,
-            date_to=date_to,
-        )
-
-        summary = self._summarize_history(tallies, enrolled, scanned)
         records = await self._history_page(filtered, sort_key, desc, page, size)
 
         return await self._build_history_response(
@@ -614,26 +617,21 @@ class AttendanceService:
         )
 
     def _apply_history_filters(
-        self,
-        stmt: Select[Any],
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
-        status: str | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
+        self, stmt: Select[Any], filters: _HistoryFilters
     ) -> Select[Any]:
-        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
         stmt = apply_if(
-            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+            stmt, filters.program_id, lambda v: CourseOffering.program_id == v
         )
-        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
-        stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
-        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(
+            stmt, filters.year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(stmt, filters.semester, lambda v: CourseOffering.semester == v)
+        stmt = apply_if(stmt, filters.course_id, lambda v: CourseOffering.course_id == v)
+        stmt = apply_if(
+            stmt, filters.status, lambda v: Attendance.validation_status == v
+        )
+        stmt = apply_if(stmt, filters.date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, filters.date_to, lambda v: Attendance.timestamp <= v)
 
         return stmt
 
@@ -656,17 +654,7 @@ class AttendanceService:
 
         return {status: count for status, count in rows}
 
-    async def _history_enrolled(
-        self,
-        student_id: int,
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
-    ) -> int:
+    async def _history_enrolled(self, student_id: int, filters: _HistoryFilters) -> int:
         stmt: Select[Any] = (
             select(func.count(func.distinct(Session.id)))
             .select_from(Session)
@@ -677,29 +665,13 @@ class AttendanceService:
             )
             .where(Enrollment.student_id == student_id)
         )
-        stmt = self._apply_offering_scope(
-            stmt,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-        )
-        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = self._apply_offering_scope(stmt, filters)
+        stmt = apply_if(stmt, filters.date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, filters.date_to, lambda v: Session.created_at <= v)
 
         return (await self._session.scalar(stmt)) or 0  # type: ignore[arg-type]
 
-    async def _history_scanned(
-        self,
-        student_id: int,
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
-    ) -> int:
+    async def _history_scanned(self, student_id: int, filters: _HistoryFilters) -> int:
         stmt: Select[Any] = (
             select(func.count(Attendance.id))
             .select_from(Attendance)
@@ -707,33 +679,29 @@ class AttendanceService:
             .join(CourseOffering, CourseOffering.id == Session.offering_id)
             .where(Attendance.student_id == student_id)
         )
-        stmt = self._apply_offering_scope(
-            stmt,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-        )
-        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = self._apply_offering_scope(stmt, filters)
+        stmt = apply_if(stmt, filters.date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, filters.date_to, lambda v: Attendance.timestamp <= v)
 
         return (await self._session.scalar(stmt)) or 0  # type: ignore[arg-type]
 
     def _apply_offering_scope(
-        self,
-        stmt: Select[Any],
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
+        self, stmt: Select[Any], filters: _HistoryFilters
     ) -> Select[Any]:
-        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        """The offering-scoped half of the filter set, without `status`.
+
+        The enrolled/scanned denominators must stay status-agnostic, so they
+        take the offering scope only — applying `status` here would silently
+        change the compliance-rate denominator.
+        """
         stmt = apply_if(
-            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+            stmt, filters.program_id, lambda v: CourseOffering.program_id == v
         )
-        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
+        stmt = apply_if(
+            stmt, filters.year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(stmt, filters.semester, lambda v: CourseOffering.semester == v)
+        stmt = apply_if(stmt, filters.course_id, lambda v: CourseOffering.course_id == v)
 
         return stmt
 

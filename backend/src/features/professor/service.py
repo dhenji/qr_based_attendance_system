@@ -75,6 +75,13 @@ ROSTER_CSV_SCHEMA = CsvSchema(
 )
 
 
+_PROFESSOR_SORT_COLUMNS: dict[str, tuple[Any, ...]] = {
+    "last_name": (Professor.last_name, Professor.first_name),
+    "email": (Professor.email,),
+    "created_at": (Professor.created_at,),
+}
+
+
 @dataclass
 class _RosterRow:
     line: int
@@ -643,20 +650,12 @@ class ProfessorService:
     def _apply_order(
         stmt: Select[tuple[Professor]], *, sort_by: str | None, sort_dir: str | None
     ) -> Select[tuple[Professor]]:
-        direction: str = (sort_dir or "asc").lower()
-        desc: bool = direction == "desc"
+        columns: tuple[Any, ...] | None = _PROFESSOR_SORT_COLUMNS.get(sort_by or "")
 
-        def _order(*columns: Any) -> Any:
-            ordered = [col.desc() if desc else col.asc() for col in columns]
-            return stmt.order_by(*ordered, Professor.id.asc())
+        if columns is None:
+            return stmt.order_by(Professor.id)
 
-        if sort_by == "last_name":
-            return _order(Professor.last_name, Professor.first_name)
+        desc: bool = (sort_dir or "asc").lower() == "desc"
+        ordered = [col.desc() if desc else col.asc() for col in columns]
 
-        if sort_by == "email":
-            return _order(Professor.email)
-
-        if sort_by == "created_at":
-            return _order(Professor.created_at)
-
-        return stmt.order_by(Professor.id)
+        return stmt.order_by(*ordered, Professor.id.asc())

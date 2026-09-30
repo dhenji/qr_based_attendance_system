@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -57,6 +57,7 @@ from shared.csv_import import (
     strip_upper,
 )
 from shared.pagination import PaginatedResponse
+from shared.query import apply_if
 
 ROSTER_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn(
@@ -87,6 +88,27 @@ ROSTER_CSV_SCHEMA = CsvSchema(
         ),
     ),
 )
+
+
+_STUDENT_SORT_COLUMNS: dict[str, tuple[Any, ...]] = {
+    "last_name": (Student.last_name, Student.first_name),
+    "student_id": (Student.student_id,),
+    "created_at": (Student.created_at,),
+}
+
+
+@dataclass
+class _ImportState:
+    """Counters and seen-sets for one roster import run.
+
+    Mutable by design: the per-row helpers own the bookkeeping so the driver
+    loop stays a flat read/dispatch/collect.
+    """
+
+    imported: int = 0
+    duplicates: int = 0
+    seen_ids: set[str] = field(default_factory=set)
+    seen_emails: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -346,35 +368,13 @@ class StudentService:
         page: int,
         size: int,
     ) -> PaginatedResponse[StudentRead]:
-        stmt: Select[tuple[Student]] = select(Student)
-
-        if year_level_id is not None:
-            stmt = stmt.where(Student.year_level_id == year_level_id)
-
-        if program_id is not None:
-            stmt = stmt.where(
-                Student.year_level_id.in_(
-                    select(YearLevel.id).where(YearLevel.program_id == program_id)
-                )
-            )
-
-        if section is not None:
-            stmt = stmt.where(Student.section == section)
-
-        if is_active is not None:
-            stmt = stmt.where(Student.is_active == is_active)
-
-        if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Student.student_id.ilike(term),
-                    Student.first_name.ilike(term),
-                    Student.middle_name.ilike(term),
-                    Student.last_name.ilike(term),
-                    Student.email.ilike(term),
-                )
-            )
+        stmt: Select[tuple[Student]] = self._list_stmt(
+            search=search,
+            program_id=program_id,
+            year_level_id=year_level_id,
+            section=section,
+            is_active=is_active,
+        )
 
         total: int = (
             await self._session.scalar(
@@ -397,6 +397,46 @@ class StudentService:
             page=page,
             size=size,
         )
+
+    @staticmethod
+    def _list_stmt(
+        *,
+        search: str | None,
+        program_id: int | None,
+        year_level_id: int | None,
+        section: str | None,
+        is_active: bool | None,
+    ) -> Select[tuple[Student]]:
+        """Base select with every list filter applied.
+
+        Criteria are built lazily by `apply_if` so a missing filter never
+        constructs a comparison that would reject ``None``.
+        """
+        stmt: Select[tuple[Student]] = select(Student)
+        stmt = apply_if(stmt, year_level_id, lambda v: Student.year_level_id == v)
+        stmt = apply_if(
+            stmt,
+            program_id,
+            lambda v: Student.year_level_id.in_(
+                select(YearLevel.id).where(YearLevel.program_id == v)
+            ),
+        )
+        stmt = apply_if(stmt, section, lambda v: Student.section == v)
+        stmt = apply_if(stmt, is_active, lambda v: Student.is_active == v)
+
+        if search:
+            term: str = f"%{search.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Student.student_id.ilike(term),
+                    Student.first_name.ilike(term),
+                    Student.middle_name.ilike(term),
+                    Student.last_name.ilike(term),
+                    Student.email.ilike(term),
+                )
+            )
+
+        return stmt
 
     async def update(self, *, student_id: int, payload: StudentUpdate) -> StudentRead:
         student: Student = await self._get_or_404(student_id)
@@ -503,93 +543,88 @@ class StudentService:
         counted as duplicates, not errors.
         """
         rows, parse_errors = parse_roster_csv(content)
-        imported = 0
-        duplicates = 0
-        seen_ids: set[str] = set()
-        seen_emails: set[str] = set()
+        state = _ImportState()
         errors: list[StudentImportError] = list(parse_errors)
 
         for row in rows:
-            is_duplicate, error = await self._validate_import_row(
-                row, seen_ids, seen_emails
-            )
-            if is_duplicate:
-                duplicates += 1
-                seen_ids.add(row.student_id)
-                seen_emails.add(row.email)
+            if await self._is_duplicate_row(row, state):
+                state.duplicates += 1
                 continue
-            if error:
+
+            error: StudentImportError | None = await self._import_row(row, state)
+
+            if error is None:
+                state.imported += 1
+            else:
                 errors.append(error)
-                continue
-
-            seen_ids.add(row.student_id)
-            seen_emails.add(row.email)
-
-            program = await self._programs.get_by(code=row.program_code)
-
-            if program is None:
-                errors.append(
-                    StudentImportError(
-                        line=row.line,
-                        reason=f"unknown program_code {row.program_code}",
-                    )
-                )
-                continue
-
-            year_level = await self._resolve_import_year_level(
-                program.id, row.year_level
-            )
-
-            if year_level is None:
-                errors.append(
-                    StudentImportError(
-                        line=row.line,
-                        reason=(
-                            f"unknown year_level {row.year_level} "
-                            f"for program {row.program_code}"
-                        ),
-                    )
-                )
-                continue
-
-            self._session.add(
-                Student(
-                    student_id=row.student_id,
-                    first_name=row.first_name,
-                    middle_name=row.middle_name,
-                    last_name=row.last_name,
-                    email=row.email,
-                    year_level_id=year_level.id,
-                    section=row.section,
-                )
-            )
-            imported += 1
 
         await self._session.flush()
 
         errors.sort(key=lambda e: e.line)
 
         return StudentImportResult(
-            imported=imported, duplicates=duplicates, errors=errors
+            imported=state.imported, duplicates=state.duplicates, errors=errors
         )
 
-    async def _validate_import_row(
-        self,
-        row: _RosterRow,
-        seen_ids: set[str],
-        seen_emails: set[str],
-    ) -> tuple[bool, StudentImportError | None]:
-        """Validate a single import row. Returns (is_duplicate, error)."""
+    async def _is_duplicate_row(
+        self, row: _RosterRow, state: _ImportState
+    ) -> bool:
+        """Row collides with an earlier row in this file or with the database.
 
-        if (
-            row.student_id in seen_ids
-            or row.email in seen_emails
+        Both the id and the email are checked, in-file first, so a repeat of
+        either counts as a duplicate rather than a per-line error.
+        """
+        return (
+            row.student_id in state.seen_ids
+            or row.email in state.seen_emails
             or await self._students.get_by(student_id=row.student_id) is not None
             or await self._students.get_by(email=row.email) is not None
-        ):
-            return True, None
+        )
 
-        return False, None
+    async def _import_row(
+        self, row: _RosterRow, state: _ImportState
+    ) -> StudentImportError | None:
+        """Insert one student. Returns the error to report, or None on success.
+
+        The seen-sets are populated *before* the program and year-level
+        lookups, so a row rejected for an unknown program still suppresses a
+        later row repeating the same id or email.
+        """
+        state.seen_ids.add(row.student_id)
+        state.seen_emails.add(row.email)
+
+        program = await self._programs.get_by(code=row.program_code)
+
+        if program is None:
+            return StudentImportError(
+                line=row.line,
+                reason=f"unknown program_code {row.program_code}",
+            )
+
+        year_level = await self._resolve_import_year_level(program.id, row.year_level)
+
+        if year_level is None:
+            return StudentImportError(
+                line=row.line,
+                reason=(
+                    f"unknown year_level {row.year_level} "
+                    f"for program {row.program_code}"
+                ),
+            )
+
+        self._session.add(
+            Student(
+                student_id=row.student_id,
+                first_name=row.first_name,
+                middle_name=row.middle_name,
+                last_name=row.last_name,
+                email=row.email,
+                year_level_id=year_level.id,
+                section=row.section,
+            )
+        )
+
+        return None
 
     async def hard_delete(self, *, student_id: int) -> None:
         """Permanently delete an archived student with no referencing rows."""
@@ -720,20 +755,12 @@ class StudentService:
     def _apply_order(
         stmt: Select[tuple[Student]], *, sort_by: str | None, sort_dir: str | None
     ) -> Select[tuple[Student]]:
-        direction: str = (sort_dir or "asc").lower()
-        desc: bool = direction == "desc"
+        columns: tuple[Any, ...] | None = _STUDENT_SORT_COLUMNS.get(sort_by or "")
 
-        def _order(*columns: Any) -> Any:
-            ordered = [col.desc() if desc else col.asc() for col in columns]
-            return stmt.order_by(*ordered, Student.id.asc())
+        if columns is None:
+            return stmt.order_by(Student.id)
 
-        if sort_by == "last_name":
-            return _order(Student.last_name, Student.first_name)
+        desc: bool = (sort_dir or "asc").lower() == "desc"
+        ordered = [col.desc() if desc else col.asc() for col in columns]
 
-        if sort_by == "student_id":
-            return _order(Student.student_id)
-
-        if sort_by == "created_at":
-            return _order(Student.created_at)
-
-        return stmt.order_by(Student.id)
+        return stmt.order_by(*ordered, Student.id.asc())
