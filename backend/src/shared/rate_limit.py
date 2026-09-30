@@ -58,6 +58,22 @@ class FixedWindowLimiter:
         for key in stale:
             del self._windows[key]
 
+    async def exhausted(self, key: str, max_calls: int, window_seconds: int) -> bool:
+        """Whether ``key`` has already spent its budget in the current window.
+
+        Read-only: unlike `hit` this records nothing, so a caller can gate a
+        *failure* counter on it. Calling `hit` up front would count successes
+        too, which is wrong for a limiter that is meant to cap failures.
+        """
+
+        now: float = time.monotonic()
+        entry: tuple[float, int, int] | None = self._windows.get(key)
+
+        if entry is None or now - entry[0] >= entry[1]:
+            return False
+
+        return entry[2] >= max_calls
+
     async def hit(self, key: str, max_calls: int, window_seconds: int) -> bool:
         """Record a call for ``key``.
 
@@ -87,18 +103,24 @@ class FixedWindowLimiter:
 _limiter = FixedWindowLimiter()
 
 
-async def _email_from(request: Request) -> str:
-    """Pull a normalized email out of the JSON body; fall back to ``"unknown"``."""
+async def _email_from(request: Request) -> str | None:
+    """Pull a normalized email out of the JSON body, or None if there isn't one.
+
+    None rather than a placeholder: the caller resolves it to the client IP.
+    A shared sentinel would put every request whose body carries no email -
+    including ones an attacker sends deliberately - into one bucket, so a
+    single hostile client could spend the budget belonging to all of them.
+    """
 
     try:
         body: dict[str, Any] = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return "unknown"
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
 
     email: Any = body.get("email")
 
     if not isinstance(email, str) or not email.strip():
-        return "unknown"
+        return None
 
     return email.strip().lower()
 
@@ -119,17 +141,15 @@ def rate_limit(
     limiter: FixedWindowLimiter = _limiter
 
     async def dependency(request: Request) -> None:
+        ip: str = "unknown"
+
+        if request.client is not None:
+            ip = request.client.host
+
         source: str
+        email: str | None = await _email_from(request) if key == "email" else None
 
-        if key == "email":
-            source = await _email_from(request)
-        elif request.client is not None:
-            source = request.client.host
-        else:
-            source = "unknown"
-
-        source = source or "unknown"
-
+        source = email if email is not None else (ip or "unknown")
         bucket_key: str = f"{request.url.path}|{source.lower()}"
 
         if not await limiter.hit(bucket_key, max_calls, window_seconds):

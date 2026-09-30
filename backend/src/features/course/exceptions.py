@@ -71,6 +71,26 @@ class OfferingExistsException(CourseDomainException):
         )
 
 
+class OfferingScheduleWindowException(CourseDomainException):
+    """422 - the requested schedule would end at or before it starts.
+
+    Raised for a PATCH that supplies only one of the two times as well as one
+    that supplies both, because the stored value of the omitted half still
+    has to satisfy the comparison. `OfferingUpdate`'s own validator only sees
+    the fields present in the request body, so it cannot catch the
+    single-field case.
+    """
+
+    status_code: int = 422
+    code: str = "invalid_schedule_window"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="schedule_end_time must be after schedule_start_time",
+            field="schedule_end_time",
+        )
+
+
 class WindowsExceedDurationException(CourseDomainException):
     """422 - present + late windows exceed the course session duration."""
 

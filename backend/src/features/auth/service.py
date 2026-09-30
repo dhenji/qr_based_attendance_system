@@ -332,12 +332,18 @@ class AuthService:
         cannot be skipped. Unknown emails and wrong answers return the identical
         error and consume the same attempt budget, so this endpoint is not an
         enumeration oracle either.
+
+        The cap counts *failures*, not attempts: `exhausted` is checked without
+        recording, and the budget is only spent below on the failure branch.
+        Calling `hit` up front would lock a legitimate user out after three
+        correct answers inside the window.
         """
 
         normalized: str = email.lower()
+        limiter_key: str = f"forgot_password|{normalized}"
 
-        if not await _recovery_limiter.hit(
-            f"forgot_password|{normalized}",
+        if await _recovery_limiter.exhausted(
+            limiter_key,
             SECURITY_RECOVERY_MAX_ATTEMPTS,
             self._settings.lockout_duration_minutes * 60,
         ):
@@ -352,6 +358,11 @@ class AuthService:
                 self._normalize_answer(answer), user.security_answer_hash
             )
         ):
+            await _recovery_limiter.hit(
+                limiter_key,
+                SECURITY_RECOVERY_MAX_ATTEMPTS,
+                self._settings.lockout_duration_minutes * 60,
+            )
             await self._session.flush()
             raise SecurityAnswerInvalidException()
 

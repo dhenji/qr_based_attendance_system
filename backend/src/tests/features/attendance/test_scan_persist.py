@@ -115,6 +115,7 @@ def test_expires_at_comes_from_the_passed_session() -> None:
             review=False,
             original=None,
             now=NOW,
+            cache_key=None,
             idempotency_key=None,
         )
     )
@@ -141,6 +142,7 @@ def test_persisting_issues_no_queries() -> None:
             review=False,
             original=None,
             now=NOW,
+            cache_key=None,
             idempotency_key=None,
         )
     )
@@ -163,6 +165,7 @@ def test_session_id_is_written_from_the_passed_session() -> None:
             review=False,
             original=None,
             now=NOW,
+            cache_key=None,
             idempotency_key=None,
         )
     )

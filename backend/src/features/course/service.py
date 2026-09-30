@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from features.course.exceptions import (
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingNotFoundException,
+    OfferingScheduleWindowException,
     WindowsExceedDurationException,
 )
 from features.course.model import Course, CourseOffering
@@ -300,15 +302,21 @@ class CourseService:
         self, *, offering_id: int, payload: OfferingUpdate
     ) -> OfferingRead:
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        changes: dict[str, Any] = payload.model_dump(exclude_unset=True)
 
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        # Validate against the merged result, before touching the ORM object.
+        # A PATCH that moves only `schedule_start_time` past the stored end
+        # has to be caught here: the schema validator cannot see the half it
+        # was not sent, and mutating first would leave the row dirty when the
+        # request is rejected.
+        start = changes.get("schedule_start_time", offering.schedule_start_time)
+        end = changes.get("schedule_end_time", offering.schedule_end_time)
+
+        if start is None or end is None or end <= start:
+            raise OfferingScheduleWindowException()
+
+        for field, value in changes.items():
             setattr(offering, field, value)
-
-        start = offering.schedule_start_time
-        end = offering.schedule_end_time
-
-        if end <= start:
-            raise ValueError("schedule_end_time must be after schedule_start_time")
 
         course: Course = await self._get_or_404(offering.course_id)
         self._check_windows(

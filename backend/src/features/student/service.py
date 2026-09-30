@@ -766,6 +766,7 @@ class StudentService:
 
         return StudentDetail(
             **read.model_dump(),
+            student_number=student.student_id,
             face_enrolled_at=student.face_enrolled_at,
             face_embedding_version=student.face_embedding_version or 0,
         )
