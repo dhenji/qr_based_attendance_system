@@ -19,6 +19,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY --from=builder /opt/venv /opt/venv
 COPY src ./src
+# The `api-test` service runs pytest from /app and needs this for
+# asyncio_mode and the marker registry; the dev image otherwise has no tests.
+COPY pytest.ini ./pytest.ini
 
 EXPOSE 8000
 

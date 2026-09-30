@@ -4,11 +4,15 @@ import asyncio
 from datetime import date, datetime, time, timezone
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from features.course.exceptions import (
     CourseNotFoundException,
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingNotFoundException,
+    OfferingScheduleWindowException,
     WindowsExceedDurationException,
 )
 from features.course.model import Course, CourseOffering
@@ -333,22 +337,44 @@ def test_archive_offering_flips_flag() -> None:
     assert offering.is_active is False
 
 
-def test_update_offering_rejects_bad_times() -> None:
-    session = _FakeSession(objs=(_offering(), _course()))
+def test_update_offering_rejects_bad_times_at_the_schema() -> None:
+    """Both times in the body and inverted: rejected before the service.
 
-    try:
+    `OfferingUpdate`'s validator sees both halves, so this never reaches the
+    service. Kept as a 422 (Pydantic's) rather than the bare `ValueError`
+    the service used to raise for the case it could actually see.
+    """
+
+    with pytest.raises(ValidationError):
+        OfferingUpdate(
+            schedule_start_time=time(11, 0), schedule_end_time=time(10, 0)
+        )
+
+
+def test_update_offering_rejects_a_start_moved_past_the_stored_end() -> None:
+    """Only the start is sent, and it lands after the *stored* end.
+
+    This is the case the schema validator cannot see - it only knows the
+    fields in the request body. It used to fall through to the service,
+    which raised a bare `ValueError` that nothing caught, so the route
+    returned a 500 instead of the contract's 422.
+    """
+
+    offering = _offering()
+    session = _FakeSession(objs=(offering, _course()))
+
+    with pytest.raises(OfferingScheduleWindowException) as excinfo:
         _run(
             CourseService(session).update_offering(
                 offering_id=10,
-                payload=OfferingUpdate(
-                    schedule_start_time=time(11, 0), schedule_end_time=time(10, 0)
-                ),
+                payload=OfferingUpdate(schedule_start_time=time(18, 0)),
             )
         )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected ValueError for inverted times")
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.code == "invalid_schedule_window"
+    # And the rejection must not have dirtied the row.
+    assert offering.schedule_start_time == time(9, 0)
 
 
 # -- assignments -------------------------------------------------------------

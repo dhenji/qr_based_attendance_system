@@ -14,6 +14,7 @@ from features.course.exceptions import (
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingNotFoundException,
+    OfferingScheduleWindowException,
     WindowsExceedDurationException,
 )
 from features.course.model import Course, CourseOffering
@@ -52,6 +53,7 @@ from shared.csv_import import (
     parse_import_csv,
 )
 from shared.pagination import PaginatedResponse
+from shared.query import apply_if
 
 BULK_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn("student_id", required_reason="missing student_id"),
@@ -82,7 +84,7 @@ BULK_CSV_SCHEMA = CsvSchema(
 )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _CsvRow:
     line: int
     student_id: str
@@ -93,6 +95,15 @@ class _CsvRow:
     program_code: str
     year_level: str
     section: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class _RowOutcome:
+    """Result of processing one bulk-enroll CSV row."""
+
+    enrolled: bool = False
+    skipped: bool = False
+    error: BulkEnrollError | None = None
 
 
 def _to_csv_row(raw: CsvRow) -> _CsvRow:
@@ -224,40 +235,14 @@ class CourseService:
 
     async def create_offering(self, *, payload: OfferingCreate) -> OfferingRead:
         course: Course = await self._get_or_404(payload.course_id)
-
-        program: Program | None = await self._session.get(Program, payload.program_id)
-
-        if program is None:
-            raise ProgramNotFoundException(payload.program_id)
-
-        year_level: YearLevel | None = await self._session.get(
-            YearLevel, payload.year_level_id
-        )
-
-        if year_level is None or year_level.program_id != payload.program_id:
-            raise YearLevelNotFoundException(payload.year_level_id, payload.program_id)
-
+        await self._require_program(payload.program_id)
+        await self._require_year_level(payload.program_id, payload.year_level_id)
         self._check_windows(
             course,
             payload.default_present_window_minutes,
             payload.default_late_window_minutes,
         )
-
-        if (
-            await self._offerings.get_by(
-                course_id=payload.course_id,
-                program_id=payload.program_id,
-                semester=payload.semester,
-                academic_year=payload.academic_year,
-            )
-            is not None
-        ):
-            raise OfferingExistsException(
-                payload.course_id,
-                payload.program_id,
-                payload.semester,
-                payload.academic_year,
-            )
+        await self._require_no_duplicate_offering(payload)
 
         offering: CourseOffering = await self._offerings.create(**payload.model_dump())
 
@@ -320,15 +305,21 @@ class CourseService:
         self, *, offering_id: int, payload: OfferingUpdate
     ) -> OfferingRead:
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        changes: dict[str, Any] = payload.model_dump(exclude_unset=True)
 
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        # Validate against the merged result, before touching the ORM object.
+        # A PATCH that moves only `schedule_start_time` past the stored end
+        # has to be caught here: the schema validator cannot see the half it
+        # was not sent, and mutating first would leave the row dirty when the
+        # request is rejected.
+        start = changes.get("schedule_start_time", offering.schedule_start_time)
+        end = changes.get("schedule_end_time", offering.schedule_end_time)
+
+        if start is None or end is None or end <= start:
+            raise OfferingScheduleWindowException()
+
+        for field, value in changes.items():
             setattr(offering, field, value)
-
-        start = offering.schedule_start_time
-        end = offering.schedule_end_time
-
-        if end <= start:
-            raise ValueError("schedule_end_time must be after schedule_start_time")
 
         course: Course = await self._get_or_404(offering.course_id)
         self._check_windows(
@@ -450,75 +441,102 @@ class CourseService:
         seen: set[str] = set()
 
         for row in rows:
-            student: Student | None = await self._students.get_by(
-                student_id=row.student_id
-            )
+            outcome: _RowOutcome = await self._enroll_row(row, offering, program, seen)
 
-            if student is None:
-                errors.append(
-                    BulkEnrollError(
-                        line=row.line,
-                        reason=f"unknown student_id {row.student_id}",
-                    )
-                )
-                continue
-
-            if student.email.lower() != row.email.lower():
-                errors.append(
-                    BulkEnrollError(
-                        line=row.line,
-                        reason=f"email mismatch for student {row.student_id}",
-                    )
-                )
-                continue
-
-            if program is not None and row.program_code.upper() != program.code.upper():
-                errors.append(
-                    BulkEnrollError(
-                        line=row.line,
-                        reason=(
-                            f"program_code {row.program_code} does not match offering"
-                        ),
-                    )
-                )
-                continue
-
-            if row.student_id in seen:
+            if outcome.error is not None:
+                errors.append(outcome.error)
+            elif outcome.enrolled:
+                enrolled += 1
+            else:
                 skipped += 1
-                continue
-
-            if (
-                await self._enrollments.get_by(
-                    student_id=student.id,
-                    offering_id=offering_id,
-                    academic_year=offering.academic_year,
-                )
-                is not None
-            ):
-                seen.add(row.student_id)
-                skipped += 1
-                continue
-
-            seen.add(row.student_id)
-            self._session.add(
-                Enrollment(
-                    student_id=student.id,
-                    offering_id=offering_id,
-                    semester=offering.semester,
-                    academic_year=offering.academic_year,
-                )
-            )
-
-            if row.section is not None and row.section != student.section:
-                student.section = row.section
-
-            enrolled += 1
 
         await self._session.flush()
 
         errors.sort(key=lambda e: e.line)
 
         return BulkEnrollResult(enrolled=enrolled, skipped=skipped, errors=errors)
+
+    async def _enroll_row(
+        self,
+        row: _CsvRow,
+        offering: CourseOffering,
+        program: Program | None,
+        seen: set[str],
+    ) -> _RowOutcome:
+        """Validate and attach one CSV row to the offering.
+
+        Mutates ``seen`` only on the two skip branches, so a later duplicate
+        in the same file is skipped without a second database round trip.
+        """
+        resolved: Student | BulkEnrollError = await self._resolve_bulk_student(
+            row, program
+        )
+
+        if isinstance(resolved, BulkEnrollError):
+            return _RowOutcome(error=resolved)
+
+        if row.student_id in seen:
+            return _RowOutcome(skipped=True)
+
+        if await self._is_enrolled(resolved.id, offering):
+            seen.add(row.student_id)
+            return _RowOutcome(skipped=True)
+
+        seen.add(row.student_id)
+        self._session.add(
+            Enrollment(
+                student_id=resolved.id,
+                offering_id=offering.id,
+                semester=offering.semester,
+                academic_year=offering.academic_year,
+            )
+        )
+
+        if row.section is not None and row.section != resolved.section:
+            resolved.section = row.section
+
+        return _RowOutcome(enrolled=True)
+
+    async def _resolve_bulk_student(
+        self, row: _CsvRow, program: Program | None
+    ) -> Student | BulkEnrollError:
+        """Look the row's student up and check it against the offering.
+
+        Returns the student, or a BulkEnrollError carrying the reason the row
+        cannot be enrolled. The three checks stay in this order — unknown id,
+        email mismatch, program mismatch.
+        """
+        student: Student | None = await self._students.get_by(student_id=row.student_id)
+
+        if student is None:
+            return BulkEnrollError(
+                line=row.line,
+                reason=f"unknown student_id {row.student_id}",
+            )
+
+        if student.email.lower() != row.email.lower():
+            return BulkEnrollError(
+                line=row.line,
+                reason=f"email mismatch for student {row.student_id}",
+            )
+
+        if program is not None and row.program_code.upper() != program.code.upper():
+            return BulkEnrollError(
+                line=row.line,
+                reason=f"program_code {row.program_code} does not match offering",
+            )
+
+        return student
+
+    async def _is_enrolled(self, student_id: int, offering: CourseOffering) -> bool:
+        return (
+            await self._enrollments.get_by(
+                student_id=student_id,
+                offering_id=offering.id,
+                academic_year=offering.academic_year,
+            )
+            is not None
+        )
 
     async def get_roster(
         self,
@@ -529,15 +547,7 @@ class CourseService:
         size: int,
     ) -> PaginatedResponse[RosterItem]:
         await self._get_offering_or_404(offering_id)
-
-        stmt: Select[tuple[Enrollment]] = (
-            select(Enrollment)
-            .join(Student, Enrollment.student_id == Student.id)
-            .where(Enrollment.offering_id == offering_id)
-        )
-
-        if section is not None:
-            stmt = stmt.where(Student.section == section)
+        stmt: Select[tuple[Enrollment]] = self._roster_stmt(offering_id, section)
 
         total: int = (
             await self._session.scalar(
@@ -554,6 +564,26 @@ class CourseService:
             )
         ).all()
 
+        return PaginatedResponse[RosterItem](
+            items=await self._roster_items(rows),
+            total=total,
+            page=page,
+            size=size,
+        )
+
+    @staticmethod
+    def _roster_stmt(
+        offering_id: int, section: str | None
+    ) -> Select[tuple[Enrollment]]:
+        stmt: Select[tuple[Enrollment]] = (
+            select(Enrollment)
+            .join(Student, Enrollment.student_id == Student.id)
+            .where(Enrollment.offering_id == offering_id)
+        )
+
+        return apply_if(stmt, section, lambda v: Student.section == v)
+
+    async def _roster_items(self, rows: Sequence[Enrollment]) -> list[RosterItem]:
         items: list[RosterItem] = []
 
         for enrollment in rows:
@@ -582,11 +612,36 @@ class CourseService:
                 )
             )
 
-        return PaginatedResponse[RosterItem](
-            items=items, total=total, page=page, size=size
-        )
+        return items
 
     # -- internals --------------------------------------------------------
+
+    async def _require_program(self, program_id: int) -> None:
+        if await self._session.get(Program, program_id) is None:
+            raise ProgramNotFoundException(program_id)
+
+    async def _require_year_level(self, program_id: int, year_level_id: int) -> None:
+        year_level: YearLevel | None = await self._session.get(YearLevel, year_level_id)
+
+        if year_level is None or year_level.program_id != program_id:
+            raise YearLevelNotFoundException(year_level_id, program_id)
+
+    async def _require_no_duplicate_offering(self, payload: OfferingCreate) -> None:
+        if (
+            await self._offerings.get_by(
+                course_id=payload.course_id,
+                program_id=payload.program_id,
+                semester=payload.semester,
+                academic_year=payload.academic_year,
+            )
+            is not None
+        ):
+            raise OfferingExistsException(
+                payload.course_id,
+                payload.program_id,
+                payload.semester,
+                payload.academic_year,
+            )
 
     async def _get_offering_or_404(self, offering_id: int) -> CourseOffering:
         offering: CourseOffering | None = await self._offerings.get(offering_id)
@@ -607,10 +662,33 @@ class CourseService:
         )
 
     async def _to_offering_read(self, offering: CourseOffering) -> OfferingRead:
-        read = OfferingRead.model_validate(offering)
-        read.enrolled_count = await self._enrollment_count(offering.id)
+        """Build the read schema by hand so `enrolled_count` is a real value.
 
-        return read
+        `model_validate` cannot see derived aggregates (§1.7), and mutating the
+        model afterwards would leave a half-filled schema behind.
+        """
+        return OfferingRead(
+            id=offering.id,
+            course_id=offering.course_id,
+            program_id=offering.program_id,
+            year_level_id=offering.year_level_id,
+            semester=offering.semester,
+            academic_year=offering.academic_year,
+            sessions_per_week=offering.sessions_per_week,
+            semester_weeks=offering.semester_weeks,
+            schedule_days=offering.schedule_days,
+            schedule_start_time=offering.schedule_start_time,
+            schedule_end_time=offering.schedule_end_time,
+            classroom_name=offering.classroom_name,
+            classroom_lat=offering.classroom_lat,
+            classroom_lng=offering.classroom_lng,
+            default_present_window_minutes=offering.default_present_window_minutes,
+            default_late_window_minutes=offering.default_late_window_minutes,
+            enrolled_count=await self._enrollment_count(offering.id),
+            is_active=offering.is_active,
+            created_at=offering.created_at,
+            updated_at=offering.updated_at,
+        )
 
     @staticmethod
     def _check_windows(course: Course, present_minutes: int, late_minutes: int) -> None:

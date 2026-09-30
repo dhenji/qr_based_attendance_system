@@ -1,6 +1,6 @@
 # AGENTS.md — QR-Based Attendance System
 
-**FastAPI backend** (15 feature slices / 17 models + 4 Alembic migrations; 12 routers with routes, enrollment intentionally unmounted) + **SvelteKit frontend** (real API by default, mock opt-in via `PUBLIC_MOCK_MODE`; attendance ledger + excuse queue are hard-coded mock until their backend endpoints land). Backend has a pytest suite (116 test functions / 119 cases) but **no linters, formatters, or CI**. `README.md` is current and accurate; when docs conflict, trust `README.md` + executable config over older guides.
+**FastAPI backend** (15 feature slices / 17 models + 4 Alembic migrations; 12 routers with routes, enrollment intentionally unmounted) + **SvelteKit frontend** (real API by default, mock opt-in via `PUBLIC_MOCK_MODE`; attendance ledger + excuse queue are hard-coded mock until their backend endpoints land). Backend has a pytest suite (239 cases / 19 files) but **no linters, formatters, or CI**. `README.md` is current and accurate; when docs conflict, trust `README.md` + executable config over older guides.
 
 ## Repository State
 
@@ -31,7 +31,21 @@ uvicorn main:app --app-dir src --reload
 cd backend
 DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
 ```
-`DEBUG=true` + a dummy `JWT_SECRET` are required or `Settings` validation fails at import. There is no `conftest.py`; the suite uses hand-rolled fakes (fake `AsyncSession`/settings) and never touches a real database.
+`DEBUG=true` + a dummy `JWT_SECRET` are still required: the 133 pre-existing tests build `Settings()` themselves. `src/tests/conftest.py` runs against **in-memory SQLite** by default (no Docker, no Postgres) and sets both vars for the fixtures it owns.
+
+To run the identical suite against a real Postgres, set `TEST_DATABASE_URL` — the fixture switches engine and the same tests run unmodified:
+
+```bash
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test \
+  PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
+```
+
+Coverage (deliberately no `--cov` in `addopts`, so a plain run stays fast):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest src/tests -q \
+  --cov=src/features --cov=src/shared --cov=src/core --cov-report=term-missing
+```
 
 ### Frontend
 ```bash
@@ -105,7 +119,11 @@ npm run check                      # typecheck (runs svelte-kit sync first; watc
 | Phase 3 soft archive | `DELETE /admin/programs/{id}` flips `programs.is_active` **only** — `year_levels` has no `is_active` column and `courses` has no program FK (D44), so the contract's old "cascades year-levels/courses inactive" line is stale; there is nothing to cascade to (ADR-058). Do not invent a cascade. |
 | Phase 3 hard delete | `DELETE /admin/{students,professors}/{id}/archive` needs a has-records guard (409) — `enrollments`/`attendance_records`/`excuse_requests`/`sessions` are `ondelete=RESTRICT`, so the `is_active` check alone 500s. Do not relax them to CASCADE (ADR-057). |
 | Frontend typecheck | `npm run check` generates `.svelte-kit/` (gitignored) via `svelte-kit sync`. |
-| Backend tests | Suite is 116 functions / 119 cases; 2 session tests (`test_create_session_copies_offering_defaults`, `test_get_active_session_counts_tiles_and_banner`) pin a fixed `NOW = 2026-09-27 12:00 UTC` fixture and fail once the wall clock passes it — pre-existing clock sensitivity on `main`, not a regression. |
+| Backend tests | Suite is 239 cases / 19 files: 133 original hand-rolled-fake tests + 106 new DB-backed ones. |
+| Test DB shims | `conftest.py` registers three SQLite-only dialect shims, without which the models cannot be tested off Postgres: `JSONB`→`JSON`; `BigInteger`→`INTEGER` (SQLite only auto-increments a column declared exactly `INTEGER PRIMARY KEY`, so every `id BIGINT` insert would fail `NOT NULL`); and a `DateTime` subclass returning **aware** UTC (SQLite `CURRENT_TIMESTAMP` is naive while Postgres `now()` on `timestamptz` is not — `SessionService.create_session` compares `created_at + duration` against an aware `scheduled_end_time` and raises `TypeError` without it). `PRAGMA foreign_keys=ON` is also required, or the `ondelete=RESTRICT` archive-guard tests pass against a database enforcing nothing. |
+| Sync + async tests coexist | `asyncio_mode = auto` only wraps `async def` tests. The 133 pre-existing tests are *sync* functions calling `asyncio.run()`, and are unaffected. Don't mass-convert them to `async def`. |
+| Test process globals | `conftest.py` has an autouse fixture clearing `attendance.service._IDEMPOTENCY_STORE` and `rate_limit._limiter._windows`. The scan route's 30-per-60s budget is process-global, so without that reset tests 429 each other. |
+| `api_client` vs `test_client` | DB-backed API tests must use `api_client` (`httpx.AsyncClient` + `ASGITransport`, `_get_db` overridden to the test session). `TestClient` blocks on a thread portal and raises when called from inside a running event loop, so it is sync-only, and it is deliberately not used as a context manager — entering it runs the app lifespan, whose `SELECT 1` would need a live Postgres. |
 
 ## Docs Reference
 
@@ -129,7 +147,7 @@ Key docs an agent is likely to need (README.md links the full inventory):
 - `docs/project/roadmap.md` — 13-phase implementation roadmap (Phase 0 done, 12 is a gap)
 
 ### Decision tracking & ops
-- `docs/project/decision-log.md` — authoritative decision log (D1–D58, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing, ADR-058 admin CRUD slice template, ADR-059 face-enrollment class)
+- `docs/project/decision-log.md` — authoritative decision log (D1–D60, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing, ADR-058 admin CRUD slice template, ADR-059 face-enrollment class, ADR-060 conformance audit)
 - `docs/operations/runbooks.md` — restore, rollback, unlock, re-enroll, key rotation
 - `docs/testing/test-plan.md` — portal×feature matrix & decision coverage
 - `docs/deployment/production-checklist.md` — secrets, CORS, storage, first-admin seeding

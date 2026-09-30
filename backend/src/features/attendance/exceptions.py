@@ -45,6 +45,33 @@ class FaceMismatchException(AttendanceDomainException):
         )
 
 
+class StudentNumberMismatchException(AttendanceDomainException):
+    """403 - the body claims a different student than the one authenticated.
+
+    `student_number` stays in the scan/precheck body because the contract
+    documents it (api-contracts.md:935/949), but the authenticated user is
+    authoritative: a body that names another student is a spoofed request,
+    not a typo, so it is rejected rather than silently ignored.
+    """
+
+    status_code: int = 403
+    code: str = "student_number_mismatch"
+
+    def __init__(self, submitted: str, expected: str | None = None) -> None:
+        if expected is None:
+            message: str = (
+                f"student_number '{submitted}' does not belong to the "
+                "authenticated account"
+            )
+        else:
+            message = (
+                f"student_number '{submitted}' does not match this account "
+                f"('{expected}')"
+            )
+
+        super().__init__(message=message)
+
+
 class ReviewNotFoundException(AttendanceDomainException):
     """404 - the flagged attendance record does not exist."""
 

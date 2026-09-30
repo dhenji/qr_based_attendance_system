@@ -1,0 +1,28 @@
+# Frontend-only artifacts. Companion to backend/.gitignore: the root file keeps
+# only what is shared across the repo, and each subtree's .gitignore owns what
+# is uniquely its own. The root entries this file replaces were anchored
+# ("/.svelte-kit"), so they never matched anything in frontend/ -- the rule
+# that actually worked was a "/frontend/.svelte-kit" line appended at the
+# bottom of the root file. These are the same patterns, unanchored, so they
+# resolve relative to frontend/.
+#
+# Env-file rules (.env, .env.*, !.env.example) deliberately stay in the root
+# .gitignore. They are shared with backend/, and the deeper file takes
+# precedence over the root rather than merging with it: duplicating them here
+# would mean two files that must stay byte-identical, and any drift would
+# re-ignore a tracked .env.example with no error.
+
+# deps
+node_modules/
+
+# svelte-kit
+.svelte-kit/
+build/
+.output/
+.vercel/
+.netlify/
+.wrangler/
+
+# vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*

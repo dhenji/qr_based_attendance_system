@@ -6,6 +6,8 @@ slices never import each other's `constants.py`. A feature that owns a value
 re-exports it only when an existing import site must keep working.
 """
 
+from __future__ import annotations
+
 # Geofence coordinates. Classroom anchors (course, session) and the
 # student-reported position (attendance) are the same physical limits, so all
 # three slices read them from here.

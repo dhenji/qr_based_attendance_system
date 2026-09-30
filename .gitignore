@@ -5,30 +5,18 @@ Thumbs.db
 .vscode/
 *.swp
 
-# python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
+# Subtree-owned artifacts live in the subtree they belong to, not here:
+# backend/.gitignore owns Python artifacts (__pycache__/, *.pyc, *.pyo,
+# .venv/, .pytest_cache/, backups/) and frontend/.gitignore owns Node
+# artifacts (node_modules/, .svelte-kit/, build/, .output/, host deploy dirs,
+# vite timestamps). Neither pattern set is repeated below.
 
 # env files
+# Applies to backend/ and frontend/ alike; both have real .env files.
 .env
 .env.*
 !.env.example
 !.env.test
-
-# node
-node_modules/
-/.svelte-kit
-/build
-/.output
-/.vercel
-/.netlify
-/.wrangler
-
-# vite
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
 
 # misc
 *.log
@@ -40,4 +28,3 @@ pgdata/
 
 # ai prompts
 docs/developer/prompts
-/frontend/.svelte-kit

@@ -891,3 +891,64 @@
   slices (`shared/csv_import.py` and any future ones).
 - **Supersedes:** the application of ADR-058 (a)'s "non-CRUD slices keep
   module-level functions" clause to `face_enrollment` only.
+
+### ADR-060: Contract Conformance Audit — Pagination Default and `overlapping_assignment` Status
+
+- **Decision (D60):** Two §1.8/`api-contracts.md` conformance corrections, both
+  resolved in the contract's favour: `shared/pagination.py`'s `DEFAULT_PAGE_SIZE`
+  becomes `20` (was `50`), and `OverlappingAssignmentException` becomes `409`
+  (was `422`).
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Context:** An audit of all 12 mounted routers (78 operations, 57 paths)
+  against §1.8 of `coding-standards.md` and `api-contracts.md` confirmed the
+  structural rules hold: every collection route is declared `""` rather than
+  `"/"`, all 45 `/admin/*` routes carry a role guard (`/admin/users` on
+  `SUPER_ADMIN` per the contract, the other 42 on `ADMIN` — 62 role-guarded
+  routes in total, plus 15 under `/auth` and `/health`), all 14 paginated routes
+  source their bounds from `shared.pagination` with `ge=1` / `le=MAX_PAGE_SIZE`,
+  404s fold the id into the message, and 409s reuse existing class names. Two
+  value-level drifts survived that check. `DEFAULT_PAGE_SIZE` was `50` while
+  `api-contracts.md` documents `?page=1&size=20` in 14 places, so every list
+  endpoint defaulted to 2.5× the documented page size; the frontend already sends
+  `20` and no test pinned the constant. `OverlappingAssignmentException` inherited
+  `CourseProfessorDomainException` (422) while the contract documents
+  `409 overlapping_assignment` — and §1.9 lists it among the 409 class-name-reuse
+  examples. `api-contracts.md` is the source of truth for both, so the code moves.
+- **Rationale:** For the status, follow the convention every other 409 in the
+  codebase already uses (`ProgramCodeExistsException`, `YearLevelHasCoursesException`):
+  keep the slice's `DomainException` parent and set `status_code` explicitly,
+  rather than re-parenting onto `DatabaseException`. `CourseProfessorDomainException`
+  has no other subclass, so nothing else moves. For the page size, the constant is
+  a single named value reached through 6 slice `constants.py` re-exports and 14
+  routers, so one edit propagates everywhere — the ADR-058 re-export shape is
+  exactly what makes this a one-line fix.
+- **Consequences:** One literal in `shared/pagination.py`; the OpenAPI default for
+  `size` becomes `20` across all 14 paginated endpoints. `course_professor/exceptions.py`
+  gains an explicit `status_code: int = 409` and a corrected docstring. No new
+  exception classes, no role-guard changes, no router path changes, no migration,
+  no OpenAPI response-shape change (`{items, total, page, size}` is unchanged — only
+  the default window moved). `test_offering_service.py` asserts only `exc.code`, so
+  the status change is test-safe. Two `size: 50` values remain in mock-fixture
+  response bodies in `frontend/src/lib/api/endpoints.ts` — cosmetic, since wire
+  requests already send `20`.
+- **Deferred:** Three groups of contract-documented behavior remain unimplemented
+  and are reported rather than fixed, since closing them would mean adding new
+  exception classes: face enrollment's `400 no_face_detected`, `400 multiple_faces`,
+  and `422 quality_too_low` (contract line 333 — detection runs client-side via
+  MediaPipe, so the backend has no detector to fail); bulk enroll's
+  `422 validation_error` (line 309 — per-row errors are folded into the 201 body
+  instead); and the three admin reset-password endpoints
+  `POST /admin/users/{id}/reset-password`,
+  `POST /admin/students/{id}/reset-password`, and
+  `POST /admin/professors/{id}/reset-password` (lines 674-676 — only
+  `/auth/reset-password` ships). A fourth: `resolve_review` raises
+  `AttendanceDomainException(code="invalid_decision")` inline, with no class in
+  `exceptions.py` and no `api-contracts.md` entry, which breaks §1.6's "codes
+  come from the contract and are never invented" rule the same way ADR-060
+  corrected `overlapping_assignment`. It is left as-is because giving it a class
+  would add surface the contract has not asked for, and because the call was
+  extracted into `_resolve_approved_status` in the same change that noted it,
+  so the next reader sees the fix's scope in one place.
+- **Extends:** ADR-058 (whose §1.9 states the 404 fold-the-id and 409-reuse-the-name
+  rules this audit checked) and ADR-059.

@@ -58,9 +58,13 @@ async def resolve_liveness_review(
     user: AdminUser,
     service: AttendanceServiceDep,
 ) -> ResolveReviewResponse:
-    # body.note is accepted for the audit trail and not stored on the row.
+    # The note rides inside `liveness_evidence` (attendance_records has no
+    # dedicated column). The prompt also asks for an audit-log row here;
+    # there is no audit table until Phase 8, so the decision is recorded on
+    # the record itself for now.
     return await service.resolve_review(
         record_id=record_id,
         decision=body.decision,
         actor_id=user.id,
+        note=body.note,
     )

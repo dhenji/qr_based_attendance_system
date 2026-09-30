@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -88,6 +89,19 @@ def _summarize(records: Sequence[Attendance]) -> tuple[SessionCounts, int]:
     return counts, len(records)
 
 
+@dataclass(frozen=True)
+class _SessionWindows:
+    """The two scan windows, resolved payload -> offering -> app default."""
+
+    present: int
+    late: int
+
+
+def _or_fallback[T](chosen: T | None, fallback: T | None) -> T | None:
+    """First non-None of two values; `None` overrides are explicit `0` on purpose."""
+    return fallback if chosen is None else chosen
+
+
 def _rates(enrolled: int, counts: SessionCounts) -> tuple[float, float]:
     """Compliance (present/total) and participation ((p+l+e)/total) rates."""
     if enrolled <= 0:
@@ -140,20 +154,63 @@ class SessionService:
         await self._require_assignment(
             offering_id=offering.id, professor_id=professor_id
         )
+        await self._require_no_active_session(offering_id=offering.id, now=now)
 
+        duration: int = await self._resolve_duration(payload, offering)
+        windows: _SessionWindows = self._resolve_windows(payload, offering)
+        self._check_windows(windows, duration)
+
+        radius: int = (
+            payload.classroom_radius_meters
+            or self._settings.default_geofence_radius_meters
+        )
+
+        row: Session = await self._insert_session(
+            offering=offering,
+            professor_id=professor_id,
+            payload=payload,
+            windows=windows,
+            duration=duration,
+            radius=radius,
+            now=now,
+        )
+        await self._stamp_session(row, duration, now)
+
+        return SessionRead(
+            id=row.id,
+            session_code=row.session_code,
+            offering_id=offering.id,
+            qr_payload=QRPayload(
+                code=row.session_code,
+                offering=offering.id,
+                radius=radius,
+                pw=windows.present,
+                lw=windows.late,
+            ),
+            expires_at=row.expires_at,
+            scheduled_end_time=row.scheduled_end_time,
+            created_at=row.created_at or now,
+        )
+
+    async def _require_no_active_session(
+        self, *, offering_id: int, now: datetime
+    ) -> None:
         active_id: int | None = await self._session.scalar(
             select(Session.id)
             .where(
-                Session.offering_id == offering.id,
+                Session.offering_id == offering_id,
                 Session.expires_at > now,
             )
             .limit(1)
         )
 
         if active_id is not None:
-            raise SessionAlreadyActiveException(offering.id)
+            raise SessionAlreadyActiveException(offering_id)
 
-        duration: int = await self._resolve_duration(payload, offering)
+    def _resolve_windows(
+        self, payload: SessionCreate, offering: CourseOffering
+    ) -> _SessionWindows:
+        """Payload -> offering -> app-default fallback for the two scan windows."""
         present: int = (
             payload.present_window_minutes
             or offering.default_present_window_minutes
@@ -165,62 +222,54 @@ class SessionService:
             or self._settings.default_late_window_minutes
         )
 
-        if present + late > duration:
-            raise WindowsExceedDurationException(present, late, duration)
+        return _SessionWindows(present=present, late=late)
 
-        radius: int = (
-            payload.classroom_radius_meters
-            or self._settings.default_geofence_radius_meters
-        )
-        scheduled_end: datetime = now + timedelta(minutes=duration)
+    @staticmethod
+    def _check_windows(windows: _SessionWindows, duration: int) -> None:
+        if windows.present + windows.late > duration:
+            raise WindowsExceedDurationException(
+                windows.present, windows.late, duration
+            )
+
+    async def _insert_session(
+        self,
+        *,
+        offering: CourseOffering,
+        professor_id: int,
+        payload: SessionCreate,
+        windows: _SessionWindows,
+        duration: int,
+        radius: int,
+        now: datetime,
+    ) -> Session:
         row = Session(
             offering_id=offering.id,
             professor_id=professor_id,
             session_code=secrets.token_hex(16),
             duration_minutes=duration,
-            present_window_minutes=present,
-            late_window_minutes=late,
+            present_window_minutes=windows.present,
+            late_window_minutes=windows.late,
             scheduled_start_time=now,
-            scheduled_end_time=scheduled_end,
+            scheduled_end_time=now + timedelta(minutes=duration),
             expires_at=None,
             classroom_radius_meters=radius,
             classroom_name=payload.classroom_name or offering.classroom_name,
-            classroom_lat=(
-                payload.classroom_lat
-                if payload.classroom_lat is not None
-                else offering.classroom_lat
-            ),
-            classroom_lng=(
-                payload.classroom_lng
-                if payload.classroom_lng is not None
-                else offering.classroom_lng
-            ),
+            classroom_lat=_or_fallback(payload.classroom_lat, offering.classroom_lat),
+            classroom_lng=_or_fallback(payload.classroom_lng, offering.classroom_lng),
         )
         self._session.add(row)
         await self._session.flush()
 
+        return row
+
+    async def _stamp_session(
+        self, row: Session, duration: int, now: datetime
+    ) -> None:
+        """Second flush: derive the code from the assigned id and stamp expiry."""
         base: datetime = row.created_at or now
         row.expires_at = min(base + timedelta(minutes=duration), row.scheduled_end_time)
         row.session_code = generate_session_code(row.id, self._settings)
         await self._session.flush()
-
-        qr = QRPayload(
-            code=row.session_code,
-            offering=offering.id,
-            radius=radius,
-            pw=present,
-            lw=late,
-        )
-
-        return SessionRead(
-            id=row.id,
-            session_code=row.session_code,
-            offering_id=offering.id,
-            qr_payload=qr,
-            expires_at=row.expires_at,
-            scheduled_end_time=row.scheduled_end_time,
-            created_at=row.created_at or now,
-        )
 
     async def get_active_session(
         self, *, session_id: int, professor_id: int
@@ -238,6 +287,41 @@ class SessionService:
         records: Sequence[Attendance] = await self._attendance_rows(session_id)
         counts, scanned = _summarize(records)
         enrolled_count: int = len(students)
+
+        return SessionActiveResponse(
+            id=row.id,
+            offering=row.offering_id,
+            session_code=row.session_code,
+            scan_window_remaining=self._scan_window_remaining(row, now),
+            scheduled_end_time=row.scheduled_end_time,
+            status=_session_status(row.expires_at, now),
+            enrolled_count=enrolled_count,
+            remaining=max(0, enrolled_count - scanned),
+            pending_sync_count=await self._pending_sync_count(session_id),
+            students=self._active_student_items(students, records),
+            counts=counts,
+        )
+
+    @staticmethod
+    def _scan_window_remaining(row: Session, now: datetime) -> int:
+        """Seconds left before the session expires.
+
+        Deliberately seconds: the frontend renders this as a countdown clock,
+        and every other duration on the session is stored in whole minutes, so
+        converting here would make the projector tile tick in 60s steps. The
+        name carries no unit, which is why the schema field documents it.
+        """
+
+        if row.expires_at is None:
+            return 0
+
+        return max(0, int((row.expires_at - now).total_seconds()))
+
+    @staticmethod
+    def _active_student_items(
+        students: Sequence[Student], records: Sequence[Attendance]
+    ) -> list[ActiveStudentItem]:
+        """One tile per enrolled student; unscanned reads as absent."""
         scanned_status: dict[int, ValidationStatus] = {
             r.student_id: ValidationStatus(r.validation_status) for r in records
         }
@@ -245,7 +329,8 @@ class SessionService:
         excuses: dict[int, str | None] = {
             r.student_id: r.excuse_reason for r in records
         }
-        items: list[ActiveStudentItem] = [
+
+        return [
             ActiveStudentItem(
                 student_number=student.student_id,
                 name=f"{student.first_name} {student.last_name}",
@@ -256,25 +341,6 @@ class SessionService:
             )
             for student in students
         ]
-
-        scan_window_remaining: int = 0
-
-        if row.expires_at is not None:
-            scan_window_remaining = max(0, int((row.expires_at - now).total_seconds()))
-
-        return SessionActiveResponse(
-            id=row.id,
-            offering=row.offering_id,
-            session_code=row.session_code,
-            scan_window_remaining=scan_window_remaining,
-            scheduled_end_time=row.scheduled_end_time,
-            status=_session_status(row.expires_at, now),
-            enrolled_count=enrolled_count,
-            remaining=max(0, enrolled_count - scanned),
-            pending_sync_count=await self._pending_sync_count(session_id),
-            students=items,
-            counts=counts,
-        )
 
     async def close_session(
         self, *, session_id: int, professor_id: int
@@ -355,12 +421,12 @@ class SessionService:
     ) -> PaginatedResponse[SessionListItem]:
         page, size = _normalize_page(page, size)
         now: datetime = _utcnow()
-        stmt: Select[tuple[Session]] = select(Session).where(
-            Session.professor_id == professor_id
+        stmt: Select[tuple[Session]] = self._owned_sessions_stmt(
+            professor_id,
+            offering_id=offering_id,
+            date_from=date_from,
+            date_to=date_to,
         )
-        stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
-        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         total: int = (
             await self._session.scalar(
@@ -379,25 +445,30 @@ class SessionService:
         items: list[SessionListItem] = []
 
         for row in rows:
-            counts, scanned = _summarize(await self._attendance_rows(row.id))
-            enrolled: int = await self._enrollment_count(row.offering_id)
-            items.append(
-                SessionListItem(
-                    id=row.id,
-                    offering_id=row.offering_id,
-                    session_code=row.session_code,
-                    created_at=row.created_at,
-                    expires_at=row.expires_at,
-                    duration_minutes=row.duration_minutes,
-                    present_count=counts.present,
-                    late_count=counts.late,
-                    absent_count=max(0, enrolled - scanned),
-                    status=_session_status(row.expires_at, now),
-                )
-            )
+            items.append(await self._session_list_item(row, now))
 
         return PaginatedResponse[SessionListItem](
             items=items, total=total, page=page, size=size
+        )
+
+    async def _session_list_item(
+        self, row: Session, now: datetime
+    ) -> SessionListItem:
+        """One list tile: present/late/absent plus the derived session status."""
+        counts, scanned = _summarize(await self._attendance_rows(row.id))
+        enrolled: int = await self._enrollment_count(row.offering_id)
+
+        return SessionListItem(
+            id=row.id,
+            offering_id=row.offering_id,
+            session_code=row.session_code,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            duration_minutes=row.duration_minutes,
+            present_count=counts.present,
+            late_count=counts.late,
+            absent_count=max(0, enrolled - scanned),
+            status=_session_status(row.expires_at, now),
         )
 
     async def get_session_history(
@@ -421,12 +492,12 @@ class SessionService:
         """
         page, size = _normalize_page(page, size)
         now: datetime = _utcnow()
-        stmt: Select[tuple[Session]] = select(Session).where(
-            Session.professor_id == professor_id
+        stmt: Select[tuple[Session]] = self._owned_sessions_stmt(
+            professor_id,
+            offering_id=offering_id,
+            date_from=date_from,
+            date_to=date_to,
         )
-        stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
-        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         rows: Sequence[Session] = (
             await self._session.scalars(stmt.order_by(Session.id.asc()))
@@ -435,31 +506,10 @@ class SessionService:
         items: list[SessionHistoryItem] = []
 
         for row in rows:
-            if section is not None:
-                sections: set[str] = await self._offering_sections(row.offering_id)
+            if not await self._matches_section(row.offering_id, section):
+                continue
 
-                if section not in sections:
-                    continue
-
-            counts, scanned = _summarize(await self._attendance_rows(row.id))
-            enrolled: int = await self._enrollment_count(row.offering_id)
-            compliance, participation = _rates(enrolled, counts)
-            items.append(
-                SessionHistoryItem(
-                    id=row.id,
-                    offering_id=row.offering_id,
-                    session_code=row.session_code,
-                    created_at=row.created_at,
-                    expires_at=row.expires_at,
-                    duration_minutes=row.duration_minutes,
-                    present_count=counts.present,
-                    late_count=counts.late,
-                    absent_count=max(0, enrolled - scanned),
-                    status=_session_status(row.expires_at, now),
-                    compliance_rate=compliance,
-                    participation_rate=participation,
-                )
-            )
+            items.append(await self._session_history_item(row, now))
 
         items.sort(key=_history_key(sort_by), reverse=_desc(sort_dir))
         total: int = len(items)
@@ -468,6 +518,36 @@ class SessionService:
         return PaginatedResponse[SessionHistoryItem](
             items=window, total=total, page=page, size=size
         )
+
+    async def _session_history_item(
+        self, row: Session, now: datetime
+    ) -> SessionHistoryItem:
+        """One history row: counts plus the compliance/participation rates."""
+        counts, scanned = _summarize(await self._attendance_rows(row.id))
+        enrolled: int = await self._enrollment_count(row.offering_id)
+        compliance, participation = _rates(enrolled, counts)
+
+        return SessionHistoryItem(
+            id=row.id,
+            offering_id=row.offering_id,
+            session_code=row.session_code,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            duration_minutes=row.duration_minutes,
+            present_count=counts.present,
+            late_count=counts.late,
+            absent_count=max(0, enrolled - scanned),
+            status=_session_status(row.expires_at, now),
+            compliance_rate=compliance,
+            participation_rate=participation,
+        )
+
+    async def _matches_section(self, offering_id: int, section: str | None) -> bool:
+        """No section filter, or the offering has a student in that section."""
+        if section is None:
+            return True
+
+        return section in await self._offering_sections(offering_id)
 
     async def get_professor_attendance(
         self,
@@ -492,6 +572,59 @@ class SessionService:
         date, student, section, status, time.
         """
         page, size = _normalize_page(page, size)
+        stmt: Select[tuple[Attendance]] = self._attendance_stmt(
+            professor_id,
+            course_id=course_id,
+            offering_id=offering_id,
+            section=section,
+            session_id=session_id,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
+        records: Sequence[Attendance] = (
+            await self._session.scalars(
+                _apply_attendance_order(stmt, sort_by=sort_by, sort_dir=sort_dir)
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+
+        students: dict[int, Student] = await self._load_students(
+            {r.student_id for r in records}
+        )
+
+        return PaginatedResponse[ProfessorAttendanceItem](
+            items=self._attendance_items(records, students),
+            total=total,
+            page=page,
+            size=size,
+        )
+
+    def _attendance_stmt(
+        self,
+        professor_id: int,
+        *,
+        course_id: int | None,
+        offering_id: int | None,
+        section: str | None,
+        session_id: int | None,
+        status: ValidationStatus | str | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> Select[tuple[Attendance]]:
+        """Base join for one professor's attendance rows, plus every filter.
+
+        ``CourseOffering`` is joined only when a course filter is present so
+        the unfiltered query keeps its original join set.
+        """
         stmt: Select[tuple[Attendance]] = (
             select(Attendance)
             .join(Session, Session.id == Attendance.session_id)
@@ -511,31 +644,25 @@ class SessionService:
         stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
 
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
-        )
-        records: Sequence[Attendance] = (
+        return stmt
+
+    async def _load_students(self, student_ids: set[int]) -> dict[int, Student]:
+        if not student_ids:
+            return {}
+
+        rows: Sequence[Student] = (
             await self._session.scalars(
-                _apply_attendance_order(stmt, sort_by=sort_by, sort_dir=sort_dir)
-                .offset((page - 1) * size)
-                .limit(size)
+                select(Student).where(Student.id.in_(student_ids))
             )
         ).all()
 
-        student_ids: list[int] = list({r.student_id for r in records})
-        students: dict[int, Student] = {}
+        return {s.id: s for s in rows}
 
-        if student_ids:
-            rows: Sequence[Student] = (
-                await self._session.scalars(
-                    select(Student).where(Student.id.in_(student_ids))
-                )
-            ).all()
-            students = {s.id: s for s in rows}
-
+    @staticmethod
+    def _attendance_items(
+        records: Sequence[Attendance], students: dict[int, Student]
+    ) -> list[ProfessorAttendanceItem]:
+        """Project rows onto the table; records with no student are dropped."""
         items: list[ProfessorAttendanceItem] = []
 
         for record in records:
@@ -567,11 +694,27 @@ class SessionService:
                 )
             )
 
-        return PaginatedResponse[ProfessorAttendanceItem](
-            items=items, total=total, page=page, size=size
-        )
+        return items
 
     # -- internals --------------------------------------------------------
+
+    @staticmethod
+    def _owned_sessions_stmt(
+        professor_id: int,
+        *,
+        offering_id: int | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> Select[tuple[Session]]:
+        """Sessions owned by one professor, narrowed by the shared filters."""
+        stmt: Select[tuple[Session]] = select(Session).where(
+            Session.professor_id == professor_id
+        )
+        stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+
+        return stmt
 
     async def _get_offering_or_404(self, offering_id: int) -> CourseOffering:
         offering: CourseOffering | None = await self._offerings.get(offering_id)

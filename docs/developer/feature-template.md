@@ -348,42 +348,53 @@ api_router.include_router(program_router)
 
 ### 7. Backend Tests (`backend/src/tests/test_{feature}.py`)
 
-> The backend suite is run with pytest. The `api-test` Compose service runs the suite in a one-shot container. The example below is the target shape for async API tests; add `pytest-asyncio` and the required database fixtures when implementing those tests.
+> The backend suite is run with pytest. The `api-test` Compose service runs the suite in a one-shot container. Async tests need no `@pytest.mark.asyncio` decorator — `backend/pytest.ini` sets `asyncio_mode = auto`. The client fixture already exists; use it rather than declaring a local one.
 
 ```python
-import pytest
-from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from main import app
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+from features.program.service import ProgramService
+from tests.conftest import Factories
 
 
-@pytest.mark.asyncio
-async def test_create_program(client):
-    # api_router carries prefix="/api", so the real path is /api/admin/programs/
-    response = await client.post("/api/admin/programs/", json={
-        "code": "BSCS",
-        "name": "Bachelor of Science in Computer Science",
-        "total_years": 4,
-    })
-    assert response.status_code == 200
-    data = response.json()
-    assert data["code"] == "BSCS"
-    assert data["total_years"] == 4
+async def test_create_program(api_client, auth_headers) -> None:
+    # Collection routes are mounted without a trailing slash, so the real
+    # path is /api/admin/programs, not /api/admin/programs/.
+    headers = await auth_headers(role="admin")
+    response = await api_client.post(
+        "/api/admin/programs",
+        json={"code": "BSCS", "name": "BS Computer Science", "total_years": 4},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    assert response.json()["code"] == "BSCS"
 
 
-@pytest.mark.asyncio
-async def test_list_programs(client):
-    response = await client.get("/api/admin/programs/")
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
+async def test_program_service_requires_a_unique_code(
+    test_db_session: AsyncSession, factories: Factories, settings
+) -> None:
+    """Service-level, when the route test is not enough.
+
+    `factories` seeds via the same database the request path uses, and every
+    keyword is a column override on top of a valid default.
+    """
+
+    await factories.program(code="BSCS")
+    service = ProgramService(test_db_session, settings)
+    # ...assert the domain exception is raised
 ```
+
+**Available fixtures** (all in `src/tests/conftest.py`):
+
+| Fixture | Use |
+|---------|-----|
+| `test_db_session` | `AsyncSession` on a per-test schema, rolled back at teardown |
+| `test_client` | Sync `TestClient` for DB-free routing/auth checks |
+| `api_client` | `httpx.AsyncClient` over the real app, wired to `test_db_session` |
+| `auth_headers` | `await auth_headers(role=...)` → a real bearer header |
+| `factories` | Seed users/programs/students/offerings/sessions/enrollments |
+| `db_factory` | `await db_factory(Model, **columns)` escape hatch |
+| `settings`, `now` | `Settings` for service construction; frozen UTC clock |
 
 **Done:**
 

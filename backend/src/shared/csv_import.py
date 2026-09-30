@@ -6,13 +6,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(kw_only=True)
 class CsvParseError:
     line: int
     reason: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class CsvRow:
     line: int
     values: dict[str, str]

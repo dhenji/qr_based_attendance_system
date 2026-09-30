@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
 from core.database import database
-from core.exceptions import AppException
 from core.security import decode_access_token, extract_user_id
 from features.admin.service import AdminService
 from features.attendance.service import AttendanceService
@@ -33,7 +32,11 @@ async def _get_db() -> AsyncIterator[AsyncSession]:
         try:
             yield session
             await session.commit()
-        except AppException:
+        except BaseException:
+            # Any exception, not just the AppException family. Nothing catches
+            # the rest, so it would otherwise escape without an explicit
+            # rollback and leave the transaction to be undone implicitly by the
+            # pool when the connection is returned.
             await session.rollback()
             raise
 
