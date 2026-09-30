@@ -35,6 +35,8 @@ from features.attendance.schema import (
     HistorySummary,
     LivenessEvidence,
     LivenessReviewItem,
+    PrecheckRequest,
+    PrecheckResponse,
     ResolveReviewResponse,
     ScanRequest,
     ScanResponse,
@@ -242,6 +244,43 @@ class AttendanceService:
             original,
             now,
             idempotency_key,
+        )
+
+    async def precheck_scan(
+        self, *, session_id: int, student_number: str
+    ) -> PrecheckResponse:
+        """Read-only pre-check: validates session, enrollment, and duplicate scan.
+
+        Does not write attendance_records or sync_queue rows.
+        """
+        now: datetime = _utcnow()
+
+        db_session: Session = await self._get_active_session(session_id, now, now)
+
+        student: Student = await self._get_active_student(
+            student_number, db_session.offering_id
+        )
+
+        enrolled: bool = True
+        try:
+            await self._require_enrollment(student.id, db_session.offering_id)
+        except NotEnrolledException:
+            enrolled = False
+
+        already_scanned: bool = False
+        try:
+            await self._require_no_duplicate(student.id, db_session.id)
+        except DuplicateScanException:
+            already_scanned = True
+
+        return PrecheckResponse(
+            enrolled=enrolled,
+            already_scanned=already_scanned,
+            student={
+                "student_id": student.student_id,
+                "name": f"{student.first_name} {student.last_name}",
+                "section": student.section,
+            },
         )
 
     async def _get_active_session(
