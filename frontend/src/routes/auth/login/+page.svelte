@@ -124,12 +124,6 @@
 <main class="auth">
 	<div class="wrapper">
 
-		<!-- DEBUG TEST: This spinner should always be visible and spinning -->
-		<div style="margin: 1rem 0; padding: 1rem; border: 2px solid #1e3a5f; background: #f0f8ff; text-align: center;">
-			<p style="margin: 0 0 1rem 0; font-weight: bold; color: #1e3a5f;">🔧 DEBUG: Testing Spinner Animation</p>
-			<LoadingSpinner size="lg" message="This should be spinning continuously" />
-		</div>
-
 		<div class="header">
 			<div class="logo-tile"><img src="/qr-attend-logo.svg" alt="Attendly" /></div>
 			{#if stage === 'credentials'}

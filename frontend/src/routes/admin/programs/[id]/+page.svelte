@@ -18,6 +18,12 @@
 		yearLevelCreateSchema,
 		yearLevelUpdateSchema,
 	} from '$lib/features/admin/programs/schema';
+	import { yearLabel } from '$lib/shared/utils/format';
+	import {
+		MAX_TERMS_PER_YEAR,
+		TERM_CODES,
+		TERM_LABELS,
+	} from '$lib/shared/constants/terms';
 	import type { YearLevel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 
@@ -37,7 +43,6 @@
 
 	let yearOpen = $state(false);
 	let y_number = $state('');
-	let y_label = $state('');
 	let y_terms = $state<{ code: string; label: string }[]>([]);
 	let yearError = $state<string | null>(null);
 	let yearBusy = $state(false);
@@ -56,6 +61,20 @@
 	});
 
 	const program = $derived(adminProgramDetailState.program);
+
+	type TermRow = { code: string; label: string };
+
+	// New term rows take the first code not already used, so the default never
+	// collides with an existing row. Codes are chosen from the dropdown rather
+	// than fixed by position, so this is a starting point, not a guarantee —
+	// schema.ts rejects duplicates on save.
+	const nextTermRow = (rows: TermRow[]): TermRow => {
+		const used = new Set(rows.map((r) => r.code));
+		return {
+			code: TERM_CODES.find((c) => !used.has(c)) ?? TERM_CODES[0],
+			label: TERM_LABELS[0],
+		};
+	};
 
 	const openEdit = () => {
 		if (!program) return;
@@ -91,11 +110,21 @@
 		}
 	};
 
+	// Years still available to add: 1..total_years, minus any already created.
+	// Hiding the taken ones avoids the backend's 409 year_number_exists.
+	const availableYears = $derived.by(() => {
+		if (!program) return [] as number[];
+		const taken = new Set(program.yearLevels.map((y) => y.yearNumber));
+		return Array.from({ length: program.totalYears }, (_, i) => i + 1).filter(
+			(n) => !taken.has(n)
+		);
+	});
+
 	const openYear = () => {
 		yearError = null;
-		y_number = '';
-		y_label = '';
-		y_terms = [{ code: '1st', label: '1st Semester' }];
+		// Default to the first free year; the label is derived from it.
+		y_number = String(availableYears[0] ?? '');
+		y_terms = [nextTermRow([])];
 		yearOpen = true;
 	};
 
@@ -106,7 +135,7 @@
 		try {
 			const parsed = yearLevelCreateSchema.safeParse({
 				year_number: y_number,
-				label: y_label,
+				label: yearLabel(Number(y_number)),
 				terms: y_terms,
 			});
 			if (!parsed.success) {
@@ -204,7 +233,12 @@
 
 		<section class="years-head">
 			<h2 class="section-title">Year Levels</h2>
-			<button class="btn btn-primary" data-testid="add-year" onclick={openYear}>
+			<button
+				class="btn btn-primary"
+				data-testid="add-year"
+				disabled={availableYears.length === 0}
+				onclick={openYear}
+			>
 				<AppIcon name="plus" size={18} />
 				Add Year
 			</button>
@@ -227,7 +261,7 @@
 						</div>
 						<p class="muted">Terms: {termsText(year)}</p>
 						<div class="chips">
-							{#each year.terms as term (term.code)}
+							{#each year.terms as term, i (i)}
 								<span class="chip">{term.label}</span>
 							{/each}
 						</div>
@@ -268,22 +302,36 @@
 				<p class="error" role="alert">{yearError}</p>
 			{/if}
 			<div class="form">
-				<div class="grid2">
-					<label>Year number<input class="input" inputmode="numeric" bind:value={y_number} placeholder="1" /></label>
-					<label>Label<input class="input" bind:value={y_label} placeholder="1st Year" /></label>
-				</div>
+				<label>
+					Year
+					<select class="input" bind:value={y_number}>
+						{#each availableYears as n (n)}
+							<option value={n}>{yearLabel(n)}</option>
+						{/each}
+					</select>
+				</label>
+				<p class="hint">The label is generated from the year, so the two can't disagree.</p>
 				<div class="terms-edit">
 					<span class="terms-label">Terms</span>
 					{#each y_terms as term, i (i)}
 						<div class="grid2">
-							<input class="input" aria-label="Term code" placeholder="1st" bind:value={y_terms[i].code} />
-							<input class="input" aria-label="Term label" placeholder="1st Semester" bind:value={y_terms[i].label} />
+							<select class="input" aria-label="Term code" bind:value={y_terms[i].code}>
+								{#each TERM_CODES as c (c)}
+									<option value={c}>{c}</option>
+								{/each}
+							</select>
+							<select class="input" aria-label="Term label" bind:value={y_terms[i].label}>
+								{#each TERM_LABELS as l (l)}
+									<option value={l}>{l}</option>
+								{/each}
+							</select>
 						</div>
 					{/each}
 					<div class="terms-row">
 						<button
 							class="btn btn-secondary"
-							onclick={() => (y_terms = [...y_terms, { code: '', label: '' }])}
+							disabled={y_terms.length >= MAX_TERMS_PER_YEAR}
+							onclick={() => (y_terms = [...y_terms, nextTermRow(y_terms)])}
 						>
 							Add term
 						</button>
@@ -293,6 +341,9 @@
 							</button>
 						{/if}
 					</div>
+					{#if y_terms.length >= MAX_TERMS_PER_YEAR}
+						<p class="muted">A year can hold at most {MAX_TERMS_PER_YEAR} terms.</p>
+					{/if}
 				</div>
 			</div>
 			<div class="modal-actions">
@@ -318,14 +369,23 @@
 				{/if}
 				{#each t_rows as term, i (i)}
 					<div class="grid2">
-						<input class="input" aria-label="Term code" placeholder="1st" bind:value={t_rows[i].code} />
-						<input class="input" aria-label="Term label" placeholder="1st Semester" bind:value={t_rows[i].label} />
+						<select class="input" aria-label="Term code" bind:value={t_rows[i].code}>
+							{#each TERM_CODES as c (c)}
+								<option value={c}>{c}</option>
+							{/each}
+						</select>
+						<select class="input" aria-label="Term label" bind:value={t_rows[i].label}>
+							{#each TERM_LABELS as l (l)}
+								<option value={l}>{l}</option>
+							{/each}
+						</select>
 					</div>
 				{/each}
 				<div class="terms-row">
 					<button
 						class="btn btn-secondary"
-						onclick={() => (t_rows = [...t_rows, { code: '', label: '' }])}
+						disabled={t_rows.length >= MAX_TERMS_PER_YEAR}
+						onclick={() => (t_rows = [...t_rows, nextTermRow(t_rows)])}
 					>
 						Add term
 					</button>
@@ -335,6 +395,9 @@
 						</button>
 					{/if}
 				</div>
+				{#if t_rows.length >= MAX_TERMS_PER_YEAR}
+					<p class="muted">A year can hold at most {MAX_TERMS_PER_YEAR} terms.</p>
+				{/if}
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => { termsOpen = false; termsTarget = null; }}>Cancel</button>

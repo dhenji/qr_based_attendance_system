@@ -4,7 +4,6 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminProgramsState,
-		archiveProgramRow,
 		initAdminPrograms,
 		refreshAdminPrograms,
 		toggleProgramActive,
@@ -19,7 +18,9 @@
 	// GET /admin/programs. Aggregates (Years/Terms/Courses) are derived
 	// per-request server-side and rendered as-is. The list endpoint takes no
 	// sort params, so the Code/Name headers sort client-side over the loaded
-	// page. Archive flips is_active only — no cascade (ADR-058).
+	// page. Deactivate/Reactivate is the single status control: it PATCHes
+	// is_active. DELETE /admin/programs/{id} is the same soft archive (ADR-058)
+	// and stays on the backend, but has no UI caller.
 
 	let search = $state('');
 	let statusFilter = $state<'all' | 'active' | 'archived'>('all');
@@ -202,9 +203,6 @@
 								>
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
-								{#if p.isActive}
-									<button class="link danger" onclick={() => archiveProgramRow(p.id).catch(() => {})}>Archive</button>
-								{/if}
 							</td>
 						</tr>
 					{/each}
@@ -385,10 +383,6 @@
 	.link.strong {
 		font-size: 0.875rem;
 		font-weight: 700;
-	}
-
-	.link.danger {
-		color: #dc2626;
 	}
 
 	.sr {

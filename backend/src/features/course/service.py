@@ -201,6 +201,9 @@ class CourseService:
             setattr(course, field, value)
 
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(course)
 
         return CourseRead.model_validate(course)
 
@@ -335,6 +338,9 @@ class CourseService:
         )
 
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(offering)
 
         return await self._to_offering_read(offering)
 

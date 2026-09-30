@@ -7,10 +7,11 @@
 // `/3/years`, `/3/years/12`). Real API by default; mocks only when
 // PUBLIC_MOCK_MODE=true (see api/client.ts).
 //
-// Archive semantics (ADR-058): DELETE /admin/programs/{id} flips
-// is_active=false on the program row ONLY — year_levels has no is_active
-// column and courses carries no program FK, so there is nothing to cascade
-// to. Year-level DELETE is a real delete that 409s when offerings reference
+// Status semantics (ADR-058): the Deactivate/Reactivate toggle PATCHes
+// is_active. DELETE /admin/programs/{id} is an equivalent soft archive that
+// stays on the backend with no UI caller — there is nothing to cascade to,
+// since year_levels has no is_active column and courses carries no program
+// FK. Year-level DELETE is a real delete that 409s when offerings reference
 // the row (`year_has_courses`).
 
 import { del, get, patch, post } from '$lib/api/client';
@@ -115,12 +116,6 @@ export const updateProgram = async (
 
 export const setProgramActive = async (id: number, isActive: boolean): Promise<Program> =>
 	updateProgram(id, { is_active: isActive });
-
-// Archive: soft-deactivate via is_active. Reactivate with
-// setProgramActive(id, true). No cascade by design (ADR-058).
-export const archiveProgram = async (id: number): Promise<void> => {
-	await del<void>('adminProgramDetail', undefined, `/${id}`);
-};
 
 export const listYearLevels = async (programId: number): Promise<YearLevel[]> => {
 	const response = await get<Paginated<YearLevelResponse>>(

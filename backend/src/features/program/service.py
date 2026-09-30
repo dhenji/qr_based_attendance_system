@@ -117,8 +117,22 @@ class ProgramService:
             setattr(program, field, value)
 
         await self._session.flush()
+        # `updated_at` is a server-side `onupdate=func.now()` (TimestampMixin), so
+        # the flush expires it. Reading it below would trigger a lazy load — a
+        # synchronous SELECT in async context, which raises MissingGreenlet and
+        # 500s the request. Reload explicitly so the read is a plain attribute hit.
+        await self._session.refresh(program)
 
-        return ProgramRead(**self._read_fields(program))
+        year_levels: Sequence[YearLevel] = await self._year_levels(program_id)
+
+        return ProgramRead(
+            **self._read_fields(
+                program,
+                course_count=await self._course_count(program_id),
+                year_level_count=len(year_levels),
+                terms_count=self._terms_count(year_levels),
+            )
+        )
 
     async def archive(self, *, program_id: int) -> None:
         program: Program = await self._get_or_404(program_id)
