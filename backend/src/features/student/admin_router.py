@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from api.deps import StudentServiceDep, require_role
+from shared.csv_import import csv_template_header
+from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
 from features.auth.model import User
 from features.student.constants import (
     DEFAULT_PAGE,
@@ -19,8 +24,6 @@ from features.student.schema import (
     StudentUpdate,
 )
 from features.student.service import ROSTER_CSV_COLUMNS
-from shared.enums import UserRole
-from shared.pagination import PaginatedResponse
 
 # This module owns /admin/students ONLY.
 #
@@ -110,7 +113,7 @@ async def download_import_template(
     _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
 ) -> Response:
     return Response(
-        content=",".join(ROSTER_CSV_COLUMNS) + "\n",
+        content=csv_template_header(ROSTER_CSV_COLUMNS),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=students_template.csv"},
     )

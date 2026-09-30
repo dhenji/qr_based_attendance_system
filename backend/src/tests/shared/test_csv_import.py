@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from shared.csv_import import is_valid_email, parse_csv
 
 COLS = ("student_id", "first_name", "email")

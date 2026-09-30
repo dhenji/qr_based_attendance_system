@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 from shared.pagination import (
     DEFAULT_PAGE,

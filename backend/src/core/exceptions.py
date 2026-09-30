@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 class AppException(Exception):
     """Base class for all application exceptions."""
 

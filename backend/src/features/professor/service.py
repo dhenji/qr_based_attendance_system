@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -34,15 +36,42 @@ from features.program.model import Program, YearLevel
 from features.session.model import Session
 from features.student.model import Student
 from shared.base import BaseCRUD
-from shared.csv_import import is_valid_email, parse_csv
-from shared.pagination import PaginatedResponse
+from shared.csv_import import (
+    CsvColumn,
+    CsvEmailCheck,
+    CsvGroup,
+    CsvRow,
+    CsvSchema,
+    parse_import_csv,
+    strip_lower,
+)
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
 
-ROSTER_CSV_COLUMNS: tuple[str, ...] = (
-    "first_name",
-    "middle_name",
-    "last_name",
-    "email",
-    "department",
+ROSTER_CSV_COLUMNS: tuple[CsvColumn, ...] = (
+    CsvColumn("first_name"),
+    CsvColumn("middle_name"),
+    CsvColumn("last_name"),
+    CsvColumn("email", normalize=strip_lower),
+    CsvColumn("department"),
+)
+
+ROSTER_CSV_SCHEMA = CsvSchema(
+    columns=ROSTER_CSV_COLUMNS,
+    subject="professor",
+    subject_column="email",
+    subject_fallback="on line",
+    checks=(
+        CsvGroup(
+            columns=("first_name", "last_name", "email"),
+            reason="missing required field for {subject} {key}",
+        ),
+        CsvEmailCheck("email", "invalid email for {subject} {key}"),
+    ),
 )
 
 
@@ -56,6 +85,19 @@ class _RosterRow:
     department: str | None
 
 
+def _to_roster_row(raw: CsvRow) -> _RosterRow:
+    values: dict[str, str] = raw.values
+
+    return _RosterRow(
+        line=raw.line,
+        first_name=values["first_name"],
+        middle_name=values["middle_name"] or None,
+        last_name=values["last_name"],
+        email=values["email"],
+        department=values["department"] or None,
+    )
+
+
 def parse_professor_roster_csv(
     content: bytes,
 ) -> tuple[list[_RosterRow], list[ProfessorImportError]]:
@@ -66,55 +108,13 @@ def parse_professor_roster_csv(
     (header = 1). Emails are lowercased so duplicate detection agrees with
     single-create.
     """
-    raw_rows, structural_errors = parse_csv(content, ROSTER_CSV_COLUMNS)
+    rows, errors = parse_import_csv(
+        content,
+        ROSTER_CSV_SCHEMA,
+        error=lambda line, reason: ProfessorImportError(line=line, reason=reason),
+    )
 
-    errors: list[ProfessorImportError] = [
-        ProfessorImportError(line=e.line, reason=e.reason) for e in structural_errors
-    ]
-
-    if structural_errors:
-        return [], errors
-
-    rows: list[_RosterRow] = []
-
-    for raw in raw_rows:
-        lineno = raw.line
-        cell = raw.values.get
-
-        first_name = (cell("first_name") or "").strip()
-        last_name = (cell("last_name") or "").strip()
-        email = (cell("email") or "").strip().lower()
-
-        if not first_name or not last_name or not email:
-            errors.append(
-                ProfessorImportError(
-                    line=lineno,
-                    reason=f"missing required field for professor {email or 'on line'}",
-                )
-            )
-            continue
-
-        if not is_valid_email(email):
-            errors.append(
-                ProfessorImportError(
-                    line=lineno,
-                    reason=f"invalid email for professor {email}",
-                )
-            )
-            continue
-
-        rows.append(
-            _RosterRow(
-                line=lineno,
-                first_name=first_name,
-                middle_name=(cell("middle_name") or "").strip() or None,
-                last_name=last_name,
-                email=email,
-                department=(cell("department") or "").strip() or None,
-            )
-        )
-
-    return rows, errors
+    return [_to_roster_row(row) for row in rows], errors
 
 
 class ProfessorService:
@@ -320,7 +320,11 @@ class ProfessorService:
         return (await self._get_professor_by_user_or_404(user_id)).id
 
     async def list_assigned_offerings(
-        self, *, user_id: int, page: int = 1, size: int = 50
+        self,
+        *,
+        user_id: int,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[AssignedOfferingItem]:
         """Own active assignments with course-card enrichment.
 

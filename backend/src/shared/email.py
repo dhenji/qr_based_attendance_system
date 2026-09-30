@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from logging import Logger, getLogger
 
 from core.config import Settings, get_settings

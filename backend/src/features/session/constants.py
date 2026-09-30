@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -8,10 +10,6 @@ from shared.pagination import (
 STUDENT_NUMBER_MIN_LENGTH: int = 1
 STUDENT_NUMBER_MAX_LENGTH: int = 50
 
-GPS_LAT_MIN: float = -90.0
-GPS_LAT_MAX: float = 90.0
-GPS_LNG_MIN: float = -180.0
-GPS_LNG_MAX: float = 180.0
 GPS_ACCURACY_MIN: float = 0.0
 GPS_ACCURACY_MAX: float = 1000.0
 
@@ -38,7 +36,15 @@ HISTORY_SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 HISTORY_DEFAULT_SORT_BY: str = "time"
 HISTORY_DEFAULT_SORT_DIR: str = "desc"
 
+# Caps on the history filter strings. The accepted *values* are the
+# HISTORY_SORT_FIELDS / HISTORY_SORT_DIRS sets; these only bound the wire length.
+HISTORY_SORT_BY_MAX_LENGTH: int = 20
+HISTORY_SORT_DIR_MAX_LENGTH: int = 4
+
 REVIEW_STATUSES: frozenset[str] = frozenset({"pending", "approved", "rejected"})
+
+# Caps the `?status=` filter string; the accepted values are REVIEW_STATUSES.
+REVIEW_STATUS_MAX_LENGTH: int = 20
 
 REVIEW_DEFAULT_STATUS: str = "pending"
 

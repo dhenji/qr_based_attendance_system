@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -5,7 +7,12 @@ from fastapi import APIRouter, Depends, Query, Response
 from api.deps import SessionServiceDep, StudentServiceDep, require_role
 from features.auth.model import User
 from features.session.schema import VerifyCodeRequest, VerifyCodeResponse
-from features.student.schema import ChangePasswordRequest, FaceEmbeddingResponse, ScheduleResponse, StudentDetail
+from features.student.schema import (
+    ChangePasswordRequest,
+    FaceEmbeddingResponse,
+    ScheduleResponse,
+    StudentDetail,
+)
 from shared.enums import UserRole
 
 # ALREADY MOUNTED at /api/student (see api/router.py). Student-facing routes

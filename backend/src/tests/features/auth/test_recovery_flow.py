@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from types import SimpleNamespace
 
@@ -166,9 +168,7 @@ def test_step2_answer_is_case_and_space_insensitive() -> None:
 
 def test_step2_rejects_wrong_answer() -> None:
     with pytest.raises(SecurityAnswerInvalidException):
-        asyncio.run(
-            _service(_user()).forgot_password_step2("u@example.com", "wrong")
-        )
+        asyncio.run(_service(_user()).forgot_password_step2("u@example.com", "wrong"))
 
 
 def test_step2_rejects_unknown_email_with_identical_error() -> None:
@@ -233,9 +233,7 @@ def test_claim_otp_needs_no_grant(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda to, code, *a, **kw: sent.append(code),
     )
 
-    asyncio.run(
-        _service(_user()).request_otp("u@example.com", OtpPurpose.CLAIM, None)
-    )
+    asyncio.run(_service(_user()).request_otp("u@example.com", OtpPurpose.CLAIM, None))
 
     assert len(sent) == 1
 
@@ -267,7 +265,12 @@ def test_preauth_token_is_not_accepted_as_a_grant() -> None:
 
 
 def test_expired_grant_is_rejected_by_decoder() -> None:
-    assert decode_recovery_token(create_recovery_token(7, "a@b.c", _settings(-1)), _settings()) is None
+    assert (
+        decode_recovery_token(
+            create_recovery_token(7, "a@b.c", _settings(-1)), _settings()
+        )
+        is None
+    )
 
 
 def test_recovery_token_type_is_distinct() -> None:

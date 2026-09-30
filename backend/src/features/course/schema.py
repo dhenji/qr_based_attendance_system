@@ -1,7 +1,19 @@
+from __future__ import annotations
+
 from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from shared.constants import (
+    DEFAULT_LATE_WINDOW_MINUTES,
+    DEFAULT_PRESENT_WINDOW_MINUTES,
+    LATITUDE_MAX,
+    LATITUDE_MIN,
+    LONGITUDE_MAX,
+    LONGITUDE_MIN,
+    SEMESTER_MAX_LENGTH,
+    SEMESTER_MIN_LENGTH,
+)
 from features.course.constants import (
     ACADEMIC_YEAR_MAX_LENGTH,
     ACADEMIC_YEAR_MIN_LENGTH,
@@ -14,8 +26,6 @@ from features.course.constants import (
     NAME_MIN_LENGTH,
     SCHEDULE_DAYS_MAX_LENGTH,
     SCHEDULE_DAYS_MIN_LENGTH,
-    SEMESTER_MAX_LENGTH,
-    SEMESTER_MIN_LENGTH,
     SEMESTER_WEEKS_MAX,
     SEMESTER_WEEKS_MIN,
     SESSIONS_PER_WEEK_MAX,
@@ -108,13 +118,21 @@ class OfferingCreate(BaseModel):
     classroom_name: str | None = Field(
         default=None, max_length=CLASSROOM_NAME_MAX_LENGTH
     )
-    classroom_lat: float | None = Field(default=None, ge=-90.0, le=90.0)
-    classroom_lng: float | None = Field(default=None, ge=-180.0, le=180.0)
+    classroom_lat: float | None = Field(
+        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
+    )
+    classroom_lng: float | None = Field(
+        default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
+    )
     default_present_window_minutes: int = Field(
-        default=5, ge=WINDOW_MINUTES_MIN, le=WINDOW_MINUTES_MAX
+        default=DEFAULT_PRESENT_WINDOW_MINUTES,
+        ge=WINDOW_MINUTES_MIN,
+        le=WINDOW_MINUTES_MAX,
     )
     default_late_window_minutes: int = Field(
-        default=10, ge=WINDOW_MINUTES_MIN, le=WINDOW_MINUTES_MAX
+        default=DEFAULT_LATE_WINDOW_MINUTES,
+        ge=WINDOW_MINUTES_MIN,
+        le=WINDOW_MINUTES_MAX,
     )
 
     @field_validator("semester", "academic_year", "schedule_days")
@@ -175,8 +193,12 @@ class OfferingUpdate(BaseModel):
     schedule_start_time: time | None = None
     schedule_end_time: time | None = None
     classroom_name: str | None = None
-    classroom_lat: float | None = Field(default=None, ge=-90.0, le=90.0)
-    classroom_lng: float | None = Field(default=None, ge=-180.0, le=180.0)
+    classroom_lat: float | None = Field(
+        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
+    )
+    classroom_lng: float | None = Field(
+        default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
+    )
     default_present_window_minutes: int | None = Field(
         default=None, ge=WINDOW_MINUTES_MIN, le=WINDOW_MINUTES_MAX
     )

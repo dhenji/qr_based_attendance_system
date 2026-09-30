@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone
 
@@ -5,10 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
 from features.face_enrollment.exceptions import InvalidImageException
-from features.face_enrollment.schema import (
-    FaceEnrollmentResponse,
-    FaceEnrollmentStatus,
-)
+from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from shared.cache import invalidate_face_embedding
@@ -59,9 +58,7 @@ def _validate_photo(
 
 
 class FaceEnrollmentService:
-    def __init__(
-        self, session: AsyncSession, settings: Settings | None = None
-    ) -> None:
+    def __init__(self, session: AsyncSession, settings: Settings | None = None) -> None:
         self._session = session
         self._settings = settings or get_settings()
 

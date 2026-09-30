@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -129,8 +131,7 @@ def test_list_backup_codes_summary_latest_batch() -> None:
     created = datetime.now(timezone.utc)
 
     rows = [
-        _code_record("AAAAAGGGGG", used_at=None, created_at=created)
-        for _ in range(4)
+        _code_record("AAAAAGGGGG", used_at=None, created_at=created) for _ in range(4)
     ] + [
         _code_record("CCCCCCTTTTT", used_at=created, created_at=created)
         for _ in range(6)
