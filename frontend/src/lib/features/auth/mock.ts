@@ -5,13 +5,13 @@
 import type { MeResponse, TokenResponse } from '$lib/shared/types';
 
 // Test-data student 24-0001 (docs/testing/test-data.md §4) using the
-// {first}.{last}@isu.edu.ph convention.
+// {first}.{middle}.{last}@isu.edu.ph convention.
 const MOCK_STUDENT: MeResponse = {
 	id: 1,
 	role: 'student',
 	first_name: 'Jose',
 	last_name: 'Rizal',
-	email: 'jose.rizal@isu.edu.ph',
+	email: 'jose.p.rizal@isu.edu.ph',
 	mfa_enabled: false,
 	security_question_set: true,
 	must_change_password: false,
@@ -28,7 +28,7 @@ const MOCK_PROFESSOR: MeResponse = {
 	role: 'professor',
 	first_name: 'Maria',
 	last_name: 'Dela Cruz',
-	email: 'maria.delacruz@isu.edu.ph',
+	email: 'maria.c.delacruz@isu.edu.ph',
 	face_enrolled: null,
 	face_enrolled_at: null,
 	face_embedding_version: null,
