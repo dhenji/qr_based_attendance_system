@@ -1,5 +1,9 @@
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
-from features.auth.constants import USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH
+from features.auth.constants import (
+    PASSWORD_MIN_LENGTH,
+    USERNAME_MAX_LENGTH,
+    USERNAME_MIN_LENGTH,
+)
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -24,6 +28,7 @@ __all__: list[str] = [
     "MAX_PAGE_SIZE",
     "NAME_MAX_LENGTH",
     "NAME_MIN_LENGTH",
+    "PASSWORD_MIN_LENGTH",
     "SEARCH_MAX_LENGTH",
     "SECTION_MAX_LENGTH",
     "SORT_BY_OPTIONS",
