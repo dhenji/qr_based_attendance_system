@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
@@ -48,9 +50,7 @@ async def list_professors(
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     department: str | None = Query(default=None, max_length=DEPARTMENT_MAX_LENGTH),
     is_active: bool | None = Query(default=None),
-    sort_by: Literal["last_name", "email", "created_at"] | None = Query(
-        default=None
-    ),
+    sort_by: Literal["last_name", "email", "created_at"] | None = Query(default=None),
     sort_dir: Literal["asc", "desc"] | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),

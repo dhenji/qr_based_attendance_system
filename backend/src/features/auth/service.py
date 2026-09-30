@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
 from collections.abc import Sequence
@@ -11,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.security import (
     PREAUTH_TOKEN_TYPE,
-    REFRESH_TOKEN_TYPE,
     RECOVERY_TOKEN_TYPE,
+    REFRESH_TOKEN_TYPE,
     backup_code_fingerprint,
     create_access_token,
     create_preauth_token,
-    create_refresh_token,
     create_recovery_token,
+    create_refresh_token,
     decode_access_token,
     decode_recovery_token,
     extract_user_id,
@@ -128,15 +130,12 @@ class AuthService:
             email=normalized,
             purpose=purpose.value,
             otp_hash=hash_otp(code),
-            expires_at=now
-            + timedelta(minutes=self._settings.otp_expires_minutes),
+            expires_at=now + timedelta(minutes=self._settings.otp_expires_minutes),
         )
 
         send_otp_email(email, code)
 
-    def _assert_recovery_grant(
-        self, email: str, recovery_token: str | None
-    ) -> None:
+    def _assert_recovery_grant(self, email: str, recovery_token: str | None) -> None:
         """Gate step 3 on a valid step-2 grant for the same address.
 
         Holding the OTP is what authorises step 4, so minting one is the only place

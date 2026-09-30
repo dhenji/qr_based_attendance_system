@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from features.auth.constants import USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH
 from shared.pagination import (
     DEFAULT_PAGE,

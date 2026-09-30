@@ -1,10 +1,18 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query
 
 from api.deps import AttendanceServiceDep, require_role
+from shared.constants import SEMESTER_MAX_LENGTH
+from shared.enums import UserRole, ValidationStatus
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.rate_limit import rate_limit
 from features.attendance.constants import (
+    HISTORY_SORT_BY_MAX_LENGTH,
+    HISTORY_SORT_DIR_MAX_LENGTH,
     IDEMPOTENCY_KEY_MAX_LENGTH,
     SCAN_RATE_LIMIT_MAX_CALLS,
     SCAN_RATE_LIMIT_WINDOW_SECONDS,
@@ -17,9 +25,6 @@ from features.attendance.schema import (
     ScanResponse,
 )
 from features.auth.model import User
-from shared.enums import UserRole, ValidationStatus
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.rate_limit import rate_limit
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
 #
@@ -80,13 +85,13 @@ async def attendance_history(
     service: AttendanceServiceDep,
     program_id: int | None = Query(default=None, gt=0),
     year_level_id: int | None = Query(default=None, gt=0),
-    semester: str | None = Query(default=None, max_length=20),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
     course_id: int | None = Query(default=None, gt=0),
     status: ValidationStatus | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
-    sort_by: str | None = Query(default=None, max_length=20),
-    sort_dir: str | None = Query(default=None, max_length=4),
+    sort_by: str | None = Query(default=None, max_length=HISTORY_SORT_BY_MAX_LENGTH),
+    sort_dir: str | None = Query(default=None, max_length=HISTORY_SORT_DIR_MAX_LENGTH),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> HistoryResponse:

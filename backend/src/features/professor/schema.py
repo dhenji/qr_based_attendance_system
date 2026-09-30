@@ -1,7 +1,17 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
+
 from features.professor.constants import (
     DEPARTMENT_MAX_LENGTH,
     EMAIL_MAX_LENGTH,

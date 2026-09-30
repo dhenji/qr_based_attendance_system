@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import date, datetime, timezone
 from typing import Any
@@ -65,7 +67,13 @@ class _FakeResult:
 
 class _FakeSession:
     def __init__(
-        self, *, professor=None, assignments=(), counts=(), sections=(), scalar_counts=None
+        self,
+        *,
+        professor=None,
+        assignments=(),
+        counts=(),
+        sections=(),
+        scalar_counts=None,
     ):
         self.professor = professor
         self.assignments = list(assignments)
@@ -148,9 +156,7 @@ def test_list_assigned_offerings_shape_and_pagination() -> None:
     )
 
     page = _run(
-        ProfessorService(session).list_assigned_offerings(
-            user_id=42, page=1, size=1
-        )
+        ProfessorService(session).list_assigned_offerings(user_id=42, page=1, size=1)
     )
 
     assert page.total == 2 and page.page == 1 and page.size == 1
@@ -176,9 +182,7 @@ def test_list_assigned_offerings_shape_and_pagination() -> None:
     )
 
     second = _run(
-        ProfessorService(session).list_assigned_offerings(
-            user_id=42, page=2, size=1
-        )
+        ProfessorService(session).list_assigned_offerings(user_id=42, page=2, size=1)
     )
 
     assert len(second.items) == 1 and second.items[0].offering_id == 12

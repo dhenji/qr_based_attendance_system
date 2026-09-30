@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
@@ -53,7 +55,12 @@ from features.student.exceptions import NotEnrolledException, StudentNotFoundExc
 from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.enums import QueueStatus, SyncStatus, ValidationStatus
-from shared.pagination import MAX_PAGE_SIZE, PaginatedResponse
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
 from shared.query import apply_if
 
 EARTH_RADIUS_METERS: float = 6371000.0
@@ -125,9 +132,7 @@ _HISTORY_COUNT_FIELDS: dict[str, str] = {
 
 
 def _pending_review_filter(stmt: Select[Any]) -> Select[Any]:
-    return stmt.where(
-        Attendance.validation_status == ValidationStatus.PENDING.value
-    )
+    return stmt.where(Attendance.validation_status == ValidationStatus.PENDING.value)
 
 
 def _approved_review_filter(stmt: Select[Any]) -> Select[Any]:
@@ -167,7 +172,9 @@ class AttendanceService:
     async def _resolve_scan_parties(
         self, session_id: int, scanned_at: datetime, now: datetime, student_number: str
     ) -> tuple[Session, Student]:
-        db_session: Session = await self._get_active_session(session_id, scanned_at, now)
+        db_session: Session = await self._get_active_session(
+            session_id, scanned_at, now
+        )
         student: Student = await self._get_active_student(
             student_number, db_session.offering_id
         )
@@ -470,8 +477,8 @@ class AttendanceService:
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
-        page: int = 1,
-        size: int = 50,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> HistoryResponse:
         """Student history: filter -> count -> summarize -> paginate."""
         page, size = self._normalize_history_paging(page, size)
@@ -618,22 +625,14 @@ class AttendanceService:
         date_from: datetime | None,
         date_to: datetime | None,
     ) -> Select[Any]:
-        stmt = apply_if(
-            stmt, program_id, lambda v: CourseOffering.program_id == v
-        )
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
         stmt = apply_if(
             stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
         )
         stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(
-            stmt, course_id, lambda v: CourseOffering.course_id == v
-        )
-        stmt = apply_if(
-            stmt, status, lambda v: Attendance.validation_status == v
-        )
-        stmt = apply_if(
-            stmt, date_from, lambda v: Attendance.timestamp >= v
-        )
+        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
+        stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
 
         return stmt
@@ -649,9 +648,7 @@ class AttendanceService:
     async def _history_tallies(self, filtered: Select[Any]) -> dict[str, int]:
         rows: Sequence[tuple[str, int]] = (
             await self._session.execute(
-                select(
-                    Attendance.validation_status, func.count(Attendance.id)
-                )
+                select(Attendance.validation_status, func.count(Attendance.id))
                 .select_from(filtered.subquery())
                 .group_by(Attendance.validation_status)
             )
@@ -687,9 +684,7 @@ class AttendanceService:
             semester=semester,
             course_id=course_id,
         )
-        stmt = apply_if(
-            stmt, date_from, lambda v: Session.created_at >= v
-        )
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
         return (await self._session.scalar(stmt)) or 0  # type: ignore[arg-type]
@@ -719,9 +714,7 @@ class AttendanceService:
             semester=semester,
             course_id=course_id,
         )
-        stmt = apply_if(
-            stmt, date_from, lambda v: Attendance.timestamp >= v
-        )
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
 
         return (await self._session.scalar(stmt)) or 0  # type: ignore[arg-type]
@@ -735,16 +728,12 @@ class AttendanceService:
         semester: str | None,
         course_id: int | None,
     ) -> Select[Any]:
-        stmt = apply_if(
-            stmt, program_id, lambda v: CourseOffering.program_id == v
-        )
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
         stmt = apply_if(
             stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
         )
         stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(
-            stmt, course_id, lambda v: CourseOffering.course_id == v
-        )
+        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
 
         return stmt
 
@@ -781,23 +770,17 @@ class AttendanceService:
 
         return (
             await self._session.scalars(
-                filtered.order_by(*ordered, tie)
-                .offset((page - 1) * size)
-                .limit(size)
+                filtered.order_by(*ordered, tie).offset((page - 1) * size).limit(size)
             )
         ).all()
 
-    async def _history_items(
-        self, records: Sequence[Attendance]
-    ) -> list[HistoryItem]:
+    async def _history_items(self, records: Sequence[Attendance]) -> list[HistoryItem]:
         if not records:
             return []
 
         sessions: Sequence[Session] = (
             await self._session.scalars(
-                select(Session).where(
-                    Session.id.in_({r.session_id for r in records})
-                )
+                select(Session).where(Session.id.in_({r.session_id for r in records}))
             )
         ).all()
         session_map: dict[int, Session] = {s.id: s for s in sessions}
@@ -805,9 +788,7 @@ class AttendanceService:
         offerings: Sequence[CourseOffering] = (
             await self._session.scalars(
                 select(CourseOffering).where(
-                    CourseOffering.id.in_(
-                        {s.offering_id for s in sessions}
-                    )
+                    CourseOffering.id.in_({s.offering_id for s in sessions})
                 )
             )
         ).all()
@@ -815,9 +796,7 @@ class AttendanceService:
 
         courses: Sequence[Course] = (
             await self._session.scalars(
-                select(Course).where(
-                    Course.id.in_({o.course_id for o in offerings})
-                )
+                select(Course).where(Course.id.in_({o.course_id for o in offerings}))
             )
         ).all()
         course_map: dict[int, Course] = {c.id: c for c in courses}
@@ -826,9 +805,7 @@ class AttendanceService:
 
         for record in records:
             db_session = session_map.get(record.session_id)
-            offering = (
-                offering_map.get(db_session.offering_id) if db_session else None
-            )
+            offering = offering_map.get(db_session.offering_id) if db_session else None
             course = course_map.get(offering.course_id) if offering else None
 
             if db_session is None or offering is None or course is None:
@@ -871,9 +848,12 @@ class AttendanceService:
         ).all()
         return records, total
 
-    async def _load_review_maps(
-        self, records: Sequence[Attendance]
-    ) -> tuple[dict[int, Student], dict[int, Session], dict[int, CourseOffering], dict[int, Course]]:
+    async def _load_review_maps(self, records: Sequence[Attendance]) -> tuple[
+        dict[int, Student],
+        dict[int, Session],
+        dict[int, CourseOffering],
+        dict[int, Course],
+    ]:
         students: dict[int, Student] = {
             s.id: s
             for s in (
@@ -962,13 +942,12 @@ class AttendanceService:
             )
         return items
 
-
     async def list_liveness_review(
         self,
         *,
         status: str | None = None,
-        page: int = 1,
-        size: int = 50,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[LivenessReviewItem]:
         key: str = (status or REVIEW_DEFAULT_STATUS).lower()
         if key not in REVIEW_STATUSES:
@@ -995,9 +974,7 @@ class AttendanceService:
             items=items, total=total, page=page, size=size
         )
 
-    async def _load_pending_review(
-        self, record_id: int
-    ) -> tuple[Attendance, dict]:
+    async def _load_pending_review(self, record_id: int) -> tuple[Attendance, dict]:
         row: Attendance | None = await self._session.get(Attendance, record_id)
         if row is None:
             raise ReviewNotFoundException(record_id)
@@ -1028,7 +1005,6 @@ class AttendanceService:
         evidence.pop("review", None)
         row.liveness_evidence = evidence
         await self._session.flush()
-
 
     async def resolve_review(
         self,

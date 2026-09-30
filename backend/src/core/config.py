@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from functools import lru_cache
 
 from pydantic import model_validator
@@ -41,7 +43,10 @@ class Settings(BaseSettings):
     backup_retention_monthly: int = 12
     backup_exclude_otp_codes: bool = False
 
-    # Attendance defaults (D13, geofence)
+    # Attendance defaults (D13, geofence). The two window values mirror
+    # `shared.constants.DEFAULT_PRESENT_WINDOW_MINUTES` /
+    # `DEFAULT_LATE_WINDOW_MINUTES`, which is what an offering row defaults to;
+    # core deliberately does not import `shared`, so keep the pair in step.
     default_present_window_minutes: int = 5
     default_late_window_minutes: int = 10
     default_geofence_radius_meters: int = 50

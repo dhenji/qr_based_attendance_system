@@ -1,8 +1,17 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from shared.constants import (
+    LATITUDE_MAX,
+    LATITUDE_MIN,
+    LONGITUDE_MAX,
+    LONGITUDE_MIN,
+)
+from shared.enums import ValidationStatus
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
@@ -14,7 +23,6 @@ from features.session.constants import (
     WINDOW_MINUTES_MAX,
     WINDOW_MINUTES_MIN,
 )
-from shared.enums import ValidationStatus
 
 
 class QRPayload(BaseModel):
@@ -45,8 +53,12 @@ class SessionCreate(BaseModel):
     classroom_name: str | None = Field(
         default=None, max_length=CLASSROOM_NAME_MAX_LENGTH
     )
-    classroom_lat: float | None = Field(default=None, ge=-90.0, le=90.0)
-    classroom_lng: float | None = Field(default=None, ge=-180.0, le=180.0)
+    classroom_lat: float | None = Field(
+        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
+    )
+    classroom_lng: float | None = Field(
+        default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
+    )
 
     @model_validator(mode="after")
     def _windows_within_duration(self) -> "SessionCreate":

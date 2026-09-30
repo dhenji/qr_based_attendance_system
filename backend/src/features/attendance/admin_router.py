@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
 from api.deps import AttendanceServiceDep, require_role
+from features.attendance.constants import REVIEW_STATUS_MAX_LENGTH
 from features.attendance.schema import (
     LivenessReviewItem,
     ResolveReviewRequest,
@@ -37,7 +40,7 @@ AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 async def list_liveness_review(
     _: AdminUser,
     service: AttendanceServiceDep,
-    status: str | None = Query(default=None, max_length=20),
+    status: str | None = Query(default=None, max_length=REVIEW_STATUS_MAX_LENGTH),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> PaginatedResponse[LivenessReviewItem]:

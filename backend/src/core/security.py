@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
@@ -101,8 +103,7 @@ def create_recovery_token(
         "email": email.lower(),
         "type": RECOVERY_TOKEN_TYPE,
         "iat": now,
-        "exp": now
-        + timedelta(minutes=settings.recovery_token_expire_minutes),
+        "exp": now + timedelta(minutes=settings.recovery_token_expire_minutes),
     }
 
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
@@ -186,9 +187,7 @@ def backup_code_fingerprint(
     ).hexdigest()
 
 
-_BASE62_ALPHABET: str = (
-    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-)
+_BASE62_ALPHABET: str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 SESSION_CODE_LENGTH: int = 8
 
 
@@ -204,17 +203,13 @@ def _resolve_hmac_secret(settings: Settings | None = None) -> str:
     return secret
 
 
-def generate_session_code(
-    session_id: int, settings: Settings | None = None
-) -> str:
+def generate_session_code(session_id: int, settings: Settings | None = None) -> str:
     secret: str = _resolve_hmac_secret(settings)
     digest: bytes = hmac.new(
         secret.encode("utf-8"), str(session_id).encode("utf-8"), hashlib.sha256
     ).digest()
 
-    return "".join(
-        _BASE62_ALPHABET[b % 62] for b in digest[:SESSION_CODE_LENGTH]
-    )
+    return "".join(_BASE62_ALPHABET[b % 62] for b in digest[:SESSION_CODE_LENGTH])
 
 
 def verify_session_code(

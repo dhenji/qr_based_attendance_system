@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import base64
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.security import hash_password, verify_password
 from features.attendance.model import Attendance
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
@@ -43,19 +46,46 @@ from features.student.schema import (
 )
 from shared.base import BaseCRUD
 from shared.cache import get_face_embedding_cached
-from shared.csv_import import is_valid_email, parse_csv
+from shared.csv_import import (
+    CsvColumn,
+    CsvEmailCheck,
+    CsvGroup,
+    CsvRow,
+    CsvSchema,
+    parse_import_csv,
+    strip_lower,
+    strip_upper,
+)
 from shared.pagination import PaginatedResponse
-from core.security import hash_password, verify_password
 
-ROSTER_CSV_COLUMNS: tuple[str, ...] = (
-    "student_id",
-    "first_name",
-    "middle_name",
-    "last_name",
-    "email",
-    "program_code",
-    "section",
-    "year_level",
+ROSTER_CSV_COLUMNS: tuple[CsvColumn, ...] = (
+    CsvColumn(
+        "student_id", normalize=strip_upper, required_reason="missing student_id"
+    ),
+    CsvColumn("first_name"),
+    CsvColumn("middle_name"),
+    CsvColumn("last_name"),
+    CsvColumn("email", normalize=strip_lower),
+    CsvColumn("program_code", normalize=strip_upper),
+    CsvColumn("section"),
+    CsvColumn("year_level"),
+)
+
+ROSTER_CSV_SCHEMA = CsvSchema(
+    columns=ROSTER_CSV_COLUMNS,
+    subject="student",
+    subject_column="student_id",
+    checks=(
+        CsvGroup(
+            columns=("first_name", "last_name", "email"),
+            reason="missing required field for {subject} {key}",
+        ),
+        CsvEmailCheck("email", "invalid email for {subject} {key}"),
+        CsvGroup(
+            columns=("program_code", "year_level"),
+            reason="missing program_code/year_level for {subject} {key}",
+        ),
+    ),
 )
 
 
@@ -72,6 +102,22 @@ class _RosterRow:
     year_level: str
 
 
+def _to_roster_row(raw: CsvRow) -> _RosterRow:
+    values: dict[str, str] = raw.values
+
+    return _RosterRow(
+        line=raw.line,
+        student_id=values["student_id"],
+        first_name=values["first_name"],
+        middle_name=values["middle_name"] or None,
+        last_name=values["last_name"],
+        email=values["email"],
+        program_code=values["program_code"],
+        section=values["section"] or None,
+        year_level=values["year_level"],
+    )
+
+
 def parse_roster_csv(
     content: bytes,
 ) -> tuple[list[_RosterRow], list[StudentImportError]]:
@@ -82,76 +128,13 @@ def parse_roster_csv(
     Values are normalized the same way as StudentCreate (student_id upper,
     email lower) so duplicate detection agrees with single-create.
     """
-    raw_rows, structural_errors = parse_csv(content, ROSTER_CSV_COLUMNS)
+    rows, errors = parse_import_csv(
+        content,
+        ROSTER_CSV_SCHEMA,
+        error=lambda line, reason: StudentImportError(line=line, reason=reason),
+    )
 
-    errors: list[StudentImportError] = [
-        StudentImportError(line=e.line, reason=e.reason) for e in structural_errors
-    ]
-
-    if structural_errors:
-        return [], errors
-
-    rows: list[_RosterRow] = []
-
-    for raw in raw_rows:
-        lineno = raw.line
-        cell = raw.values.get
-
-        student_id: str = (cell("student_id") or "").strip().upper()
-
-        if not student_id:
-            errors.append(StudentImportError(line=lineno, reason="missing student_id"))
-            continue
-
-        first_name = (cell("first_name") or "").strip()
-        last_name = (cell("last_name") or "").strip()
-        email = (cell("email") or "").strip().lower()
-
-        if not first_name or not last_name or not email:
-            errors.append(
-                StudentImportError(
-                    line=lineno,
-                    reason=f"missing required field for student {student_id}",
-                )
-            )
-            continue
-
-        if not is_valid_email(email):
-            errors.append(
-                StudentImportError(
-                    line=lineno,
-                    reason=f"invalid email for student {student_id}",
-                )
-            )
-            continue
-
-        program_code = (cell("program_code") or "").strip().upper()
-        year_level = (cell("year_level") or "").strip()
-
-        if not program_code or not year_level:
-            errors.append(
-                StudentImportError(
-                    line=lineno,
-                    reason=f"missing program_code/year_level for student {student_id}",
-                )
-            )
-            continue
-
-        rows.append(
-            _RosterRow(
-                line=lineno,
-                student_id=student_id,
-                first_name=first_name,
-                middle_name=(cell("middle_name") or "").strip() or None,
-                last_name=last_name,
-                email=email,
-                program_code=program_code,
-                section=(cell("section") or "").strip() or None,
-                year_level=year_level,
-            )
-        )
-
-    return rows, errors
+    return [_to_roster_row(row) for row in rows], errors
 
 
 class StudentService:
@@ -527,7 +510,9 @@ class StudentService:
         errors: list[StudentImportError] = list(parse_errors)
 
         for row in rows:
-            is_duplicate, error = await self._validate_import_row(row, seen_ids, seen_emails)
+            is_duplicate, error = await self._validate_import_row(
+                row, seen_ids, seen_emails
+            )
             if is_duplicate:
                 duplicates += 1
                 seen_ids.add(row.student_id)
@@ -559,7 +544,10 @@ class StudentService:
                 errors.append(
                     StudentImportError(
                         line=row.line,
-                        reason=f"unknown year_level {row.year_level} for program {row.program_code}",
+                        reason=(
+                            f"unknown year_level {row.year_level} "
+                            f"for program {row.program_code}"
+                        ),
                     )
                 )
                 continue

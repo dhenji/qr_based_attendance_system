@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 from features.auth.constants import (
     PASSWORD_MIN_LENGTH,
