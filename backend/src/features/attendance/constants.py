@@ -21,7 +21,19 @@ EAR_SAMPLES_MAX_COUNT: int = 100
 EAR_VALUE_MIN: float = 0.0
 EAR_VALUE_MAX: float = 1.0
 
+# Acceptance band for the *mean* of `ear_samples` (EAR_VALUE_MIN/MAX above
+# bound each individual sample). Distinct from them on purpose: an evidence
+# blob can hold every sample inside [0.0, 1.0] and still fail on its mean.
+EAR_MEAN_MIN: float = 0.05
+EAR_MEAN_MAX: float = 0.5
+
 IDEMPOTENCY_KEY_MAX_LENGTH: int = 64
+
+# How long a cached scan response may be replayed for a repeated
+# X-Idempotency-Key. Long enough to cover an offline-sync retry loop, short
+# enough that a key reused days later does not resurrect a stale response.
+IDEMPOTENCY_TTL_SECONDS: int = 900
+_IDEMPOTENCY_MAX_ENTRIES: int = 10_000
 
 SCAN_RATE_LIMIT_MAX_CALLS: int = 30
 SCAN_RATE_LIMIT_WINDOW_SECONDS: int = 60
@@ -51,3 +63,7 @@ REVIEW_DEFAULT_STATUS: str = "pending"
 REVIEW_DECISIONS: frozenset[str] = frozenset({"approve", "reject"})
 
 REVIEW_NOTE_MAX_LENGTH: int = 1000
+
+# Where a reviewer's free-text note is stored: `attendance_records` has no
+# dedicated column, so it rides inside the existing JSONB evidence blob.
+REVIEW_NOTE_EVIDENCE_KEY: str = "review_note"

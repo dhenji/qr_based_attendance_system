@@ -134,7 +134,13 @@ class SessionActiveResponse(BaseModel):
     id: int
     offering: int
     session_code: str
-    scan_window_remaining: int
+    scan_window_remaining: int = Field(
+        description=(
+            "Seconds remaining before the session expires. Note this is "
+            "SECONDS, unlike duration_minutes / present_window_minutes / "
+            "late_window_minutes, which are minutes."
+        )
+    )
     scheduled_end_time: datetime
     status: Literal["active", "closed"]
     enrolled_count: int = 0

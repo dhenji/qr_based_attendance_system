@@ -14,9 +14,10 @@ from core.security import (
     decode_recovery_token,
     hash_password,
 )
-from features.auth.constants import SECURITY_QUESTION_POOL
+from features.auth.constants import SECURITY_QUESTION_POOL, SECURITY_RECOVERY_MAX_ATTEMPTS
 from features.auth.exceptions import (
     RecoveryGrantRequiredException,
+    RecoveryLockedException,
     SecurityAnswerInvalidException,
 )
 from features.auth.service import AuthService, _decoy_question
@@ -176,6 +177,55 @@ def test_step2_rejects_unknown_email_with_identical_error() -> None:
         asyncio.run(
             _service(None).forgot_password_step2("nobody@example.com", "bluebell")
         )
+
+
+# --- the 3-attempt cap counts failures, not attempts -----------------------
+
+
+def test_repeated_correct_answers_are_not_capped() -> None:
+    """A user who knows the answer must never be locked out by it.
+
+    The cap is on *failures* (PROMPT 2.9). Recording every attempt locked a
+    legitimate user out after three successful tries inside the window.
+    """
+
+    for _ in range(SECURITY_RECOVERY_MAX_ATTEMPTS + 2):
+        result = asyncio.run(
+            _service(_user()).forgot_password_step2("u@example.com", "bluebell")
+        )
+        assert result.recovery_token is not None
+
+
+def test_three_wrong_answers_then_lockout() -> None:
+    """Failures still spend the budget, and the next attempt is locked out."""
+
+    service = _service(_user())
+
+    for _ in range(SECURITY_RECOVERY_MAX_ATTEMPTS):
+        with pytest.raises(SecurityAnswerInvalidException):
+            asyncio.run(service.forgot_password_step2("u@example.com", "wrong"))
+
+    with pytest.raises(RecoveryLockedException):
+        asyncio.run(service.forgot_password_step2("u@example.com", "bluebell"))
+
+
+def test_unknown_email_spends_the_same_failure_budget() -> None:
+    """ADR-056: the unknown-address path must not be a free oracle.
+
+    It fails identically and shares the failure branch, so it burns budget
+    exactly like a registered account with a wrong answer.
+    """
+
+    service = _service(None)
+
+    for _ in range(SECURITY_RECOVERY_MAX_ATTEMPTS):
+        with pytest.raises(SecurityAnswerInvalidException):
+            asyncio.run(
+                service.forgot_password_step2("nobody@example.com", "bluebell")
+            )
+
+    with pytest.raises(RecoveryLockedException):
+        asyncio.run(service.forgot_password_step2("nobody@example.com", "bluebell"))
 
 
 # --- item 2: the gate itself -------------------------------------------------

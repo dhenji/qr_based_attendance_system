@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,14 +14,19 @@ from sqlalchemy.orm import DeclarativeBase
 
 from core.config import Settings, get_settings
 from features.attendance.constants import (
+    EAR_MEAN_MAX,
+    EAR_MEAN_MIN,
     HISTORY_DEFAULT_SORT_BY,
     HISTORY_DEFAULT_SORT_DIR,
     HISTORY_SORT_DIRS,
     HISTORY_SORT_FIELDS,
+    IDEMPOTENCY_TTL_SECONDS,
     REVIEW_DECISIONS,
     REVIEW_DEFAULT_STATUS,
+    REVIEW_NOTE_EVIDENCE_KEY,
     REVIEW_STATUSES,
     SYNC_STALE_SECONDS,
+    _IDEMPOTENCY_MAX_ENTRIES,
 )
 from features.attendance.exceptions import (
     AttendanceDomainException,
@@ -29,6 +35,7 @@ from features.attendance.exceptions import (
     OutsideGeofenceException,
     ReviewNotFoundException,
     ReviewNotPendingException,
+    StudentNumberMismatchException,
 )
 from features.attendance.model import Attendance
 from features.attendance.schema import (
@@ -67,7 +74,13 @@ from shared.query import apply_if
 
 EARTH_RADIUS_METERS: float = 6371000.0
 
-_IDEMPOTENCY_STORE: dict[str, ScanResponse] = {}
+# Scan idempotency cache, keyed by "user_id:session_id:caller-supplied key"
+# and valued as a monotonic deadline. Scoping the key by student and session is
+# what stops one student's replay from being served another student's cached
+# response; the deadline and the prune stop the map growing without bound (it is
+# process-local, so a multi-instance deployment still needs a shared store -
+# see shared/rate_limit.py for the same caveat).
+_IDEMPOTENCY_STORE: dict[str, tuple[float, ScanResponse]] = {}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -125,22 +138,54 @@ def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
 
     mean_ear: float = sum(evidence.ear_samples) / len(evidence.ear_samples)
 
-    if not 0.05 <= mean_ear <= 0.5:
+    if not EAR_MEAN_MIN <= mean_ear <= EAR_MEAN_MAX:
         return False
 
     return bool(evidence.pnp_evidence)
 
 
-def _cached_response(key: str | None) -> ScanResponse | None:
-    if key is None:
+def _idempotency_key_for(user_id: int, session_id: int, key: str | None) -> str | None:
+    return None if key is None else f"{user_id}:{session_id}:{key}"
+
+
+def _prune_idempotency(now: float) -> None:
+    """Drop expired entries once the map outgrows its cap."""
+
+    if len(_IDEMPOTENCY_STORE) <= _IDEMPOTENCY_MAX_ENTRIES:
+        return
+
+    for cache_key, (deadline, _) in list(_IDEMPOTENCY_STORE.items()):
+        if deadline <= now:
+            del _IDEMPOTENCY_STORE[cache_key]
+
+
+def _cached_response(cache_key: str | None) -> ScanResponse | None:
+    if cache_key is None:
         return None
 
-    return _IDEMPOTENCY_STORE.get(key)
+    entry: tuple[float, ScanResponse] | None = _IDEMPOTENCY_STORE.get(cache_key)
+
+    if entry is None:
+        return None
+
+    deadline, response = entry
+
+    if deadline <= time.monotonic():
+        # Expired: fall through and re-process rather than replaying a stale
+        # response for a submission that could now be well outside its window.
+        del _IDEMPOTENCY_STORE[cache_key]
+        return None
+
+    return response
 
 
-def _store_response(key: str | None, response: ScanResponse) -> None:
-    if key is not None:
-        _IDEMPOTENCY_STORE[key] = response
+def _store_response(cache_key: str | None, response: ScanResponse) -> None:
+    if cache_key is None:
+        return
+
+    now: float = time.monotonic()
+    _IDEMPOTENCY_STORE[cache_key] = (now + IDEMPOTENCY_TTL_SECONDS, response)
+    _prune_idempotency(now)
 
 
 async def _keyed_by_id[M: DeclarativeBase](
@@ -209,13 +254,18 @@ class AttendanceService:
         self._settings = settings or get_settings()
 
     async def _resolve_scan_parties(
-        self, session_id: int, scanned_at: datetime, now: datetime, student_number: str
+        self,
+        session_id: int,
+        scanned_at: datetime,
+        now: datetime,
+        user_id: int,
+        student_number: str,
     ) -> tuple[Session, Student]:
         db_session: Session = await self._get_active_session(
             session_id, scanned_at, now
         )
         student: Student = await self._get_active_student(
-            student_number, db_session.offering_id
+            user_id, student_number, db_session.offering_id
         )
         await self._require_enrollment(student.id, db_session.offering_id)
         await self._require_no_duplicate(student.id, db_session.id)
@@ -240,6 +290,7 @@ class AttendanceService:
         review: bool,
         original: str | None,
         now: datetime,
+        cache_key: str | None,
         idempotency_key: str | None,
     ) -> ScanResponse:
         """Write the attendance row and build the response.
@@ -264,13 +315,20 @@ class AttendanceService:
             scanned_at=row.timestamp,
             expires_at=db_session.expires_at,
         )
-        _store_response(idempotency_key, response)
+        _store_response(cache_key, response)
         return response
 
     async def submit_scan(
-        self, *, payload: ScanRequest, idempotency_key: str | None = None
+        self,
+        *,
+        payload: ScanRequest,
+        user_id: int,
+        idempotency_key: str | None = None,
     ) -> ScanResponse:
-        cached: ScanResponse | None = _cached_response(idempotency_key)
+        cache_key: str | None = _idempotency_key_for(
+            user_id, payload.session_id, idempotency_key
+        )
+        cached: ScanResponse | None = _cached_response(cache_key)
 
         if cached is not None:
             return cached
@@ -279,7 +337,7 @@ class AttendanceService:
         scanned_at: datetime = _ensure_aware(payload.scanned_at)
 
         db_session, student = await self._resolve_scan_parties(
-            payload.session_id, scanned_at, now, payload.student_number
+            payload.session_id, scanned_at, now, user_id, payload.student_number
         )
 
         self._validate_geofence(db_session, payload.gps)
@@ -298,11 +356,12 @@ class AttendanceService:
             review,
             original,
             now,
+            cache_key,
             idempotency_key,
         )
 
     async def precheck_scan(
-        self, *, session_id: int, student_number: str
+        self, *, session_id: int, user_id: int, student_number: str
     ) -> PrecheckResponse:
         """Read-only pre-check: validates session, enrollment, and duplicate scan.
 
@@ -313,7 +372,7 @@ class AttendanceService:
         db_session: Session = await self._get_active_session(session_id, now, now)
 
         student: Student = await self._get_active_student(
-            student_number, db_session.offering_id
+            user_id, student_number, db_session.offering_id
         )
 
         enrolled: bool = True
@@ -357,16 +416,34 @@ class AttendanceService:
         return row
 
     async def _get_active_student(
-        self, student_number: str, offering_id: int
+        self, user_id: int, student_number: str, offering_id: int
     ) -> Student:
+        """Resolve the scanning student from the *authenticated* user.
+
+        `student_number` is still read off the body because the contract
+        documents it (api-contracts.md:935), but it is only ever used to
+        check the body against the token - never to select the row. Keying
+        the lookup off the payload instead would let any authenticated
+        student submit or replay a scan as somebody else.
+        """
+
         student: Student | None = (
             await self._session.scalars(
-                select(Student).where(Student.student_id == student_number).limit(1)
+                select(Student).where(Student.user_id == user_id).limit(1)
             )
         ).one_or_none()
 
         if student is None:
-            raise StudentNotFoundException(student_number)  # type: ignore[arg-type]
+            # A STUDENT-role user with no linked `students` row. There is no
+            # student number to name here, so the id in the message is the
+            # account id; the 404 `student_not_found` code still holds.
+            raise StudentNotFoundException(user_id)
+
+        # `students.student_id` is upper-cased on write (StudentCreate
+        # normalizes it) while the request field is only stripped, so the
+        # comparison has to be case-insensitive.
+        if (student.student_id or "").upper() != student_number.strip().upper():
+            raise StudentNumberMismatchException(student_number, student.student_id)
 
         if not student.is_active:
             raise NotEnrolledException(student.id, offering_id)
@@ -991,10 +1068,14 @@ class AttendanceService:
         return recomputed
 
     async def _apply_resolution(
-        self, row: Attendance, evidence: dict, status: str
+        self, row: Attendance, evidence: dict, status: str, note: str | None
     ) -> None:
         row.validation_status = status
         evidence.pop("review", None)
+
+        if note is not None:
+            evidence[REVIEW_NOTE_EVIDENCE_KEY] = note
+
         row.liveness_evidence = evidence
         await self._session.flush()
 
@@ -1004,6 +1085,7 @@ class AttendanceService:
         record_id: int,
         decision: str,
         actor_id: int,
+        note: str | None = None,
     ) -> ResolveReviewResponse:
         row, evidence = await self._load_pending_review(record_id)
 
@@ -1019,7 +1101,7 @@ class AttendanceService:
         else:
             status = ValidationStatus.REJECTED.value
 
-        await self._apply_resolution(row, evidence, status)
+        await self._apply_resolution(row, evidence, status, note)
 
         return ResolveReviewResponse(
             id=row.id,

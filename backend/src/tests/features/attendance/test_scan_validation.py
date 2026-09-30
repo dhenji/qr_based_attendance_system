@@ -16,6 +16,7 @@ covered on both sides of every boundary.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -29,12 +30,15 @@ from features.attendance.exceptions import (
     FaceMismatchException,
     LivenessFailedException,
     OutsideGeofenceException,
+    StudentNumberMismatchException,
 )
 from features.attendance.model import Attendance
+from features.attendance import service as attendance_service
 from features.attendance.schema import (
     GPSInput,
     LivenessEvidence,
     ScanRequest,
+    ScanResponse,
 )
 from features.attendance.service import AttendanceService
 from features.session.exceptions import (
@@ -48,7 +52,7 @@ from features.student.exceptions import (
     StudentNotFoundException,
 )
 from features.sync.model import SyncQueue
-from shared.enums import ScannedVia, ValidationStatus
+from shared.enums import ScannedVia, UserRole, ValidationStatus
 from tests.conftest import Factories
 
 # Somewhere inside the default radius of the fixture classroom.
@@ -69,7 +73,6 @@ SYNC_STALE_SECONDS = 60
 
 # Past the end of any real sequence, so it can never collide with a seeded id.
 UNKNOWN_SESSION_ID = 2**31
-UNKNOWN_STUDENT_NUMBER = "STU-99999"
 
 
 def valid_evidence(**overrides: Any) -> LivenessEvidence:
@@ -132,6 +135,7 @@ async def test_scan_inside_present_window_is_present(
 
     # created_at anchors the window; 2 minutes in is inside the 5-minute window.
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -153,6 +157,7 @@ async def test_scan_after_present_window_is_late(
 
     # 8 minutes: past the 5-minute present window, inside present+late (15).
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -174,6 +179,7 @@ async def test_scan_after_late_window_is_rejected(
 
     # 20 minutes: past present (5) + late (10).
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -200,6 +206,7 @@ async def test_present_window_boundary_is_inclusive(
     service = AttendanceService(test_db_session, settings)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -221,6 +228,7 @@ async def test_late_window_boundary_is_inclusive(
 
     # Exactly present (5) + late (10) = 15 minutes, still late not rejected.
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -244,6 +252,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
     service = AttendanceService(test_db_session, settings)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -278,6 +287,7 @@ async def test_review_band_preserves_late_as_original_status(
     service = AttendanceService(test_db_session, settings)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -307,6 +317,7 @@ async def test_score_below_review_band_raises_face_mismatch(
 
     with pytest.raises(FaceMismatchException) as excinfo:
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -330,6 +341,7 @@ async def test_rejected_score_writes_no_attendance_row(
 
     with pytest.raises(FaceMismatchException):
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -358,6 +370,7 @@ async def test_scan_outside_geofence_raises(
 
     with pytest.raises(OutsideGeofenceException) as excinfo:
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -382,6 +395,7 @@ async def test_session_without_classroom_coords_skips_geofence(
     service = AttendanceService(test_db_session, settings)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -421,6 +435,7 @@ async def test_failing_liveness_evidence_raises(
 
     with pytest.raises(LivenessFailedException) as excinfo:
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -444,6 +459,7 @@ async def test_empty_pnp_evidence_fails_liveness(
 
     with pytest.raises(LivenessFailedException):
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -480,6 +496,7 @@ async def test_empty_ear_samples_fail_the_grade(
 
     with pytest.raises(LivenessFailedException) as excinfo:
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -508,30 +525,95 @@ async def test_unknown_session_raises_not_found(
     unknown = unknown.model_copy(update={"session_id": UNKNOWN_SESSION_ID})
 
     with pytest.raises(SessionNotFoundException) as excinfo:
-        await service.submit_scan(payload=unknown)
+        await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=unknown)
 
     assert excinfo.value.status_code == 404
     assert excinfo.value.code == "session_not_found"
 
 
-async def test_unknown_student_number_raises(
+async def test_authenticated_user_without_a_student_row_raises(
     test_db_session: AsyncSession,
     factories: Factories,
     settings: Settings,
 ) -> None:
+    """A STUDENT-role account with no linked `students` row is a 404."""
+
     stack: dict[str, Any] = await seed(factories)
+    orphan = await factories.user(role=UserRole.STUDENT.value)
     service = AttendanceService(test_db_session, settings)
 
     with pytest.raises(StudentNotFoundException) as excinfo:
         await service.submit_scan(
+            user_id=orphan.id,
             payload=scan_request(
                 stack["session"],
-                UNKNOWN_STUDENT_NUMBER,
+                stack["student"].student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
             )
         )
 
     assert excinfo.value.status_code == 404
+    assert excinfo.value.code == "student_not_found"
+
+
+async def test_scanning_as_another_student_is_refused(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """The body cannot name a different student than the token does.
+
+    This is the spoofing guard: the scan used to select the student by
+    `payload.student_number`, so any authenticated student could submit (and
+    then replay an idempotency key for) somebody else's attendance.
+    """
+
+    stack: dict[str, Any] = await seed(factories)
+    victim = await factories.student(stack["year_level"])
+    service = AttendanceService(test_db_session, settings)
+
+    with pytest.raises(StudentNumberMismatchException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                victim.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=2),
+            )
+        )
+
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.code == "student_number_mismatch"
+    assert (await test_db_session.scalars(select(Attendance))).all() == []
+
+
+async def test_scanned_student_number_comparison_ignores_case(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """`students.student_id` is stored upper-cased; the request is not.
+
+    A student typing `stu-00001` is the same student, so a case difference
+    must not read as a spoofing attempt.
+    """
+
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    result = await service.submit_scan(
+        user_id=student.user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id.lower(),
+            scanned_at=stack["session"].created_at + timedelta(minutes=2),
+        )
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
 
 
 async def test_unenrolled_student_raises_not_enrolled(
@@ -539,15 +621,19 @@ async def test_unenrolled_student_raises_not_enrolled(
     factories: Factories,
     settings: Settings,
 ) -> None:
+    """Enrollment is checked after ownership, on the authenticated student."""
+
     stack: dict[str, Any] = await factories.full_stack()
-    outsider = await factories.student(stack["year_level"])
+    await test_db_session.delete(stack["enrollment"])
+    await test_db_session.flush()
     service = AttendanceService(test_db_session, settings)
 
     with pytest.raises(NotEnrolledException) as excinfo:
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
-                outsider.student_id,
+                stack["student"].student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
             )
         )
@@ -567,6 +653,7 @@ async def test_inactive_student_raises_not_enrolled(
 
     with pytest.raises(NotEnrolledException):
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 stack["student"].student_id,
@@ -589,10 +676,14 @@ async def test_second_scan_raises_duplicate(
         scanned_at=stack["session"].created_at + timedelta(minutes=2),
     )
 
-    await service.submit_scan(payload=payload)
+    await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=payload)
 
     with pytest.raises(DuplicateScanException) as excinfo:
-        await service.submit_scan(payload=payload)
+        await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=payload)
 
     assert excinfo.value.status_code == 409
     assert excinfo.value.code == "duplicate_scan"
@@ -615,8 +706,12 @@ async def test_idempotency_key_replays_cached_response(
         scanned_at=stack["session"].created_at + timedelta(minutes=2),
     )
 
-    first = await service.submit_scan(payload=payload, idempotency_key="key-abc")
-    second = await service.submit_scan(payload=payload, idempotency_key="key-abc")
+    first = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=payload, idempotency_key="key-abc")
+    second = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=payload, idempotency_key="key-abc")
 
     assert second.id == first.id
 
@@ -642,10 +737,14 @@ async def test_distinct_idempotency_keys_write_distinct_rows(
         scanned_at=stack["session"].created_at + timedelta(minutes=2),
     )
 
-    await service.submit_scan(payload=payload, idempotency_key="key-one")
+    await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=payload, idempotency_key="key-one")
 
     with pytest.raises(DuplicateScanException):
-        await service.submit_scan(payload=payload, idempotency_key="key-two")
+        await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=payload, idempotency_key="key-two")
 
 
 # --- persisted shape ------------------------------------------------------
@@ -661,6 +760,7 @@ async def test_persisted_scan_records_gps_status_and_evidence(
     service = AttendanceService(test_db_session, settings)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -700,6 +800,7 @@ async def test_fresh_scan_writes_no_sync_queue_row(
     service = AttendanceService(test_db_session, settings)
 
     await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -723,6 +824,7 @@ async def test_stale_offline_scan_queues_a_sync_record(
     scanned_at = now - timedelta(seconds=SYNC_STALE_SECONDS + 30)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(stack["session"], student.student_id, scanned_at)
     )
 
@@ -753,6 +855,7 @@ async def test_naive_scanned_at_is_treated_as_utc(
     created_at = stack["session"].created_at.replace(tzinfo=None)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -785,6 +888,7 @@ async def test_session_created_at_anchors_the_window_not_the_schedule(
     service = AttendanceService(test_db_session, settings)
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             session,
             student.student_id,
@@ -805,7 +909,7 @@ async def test_precheck_reports_enrolled_and_unscanned(
     stack: dict[str, Any] = await seed(factories)
     service = AttendanceService(test_db_session)
 
-    precheck = await service.precheck_scan(
+    precheck = await service.precheck_scan(user_id=stack["student"].user_id,
         session_id=stack["session"].id,
         student_number=stack["student"].student_id,
     )
@@ -820,14 +924,22 @@ async def test_precheck_reports_unenrolled_without_raising(
     test_db_session: AsyncSession,
     factories: Factories,
 ) -> None:
-    """Precheck reports a flag; only `submit_scan` raises."""
+    """Precheck reports a flag; only `submit_scan` raises.
+
+    The unenrolled student has to be the *authenticated* one now that the
+    scan resolves the student off the token, so the enrollment row is what
+    gets removed rather than swapping in a second student.
+    """
 
     stack: dict[str, Any] = await factories.full_stack()
-    outsider = await factories.student(stack["year_level"])
+    await test_db_session.delete(stack["enrollment"])
+    await test_db_session.flush()
     service = AttendanceService(test_db_session)
 
     precheck = await service.precheck_scan(
-        session_id=stack["session"].id, student_number=outsider.student_id
+        user_id=stack["student"].user_id,
+        session_id=stack["session"].id,
+        student_number=stack["student"].student_id,
     )
 
     assert precheck.enrolled is False
@@ -844,6 +956,7 @@ async def test_precheck_reports_already_scanned(
     service = AttendanceService(test_db_session, settings)
 
     await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -851,7 +964,7 @@ async def test_precheck_reports_already_scanned(
         )
     )
 
-    precheck = await service.precheck_scan(
+    precheck = await service.precheck_scan(        user_id=stack["student"].user_id,
         session_id=stack["session"].id, student_number=student.student_id
     )
 
@@ -865,7 +978,7 @@ async def test_precheck_writes_nothing(
     stack: dict[str, Any] = await seed(factories)
     service = AttendanceService(test_db_session)
 
-    await service.precheck_scan(
+    await service.precheck_scan(user_id=stack["student"].user_id,
         session_id=stack["session"].id,
         student_number=stack["student"].student_id,
     )
@@ -902,6 +1015,7 @@ async def test_scanned_at_after_expiry_is_refused_while_the_session_is_live(
 
     with pytest.raises(SessionExpiredException) as excinfo:
         await service.submit_scan(
+            user_id=stack["student"].user_id,
             payload=scan_request(
                 stack["session"],
                 student.student_id,
@@ -927,6 +1041,7 @@ async def test_scanned_at_exactly_at_expiry_is_accepted(
     assert expires_at is not None
 
     result = await service.submit_scan(
+        user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
@@ -947,7 +1062,136 @@ async def test_precheck_raises_on_expired_session(
     service = AttendanceService(test_db_session)
 
     with pytest.raises(SessionExpiredException):
-        await service.precheck_scan(
+        await service.precheck_scan(user_id=stack["student"].user_id,
             session_id=stack["session"].id,
             student_number=stack["student"].student_id,
         )
+
+
+# --- idempotency store scoping and expiry ----------------------------------
+
+
+async def test_idempotency_entry_is_reprocessed_once_expired(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached response is not replayed past IDEMPOTENCY_TTL_SECONDS.
+
+    With no expiry the map only grew, and a key reused later would
+    resurrect a response for a submission that is by then outside its
+    session window. Expiring the entry means the duplicate guard runs
+    again, which is what a genuinely new submission should hit.
+    """
+
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+    payload = scan_request(
+        stack["session"],
+        student.student_id,
+        scanned_at=stack["session"].created_at + timedelta(minutes=2),
+    )
+
+    first = await service.submit_scan(
+        user_id=student.user_id, payload=payload, idempotency_key="ttl-key"
+    )
+    assert first.id is not None
+
+    # Push every stored entry past its deadline.
+    backdate = time.monotonic() - attendance_service.IDEMPOTENCY_TTL_SECONDS - 1
+    monkeypatch.setattr(
+        attendance_service,
+        "_IDEMPOTENCY_STORE",
+        {key: (backdate, resp) for key, (_, resp) in attendance_service._IDEMPOTENCY_STORE.items()},
+    )
+
+    with pytest.raises(DuplicateScanException):
+        await service.submit_scan(
+            user_id=student.user_id, payload=payload, idempotency_key="ttl-key"
+        )
+
+
+async def test_expired_idempotency_entry_is_dropped_not_replayed(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stale key is evicted on lookup, so the map cannot hold it forever."""
+
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+    payload = scan_request(
+        stack["session"],
+        student.student_id,
+        scanned_at=stack["session"].created_at + timedelta(minutes=2),
+    )
+
+    # A real first scan, so the attendance row the duplicate guard looks for
+    # actually exists.
+    await service.submit_scan(
+        user_id=student.user_id, payload=payload, idempotency_key="doomed-key"
+    )
+
+    cache_key = f"{student.user_id}:{stack['session'].id}:doomed-key"
+    backdate = time.monotonic() - attendance_service.IDEMPOTENCY_TTL_SECONDS - 1
+    store: dict[str, Any] = {
+        key: (backdate, response)
+        for key, (_, response) in attendance_service._IDEMPOTENCY_STORE.items()
+    }
+    assert cache_key in store
+    monkeypatch.setattr(attendance_service, "_IDEMPOTENCY_STORE", store)
+
+    with pytest.raises(DuplicateScanException):
+        await service.submit_scan(
+            user_id=student.user_id, payload=payload, idempotency_key="doomed-key"
+        )
+
+    assert cache_key not in store
+
+
+async def test_idempotency_cache_prunes_expired_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_prune_idempotency` bounds the map once it passes its cap."""
+
+    now = time.monotonic()
+    store: dict[str, Any] = {
+        "stale": (now - 1.0, _stale_response()),
+        "fresh": (now + 900.0, _stale_response()),
+    }
+    monkeypatch.setattr(attendance_service, "_IDEMPOTENCY_STORE", store)
+    monkeypatch.setattr(attendance_service, "_IDEMPOTENCY_MAX_ENTRIES", 2)
+
+    attendance_service._store_response("new", _stale_response())
+
+    assert "stale" not in store
+    assert "fresh" in store
+    assert "new" in store
+
+
+async def test_idempotency_prune_is_a_no_op_below_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = time.monotonic()
+    store: dict[str, Any] = {"stale": (now - 1.0, _stale_response())}
+    monkeypatch.setattr(attendance_service, "_IDEMPOTENCY_STORE", store)
+    monkeypatch.setattr(attendance_service, "_IDEMPOTENCY_MAX_ENTRIES", 100)
+
+    attendance_service._store_response("new", _stale_response())
+
+    # Under the cap nothing is swept, even an already-expired neighbour.
+    assert "stale" in store
+
+
+def _stale_response() -> ScanResponse:
+    moment = datetime.now(timezone.utc)
+    return ScanResponse(
+        id=1,
+        status=ValidationStatus.PRESENT.value,
+        scanned_at=moment,
+        expires_at=moment,
+    )

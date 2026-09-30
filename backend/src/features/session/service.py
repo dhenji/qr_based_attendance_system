@@ -304,6 +304,14 @@ class SessionService:
 
     @staticmethod
     def _scan_window_remaining(row: Session, now: datetime) -> int:
+        """Seconds left before the session expires.
+
+        Deliberately seconds: the frontend renders this as a countdown clock,
+        and every other duration on the session is stored in whole minutes, so
+        converting here would make the projector tile tick in 60s steps. The
+        name carries no unit, which is why the schema field documents it.
+        """
+
         if row.expires_at is None:
             return 0
 

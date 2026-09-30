@@ -55,8 +55,14 @@ async def submit_scan(
         rate_limit(SCAN_RATE_LIMIT_MAX_CALLS, SCAN_RATE_LIMIT_WINDOW_SECONDS)
     ),
 ) -> ScanResponse:
-    _: StudentUser = user  # role gate only; student resolved by payload.student_number
-    return await service.submit_scan(payload=payload, idempotency_key=idempotency_key)
+    # `payload.student_number` is checked against the authenticated account
+    # rather than used to select the student: any student could otherwise
+    # submit - or replay an idempotency key for - somebody else's scan.
+    return await service.submit_scan(
+        payload=payload,
+        user_id=user.id,
+        idempotency_key=idempotency_key,
+    )
 
 
 @router.post(
@@ -69,9 +75,10 @@ async def precheck_scan(
     user: StudentUser,
     service: AttendanceServiceDep,
 ) -> PrecheckResponse:
-    _: StudentUser = user  # role gate only
     return await service.precheck_scan(
-        session_id=payload.session_id, student_number=payload.student_number
+        session_id=payload.session_id,
+        user_id=user.id,
+        student_number=payload.student_number,
     )
 
 

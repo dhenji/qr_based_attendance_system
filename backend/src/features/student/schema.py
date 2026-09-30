@@ -85,6 +85,16 @@ class StudentRead(BaseModel):
 
 
 class StudentDetail(StudentRead):
+    """Single-student detail, for the profile page and the admin detail route.
+
+    `student_number` is the same value as `student_id`, carried under the name
+    the *student-facing* contract uses (api-contracts.md:1035) while the admin
+    roster rows keep `student_id` (:615/:634). Both are emitted so either
+    client reads the field it expects; the two spellings collapse onto the one
+    column `students.student_id` and cannot disagree.
+    """
+
+    student_number: str = ""
     face_enrolled_at: datetime | None = None
     face_embedding_version: int = 0
 

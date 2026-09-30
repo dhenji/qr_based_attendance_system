@@ -455,6 +455,12 @@ class Factories:
         The dependency chain every scan needs. Returns a dict rather than a
         tuple so a test can address the parts it asserts on by name.
 
+        The student is linked to a `users` row because the scan and precheck
+        routes resolve the student from the *authenticated* account rather
+        than from `payload.student_number`; a service-level test that wants to
+        exercise those needs a `user_id` to pass. Created last so the id
+        sequence every other factory draws from is unchanged by it.
+
         The session row is inserted directly rather than opened through
         `SessionService.create_session`, so `expires_at` and
         `scheduled_*` land exactly as the test states them. Tests that are
@@ -469,11 +475,16 @@ class Factories:
         offering: CourseOffering = await self.offering(course, program, year_level)
         session: Session = await self.session(offering, professor, **session_overrides)
         enrollment: Enrollment = await self.enrollment(student, offering)
+        user: User = await self.user(role=UserRole.STUDENT.value)
+
+        student.user_id = user.id
+        await self.db.flush()
 
         return {
             "program": program,
             "year_level": year_level,
             "student": student,
+            "user": user,
             "professor": professor,
             "course": course,
             "offering": offering,
@@ -596,25 +607,38 @@ async def auth_headers(
 def reset_process_globals() -> Any:
     """Clear module-level caches that would otherwise leak across tests.
 
-    Two of them:
+    Four of them, all process-global:
 
     - `features.attendance.service._IDEMPOTENCY_STORE` is the scan
-      idempotency cache, keyed by caller-supplied key. A scan cached in one
-      test would be replayed by another.
+      idempotency cache, keyed by user/session/caller-supplied key. A scan
+      cached in one test would be replayed by another.
     - `shared.rate_limit._limiter` is a process-global fixed-window limiter.
       Without this, the 30-calls-per-60s budget on `POST /attendance/scan`
       is shared by the whole test session, so an unrelated test eventually
       gets a spurious 429.
+    - `features.auth.service._recovery_limiter` caps security-answer failures
+      at 3 per email. It keys on the email, so it only stayed invisible while
+      every recovery test happened to use a distinct address; one test reusing
+      another's address would lock itself out for the rest of the window.
+    - `shared.cache._cache` holds face embeddings keyed by `student.id`. The
+      factory id counter restarts every test, so student 1 in this test is the
+      same cache key as student 1 in the last one - a test that enrolls a face
+      hands its blob to the next test that reads an unenrolled student.
     """
 
     from features.attendance import service as attendance_service
-    from shared import rate_limit
+    from features.auth import service as auth_service
+    from shared import cache, rate_limit
 
-    attendance_service._IDEMPOTENCY_STORE.clear()
-    rate_limit._limiter._windows.clear()
+    def _clear() -> None:
+        attendance_service._IDEMPOTENCY_STORE.clear()
+        rate_limit._limiter._windows.clear()
+        auth_service._recovery_limiter._windows.clear()
+        cache._cache._store.clear()
+
+    _clear()
     yield
-    attendance_service._IDEMPOTENCY_STORE.clear()
-    rate_limit._limiter._windows.clear()
+    _clear()
 
 
 @pytest.fixture(autouse=True)

@@ -31,9 +31,10 @@ work, not a code change.
 | auth / core               | `invalid_credentials` · `account_locked` · `role_mismatch` · `user_exists` · `ambiguous_account` · `unrecognized_email` · `security_answer_invalid` · `otp_invalid` · `otp_expired` · `recovery_locked` · `invalid_mfa_code` · `mfa_already_enabled` · `internal_error` · `database_error` |
 | admin                     | `admin_user_not_found` · `admin_user_email_exists` · `admin_user_username_exists` · `roster_link_impossible` · `self_deactivation_forbidden`                                                                                                                                                                                  |
 | student / professor       | `student_not_found` · `student_id_exists` · `student_email_exists` · `year_level_not_found` · `year_level_program_mismatch` · `year_number_exists` · `invalid_semester` · `professor_email_exists`                                                                                                                                      |
-| course / offering         | `offering_not_found`                                                                                                                                                                                                                                                                                          |
+| course / offering         | `offering_not_found` · `invalid_schedule_window`                                                                                                                                                                                                                                                               |
 | face enrollment           | `face_not_enrolled` · `face_embedding_not_found`                                                                                                                                                                                                                                                              |
-| attendance review queue   | `review_not_found` · `review_not_pending`                                                                                                                                                                                                                                                                     |
+| attendance review queue   | `review_not_found` · `review_not_pending`
+| attendance scan           | `outside_geofence` · `liveness_failed` · `face_mismatch` · `duplicate_scan` · `student_number_mismatch`                                                                                                                                                                                                   |
 
 Conversely, `no_face_detected`, `multiple_faces`, `quality_too_low` and `invalid_image`
 are documented below but not yet raised: face detection is stubbed by
@@ -284,6 +285,8 @@ A course offering is a specific instance of a course template for a program, yea
 | ---------------- | ---------------------------------------------- |
 | **Request**      | Any mutable field from POST (except course_id, program_id, year_level_id, semester, academic_year) |
 | **Response 200** | Updated course offering                        |
+| **Errors**       | 404 `offering_not_found` · 422 `invalid_schedule_window` |
+| **Notes**        | `invalid_schedule_window` is 422 when the *merged* result would end at or before it starts. A PATCH that moves only `schedule_start_time` past the stored end is caught here, because the request body's own validator only sees the fields it was sent. |
 
 #### `DELETE /admin/offerings/{oid}`
 
@@ -549,7 +552,7 @@ Approve or reject a flagged record.
 | ---------------- | --------------------------------------------------------------------------------- |
 | **Request**      | `{ decision: "approve" \| "reject", note?: string }`                              |
 | **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
-| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. Decisions are audit-logged. |
+| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. `note` (≤1000 chars, stripped) is stored as `liveness_evidence.review_note` and returned by the list endpoint's `evidence`. Resolving an already-resolved record is 409 `review_not_pending`. **Audit logging is deferred to PROMPT 8.7** — no audit table exists until Phase 8, so the decision is currently recorded only on the attendance row. |
 
 ### Students, Professors & Archive
 
@@ -632,6 +635,7 @@ Single student detail.
 |                  |                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
 | **Response 200** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, created_at, scan_count, face_enrolled: bool, face_enrolled_at?, face_embedding_version? }` |
+| **Notes**        | Detail response also carries `student_number` (same `students.student_id` column) — see `GET /student/profile`. |
 
 #### `PATCH /admin/students/{id}`
 
@@ -745,7 +749,7 @@ Live session detail with dual timers.
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Response 200** | `{ id, offering, session_code, scan_window_remaining, scheduled_end_time, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
-| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns). `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). |
+| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). |
 
 #### `POST /professor/sessions/{id}/close`
 
@@ -934,8 +938,9 @@ Submit attendance scan (online or queued for offline sync).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
-| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 410 `session_expired`                                                                                                                                                     |
-| **Notes**        | `student_number` maps `students.student_id`. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): `"qr_camera"` when submitted from a QR scan of the session/student-ID QR, `"manual_code"` when the session code was typed via verify-code. |
+| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired`                                                                                                                                                     |
+| **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): `"qr_camera"` when submitted from a QR scan of the session/student-ID QR, `"manual_code"` when the session code was typed via verify-code. |
+| **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
 
 #### `POST /student/attendance/precheck`
@@ -948,8 +953,8 @@ duplicate BEFORE GPS/face are captured. **Never writes attendance.**
 | **Role**         | student                                                                               |
 | **Request**      | `{ session_id: int, student_number: string }`                                         |
 | **Response 200** | `{ enrolled: true, already_scanned: false, student: { student_id, name, section } }` |
-| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 403 `not_enrolled` · 409 `duplicate_scan` |
-| **Notes**        | Read-only gate — the full submission still goes through `POST /student/attendance/scan`; duplicate-scan is re-checked atomically at submit time. |
+| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 403 `student_number_mismatch` |
+| **Notes**        | Read-only gate — the full submission still goes through `POST /student/attendance/scan`; duplicate-scan is re-checked atomically at submit time. `student_number` is checked against the authenticated account, not used to select the row (see the scan endpoint). `not_enrolled` and `duplicate_scan` are reported as `enrolled: false` / `already_scanned: true` in the 200 body rather than raised, so the client gets both flags in one round trip. |
 
 ---
 
@@ -1033,6 +1038,7 @@ Read-only identity fields.
 |                  |                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **Response 200** | `{ student_number, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count, face_enrolled_at?, face_embedding_version }` |
+| **Notes**        | Also carries `student_id` alongside `student_number` — the same `students.student_id` column under the name the admin roster rows use (:615/:634). Both spellings are emitted on this response and on `GET /admin/students/{id}` so either client reads the name it expects. |
 | **Notes**        | `created_at` (Account date) + `scan_count` + face-enrollment meta feed wireframes.md 2.10 ("Account: Jun 2026 · Scans: 42", "Enrolled (vN)"). |
 
 #### `PATCH /student/profile/password`
