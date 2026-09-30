@@ -10,6 +10,8 @@
 		doLogin,
 		doMfaVerify,
 	} from '$lib/features/auth/store.svelte';
+	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
+	import ErrorBoundary from '$lib/components/ErrorBoundary.svelte';
 
 	// 'credentials' -> 'mfa' (when the account has MFA enabled) -> 'change-password'
 	// (when an admin issued a temporary password).
@@ -121,6 +123,13 @@
 
 <main class="auth">
 	<div class="wrapper">
+
+		<!-- DEBUG TEST: This spinner should always be visible and spinning -->
+		<div style="margin: 1rem 0; padding: 1rem; border: 2px solid #1e3a5f; background: #f0f8ff; text-align: center;">
+			<p style="margin: 0 0 1rem 0; font-weight: bold; color: #1e3a5f;">🔧 DEBUG: Testing Spinner Animation</p>
+			<LoadingSpinner size="lg" message="This should be spinning continuously" />
+		</div>
+
 		<div class="header">
 			<div class="logo-tile"><img src="/qr-attend-logo.svg" alt="Attendly" /></div>
 			{#if stage === 'credentials'}
@@ -136,9 +145,8 @@
 		</div>
 
 		<div class="card">
-			{#if error}
-				<div class="error-banner">{error}</div>
-			{/if}
+			<ErrorBoundary {error} retryButton={false}>
+				{#snippet children()}
 
 			{#if stage === 'credentials'}
 				<form onsubmit={handleLogin}>
@@ -171,7 +179,14 @@
 					</div>
 
 					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{authState.loading ? 'Signing in…' : 'Login'}
+						{#if authState.loading}
+							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+								<LoadingSpinner size="sm" message="" />
+								<span>Signing in…</span>
+							</div>
+						{:else}
+							Login
+						{/if}
 					</button>
 				</form>
 			{:else if stage === 'mfa'}
@@ -187,7 +202,14 @@
 					</div>
 
 					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{authState.loading ? 'Verifying…' : 'Verify'}
+						{#if authState.loading}
+							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+								<LoadingSpinner size="sm" message="" />
+								<span>Verifying…</span>
+							</div>
+						{:else}
+							Verify
+						{/if}
 					</button>
 					<button type="button" class="link-btn block" onclick={backToCredentials}>
 						Back to sign in
@@ -228,7 +250,14 @@
 					</div>
 
 					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{authState.loading ? 'Saving…' : 'Set password and continue'}
+						{#if authState.loading}
+							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+								<LoadingSpinner size="sm" message="" />
+								<span>Saving…</span>
+							</div>
+						{:else}
+							Set password and continue
+						{/if}
 					</button>
 				</form>
 			{/if}
@@ -249,7 +278,10 @@
 					</span>
 				</div>
 			{/if}
-		</div>
+
+			{/snippet}
+		</ErrorBoundary>
+	</div>
 	</div>
 </main>
 
