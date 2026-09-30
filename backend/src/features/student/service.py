@@ -2,7 +2,7 @@ import base64
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from features.program.exceptions import (
 )
 from features.program.model import Program, YearLevel
 from features.student.exceptions import (
+    CurrentPasswordInvalidException,
     FaceEmbeddingNotFoundException,
     StudentEmailExistsException,
     StudentHasRecordsException,
@@ -29,6 +30,7 @@ from features.student.exceptions import (
 )
 from features.student.model import Student
 from features.student.schema import (
+    ChangePasswordRequest,
     FaceEmbeddingResponse,
     ScheduleItem,
     ScheduleResponse,
@@ -43,6 +45,7 @@ from shared.base import BaseCRUD
 from shared.cache import get_face_embedding_cached
 from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
+from core.security import hash_password, verify_password
 
 ROSTER_CSV_COLUMNS: tuple[str, ...] = (
     "student_id",
@@ -183,6 +186,19 @@ class StudentService:
 
     async def get(self, *, student_id: int) -> StudentDetail:
         return await self._to_detail(await self._get_or_404(student_id))
+
+    async def get_profile(self, *, user_id: int) -> StudentDetail:
+        """Get the student profile for the authenticated user.
+
+        Resolves the student by user_id (from the auth token) and returns
+        the full detail including face enrollment metadata and scan count.
+        """
+        student: Student | None = await self._students.get_by(user_id=user_id)
+
+        if student is None:
+            raise StudentNotFoundException(user_id)
+
+        return await self._to_detail(student)
 
     async def get_face_embedding(
         self, *, user_id: int, current_version: int = 0
@@ -403,42 +419,58 @@ class StudentService:
         student: Student = await self._get_or_404(student_id)
         values: dict[str, Any] = payload.model_dump(exclude_unset=True)
 
-        is_active: bool | None = values.pop("is_active", None)
+        # Extract cohort fields for joint validation
         program_id: int | None = values.pop("program_id", None)
         year_level_id: int | None = values.pop("year_level_id", None)
 
-        if "email" in values and values["email"] != student.email:
-            existing: Student | None = await self._students.get_by(
-                email=values["email"]
-            )
-
-            if existing is not None and existing.id != student.id:
-                raise StudentEmailExistsException(values["email"])
-
         for field, value in values.items():
-            setattr(student, field, value)
+            if handler := self._FIELD_HANDLERS.get(field):
+                await handler(self, student, value, student_id)
+            else:
+                setattr(student, field, value)
 
         if program_id is not None or year_level_id is not None:
-            target_program: int = (
-                program_id
-                if program_id is not None
-                else (await self._year_level(student.year_level_id)).program_id
-            )
-            target_year: int = (
-                year_level_id if year_level_id is not None else student.year_level_id
-            )
-            year_level, _ = await self._resolve_cohort(target_year, target_program)
-            student.year_level_id = year_level.id
-
-        if is_active is False:
-            return await self.archive(student_id=student.id)
-
-        if is_active is True:
-            student.is_active = True
+            await self._resolve_and_set_cohort(student, program_id, year_level_id)
 
         await self._session.flush()
 
         return await self._to_read(student)
+
+    async def _handle_email(
+        self, student: Student, value: str, student_id: int
+    ) -> None:
+        if value != student.email:
+            existing: Student | None = await self._students.get_by(email=value)
+            if existing is not None and existing.id != student.id:
+                raise StudentEmailExistsException(value)
+        student.email = value
+
+    async def _handle_is_active(
+        self, student: Student, value: bool, student_id: int
+    ) -> None:
+        if value is False:
+            await self.archive(student_id=student.id)
+        else:
+            student.is_active = True
+
+    async def _resolve_and_set_cohort(
+        self, student: Student, program_id: int | None, year_level_id: int | None
+    ) -> None:
+        target_program: int = (
+            program_id
+            if program_id is not None
+            else (await self._year_level(student.year_level_id)).program_id
+        )
+        target_year: int = (
+            year_level_id if year_level_id is not None else student.year_level_id
+        )
+        year_level, _ = await self._resolve_cohort(target_year, target_program)
+        student.year_level_id = year_level.id
+
+    _FIELD_HANDLERS: dict[str, Callable] = {
+        "email": _handle_email,
+        "is_active": _handle_is_active,
+    }
 
     async def archive(self, *, student_id: int) -> StudentRead:
         student: Student = await self._get_or_404(student_id)
@@ -458,6 +490,27 @@ class StudentService:
 
         return await self._to_read(student)
 
+    async def change_password(
+        self, user_id: int, current_password: str, new_password: str
+    ) -> None:
+        """Change the student's password.
+
+        Validates the current password against the linked User record,
+        then updates the hash and clears must_change_password.
+        """
+        student: Student | None = await self._students.get_by(user_id=user_id)
+
+        if student is None or student.user is None:
+            raise StudentNotFoundException(user_id)
+
+        if not verify_password(current_password, student.user.password_hash):
+            raise CurrentPasswordInvalidException()
+
+        student.user.password_hash = hash_password(new_password)
+        student.user.must_change_password = False
+
+        await self._session.flush()
+
     async def import_roster(self, *, content: bytes) -> StudentImportResult:
         """Create NEW roster students from a CSV upload.
 
@@ -466,28 +519,28 @@ class StudentService:
         already exists — in the database or earlier in the same file — are
         counted as duplicates, not errors.
         """
-        rows, errors = parse_roster_csv(content)
+        rows, parse_errors = parse_roster_csv(content)
         imported = 0
         duplicates = 0
         seen_ids: set[str] = set()
         seen_emails: set[str] = set()
+        errors: list[StudentImportError] = list(parse_errors)
 
         for row in rows:
-            if (
-                row.student_id in seen_ids
-                or row.email in seen_emails
-                or await self._students.get_by(student_id=row.student_id) is not None
-                or await self._students.get_by(email=row.email) is not None
-            ):
+            is_duplicate, error = await self._validate_import_row(row, seen_ids, seen_emails)
+            if is_duplicate:
                 duplicates += 1
                 seen_ids.add(row.student_id)
                 seen_emails.add(row.email)
+                continue
+            if error:
+                errors.append(error)
                 continue
 
             seen_ids.add(row.student_id)
             seen_emails.add(row.email)
 
-            program: Program | None = await self._programs.get_by(code=row.program_code)
+            program = await self._programs.get_by(code=row.program_code)
 
             if program is None:
                 errors.append(
@@ -498,7 +551,7 @@ class StudentService:
                 )
                 continue
 
-            year_level: YearLevel | None = await self._resolve_import_year_level(
+            year_level = await self._resolve_import_year_level(
                 program.id, row.year_level
             )
 
@@ -531,6 +584,24 @@ class StudentService:
         return StudentImportResult(
             imported=imported, duplicates=duplicates, errors=errors
         )
+
+    async def _validate_import_row(
+        self,
+        row: _RosterRow,
+        seen_ids: set[str],
+        seen_emails: set[str],
+    ) -> tuple[bool, StudentImportError | None]:
+        """Validate a single import row. Returns (is_duplicate, error)."""
+
+        if (
+            row.student_id in seen_ids
+            or row.email in seen_emails
+            or await self._students.get_by(student_id=row.student_id) is not None
+            or await self._students.get_by(email=row.email) is not None
+        ):
+            return True, None
+
+        return False, None
 
     async def hard_delete(self, *, student_id: int) -> None:
         """Permanently delete an archived student with no referencing rows."""
