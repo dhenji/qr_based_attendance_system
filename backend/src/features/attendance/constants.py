@@ -37,3 +37,11 @@ HISTORY_SORT_DIRS: frozenset[str] = frozenset({"asc", "desc"})
 
 HISTORY_DEFAULT_SORT_BY: str = "time"
 HISTORY_DEFAULT_SORT_DIR: str = "desc"
+
+REVIEW_STATUSES: frozenset[str] = frozenset({"pending", "approved", "rejected"})
+
+REVIEW_DEFAULT_STATUS: str = "pending"
+
+REVIEW_DECISIONS: frozenset[str] = frozenset({"approve", "reject"})
+
+REVIEW_NOTE_MAX_LENGTH: int = 1000

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from features.admin.router import router as admin_router
+from features.attendance.admin_router import router as attendance_admin_router
 from features.attendance.router import router as attendance_router
 from features.auth.router import router as auth_router
 from features.course.offering_router import router as offering_router
@@ -23,6 +24,7 @@ api_router.include_router(auth_router, tags=["auth"])
 api_router.include_router(student_router, tags=["student"])
 api_router.include_router(session_router, tags=["session"])
 api_router.include_router(attendance_router, tags=["attendance"])
+api_router.include_router(attendance_admin_router, tags=["admin-attendance"])
 api_router.include_router(professor_router, tags=["professor"])
 api_router.include_router(program_router, tags=["programs"])
 api_router.include_router(admin_router, tags=["admin"])
