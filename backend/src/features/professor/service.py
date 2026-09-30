@@ -105,6 +105,80 @@ def _to_roster_row(raw: CsvRow) -> _RosterRow:
     )
 
 
+def _assignments_stmt(professor_id: int) -> Select[tuple[Any, ...]]:
+    """Current-dated, active assignments, projected in `_to_assigned_offering` order."""
+    today: date = date.today()
+
+    return (
+        select(
+            CourseOffering.id,
+            CourseOffering.course_id,
+            Course.course_code,
+            Course.course_name,
+            CourseOffering.program_id,
+            Program.code,
+            CourseOffering.year_level_id,
+            YearLevel.label,
+            CourseOffering.semester,
+            CourseOffering.academic_year,
+            CourseProfessor.is_primary,
+            CourseProfessor.effective_from,
+            CourseProfessor.effective_to,
+            Course.units,
+        )
+        .join(CourseProfessor, CourseProfessor.offering_id == CourseOffering.id)
+        .join(Course, Course.id == CourseOffering.course_id)
+        .join(Program, Program.id == CourseOffering.program_id)
+        .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
+        .where(
+            CourseProfessor.professor_id == professor_id,
+            CourseProfessor.effective_from <= today,
+            or_(
+                CourseProfessor.effective_to.is_(None),
+                CourseProfessor.effective_to >= today,
+            ),
+            CourseOffering.is_active.is_(True),
+        )
+        .order_by(CourseOffering.id.asc())
+    )
+
+
+def _to_assigned_offering(row: Sequence[Any]) -> AssignedOfferingItem:
+    (
+        offering_id,
+        course_id,
+        course_code,
+        course_name,
+        program_id,
+        program_code,
+        year_level_id,
+        year_level_label,
+        semester,
+        academic_year,
+        is_primary,
+        effective_from,
+        effective_to,
+        units,
+    ) = row
+
+    return AssignedOfferingItem(
+        offering_id=offering_id,
+        course_id=course_id,
+        course_code=course_code,
+        course_name=course_name,
+        program_id=program_id,
+        program_code=program_code,
+        year_level_id=year_level_id,
+        year_level_label=year_level_label,
+        semester=semester,
+        academic_year=academic_year,
+        is_primary=bool(is_primary),
+        effective_from=effective_from,
+        effective_to=effective_to,
+        units=int(units),
+    )
+
+
 def parse_professor_roster_csv(
     content: bytes,
 ) -> tuple[list[_RosterRow], list[ProfessorImportError]]:
@@ -411,81 +485,11 @@ class ProfessorService:
         self, professor_id: int
     ) -> Sequence[AssignedOfferingItem]:
         """Active assignments ordered by offering id (base columns only)."""
-        today: date = date.today()
         rows = (
-            await self._session.execute(
-                select(
-                    CourseOffering.id,
-                    CourseOffering.course_id,
-                    Course.course_code,
-                    Course.course_name,
-                    CourseOffering.program_id,
-                    Program.code,
-                    CourseOffering.year_level_id,
-                    YearLevel.label,
-                    CourseOffering.semester,
-                    CourseOffering.academic_year,
-                    CourseProfessor.is_primary,
-                    CourseProfessor.effective_from,
-                    CourseProfessor.effective_to,
-                    Course.units,
-                )
-                .join(
-                    CourseProfessor,
-                    CourseProfessor.offering_id == CourseOffering.id,
-                )
-                .join(Course, Course.id == CourseOffering.course_id)
-                .join(Program, Program.id == CourseOffering.program_id)
-                .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
-                .where(
-                    CourseProfessor.professor_id == professor_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
-                    CourseOffering.is_active.is_(True),
-                )
-                .order_by(CourseOffering.id.asc())
-            )
+            await self._session.execute(_assignments_stmt(professor_id))
         ).all()
 
-        items: list[AssignedOfferingItem] = [
-            AssignedOfferingItem(
-                offering_id=offering_id,
-                course_id=course_id,
-                course_code=course_code,
-                course_name=course_name,
-                program_id=program_id,
-                program_code=program_code,
-                year_level_id=year_level_id,
-                year_level_label=year_level_label,
-                semester=semester,
-                academic_year=academic_year,
-                is_primary=bool(is_primary),
-                effective_from=effective_from,
-                effective_to=effective_to,
-                units=int(units),
-            )
-            for (
-                offering_id,
-                course_id,
-                course_code,
-                course_name,
-                program_id,
-                program_code,
-                year_level_id,
-                year_level_label,
-                semester,
-                academic_year,
-                is_primary,
-                effective_from,
-                effective_to,
-                units,
-            ) in rows
-        ]
-
-        return items
+        return [_to_assigned_offering(row) for row in rows]
 
     async def _enrich_assigned_offerings(
         self, items: Sequence[AssignedOfferingItem]

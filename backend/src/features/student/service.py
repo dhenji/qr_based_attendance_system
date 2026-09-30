@@ -141,6 +141,66 @@ def _to_roster_row(raw: CsvRow) -> _RosterRow:
     )
 
 
+def _schedule_stmt(student_id: int) -> Select[tuple[Any, ...]]:
+    """Active offerings for `student_id`, projected in `_to_schedule_item` order."""
+    return (
+        select(
+            CourseOffering.id,
+            CourseOffering.course_id,
+            Course.course_code,
+            Course.course_name,
+            Program.code,
+            YearLevel.label,
+            CourseOffering.semester,
+            CourseOffering.schedule_days,
+            CourseOffering.schedule_start_time,
+            CourseOffering.schedule_end_time,
+            CourseOffering.classroom_name,
+        )
+        .select_from(Enrollment)
+        .join(CourseOffering, CourseOffering.id == Enrollment.offering_id)
+        .join(Course, Course.id == CourseOffering.course_id)
+        .join(Program, Program.id == CourseOffering.program_id)
+        .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
+        .where(
+            Enrollment.student_id == student_id,
+            CourseOffering.is_active.is_(True),
+        )
+        .order_by(CourseOffering.id.asc())
+    )
+
+
+def _to_schedule_item(row: Sequence[Any], names: dict[int, str]) -> ScheduleItem:
+    (
+        offering_id,
+        course_id,
+        course_code,
+        course_name,
+        program_code,
+        year_level_label,
+        semester,
+        schedule_days,
+        schedule_start_time,
+        schedule_end_time,
+        classroom_name,
+    ) = row
+
+    return ScheduleItem(
+        offering_id=offering_id,
+        course_id=course_id,
+        course_code=course_code,
+        course_name=course_name,
+        program_code=program_code,
+        year_level_label=year_level_label,
+        semester=semester,
+        schedule_days=schedule_days,
+        schedule_start_time=schedule_start_time,
+        schedule_end_time=schedule_end_time,
+        classroom_name=classroom_name,
+        professor_name=names.get(offering_id),
+    )
+
+
 def parse_roster_csv(
     content: bytes,
 ) -> tuple[list[_RosterRow], list[StudentImportError]]:
@@ -248,31 +308,7 @@ class StudentService:
             raise StudentNotFoundException(user_id)
 
         rows = (
-            await self._session.execute(
-                select(
-                    CourseOffering.id,
-                    CourseOffering.course_id,
-                    Course.course_code,
-                    Course.course_name,
-                    Program.code,
-                    YearLevel.label,
-                    CourseOffering.semester,
-                    CourseOffering.schedule_days,
-                    CourseOffering.schedule_start_time,
-                    CourseOffering.schedule_end_time,
-                    CourseOffering.classroom_name,
-                )
-                .select_from(Enrollment)
-                .join(CourseOffering, CourseOffering.id == Enrollment.offering_id)
-                .join(Course, Course.id == CourseOffering.course_id)
-                .join(Program, Program.id == CourseOffering.program_id)
-                .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
-                .where(
-                    Enrollment.student_id == student.id,
-                    CourseOffering.is_active.is_(True),
-                )
-                .order_by(CourseOffering.id.asc())
-            )
+            await self._session.execute(_schedule_stmt(student.id))
         ).all()
 
         names: dict[int, str] = await self._schedule_professor_names(
@@ -280,35 +316,7 @@ class StudentService:
         )
 
         return ScheduleResponse(
-            offerings=[
-                ScheduleItem(
-                    offering_id=offering_id,
-                    course_id=course_id,
-                    course_code=course_code,
-                    course_name=course_name,
-                    program_code=program_code,
-                    year_level_label=year_level_label,
-                    semester=semester,
-                    schedule_days=schedule_days,
-                    schedule_start_time=schedule_start_time,
-                    schedule_end_time=schedule_end_time,
-                    classroom_name=classroom_name,
-                    professor_name=names.get(offering_id),
-                )
-                for (
-                    offering_id,
-                    course_id,
-                    course_code,
-                    course_name,
-                    program_code,
-                    year_level_label,
-                    semester,
-                    schedule_days,
-                    schedule_start_time,
-                    schedule_end_time,
-                    classroom_name,
-                ) in rows
-            ]
+            offerings=[_to_schedule_item(row, names) for row in rows]
         )
 
     async def _schedule_professor_names(

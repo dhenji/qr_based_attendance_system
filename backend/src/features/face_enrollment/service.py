@@ -97,30 +97,22 @@ class FaceEnrollmentService:
         right_content_type: str | None = None,
     ) -> FaceEnrollmentResponse:
         """Store a new face enrollment, superseding any previous one."""
-
         student: Student | None = await self._session.get(Student, student_id)
 
         if student is None:
             raise StudentNotFoundException(student_id)
 
-        _validate_photo(
-            name="front",
-            content=front,
-            content_type=front_content_type,
-            max_bytes=self._settings.attachments_max_bytes,
-        )
-        _validate_photo(
-            name="left",
-            content=left,
-            content_type=left_content_type,
-            max_bytes=self._settings.attachments_max_bytes,
-        )
-        _validate_photo(
-            name="right",
-            content=right,
-            content_type=right_content_type,
-            max_bytes=self._settings.attachments_max_bytes,
-        )
+        for photo in (
+            ("front", front, front_content_type),
+            ("left", left, left_content_type),
+            ("right", right, right_content_type),
+        ):
+            _validate_photo(
+                name=photo[0],
+                content=photo[1],
+                content_type=photo[2],
+                max_bytes=self._settings.attachments_max_bytes,
+            )
 
         student.face_embedding = _stub_embedding_blob(
             version=self._settings.face_embedding_version

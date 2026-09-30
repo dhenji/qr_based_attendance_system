@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
 from core.config import Settings, get_settings
 from features.attendance.constants import (
@@ -142,6 +143,25 @@ def _store_response(key: str | None, response: ScanResponse) -> None:
         _IDEMPOTENCY_STORE[key] = response
 
 
+async def _keyed_by_id[M: DeclarativeBase](
+    session: AsyncSession, model: type[M], ids: set[int]
+) -> dict[int, M]:
+    """Load a lookup map, skipping the query entirely when `ids` is empty.
+
+    `_load_review_maps` chains these (students -> sessions -> offerings ->
+    courses) to hydrate a page of rows without a query per row.
+    """
+    if not ids:
+        return {}
+
+    return {
+        obj.id: obj
+        for obj in (
+            await session.scalars(select(model).where(model.id.in_(ids)))
+        ).all()
+    }
+
+
 _HISTORY_COUNT_FIELDS: dict[str, str] = {
     "present": ValidationStatus.PRESENT.value,
     "late": ValidationStatus.LATE.value,
@@ -159,14 +179,14 @@ def _approved_review_filter(stmt: Select[Any]) -> Select[Any]:
         Attendance.validation_status.in_(
             [ValidationStatus.PRESENT.value, ValidationStatus.LATE.value]
         ),
-        Attendance.original_status.is_not_none(),
+        Attendance.original_status.is_not(None),
     )
 
 
 def _rejected_review_filter(stmt: Select[Any]) -> Select[Any]:
     return stmt.where(
         Attendance.validation_status == ValidationStatus.REJECTED.value,
-        Attendance.original_status.is_not_none(),
+        Attendance.original_status.is_not(None),
     )
 
 
@@ -655,15 +675,24 @@ class AttendanceService:
         )
 
     async def _history_tallies(self, filtered: Select[Any]) -> dict[str, int]:
+        """Per-status counts over the filtered set.
+
+        The status column has to be read off the subquery. Selecting
+        `Attendance.validation_status` while selecting *from* the subquery
+        would add `attendance_records` as a second FROM element, silently
+        cross-joining the whole table into the group-by and producing rates
+        above 1.0.
+        """
+        scoped = filtered.subquery()
+        status = scoped.c.validation_status
+
         rows: Sequence[tuple[str, int]] = (
             await self._session.execute(
-                select(Attendance.validation_status, func.count(Attendance.id))
-                .select_from(filtered.subquery())
-                .group_by(Attendance.validation_status)
+                select(status, func.count()).select_from(scoped).group_by(status)
             )
         ).all()  # type: ignore[assignment]
 
-        return {status: count for status, count in rows}
+        return {found: count for found, count in rows}
 
     async def _history_enrolled(self, student_id: int, filters: _HistoryFilters) -> int:
         stmt: Select[Any] = (
@@ -759,28 +788,17 @@ class AttendanceService:
         if not records:
             return []
 
-        sessions: Sequence[Session] = (
-            await self._session.scalars(
-                select(Session).where(Session.id.in_({r.session_id for r in records}))
-            )
-        ).all()
-        session_map: dict[int, Session] = {s.id: s for s in sessions}
-
-        offerings: Sequence[CourseOffering] = (
-            await self._session.scalars(
-                select(CourseOffering).where(
-                    CourseOffering.id.in_({s.offering_id for s in sessions})
-                )
-            )
-        ).all()
-        offering_map: dict[int, CourseOffering] = {o.id: o for o in offerings}
-
-        courses: Sequence[Course] = (
-            await self._session.scalars(
-                select(Course).where(Course.id.in_({o.course_id for o in offerings}))
-            )
-        ).all()
-        course_map: dict[int, Course] = {c.id: c for c in courses}
+        session_map: dict[int, Session] = await _keyed_by_id(
+            self._session, Session, {r.session_id for r in records}
+        )
+        offering_map: dict[int, CourseOffering] = await _keyed_by_id(
+            self._session,
+            CourseOffering,
+            {s.offering_id for s in session_map.values()},
+        )
+        course_map: dict[int, Course] = await _keyed_by_id(
+            self._session, Course, {o.course_id for o in offering_map.values()}
+        )
 
         items: list[HistoryItem] = []
 
@@ -835,55 +853,19 @@ class AttendanceService:
         dict[int, CourseOffering],
         dict[int, Course],
     ]:
-        students: dict[int, Student] = {
-            s.id: s
-            for s in (
-                await self._session.scalars(
-                    select(Student).where(
-                        Student.id.in_({r.student_id for r in records})
-                    )
-                )
-            ).all()
-        }
-        sessions: dict[int, Session] = {
-            s.id: s
-            for s in (
-                await self._session.scalars(
-                    select(Session).where(
-                        Session.id.in_({r.session_id for r in records})
-                    )
-                )
-            ).all()
-        }
-        offerings: dict[int, CourseOffering] = (
-            {
-                o.id: o
-                for o in (
-                    await self._session.scalars(
-                        select(CourseOffering).where(
-                            CourseOffering.id.in_(
-                                {s.offering_id for s in sessions.values()}
-                            )
-                        )
-                    )
-                ).all()
-            }
-            if sessions
-            else {}
+        students: dict[int, Student] = await _keyed_by_id(
+            self._session, Student, {r.student_id for r in records}
         )
-        courses: dict[int, Course] = (
-            {
-                c.id: c
-                for c in (
-                    await self._session.scalars(
-                        select(Course).where(
-                            Course.id.in_({o.course_id for o in offerings.values()})
-                        )
-                    )
-                ).all()
-            }
-            if offerings
-            else {}
+        sessions: dict[int, Session] = await _keyed_by_id(
+            self._session, Session, {r.session_id for r in records}
+        )
+        offerings: dict[int, CourseOffering] = await _keyed_by_id(
+            self._session,
+            CourseOffering,
+            {s.offering_id for s in sessions.values()},
+        )
+        courses: dict[int, Course] = await _keyed_by_id(
+            self._session, Course, {o.course_id for o in offerings.values()}
         )
         return students, sessions, offerings, courses
 

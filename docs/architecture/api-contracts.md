@@ -17,8 +17,30 @@
 | Timestamps  | ISO-8601 UTC (`2026-08-25T14:30:00Z`)                                                       |
 | Soft-delete | `DELETE` endpoints archive (set `is_active=false`) unless stated destructive               |
 
-### DTO → Column Mapping
+### Error Code Coverage
 
+The per-endpoint `**Errors**` rows below are a summary, not an exhaustive index. The
+following codes are implemented in `backend/src/features/*/exceptions.py` and
+`core/exceptions.py` but are **not yet listed** against a specific endpoint in this
+document. They are stable (covered by the test suite) and clients may already depend on
+them; folding each into its endpoint's `**Errors**` row is outstanding documentation
+work, not a code change.
+
+| Slice                     | Codes                                                                                                                                                                                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| auth / core               | `invalid_credentials` · `account_locked` · `role_mismatch` · `user_exists` · `ambiguous_account` · `unrecognized_email` · `security_answer_invalid` · `otp_invalid` · `otp_expired` · `recovery_locked` · `invalid_mfa_code` · `mfa_already_enabled` · `internal_error` · `database_error` |
+| admin                     | `admin_user_not_found` · `admin_user_email_exists` · `admin_user_username_exists` · `roster_link_impossible` · `self_deactivation_forbidden`                                                                                                                                                                                  |
+| student / professor       | `student_not_found` · `student_id_exists` · `student_email_exists` · `year_level_not_found` · `year_level_program_mismatch` · `year_number_exists` · `invalid_semester` · `professor_email_exists`                                                                                                                                      |
+| course / offering         | `offering_not_found`                                                                                                                                                                                                                                                                                          |
+| face enrollment           | `face_not_enrolled` · `face_embedding_not_found`                                                                                                                                                                                                                                                              |
+| attendance review queue   | `review_not_found` · `review_not_pending`                                                                                                                                                                                                                                                                     |
+
+Conversely, `no_face_detected`, `multiple_faces`, `quality_too_low` and `invalid_image`
+are documented below but not yet raised: face detection is stubbed by
+`_stub_embedding_blob` pending the MediaPipe pipeline. `validation_error` is the
+generic 422 produced by FastAPI request validation, not a custom exception.
+
+### DTO → Column Mapping
 DTO field names below are canonical and exotic DB column names are mapped where they differ:
 
 | DTO field       | DB column                                  |

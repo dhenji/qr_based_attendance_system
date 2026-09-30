@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -88,6 +89,19 @@ def _summarize(records: Sequence[Attendance]) -> tuple[SessionCounts, int]:
     return counts, len(records)
 
 
+@dataclass(frozen=True)
+class _SessionWindows:
+    """The two scan windows, resolved payload -> offering -> app default."""
+
+    present: int
+    late: int
+
+
+def _or_fallback[T](chosen: T | None, fallback: T | None) -> T | None:
+    """First non-None of two values; `None` overrides are explicit `0` on purpose."""
+    return fallback if chosen is None else chosen
+
+
 def _rates(enrolled: int, counts: SessionCounts) -> tuple[float, float]:
     """Compliance (present/total) and participation ((p+l+e)/total) rates."""
     if enrolled <= 0:
@@ -140,20 +154,63 @@ class SessionService:
         await self._require_assignment(
             offering_id=offering.id, professor_id=professor_id
         )
+        await self._require_no_active_session(offering_id=offering.id, now=now)
 
+        duration: int = await self._resolve_duration(payload, offering)
+        windows: _SessionWindows = self._resolve_windows(payload, offering)
+        self._check_windows(windows, duration)
+
+        radius: int = (
+            payload.classroom_radius_meters
+            or self._settings.default_geofence_radius_meters
+        )
+
+        row: Session = await self._insert_session(
+            offering=offering,
+            professor_id=professor_id,
+            payload=payload,
+            windows=windows,
+            duration=duration,
+            radius=radius,
+            now=now,
+        )
+        await self._stamp_session(row, duration, now)
+
+        return SessionRead(
+            id=row.id,
+            session_code=row.session_code,
+            offering_id=offering.id,
+            qr_payload=QRPayload(
+                code=row.session_code,
+                offering=offering.id,
+                radius=radius,
+                pw=windows.present,
+                lw=windows.late,
+            ),
+            expires_at=row.expires_at,
+            scheduled_end_time=row.scheduled_end_time,
+            created_at=row.created_at or now,
+        )
+
+    async def _require_no_active_session(
+        self, *, offering_id: int, now: datetime
+    ) -> None:
         active_id: int | None = await self._session.scalar(
             select(Session.id)
             .where(
-                Session.offering_id == offering.id,
+                Session.offering_id == offering_id,
                 Session.expires_at > now,
             )
             .limit(1)
         )
 
         if active_id is not None:
-            raise SessionAlreadyActiveException(offering.id)
+            raise SessionAlreadyActiveException(offering_id)
 
-        duration: int = await self._resolve_duration(payload, offering)
+    def _resolve_windows(
+        self, payload: SessionCreate, offering: CourseOffering
+    ) -> _SessionWindows:
+        """Payload -> offering -> app-default fallback for the two scan windows."""
         present: int = (
             payload.present_window_minutes
             or offering.default_present_window_minutes
@@ -165,62 +222,54 @@ class SessionService:
             or self._settings.default_late_window_minutes
         )
 
-        if present + late > duration:
-            raise WindowsExceedDurationException(present, late, duration)
+        return _SessionWindows(present=present, late=late)
 
-        radius: int = (
-            payload.classroom_radius_meters
-            or self._settings.default_geofence_radius_meters
-        )
-        scheduled_end: datetime = now + timedelta(minutes=duration)
+    @staticmethod
+    def _check_windows(windows: _SessionWindows, duration: int) -> None:
+        if windows.present + windows.late > duration:
+            raise WindowsExceedDurationException(
+                windows.present, windows.late, duration
+            )
+
+    async def _insert_session(
+        self,
+        *,
+        offering: CourseOffering,
+        professor_id: int,
+        payload: SessionCreate,
+        windows: _SessionWindows,
+        duration: int,
+        radius: int,
+        now: datetime,
+    ) -> Session:
         row = Session(
             offering_id=offering.id,
             professor_id=professor_id,
             session_code=secrets.token_hex(16),
             duration_minutes=duration,
-            present_window_minutes=present,
-            late_window_minutes=late,
+            present_window_minutes=windows.present,
+            late_window_minutes=windows.late,
             scheduled_start_time=now,
-            scheduled_end_time=scheduled_end,
+            scheduled_end_time=now + timedelta(minutes=duration),
             expires_at=None,
             classroom_radius_meters=radius,
             classroom_name=payload.classroom_name or offering.classroom_name,
-            classroom_lat=(
-                payload.classroom_lat
-                if payload.classroom_lat is not None
-                else offering.classroom_lat
-            ),
-            classroom_lng=(
-                payload.classroom_lng
-                if payload.classroom_lng is not None
-                else offering.classroom_lng
-            ),
+            classroom_lat=_or_fallback(payload.classroom_lat, offering.classroom_lat),
+            classroom_lng=_or_fallback(payload.classroom_lng, offering.classroom_lng),
         )
         self._session.add(row)
         await self._session.flush()
 
+        return row
+
+    async def _stamp_session(
+        self, row: Session, duration: int, now: datetime
+    ) -> None:
+        """Second flush: derive the code from the assigned id and stamp expiry."""
         base: datetime = row.created_at or now
         row.expires_at = min(base + timedelta(minutes=duration), row.scheduled_end_time)
         row.session_code = generate_session_code(row.id, self._settings)
         await self._session.flush()
-
-        qr = QRPayload(
-            code=row.session_code,
-            offering=offering.id,
-            radius=radius,
-            pw=present,
-            lw=late,
-        )
-
-        return SessionRead(
-            id=row.id,
-            session_code=row.session_code,
-            offering_id=offering.id,
-            qr_payload=qr,
-            expires_at=row.expires_at,
-            scheduled_end_time=row.scheduled_end_time,
-            created_at=row.created_at or now,
-        )
 
     async def get_active_session(
         self, *, session_id: int, professor_id: int
