@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from api.deps import SessionServiceDep, StudentServiceDep, require_role
 from features.auth.model import User
 from features.session.schema import VerifyCodeRequest, VerifyCodeResponse
-from features.student.schema import FaceEmbeddingResponse
+from features.student.schema import FaceEmbeddingResponse, ScheduleResponse
 from shared.enums import UserRole
 
 # ALREADY MOUNTED at /api/student (see api/router.py). Student-facing routes
@@ -60,3 +60,14 @@ async def pull_face_embedding(
         return Response(status_code=204)
 
     return result
+
+
+@router.get(
+    "/schedule",
+    response_model=ScheduleResponse,
+    summary="Student class schedule from enrolled offerings",
+)
+async def student_schedule(
+    user: StudentUser, service: StudentServiceDep
+) -> ScheduleResponse:
+    return await service.get_schedule(user_id=user.id)
