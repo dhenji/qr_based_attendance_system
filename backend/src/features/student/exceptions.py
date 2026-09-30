@@ -131,3 +131,13 @@ class FaceEmbeddingNotFoundException(StudentDomainException):
 
     def __init__(self, user_id: int) -> None:
         super().__init__(message=f"No face embedding stored for user {user_id}")
+
+
+class CurrentPasswordInvalidException(StudentDomainException):
+    """400 - the provided current password is incorrect."""
+
+    status_code: int = 400
+    code: str = "current_password_invalid"
+
+    def __init__(self) -> None:
+        super().__init__(message="Current password is incorrect")

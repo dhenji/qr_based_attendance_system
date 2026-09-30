@@ -41,3 +41,23 @@ class FaceMismatchException(AttendanceDomainException):
         super().__init__(
             message=f"Face match score {score:.3f} is below threshold {threshold:.3f}"
         )
+
+
+class ReviewNotFoundException(AttendanceDomainException):
+    """404 - the flagged attendance record does not exist."""
+
+    status_code: int = 404
+    code: str = "review_not_found"
+
+    def __init__(self, record_id: int) -> None:
+        super().__init__(message=f"Review record {record_id} not found")
+
+
+class ReviewNotPendingException(AttendanceDomainException):
+    """409 - the record is not awaiting review (already resolved or never flagged)."""
+
+    status_code: int = 409
+    code: str = "review_not_pending"
+
+    def __init__(self, record_id: int) -> None:
+        super().__init__(message=f"Review record {record_id} is not pending review")

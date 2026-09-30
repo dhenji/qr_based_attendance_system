@@ -1,5 +1,5 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -13,6 +13,9 @@ from features.attendance.constants import (
     HISTORY_DEFAULT_SORT_DIR,
     HISTORY_SORT_DIRS,
     HISTORY_SORT_FIELDS,
+    REVIEW_DECISIONS,
+    REVIEW_DEFAULT_STATUS,
+    REVIEW_STATUSES,
     SYNC_STALE_SECONDS,
 )
 from features.attendance.exceptions import (
@@ -20,6 +23,8 @@ from features.attendance.exceptions import (
     FaceMismatchException,
     LivenessFailedException,
     OutsideGeofenceException,
+    ReviewNotFoundException,
+    ReviewNotPendingException,
 )
 from features.attendance.model import Attendance
 from features.attendance.schema import (
@@ -29,6 +34,10 @@ from features.attendance.schema import (
     HistoryResponse,
     HistorySummary,
     LivenessEvidence,
+    LivenessReviewItem,
+    PrecheckRequest,
+    PrecheckResponse,
+    ResolveReviewResponse,
     ScanRequest,
     ScanResponse,
 )
@@ -44,7 +53,7 @@ from features.student.exceptions import NotEnrolledException, StudentNotFoundExc
 from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.enums import QueueStatus, SyncStatus, ValidationStatus
-from shared.pagination import MAX_PAGE_SIZE
+from shared.pagination import MAX_PAGE_SIZE, PaginatedResponse
 from shared.query import apply_if
 
 EARTH_RADIUS_METERS: float = 6371000.0
@@ -107,6 +116,43 @@ def _store_response(key: str | None, response: ScanResponse) -> None:
         _IDEMPOTENCY_STORE[key] = response
 
 
+_HISTORY_COUNT_FIELDS: dict[str, str] = {
+    "present": ValidationStatus.PRESENT.value,
+    "late": ValidationStatus.LATE.value,
+    "excused": ValidationStatus.EXCUSED.value,
+    "rejected": ValidationStatus.REJECTED.value,
+}
+
+
+def _pending_review_filter(stmt: Select[Any]) -> Select[Any]:
+    return stmt.where(
+        Attendance.validation_status == ValidationStatus.PENDING.value
+    )
+
+
+def _approved_review_filter(stmt: Select[Any]) -> Select[Any]:
+    return stmt.where(
+        Attendance.validation_status.in_(
+            [ValidationStatus.PRESENT.value, ValidationStatus.LATE.value]
+        ),
+        Attendance.original_status.is_not_none(),
+    )
+
+
+def _rejected_review_filter(stmt: Select[Any]) -> Select[Any]:
+    return stmt.where(
+        Attendance.validation_status == ValidationStatus.REJECTED.value,
+        Attendance.original_status.is_not_none(),
+    )
+
+
+_REVIEW_FILTERS: dict[str, Callable[[Select[Any]], Select[Any]]] = {
+    "pending": _pending_review_filter,
+    "approved": _approved_review_filter,
+    "rejected": _rejected_review_filter,
+}
+
+
 class AttendanceService:
     """Student scan submissions (online + offline-sync replay).
 
@@ -117,6 +163,54 @@ class AttendanceService:
     def __init__(self, session: AsyncSession, settings: Settings | None = None) -> None:
         self._session = session
         self._settings = settings or get_settings()
+
+    async def _resolve_scan_parties(
+        self, session_id: int, scanned_at: datetime, now: datetime, student_number: str
+    ) -> tuple[Session, Student]:
+        db_session: Session = await self._get_active_session(session_id, scanned_at, now)
+        student: Student = await self._get_active_student(
+            student_number, db_session.offering_id
+        )
+        await self._require_enrollment(student.id, db_session.offering_id)
+        await self._require_no_duplicate(student.id, db_session.id)
+        return db_session, student
+
+    def _decide_scan_outcome(
+        self, db_session: Session, scanned_at: datetime, face_match_score: float
+    ) -> tuple[str, str | None, bool]:
+        review: bool = self._is_review_band(face_match_score)
+        computed: str = self._compute_status(db_session, scanned_at)
+        status: str = ValidationStatus.PENDING.value if review else computed
+        original: str | None = computed if review else None
+        return status, original, review
+
+    async def _persist_scan(
+        self,
+        payload: ScanRequest,
+        student_id: int,
+        session_id: int,
+        scanned_at: datetime,
+        status: str,
+        review: bool,
+        original: str | None,
+        now: datetime,
+        idempotency_key: str | None,
+    ) -> ScanResponse:
+        row: Attendance = await self._write_attendance(
+            payload, student_id, session_id, scanned_at, status, review, original
+        )
+        await self._maybe_record_sync(
+            session_id, student_id, row.id, scanned_at, now, idempotency_key
+        )
+
+        response = ScanResponse(
+            id=row.id,
+            status=status,  # type: ignore[arg-type]
+            scanned_at=row.timestamp,
+            expires_at=row.session.expires_at,
+        )
+        _store_response(idempotency_key, response)
+        return response
 
     async def submit_scan(
         self, *, payload: ScanRequest, idempotency_key: str | None = None
@@ -129,36 +223,65 @@ class AttendanceService:
         now: datetime = _utcnow()
         scanned_at: datetime = _ensure_aware(payload.scanned_at)
 
-        db_session: Session = await self._get_active_session(
-            payload.session_id, scanned_at, now
+        db_session, student = await self._resolve_scan_parties(
+            payload.session_id, scanned_at, now, payload.student_number
         )
-        student: Student = await self._get_active_student(
-            payload.student_number, db_session.offering_id
-        )
-        await self._require_enrollment(student.id, db_session.offering_id)
-        await self._require_no_duplicate(student.id, db_session.id)
 
         self._validate_geofence(db_session, payload.gps)
         self._validate_liveness(payload.liveness_evidence)
 
-        review: bool = self._is_review_band(payload.face_match_score)
-        status: str = self._compute_status(db_session, scanned_at, review)
-        row: Attendance = await self._write_attendance(
-            payload, student.id, db_session.id, scanned_at, status, review
-        )
-        await self._maybe_record_sync(
-            db_session.id, student.id, row.id, scanned_at, now, idempotency_key
+        status, original, review = self._decide_scan_outcome(
+            db_session, scanned_at, payload.face_match_score
         )
 
-        response = ScanResponse(
-            id=row.id,
-            status=status,  # type: ignore[arg-type]
-            scanned_at=row.timestamp,
-            expires_at=db_session.expires_at,
+        return await self._persist_scan(
+            payload,
+            student.id,
+            db_session.id,
+            scanned_at,
+            status,
+            review,
+            original,
+            now,
+            idempotency_key,
         )
-        _store_response(idempotency_key, response)
 
-        return response
+    async def precheck_scan(
+        self, *, session_id: int, student_number: str
+    ) -> PrecheckResponse:
+        """Read-only pre-check: validates session, enrollment, and duplicate scan.
+
+        Does not write attendance_records or sync_queue rows.
+        """
+        now: datetime = _utcnow()
+
+        db_session: Session = await self._get_active_session(session_id, now, now)
+
+        student: Student = await self._get_active_student(
+            student_number, db_session.offering_id
+        )
+
+        enrolled: bool = True
+        try:
+            await self._require_enrollment(student.id, db_session.offering_id)
+        except NotEnrolledException:
+            enrolled = False
+
+        already_scanned: bool = False
+        try:
+            await self._require_no_duplicate(student.id, db_session.id)
+        except DuplicateScanException:
+            already_scanned = True
+
+        return PrecheckResponse(
+            enrolled=enrolled,
+            already_scanned=already_scanned,
+            student={
+                "student_id": student.student_id,
+                "name": f"{student.first_name} {student.last_name}",
+                "section": student.section,
+            },
+        )
 
     async def _get_active_session(
         self, session_id: int, scanned_at: datetime, now: datetime
@@ -249,12 +372,7 @@ class AttendanceService:
 
         return score < threshold
 
-    def _compute_status(
-        self, session: Session, scanned_at: datetime, review: bool
-    ) -> str:
-        if review:
-            return ValidationStatus.PENDING.value
-
+    def _compute_status(self, session: Session, scanned_at: datetime) -> str:
         anchor: datetime = _ensure_aware(
             session.created_at or session.scheduled_start_time
         )
@@ -290,6 +408,7 @@ class AttendanceService:
         scanned_at: datetime,
         status: str,
         review: bool,
+        original_status: str | None = None,
     ) -> Attendance:
         row = Attendance(
             student_id=student_id,
@@ -298,6 +417,7 @@ class AttendanceService:
             gps_lat=payload.gps.lat,
             gps_lng=payload.gps.lng,
             validation_status=status,
+            original_status=original_status,
             sync_status=SyncStatus.SYNCED.value,
             liveness_evidence=self._build_evidence(
                 payload.liveness_evidence, payload.gps.accuracy, review
@@ -354,12 +474,11 @@ class AttendanceService:
         size: int = 50,
     ) -> HistoryResponse:
         """Student history: filter -> count -> summarize -> paginate."""
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
-        student: Student = await self._history_student(user_id)
+        page, size = self._normalize_history_paging(page, size)
+        student = await self._history_student(user_id)
         sort_key, desc = self._history_sort(sort_by, sort_dir)
 
-        filtered: Select[Any] = self._apply_history_filters(
+        filtered = self._apply_history_filters(
             self._history_base(student.id),
             program_id=program_id,
             year_level_id=year_level_id,
@@ -370,9 +489,9 @@ class AttendanceService:
             date_to=date_to,
         )
 
-        total: int = await self._history_total(filtered)
-        tallies: dict[str, int] = await self._history_tallies(filtered)
-        enrolled: int = await self._history_enrolled(
+        total = await self._history_total(filtered)
+        tallies = await self._history_tallies(filtered)
+        enrolled = await self._history_enrolled(
             student.id,
             program_id=program_id,
             year_level_id=year_level_id,
@@ -381,7 +500,7 @@ class AttendanceService:
             date_from=date_from,
             date_to=date_to,
         )
-        scanned: int = await self._history_scanned(
+        scanned = await self._history_scanned(
             student.id,
             program_id=program_id,
             year_level_id=year_level_id,
@@ -391,34 +510,57 @@ class AttendanceService:
             date_to=date_to,
         )
 
-        present: int = tallies.get(ValidationStatus.PRESENT.value, 0)
-        late: int = tallies.get(ValidationStatus.LATE.value, 0)
-        excused: int = tallies.get(ValidationStatus.EXCUSED.value, 0)
-        rejected: int = tallies.get(ValidationStatus.REJECTED.value, 0)
-        absent: int = max(0, enrolled - scanned)
+        summary = self._summarize_history(tallies, enrolled, scanned)
+        records = await self._history_page(filtered, sort_key, desc, page, size)
+
+        return await self._build_history_response(
+            records=records, total=total, page=page, size=size, summary=summary
+        )
+
+    def _normalize_history_paging(self, page: int, size: int) -> tuple[int, int]:
+        page = max(page, 1)
+        size = min(max(size, 1), MAX_PAGE_SIZE)
+        return page, size
+
+    def _summarize_history(
+        self, tallies: dict[str, int], enrolled: int, scanned: int
+    ) -> HistorySummary:
+        counts = HistoryCounts(
+            **{
+                name: tallies.get(status, 0)
+                for name, status in _HISTORY_COUNT_FIELDS.items()
+            }
+        )
+        absent = max(0, enrolled - scanned)
         compliance, participation = self._history_rates(
-            present, late, excused, enrolled
+            counts.present, counts.late, counts.excused, enrolled
         )
-        records: Sequence[Attendance] = await self._history_page(
-            filtered, sort_key, desc, page, size
+        return HistorySummary(
+            compliance_rate=compliance,
+            participation_rate=participation,
+            counts=HistoryCounts(
+                present=counts.present,
+                late=counts.late,
+                absent=absent,
+                excused=counts.excused,
+                rejected=counts.rejected,
+            ),
         )
 
+    async def _build_history_response(
+        self,
+        records: Sequence[Attendance],
+        total: int,
+        page: int,
+        size: int,
+        summary: HistorySummary,
+    ) -> HistoryResponse:
         return HistoryResponse(
             items=await self._history_items(records),
             total=total,
             page=page,
             size=size,
-            summary=HistorySummary(
-                compliance_rate=compliance,
-                participation_rate=participation,
-                counts=HistoryCounts(
-                    present=present,
-                    late=late,
-                    absent=absent,
-                    excused=excused,
-                    rejected=rejected,
-                ),
-            ),
+            summary=summary,
         )
 
     async def _history_student(self, user_id: int) -> Student:
@@ -707,3 +849,229 @@ class AttendanceService:
             )
 
         return items
+
+    async def _review_stmt(self, key: str) -> Select[Any]:
+        return _REVIEW_FILTERS[key](select(Attendance))
+
+    async def _review_page(
+        self, stmt: Select[Any], page: int, size: int
+    ) -> tuple[Sequence[Attendance], int]:
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
+        records: Sequence[Attendance] = (
+            await self._session.scalars(
+                stmt.order_by(Attendance.timestamp.desc(), Attendance.id.desc())
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+        return records, total
+
+    async def _load_review_maps(
+        self, records: Sequence[Attendance]
+    ) -> tuple[dict[int, Student], dict[int, Session], dict[int, CourseOffering], dict[int, Course]]:
+        students: dict[int, Student] = {
+            s.id: s
+            for s in (
+                await self._session.scalars(
+                    select(Student).where(
+                        Student.id.in_({r.student_id for r in records})
+                    )
+                )
+            ).all()
+        }
+        sessions: dict[int, Session] = {
+            s.id: s
+            for s in (
+                await self._session.scalars(
+                    select(Session).where(
+                        Session.id.in_({r.session_id for r in records})
+                    )
+                )
+            ).all()
+        }
+        offerings: dict[int, CourseOffering] = (
+            {
+                o.id: o
+                for o in (
+                    await self._session.scalars(
+                        select(CourseOffering).where(
+                            CourseOffering.id.in_(
+                                {s.offering_id for s in sessions.values()}
+                            )
+                        )
+                    )
+                ).all()
+            }
+            if sessions
+            else {}
+        )
+        courses: dict[int, Course] = (
+            {
+                c.id: c
+                for c in (
+                    await self._session.scalars(
+                        select(Course).where(
+                            Course.id.in_({o.course_id for o in offerings.values()})
+                        )
+                    )
+                ).all()
+            }
+            if offerings
+            else {}
+        )
+        return students, sessions, offerings, courses
+
+    def _review_items(
+        self,
+        records: Sequence[Attendance],
+        students: dict[int, Student],
+        sessions: dict[int, Session],
+        offerings: dict[int, CourseOffering],
+        courses: dict[int, Course],
+    ) -> list[LivenessReviewItem]:
+        items: list[LivenessReviewItem] = []
+        for record in records:
+            student = students.get(record.student_id)
+            db_session = sessions.get(record.session_id)
+            if student is None or db_session is None:
+                continue
+            offering = offerings.get(db_session.offering_id)
+            course = courses.get(offering.course_id) if offering else None
+            if course is None:
+                continue
+            items.append(
+                LivenessReviewItem(
+                    id=record.id,
+                    student_number=student.student_id,
+                    student_name=f"{student.first_name} {student.last_name}",
+                    session_code=db_session.session_code,
+                    course_code=course.course_code,
+                    face_match_score=(
+                        float(record.face_match_score)
+                        if record.face_match_score is not None
+                        else None
+                    ),
+                    evidence=dict(record.liveness_evidence or {}),
+                    scanned_at=record.timestamp,
+                )
+            )
+        return items
+
+
+    async def list_liveness_review(
+        self,
+        *,
+        status: str | None = None,
+        page: int = 1,
+        size: int = 50,
+    ) -> PaginatedResponse[LivenessReviewItem]:
+        key: str = (status or REVIEW_DEFAULT_STATUS).lower()
+        if key not in REVIEW_STATUSES:
+            raise AttendanceDomainException(
+                message=f"Invalid status '{status}'",
+                code="invalid_status",
+                field="status",
+            )
+        page = max(page, 1)
+        size = min(max(size, 1), MAX_PAGE_SIZE)
+
+        stmt = await self._review_stmt(key)
+        records, total = await self._review_page(stmt, page, size)
+
+        if not records:
+            return PaginatedResponse[LivenessReviewItem](
+                items=[], total=total, page=page, size=size
+            )
+
+        students, sessions, offerings, courses = await self._load_review_maps(records)
+        items = self._review_items(records, students, sessions, offerings, courses)
+
+        return PaginatedResponse[LivenessReviewItem](
+            items=items, total=total, page=page, size=size
+        )
+
+    async def _load_pending_review(
+        self, record_id: int
+    ) -> tuple[Attendance, dict]:
+        row: Attendance | None = await self._session.get(Attendance, record_id)
+        if row is None:
+            raise ReviewNotFoundException(record_id)
+
+        evidence: dict = dict(row.liveness_evidence or {})
+        if row.validation_status != ValidationStatus.PENDING.value or not evidence.get(
+            "review", False
+        ):
+            raise ReviewNotPendingException(record_id)
+
+        return row, evidence
+
+    def _restore_approved_status(self, row: Attendance) -> str:
+        restored: str | None = row.original_status
+        if restored not in (
+            ValidationStatus.PRESENT.value,
+            ValidationStatus.LATE.value,
+        ):
+            # synchronous fallback — cannot be async here; caller fetches session
+            # and recomputes if needed
+            restored = ValidationStatus.PRESENT.value
+        return restored
+
+    async def _apply_resolution(
+        self, row: Attendance, evidence: dict, status: str
+    ) -> None:
+        row.validation_status = status
+        evidence.pop("review", None)
+        row.liveness_evidence = evidence
+        await self._session.flush()
+
+
+    async def resolve_review(
+        self,
+        *,
+        record_id: int,
+        decision: str,
+        actor_id: int,
+    ) -> ResolveReviewResponse:
+        row, evidence = await self._load_pending_review(record_id)
+
+        if decision not in REVIEW_DECISIONS:
+            raise AttendanceDomainException(
+                message=f"Invalid decision '{decision}'",
+                code="invalid_decision",
+                field="decision",
+            )
+
+        if decision == "approve":
+            restored = self._restore_approved_status(row)
+            if restored == ValidationStatus.PRESENT.value:
+                # need full recompute with session context
+                db_session: Session | None = await self._session.get(
+                    Session, row.session_id
+                )
+                if db_session is None:
+                    raise ReviewNotFoundException(record_id)
+                restored = self._compute_status(
+                    db_session, _ensure_aware(row.timestamp)
+                )
+                if restored not in (
+                    ValidationStatus.PRESENT.value,
+                    ValidationStatus.LATE.value,
+                ):
+                    restored = ValidationStatus.PRESENT.value
+            status = restored
+        else:
+            status = ValidationStatus.REJECTED.value
+
+        await self._apply_resolution(row, evidence, status)
+
+        return ResolveReviewResponse(
+            id=row.id,
+            status=ValidationStatus(row.validation_status),  # type: ignore[arg-type]
+            reviewed_by=actor_id,
+            reviewed_at=_utcnow(),
+        )

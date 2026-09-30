@@ -16,6 +16,7 @@ from features.attendance.constants import (
     GPS_LAT_MIN,
     GPS_LNG_MAX,
     GPS_LNG_MIN,
+    REVIEW_NOTE_MAX_LENGTH,
     STUDENT_NUMBER_MAX_LENGTH,
     STUDENT_NUMBER_MIN_LENGTH,
 )
@@ -122,3 +123,71 @@ class HistoryResponse(BaseModel):
     page: int = 1
     size: int = 50
     summary: HistorySummary = Field(default_factory=HistorySummary)
+
+
+class LivenessReviewItem(BaseModel):
+    """One flagged row for GET /admin/attendance/liveness-review."""
+
+    id: int
+    student_number: str
+    student_name: str
+    session_code: str
+    course_code: str
+    face_match_score: float | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    scanned_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ResolveReviewRequest(BaseModel):
+    """Body for PATCH /admin/attendance/liveness-review/{id}/resolve."""
+
+    decision: Literal["approve", "reject"]
+    note: str | None = Field(default=None, max_length=REVIEW_NOTE_MAX_LENGTH)
+
+    @field_validator("note")
+    @classmethod
+    def _strip_note(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
+class ResolveReviewResponse(BaseModel):
+    """Result of a review decision."""
+
+    id: int
+    status: ValidationStatus
+    reviewed_by: int
+    reviewed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PrecheckRequest(BaseModel):
+    """Pre-check request for scan step 2: validates enrollment and duplicate scan."""
+
+    session_id: int = Field(gt=0)
+    student_number: str = Field(
+        min_length=STUDENT_NUMBER_MIN_LENGTH, max_length=STUDENT_NUMBER_MAX_LENGTH
+    )
+
+    @field_validator("student_number")
+    @classmethod
+    def _strip_student_number(cls, v: str) -> str:
+        v = v.strip()
+
+        if not v:
+            raise ValueError("student_number must not be blank")
+
+        return v
+
+
+class PrecheckResponse(BaseModel):
+    """Pre-check response: enrollment status and duplicate scan flag."""
+
+    enrolled: bool
+    already_scanned: bool
+    student: dict[str, Any] = Field(default_factory=dict)
