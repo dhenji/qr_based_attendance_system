@@ -1,19 +1,25 @@
+import base64
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.attendance.model import Attendance
+from features.course.model import Course, CourseOffering
+from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.excuse.model import ExcuseRequest
+from features.professor.model import Professor
 from features.program.exceptions import (
     ProgramNotFoundException,
     YearLevelNotFoundException,
 )
 from features.program.model import Program, YearLevel
 from features.student.exceptions import (
+    FaceEmbeddingNotFoundException,
     StudentEmailExistsException,
     StudentHasRecordsException,
     StudentIdExistsException,
@@ -23,6 +29,9 @@ from features.student.exceptions import (
 )
 from features.student.model import Student
 from features.student.schema import (
+    FaceEmbeddingResponse,
+    ScheduleItem,
+    ScheduleResponse,
     StudentCreate,
     StudentDetail,
     StudentImportError,
@@ -31,6 +40,7 @@ from features.student.schema import (
     StudentUpdate,
 )
 from shared.base import BaseCRUD
+from shared.cache import get_face_embedding_cached
 from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
 
@@ -173,6 +183,156 @@ class StudentService:
 
     async def get(self, *, student_id: int) -> StudentDetail:
         return await self._to_detail(await self._get_or_404(student_id))
+
+    async def get_face_embedding(
+        self, *, user_id: int, current_version: int = 0
+    ) -> FaceEmbeddingResponse | None:
+        """Return the student's embedding if the client copy is stale.
+
+        Return `None` when the client is current (router maps to 204).
+        Raises 404 when the identity is missing or has no blob stored.
+        """
+
+        student: Student | None = await self._students.get_by(user_id=user_id)
+
+        if student is None:
+            raise StudentNotFoundException(user_id)
+
+        blob: bytes | None = await get_face_embedding_cached(self._session, student.id)
+
+        if blob is None:
+            raise FaceEmbeddingNotFoundException(user_id)
+
+        server_version: int = student.face_embedding_version or 0
+
+        if current_version >= server_version:
+            return None
+
+        return FaceEmbeddingResponse(
+            version=server_version, embedding=base64.b64encode(blob).decode("ascii")
+        )
+
+    async def get_schedule(self, *, user_id: int) -> ScheduleResponse:
+        """Enrolled offerings with schedule, classroom, and professor name.
+
+        Active offerings only (`CourseOffering.is_active`), stable
+        `offering_id ASC` order (presentation sorting stays frontend-side).
+        Professor names resolve to the current primary assignment, else the
+        latest current assignment, else None. Read-only: no rows written.
+        """
+        student: Student | None = await self._students.get_by(user_id=user_id)
+
+        if student is None:
+            raise StudentNotFoundException(user_id)
+
+        rows = (
+            await self._session.execute(
+                select(
+                    CourseOffering.id,
+                    CourseOffering.course_id,
+                    Course.course_code,
+                    Course.course_name,
+                    Program.code,
+                    YearLevel.label,
+                    CourseOffering.semester,
+                    CourseOffering.schedule_days,
+                    CourseOffering.schedule_start_time,
+                    CourseOffering.schedule_end_time,
+                    CourseOffering.classroom_name,
+                )
+                .select_from(Enrollment)
+                .join(CourseOffering, CourseOffering.id == Enrollment.offering_id)
+                .join(Course, Course.id == CourseOffering.course_id)
+                .join(Program, Program.id == CourseOffering.program_id)
+                .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
+                .where(
+                    Enrollment.student_id == student.id,
+                    CourseOffering.is_active.is_(True),
+                )
+                .order_by(CourseOffering.id.asc())
+            )
+        ).all()
+
+        names: dict[int, str] = await self._schedule_professor_names(
+            [row[0] for row in rows]
+        )
+
+        return ScheduleResponse(
+            offerings=[
+                ScheduleItem(
+                    offering_id=offering_id,
+                    course_id=course_id,
+                    course_code=course_code,
+                    course_name=course_name,
+                    program_code=program_code,
+                    year_level_label=year_level_label,
+                    semester=semester,
+                    schedule_days=schedule_days,
+                    schedule_start_time=schedule_start_time,
+                    schedule_end_time=schedule_end_time,
+                    classroom_name=classroom_name,
+                    professor_name=names.get(offering_id),
+                )
+                for (
+                    offering_id,
+                    course_id,
+                    course_code,
+                    course_name,
+                    program_code,
+                    year_level_label,
+                    semester,
+                    schedule_days,
+                    schedule_start_time,
+                    schedule_end_time,
+                    classroom_name,
+                ) in rows
+            ]
+        )
+
+    async def _schedule_professor_names(
+        self, offering_ids: list[int]
+    ) -> dict[int, str]:
+        """Current professor display name per offering (batched, one query).
+
+        Keeps only assignments whose effective window covers today, then
+        picks primary first, latest `effective_from` on ties — mirroring
+        `ProfessorService._assigned_offerings`.
+        """
+        if not offering_ids:
+            return {}
+
+        today: date = date.today()
+        prof_rows = (
+            await self._session.execute(
+                select(
+                    CourseProfessor.offering_id,
+                    Professor.first_name,
+                    Professor.last_name,
+                    CourseProfessor.is_primary,
+                    CourseProfessor.effective_from,
+                )
+                .join(Professor, Professor.id == CourseProfessor.professor_id)
+                .where(
+                    CourseProfessor.offering_id.in_(offering_ids),
+                    CourseProfessor.effective_from <= today,
+                    or_(
+                        CourseProfessor.effective_to.is_(None),
+                        CourseProfessor.effective_to >= today,
+                    ),
+                )
+            )
+        ).all()
+
+        ranked: dict[int, tuple[tuple[bool, Any], str]] = {}
+
+        for offering_id, first_name, last_name, is_primary, effective_from in prof_rows:
+            key: tuple[bool, Any] = (bool(is_primary), effective_from)
+            current = ranked.get(offering_id)
+
+            if current is None or key > current[0]:
+                ranked[offering_id] = (key, f"{first_name} {last_name}")
+
+        return {offering_id: name for offering_id, (_, name) in ranked.items()}
 
     async def list(
         self,

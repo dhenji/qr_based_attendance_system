@@ -23,7 +23,7 @@ from features.session.service import SessionService
 from features.student.model import Student
 from features.sync.model import SyncQueue
 
-NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 SETTINGS = Settings(debug=True, jwt_secret="test-secret-0123456789abcdef")
 
 
@@ -76,7 +76,7 @@ class _FakeSession:
             obj.id = len(self.added) + 100
         for field in ("created_at", "assigned_at", "updated_at"):
             if hasattr(obj, field) and getattr(obj, field) is None:
-                setattr(obj, field, NOW)
+                setattr(obj, field, datetime.now(timezone.utc))
         self.added.append(obj)
 
 
@@ -214,8 +214,8 @@ def test_create_session_copies_offering_defaults() -> None:
     assert read.qr_payload.radius == 50
     assert read.qr_payload.pw == 5
     assert read.qr_payload.lw == 10
-    # The fake stamps created_at with a fixed NOW later than the real clock,
-    # so expiry is the min() of the two candidate ends: the scheduled end.
+    # The fake stamps created_at at insert time (~service now, never stale),
+    # so base + duration >= scheduled end and expiry is the scheduled end.
     assert read.expires_at == read.scheduled_end_time
     assert abs(
         (read.scheduled_end_time - before) - timedelta(minutes=120)

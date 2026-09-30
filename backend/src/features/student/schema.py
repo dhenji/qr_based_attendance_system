@@ -1,6 +1,13 @@
-from datetime import datetime
+from datetime import datetime, time
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from features.student.constants import (
     EMAIL_MAX_LENGTH,
@@ -118,3 +125,40 @@ class StudentImportResult(BaseModel):
     imported: int
     duplicates: int
     errors: list[StudentImportError] = Field(default_factory=list)
+
+
+class FaceEmbeddingResponse(BaseModel):
+    """Version-gated face-embedding pull.
+
+    `embedding` is the base64-encoded encrypted blob from `students.face_embedding` - opaque passthrough, decrypted client-side.
+    """
+
+    version: int
+    embedding: str
+
+
+class ScheduleItem(BaseModel):
+    """One enrolled offering for GET /student/schedule
+
+    Read-only projection over Enrollment -> CourseOffering -> Course / Program / YearLevel, plus the current primary professor name. `classroom_name` is None when the offering has no room set;
+    `professor_name` is None when no current assignment exists.
+    """
+
+    offering_id: int
+    course_id: int
+    course_code: str
+    course_name: str
+    program_code: str
+    year_level_label: str
+    semester: str
+    schedule_days: str
+    schedule_start_time: time
+    schedule_end_time: time
+    classroom_name: str | None = None
+    professor_name: str | None = None
+
+
+class ScheduleResponse(BaseModel):
+    """Full schedule envelope (no pagination - one row per enrollment)."""
+
+    offerings: list[ScheduleItem] = Field(default_factory=list)
