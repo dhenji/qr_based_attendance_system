@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -19,11 +20,7 @@
 		yearLevelUpdateSchema,
 	} from '$lib/features/admin/programs/schema';
 	import { yearLabel } from '$lib/shared/utils/format';
-	import {
-		MAX_TERMS_PER_YEAR,
-		TERM_CODES,
-		TERM_LABELS,
-	} from '$lib/shared/constants/terms';
+	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 	import type { YearLevel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 
@@ -64,15 +61,15 @@
 
 	type TermRow = { code: string; label: string };
 
-	// New term rows take the first code not already used, so the default never
-	// collides with an existing row. Codes are chosen from the dropdown rather
-	// than fixed by position, so this is a starting point, not a guarantee —
-	// schema.ts rejects duplicates on save.
+	// The user picks the code and the label; this only picks sensible starting
+	// values for a new row by taking whichever are not already in use, so the
+	// default never collides. Nothing here caps how many rows can be added.
 	const nextTermRow = (rows: TermRow[]): TermRow => {
-		const used = new Set(rows.map((r) => r.code));
+		const usedCodes = new Set(rows.map((r) => r.code));
+		const usedLabels = new Set(rows.map((r) => r.label));
 		return {
-			code: TERM_CODES.find((c) => !used.has(c)) ?? TERM_CODES[0],
-			label: TERM_LABELS[0],
+			code: TERM_CODES.find((c) => !usedCodes.has(c)) ?? TERM_CODES[0],
+			label: TERM_LABELS.find((l) => !usedLabels.has(l)) ?? TERM_LABELS[0],
 		};
 	};
 
@@ -202,7 +199,12 @@
 </script>
 
 <div class="page">
-	<p class="crumb"><a href={Routes.ADMIN_PROGRAMS}>Programs</a> / Detail</p>
+	<div class="page-top">
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>
+			← Back to Program Management
+		</button>
+		<p class="crumb"><a href={Routes.ADMIN_PROGRAMS}>Programs</a> / Detail</p>
+	</div>
 
 	{#if adminProgramDetailState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
@@ -330,7 +332,6 @@
 					<div class="terms-row">
 						<button
 							class="btn btn-secondary"
-							disabled={y_terms.length >= MAX_TERMS_PER_YEAR}
 							onclick={() => (y_terms = [...y_terms, nextTermRow(y_terms)])}
 						>
 							Add term
@@ -341,9 +342,6 @@
 							</button>
 						{/if}
 					</div>
-					{#if y_terms.length >= MAX_TERMS_PER_YEAR}
-						<p class="muted">A year can hold at most {MAX_TERMS_PER_YEAR} terms.</p>
-					{/if}
 				</div>
 			</div>
 			<div class="modal-actions">
@@ -384,7 +382,6 @@
 				<div class="terms-row">
 					<button
 						class="btn btn-secondary"
-						disabled={t_rows.length >= MAX_TERMS_PER_YEAR}
 						onclick={() => (t_rows = [...t_rows, nextTermRow(t_rows)])}
 					>
 						Add term
@@ -395,9 +392,6 @@
 						</button>
 					{/if}
 				</div>
-				{#if t_rows.length >= MAX_TERMS_PER_YEAR}
-					<p class="muted">A year can hold at most {MAX_TERMS_PER_YEAR} terms.</p>
-				{/if}
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => { termsOpen = false; termsTarget = null; }}>Cancel</button>
@@ -436,6 +430,15 @@
 		flex-direction: column;
 		gap: 1.5rem;
 		font-family: system-ui, sans-serif;
+	}
+
+	/* Back button + breadcrumb read as one header block, so the .page flex gap
+	 * (1.5rem) does not push them a full row apart. */
+	.page-top {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
 	}
 
 	.crumb {

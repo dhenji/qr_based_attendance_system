@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -22,8 +21,11 @@
 	// is_active. DELETE /admin/programs/{id} is the same soft archive (ADR-058)
 	// and stays on the backend, but has no UI caller.
 
+	// Keystrokes pause this long before a live-search request goes out.
+	const SEARCH_DEBOUNCE_MS = 250;
+
 	let search = $state('');
-	let statusFilter = $state<'all' | 'active' | 'archived'>('all');
+	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
 
 	let formOpen = $state(false);
 	let formError = $state<string | null>(null);
@@ -54,18 +56,24 @@
 		return items;
 	});
 
-	const load = (page = 1) =>
+	const load = (page = 1, term?: string) =>
 		initAdminPrograms(
 			{
-				search: search.trim() || undefined,
+				search: (term ?? search.trim()) || undefined,
 				is_active: isActiveFilter,
 			},
 			page,
 			adminProgramsState.size
 		);
 
-	onMount(() => {
-		load(1);
+	// Live search: refetch as the user types, debounced so a burst of keystrokes
+	// only costs one request. The effect body reads `search` (that is what makes
+	// it re-run) and `isActiveFilter` is read inside the timeout, so switching the
+	// status filter does not double up with applyFilters.
+	$effect(() => {
+		const term = search.trim();
+		const timer = setTimeout(() => load(1, term), SEARCH_DEBOUNCE_MS);
+		return () => clearTimeout(timer);
 	});
 
 	const applyFilters = () => {
@@ -156,7 +164,7 @@
 		<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={applyFilters}>
 			<option value="all">All statuses</option>
 			<option value="active">Active</option>
-			<option value="archived">Archived</option>
+			<option value="inactive">Inactive</option>
 		</select>
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
@@ -194,7 +202,11 @@
 							<td>{p.yearLevelCount}</td>
 							<td>{p.termsCount}</td>
 							<td>{p.courseCount}</td>
-							<td>{p.isActive ? '✅' : '🚫'}</td>
+							<td>
+								<span class="badge" class:inactive={!p.isActive}>
+									{p.isActive ? 'Active' : 'Inactive'}
+								</span>
+							</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
 								<button
@@ -344,6 +356,22 @@
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	/* Status pill in the Active/Inactive column. */
+	.badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #15803d;
+		background: #dcfce7;
+	}
+
+	.badge.inactive {
+		color: #64748b;
+		background: #f1f5f9;
 	}
 
 	.th-btn {
