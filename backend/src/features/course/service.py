@@ -82,7 +82,7 @@ BULK_CSV_SCHEMA = CsvSchema(
 )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _CsvRow:
     line: int
     student_id: str
@@ -95,7 +95,7 @@ class _CsvRow:
     section: str | None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class _RowOutcome:
     """Result of processing one bulk-enroll CSV row."""
 

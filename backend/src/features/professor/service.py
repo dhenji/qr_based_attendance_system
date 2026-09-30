@@ -82,7 +82,7 @@ _PROFESSOR_SORT_COLUMNS: dict[str, tuple[Any, ...]] = {
 }
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _RosterRow:
     line: int
     first_name: str

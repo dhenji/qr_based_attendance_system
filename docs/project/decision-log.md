@@ -942,6 +942,13 @@
   `POST /admin/users/{id}/reset-password`,
   `POST /admin/students/{id}/reset-password`, and
   `POST /admin/professors/{id}/reset-password` (lines 674-676 — only
-  `/auth/reset-password` ships).
+  `/auth/reset-password` ships). A fourth: `resolve_review` raises
+  `AttendanceDomainException(code="invalid_decision")` inline, with no class in
+  `exceptions.py` and no `api-contracts.md` entry, which breaks §1.6's "codes
+  come from the contract and are never invented" rule the same way ADR-060
+  corrected `overlapping_assignment`. It is left as-is because giving it a class
+  would add surface the contract has not asked for, and because the call was
+  extracted into `_resolve_approved_status` in the same change that noted it,
+  so the next reader sees the fix's scope in one place.
 - **Extends:** ADR-058 (whose §1.9 states the 404 fold-the-id and 409-reuse-the-name
   rules this audit checked) and ADR-059.

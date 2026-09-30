@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password, verify_password
 from features.attendance.model import Attendance
+from features.auth.model import User
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
@@ -97,7 +98,7 @@ _STUDENT_SORT_COLUMNS: dict[str, tuple[Any, ...]] = {
 }
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _ImportState:
     """Counters and seen-sets for one roster import run.
 
@@ -111,7 +112,7 @@ class _ImportState:
     seen_emails: set[str] = field(default_factory=set)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _RosterRow:
     line: int
     student_id: str
@@ -520,17 +521,27 @@ class StudentService:
 
         Validates the current password against the linked User record,
         then updates the hash and clears must_change_password.
+
+        The User is loaded with an explicit second query rather than read
+        off `student.user`: the relationship declares no `lazy=`, so
+        touching it after the `Student` query would raise MissingGreenlet
+        in async (coding-standards §1.6).
         """
         student: Student | None = await self._students.get_by(user_id=user_id)
 
-        if student is None or student.user is None:
+        if student is None:
             raise StudentNotFoundException(user_id)
 
-        if not verify_password(current_password, student.user.password_hash):
+        user: User | None = await self._session.get(User, user_id)
+
+        if user is None:
+            raise StudentNotFoundException(user_id)
+
+        if not verify_password(current_password, user.password_hash):
             raise CurrentPasswordInvalidException()
 
-        student.user.password_hash = hash_password(new_password)
-        student.user.must_change_password = False
+        user.password_hash = hash_password(new_password)
+        user.must_change_password = False
 
         await self._session.flush()
 

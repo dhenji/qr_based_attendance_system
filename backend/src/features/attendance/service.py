@@ -69,7 +69,7 @@ EARTH_RADIUS_METERS: float = 6371000.0
 _IDEMPOTENCY_STORE: dict[str, ScanResponse] = {}
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class _HistoryFilters:
     """The one filter set shared by the record, enrolled, and scanned queries.
 
@@ -98,7 +98,7 @@ def _ensure_aware(value: datetime) -> datetime:
     return value
 
 
-def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+def _haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Great-circle distance in metres between two GPS points."""
     phi1: float = math.radians(lat1)
     phi2: float = math.radians(lat2)
@@ -112,7 +112,7 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     return 2 * EARTH_RADIUS_METERS * math.asin(math.sqrt(a))
 
 
-def validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
+def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
     """Grade the fixed blink -> left -> right challenge (D31)."""
     if not (
         evidence.blink_detected and evidence.head_turn_left and evidence.head_turn_right
@@ -214,7 +214,7 @@ class AttendanceService:
         self,
         payload: ScanRequest,
         student_id: int,
-        session_id: int,
+        db_session: Session,
         scanned_at: datetime,
         status: str,
         review: bool,
@@ -222,18 +222,27 @@ class AttendanceService:
         now: datetime,
         idempotency_key: str | None,
     ) -> ScanResponse:
+        """Write the attendance row and build the response.
+
+        Takes the already-loaded `db_session` rather than an id so
+        `expires_at` never reads `row.session`: that relationship declares
+        no `lazy=`, so touching it on a freshly-flushed row would raise
+        MissingGreenlet in async (coding-standards §1.6). It resolved
+        before only because the same request had incidentally loaded this
+        Session into the identity map.
+        """
         row: Attendance = await self._write_attendance(
-            payload, student_id, session_id, scanned_at, status, review, original
+            payload, student_id, db_session.id, scanned_at, status, review, original
         )
         await self._maybe_record_sync(
-            session_id, student_id, row.id, scanned_at, now, idempotency_key
+            db_session.id, student_id, row.id, scanned_at, now, idempotency_key
         )
 
         response = ScanResponse(
             id=row.id,
             status=status,  # type: ignore[arg-type]
             scanned_at=row.timestamp,
-            expires_at=row.session.expires_at,
+            expires_at=db_session.expires_at,
         )
         _store_response(idempotency_key, response)
         return response
@@ -263,7 +272,7 @@ class AttendanceService:
         return await self._persist_scan(
             payload,
             student.id,
-            db_session.id,
+            db_session,
             scanned_at,
             status,
             review,
@@ -378,7 +387,7 @@ class AttendanceService:
         if session.classroom_lat is None or session.classroom_lng is None:
             return
 
-        distance: float = haversine_distance(
+        distance: float = _haversine_distance(
             gps.lat, gps.lng, session.classroom_lat, session.classroom_lng
         )
 
@@ -386,7 +395,7 @@ class AttendanceService:
             raise OutsideGeofenceException(distance, session.classroom_radius_meters)
 
     def _validate_liveness(self, evidence: LivenessEvidence) -> None:
-        if not validate_liveness_evidence(evidence):
+        if not _validate_liveness_evidence(evidence):
             raise LivenessFailedException()
 
     def _is_review_band(self, score: float) -> bool:
@@ -626,7 +635,9 @@ class AttendanceService:
             stmt, filters.year_level_id, lambda v: CourseOffering.year_level_id == v
         )
         stmt = apply_if(stmt, filters.semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(stmt, filters.course_id, lambda v: CourseOffering.course_id == v)
+        stmt = apply_if(
+            stmt, filters.course_id, lambda v: CourseOffering.course_id == v
+        )
         stmt = apply_if(
             stmt, filters.status, lambda v: Attendance.validation_status == v
         )
@@ -701,7 +712,9 @@ class AttendanceService:
             stmt, filters.year_level_id, lambda v: CourseOffering.year_level_id == v
         )
         stmt = apply_if(stmt, filters.semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(stmt, filters.course_id, lambda v: CourseOffering.course_id == v)
+        stmt = apply_if(
+            stmt, filters.course_id, lambda v: CourseOffering.course_id == v
+        )
 
         return stmt
 
@@ -966,6 +979,35 @@ class AttendanceService:
             restored = ValidationStatus.PRESENT.value
         return restored
 
+    async def _resolve_approved_status(self, row: Attendance, record_id: int) -> str:
+        """The status an approved record should carry.
+
+        `original_status` is the cheap answer, but a record that was
+        originally PRESENT has to be re-evaluated against the session's
+        late window, so that one case falls through to a full recompute.
+        The session is fetched explicitly — `row.session` would raise
+        MissingGreenlet in async (coding-standards §1.6).
+        """
+        restored: str = self._restore_approved_status(row)
+
+        if restored != ValidationStatus.PRESENT.value:
+            return restored
+
+        db_session: Session | None = await self._session.get(Session, row.session_id)
+
+        if db_session is None:
+            raise ReviewNotFoundException(record_id)
+
+        recomputed: str = self._compute_status(db_session, _ensure_aware(row.timestamp))
+
+        if recomputed not in (
+            ValidationStatus.PRESENT.value,
+            ValidationStatus.LATE.value,
+        ):
+            return ValidationStatus.PRESENT.value
+
+        return recomputed
+
     async def _apply_resolution(
         self, row: Attendance, evidence: dict, status: str
     ) -> None:
@@ -991,23 +1033,7 @@ class AttendanceService:
             )
 
         if decision == "approve":
-            restored = self._restore_approved_status(row)
-            if restored == ValidationStatus.PRESENT.value:
-                # need full recompute with session context
-                db_session: Session | None = await self._session.get(
-                    Session, row.session_id
-                )
-                if db_session is None:
-                    raise ReviewNotFoundException(record_id)
-                restored = self._compute_status(
-                    db_session, _ensure_aware(row.timestamp)
-                )
-                if restored not in (
-                    ValidationStatus.PRESENT.value,
-                    ValidationStatus.LATE.value,
-                ):
-                    restored = ValidationStatus.PRESENT.value
-            status = restored
+            status = await self._resolve_approved_status(row, record_id)
         else:
             status = ValidationStatus.REJECTED.value
 
