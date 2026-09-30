@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -203,9 +205,7 @@ def test_create_session_copies_offering_defaults() -> None:
     before = datetime.now(timezone.utc)
 
     read = _run(
-        service.create_session(
-            professor_id=3, payload=SessionCreate(offering_id=10)
-        )
+        service.create_session(professor_id=3, payload=SessionCreate(offering_id=10))
     )
 
     assert read.offering_id == 10
@@ -217,9 +217,9 @@ def test_create_session_copies_offering_defaults() -> None:
     # The fake stamps created_at at insert time (~service now, never stale),
     # so base + duration >= scheduled end and expiry is the scheduled end.
     assert read.expires_at == read.scheduled_end_time
-    assert abs(
-        (read.scheduled_end_time - before) - timedelta(minutes=120)
-    ) < timedelta(seconds=60)
+    assert abs((read.scheduled_end_time - before) - timedelta(minutes=120)) < timedelta(
+        seconds=60
+    )
 
 
 def test_create_session_rejects_second_active() -> None:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timezone
 from typing import Any
@@ -126,7 +128,9 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-HEADER = "student_id,first_name,middle_name,last_name,email,program_code,section,year_level"
+HEADER = (
+    "student_id,first_name,middle_name,last_name,email,program_code,section,year_level"
+)
 
 
 def test_parse_roster_csv_normalizes() -> None:
@@ -187,9 +191,7 @@ def test_import_roster_resolves_year_label() -> None:
         objs=(prog, year),
         rows=[[], [], [prog], [year]],
     )
-    content = (
-        f"{HEADER}\nS009,Zed,,Roe,zed@example.com,BSCS,Z,1st year\n"
-    ).encode()
+    content = (f"{HEADER}\nS009,Zed,,Roe,zed@example.com,BSCS,Z,1st year\n").encode()
 
     result = _run(StudentService(session).import_roster(content=content))
 

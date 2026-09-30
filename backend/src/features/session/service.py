@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -43,7 +45,12 @@ from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.base import BaseCRUD
 from shared.enums import QueueStatus, ValidationStatus
-from shared.pagination import MAX_PAGE_SIZE, PaginatedResponse
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
 from shared.query import apply_if
 
 
@@ -112,9 +119,7 @@ class SessionService:
     commit/rollback stays in the request dependency.
     """
 
-    def __init__(
-        self, session: AsyncSession, settings: Settings | None = None
-    ) -> None:
+    def __init__(self, session: AsyncSession, settings: Settings | None = None) -> None:
         self._session = session
         self._settings = settings or get_settings()
         self._sessions: BaseCRUD[Session] = BaseCRUD(Session, session)
@@ -131,9 +136,7 @@ class SessionService:
         random placeholder, then stamp the code and expiry.
         """
         now: datetime = _utcnow()
-        offering: CourseOffering = await self._get_offering_or_404(
-            payload.offering_id
-        )
+        offering: CourseOffering = await self._get_offering_or_404(payload.offering_id)
         await self._require_assignment(
             offering_id=offering.id, professor_id=professor_id
         )
@@ -197,9 +200,7 @@ class SessionService:
         await self._session.flush()
 
         base: datetime = row.created_at or now
-        row.expires_at = min(
-            base + timedelta(minutes=duration), row.scheduled_end_time
-        )
+        row.expires_at = min(base + timedelta(minutes=duration), row.scheduled_end_time)
         row.session_code = generate_session_code(row.id, self._settings)
         await self._session.flush()
 
@@ -240,9 +241,7 @@ class SessionService:
         scanned_status: dict[int, ValidationStatus] = {
             r.student_id: ValidationStatus(r.validation_status) for r in records
         }
-        scanned_at: dict[int, datetime] = {
-            r.student_id: r.timestamp for r in records
-        }
+        scanned_at: dict[int, datetime] = {r.student_id: r.timestamp for r in records}
         excuses: dict[int, str | None] = {
             r.student_id: r.excuse_reason for r in records
         }
@@ -261,9 +260,7 @@ class SessionService:
         scan_window_remaining: int = 0
 
         if row.expires_at is not None:
-            scan_window_remaining = max(
-                0, int((row.expires_at - now).total_seconds())
-            )
+            scan_window_remaining = max(0, int((row.expires_at - now).total_seconds()))
 
         return SessionActiveResponse(
             id=row.id,
@@ -303,9 +300,7 @@ class SessionService:
         """
         row: Session | None = (
             await self._session.scalars(
-                select(Session)
-                .where(Session.session_code == code.strip())
-                .limit(1)
+                select(Session).where(Session.session_code == code.strip()).limit(1)
             )
         ).one_or_none()
 
@@ -317,15 +312,9 @@ class SessionService:
         if row.expires_at is None or row.expires_at <= now:
             raise SessionExpiredException(row.id)
 
-        offering: CourseOffering = await self._get_offering_or_404(
-            row.offering_id
-        )
-        course: Course | None = await self._session.get(
-            Course, offering.course_id
-        )
-        program: Program | None = await self._session.get(
-            Program, offering.program_id
-        )
+        offering: CourseOffering = await self._get_offering_or_404(row.offering_id)
+        course: Course | None = await self._session.get(Course, offering.course_id)
+        program: Program | None = await self._session.get(Program, offering.program_id)
         year_level: YearLevel | None = await self._session.get(
             YearLevel, offering.year_level_id
         )
@@ -361,17 +350,15 @@ class SessionService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         offering_id: int | None = None,
-        page: int = 1,
-        size: int = 50,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[SessionListItem]:
         page, size = _normalize_page(page, size)
         now: datetime = _utcnow()
         stmt: Select[tuple[Session]] = select(Session).where(
             Session.professor_id == professor_id
         )
-        stmt = apply_if(
-            stmt, offering_id, lambda v: Session.offering_id == v
-        )
+        stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
@@ -423,8 +410,8 @@ class SessionService:
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
-        page: int = 1,
-        size: int = 50,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[SessionHistoryItem]:
         """Per-session history with present/late/absent counts and both rates.
 
@@ -437,9 +424,7 @@ class SessionService:
         stmt: Select[tuple[Session]] = select(Session).where(
             Session.professor_id == professor_id
         )
-        stmt = apply_if(
-            stmt, offering_id, lambda v: Session.offering_id == v
-        )
+        stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 
@@ -478,9 +463,7 @@ class SessionService:
 
         items.sort(key=_history_key(sort_by), reverse=_desc(sort_dir))
         total: int = len(items)
-        window: list[SessionHistoryItem] = items[
-            (page - 1) * size : page * size
-        ]
+        window: list[SessionHistoryItem] = items[(page - 1) * size : page * size]
 
         return PaginatedResponse[SessionHistoryItem](
             items=window, total=total, page=page, size=size
@@ -499,8 +482,8 @@ class SessionService:
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
-        page: int = 1,
-        size: int = 50,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[ProfessorAttendanceItem]:
         """Filterable attendance table across the professor's sessions.
 
@@ -521,14 +504,10 @@ class SessionService:
                 CourseOffering, CourseOffering.id == Session.offering_id
             ).where(CourseOffering.course_id == course_id)
 
-        stmt = apply_if(
-            stmt, offering_id, lambda v: Session.offering_id == v
-        )
+        stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, section, lambda v: Student.section == v)
         stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
-        stmt = apply_if(
-            stmt, status, lambda v: Attendance.validation_status == v
-        )
+        stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
         stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
 
@@ -602,9 +581,7 @@ class SessionService:
 
         return offering
 
-    async def _get_owned_or_404(
-        self, session_id: int, professor_id: int
-    ) -> Session:
+    async def _get_owned_or_404(self, session_id: int, professor_id: int) -> Session:
         row: Session | None = await self._sessions.get(session_id)
 
         if row is None or row.professor_id != professor_id:
@@ -612,9 +589,7 @@ class SessionService:
 
         return row
 
-    async def _require_assignment(
-        self, *, offering_id: int, professor_id: int
-    ) -> None:
+    async def _require_assignment(self, *, offering_id: int, professor_id: int) -> None:
         today: date = date.today()
         row: CourseProfessor | None = (
             await self._session.scalars(
@@ -713,9 +688,7 @@ class SessionService:
         """
         rows: Sequence[SyncQueue] = (
             await self._session.scalars(
-                select(SyncQueue).where(
-                    SyncQueue.status == QueueStatus.PENDING.value
-                )
+                select(SyncQueue).where(SyncQueue.status == QueueStatus.PENDING.value)
             )
         ).all()
         wanted: str = str(session_id)

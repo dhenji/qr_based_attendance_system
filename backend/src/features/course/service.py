@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -41,18 +43,42 @@ from features.program.exceptions import (
 from features.program.model import Program, YearLevel
 from features.student.model import Student
 from shared.base import BaseCRUD
-from shared.csv_import import is_valid_email, parse_csv
+from shared.csv_import import (
+    CsvColumn,
+    CsvEmailCheck,
+    CsvGroup,
+    CsvRow,
+    CsvSchema,
+    parse_import_csv,
+)
 from shared.pagination import PaginatedResponse
 
-BULK_CSV_COLUMNS: tuple[str, ...] = (
-    "student_id",
-    "first_name",
-    "middle_name",
-    "last_name",
-    "email",
-    "program_code",
-    "year_level",
-    "section",
+BULK_CSV_COLUMNS: tuple[CsvColumn, ...] = (
+    CsvColumn("student_id", required_reason="missing student_id"),
+    CsvColumn("first_name"),
+    CsvColumn("middle_name"),
+    CsvColumn("last_name"),
+    CsvColumn("email"),
+    CsvColumn("program_code"),
+    CsvColumn("year_level"),
+    CsvColumn("section"),
+)
+
+BULK_CSV_SCHEMA = CsvSchema(
+    columns=BULK_CSV_COLUMNS,
+    subject="student",
+    subject_column="student_id",
+    checks=(
+        CsvGroup(
+            columns=("first_name", "last_name", "email"),
+            reason="missing required field for {subject} {key}",
+        ),
+        CsvEmailCheck("email", "invalid email for {subject} {key}"),
+        CsvGroup(
+            columns=("program_code", "year_level"),
+            reason="missing program_code/year_level for {subject} {key}",
+        ),
+    ),
 )
 
 
@@ -69,85 +95,37 @@ class _CsvRow:
     section: str | None
 
 
+def _to_csv_row(raw: CsvRow) -> _CsvRow:
+    values: dict[str, str] = raw.values
+
+    return _CsvRow(
+        line=raw.line,
+        student_id=values["student_id"],
+        first_name=values["first_name"],
+        middle_name=values["middle_name"] or None,
+        last_name=values["last_name"],
+        email=values["email"],
+        program_code=values["program_code"],
+        year_level=values["year_level"],
+        section=values["section"] or None,
+    )
+
+
 def parse_enrollment_csv(content: bytes) -> tuple[list[_CsvRow], list[BulkEnrollError]]:
     """Parse the bulk-enroll CSV upload.
 
     Returns (valid_rows, errors). Never raises on bad rows — every problem is
     reported as a BulkEnrollError with its 1-based line number (header = 1).
+    Cells are only stripped, not case-folded: `bulk_enroll` compares against
+    the stored student and offering values itself.
     """
-    raw_rows, structural_errors = parse_csv(content, BULK_CSV_COLUMNS)
+    rows, errors = parse_import_csv(
+        content,
+        BULK_CSV_SCHEMA,
+        error=lambda line, reason: BulkEnrollError(line=line, reason=reason),
+    )
 
-    errors: list[BulkEnrollError] = [
-        BulkEnrollError(line=e.line, reason=e.reason) for e in structural_errors
-    ]
-
-    if structural_errors:
-        return [], errors
-
-    rows: list[_CsvRow] = []
-
-    for raw in raw_rows:
-        lineno = raw.line
-        cell = raw.values.get
-
-        student_id: str = (cell("student_id") or "").strip()
-
-        if not student_id:
-            errors.append(BulkEnrollError(line=lineno, reason="missing student_id"))
-            continue
-
-        first_name = (cell("first_name") or "").strip()
-        last_name = (cell("last_name") or "").strip()
-        email = (cell("email") or "").strip()
-
-        if not first_name or not last_name or not email:
-            errors.append(
-                BulkEnrollError(
-                    line=lineno,
-                    reason=f"missing required field for student {student_id}",
-                )
-            )
-            continue
-
-        if not is_valid_email(email):
-            errors.append(
-                BulkEnrollError(
-                    line=lineno,
-                    reason=f"invalid email for student {student_id}",
-                )
-            )
-            continue
-
-        program_code = (cell("program_code") or "").strip()
-        year_level = (cell("year_level") or "").strip()
-
-        if not program_code or not year_level:
-            errors.append(
-                BulkEnrollError(
-                    line=lineno,
-                    reason=f"missing program_code/year_level for student {student_id}",
-                )
-            )
-            continue
-
-        middle_name = (cell("middle_name") or "").strip() or None
-        section = (cell("section") or "").strip() or None
-
-        rows.append(
-            _CsvRow(
-                line=lineno,
-                student_id=student_id,
-                first_name=first_name,
-                middle_name=middle_name,
-                last_name=last_name,
-                email=email,
-                program_code=program_code,
-                year_level=year_level,
-                section=section,
-            )
-        )
-
-    return rows, errors
+    return [_to_csv_row(row) for row in rows], errors
 
 
 class CourseService:
@@ -492,7 +470,9 @@ class CourseService:
                 errors.append(
                     BulkEnrollError(
                         line=row.line,
-                        reason=f"program_code {row.program_code} does not match offering",
+                        reason=(
+                            f"program_code {row.program_code} does not match offering"
+                        ),
                     )
                 )
                 continue

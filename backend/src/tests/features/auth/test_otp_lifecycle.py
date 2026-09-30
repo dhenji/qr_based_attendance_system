@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from sqlalchemy.sql import operators
+
 from core.config import Settings
 from features.auth.service import AuthService
 from shared.enums import OtpPurpose
-from sqlalchemy.sql import operators
 
 PURPOSE = OtpPurpose.CLAIM
 
@@ -139,4 +142,6 @@ def test_new_otp_carries_a_five_minute_expiry(monkeypatch) -> None:
 
     expires_at = session.added[0].expires_at
     # The service captures its own `now` a hair after `before`, so allow a sliver.
-    assert timedelta(minutes=4) < (expires_at - before) <= timedelta(minutes=5, seconds=1)
+    assert (
+        timedelta(minutes=4) < (expires_at - before) <= timedelta(minutes=5, seconds=1)
+    )

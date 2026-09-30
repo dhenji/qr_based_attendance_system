@@ -1,6 +1,8 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
 from datetime import date
 from typing import Annotated
-from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 

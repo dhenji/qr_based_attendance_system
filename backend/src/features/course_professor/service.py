@@ -1,5 +1,8 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
 from datetime import date
-from typing import Any, Sequence, Tuple
+from typing import Any
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +24,7 @@ class CourseProfessorService:
         exclude: CourseProfessor | None = None,
     ) -> list[CourseProfessor]:
         """Return existing assignments overlapping [effective_from, effective_to]."""
-        stmt: Select[Tuple[CourseProfessor]] = select(CourseProfessor).where(
+        stmt: Select[tuple[CourseProfessor]] = select(CourseProfessor).where(
             CourseProfessor.offering_id == offering_id,
             CourseProfessor.professor_id == professor_id,
         )

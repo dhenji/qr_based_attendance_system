@@ -1,8 +1,18 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from shared.constants import (
+    LATITUDE_MAX,
+    LATITUDE_MIN,
+    LONGITUDE_MAX,
+    LONGITUDE_MIN,
+)
+from shared.enums import ScannedVia, ValidationStatus
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE
 from features.attendance.constants import (
     EAR_SAMPLES_MAX_COUNT,
     EAR_SAMPLES_MIN_COUNT,
@@ -12,22 +22,17 @@ from features.attendance.constants import (
     FACE_MATCH_SCORE_MIN,
     GPS_ACCURACY_MAX,
     GPS_ACCURACY_MIN,
-    GPS_LAT_MAX,
-    GPS_LAT_MIN,
-    GPS_LNG_MAX,
-    GPS_LNG_MIN,
     REVIEW_NOTE_MAX_LENGTH,
     STUDENT_NUMBER_MAX_LENGTH,
     STUDENT_NUMBER_MIN_LENGTH,
 )
-from shared.enums import ScannedVia, ValidationStatus
 
 
 class GPSInput(BaseModel):
     """Nested gps input; stored flat as gps_lat/gps_lng on write."""
 
-    lat: float = Field(ge=GPS_LAT_MIN, le=GPS_LAT_MAX)
-    lng: float = Field(ge=GPS_LNG_MIN, le=GPS_LNG_MAX)
+    lat: float = Field(ge=LATITUDE_MIN, le=LATITUDE_MAX)
+    lng: float = Field(ge=LONGITUDE_MIN, le=LONGITUDE_MAX)
     accuracy: float = Field(ge=GPS_ACCURACY_MIN, le=GPS_ACCURACY_MAX)
 
 
@@ -120,8 +125,8 @@ class HistoryResponse(BaseModel):
 
     items: list[HistoryItem] = Field(default_factory=list)
     total: int = 0
-    page: int = 1
-    size: int = 50
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE
     summary: HistorySummary = Field(default_factory=HistorySummary)
 
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -16,9 +18,6 @@ UNITS_MAX: int = 6
 
 DURATION_MIN: float = 0.5
 DURATION_MAX: float = 8.0
-
-SEMESTER_MIN_LENGTH: int = 1
-SEMESTER_MAX_LENGTH: int = 20
 
 ACADEMIC_YEAR_MIN_LENGTH: int = 4
 ACADEMIC_YEAR_MAX_LENGTH: int = 20

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """In-memory, per-key fixed-window rate limiter (process-local).
 
 WARNING: this limiter lives in process memory only. When the API runs as

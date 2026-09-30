@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -116,9 +118,7 @@ def test_status_unknown_student_404() -> None:
 def test_enroll_writes_stub_blob_and_bumps_version() -> None:
     session = _FakeSession(objs=(_student(),))
 
-    result = _run(
-        _service(session).enroll_face(student_id=1, **_enroll_kwargs())
-    )
+    result = _run(_service(session).enroll_face(student_id=1, **_enroll_kwargs()))
 
     student = session.store[(Student, 1)]
     assert student.face_embedding is not None
@@ -144,11 +144,7 @@ def test_enroll_rejects_empty_photo() -> None:
     session = _FakeSession(objs=(_student(),))
 
     with pytest.raises(InvalidImageException) as exc_info:
-        _run(
-            _service(session).enroll_face(
-                student_id=1, **_enroll_kwargs(front=b"")
-            )
-        )
+        _run(_service(session).enroll_face(student_id=1, **_enroll_kwargs(front=b"")))
 
     assert exc_info.value.code == "invalid_image"
     assert exc_info.value.status_code == 400

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from core.exceptions import AppException, DatabaseException, DomainException
 
 

@@ -1,4 +1,7 @@
-from typing import Any, Sequence, Tuple
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +24,7 @@ class BaseCRUD[T: DeclarativeBase]:
         return await self.session.get(self.model, id)
 
     async def get_by(self, **filters: Any) -> T | None:
-        stmt: Select[Tuple[T]] = select(self.model)
+        stmt: Select[tuple[T]] = select(self.model)
         stmt = self._map_filters(stmt, **filters)
 
         return (await self.session.scalars(stmt)).one_or_none()
@@ -29,7 +32,7 @@ class BaseCRUD[T: DeclarativeBase]:
     async def list(
         self, offset: int = 0, limit: int = 50, **filters: Any
     ) -> Sequence[T]:
-        stmt: Select[Tuple[T]] = (
+        stmt: Select[tuple[T]] = (
             select(self.model).order_by(self.model.id).offset(offset).limit(limit)
         )
         stmt = self._map_filters(stmt, **filters)
@@ -37,7 +40,7 @@ class BaseCRUD[T: DeclarativeBase]:
         return (await self.session.scalars(stmt)).all()
 
     async def count(self, **filters: Any) -> int:
-        stmt: Select[Tuple[int]] = select(func.count()).select_from(self.model)
+        stmt: Select[tuple[int]] = select(func.count()).select_from(self.model)
         stmt = self._map_filters(stmt, **filters)
 
         return (await self.session.scalars(stmt)).one()

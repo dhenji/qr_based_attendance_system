@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 def password_strength(value: str) -> str:
     # security-model.md:102 - min 8 chars, mixed case + number + symbol.
     # Length is enforced separately via Field(min_length=PASSWORD_MIN_LENGTH).
