@@ -1,0 +1,25 @@
+# Backend-only artifacts. Everything here is uniquely the backend's and
+# cannot be spelled once at the repo root: Python exists only under backend/,
+# and only backend/ runs pytest.
+#
+# Env-file rules (.env, .env.*, !.env.example, !.env.test) deliberately live
+# in the root .gitignore instead. They are shared with frontend/, and copying
+# them here would mean two files that must stay byte-identical: the deeper
+# .gitignore takes precedence rather than merging, so dropping the negations
+# from this file would make backend/.env.example ignored, breaking a tracked
+# file with no error.
+#
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# pytest
+.pytest_cache/
+
+# pytest-cov
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

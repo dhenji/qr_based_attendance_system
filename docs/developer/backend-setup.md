@@ -85,7 +85,9 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-The current suite contains 56 unit tests under `backend/src/tests/`. It uses fake sessions and does not require a database. `pytest` and `httpx` are listed in `backend/requirements.txt`; add `pytest-asyncio` when async integration tests are introduced.
+The suite holds 239 cases across 19 files. `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
+
+Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead.
 
 ---
 
