@@ -8,6 +8,15 @@
 ## Table of Contents
 
 1. [Python (Backend)](#1-python-backend)
+   1.1. [Style Guide](#11-style-guide)
+   1.2. [Formatting Rules](#12-formatting-rules)
+   1.3. [Function & Method Design](#13-function--method-design)
+   1.4. [Import Order](#14-import-order)
+   1.5. [Model Conventions](#15-model-conventions)
+   1.6. [Schema Conventions (Pydantic)](#16-schema-conventions-pydantic)
+   1.7. [Service Conventions](#17-service-conventions)
+   1.8. [Router Conventions](#18-router-conventions)
+   1.9. [Admin CRUD Slice Template](#19-admin-crud-slice-template)
 2. [TypeScript / Svelte 5 (Frontend)](#2-typescript--svelte-5-frontend)
 3. [Naming Conventions](#3-naming-conventions)
 4. [Git & PR Conventions](#4-git--pr-conventions)
@@ -39,7 +48,48 @@ to follow by convention until tooling is added:
 | Max line length 88  | Break long lines with parens or backslash                                               |
 | Trailing commas     | `def foo(a, b,)` on multi-line signatures                                               |
 
-### 1.3 Import Order
+### 1.3 Function & Method Design
+
+- **Single responsibility**: Functions/methods should do one thing. If a function exceeds ~30 lines or has multiple logical steps, **extract helper functions** (private `_snake_case` methods or module-level functions).
+- **Prefer `match` / dictionary dispatch over `if/elif/else` chains** when branching on a value:
+  ```python
+  # GOOD: dictionary dispatch
+  _HANDLERS = {
+      UserRole.STUDENT: _handle_student,
+      UserRole.PROFESSOR: _handle_professor,
+      UserRole.ADMIN: _handle_admin,
+  }
+  handler = _HANDLERS.get(role, _handle_default)
+  return await handler(...)
+
+  # GOOD: match (Python 3.10+)
+  match role:
+      case UserRole.STUDENT: return await _handle_student(...)
+      case UserRole.PROFESSOR: return await _handle_professor(...)
+      case _: return await _handle_default(...)
+
+  # AVOID: long if/elif chains
+  ```
+- **Modern Python**: use `X | None` not `Optional[X]`, `list[T]` not `List[T]`, `dict[K, V]` not `Dict[K, V]`, `@dataclass`/`@dataclass(kw_only=True)` for data carriers, `from __future__ import annotations` at top of files.
+- **Early returns / guard clauses** over nested blocks.
+- **Private helpers** prefixed with `_` — module-level for pure logic, `self._method` for service-internal.
+- **Extract shared logic to `shared/`**: If the same helper logic appears in **two or more feature modules**, move it to a module under `src/shared/` (e.g., `shared/validators.py`, `shared/utils.py`, `shared/csv_import.py`) and import it. Avoid copy-pasting logic across slices.
+  - Examples already in codebase: `shared/csv_import.py` (parsing + email validation), `shared/validators.py`, `shared/enums.py`, `shared/pagination.py`, `shared/rate_limit.py`.
+  - New shared helpers should be **pure functions** (no DB session) or **session-accepting functions** with clear signatures.
+- **No inline magic values**: All field bounds, limits, thresholds, and config-like constants live in **`constants.py`** files:
+  - Per-slice: `features/<slice>/constants.py` (e.g., `CODE_MAX_LENGTH`, `TOTAL_YEARS_MAX`)
+  - Shared: `shared/pagination.py` (`DEFAULT_PAGE`, `MAX_PAGE_SIZE`, `SEARCH_MAX_LENGTH`)
+  - Shared: `shared/enums.py` for `StrEnum` values
+  - Auth-specific: `features/auth/constants.py` (`BACKUP_CODE_COUNT`, `SECURITY_QUESTION_POOL`, etc.)
+- **`lambda` for tiny callbacks**: acceptable for one-liner key functions, `sorted(key=...)`, `filter()`, or simple `Callable` arguments — **not** for multi-line logic (extract a named function instead).
+- **Generics for reusable algorithms**: when a helper operates on a type parameter, use **PEP 695** syntax (Python 3.12+):
+  ```python
+  def first_or_none[T](items: Sequence[T], predicate: Callable[[T], bool]) -> T | None:
+      return next((item for item in items if predicate(item)), None)
+  ```
+  Avoid over-engineering — only when the same logic applies to multiple types in the codebase.
+
+### 1.4 Import Order
 
 ```python
 # 1. Standard library
@@ -63,7 +113,7 @@ from shared.mixins import TimestampMixin
 from features.student.model import Student
 ```
 
-### 1.4 Model Conventions
+### 1.5 Model Conventions
 
 - All models inherit from `Base` (imported from `core.database`).
 - Use mixins (`CreatedAtMixin`, `TimestampMixin`) for timestamp columns.
@@ -72,7 +122,7 @@ from features.student.model import Student
 - Table names: lowercase, snake_case, plural (`students`, `attendance_records`).
 - Unique constraints: define at column level or table level consistently.
 
-### 1.5 Schema Conventions (Pydantic)
+### 1.6 Schema Conventions (Pydantic)
 
 - Use **Pydantic v2** (`BaseModel` from `pydantic`).
 - Request schemas: `FooCreate`, `FooUpdate`; read schemas: `FooRead` (e.g. `ProgramRead`, `StudentRead`). Legacy `FooResponse` names in `auth/schema.py` are kept as-is.
@@ -88,13 +138,38 @@ from features.student.model import Student
   fields (`Program.code`, `Program.total_years`) are absent, not `Optional[...]`-ed.
 - **Derived aggregates live on the read schema, defaulting to `0`** — `course_count`,
   `year_level_count`, `terms_count`, `enrolled_count`, `scan_count`. They are computed per
-  request and are never model columns (see §1.8).
+  request and are never model columns (see §1.9).
 - **Nested reads get a `FooDetail(FooRead)`** that adds the child collection, e.g.
   `ProgramDetail.year_levels: list[YearLevelRead]`. A create response may reuse `FooRead`
   with the aggregates at their `0` default — correct for a brand-new row, and one model
   instead of two.
 
-### 1.6 Service Conventions
+#### Exception Hierarchy Design (all feature `exceptions.py`)
+
+Standard 3-tier pattern used by all 11 feature exception modules:
+
+```python
+class FeatureException(AppException):              # umbrella
+    pass
+
+class FeatureDomainException(FeatureException, DomainException):  # 422 base
+    pass
+
+class ConcreteNotFound(FeatureDomainException):     # 404
+    status_code = 404
+    code = "feature_not_found"
+    def __init__(self, id: int): super().__init__(f"Feature {id} not found")
+
+class ConcreteConflict(FeatureDomainException):     # 409
+    status_code = 409
+    code = "feature_conflict"
+    def __init__(self, detail: str): super().__init__(detail)
+```
+
+- **Codes come from `api-contracts.md`** — never invent new ones
+- 404 may fold ID into message; 409 reuses existing class names where contract overlaps (`EmailAlreadyExists`)
+
+### 1.7 Service Conventions
 
 - **CRUD slices under `/admin/*` are classes.** A slice whose job is create/read/update/archive
   for one or two models (`program`, `course`, student-admin, professor-admin) implements
@@ -129,7 +204,20 @@ from features.student.model import Student
 - Raise `HTTPException` or domain exceptions, never raw `ValueError`.
 - Transactions: flush within service methods; commit managed by the router/dependency.
 
-### 1.7 Router Conventions
+#### Service Form Decision Tree (ADR-055/058/059)
+
+| Slice Type                                                                         | Form                                 | Rationale                                                                                           |
+| ---------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Admin CRUD (`/admin/*`: program, course, student-admin, professor-admin)           | **Class** (`FeatureService`)         | Composes multiple `BaseCRUD` handles in `__init__`; per-request injection via `<Feature>ServiceDep` |
+| `face_enrollment`                                                                  | **Class** (`FaceEnrollmentService`)  | Holds `Session` + `Settings` (upload caps, embedding version) read by every method (ADR-059)        |
+| `session`                                                                          | **Class** (`SessionService`)         | Holds `Session` + `Settings`; owns professor sessions + attendance reads                            |
+| `auth`                                                                             | **Class** (`AuthService`)            | Accepted cost: multiple CRUDs + settings + rate limiter — ADR-055                                   |
+| `course_professor`                                                                 | **Class** (`CourseProfessorService`) | Borderline holdover — retained, **not precedent** (ADR-055)                                         |
+| **All other slices** (`sync`, `excuse`, `analytics`, `system`, `csv_import`, etc.) | **Module-level `async def`**         | No composed handles; a session alone doesn't justify a class (ADR-055 default)                      |
+
+**Rule of thumb**: a class earns its place when `__init__` builds **multiple per-request handles** (CRUD, settings, limiters) that every method uses. Otherwise, write `async def foo(session: AsyncSession, ...)`.
+
+### 1.8 Router Conventions
 
 - **One `APIRouter` per (feature, mount point).** A router's prefix is its full
   contract path and is baked into the `APIRouter(...)`; `api/router.py` passes no
@@ -158,7 +246,7 @@ from features.student.model import Student
   (`ilike` across the human-readable columns) for a wireframe search box. It must stay
   optional, default to `None`, be length-capped by `SEARCH_MAX_LENGTH`, and be recorded
   in [api-contracts.md](../architecture/api-contracts.md) so the contract stays the
-  source of truth. Adding a *required* undocumented parameter is not allowed.
+  source of truth. Adding a _required_ undocumented parameter is not allowed.
 - **204 responses declare `status_code=status.HTTP_204_NO_CONTENT` and return `None`** —
   never a body, and never a status code the contract does not document.
 - Mount all feature routers in `api/router.py`.
@@ -168,7 +256,15 @@ from features.student.model import Student
 - Use `response_model` on endpoint decorators (`PaginatedResponse[FooRead]` for lists).
 - Paginated responses: `{items, total, page, size}`.
 
-### 1.8 Admin CRUD Slice Template
+#### Mount Point Rules (ADR-057)
+
+- **One `APIRouter` per (feature, mount point)** — prefix baked in `APIRouter(prefix="/admin/programs")`; `api/router.py` uses **no `prefix=`**
+- **Shared mount points**: multiple routers → same prefix (`professor` + `session` → `/professor`; `student` + `attendance` → `/student`) — inner paths must not collide
+- **Second router module** when a feature spans two prefixes: `admin_router.py`, `offering_router.py` — **never mount the same router twice**
+- **Collection routes**: `@router.get("")` not `"/"` (avoids trailing-slash redirect)
+- **Admin CRUD route order**: `GET ""`, `POST ""`, `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` each with `summary=`
+
+### 1.9 Admin CRUD Slice Template
 
 A CRUD slice under `/api/admin/*` is exactly these files, beside the `model.py` that
 already exists. `features/program/` is the reference implementation.
@@ -208,7 +304,7 @@ re-exports the four `shared.pagination` names so the existing admin routes are u
 That re-export is the temporary shape: if a third slice needs the name bounds, they get
 their own `shared/constants.py` rather than a growing feature-to-feature import.
 
-**`service.py` + `api/deps.py`** — see §1.6. `api/deps.py` is the only file outside the
+**`service.py` + `api/deps.py`** — see §1.7. `api/deps.py` is the only file outside the
 slice folder that changes, and only additively:
 
 ```python
@@ -240,19 +336,19 @@ Two traps this shape hides:
 **Archive vs hard delete** — which route a slice gets is decided by the contract, not by
 pattern-matching the other slices:
 
-| Slice                        | Soft archive                                    | Hard delete                             |
-| ---------------------------- | ----------------------------------------------- | --------------------------------------- |
-| programs, year levels, courses, offerings | `DELETE /{id}` → `is_active = False`  | none                                     |
-| students, professors         | `PATCH /{id}` with `is_active` (archive/reactivate) | `DELETE /{id}/archive`, archived rows only, plus a has-records 409 |
+| Slice                                     | Soft archive                                        | Hard delete                                                        |
+| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
+| programs, year levels, courses, offerings | `DELETE /{id}` → `is_active = False`                | none                                                               |
+| students, professors                      | `PATCH /{id}` with `is_active` (archive/reactivate) | `DELETE /{id}/archive`, archived rows only, plus a has-records 409 |
 
 - A soft archive touches **only its own row**. `DELETE /admin/programs/{id}` sets
   `programs.is_active = False` and nothing else: `year_levels` has no `is_active` column
   and `courses` is a decoupled template, so there is nothing to cascade to. Do not invent
   a cascade, and do not re-activate archived offerings as a side effect.
 - Reactivation is the same `PATCH` with `is_active: true`; slices that have no `DELETE
-  /{id}` reach `archive()`/`reactivate()` from the PATCH handler.
+/{id}` reach `archive()`/`reactivate()` from the PATCH handler.
 - The hard delete needs **two** guards, not one: `is_active = False` (else
-  `409 not_archived`) *and* a child-row check (`409 student_has_records` /
+  `409 not_archived`) _and_ a child-row check (`409 student_has_records` /
   `professor_has_records`), because `enrollments`, `attendance_records` and
   `excuse_requests` reference `students.id` with `ondelete="RESTRICT"` (and `sessions`
   references `professors.id`). The FKs stay RESTRICT as the last line of defence — never
@@ -265,6 +361,21 @@ by the session that owns the whole mount list (the mount session). Until then, v
 by importing it and reading `router.routes`, and never add an `include_router` call in the
 slice's own session.
 
+#### Dependency Injection Patterns
+
+- **Service deps** in `api/deps.py`:
+  ```python
+  async def _get_program_service(
+      session: Annotated[AsyncSession, Depends(_get_db)],
+  ) -> ProgramService:
+      return ProgramService(session)
+
+  ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
+  ```
+- **Settings injection**:
+  - Admin CRUD services: **not injected** (don't need settings)
+  - `AuthService`, `FaceEnrollmentService`, `SessionService`: `Settings` via `__init__(session, settings: Settings | None = None)` with `settings or get_settings()`
+- **Transaction boundary**: single `commit()` in `_get_db`; services only `flush()`
 
 ---
 
@@ -348,23 +459,23 @@ features/
 
 ### 3.1 Backend
 
-| Element   | Convention                           | Example                            |
-| --------- | ------------------------------------ | ---------------------------------- |
-| Tables    | lowercase, snake_case, plural        | `students`, `attendance_records`   |
-| Columns   | snake_case                           | `student_id`, `created_at`         |
-| Models    | PascalCase                           | `Student`, `AttendanceRecord`      |
-| Schemas   | PascalCase + suffix                  | `StudentCreate`, `SessionResponse` |
-| Services  | PascalCase + suffix (admin CRUD)     | `ProgramService`                   |
-| Service fns | snake_case, `session` first arg   | `check_overlap()`                  |
-| Routers   | snake_case, prefix baked in          | `student_router`, `session_router` |
-| Router modules | snake_case, one per mount point | `admin_router.py`, `offering_router.py` |
-| Service deps | `<Feature>ServiceDep` in `api/deps.py` | `ProgramServiceDep`             |
-| Exceptions | `<Feature>Exception` / `<Feature>DomainException` | `ProgramCodeExistsException` |
-| Slice constants | UPPER_SNAKE in `<slice>/constants.py` | `MAX_PAGE_SIZE`             |
-| Functions | snake_case                           | `get_student_by_id()`              |
-| Constants | UPPER_SNAKE_CASE                     | `FACE_MATCH_THRESHOLD`             |
-| Enums     | PascalCase class, UPPER_SNAKE values | `UserRole.STUDENT`                 |
-| Env vars  | UPPER_SNAKE_CASE                     | `DATABASE_URL`, `HMAC_SECRET_KEY`  |
+| Element         | Convention                                        | Example                                 |
+| --------------- | ------------------------------------------------- | --------------------------------------- |
+| Tables          | lowercase, snake_case, plural                     | `students`, `attendance_records`        |
+| Columns         | snake_case                                        | `student_id`, `created_at`              |
+| Models          | PascalCase                                        | `Student`, `AttendanceRecord`           |
+| Schemas         | PascalCase + suffix                               | `StudentCreate`, `SessionResponse`      |
+| Services        | PascalCase + suffix (admin CRUD)                  | `ProgramService`                        |
+| Service fns     | snake_case, `session` first arg                   | `check_overlap()`                       |
+| Routers         | snake_case, prefix baked in                       | `student_router`, `session_router`      |
+| Router modules  | snake_case, one per mount point                   | `admin_router.py`, `offering_router.py` |
+| Service deps    | `<Feature>ServiceDep` in `api/deps.py`            | `ProgramServiceDep`                     |
+| Exceptions      | `<Feature>Exception` / `<Feature>DomainException` | `ProgramCodeExistsException`            |
+| Slice constants | UPPER_SNAKE in `<slice>/constants.py`             | `MAX_PAGE_SIZE`                         |
+| Functions       | snake_case                                        | `get_student_by_id()`                   |
+| Constants       | UPPER_SNAKE_CASE                                  | `FACE_MATCH_THRESHOLD`                  |
+| Enums           | PascalCase class, UPPER_SNAKE values              | `UserRole.STUDENT`                      |
+| Env vars        | UPPER_SNAKE_CASE                                  | `DATABASE_URL`, `HMAC_SECRET_KEY`       |
 
 ### 3.2 Frontend
 
