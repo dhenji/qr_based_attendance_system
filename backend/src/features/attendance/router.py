@@ -11,6 +11,8 @@ from features.attendance.constants import (
 )
 from features.attendance.schema import (
     HistoryResponse,
+    PrecheckRequest,
+    PrecheckResponse,
     ScanRequest,
     ScanResponse,
 )
@@ -50,6 +52,22 @@ async def submit_scan(
 ) -> ScanResponse:
     _: StudentUser = user  # role gate only; student resolved by payload.student_number
     return await service.submit_scan(payload=payload, idempotency_key=idempotency_key)
+
+
+@router.post(
+    "/attendance/precheck",
+    response_model=PrecheckResponse,
+    summary="Pre-check enrollment and duplicate scan before full attendance submission",
+)
+async def precheck_scan(
+    payload: PrecheckRequest,
+    user: StudentUser,
+    service: AttendanceServiceDep,
+) -> PrecheckResponse:
+    _: StudentUser = user  # role gate only
+    return await service.precheck_scan(
+        session_id=payload.session_id, student_number=payload.student_number
+    )
 
 
 @router.get(

@@ -164,3 +164,30 @@ class ResolveReviewResponse(BaseModel):
     reviewed_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PrecheckRequest(BaseModel):
+    """Pre-check request for scan step 2: validates enrollment and duplicate scan."""
+
+    session_id: int = Field(gt=0)
+    student_number: str = Field(
+        min_length=STUDENT_NUMBER_MIN_LENGTH, max_length=STUDENT_NUMBER_MAX_LENGTH
+    )
+
+    @field_validator("student_number")
+    @classmethod
+    def _strip_student_number(cls, v: str) -> str:
+        v = v.strip()
+
+        if not v:
+            raise ValueError("student_number must not be blank")
+
+        return v
+
+
+class PrecheckResponse(BaseModel):
+    """Pre-check response: enrollment status and duplicate scan flag."""
+
+    enrolled: bool
+    already_scanned: bool
+    student: dict[str, Any] = Field(default_factory=dict)
