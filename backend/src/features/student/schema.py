@@ -13,6 +13,7 @@ from features.student.constants import (
     EMAIL_MAX_LENGTH,
     NAME_MAX_LENGTH,
     NAME_MIN_LENGTH,
+    PASSWORD_MIN_LENGTH,
     SECTION_MAX_LENGTH,
     STUDENT_ID_MAX_LENGTH,
     STUDENT_ID_MIN_LENGTH,
@@ -162,3 +163,10 @@ class ScheduleResponse(BaseModel):
     """Full schedule envelope (no pagination - one row per enrollment)."""
 
     offerings: list[ScheduleItem] = Field(default_factory=list)
+
+
+class ChangePasswordRequest(BaseModel):
+    """Student self-service password change."""
+
+    current_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
