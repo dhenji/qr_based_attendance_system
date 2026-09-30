@@ -8,6 +8,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.test
 
 # git
 .git/
@@ -19,6 +20,19 @@ alembic/
 Dockerfile*
 .dockerignore
 
+# pytest-cov output: written into backend/ by the coverage command, and it
+# must not ride along in a layer. Not a secret, but it is noise that only
+# grows.
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # misc
 .DS_Store
 *.log
+
+# backup archives must never reach an image layer: Dockerfile.dev copies only
+# src/ today, but a .dump/.enc in a layer survives deleting the file.
+backups/

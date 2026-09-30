@@ -546,7 +546,8 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 
 - Never commit `.env` or `.env.*` (except `.env.example` and `.env.test`).
 - Never commit `__pycache__/`, `.venv/`, `node_modules/`, `.svelte-kit/`.
-- Backups directory (`backups/`) is gitignored.
+- Backend-only artifacts — Python bytecode, `.venv/`, pytest/coverage output, and `backups/` — are ignored by `backend/.gitignore`.
+- Env-file rules stay in the root `.gitignore`: `frontend/.env` is also a real file. A nested `.gitignore` takes precedence rather than merging, so duplicating them would mean two files that must stay byte-identical.
 
 ---
 
@@ -554,11 +555,12 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 
 ### 5.1 Backend Tests
 
-- **Framework:** pytest + pytest-asyncio (to be added to `requirements.txt`).
+- **Framework:** pytest + pytest-asyncio (`backend/requirements.txt`); config in `backend/pytest.ini`.
 - **Location:** `backend/src/tests/`.
 - **Naming:** `test_<feature>_<scenario>.py`.
-- **Fixtures:** use `conftest.py` for shared fixtures (test DB session, test client).
-- **Async tests:** all DB-dependent tests use `@pytest.mark.asyncio`.
+- **Fixtures:** use `conftest.py` for shared fixtures (test DB session, test client, factories).
+- **Async tests:** `asyncio_mode = auto`, so no `@pytest.mark.asyncio` decorator is needed. The pre-existing sync tests that call `asyncio.run()` keep working untouched.
+- **Test database:** in-memory SQLite by default; set `TEST_DATABASE_URL` to run the same suite against Postgres.
 - **Coverage target:** 80%+ for services, 100% for critical paths (attendance validation, session expiry).
 
 ### 5.2 Frontend Tests

@@ -94,7 +94,7 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (12 routers mounted under /api, no prefix= arg; all 12 with routes)
 │   │   ├── features/     # 15 slices: admin, analytics, attendance, auth, course, course_professor, enrollment, excuse, face_enrollment, professor, program, session, student, sync, system
 │   │   │   └── */        # model.py in 13 slices (17 classes; admin + face_enrollment are model-less); 12 with routes (auth/admin/program/course/offering/student-admin/professor-admin/face-enrollment, session-professor ×7, professor-self ×2, student ×2, attendance ×2 sharing one /api/student mount), enrollment intentionally unmounted; service.py ×10, schema.py ×9, exceptions.py ×11, constants.py ×8
-│   │   └── tests/        # pytest suite — 116 test functions (119 cases with parametrization) in 13 files (hand-rolled fakes, no DB); requires DEBUG=true + JWT_SECRET
+│   │   └── tests/        # pytest suite — 239 cases in 19 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + 3 DB-backed files; 13 files still hand-rolled fakes. Config: backend/pytest.ini
 │   ├── alembic/          # env.py imports all 13 feature models; 4 migrations — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at) → 17 tables
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
 ├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend (+ api-test under profile: test)
@@ -208,16 +208,34 @@ Backend tests:
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-Or directly against the local venv (no Docker, no database — the suite uses
-hand-rolled fakes and never opens a connection):
+Or directly against the local venv. No Docker and no database are needed:
+`conftest.py` runs against in-memory SQLite by default.
 
 ```bash
 cd backend
 DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
 ```
 
-`DEBUG=true` and a dummy `JWT_SECRET` are required, otherwise `Settings`
-validation fails at import time. There is no `conftest.py`.
+`DEBUG=true` and a `JWT_SECRET` are only needed for the pre-existing tests,
+which build `Settings()` themselves; `conftest.py` sets both for everything
+it owns. `PYTHONPATH=src` is what makes `core.*`/`features.*` importable.
+
+To run the same suite against a real Postgres instead of SQLite:
+
+```bash
+cd backend
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test \
+  PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
+```
+
+Markers (`backend/pytest.ini`): `-m "not slow"`, `-m "not integration"`.
+
+Coverage (no `--cov` in `addopts`, so a plain run stays fast):
+
+```bash
+cd backend && PYTHONPATH=src .venv/bin/python -m pytest src/tests -q \
+  --cov=src/features --cov=src/shared --cov=src/core --cov-report=term-missing
+```
 
 Schema drift check (requires a reachable Postgres and `alembic`):
 
@@ -237,7 +255,7 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured, and no CI workflows (no `.github/workflows`). The backend suite currently contains 116 test functions (119 cases with parametrization).
+There are no linters or formatters configured, and no CI workflows (no `.github/workflows`). The backend suite currently contains 239 cases across 19 files.
 
 > **Note**: 2 session tests (`test_create_session_copies_offering_defaults`,
 > `test_get_active_session_counts_tiles_and_banner`) pin a fixed `NOW =
@@ -324,8 +342,8 @@ Shared infrastructure is complete — **Phase 0** of the [13-phase roadmap](docs
 
 | Area     | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security + HMAC session codes/versioned QR payload, exceptions, base CRUD, pagination, email, validators, captcha, rate limiting, cache, csv_import, 13 enums); `api/deps.py` with `_get_db`, `_get_current_user`/`_get_optional_current_user` (JWT/HTTPBearer), `require_role(*roles)`, plus `Auth/Admin/Program/Course/Student/Professor/Session/FaceEnrollmentServiceDep`; 15 feature slices / 17 model classes; 12 routers mounted under `/api` with 12 carrying routes — auth(15)→`/api/auth`, admin(3)→`/api/admin/users`, program(10)→`/api/admin/programs`, course(5)→`/api/admin/courses`, offering(10)→`/api/admin/offerings`, student-admin(7)→`/api/admin/students`, professor-admin(6)→`/api/admin/professors`, face-enrollment(2)→`/api/admin/face-enrollment`, session-professor(7)→`/api/professor` (courses/sessions/history/active/close/attendance), professor-self(2)→`/api/professor` (profile read + password patch), student(2)→`/api/student` (sessions verify-code, face-embedding pull), attendance(2)→`/api/student` (scan, history) — the last two share one mount (`enrollment/router.py` intentionally unmounted); `SessionService` (session open/list/history/active/close/attendance reads, HMAC code + `qr_payload`) and professor self-service (`resolve_professor_id`, `list_assigned_offerings` with units/enrolled-count/derived sections, `get_self_profile`); 4 Alembic migrations — `679a319c12d6` (16-table baseline) + `2a437ca93c53` + `33eabbfbfa6a` (`mfa_backup_codes` + indexed fingerprint) + `c3e913d02be0` (`enrollments.created_at`) → 17 tables; 116-test pytest suite (119 cases); multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
+| Backend  | FastAPI app with `/health`, `/api` router, CORS, lifespan `SELECT 1` boot check, `AppException` handler; async SQLAlchemy 2.0 + `core`/`shared` infra (config, database, Argon2id security + HMAC session codes/versioned QR payload, exceptions, base CRUD, pagination, email, validators, captcha, rate limiting, cache, csv_import, 13 enums); `api/deps.py` with `_get_db`, `_get_current_user`/`_get_optional_current_user` (JWT/HTTPBearer), `require_role(*roles)`, plus `Auth/Admin/Program/Course/Student/Professor/Session/FaceEnrollmentServiceDep`; 15 feature slices / 17 model classes; 12 routers mounted under `/api` with 12 carrying routes — auth(15)→`/api/auth`, admin(3)→`/api/admin/users`, program(10)→`/api/admin/programs`, course(5)→`/api/admin/courses`, offering(10)→`/api/admin/offerings`, student-admin(7)→`/api/admin/students`, professor-admin(6)→`/api/admin/professors`, face-enrollment(2)→`/api/admin/face-enrollment`, session-professor(7)→`/api/professor` (courses/sessions/history/active/close/attendance), professor-self(2)→`/api/professor` (profile read + password patch), student(2)→`/api/student` (sessions verify-code, face-embedding pull), attendance(2)→`/api/student` (scan, history) — the last two share one mount (`enrollment/router.py` intentionally unmounted); `SessionService` (session open/list/history/active/close/attendance reads, HMAC code + `qr_payload`) and professor self-service (`resolve_professor_id`, `list_assigned_offerings` with units/enrolled-count/derived sections, `get_self_profile`); 4 Alembic migrations — `679a319c12d6` (16-table baseline) + `2a437ca93c53` + `33eabbfbfa6a` (`mfa_backup_codes` + indexed fingerprint) + `c3e913d02be0` (`enrollments.created_at`) → 17 tables; 239-case pytest suite (19 files, `conftest.py` + SQLite-by-default `test_db_session`); multi-stage `Dockerfile.dev` (builder→runtime→migrate) |
 | Frontend | Real-API-by-default feature-slice implementation (mock only when `PUBLIC_MOCK_MODE=true`, except the attendance ledger + excuse queue which are hard-coded `MOCK = true` until their backend endpoints land) — 24 pages: landing (Attendly), about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/sessions + create/history/active/[id]/attendance/excuse-requests/reports/profile/settings); 10 feature slices (auth, student, session, attendance, excuse, liveness, sync, report, professor, settings) + runes stores (auth, student) + components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart); professor attendance ledger derives from report fixtures (shared rows + CSV export with history page) and the excuse queue implements the D21 review/quick-excuse contracts in memory; typed `api/client.ts` (BASE_URL + `/api` prefix, auth header, 401-refresh retry, 3-envelope unwrapping) + 18-entry `api/endpoints.ts` registry with mock fixtures; Svelte 5 runes mode forced in `vite.config.ts` (function form, `node_modules` exempt) |
 | Features | Model layer complete (17 classes); service layer landed for auth, admin, program, course, student, professor, session, face_enrollment, attendance (+ `course_professor` borderline class, `shared/csv_import.py` module-level fns); schema layer for the same minus `course_professor`; `enrollment` remains model + stub-router only; `sync`/`excuse`/`analytics`/`system` remain model-only (excuse has a mock-only frontend queue); `liveness` is frontend-only (+ `face_enrollment` backend slice with no model) |
 | Schema   | 17 tables modeled (incl. programs, year_levels, course_offerings, course_professors, excuse_requests, student_risk_scores, backup_log, mfa_backup_codes); migrations at head `c3e913d02be0` ([ERD](docs/design/database-er.md)); forward-looking target is 19 tables (adds `audit_logs`, `app_settings`) per docs/architecture/migration-strategy.md                                                                                                                                                                                                                                                                                                                                                                                         |
-| Tests    | 116 backend test functions (119 cases with parametrization, 13 files) run through the `api-test` Compose service (`--profile test`); frontend verification uses `npm run check` |
+| Tests    | 239 backend test cases (19 files) run through the `api-test` Compose service (`--profile test`) or the local venv; frontend verification uses `npm run check` |

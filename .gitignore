@@ -5,13 +5,12 @@ Thumbs.db
 .vscode/
 *.swp
 
-# python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
+# Python artifacts (__pycache__/, *.pyc, *.pyo, .venv/) live in
+# backend/.gitignore, which owns them. Nothing tracked lives outside
+# backend/, so they are not needed here.
 
 # env files
+# Applies to backend/ and frontend/ alike; both have real .env files.
 .env
 .env.*
 !.env.example

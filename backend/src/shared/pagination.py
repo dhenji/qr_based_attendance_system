@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import Select
 
 DEFAULT_PAGE: int = 1
-DEFAULT_PAGE_SIZE: int = 50
+DEFAULT_PAGE_SIZE: int = 20
 MAX_PAGE_SIZE: int = 200
 SEARCH_MAX_LENGTH: int = 100
 

@@ -29,6 +29,72 @@ from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
 
+def _users_stmt() -> Select[Any]:
+    """Users with the optional student/professor name columns outer-joined.
+
+    Projected in `_to_admin_user_read` order.
+    """
+    return (
+        select(
+            User,
+            Student.first_name,
+            Student.last_name,
+            Professor.first_name,
+            Professor.last_name,
+        )
+        .outerjoin(Student, Student.user_id == User.id)
+        .outerjoin(Professor, Professor.user_id == User.id)
+    )
+
+
+def _users_filters(
+    search: str | None, role: UserRole | None, is_active: bool | None
+) -> list[Any]:
+    filters: list[Any] = []
+
+    if role is not None:
+        filters.append(User.role == role.value)
+
+    if is_active is not None:
+        filters.append(User.is_active == is_active)
+
+    if search:
+        term = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                User.email.ilike(term),
+                User.username.ilike(term),
+                Student.first_name.ilike(term),
+                Student.last_name.ilike(term),
+                Professor.first_name.ilike(term),
+                Professor.last_name.ilike(term),
+            )
+        )
+
+    return filters
+
+
+def _to_admin_user_read(
+    user: User,
+    student_first: str | None,
+    student_last: str | None,
+    professor_first: str | None,
+    professor_last: str | None,
+) -> AdminUserRead:
+    return AdminUserRead(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        role=UserRole(user.role),
+        first_name=student_first or professor_first,
+        last_name=student_last or professor_last,
+        is_active=user.is_active,
+        must_change_password=user.must_change_password,
+        last_login=user.last_login,
+        created_at=user.created_at,
+    )
+
+
 class AdminService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -59,13 +125,13 @@ class AdminService:
             must_change_password=True,
         )
 
-        if payload.role is UserRole.STUDENT:
+        roster: tuple[BaseCRUD[Any], str] | None = self._roster_handles().get(
+            payload.role
+        )
+
+        if roster is not None:
             await self._link_roster(
-                self._students, email=normalized, user_id=user.id, role="student"
-            )
-        elif payload.role is UserRole.PROFESSOR:
-            await self._link_roster(
-                self._professors, email=normalized, user_id=user.id, role="professor"
+                roster[0], email=normalized, user_id=user.id, role=roster[1]
             )
 
         return AdminUserCreateResponse(
@@ -91,36 +157,7 @@ class AdminService:
         page: int,
         size: int,
     ) -> PaginatedResponse[AdminUserRead]:
-        stmt: Select[Any] = (
-            select(
-                User,
-                Student.first_name,
-                Student.last_name,
-                Professor.first_name,
-                Professor.last_name,
-            )
-            .outerjoin(Student, Student.user_id == User.id)
-            .outerjoin(Professor, Professor.user_id == User.id)
-        )
-
-        if role is not None:
-            stmt = stmt.where(User.role == role.value)
-
-        if is_active is not None:
-            stmt = stmt.where(User.is_active == is_active)
-
-        if search:
-            term = f"%{search.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    User.email.ilike(term),
-                    User.username.ilike(term),
-                    Student.first_name.ilike(term),
-                    Student.last_name.ilike(term),
-                    Professor.first_name.ilike(term),
-                    Professor.last_name.ilike(term),
-                )
-            )
+        stmt: Select[Any] = _users_stmt().where(_users_filters(search, role, is_active))
 
         total: int = (
             await self._session.scalar(
@@ -135,24 +172,11 @@ class AdminService:
             )
         ).all()
 
-        items = [
-            AdminUserRead(
-                id=user.id,
-                email=user.email,
-                username=user.username,
-                role=UserRole(user.role),
-                first_name=student_first or professor_first,
-                last_name=student_last or professor_last,
-                is_active=user.is_active,
-                must_change_password=user.must_change_password,
-                last_login=user.last_login,
-                created_at=user.created_at,
-            )
-            for user, student_first, student_last, professor_first, professor_last in rows
-        ]
-
         return PaginatedResponse[AdminUserRead](
-            items=items, total=total, page=page, size=size
+            items=[_to_admin_user_read(*row) for row in rows],
+            total=total,
+            page=page,
+            size=size,
         )
 
     async def deactivate_user(self, *, actor_id: int, user_id: int) -> None:
@@ -166,6 +190,13 @@ class AdminService:
 
         user.is_active = False
         await self._session.flush()
+
+    def _roster_handles(self) -> dict[UserRole, tuple[BaseCRUD[Any], str]]:
+        """Role -> (roster handle, label passed to RosterLinkImpossible)."""
+        return {
+            UserRole.STUDENT: (self._students, "student"),
+            UserRole.PROFESSOR: (self._professors, "professor"),
+        }
 
     async def _link_roster(
         self,

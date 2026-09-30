@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
 from core.config import Settings, get_settings
 from features.attendance.constants import (
@@ -68,6 +70,24 @@ EARTH_RADIUS_METERS: float = 6371000.0
 _IDEMPOTENCY_STORE: dict[str, ScanResponse] = {}
 
 
+@dataclass(frozen=True, kw_only=True)
+class _HistoryFilters:
+    """The one filter set shared by the record, enrolled, and scanned queries.
+
+    `status` narrows the record query only — the enrolled/scanned denominators
+    are deliberately status-agnostic, which is why the whole set is passed
+    rather than each helper taking the subset it happens to use.
+    """
+
+    program_id: int | None = None
+    year_level_id: int | None = None
+    semester: str | None = None
+    course_id: int | None = None
+    status: str | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -79,7 +99,7 @@ def _ensure_aware(value: datetime) -> datetime:
     return value
 
 
-def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+def _haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Great-circle distance in metres between two GPS points."""
     phi1: float = math.radians(lat1)
     phi2: float = math.radians(lat2)
@@ -93,7 +113,7 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     return 2 * EARTH_RADIUS_METERS * math.asin(math.sqrt(a))
 
 
-def validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
+def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
     """Grade the fixed blink -> left -> right challenge (D31)."""
     if not (
         evidence.blink_detected and evidence.head_turn_left and evidence.head_turn_right
@@ -123,6 +143,25 @@ def _store_response(key: str | None, response: ScanResponse) -> None:
         _IDEMPOTENCY_STORE[key] = response
 
 
+async def _keyed_by_id[M: DeclarativeBase](
+    session: AsyncSession, model: type[M], ids: set[int]
+) -> dict[int, M]:
+    """Load a lookup map, skipping the query entirely when `ids` is empty.
+
+    `_load_review_maps` chains these (students -> sessions -> offerings ->
+    courses) to hydrate a page of rows without a query per row.
+    """
+    if not ids:
+        return {}
+
+    return {
+        obj.id: obj
+        for obj in (
+            await session.scalars(select(model).where(model.id.in_(ids)))
+        ).all()
+    }
+
+
 _HISTORY_COUNT_FIELDS: dict[str, str] = {
     "present": ValidationStatus.PRESENT.value,
     "late": ValidationStatus.LATE.value,
@@ -140,14 +179,14 @@ def _approved_review_filter(stmt: Select[Any]) -> Select[Any]:
         Attendance.validation_status.in_(
             [ValidationStatus.PRESENT.value, ValidationStatus.LATE.value]
         ),
-        Attendance.original_status.is_not_none(),
+        Attendance.original_status.is_not(None),
     )
 
 
 def _rejected_review_filter(stmt: Select[Any]) -> Select[Any]:
     return stmt.where(
         Attendance.validation_status == ValidationStatus.REJECTED.value,
-        Attendance.original_status.is_not_none(),
+        Attendance.original_status.is_not(None),
     )
 
 
@@ -195,7 +234,7 @@ class AttendanceService:
         self,
         payload: ScanRequest,
         student_id: int,
-        session_id: int,
+        db_session: Session,
         scanned_at: datetime,
         status: str,
         review: bool,
@@ -203,18 +242,27 @@ class AttendanceService:
         now: datetime,
         idempotency_key: str | None,
     ) -> ScanResponse:
+        """Write the attendance row and build the response.
+
+        Takes the already-loaded `db_session` rather than an id so
+        `expires_at` never reads `row.session`: that relationship declares
+        no `lazy=`, so touching it on a freshly-flushed row would raise
+        MissingGreenlet in async (coding-standards §1.6). It resolved
+        before only because the same request had incidentally loaded this
+        Session into the identity map.
+        """
         row: Attendance = await self._write_attendance(
-            payload, student_id, session_id, scanned_at, status, review, original
+            payload, student_id, db_session.id, scanned_at, status, review, original
         )
         await self._maybe_record_sync(
-            session_id, student_id, row.id, scanned_at, now, idempotency_key
+            db_session.id, student_id, row.id, scanned_at, now, idempotency_key
         )
 
         response = ScanResponse(
             id=row.id,
             status=status,  # type: ignore[arg-type]
             scanned_at=row.timestamp,
-            expires_at=row.session.expires_at,
+            expires_at=db_session.expires_at,
         )
         _store_response(idempotency_key, response)
         return response
@@ -244,7 +292,7 @@ class AttendanceService:
         return await self._persist_scan(
             payload,
             student.id,
-            db_session.id,
+            db_session,
             scanned_at,
             status,
             review,
@@ -359,7 +407,7 @@ class AttendanceService:
         if session.classroom_lat is None or session.classroom_lng is None:
             return
 
-        distance: float = haversine_distance(
+        distance: float = _haversine_distance(
             gps.lat, gps.lng, session.classroom_lat, session.classroom_lng
         )
 
@@ -367,7 +415,7 @@ class AttendanceService:
             raise OutsideGeofenceException(distance, session.classroom_radius_meters)
 
     def _validate_liveness(self, evidence: LivenessEvidence) -> None:
-        if not validate_liveness_evidence(evidence):
+        if not _validate_liveness_evidence(evidence):
             raise LivenessFailedException()
 
     def _is_review_band(self, score: float) -> bool:
@@ -484,9 +532,7 @@ class AttendanceService:
         page, size = self._normalize_history_paging(page, size)
         student = await self._history_student(user_id)
         sort_key, desc = self._history_sort(sort_by, sort_dir)
-
-        filtered = self._apply_history_filters(
-            self._history_base(student.id),
+        filters = _HistoryFilters(
             program_id=program_id,
             year_level_id=year_level_id,
             semester=semester,
@@ -496,28 +542,14 @@ class AttendanceService:
             date_to=date_to,
         )
 
+        filtered = self._apply_history_filters(self._history_base(student.id), filters)
         total = await self._history_total(filtered)
         tallies = await self._history_tallies(filtered)
-        enrolled = await self._history_enrolled(
-            student.id,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-            date_from=date_from,
-            date_to=date_to,
+        summary = self._summarize_history(
+            tallies,
+            await self._history_enrolled(student.id, filters),
+            await self._history_scanned(student.id, filters),
         )
-        scanned = await self._history_scanned(
-            student.id,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-            date_from=date_from,
-            date_to=date_to,
-        )
-
-        summary = self._summarize_history(tallies, enrolled, scanned)
         records = await self._history_page(filtered, sort_key, desc, page, size)
 
         return await self._build_history_response(
@@ -614,26 +646,23 @@ class AttendanceService:
         )
 
     def _apply_history_filters(
-        self,
-        stmt: Select[Any],
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
-        status: str | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
+        self, stmt: Select[Any], filters: _HistoryFilters
     ) -> Select[Any]:
-        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
         stmt = apply_if(
-            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+            stmt, filters.program_id, lambda v: CourseOffering.program_id == v
         )
-        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
-        stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
-        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(
+            stmt, filters.year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(stmt, filters.semester, lambda v: CourseOffering.semester == v)
+        stmt = apply_if(
+            stmt, filters.course_id, lambda v: CourseOffering.course_id == v
+        )
+        stmt = apply_if(
+            stmt, filters.status, lambda v: Attendance.validation_status == v
+        )
+        stmt = apply_if(stmt, filters.date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, filters.date_to, lambda v: Attendance.timestamp <= v)
 
         return stmt
 
@@ -646,27 +675,26 @@ class AttendanceService:
         )
 
     async def _history_tallies(self, filtered: Select[Any]) -> dict[str, int]:
+        """Per-status counts over the filtered set.
+
+        The status column has to be read off the subquery. Selecting
+        `Attendance.validation_status` while selecting *from* the subquery
+        would add `attendance_records` as a second FROM element, silently
+        cross-joining the whole table into the group-by and producing rates
+        above 1.0.
+        """
+        scoped = filtered.subquery()
+        status = scoped.c.validation_status
+
         rows: Sequence[tuple[str, int]] = (
             await self._session.execute(
-                select(Attendance.validation_status, func.count(Attendance.id))
-                .select_from(filtered.subquery())
-                .group_by(Attendance.validation_status)
+                select(status, func.count()).select_from(scoped).group_by(status)
             )
         ).all()  # type: ignore[assignment]
 
-        return {status: count for status, count in rows}
+        return {found: count for found, count in rows}
 
-    async def _history_enrolled(
-        self,
-        student_id: int,
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
-    ) -> int:
+    async def _history_enrolled(self, student_id: int, filters: _HistoryFilters) -> int:
         stmt: Select[Any] = (
             select(func.count(func.distinct(Session.id)))
             .select_from(Session)
@@ -677,29 +705,13 @@ class AttendanceService:
             )
             .where(Enrollment.student_id == student_id)
         )
-        stmt = self._apply_offering_scope(
-            stmt,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-        )
-        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = self._apply_offering_scope(stmt, filters)
+        stmt = apply_if(stmt, filters.date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, filters.date_to, lambda v: Session.created_at <= v)
 
         return (await self._session.scalar(stmt)) or 0  # type: ignore[arg-type]
 
-    async def _history_scanned(
-        self,
-        student_id: int,
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
-    ) -> int:
+    async def _history_scanned(self, student_id: int, filters: _HistoryFilters) -> int:
         stmt: Select[Any] = (
             select(func.count(Attendance.id))
             .select_from(Attendance)
@@ -707,33 +719,31 @@ class AttendanceService:
             .join(CourseOffering, CourseOffering.id == Session.offering_id)
             .where(Attendance.student_id == student_id)
         )
-        stmt = self._apply_offering_scope(
-            stmt,
-            program_id=program_id,
-            year_level_id=year_level_id,
-            semester=semester,
-            course_id=course_id,
-        )
-        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = self._apply_offering_scope(stmt, filters)
+        stmt = apply_if(stmt, filters.date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, filters.date_to, lambda v: Attendance.timestamp <= v)
 
         return (await self._session.scalar(stmt)) or 0  # type: ignore[arg-type]
 
     def _apply_offering_scope(
-        self,
-        stmt: Select[Any],
-        *,
-        program_id: int | None,
-        year_level_id: int | None,
-        semester: str | None,
-        course_id: int | None,
+        self, stmt: Select[Any], filters: _HistoryFilters
     ) -> Select[Any]:
-        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        """The offering-scoped half of the filter set, without `status`.
+
+        The enrolled/scanned denominators must stay status-agnostic, so they
+        take the offering scope only — applying `status` here would silently
+        change the compliance-rate denominator.
+        """
         stmt = apply_if(
-            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+            stmt, filters.program_id, lambda v: CourseOffering.program_id == v
         )
-        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
-        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
+        stmt = apply_if(
+            stmt, filters.year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(stmt, filters.semester, lambda v: CourseOffering.semester == v)
+        stmt = apply_if(
+            stmt, filters.course_id, lambda v: CourseOffering.course_id == v
+        )
 
         return stmt
 
@@ -778,28 +788,17 @@ class AttendanceService:
         if not records:
             return []
 
-        sessions: Sequence[Session] = (
-            await self._session.scalars(
-                select(Session).where(Session.id.in_({r.session_id for r in records}))
-            )
-        ).all()
-        session_map: dict[int, Session] = {s.id: s for s in sessions}
-
-        offerings: Sequence[CourseOffering] = (
-            await self._session.scalars(
-                select(CourseOffering).where(
-                    CourseOffering.id.in_({s.offering_id for s in sessions})
-                )
-            )
-        ).all()
-        offering_map: dict[int, CourseOffering] = {o.id: o for o in offerings}
-
-        courses: Sequence[Course] = (
-            await self._session.scalars(
-                select(Course).where(Course.id.in_({o.course_id for o in offerings}))
-            )
-        ).all()
-        course_map: dict[int, Course] = {c.id: c for c in courses}
+        session_map: dict[int, Session] = await _keyed_by_id(
+            self._session, Session, {r.session_id for r in records}
+        )
+        offering_map: dict[int, CourseOffering] = await _keyed_by_id(
+            self._session,
+            CourseOffering,
+            {s.offering_id for s in session_map.values()},
+        )
+        course_map: dict[int, Course] = await _keyed_by_id(
+            self._session, Course, {o.course_id for o in offering_map.values()}
+        )
 
         items: list[HistoryItem] = []
 
@@ -854,55 +853,19 @@ class AttendanceService:
         dict[int, CourseOffering],
         dict[int, Course],
     ]:
-        students: dict[int, Student] = {
-            s.id: s
-            for s in (
-                await self._session.scalars(
-                    select(Student).where(
-                        Student.id.in_({r.student_id for r in records})
-                    )
-                )
-            ).all()
-        }
-        sessions: dict[int, Session] = {
-            s.id: s
-            for s in (
-                await self._session.scalars(
-                    select(Session).where(
-                        Session.id.in_({r.session_id for r in records})
-                    )
-                )
-            ).all()
-        }
-        offerings: dict[int, CourseOffering] = (
-            {
-                o.id: o
-                for o in (
-                    await self._session.scalars(
-                        select(CourseOffering).where(
-                            CourseOffering.id.in_(
-                                {s.offering_id for s in sessions.values()}
-                            )
-                        )
-                    )
-                ).all()
-            }
-            if sessions
-            else {}
+        students: dict[int, Student] = await _keyed_by_id(
+            self._session, Student, {r.student_id for r in records}
         )
-        courses: dict[int, Course] = (
-            {
-                c.id: c
-                for c in (
-                    await self._session.scalars(
-                        select(Course).where(
-                            Course.id.in_({o.course_id for o in offerings.values()})
-                        )
-                    )
-                ).all()
-            }
-            if offerings
-            else {}
+        sessions: dict[int, Session] = await _keyed_by_id(
+            self._session, Session, {r.session_id for r in records}
+        )
+        offerings: dict[int, CourseOffering] = await _keyed_by_id(
+            self._session,
+            CourseOffering,
+            {s.offering_id for s in sessions.values()},
+        )
+        courses: dict[int, Course] = await _keyed_by_id(
+            self._session, Course, {o.course_id for o in offerings.values()}
         )
         return students, sessions, offerings, courses
 
@@ -998,6 +961,35 @@ class AttendanceService:
             restored = ValidationStatus.PRESENT.value
         return restored
 
+    async def _resolve_approved_status(self, row: Attendance, record_id: int) -> str:
+        """The status an approved record should carry.
+
+        `original_status` is the cheap answer, but a record that was
+        originally PRESENT has to be re-evaluated against the session's
+        late window, so that one case falls through to a full recompute.
+        The session is fetched explicitly — `row.session` would raise
+        MissingGreenlet in async (coding-standards §1.6).
+        """
+        restored: str = self._restore_approved_status(row)
+
+        if restored != ValidationStatus.PRESENT.value:
+            return restored
+
+        db_session: Session | None = await self._session.get(Session, row.session_id)
+
+        if db_session is None:
+            raise ReviewNotFoundException(record_id)
+
+        recomputed: str = self._compute_status(db_session, _ensure_aware(row.timestamp))
+
+        if recomputed not in (
+            ValidationStatus.PRESENT.value,
+            ValidationStatus.LATE.value,
+        ):
+            return ValidationStatus.PRESENT.value
+
+        return recomputed
+
     async def _apply_resolution(
         self, row: Attendance, evidence: dict, status: str
     ) -> None:
@@ -1023,23 +1015,7 @@ class AttendanceService:
             )
 
         if decision == "approve":
-            restored = self._restore_approved_status(row)
-            if restored == ValidationStatus.PRESENT.value:
-                # need full recompute with session context
-                db_session: Session | None = await self._session.get(
-                    Session, row.session_id
-                )
-                if db_session is None:
-                    raise ReviewNotFoundException(record_id)
-                restored = self._compute_status(
-                    db_session, _ensure_aware(row.timestamp)
-                )
-                if restored not in (
-                    ValidationStatus.PRESENT.value,
-                    ValidationStatus.LATE.value,
-                ):
-                    restored = ValidationStatus.PRESENT.value
-            status = restored
+            status = await self._resolve_approved_status(row, record_id)
         else:
             status = ValidationStatus.REJECTED.value
 

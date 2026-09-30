@@ -26,6 +26,7 @@ from features.program.schema import (
 )
 from shared.base import BaseCRUD
 from shared.pagination import PaginatedResponse
+from shared.query import apply_if
 
 
 class ProgramService:
@@ -71,14 +72,9 @@ class ProgramService:
         page: int,
         size: int,
     ) -> PaginatedResponse[ProgramRead]:
-        stmt: Select[tuple[Program]] = select(Program)
-
-        if is_active is not None:
-            stmt = stmt.where(Program.is_active == is_active)
-
-        if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(or_(Program.code.ilike(term), Program.name.ilike(term)))
+        stmt: Select[tuple[Program]] = self._list_stmt(
+            search=search, is_active=is_active
+        )
 
         total: int = (
             await self._session.scalar(
@@ -96,18 +92,38 @@ class ProgramService:
         items: list[ProgramRead] = []
 
         for program in rows:
-            year_levels: Sequence[YearLevel] = await self._year_levels(program.id)
-            fields: dict[str, Any] = self._read_fields(
-                program,
-                course_count=await self._course_count(program.id),
-                year_level_count=len(year_levels),
-                terms_count=self._terms_count(year_levels),
-            )
-
-            items.append(ProgramRead(**fields))
+            items.append(ProgramRead(**await self._aggregates(program)))
 
         return PaginatedResponse[ProgramRead](
             items=items, total=total, page=page, size=size
+        )
+
+    @staticmethod
+    def _list_stmt(
+        *, search: str | None, is_active: bool | None
+    ) -> Select[tuple[Program]]:
+        stmt: Select[tuple[Program]] = select(Program)
+        stmt = apply_if(stmt, is_active, lambda v: Program.is_active == v)
+
+        if search:
+            term: str = f"%{search.strip()}%"
+            stmt = stmt.where(or_(Program.code.ilike(term), Program.name.ilike(term)))
+
+        return stmt
+
+    async def _aggregates(self, program: Program) -> dict[str, Any]:
+        """Derived per-program counts, shaped for `**_read_fields`.
+
+        One query per aggregate — an accepted N+1 at Phase 3 volumes
+        (ADR-057 "Deferred"); never a grouped aggregate query or a column.
+        """
+        year_levels: Sequence[YearLevel] = await self._year_levels(program.id)
+
+        return self._read_fields(
+            program,
+            course_count=await self._course_count(program.id),
+            year_level_count=len(year_levels),
+            terms_count=self._terms_count(year_levels),
         )
 
     async def update(self, *, program_id: int, payload: ProgramUpdate) -> ProgramRead:

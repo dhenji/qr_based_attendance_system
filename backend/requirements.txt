@@ -11,3 +11,9 @@ email-validator==2.2.0
 python-multipart==0.0.20
 httpx==0.28.1
 pytest==8.3.5
+# pytest-asyncio is pinned below 1.4.0 on purpose: 1.4.0 requires
+# pytest>=8.4 and this file pins pytest==8.3.5.
+pytest-asyncio==1.3.0
+# aiosqlite backs the default in-memory test database (conftest.py).
+aiosqlite==0.22.1
+pytest-cov==7.1.0
