@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
@@ -27,6 +28,18 @@ from features.student.model import Student
 from shared.base import BaseCRUD
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
+
+
+@dataclass(frozen=True)
+class _RosterHandle:
+    """A roster a newly created account can be linked into.
+
+    `label` is the role name `RosterLinkImpossible` reports back, so a failed
+    link says "student"/"professor" rather than leaking a model name.
+    """
+
+    handle: BaseCRUD[Student] | BaseCRUD[Professor]
+    label: str
 
 
 def _users_stmt() -> Select[Any]:
@@ -125,13 +138,11 @@ class AdminService:
             must_change_password=True,
         )
 
-        roster: tuple[BaseCRUD[Any], str] | None = self._roster_handles().get(
-            payload.role
-        )
+        roster: _RosterHandle | None = self._roster_handles().get(payload.role)
 
         if roster is not None:
             await self._link_roster(
-                roster[0], email=normalized, user_id=user.id, role=roster[1]
+                roster.handle, email=normalized, user_id=user.id, role=roster.label
             )
 
         return AdminUserCreateResponse(
@@ -191,11 +202,11 @@ class AdminService:
         user.is_active = False
         await self._session.flush()
 
-    def _roster_handles(self) -> dict[UserRole, tuple[BaseCRUD[Any], str]]:
-        """Role -> (roster handle, label passed to RosterLinkImpossible)."""
+    def _roster_handles(self) -> dict[UserRole, _RosterHandle]:
+        """Role -> the roster a new account should be linked into."""
         return {
-            UserRole.STUDENT: (self._students, "student"),
-            UserRole.PROFESSOR: (self._professors, "professor"),
+            UserRole.STUDENT: _RosterHandle(self._students, "student"),
+            UserRole.PROFESSOR: _RosterHandle(self._professors, "professor"),
         }
 
     async def _link_roster(
