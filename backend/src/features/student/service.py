@@ -1,3 +1,4 @@
+import base64
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,7 @@ from features.program.exceptions import (
 )
 from features.program.model import Program, YearLevel
 from features.student.exceptions import (
+    FaceEmbeddingNotFoundException,
     StudentEmailExistsException,
     StudentHasRecordsException,
     StudentIdExistsException,
@@ -23,6 +25,7 @@ from features.student.exceptions import (
 )
 from features.student.model import Student
 from features.student.schema import (
+    FaceEmbeddingResponse,
     StudentCreate,
     StudentDetail,
     StudentImportError,
@@ -31,6 +34,7 @@ from features.student.schema import (
     StudentUpdate,
 )
 from shared.base import BaseCRUD
+from shared.cache import get_face_embedding_cached
 from shared.csv_import import is_valid_email, parse_csv
 from shared.pagination import PaginatedResponse
 
@@ -173,6 +177,34 @@ class StudentService:
 
     async def get(self, *, student_id: int) -> StudentDetail:
         return await self._to_detail(await self._get_or_404(student_id))
+
+    async def get_face_embedding(
+        self, *, user_id: int, current_version: int = 0
+    ) -> FaceEmbeddingResponse | None:
+        """Return the student's embedding if the client copy is stale.
+
+        Return `None` when the client is current (router maps to 204).
+        Raises 404 when the identity is missing or has no blob stored.
+        """
+
+        student: Student | None = await self._students.get_by(user_id=user_id)
+
+        if student is None:
+            raise StudentNotFoundException(user_id)
+
+        blob: bytes | None = await get_face_embedding_cached(self._session, student.id)
+
+        if blob is None:
+            raise FaceEmbeddingNotFoundException(user_id)
+
+        server_version: int = student.face_embedding_version or 0
+
+        if current_version >= server_version:
+            return None
+
+        return FaceEmbeddingResponse(
+            version=server_version, embedding=base64.b64encode(blob).decode("ascii")
+        )
 
     async def list(
         self,

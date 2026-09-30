@@ -1,10 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 
-from api.deps import SessionServiceDep, require_role
+from api.deps import SessionServiceDep, StudentServiceDep, require_role
 from features.auth.model import User
 from features.session.schema import VerifyCodeRequest, VerifyCodeResponse
+from features.student.schema import FaceEmbeddingResponse
 from shared.enums import UserRole
 
 # ALREADY MOUNTED at /api/student (see api/router.py). Student-facing routes
@@ -38,3 +39,24 @@ async def verify_session_code(
 ) -> VerifyCodeResponse:
     _ = user  # role gate only; no student scoping needed for verify
     return await service.verify_code(code=payload.code)
+
+
+@router.get(
+    "/me/face-embedding",
+    response_model=FaceEmbeddingResponse,
+    responses={204: {"description": "Embedding current, no update needed"}},
+    summary="Pull face embedding if client copy is stale",
+)
+async def pull_face_embedding(
+    user: StudentUser,
+    service: StudentServiceDep,
+    current_version: int = Query(default=0, ge=0),
+) -> FaceEmbeddingResponse | Response:
+    result: FaceEmbeddingResponse | None = await service.get_face_embedding(
+        user_id=user.id, current_version=current_version
+    )
+
+    if result is None:
+        return Response(status_code=204)
+
+    return result

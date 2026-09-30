@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from features.student.constants import (
     EMAIL_MAX_LENGTH,
@@ -118,3 +125,13 @@ class StudentImportResult(BaseModel):
     imported: int
     duplicates: int
     errors: list[StudentImportError] = Field(default_factory=list)
+
+
+class FaceEmbeddingResponse(BaseModel):
+    """Version-gated face-embedding pull.
+
+    `embedding` is the base64-encoded encrypted blob from `students.face_embedding` - opaque passthrough, decrypted client-side.
+    """
+
+    version: int
+    embedding: str

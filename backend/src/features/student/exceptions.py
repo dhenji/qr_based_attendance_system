@@ -118,3 +118,16 @@ class StudentHasRecordsException(StudentDomainException):
         super().__init__(
             message=f"Student {student_id} has records and cannot be permanently deleted"
         )
+
+
+class FaceEmbeddingNotFoundException(StudentDomainException):
+    """404 - the student has no face embedding stored.
+
+    Distinct from `StudentNotFoundException`: the identity exists but `student.face_embedding is NULL` (never enrolled, revoked, or cleared on archive).
+    """
+
+    status_code: int = 404
+    code: str = "face_embedding_not_found"
+
+    def __init__(self, user_id: int) -> None:
+        super().__init__(message=f"No face embedding stored for user {user_id}")
