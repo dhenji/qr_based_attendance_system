@@ -267,7 +267,7 @@ export const AuthMeEndpoint: EndpointDef<MeResponse> = {
 		role: 'student',
 		first_name: 'Jose',
 		last_name: 'Rizal',
-		email: 'jose.rizal@isu.edu.ph',
+		email: 'jose.p.rizal@isu.edu.ph',
 		mfa_enabled: false,
 		security_question_set: true,
 		must_change_password: false,
@@ -301,7 +301,7 @@ export const StudentProfileEndpoint: EndpointDef<StudentProfileResponse> = {
 		first_name: 'Jose',
 		middle_name: null,
 		last_name: 'Rizal',
-		email: 'jose.rizal@isu.edu.ph',
+		email: 'jose.p.rizal@isu.edu.ph',
 		program_code: 'BSCS',
 		year_level_label: '1st Year',
 		section: 'A',
@@ -323,6 +323,64 @@ export const StudentDashboardEndpoint: EndpointDef<StudentDashboardResponse> = {
 		total_scans: 0,
 		today_schedule: [],
 		recent_activity: [],
+	}),
+};
+
+export type StudentHistoryStatus =
+	| 'present'
+	| 'late'
+	| 'absent'
+	| 'excused'
+	| 'pending'
+	| 'rejected';
+
+export interface StudentHistoryItemResponse {
+	id: number;
+	session_id: number;
+	course_code: string;
+	course_name: string;
+	status: StudentHistoryStatus;
+	original_status?: StudentHistoryStatus | null;
+	excuse_reason?: string | null;
+	scanned_at: string;
+	scanned_via?: string | null;
+}
+
+export interface StudentHistoryResponse {
+	items: StudentHistoryItemResponse[];
+	total: number;
+	page: number;
+	size: number;
+	summary: {
+		compliance_rate: number;
+		participation_rate: number;
+		counts: {
+			present: number;
+			late: number;
+			absent: number;
+			excused: number;
+			rejected: number;
+		};
+	};
+}
+
+// Student attendance history — live on features/attendance/router.py
+// (GET /student/attendance/history). Query: ?program_id&year_level_id&semester&
+// course_id&status&date_from&date_to&sort_by=date|course|section|status|time&
+// sort_dir&page&size. Summary covers the FULL filter set, not just the page.
+export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
+	url: '/student/attendance/history',
+	method: 'GET',
+	mock: () => ({
+		items: [],
+		total: 0,
+		page: 1,
+		size: 20,
+		summary: {
+			compliance_rate: 0,
+			participation_rate: 0,
+			counts: { present: 0, late: 0, absent: 0, excused: 0, rejected: 0 },
+		},
 	}),
 };
 
@@ -702,6 +760,7 @@ export const endpoints = {
 	// Student
 	studentProfile: StudentProfileEndpoint,
 	studentDashboard: StudentDashboardEndpoint,
+	studentHistory: StudentHistoryEndpoint,
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,

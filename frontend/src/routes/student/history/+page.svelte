@@ -1,12 +1,36 @@
 <script lang="ts">
-	type Status = 'present' | 'absent' | 'pending';
-	type Row = { date: string; course: string; status: Status; time: string };
+	import { onMount } from 'svelte';
+	import { APIError } from '$lib/api/client';
+	import {
+		getSessionHistory,
+		type StudentHistoryStatus,
+	} from '$lib/features/student/service';
+	import { formatDate, formatTime } from '$lib/shared/utils/format';
+
+	type Status = StudentHistoryStatus;
+	type Row = {
+		id: number;
+		date: string;
+		course: string;
+		courseName: string;
+		status: Status;
+		time: string;
+		scannedAt: string;
+	};
 	type SortKey = 'date' | 'course' | 'status' | 'time';
 
-	const rows: Row[] = [];
+	let rows: Row[] = $state([]);
+	let loading = $state(true);
+	let loadError: string | null = $state(null);
+	let total = $state(0);
+	let summary: {
+		compliance_rate: number;
+		participation_rate: number;
+		counts: Record<Status, number> | Record<string, number>;
+	} | null = $state(null);
 
 	const courseOptions = $derived([...new Set(rows.map((r) => r.course))]);
-	const STATUSES: Status[] = ['present', 'absent', 'pending'];
+	const STATUSES: Status[] = ['present', 'late', 'absent', 'excused', 'pending', 'rejected'];
 
 	let sortKey: SortKey = $state('date');
 	let sortAsc = $state(false);
@@ -16,6 +40,92 @@
 	let page = $state(1);
 
 	const PER_PAGE = 5;
+
+	const toRow = (item: {
+		id: number;
+		courseCode: string;
+		courseName: string;
+		status: Status;
+		scannedAt: string;
+	}): Row => ({
+		id: item.id,
+		date: formatDate(item.scannedAt),
+		course: item.courseCode,
+		courseName: item.courseName,
+		status: item.status,
+		time: formatTime(item.scannedAt),
+		scannedAt: item.scannedAt,
+	});
+
+	const load = async () => {
+		loading = true;
+		loadError = null;
+		try {
+			const res = await getSessionHistory({
+				status: filterStatus !== 'All' ? (filterStatus.toLowerCase() as Status) : undefined,
+				sortBy: sortKey,
+				sortDir: sortAsc ? 'asc' : 'desc',
+				page,
+				size: PER_PAGE,
+			});
+			rows = res.items.map(toRow);
+			total = res.total;
+			summary = res.summary;
+		} catch (e) {
+			loadError =
+				e instanceof APIError
+					? e.message
+					: e instanceof Error
+						? e.message
+						: 'Unable to load attendance history';
+			rows = [];
+		} finally {
+			loading = false;
+		}
+	};
+
+	onMount(() => {
+		void load();
+	});
+
+	// Reload server page when the server-side controls change. rows/total/
+	// loading are written by load() but never read here, so no reload loop.
+	$effect(() => {
+		const key = sortKey;
+		const asc = sortAsc;
+		const status = filterStatus;
+		const p = page;
+		void (async () => {
+			loading = true;
+			loadError = null;
+			try {
+				const res = await getSessionHistory({
+					status: status !== 'All' ? (status.toLowerCase() as Status) : undefined,
+					sortBy: key,
+					sortDir: asc ? 'asc' : 'desc',
+					page: p,
+					size: PER_PAGE,
+				});
+				rows = res.items.map(toRow);
+				total = res.total;
+				summary = res.summary;
+			} catch (e) {
+				loadError =
+					e instanceof APIError
+						? e.message
+						: e instanceof Error
+							? e.message
+							: 'Unable to load attendance history';
+				rows = [];
+			} finally {
+				loading = false;
+			}
+		})();
+	});
+
+	const reload = () => {
+		void load();
+	};
 
 	const handleSort = (key: SortKey) => {
 		if (sortKey === key) {
@@ -32,30 +142,25 @@
 	const badgeLabel = (status: Status): string =>
 		status.charAt(0).toUpperCase() + status.slice(1);
 
+	// Server owns status/sort/page; course + search filter the fetched page
+	// client-side (course_id mapping needs a schedule that has no backend yet).
 	const filtered = $derived(
-		rows
-			.filter((r) => {
-				if (filterCourse !== 'All' && r.course !== filterCourse) return false;
-				if (filterStatus !== 'All' && r.status !== filterStatus) return false;
-				if (
-					search &&
-					!r.course.toLowerCase().includes(search.toLowerCase()) &&
-					!r.date.toLowerCase().includes(search.toLowerCase())
-				) {
-					return false;
-				}
-				return true;
-			})
-			.sort((a, b) => {
-				const av = a[sortKey];
-				const bv = b[sortKey];
-				const v = av > bv ? 1 : av < bv ? -1 : 0;
-				return sortAsc ? v : -v;
-			})
+		rows.filter((r) => {
+			if (filterCourse !== 'All' && r.course !== filterCourse) return false;
+			if (
+				search &&
+				!r.course.toLowerCase().includes(search.toLowerCase()) &&
+				!r.date.toLowerCase().includes(search.toLowerCase()) &&
+				!r.courseName.toLowerCase().includes(search.toLowerCase())
+			) {
+				return false;
+			}
+			return true;
+		})
 	);
 
-	const pages = $derived(Math.max(1, Math.ceil(filtered.length / PER_PAGE)));
-	const paged = $derived(filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE));
+	const pages = $derived(Math.max(1, Math.ceil(total / PER_PAGE)));
+	const paged = $derived(filtered);
 
 	const exportCsv = () => {
 		if (filtered.length === 0) {
@@ -83,7 +188,14 @@
 <div class="page">
 	<header class="header">
 		<h1>Attendance History</h1>
-		<p class="subtitle">Semester: 1st Sem 2026</p>
+		<p class="subtitle">
+			{#if summary}
+				Compliance {Math.round(summary.compliance_rate * 100)}% · Participation
+				{Math.round(summary.participation_rate * 100)}% · {total} records
+			{:else}
+				Semester: 1st Sem 2026
+			{/if}
+		</p>
 	</header>
 
 	<div class="card filters">
@@ -144,21 +256,35 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#if filtered.length === 0}
+					{#if loading}
+						<tr>
+							<td class="empty-row" colspan="4">Loading attendance history…</td>
+						</tr>
+					{:else if loadError}
+						<tr>
+							<td class="empty-row" colspan="4">
+								{loadError}
+								<button class="btn-ghost retry-btn" onclick={reload}>Retry</button>
+							</td>
+						</tr>
+					{:else if filtered.length === 0}
 						<tr>
 							<td class="empty-row" colspan="4">No matching records</td>
 						</tr>
 					{:else}
-						{#each paged as r (r.date + r.course)}
+						{#each paged as r (r.id)}
 							<tr>
 								<td class="mono">{r.date}</td>
-								<td><span class="course">{r.course}</span></td>
+								<td><span class="course" title={r.courseName}>{r.course}</span></td>
 								<td>
 									<span
 										class="badge"
 										class:present={r.status === 'present'}
+										class:late={r.status === 'late'}
 										class:absent={r.status === 'absent'}
+										class:excused={r.status === 'excused'}
 										class:pending={r.status === 'pending'}
+										class:rejected={r.status === 'rejected'}
 									>
 										{badgeLabel(r.status)}
 									</span>
@@ -379,6 +505,28 @@
 		color: #b45309;
 		background: #fffbeb;
 		border: 1px solid #fde68a;
+	}
+
+	.badge.late {
+		color: #c2410c;
+		background: #fff7ed;
+		border: 1px solid #fed7aa;
+	}
+
+	.badge.excused {
+		color: #1d4ed8;
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+	}
+
+	.badge.rejected {
+		color: #6b7280;
+		background: #f3f4f6;
+		border: 1px solid #e5e7eb;
+	}
+
+	.retry-btn {
+		margin-left: 0.75rem;
 	}
 
 	.empty-row {

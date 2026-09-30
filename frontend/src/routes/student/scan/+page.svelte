@@ -10,7 +10,8 @@
 		verifySessionCode,
 		type SessionVerification
 	} from '$lib/features/liveness/service';
-	import { studentState } from '$lib/features/student/store.svelte';
+	import { initStudent, studentState } from '$lib/features/student/store.svelte';
+	import { APIError } from '$lib/api/client';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
@@ -47,12 +48,37 @@
 	const getErrorMessage = (error: unknown, fallback: string) =>
 		error instanceof Error ? error.message : fallback;
 
+	// D15 rejection reasons + session lookup failures mapped to user text.
+	// Raw codes never reach the UI.
+	const SCAN_ERROR_MESSAGES: Record<string, string> = {
+		duplicate_scan: 'You have already scanned for this session.',
+		outside_geofence: 'You are outside the attendance geofence.',
+		liveness_failed: 'Liveness check failed. Please try again in good lighting.',
+		face_mismatch: 'Face did not match the enrolled record. Please try again.',
+		not_enrolled: 'You are not enrolled in this course offering.',
+		session_expired: 'This session has closed for scanning.',
+		session_not_found: 'Session not found. Check the code and try again.',
+	};
+
+	const toUserMessage = (error: unknown, fallback: string): string => {
+		if (error instanceof APIError && error.code && SCAN_ERROR_MESSAGES[error.code]) {
+			return SCAN_ERROR_MESSAGES[error.code];
+		}
+		if (error instanceof APIError && error.status === 410) {
+			return 'This session has closed for scanning.';
+		}
+		return getErrorMessage(error, fallback);
+	};
+
 	onDestroy(() => {
 		clearCountdown();
 	});
 
 	onMount(() => {
 		void initFaceModel();
+		if (!studentState.student && !studentState.loading) {
+			void initStudent();
+		}
 	});
 
 	const verifyCode = async (code: string, openScanner: boolean) => {
@@ -70,7 +96,7 @@
 			if (openScanner) goToQr();
 			else startLiveness();
 		} catch (error) {
-			scanError = getErrorMessage(error, 'Unable to verify the session code');
+			scanError = toUserMessage(error, 'Unable to verify the session code');
 		} finally {
 			verifying = false;
 		}
@@ -155,6 +181,11 @@
 			showFailure = true;
 			return;
 		}
+		if (!studentNumber) {
+			rejectionReason = 'Student profile is unavailable. Reload and try again.';
+			showFailure = true;
+			return;
+		}
 
 		livenessActive = false;
 		submitting = true;
@@ -185,7 +216,8 @@
 			});
 
 			if (result.status === 'rejected') {
-				rejectionReason = 'The attendance scan was rejected';
+				rejectionReason =
+					'The attendance scan was rejected. Check your enrollment, location, and lighting, then try again.';
 				showFailure = true;
 				return;
 			}
@@ -203,7 +235,7 @@
 				}
 			}, 1000);
 		} catch (error) {
-			rejectionReason = getErrorMessage(error, 'Unable to submit the attendance scan');
+			rejectionReason = toUserMessage(error, 'Unable to submit the attendance scan');
 			showFailure = true;
 		} finally {
 			submitting = false;

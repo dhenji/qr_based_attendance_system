@@ -233,7 +233,7 @@
 					<div class="field">
 						<label class="form-label" for="reg-email">University email</label>
 						<input class="form-input" id="reg-email" type="email" required
-							autocomplete="email" placeholder="jose.rizal@isu.edu.ph"
+							autocomplete="email" placeholder="jose.p.rizal@isu.edu.ph"
 							value={email}
 							oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
 						<p class="hint">Your name, program and section come from your roster record —

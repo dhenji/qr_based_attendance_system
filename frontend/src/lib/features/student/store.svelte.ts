@@ -1,7 +1,7 @@
 // features/student/store.svelte.ts
 // Student dashboard + scan state using Svelte 5 runes ($state object store)
 
-import type { Course, Student, StudentDashboardResponse } from '$lib/shared/types';
+import type { Course, LivenessEvidence, Student, StudentDashboardResponse } from '$lib/shared/types';
 import {
 	getProfile,
 	updateProfile,
@@ -9,20 +9,35 @@ import {
 	getSessionHistory,
 	getDashboard,
 	submitScan,
+	type StudentHistoryRow,
 } from '$lib/features/student/service';
+import { me } from '$lib/features/auth/service';
 
 // Student state
 export type SessionHistoryItem = {
 	id: number;
-	courseId: number;
+	sessionId?: number;
+	courseId?: number;
 	code: string;
 	courseName: string;
-	status: 'present' | 'late' | 'absent' | 'excused' | 'rejected';
+	status: 'present' | 'late' | 'absent' | 'excused' | 'pending' | 'rejected';
 	originalStatus?: string;
 	excuseReason?: string;
 	scannedAt: string;
 	scannedVia: 'qr' | 'manual';
 };
+
+const toStoreItem = (row: StudentHistoryRow): SessionHistoryItem => ({
+	id: row.id,
+	sessionId: row.sessionId,
+	code: row.courseCode,
+	courseName: row.courseName,
+	status: row.status,
+	originalStatus: row.originalStatus,
+	excuseReason: row.excuseReason,
+	scannedAt: row.scannedAt,
+	scannedVia: row.scannedVia === 'manual' ? 'manual' : 'qr',
+});
 
 const EMPTY_DASHBOARD: StudentDashboardResponse = {
 	compliance_rate: 0,
@@ -63,18 +78,84 @@ const toMessage = (e: unknown, fallback: string) =>
 
 // init
 // One-shot bootstrap: loads the profile, dashboard summary, schedule, and
-// history into state. The profile and dashboard run together; schedule and
-// history are still empty placeholders.
+// history into state. GET /student/profile and GET /student/dashboard have no
+// backend route yet and 404 in real mode, so each leg is independent — a
+// single 404 never blanks the page. Profile falls back to GET /auth/me;
+// dashboard falls back to EMPTY_DASHBOARD. studentState.error is set only
+// when every leg fails.
 export const initStudent = async (): Promise<void> => {
 	studentState.loading = true;
 	studentState.error = null;
+	let failures = 0;
 	try {
-		const [profile, dashboard] = await Promise.all([getProfile(), getDashboard()]);
-		studentState.student = profile;
-		studentState.dashboard = dashboard;
-		studentState.courses = await getSchedule();
-		const res = await getSessionHistory();
-		studentState.history = res.items as SessionHistoryItem[];
+		const [profileRes, dashboardRes] = await Promise.allSettled([getProfile(), getDashboard()]);
+
+		if (profileRes.status === 'fulfilled' && profileRes.value) {
+			studentState.student = profileRes.value;
+		} else {
+			failures += 1;
+			try {
+				const identity = await me();
+				if (identity && identity.role === 'student') {
+					studentState.student = {
+						id: identity.email,
+						userId: String(identity.id),
+						studentNumber: '',
+						email: identity.email,
+						firstName: identity.first_name ?? 'Student',
+						lastName: identity.last_name ?? '',
+						programCode: '',
+						yearLevelLabel: '',
+						faceEnrolled: identity.face_enrolled ?? false,
+						faceEnrolledAt: identity.face_enrolled_at ?? undefined,
+						faceEmbeddingVersion: identity.face_embedding_version ?? undefined,
+						isActive: true,
+					};
+				} else if (identity) {
+					studentState.student = {
+						id: identity.email,
+						userId: String(identity.id),
+						studentNumber: '',
+						email: identity.email,
+						firstName: identity.first_name ?? 'Student',
+						lastName: identity.last_name ?? '',
+						programCode: '',
+						yearLevelLabel: '',
+						faceEnrolled: false,
+						isActive: true,
+					};
+				} else {
+					studentState.student = null;
+				}
+			} catch {
+				studentState.student = null;
+			}
+		}
+
+		if (dashboardRes.status === 'fulfilled' && dashboardRes.value) {
+			studentState.dashboard = dashboardRes.value;
+		} else {
+			failures += 1;
+			studentState.dashboard = { ...EMPTY_DASHBOARD };
+		}
+
+		try {
+			studentState.courses = await getSchedule();
+		} catch {
+			studentState.courses = [];
+		}
+
+		try {
+			const res = await getSessionHistory({ page: 1, size: 20 });
+			studentState.history = res.items.map(toStoreItem);
+		} catch {
+			failures += 1;
+			studentState.history = [];
+		}
+
+		if (failures >= 3 && !studentState.student) {
+			studentState.error = 'Failed to load student data';
+		}
 	} catch (e: unknown) {
 		studentState.error = toMessage(e, 'Failed to load student data');
 	} finally {
@@ -96,19 +177,14 @@ export const doUpdateProfile = async (updates: Partial<Student>): Promise<void> 
 	}
 };
 
-// doSubmitScan: submits a scan, then refreshes history so the dashboard is in
-// sync with the latest records.
+// doSubmitScan: submits via the single live scan path (student/service.ts
+// delegates to liveness/service.ts in real mode), then refreshes history so
+// the dashboard stays in sync with the latest records.
 export const doSubmitScan = async (scanData: {
 	sessionId: number;
 	qrStudentNumber: string;
 	gps: { lat: number; lng: number; accuracy: number };
-	livenessEvidence: {
-		blinkDetected: boolean;
-		headTurnLeft: boolean;
-		headTurnRight: boolean;
-		earSamples: number[];
-		pnpEvidence: object;
-	};
+	livenessEvidence: LivenessEvidence;
 	faceMatchScore: number;
 	scannedAt: string;
 }) => {
@@ -116,8 +192,12 @@ export const doSubmitScan = async (scanData: {
 	studentState.error = null;
 	try {
 		const result = await submitScan(scanData);
-		const res = await getSessionHistory();
-		studentState.history = res.items as SessionHistoryItem[];
+		try {
+			const res = await getSessionHistory({ page: 1, size: 20 });
+			studentState.history = res.items.map(toStoreItem);
+		} catch {
+			// Scan succeeded; history refresh is best-effort.
+		}
 		return result;
 	} catch (e: unknown) {
 		studentState.error = toMessage(e, 'Scan failed');

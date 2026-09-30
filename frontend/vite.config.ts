@@ -6,6 +6,10 @@ import { defineConfig } from 'vite';
 //   npm i -D vite-plugin-pwa
 // and add VitePWA() here + a post-build script (see docs/architecture/frontend-architecture.md).
 export default defineConfig({
+	// api/client.ts reads import.meta.env.PUBLIC_API_URL / PUBLIC_MOCK_MODE.
+	// Vite only exposes VITE_* to the browser by default, so without this the
+	// PUBLIC_* values never reach the bundle and mock mode can never engage.
+	envPrefix: ['VITE_', 'PUBLIC_'],
 	plugins: [
 		sveltekit({
 			compilerOptions: {
