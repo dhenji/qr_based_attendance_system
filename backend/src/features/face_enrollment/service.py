@@ -102,15 +102,15 @@ class FaceEnrollmentService:
         if student is None:
             raise StudentNotFoundException(student_id)
 
-        for photo in (
+        for name, content, content_type in (
             ("front", front, front_content_type),
             ("left", left, left_content_type),
             ("right", right, right_content_type),
         ):
             _validate_photo(
-                name=photo[0],
-                content=photo[1],
-                content_type=photo[2],
+                name=name,
+                content=content,
+                content_type=content_type,
                 max_bytes=self._settings.attachments_max_bytes,
             )
 
