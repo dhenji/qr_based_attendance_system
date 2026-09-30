@@ -546,12 +546,8 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 
 - Never commit `.env` or `.env.*` (except `.env.example` and `.env.test`).
 - Never commit `__pycache__/`, `.venv/`, `node_modules/`, `.svelte-kit/`.
-- Backups directory (`backups/`) is gitignored.
-- Backend-only artifacts — Python bytecode, `.venv/` and pytest/coverage
-  output — are ignored by `backend/.gitignore`.
-- Env-file rules stay in the root `.gitignore`: `frontend/.env` is also a
-  real file. A nested `.gitignore` takes precedence rather than merging, so
-  duplicating them would mean two files that must stay byte-identical.
+- Backend-only artifacts — Python bytecode, `.venv/`, pytest/coverage output, and `backups/` — are ignored by `backend/.gitignore`.
+- Env-file rules stay in the root `.gitignore`: `frontend/.env` is also a real file. A nested `.gitignore` takes precedence rather than merging, so duplicating them would mean two files that must stay byte-identical.
 
 ---
 

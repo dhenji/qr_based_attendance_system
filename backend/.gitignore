@@ -23,3 +23,9 @@ __pycache__/
 .coverage.*
 coverage.xml
 htmlcov/
+
+# backup pipeline output. config.py sets backup_local_dir="./backups" and
+# backup-strategy.md copies .enc + .sha256 there; the runbooks also put raw
+# pg_dump .dump files in it. Phase 8 is not built yet, so nothing writes
+# there today.
+backups/
