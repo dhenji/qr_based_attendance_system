@@ -14,8 +14,9 @@ class CourseProfessorDomainException(CourseProfessorException, DomainException):
 
 
 class OverlappingAssignmentException(CourseProfessorDomainException):
-    """422 - assignment interval overlaps an existing one for the same offering+professor."""
+    """409 - assignment interval overlaps an existing one for the same offering+professor."""
 
+    status_code: int = 409
     code: str = "overlapping_assignment"
 
     def __init__(

@@ -129,7 +129,7 @@ Key docs an agent is likely to need (README.md links the full inventory):
 - `docs/project/roadmap.md` — 13-phase implementation roadmap (Phase 0 done, 12 is a gap)
 
 ### Decision tracking & ops
-- `docs/project/decision-log.md` — authoritative decision log (D1–D58, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing, ADR-058 admin CRUD slice template, ADR-059 face-enrollment class)
+- `docs/project/decision-log.md` — authoritative decision log (D1–D60, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing, ADR-058 admin CRUD slice template, ADR-059 face-enrollment class, ADR-060 conformance audit)
 - `docs/operations/runbooks.md` — restore, rollback, unlock, re-enroll, key rotation
 - `docs/testing/test-plan.md` — portal×feature matrix & decision coverage
 - `docs/deployment/production-checklist.md` — secrets, CORS, storage, first-admin seeding
