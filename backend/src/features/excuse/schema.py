@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from features.excuse.constants import (
     ATTACHMENT_MAX_COUNT,
@@ -96,6 +96,39 @@ class ExcuseReviewRequest(BaseModel):
             return None
         cleaned: str = _clean_reason(value)
         return cleaned or None
+
+
+class EditExcuseRequest(BaseModel):
+    reason: Annotated[
+        str | None,
+        Field(
+            min_length=REASON_MIN_LENGTH_QUICK,
+            max_length=REASON_MAX_LENGTH,
+        ),
+    ] = None
+    review_notes: Annotated[str | None, Field(max_length=REASON_MAX_LENGTH)] = None
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned: str = _clean_reason(value)
+        return cleaned or None
+
+    @field_validator("review_notes")
+    @classmethod
+    def normalize_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned: str = _clean_reason(value)
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def require_at_least_one(self) -> "EditExcuseRequest":
+        if self.reason is None and self.review_notes is None:
+            raise ValueError("At least one of reason or review_notes is required")
+        return self
 
 
 class BulkExcuseRequest(BaseModel):
