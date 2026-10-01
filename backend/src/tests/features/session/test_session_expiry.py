@@ -34,6 +34,7 @@ from features.course.exceptions import (
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
+from features.course_professor.model import CourseProfessor
 from features.session.exceptions import (
     SessionAlreadyActiveException,
     SessionExpiredException,
@@ -750,7 +751,7 @@ async def test_session_list_reports_active_and_its_counts(
     assert item.late_count == 0
 
 
-async def test_session_list_excludes_another_professors_sessions(
+async def test_session_list_excludes_a_professor_outside_the_team(
     test_db_session: AsyncSession,
     factories: Factories,
     settings: Settings,
@@ -759,12 +760,126 @@ async def test_session_list_excludes_another_professors_sessions(
     service = SessionService(test_db_session, settings)
     stranger: Professor = await factories.professor()
 
-    # The seeded session belongs to a different professor, so ownership
-    # filtering has to drop it rather than 404.
+    # The seeded session was opened by somebody else, and `full_stack` seeds no
+    # teaching assignment, so this professor has neither claim to it.
     listed = await service.list_professor_sessions(professor_id=stranger.id)
 
     assert listed.total == 0
     assert listed.items == []
+
+
+async def test_a_coteacher_sees_the_shared_sessions(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """The list and the ledger have to widen together.
+
+    The frontend reads `list_professor_sessions` to build a session directory
+    and joins the ledger onto it. If only one of the two widened, co-teacher rows
+    would arrive with no session to join to.
+    """
+
+    stack, service = await open_session(factories, settings)
+    opened = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(offering_id=stack["offering"].id),
+    )
+    await factories.attendance(
+        stack["student"],
+        Session(id=opened.id, offering_id=stack["offering"].id),
+        validation_status=ValidationStatus.PRESENT.value,
+    )
+    coteacher = await factories.professor()
+    await factories.assignment(
+        stack["offering"], coteacher, assigned_by=stack["admin"]
+    )
+
+    listed = await service.list_professor_sessions(professor_id=coteacher.id)
+    ledger = await service.get_professor_attendance(professor_id=coteacher.id)
+
+    assert [item.id for item in listed.items] == [opened.id]
+    assert [row.session_id for row in ledger.items] == [opened.id]
+    assert ledger.total == 1
+
+
+async def test_past_sessions_stay_visible_after_an_assignment_ends(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """The reason the scope is a union and not a replacement.
+
+    An assignment window is anchored to today, so scoping on assignment alone
+    would empty a professor's history the day their `effective_to` passes - the
+    one thing `Session.professor_id` exists to prevent. Ownership has to keep
+    working on its own.
+    """
+
+    stack, service = await open_session(factories, settings)
+    opened = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(offering_id=stack["offering"].id),
+    )
+    await factories.attendance(
+        stack["student"],
+        Session(id=opened.id, offering_id=stack["offering"].id),
+        validation_status=ValidationStatus.LATE.value,
+    )
+    await service.close_session(session_id=opened.id, professor_id=stack["professor"].id)
+    # Every assignment on the offering ends, including the one the seed created.
+    ended = await test_db_session.scalar(
+        select(CourseProfessor).where(CourseProfessor.offering_id == stack["offering"].id)
+    )
+    assert ended is not None
+    ended.effective_to = factories.now.date() - timedelta(days=1)
+    await test_db_session.flush()
+
+    listed = await service.list_professor_sessions(professor_id=stack["professor"].id)
+    history = await service.get_session_history(professor_id=stack["professor"].id)
+    ledger = await service.get_professor_attendance(
+        professor_id=stack["professor"].id
+    )
+
+    assert [item.id for item in listed.items] == [opened.id]
+    assert [item.id for item in history.items] == [opened.id]
+    assert [row.session_id for row in ledger.items] == [opened.id]
+
+
+async def test_a_lapsed_assignment_stops_showing_shared_history(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """The inverse case: the list follows the assignment, not a shared claim.
+
+    A professor who co-taught before mid-term replacement never owned the
+    session, so once their assignment ends they lose the historical view of it -
+    only `Session.professor_id` outlives the assignment, and only for whoever
+    holds that value.
+    """
+
+    stack, service = await open_session(factories, settings)
+    opened = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(offering_id=stack["offering"].id),
+    )
+    await service.close_session(session_id=opened.id, professor_id=stack["professor"].id)
+    previous = await factories.professor()
+    await factories.assignment(
+        stack["offering"],
+        previous,
+        assigned_by=stack["admin"],
+        effective_to=factories.now.date() - timedelta(days=1),
+    )
+
+    listed = await service.list_professor_sessions(professor_id=previous.id)
+    history = await service.get_session_history(professor_id=previous.id)
+    owner = await service.list_professor_sessions(professor_id=stack["professor"].id)
+
+    assert [item.id for item in listed.items] == []
+    assert [item.id for item in history.items] == []
+    assert [item.id for item in owner.items] == [opened.id]
 
 
 async def test_session_list_normalizes_out_of_range_paging(
