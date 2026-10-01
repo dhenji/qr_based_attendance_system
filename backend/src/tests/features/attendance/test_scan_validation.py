@@ -47,12 +47,13 @@ from features.session.exceptions import (
     SessionNotFoundException,
 )
 from features.session.model import Session
+from features.session.service import SessionService
 from features.student.exceptions import (
     NotEnrolledException,
     StudentNotFoundException,
 )
 from features.sync.model import SyncQueue
-from shared.enums import ScannedVia, UserRole, ValidationStatus
+from shared.enums import QueueStatus, ScannedVia, UserRole, ValidationStatus
 from tests.conftest import Factories
 
 # Somewhere inside the default radius of the fixture classroom.
@@ -818,7 +819,7 @@ async def test_stale_offline_scan_queues_a_sync_record(
     settings: Settings,
     now: datetime,
 ) -> None:
-    stack: dict[str, Any] = await factories.full_stack()
+    stack = await factories.full_stack()
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
     scanned_at = now - timedelta(seconds=SYNC_STALE_SECONDS + 30)
@@ -836,6 +837,75 @@ async def test_stale_offline_scan_queues_a_sync_record(
     assert queued.record_data["attendance_id"] == result.id
     assert queued.record_data["session_id"] == stack["session"].id
     assert queued.record_data["student_id"] == student.id
+
+    # Queued, not finished. Nothing has processed the row yet, so it is what the
+    # active session and the maintenance line count, and what a forced sync
+    # picks up. Marking it done here would leave the backlog permanently empty
+    # while the row sat unreadable to both.
+    assert queued.status == QueueStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_a_stale_scan_raises_the_active_session_pending_count(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    """The queued row and the counter that reports it have to agree.
+
+    Reading the queue any other way than the writer fills it leaves the
+    "waiting for offline syncs" banner permanently at zero, which is the same as
+    not having the counter at all.
+    """
+    stack = await factories.full_stack()
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+    live = SessionService(test_db_session, settings)
+
+    before = await live.get_active_session(
+        session_id=stack["session"].id, professor_id=stack["professor"].id
+    )
+    assert before.pending_sync_count == 0
+
+    await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            now - timedelta(seconds=SYNC_STALE_SECONDS + 30),
+        )
+    )
+
+    after = await live.get_active_session(
+        session_id=stack["session"].id, professor_id=stack["professor"].id
+    )
+    assert after.pending_sync_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_live_scan_leaves_the_pending_count_flat(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    """Only an offline replay belongs in the backlog."""
+    stack = await factories.full_stack()
+    service = AttendanceService(test_db_session, settings)
+    live = SessionService(test_db_session, settings)
+
+    await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(stack["session"], stack["student"].student_id, now),
+    )
+
+    active = await live.get_active_session(
+        session_id=stack["session"].id, professor_id=stack["professor"].id
+    )
+
+    assert active.pending_sync_count == 0
+    assert active.remaining == 0
 
 
 async def test_naive_scanned_at_is_treated_as_utc(

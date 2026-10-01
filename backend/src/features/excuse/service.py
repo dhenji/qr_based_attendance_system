@@ -107,7 +107,7 @@ class ExcuseService:
     ) -> ExcuseActionResponse:
         """Record a professor-issued excuse made from direct knowledge."""
         professor: Professor = await self._resolve_professor(user_id)
-        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        session: Session = await self._get_session_or_404(session_id)
         await self._require_assignment(
             offering_id=session.offering_id, professor_id=professor.id
         )
@@ -150,7 +150,7 @@ class ExcuseService:
     ) -> ExcuseActionResponse:
         """Record a professor-issued excuse backed by held evidence."""
         professor: Professor = await self._resolve_professor(user_id)
-        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        session: Session = await self._get_session_or_404(session_id)
         await self._require_assignment(
             offering_id=session.offering_id, professor_id=professor.id
         )
@@ -196,7 +196,7 @@ class ExcuseService:
         repeat run excuses zero new rows instead of failing.
         """
         professor: Professor = await self._resolve_professor(user_id)
-        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        session: Session = await self._get_session_or_404(session_id)
         await self._require_assignment(
             offering_id=session.offering_id, professor_id=professor.id
         )
@@ -294,7 +294,7 @@ class ExcuseService:
         """
         professor: Professor = await self._resolve_professor(user_id)
         excuse: ExcuseRequest = await self._get_excuse_or_404(request_id)
-        session: Session = await self._get_owned_or_404(excuse.session_id, professor.id)
+        session: Session = await self._get_session_or_404(excuse.session_id)
         await self._require_assignment(
             offering_id=session.offering_id, professor_id=professor.id
         )
@@ -339,16 +339,30 @@ class ExcuseService:
     ) -> ExcuseRequestRead:
         """Update the reason or notes on an existing excuse."""
         professor: Professor = await self._resolve_professor(user_id)
-        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        session: Session = await self._get_session_or_404(session_id)
         await self._require_assignment(
             offering_id=session.offering_id, professor_id=professor.id
         )
-        excuse: ExcuseRequest = await self._get_latest_excuse(student_id, session_id)
+        excuse: ExcuseRequest = await self._get_professor_excuse(
+            student_id, session_id, approved_only=False
+        )
 
         if reason is not None:
             excuse.reason = reason
+            # The attendance row carries its own copy of the reason as the audit
+            # record, so a revision has to land on both tables or the two drift
+            # apart permanently. Only the wording moves: the status, who excused
+            # the student and when stay as the originals, so editing an approved
+            # excuse never rewrites the approval.
+            record: Attendance | None = await self._find_attendance(
+                student_id, session_id
+            )
+            if record is not None and record.excuse_request_id == excuse.id:
+                record.excuse_reason = reason
+
         if review_notes is not None:
             excuse.review_notes = review_notes
+
         await self._session.flush()
         await self._session.refresh(excuse)
 
@@ -359,21 +373,31 @@ class ExcuseService:
     ) -> RevokeExcuseResponse:
         """Revoke a professor-issued excuse and restore the prior status."""
         professor: Professor = await self._resolve_professor(user_id)
-        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        session: Session = await self._get_session_or_404(session_id)
         await self._require_assignment(
             offering_id=session.offering_id, professor_id=professor.id
         )
-        excuse: ExcuseRequest = await self._get_latest_excuse(student_id, session_id)
+        excuse: ExcuseRequest = await self._get_professor_excuse(
+            student_id, session_id, approved_only=True
+        )
         record: Attendance = await self._get_attendance_or_404(student_id, session_id)
 
-        reverted: str | None = record.original_status
-        record.validation_status = record.original_status or record.validation_status
-        record.original_status = None
-        record.excuse_reason = None
-        record.excused_by = None
-        record.excused_at = None
-        record.excuse_type = None
-        record.excuse_request_id = None
+        # Clearing the excuse columns is only correct for the excuse that is
+        # actually stamped here. Doing it unconditionally would drop an audit
+        # trail this revoke has no business touching.
+        reverted: str | None = None
+        if record.excuse_request_id == excuse.id:
+            reverted = record.original_status
+            record.validation_status = (
+                record.original_status or record.validation_status
+            )
+            record.original_status = None
+            record.excuse_reason = None
+            record.excused_by = None
+            record.excused_at = None
+            record.excuse_type = None
+            record.excuse_request_id = None
+
         excuse.status = ExcuseStatus.REJECTED.value
         excuse.reviewed_by = user_id
         excuse.reviewed_at = _utcnow()
@@ -389,12 +413,36 @@ class ExcuseService:
         page: int,
         size: int,
     ) -> PaginatedResponse[ExcuseRequestRead]:
-        """List excuse requests across the professor's own sessions."""
+        """List excuse requests for the offerings the professor is assigned to.
+
+        Scoped by effective teaching assignment rather than by session ownership,
+        matching what the other professor methods will let this professor act on:
+        a co-teacher is a recipient of a request and is told to review it, so the
+        queue has to show it to them.
+
+        The assignment test is an EXISTS rather than a join because a professor
+        can hold several assignments on one offering, and joining would repeat
+        every request once per row.
+        """
         professor: Professor = await self._resolve_professor(user_id)
+        today: date = date.today()
+        assigned = (
+            select(CourseProfessor.offering_id)
+            .where(
+                CourseProfessor.offering_id == Session.offering_id,
+                CourseProfessor.professor_id == professor.id,
+                CourseProfessor.effective_from <= today,
+                or_(
+                    CourseProfessor.effective_to.is_(None),
+                    CourseProfessor.effective_to >= today,
+                ),
+            )
+            .exists()
+        )
         stmt = (
             select(ExcuseRequest)
             .join(Session, Session.id == ExcuseRequest.session_id)
-            .where(Session.professor_id == professor.id)
+            .where(assigned)
         )
         if status is not None:
             stmt = stmt.where(ExcuseRequest.status == status)
@@ -675,14 +723,6 @@ class ExcuseService:
 
         return row
 
-    async def _get_owned_or_404(self, session_id: int, professor_id: int) -> Session:
-        row: Session | None = await self._session.get(Session, session_id)
-
-        if row is None or row.professor_id != professor_id:
-            raise SessionNotFoundException(session_id)
-
-        return row
-
     async def _require_assignment(
         self, *, offering_id: int, professor_id: int
     ) -> None:
@@ -754,10 +794,10 @@ class ExcuseService:
         if enrollment is None:
             raise NotEnrolledException(student_id, offering_id)
 
-    async def _get_attendance_or_404(
+    async def _find_attendance(
         self, student_id: int, session_id: int
-    ) -> Attendance:
-        record: Attendance | None = (
+    ) -> Attendance | None:
+        row: Attendance | None = (
             await self._session.scalars(
                 select(Attendance)
                 .where(
@@ -767,6 +807,13 @@ class ExcuseService:
                 .limit(1)
             )
         ).one_or_none()
+
+        return row
+
+    async def _get_attendance_or_404(
+        self, student_id: int, session_id: int
+    ) -> Attendance:
+        record: Attendance | None = await self._find_attendance(student_id, session_id)
 
         if record is None:
             raise AttendanceNotFoundException(student_id, session_id)
@@ -820,22 +867,39 @@ class ExcuseService:
 
         return row
 
-    async def _get_latest_excuse(
-        self, student_id: int, session_id: int
+    async def _get_professor_excuse(
+        self, student_id: int, session_id: int, *, approved_only: bool
     ) -> ExcuseRequest:
+        """Resolve the professor-issued excuse a revise or revoke acts on.
+
+        Both routes are scoped to a professor-initiated excuse, and neither is
+        keyed by excuse id, so the student and session alone do not identify the
+        row: a student can have their own request open against the same session.
+        Resolving by recency instead would let a professor revise or revoke the
+        student's request, which belongs to them rather than to the professor.
+
+        `approved_only` narrows to the applied state. Every professor-issued
+        excuse is approved and stamped as it is filed, so revoke can insist on
+        it. Edit does not, so it keeps working if that ever stops holding.
+        """
+        conditions = [
+            ExcuseRequest.student_id == student_id,
+            ExcuseRequest.session_id == session_id,
+            ExcuseRequest.initiated_by == ExcuseInitiatedBy.PROFESSOR.value,
+        ]
+        if approved_only:
+            conditions.append(ExcuseRequest.status == ExcuseStatus.APPROVED.value)
+
         row: ExcuseRequest | None = (
             await self._session.scalars(
                 select(ExcuseRequest)
-                .where(
-                    ExcuseRequest.student_id == student_id,
-                    ExcuseRequest.session_id == session_id,
-                )
+                .where(*conditions)
                 .order_by(ExcuseRequest.id.desc())
                 .limit(1)
             )
         ).one_or_none()
 
         if row is None:
-            raise ExcuseNotFoundException(0)
+            raise ExcuseNotFoundException(student_id=student_id, session_id=session_id)
 
         return row
