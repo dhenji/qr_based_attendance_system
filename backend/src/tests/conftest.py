@@ -607,7 +607,7 @@ async def auth_headers(
 def reset_process_globals() -> Any:
     """Clear module-level caches that would otherwise leak across tests.
 
-    Four of them, all process-global:
+    Five of them, all process-global:
 
     - `features.attendance.service._IDEMPOTENCY_STORE` is the scan
       idempotency cache, keyed by user/session/caller-supplied key. A scan
@@ -624,17 +624,21 @@ def reset_process_globals() -> Any:
       factory id counter restarts every test, so student 1 in this test is the
       same cache key as student 1 in the last one - a test that enrolls a face
       hands its blob to the next test that reads an unenrolled student.
+    - `shared.email._PENDING` holds the futures of in-flight notification
+      sends. A test that dispatches an email parks one there, and the next test
+      would inherit it (and any `SMTP_*` monkeypatch it was queued under).
     """
 
     from features.attendance import service as attendance_service
     from features.auth import service as auth_service
-    from shared import cache, rate_limit
+    from shared import cache, email, rate_limit
 
     def _clear() -> None:
         attendance_service._IDEMPOTENCY_STORE.clear()
         rate_limit._limiter._windows.clear()
         auth_service._recovery_limiter._windows.clear()
         cache._cache._store.clear()
+        email._PENDING.clear()
 
     _clear()
     yield

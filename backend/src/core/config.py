@@ -70,6 +70,21 @@ class Settings(BaseSettings):
     attachments_max_bytes: int = 5242880
     attachments_local_dir: str = "./attachments"
 
+    # Email / SMTP. An empty `smtp_host` disables delivery: `shared/email.py`
+    # logs the message instead of connecting, so a deployment without a relay
+    # still serves OTP codes and excuse notifications. `smtp_from` falls back to
+    # `smtp_user` and then to a placeholder, so a From header is always present.
+    # Deliberately unvalidated - mail is deployment config, not a boot
+    # requirement, so unlike JWT_SECRET it must not fail Settings construction.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_start_tls: bool = True
+    smtp_use_ssl: bool = False
+    smtp_timeout_seconds: int = 10
+
     # Cloudfare Trunstile CAPTCHA (optional)
     turnstile_secret_key: str = ""
 
