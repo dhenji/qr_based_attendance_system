@@ -1,0 +1,645 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from typing import Sequence
+
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from features.attendance.model import Attendance
+from features.course_professor.model import CourseProfessor
+from features.enrollment.model import Enrollment
+from features.excuse.constants import (
+    EXCUSE_TYPE_QUICK,
+    EXCUSE_TYPE_REQUEST_APPROVED,
+    EXCUSE_TYPE_WITH_EVIDENCE,
+)
+from features.excuse.exceptions import (
+    AlreadyExcusedException,
+    AttendanceNotFoundException,
+    DuplicateExcuseException,
+    ExcuseNotFoundException,
+    ExcuseNotPendingException,
+    NotEnrolledException,
+    ProfessorNotAssignedException,
+    SessionNotFoundException,
+    StudentNotFoundException,
+)
+from features.excuse.model import ExcuseRequest
+from features.excuse.schema import (
+    BulkExcuseRequest,
+    BulkExcuseResponse,
+    ExcuseActionResponse,
+    ExcuseRequestRead,
+    ExcuseReviewRequest,
+    ProfWithEvidenceRequest,
+    QuickExcuseRequest,
+    RevokeExcuseResponse,
+    StudentExcuseRequest,
+    StudentSubmitResponse,
+)
+from features.professor.model import Professor
+from features.session.model import Session
+from features.student.model import Student
+from shared.base import BaseCRUD
+from shared.enums import (
+    ExcuseInitiatedBy,
+    ExcuseInitiatedVia,
+    ExcuseStatus,
+    ValidationStatus,
+)
+from shared.pagination import PaginatedResponse
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class ExcuseService:
+    """Professor-issued excuses and student excuse requests.
+
+    Every mutation updates ``excuse_requests`` and ``attendance_records``
+    in one transaction, preserving the scanned value in
+    ``attendance_records.original_status`` before overwriting it. Only
+    ``flush()`` is used here; commit/rollback stays in the request
+    dependency.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._excuses: BaseCRUD[ExcuseRequest] = BaseCRUD(ExcuseRequest, session)
+        self._attendance: BaseCRUD[Attendance] = BaseCRUD(Attendance, session)
+
+    async def quick_excuse(
+        self,
+        *,
+        user_id: int,
+        student_id: int,
+        session_id: int,
+        payload: QuickExcuseRequest,
+    ) -> ExcuseActionResponse:
+        """Record a professor-issued excuse made from direct knowledge."""
+        professor: Professor = await self._resolve_professor(user_id)
+        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        await self._require_assignment(
+            offering_id=session.offering_id, professor_id=professor.id
+        )
+        record: Attendance = await self._get_attendance_or_404(student_id, session_id)
+        self._require_excusable(record, student_id, session_id)
+
+        excuse: ExcuseRequest = await self._insert_excuse(
+            student_id=student_id,
+            session_id=session_id,
+            initiated_by=ExcuseInitiatedBy.PROFESSOR.value,
+            initiated_via=ExcuseInitiatedVia.QUICK.value,
+            reason=payload.reason,
+            attachment_urls=None,
+            status=ExcuseStatus.APPROVED.value,
+            reviewed_by=user_id,
+            reviewed_at=_utcnow(),
+        )
+        original: str | None = self._apply_excuse(
+            record,
+            excuse_id=excuse.id,
+            reason=payload.reason,
+            actor_id=user_id,
+            excuse_type=EXCUSE_TYPE_QUICK,
+        )
+
+        return ExcuseActionResponse(
+            excuse_request_id=excuse.id,
+            status=ExcuseStatus.APPROVED.value,
+            original_status=original,
+            new_status=ValidationStatus.EXCUSED.value,
+        )
+
+    async def excuse_with_evidence(
+        self,
+        *,
+        user_id: int,
+        student_id: int,
+        session_id: int,
+        payload: ProfWithEvidenceRequest,
+    ) -> ExcuseActionResponse:
+        """Record a professor-issued excuse backed by held evidence."""
+        professor: Professor = await self._resolve_professor(user_id)
+        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        await self._require_assignment(
+            offering_id=session.offering_id, professor_id=professor.id
+        )
+        record: Attendance = await self._get_attendance_or_404(student_id, session_id)
+        self._require_excusable(record, student_id, session_id)
+
+        excuse: ExcuseRequest = await self._insert_excuse(
+            student_id=student_id,
+            session_id=session_id,
+            initiated_by=ExcuseInitiatedBy.PROFESSOR.value,
+            initiated_via=ExcuseInitiatedVia.PROF_WITH_EVIDENCE.value,
+            reason=payload.reason,
+            attachment_urls=list(payload.attachment_urls),
+            status=ExcuseStatus.APPROVED.value,
+            reviewed_by=user_id,
+            reviewed_at=_utcnow(),
+        )
+        original: str | None = self._apply_excuse(
+            record,
+            excuse_id=excuse.id,
+            reason=payload.reason,
+            actor_id=user_id,
+            excuse_type=EXCUSE_TYPE_WITH_EVIDENCE,
+        )
+
+        return ExcuseActionResponse(
+            excuse_request_id=excuse.id,
+            status=ExcuseStatus.APPROVED.value,
+            original_status=original,
+            new_status=ValidationStatus.EXCUSED.value,
+        )
+
+    async def bulk_excuse_all_absent(
+        self,
+        *,
+        user_id: int,
+        session_id: int,
+        payload: BulkExcuseRequest,
+    ) -> BulkExcuseResponse:
+        """Excuse every still-absent record in one session.
+
+        Idempotent: rows already excused no longer read as absent, so a
+        repeat run excuses zero new rows instead of failing.
+        """
+        professor: Professor = await self._resolve_professor(user_id)
+        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        await self._require_assignment(
+            offering_id=session.offering_id, professor_id=professor.id
+        )
+        now: datetime = _utcnow()
+        rows: Sequence[Attendance] = (
+            await self._session.scalars(
+                select(Attendance).where(
+                    Attendance.session_id == session_id,
+                    Attendance.validation_status == ValidationStatus.ABSENT.value,
+                )
+            )
+        ).all()
+
+        count: int = 0
+        for record in rows:
+            excuse: ExcuseRequest = await self._insert_excuse(
+                student_id=record.student_id,
+                session_id=session_id,
+                initiated_by=ExcuseInitiatedBy.PROFESSOR.value,
+                initiated_via=ExcuseInitiatedVia.QUICK.value,
+                reason=payload.reason,
+                attachment_urls=None,
+                status=ExcuseStatus.APPROVED.value,
+                reviewed_by=user_id,
+                reviewed_at=now,
+            )
+            self._apply_excuse(
+                record,
+                excuse_id=excuse.id,
+                reason=payload.reason,
+                actor_id=user_id,
+                excuse_type=EXCUSE_TYPE_QUICK,
+                now=now,
+            )
+            count += 1
+
+        return BulkExcuseResponse(excused_count=count, reason=payload.reason)
+
+    async def submit_student_excuse(
+        self, *, user_id: int, payload: StudentExcuseRequest
+    ) -> StudentSubmitResponse:
+        """File a student excuse request for the caller's own record.
+
+        The student is resolved from the authenticated user, never from a
+        body-supplied identifier. The attendance row is untouched until a
+        professor approves.
+        """
+        student: Student = await self._resolve_student(user_id)
+        session: Session = await self._get_session_or_404(payload.session_id)
+        await self._require_enrollment(
+            student_id=student.id, offering_id=session.offering_id
+        )
+        record: Attendance = await self._get_attendance_or_404(
+            student.id, session.id
+        )
+        self._require_reviewable(record, student.id, session.id)
+        await self._require_no_open_request(student.id, session.id)
+
+        excuse: ExcuseRequest = await self._insert_excuse(
+            student_id=student.id,
+            session_id=session.id,
+            initiated_by=ExcuseInitiatedBy.STUDENT.value,
+            initiated_via=ExcuseInitiatedVia.REQUEST.value,
+            reason=payload.reason,
+            attachment_urls=list(payload.attachment_urls),
+            status=ExcuseStatus.PENDING.value,
+            reviewed_by=None,
+            reviewed_at=None,
+        )
+        await self._session.refresh(excuse)
+
+        return StudentSubmitResponse(
+            id=excuse.id,
+            status=excuse.status,
+            requested_at=excuse.requested_at,
+        )
+
+    async def review_excuse(
+        self, *, user_id: int, request_id: int, payload: ExcuseReviewRequest
+    ) -> ExcuseRequestRead:
+        """Approve or reject a pending student request.
+
+        Approval mutates the attendance row; rejection leaves it alone.
+        """
+        professor: Professor = await self._resolve_professor(user_id)
+        excuse: ExcuseRequest = await self._get_excuse_or_404(request_id)
+        session: Session = await self._get_owned_or_404(excuse.session_id, professor.id)
+        await self._require_assignment(
+            offering_id=session.offering_id, professor_id=professor.id
+        )
+
+        if excuse.status != ExcuseStatus.PENDING.value:
+            raise ExcuseNotPendingException(request_id)
+
+        now: datetime = _utcnow()
+        excuse.status = payload.status
+        excuse.reviewed_by = user_id
+        excuse.reviewed_at = now
+        excuse.review_notes = payload.review_notes
+        await self._session.flush()
+
+        if payload.status == ExcuseStatus.APPROVED.value:
+            record: Attendance = await self._get_attendance_or_404(
+                excuse.student_id, excuse.session_id
+            )
+            self._require_excusable(record, excuse.student_id, excuse.session_id)
+            self._apply_excuse(
+                record,
+                excuse_id=excuse.id,
+                reason=excuse.reason,
+                actor_id=user_id,
+                excuse_type=EXCUSE_TYPE_REQUEST_APPROVED,
+                now=now,
+            )
+
+        await self._session.refresh(excuse)
+
+        return ExcuseRequestRead.model_validate(excuse)
+
+    async def edit_excuse(
+        self,
+        *,
+        user_id: int,
+        student_id: int,
+        session_id: int,
+        reason: str | None = None,
+        review_notes: str | None = None,
+    ) -> ExcuseRequestRead:
+        """Update the reason or notes on an existing excuse."""
+        professor: Professor = await self._resolve_professor(user_id)
+        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        await self._require_assignment(
+            offering_id=session.offering_id, professor_id=professor.id
+        )
+        excuse: ExcuseRequest = await self._get_latest_excuse(student_id, session_id)
+
+        if reason is not None:
+            excuse.reason = reason
+        if review_notes is not None:
+            excuse.review_notes = review_notes
+        await self._session.flush()
+        await self._session.refresh(excuse)
+
+        return ExcuseRequestRead.model_validate(excuse)
+
+    async def revoke_excuse(
+        self, *, user_id: int, student_id: int, session_id: int
+    ) -> RevokeExcuseResponse:
+        """Revoke a professor-issued excuse and restore the prior status."""
+        professor: Professor = await self._resolve_professor(user_id)
+        session: Session = await self._get_owned_or_404(session_id, professor.id)
+        await self._require_assignment(
+            offering_id=session.offering_id, professor_id=professor.id
+        )
+        excuse: ExcuseRequest = await self._get_latest_excuse(student_id, session_id)
+        record: Attendance = await self._get_attendance_or_404(student_id, session_id)
+
+        reverted: str | None = record.original_status
+        record.validation_status = record.original_status or record.validation_status
+        record.original_status = None
+        record.excuse_reason = None
+        record.excused_by = None
+        record.excused_at = None
+        record.excuse_type = None
+        record.excuse_request_id = None
+        excuse.status = ExcuseStatus.REJECTED.value
+        excuse.reviewed_by = user_id
+        excuse.reviewed_at = _utcnow()
+        await self._session.flush()
+
+        return RevokeExcuseResponse(reverted_to=reverted)
+
+    async def list_for_professor(
+        self,
+        *,
+        user_id: int,
+        status: str | None,
+        page: int,
+        size: int,
+    ) -> PaginatedResponse[ExcuseRequestRead]:
+        """List excuse requests across the professor's own sessions."""
+        professor: Professor = await self._resolve_professor(user_id)
+        stmt = (
+            select(ExcuseRequest)
+            .join(Session, Session.id == ExcuseRequest.session_id)
+            .where(Session.professor_id == professor.id)
+        )
+        if status is not None:
+            stmt = stmt.where(ExcuseRequest.status == status)
+
+        return await self._paginate(stmt, page=page, size=size)
+
+    async def list_for_student(
+        self, *, user_id: int, page: int, size: int
+    ) -> PaginatedResponse[ExcuseRequestRead]:
+        """List the caller's own excuse requests."""
+        student: Student = await self._resolve_student(user_id)
+        stmt = select(ExcuseRequest).where(ExcuseRequest.student_id == student.id)
+
+        return await self._paginate(stmt, page=page, size=size)
+
+    async def list_for_admin(
+        self, *, status: str | None, page: int, size: int
+    ) -> PaginatedResponse[ExcuseRequestRead]:
+        """List excuse requests system-wide."""
+        stmt = select(ExcuseRequest)
+        if status is not None:
+            stmt = stmt.where(ExcuseRequest.status == status)
+
+        return await self._paginate(stmt, page=page, size=size)
+
+    async def get_for_student(
+        self, *, user_id: int, request_id: int
+    ) -> ExcuseRequestRead:
+        """Read one of the caller's own excuse requests."""
+        student: Student = await self._resolve_student(user_id)
+        excuse: ExcuseRequest = await self._get_excuse_or_404(request_id)
+
+        if excuse.student_id != student.id:
+            raise ExcuseNotFoundException(request_id)
+
+        return ExcuseRequestRead.model_validate(excuse)
+
+    # -- internals --------------------------------------------------------
+
+    async def _paginate(
+        self, stmt, *, page: int, size: int
+    ) -> PaginatedResponse[ExcuseRequestRead]:
+        from sqlalchemy import func
+
+        page = max(page, 1)
+        size = min(max(size, 1), 200)
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
+        rows: Sequence[ExcuseRequest] = (
+            await self._session.scalars(
+                stmt.order_by(ExcuseRequest.id.desc())
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+
+        return PaginatedResponse[ExcuseRequestRead](
+            items=[ExcuseRequestRead.model_validate(row) for row in rows],
+            total=total,
+            page=page,
+            size=size,
+        )
+
+    async def _insert_excuse(
+        self,
+        *,
+        student_id: int,
+        session_id: int,
+        initiated_by: str,
+        initiated_via: str,
+        reason: str,
+        attachment_urls: list[str] | None,
+        status: str,
+        reviewed_by: int | None,
+        reviewed_at: datetime | None,
+    ) -> ExcuseRequest:
+        return await self._excuses.create(
+            student_id=student_id,
+            session_id=session_id,
+            initiated_by=initiated_by,
+            initiated_via=initiated_via,
+            reason=reason,
+            attachment_urls=attachment_urls,
+            status=status,
+            reviewed_by=reviewed_by,
+            reviewed_at=reviewed_at,
+        )
+
+    def _apply_excuse(
+        self,
+        record: Attendance,
+        *,
+        excuse_id: int,
+        reason: str,
+        actor_id: int,
+        excuse_type: str,
+        now: datetime | None = None,
+    ) -> str | None:
+        """Stamp an approved excuse onto the attendance row."""
+        original: str | None = record.validation_status
+        stamped: datetime = now or _utcnow()
+        record.original_status = record.validation_status
+        record.validation_status = ValidationStatus.EXCUSED.value
+        record.excuse_reason = reason
+        record.excused_by = actor_id
+        record.excused_at = stamped
+        record.excuse_type = excuse_type
+        record.excuse_request_id = excuse_id
+
+        return original
+
+    async def _get_session_or_404(self, session_id: int) -> Session:
+        row: Session | None = await self._session.get(Session, session_id)
+
+        if row is None:
+            raise SessionNotFoundException(session_id)
+
+        return row
+
+    async def _get_owned_or_404(self, session_id: int, professor_id: int) -> Session:
+        row: Session | None = await self._session.get(Session, session_id)
+
+        if row is None or row.professor_id != professor_id:
+            raise SessionNotFoundException(session_id)
+
+        return row
+
+    async def _require_assignment(
+        self, *, offering_id: int, professor_id: int
+    ) -> None:
+        today: date = date.today()
+        row: CourseProfessor | None = (
+            await self._session.scalars(
+                select(CourseProfessor)
+                .where(
+                    CourseProfessor.offering_id == offering_id,
+                    CourseProfessor.professor_id == professor_id,
+                    CourseProfessor.effective_from <= today,
+                    or_(
+                        CourseProfessor.effective_to.is_(None),
+                        CourseProfessor.effective_to >= today,
+                    ),
+                )
+                .order_by(CourseProfessor.effective_from.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if row is None:
+            raise ProfessorNotAssignedException(offering_id)
+
+    async def _resolve_professor(self, user_id: int) -> Professor:
+        professor: Professor | None = (
+            await self._session.scalars(
+                select(Professor).where(Professor.user_id == user_id).limit(1)
+            )
+        ).one_or_none()
+
+        if professor is None or not professor.is_active:
+            raise ProfessorNotAssignedException(0)
+
+        return professor
+
+    async def _resolve_student(self, user_id: int) -> Student:
+        student: Student | None = (
+            await self._session.scalars(
+                select(Student).where(Student.user_id == user_id).limit(1)
+            )
+        ).one_or_none()
+
+        if student is None:
+            raise StudentNotFoundException(user_id)
+
+        return student
+
+    async def _get_student_or_404(self, student_id: int) -> Student:
+        row: Student | None = await self._session.get(Student, student_id)
+
+        if row is None:
+            raise StudentNotFoundException(student_id)
+
+        return row
+
+    async def _require_enrollment(self, *, student_id: int, offering_id: int) -> None:
+        enrollment: Enrollment | None = (
+            await self._session.scalars(
+                select(Enrollment)
+                .where(
+                    Enrollment.student_id == student_id,
+                    Enrollment.offering_id == offering_id,
+                )
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if enrollment is None:
+            raise NotEnrolledException(student_id, offering_id)
+
+    async def _get_attendance_or_404(
+        self, student_id: int, session_id: int
+    ) -> Attendance:
+        record: Attendance | None = (
+            await self._session.scalars(
+                select(Attendance)
+                .where(
+                    Attendance.student_id == student_id,
+                    Attendance.session_id == session_id,
+                )
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if record is None:
+            raise AttendanceNotFoundException(student_id, session_id)
+
+        return record
+
+    @staticmethod
+    def _require_excusable(
+        record: Attendance, student_id: int, session_id: int
+    ) -> None:
+        if record.validation_status == ValidationStatus.EXCUSED.value:
+            raise AlreadyExcusedException(student_id, session_id)
+
+        if record.validation_status not in (
+            ValidationStatus.ABSENT.value,
+            ValidationStatus.LATE.value,
+            ValidationStatus.REJECTED.value,
+        ):
+            raise AlreadyExcusedException(student_id, session_id)
+
+    @staticmethod
+    def _require_reviewable(
+        record: Attendance, student_id: int, session_id: int
+    ) -> None:
+        if record.validation_status == ValidationStatus.EXCUSED.value:
+            raise AlreadyExcusedException(student_id, session_id)
+
+    async def _require_no_open_request(
+        self, student_id: int, session_id: int
+    ) -> None:
+        existing: ExcuseRequest | None = (
+            await self._session.scalars(
+                select(ExcuseRequest)
+                .where(
+                    ExcuseRequest.student_id == student_id,
+                    ExcuseRequest.session_id == session_id,
+                    ExcuseRequest.status == ExcuseStatus.PENDING.value,
+                )
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if existing is not None:
+            raise DuplicateExcuseException(student_id, session_id)
+
+    async def _get_excuse_or_404(self, request_id: int) -> ExcuseRequest:
+        row: ExcuseRequest | None = await self._excuses.get(request_id)
+
+        if row is None:
+            raise ExcuseNotFoundException(request_id)
+
+        return row
+
+    async def _get_latest_excuse(
+        self, student_id: int, session_id: int
+    ) -> ExcuseRequest:
+        row: ExcuseRequest | None = (
+            await self._session.scalars(
+                select(ExcuseRequest)
+                .where(
+                    ExcuseRequest.student_id == student_id,
+                    ExcuseRequest.session_id == session_id,
+                )
+                .order_by(ExcuseRequest.id.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+
+        if row is None:
+            raise ExcuseNotFoundException(0)
+
+        return row

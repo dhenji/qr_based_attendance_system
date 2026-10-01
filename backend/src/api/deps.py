@@ -16,6 +16,7 @@ from features.attendance.service import AttendanceService
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.course.service import CourseService
+from features.excuse.service import ExcuseService
 from features.face_enrollment.service import FaceEnrollmentService
 from features.professor.service import ProfessorService
 from features.program.service import ProgramService
@@ -188,6 +189,12 @@ async def _get_session_service(
     return SessionService(session)
 
 
+async def _get_excuse_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> ExcuseService:
+    return ExcuseService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
@@ -196,6 +203,7 @@ StudentServiceDep = Annotated[StudentService, Depends(_get_student_service)]
 ProfessorServiceDep = Annotated[ProfessorService, Depends(_get_professor_service)]
 SessionServiceDep = Annotated[SessionService, Depends(_get_session_service)]
 AttendanceServiceDep = Annotated[AttendanceService, Depends(_get_attendance_service)]
+ExcuseServiceDep = Annotated[ExcuseService, Depends(_get_excuse_service)]
 
 
 FaceEnrollmentServiceDep = Annotated[
