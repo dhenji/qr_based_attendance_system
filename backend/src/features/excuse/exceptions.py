@@ -17,8 +17,29 @@ class ExcuseNotFoundException(ExcuseDomainException):
     status_code: int = 404
     code: str = "excuse_not_found"
 
-    def __init__(self, request_id: int) -> None:
-        super().__init__(message=f"Excuse request {request_id} not found")
+    def __init__(
+        self,
+        request_id: int | None = None,
+        *,
+        student_id: int | None = None,
+        session_id: int | None = None,
+    ) -> None:
+        """Missing excuse.
+
+        Callers holding a real id pass it positionally. Callers resolving an
+        excuse by (student, session) have no id yet, and reporting a placeholder
+        such as 0 would send the professor a meaningless "request 0 not found",
+        so they name the student and session instead.
+        """
+        if request_id is not None:
+            message = f"Excuse request {request_id} not found"
+        else:
+            message = (
+                f"No professor-issued excuse for student {student_id} "
+                f"in session {session_id}"
+            )
+
+        super().__init__(message=message)
 
 
 class SessionNotFoundException(ExcuseDomainException):
