@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -17,18 +17,91 @@
 		adminStudentCreateSchema,
 		adminStudentUpdateSchema,
 	} from '$lib/features/admin/schema';
-	import type { AdminStudent } from '$lib/shared/types';
+	import type { AdminStudent, Program, YearLevel } from '$lib/shared/types';
+	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// Student Management (wireframe 4.2): search + status filter + sortable
 	// table + pagination over GET /admin/students. Deactivate flips
-	// is_active (soft); permanent delete is only offered on archived rows and
+	// is_active (soft); permanent delete is only offered on inactive rows and
 	// goes to DELETE /{id}/archive with its 409 has-records guard.
 
 	let search = $state('');
-	let statusFilter = $state<'all' | 'active' | 'archived'>('all');
-	let sortBy = $state<'last_name' | 'student_id' | 'created_at'>('last_name');
+	let sectionFilter = $state('');
+	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
+	let programFilter = $state('');
+	// Year filter is label-based (1st-6th Year) so it works with AND without
+	// a program picked: year_level_ids are per-program, so with no program
+	// there is no single id to send and the label narrows the page locally.
+	let yearLabel = $state('');
+	const YEAR_LABELS = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year', '6th Year'];
+	let programOptions = $state<Program[]>([]);
+	let yearOptions = $state<YearLevel[]>([]);
+	let sortBy = $state<
+		'last_name' | 'student_id' | 'created_at' | 'program_code' | 'section' | 'year_level_label'
+	>('last_name');
 	let sortDir = $state<'asc' | 'desc'>('asc');
+
+	// Columns the backend list endpoint cannot sort (its sort_by Literal only
+	// covers last_name/student_id/created_at) are sorted client-side within the
+	// loaded page instead of sending a value the API would reject with 422.
+	// "Course" here is the Program column (students carry program_code, not a course).
+	const CLIENT_SORTS = ['program_code', 'section', 'year_level_label'] as const;
+	type ClientSort = (typeof CLIENT_SORTS)[number];
+	const isClientSort = (column: typeof sortBy): column is ClientSort =>
+		(CLIENT_SORTS as readonly string[]).includes(column);
+	const CLIENT_SORT_KEY = {
+		program_code: 'programCode',
+		section: 'section',
+		year_level_label: 'yearLevelLabel',
+	} as const;
+
+	// The year_level_id the server can scope to, if any: only when a program
+	// is picked AND that program actually has a year with the chosen label.
+	const yearIdForServer = $derived(
+		programFilter && yearLabel
+			? yearOptions.find((y) => y.label === yearLabel)?.id
+			: undefined
+	);
+
+	// Rows as rendered: server order for backend sorts, local order for the
+	// client-side columns above, plus the standalone year-label filter (used
+	// whenever the label isn't server-scoped to one year_level_id — i.e. no
+	// program picked, or the picked program has no such year).
+	const visibleStudents = $derived.by(() => {
+		let items = adminStudentsState.items;
+		if (isClientSort(sortBy)) {
+			const key = CLIENT_SORT_KEY[sortBy];
+			const dir = sortDir === 'desc' ? -1 : 1;
+			items = [...items].sort(
+				(a, b) =>
+					(String(a[key] ?? '').localeCompare(String(b[key] ?? '')) ||
+						a.lastName.localeCompare(b.lastName) ||
+						a.firstName.localeCompare(b.firstName)) * dir
+			);
+		}
+		if (yearLabel && yearIdForServer === undefined) {
+			items = items.filter((s) => s.yearLevelLabel === yearLabel);
+		}
+		return items;
+	});
+
+	// In label-only mode the server total covers unfiltered rows, so count
+	// what's shown and keep the pager on the single local page.
+	const clientYearFiltered = $derived(yearLabel !== '' && yearIdForServer === undefined);
+	const displayTotal = $derived(
+		clientYearFiltered ? visibleStudents.length : adminStudentsState.total
+	);
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+	onDestroy(() => {
+		if (searchTimer) clearTimeout(searchTimer);
+	});
+
+	const onSearchInput = () => {
+		if (searchTimer) clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => load(1), 300);
+	};
 
 	let formOpen = $state(false);
 	let editing = $state<AdminStudent | null>(null);
@@ -48,31 +121,64 @@
 	let f_section = $state('');
 	let f_username = $state('');
 
+	// Fixed page size: the admin store is shared with the dashboard (which
+	// loads it with size=1 for KPI counts), so never inherit size from it —
+	// that leak is what shrank this table to one row per page.
+	const PAGE_SIZE = 10;
+
 	const isActiveFilter = $derived(
 		statusFilter === 'all' ? undefined : statusFilter === 'active'
 	);
 
 	const totalPages = $derived(
-		Math.max(1, Math.ceil(adminStudentsState.total / adminStudentsState.size))
+		Math.max(1, Math.ceil(displayTotal / PAGE_SIZE))
 	);
 
 	const load = (page = 1) =>
 		initAdminStudents(
 			{
 				search: search.trim() || undefined,
+				section: sectionFilter.trim() || undefined,
+				program_id: programFilter ? Number(programFilter) : undefined,
+				year_level_id: yearIdForServer,
 				is_active: isActiveFilter,
-				sort_by: sortBy,
-				sort_dir: sortDir,
+				// Client-side columns sort locally (see visibleStudents), so
+				// leave the request unsorted rather than sending sort_by the
+				// backend rejects.
+				sort_by: isClientSort(sortBy) ? undefined : sortBy,
+				sort_dir: isClientSort(sortBy) ? undefined : sortDir,
 			},
 			page,
-			adminStudentsState.size
+			PAGE_SIZE
 		);
 
-	onMount(() => {
+	onMount(async () => {
+		try {
+			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
+		} catch {
+			programOptions = [];
+		}
 		load(1);
 	});
 
+	const changeProgram = async () => {
+		yearLabel = '';
+		yearOptions = [];
+		if (programFilter) {
+			try {
+				yearOptions = await listYearLevels(Number(programFilter));
+			} catch {
+				yearOptions = [];
+			}
+		}
+		load(1);
+	};
+
 	const applyFilters = () => {
+		if (searchTimer) {
+			clearTimeout(searchTimer);
+			searchTimer = null;
+		}
 		load(1);
 	};
 
@@ -87,7 +193,7 @@
 	};
 
 	const sortArrow = (column: typeof sortBy) =>
-		sortBy === column ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+		sortBy === column ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ↕';
 
 	const fullName = (s: AdminStudent) =>
 		[s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ');
@@ -155,6 +261,10 @@
 					username: d.username || undefined,
 				});
 			} else {
+				if ((f_program_id && !f_year_level_id) || (!f_program_id && f_year_level_id)) {
+					formError = 'Enter both Program ID and Year level ID, or leave both unchanged.';
+					return;
+				}
 				const parsed = adminStudentUpdateSchema.safeParse({
 					first_name: f_first_name || undefined,
 					last_name: f_last_name || undefined,
@@ -192,6 +302,9 @@
 		try {
 			await deleteArchivedStudent(deleteTarget.id);
 			deleteTarget = null;
+		} catch {
+			// deleteArchivedStudent already put the reason in actionError —
+			// keep the modal open so it stays visible.
 		} finally {
 			deleteBusy = false;
 		}
@@ -202,7 +315,7 @@
 	<header class="header">
 		<div>
 			<h1>Student Management</h1>
-			<p class="muted">Roster records students claim at registration · {adminStudentsState.total} total</p>
+			<p class="muted">Roster records students claim at registration · {displayTotal} total</p>
 		</div>
 		<div class="header-actions">
 			<button class="btn btn-secondary" data-testid="import" onclick={() => goto(Routes.ADMIN_STUDENTS_IMPORT)}>
@@ -223,6 +336,18 @@
 			placeholder="Search ID, name, email…"
 			aria-label="Search students"
 			bind:value={search}
+			oninput={onSearchInput}
+			onkeydown={(e) => {
+				if (e.key === 'Enter') applyFilters();
+			}}
+		/>
+		<input
+			class="input section"
+			type="text"
+			placeholder="Section (e.g. A)"
+			aria-label="Section filter"
+			bind:value={sectionFilter}
+			oninput={onSearchInput}
 			onkeydown={(e) => {
 				if (e.key === 'Enter') applyFilters();
 			}}
@@ -230,7 +355,19 @@
 		<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={applyFilters}>
 			<option value="all">All statuses</option>
 			<option value="active">Active</option>
-			<option value="archived">Archived</option>
+			<option value="inactive">Inactive</option>
+		</select>
+		<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
+			<option value="">All programs</option>
+			{#each programOptions as p (p.id)}
+				<option value={String(p.id)}>{p.code} — {p.name}</option>
+			{/each}
+		</select>
+		<select class="input" aria-label="Year level filter" bind:value={yearLabel} onchange={applyFilters}>
+			<option value="">All years</option>
+			{#each YEAR_LABELS as label (label)}
+				<option value={label}>{label}</option>
+			{/each}
 		</select>
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
@@ -238,8 +375,11 @@
 	{#if adminStudentsState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminStudentsState.error}
-		<section class="card"><p class="error">Could not load students: {adminStudentsState.error}</p></section>
-	{:else if adminStudentsState.items.length === 0}
+		<section class="card">
+			<p class="error">Could not load students: {adminStudentsState.error}</p>
+			<button class="btn btn-secondary" onclick={() => load(adminStudentsState.page)}>Retry</button>
+		</section>
+	{:else if visibleStudents.length === 0}
 		<section class="card">
 			<p class="empty">No students match these filters. Import a roster or add one manually.</p>
 		</section>
@@ -253,24 +393,26 @@
 					<tr>
 						<th><button class="th-btn" onclick={() => toggleSort('student_id')}>ID{sortArrow('student_id')}</button></th>
 						<th><button class="th-btn" onclick={() => toggleSort('last_name')}>Name{sortArrow('last_name')}</button></th>
-						<th>Program</th>
-						<th>Sec</th>
-						<th>Year</th>
+						<th><button class="th-btn" onclick={() => toggleSort('program_code')}>Program{sortArrow('program_code')}</button></th>
+						<th><button class="th-btn" onclick={() => toggleSort('section')}>Sec{sortArrow('section')}</button></th>
+						<th><button class="th-btn" onclick={() => toggleSort('year_level_label')}>Year{sortArrow('year_level_label')}</button></th>
 						<th>Status</th>
 						<th>Face</th>
+						<th><button class="th-btn" onclick={() => toggleSort('created_at')}>Added{sortArrow('created_at')}</button></th>
 						<th><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each adminStudentsState.items as s (s.id)}
+					{#each visibleStudents as s (s.id)}
 						<tr>
 							<td class="mono">{s.studentId}</td>
 							<td>{fullName(s)}</td>
 							<td>{s.programCode}</td>
 							<td>{s.section ?? '—'}</td>
 							<td>{s.yearLevelLabel}</td>
-							<td>{s.isActive ? '✅' : '🚫'}</td>
-							<td>{s.faceEnrolled ? '✅' : '—'}</td>
+							<td><span class={s.isActive ? 'status-active' : 'status-inactive'}>{s.isActive ? 'Active' : 'Inactive'}</span></td>
+							<td>{s.faceEnrolled ? 'Yes' : '—'}</td>
+							<td class="mono">{new Date(s.createdAt).toLocaleDateString()}</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => openEdit(s)}>Edit</button>
 								<button
@@ -290,16 +432,19 @@
 			<div class="pager">
 				<button
 					class="btn btn-secondary"
-					disabled={adminStudentsState.page <= 1}
-					onclick={() => load(adminStudentsState.page - 1)}
+					disabled={adminStudentsState.loading || clientYearFiltered || adminStudentsState.page <= 1}
+					onclick={() => load(Math.max(1, adminStudentsState.page - 1))}
 				>
 					‹ Prev
 				</button>
-				<span class="muted">Page {adminStudentsState.page} of {totalPages}</span>
+				<span class="muted"
+					>Page {Math.min(adminStudentsState.page, totalPages)} of {totalPages} · {displayTotal}
+					total</span
+				>
 				<button
 					class="btn btn-secondary"
-					disabled={adminStudentsState.page >= totalPages}
-					onclick={() => load(adminStudentsState.page + 1)}
+					disabled={adminStudentsState.loading || clientYearFiltered || adminStudentsState.page >= totalPages}
+					onclick={() => load(Math.min(totalPages, adminStudentsState.page + 1))}
 				>
 					Next ›
 				</button>
@@ -317,7 +462,7 @@
 			{/if}
 			<div class="form">
 				{#if !editing}
-					<label>Student ID<input class="input" bind:value={f_student_id} placeholder="2021-01234" /></label>
+					<label>Student ID<input class="input" bind:value={f_student_id} placeholder="24-2132" /></label>
 				{/if}
 				<div class="grid2">
 					<label>First name<input class="input" bind:value={f_first_name} /></label>
@@ -360,7 +505,7 @@
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} ({deleteTarget.studentId}) is archived. This cannot be undone,
+				{fullName(deleteTarget)} ({deleteTarget.studentId}) is inactive. This cannot be undone,
 				and it fails with 409 if enrollments, scans, or excuse requests still reference them.
 			</p>
 			{#if adminStudentsState.actionError}
@@ -446,6 +591,11 @@
 		flex: 1 1 240px;
 	}
 
+	.section {
+		flex: 0 1 140px;
+		min-width: 120px;
+	}
+
 	table {
 		width: 100%;
 		border-collapse: collapse;
@@ -485,6 +635,26 @@
 		font-variant-numeric: tabular-nums;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+
+	.status-active,
+	.status-inactive {
+		display: inline-block;
+		padding: 0.125rem 0.625rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.status-active {
+		background: #dcfce7;
+		color: #16a34a;
+	}
+
+	.status-inactive {
+		background: #f1f5f9;
+		color: #64748b;
 	}
 
 	.row-actions {

@@ -35,6 +35,19 @@ const MOCK_PROFESSOR: MeResponse = {
 	claim_status: 'active',
 };
 
+const MOCK_ADMIN: MeResponse = {
+	...MOCK_STUDENT,
+	id: 3,
+	role: 'admin',
+	first_name: 'Admin',
+	last_name: 'User',
+	email: 'admin@isu.edu.ph',
+	face_enrolled: null,
+	face_enrolled_at: null,
+	face_embedding_version: null,
+	claim_status: null,
+};
+
 const delay = <T>(value: T): Promise<T> => Promise.resolve(value);
 
 const studentTokens: TokenResponse = {
@@ -53,12 +66,25 @@ const professorTokens: TokenResponse = {
 	must_change_password: false,
 };
 
+const adminTokens: TokenResponse = {
+	access_token: 'mock-access-token-admin',
+	refresh_token: 'mock-refresh-token-admin',
+	mfa_pending: false,
+	preauth_token: null,
+	must_change_password: false,
+};
+
 // Who the last mock login signed in as, so /auth/me returns a matching identity
 // instead of always claiming to be the student.
 let signedInAs: MeResponse = MOCK_STUDENT;
 
 export const mockLogin = async (email: string): Promise<TokenResponse> => {
 	const normalized = email.trim().toLowerCase();
+
+	if (normalized === MOCK_ADMIN.email) {
+		signedInAs = MOCK_ADMIN;
+		return delay(adminTokens);
+	}
 
 	if (normalized === MOCK_PROFESSOR.email) {
 		signedInAs = MOCK_PROFESSOR;
@@ -80,6 +106,9 @@ export const mockRegister = async (): Promise<TokenResponse> => {
 
 export const mockMe = async (): Promise<MeResponse> => delay(signedInAs);
 
-export const mockMfaVerify = async (): Promise<TokenResponse> => delay(signedInAs === MOCK_PROFESSOR ? professorTokens : studentTokens);
+export const mockMfaVerify = async (): Promise<TokenResponse> => {
+	if (signedInAs === MOCK_ADMIN) return delay(adminTokens);
+	return delay(signedInAs === MOCK_PROFESSOR ? professorTokens : studentTokens);
+};
 
 export const mockNoop = async (): Promise<void> => delay(undefined);

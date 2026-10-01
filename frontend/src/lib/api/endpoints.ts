@@ -70,7 +70,15 @@ export interface Paginated<T> {
 export interface EndpointDef<T> {
 	url: string;
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-	mock?: () => T;
+	// Mocks receive the same inputs as the real call so stateful fixtures
+	// (e.g. admin roster CRUD) can read path ids from `suffix` and payloads
+	// from `body`, and branch on `method` when one def serves several verbs.
+	mock?: (
+		params?: Record<string, string>,
+		suffix?: string,
+		body?: unknown,
+		method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+	) => T;
 }
 
 // Session QR payload (D18)
@@ -514,60 +522,329 @@ export const ProfessorCoursesEndpoint: EndpointDef<Paginated<ProfessorAssignedOf
 // not append "/" — list/create hit the bare url, detail routes pass the id via
 // the client's `suffix` option (e.g. `/123`, `/123/archive`, `/import`).
 
+const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
+	{
+		id: 1,
+			student_id: '24-2132',
+		first_name: 'Alice',
+		middle_name: 'M',
+		last_name: 'Santos',
+		email: 'alice.santos@isu.edu.ph',
+		program_code: 'BSCS',
+		year_level_label: '3rd Year',
+		section: 'A',
+		is_active: true,
+		face_enrolled: true,
+		created_at: '2024-06-01T08:00:00.000Z',
+		scan_count: 42,
+	},
+	{
+		id: 2,
+			student_id: '24-1045',
+		first_name: 'Bob',
+		middle_name: null,
+		last_name: 'Cruz',
+		email: 'bob.cruz@isu.edu.ph',
+		program_code: 'BSIT',
+		year_level_label: '2nd Year',
+		section: 'B',
+		is_active: true,
+		face_enrolled: false,
+		created_at: '2024-06-02T08:00:00.000Z',
+		scan_count: 18,
+	},
+	{
+		id: 3,
+		student_id: '24-3107',
+		first_name: 'Carla',
+		middle_name: 'D',
+		last_name: 'Reyes',
+		email: 'carla.reyes@isu.edu.ph',
+		program_code: 'BSCS',
+		year_level_label: '3rd Year',
+		section: 'A',
+		is_active: false,
+		face_enrolled: false,
+		created_at: '2024-06-03T08:00:00.000Z',
+		scan_count: 5,
+	},
+	{
+		id: 4,
+		student_id: '24-0892',
+		first_name: 'Dan',
+		middle_name: null,
+		last_name: 'Aquino',
+		email: 'dan.aquino@isu.edu.ph',
+		program_code: 'BSECE',
+		year_level_label: '1st Year',
+		section: 'C',
+		is_active: true,
+		face_enrolled: true,
+		created_at: '2024-06-04T08:00:00.000Z',
+		scan_count: 30,
+	},
+	{
+		id: 5,
+		student_id: '24-5561',
+		first_name: 'Ella',
+		middle_name: 'F',
+		last_name: 'Bautista',
+		email: 'ella.bautista@isu.edu.ph',
+		program_code: 'BSIT',
+		year_level_label: '2nd Year',
+		section: 'B',
+		is_active: false,
+		face_enrolled: false,
+		created_at: '2024-06-05T08:00:00.000Z',
+		scan_count: 0,
+	},
+	{
+		id: 6,
+		student_id: '24-7784',
+		first_name: 'Felix',
+		middle_name: null,
+		last_name: 'Ocampo',
+		email: 'felix.ocampo@isu.edu.ph',
+		program_code: 'BSCS',
+		year_level_label: '4th Year',
+		section: 'A',
+		is_active: true,
+		face_enrolled: true,
+		created_at: '2024-06-06T08:00:00.000Z',
+		scan_count: 51,
+	},
+	{
+		id: 7,
+		student_id: '24-1290',
+		first_name: 'Gia',
+		middle_name: 'H',
+		last_name: 'Navarro',
+		email: 'gia.navarro@isu.edu.ph',
+		program_code: 'BSECE',
+		year_level_label: '1st Year',
+		section: 'C',
+		is_active: true,
+		face_enrolled: false,
+		created_at: '2024-06-07T08:00:00.000Z',
+		scan_count: 12,
+	},
+	{
+		id: 8,
+		student_id: '24-4436',
+		first_name: 'Hugo',
+		middle_name: null,
+		last_name: 'Torres',
+		email: 'hugo.torres@isu.edu.ph',
+		program_code: 'BSIT',
+		year_level_label: '3rd Year',
+		section: 'A',
+		is_active: true,
+		face_enrolled: true,
+		created_at: '2024-06-08T08:00:00.000Z',
+		scan_count: 27,
+	},
+	{
+		id: 9,
+		student_id: '24-9021',
+		first_name: 'Ivy',
+		middle_name: 'J',
+		last_name: 'Lim',
+		email: 'ivy.lim@isu.edu.ph',
+		program_code: 'BSCS',
+		year_level_label: '2nd Year',
+		section: 'B',
+		is_active: true,
+		face_enrolled: false,
+		created_at: '2024-06-09T08:00:00.000Z',
+		scan_count: 9,
+	},
+	{
+		id: 10,
+		student_id: '24-6178',
+		first_name: 'Jonas',
+		middle_name: null,
+		last_name: 'Mendoza',
+		email: 'jonas.mendoza@isu.edu.ph',
+		program_code: 'BSECE',
+		year_level_label: '2nd Year',
+		section: 'A',
+		is_active: false,
+		face_enrolled: true,
+		created_at: '2024-06-10T08:00:00.000Z',
+		scan_count: 22,
+	},
+];
+
 const MOCK_ADMIN_STUDENTS: Paginated<AdminStudentResponse> = {
-	items: [
-		{
-			id: 1,
-			student_id: '2021-001',
-			first_name: 'Alice',
-			middle_name: 'M',
-			last_name: 'Santos',
-			email: 'alice.santos@isu.edu.ph',
-			program_code: 'BSCS',
-			year_level_label: '3rd Year',
-			section: 'A',
-			is_active: true,
-			face_enrolled: true,
-			created_at: new Date().toISOString(),
-			scan_count: 42,
-		},
-		{
-			id: 2,
-			student_id: '2022-002',
-			first_name: 'Bob',
-			middle_name: null,
-			last_name: 'Cruz',
-			email: 'bob.cruz@isu.edu.ph',
-			program_code: 'BSIT',
-			year_level_label: '2nd Year',
-			section: 'B',
-			is_active: true,
-			face_enrolled: false,
-			created_at: new Date().toISOString(),
-			scan_count: 18,
-		},
-	],
+	items: MOCK_ADMIN_STUDENT_ROWS.slice(0, 2),
 	total: 2,
 	page: 1,
 	size: 20,
 };
 
+const mockAdminStudentsList = (
+	params?: Record<string, string>
+): Paginated<AdminStudentResponse> => {
+	let rows = [...MOCK_ADMIN_STUDENT_ROWS];
+
+	const search = params?.search?.trim().toLowerCase();
+	if (search) {
+		rows = rows.filter((r) =>
+			[r.student_id, r.first_name, r.middle_name ?? '', r.last_name, r.email]
+				.join(' ')
+				.toLowerCase()
+				.includes(search)
+		);
+	}
+
+	if (params?.is_active !== undefined) {
+		const wantActive = params.is_active === 'true';
+		rows = rows.filter((r) => r.is_active === wantActive);
+	}
+
+	const section = params?.section?.trim().toLowerCase();
+	if (section) {
+		rows = rows.filter((r) => (r.section ?? '').toLowerCase() === section);
+	}
+
+	// program_id/year_level_id mirror the backend list filters. The mock rows
+	// carry codes/labels rather than FK ids, so resolve through the programs
+	// mock (same source the filter dropdowns read).
+	if (params?.program_id) {
+		const program = MOCK_PROGRAMS.items.find((p) => String(p.id) === params.program_id);
+		rows = program ? rows.filter((r) => r.program_code === program.code) : [];
+	}
+
+	if (params?.year_level_id) {
+		const year = MOCK_YEARS.find((y) => String(y.id) === params.year_level_id);
+		rows = year ? rows.filter((r) => r.year_level_label === year.label) : [];
+	}
+
+	const sortBy = params?.sort_by;
+	const dir = params?.sort_dir === 'desc' ? -1 : 1;
+	if (sortBy === 'last_name' || sortBy === 'student_id' || sortBy === 'created_at') {
+		rows.sort((a, b) => {
+			if (sortBy === 'last_name') {
+				return (
+					a.last_name.localeCompare(b.last_name) ||
+					a.first_name.localeCompare(b.first_name)
+				) * dir;
+			}
+			return String(a[sortBy]).localeCompare(String(b[sortBy])) * dir;
+		});
+	}
+
+	const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+	const total = rows.length;
+	const totalPages = Math.max(1, Math.ceil(total / size));
+	const page = Math.min(Math.max(parseInt(params?.page ?? '1', 10) || 1, 1), totalPages);
+
+	return {
+		items: rows.slice((page - 1) * size, page * size),
+		total,
+		page,
+		size,
+	};
+};
+
 export const AdminStudentsEndpoint: EndpointDef<Paginated<AdminStudentResponse>> = {
 	url: '/admin/students',
 	method: 'GET',
-	mock: () => MOCK_ADMIN_STUDENTS,
+	mock: (params) => mockAdminStudentsList(params),
 };
+
+interface MockStudentPayload {
+	student_id?: unknown;
+	first_name?: unknown;
+	middle_name?: unknown;
+	last_name?: unknown;
+	email?: unknown;
+	program_id?: unknown;
+	year_level_id?: unknown;
+	section?: unknown;
+	is_active?: unknown;
+}
+
+// In-memory roster so mock-mode Add/Edit/Deactivate/Delete actually stick.
+// Keyed off MOCK_ADMIN_STUDENT_ROWS; list/create/detail/delete all share it.
+const findMockStudentRow = (suffix?: string): AdminStudentResponse => {
+	const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+	const row = MOCK_ADMIN_STUDENT_ROWS.find((r) => r.id === id);
+	if (!row) throw new Error('Student not found.');
+	return row;
+};
+
+const mockProgramCodeFor = (programId: number): string =>
+	MOCK_PROGRAMS.items.find((p) => p.id === programId)?.code ?? 'BSCS';
+
+const mockYearLabelFor = (yearLevelId: number): string =>
+	MOCK_YEARS.find((y) => y.id === yearLevelId)?.label ?? '1st Year';
+
+const toMockDetail = (row: AdminStudentResponse): AdminStudentDetailResponse => ({
+	...row,
+	face_enrolled_at: null,
+	face_embedding_version: 1,
+});
 
 export const AdminStudentCreateEndpoint: EndpointDef<AdminStudentResponse> = {
 	url: '/admin/students',
 	method: 'POST',
-	mock: () => MOCK_ADMIN_STUDENTS.items[0],
+	mock: (_params, _suffix, body) => {
+		const p = (body ?? {}) as MockStudentPayload;
+		const studentId = String(p.student_id ?? '').trim().toUpperCase();
+		const email = String(p.email ?? '').trim().toLowerCase();
+		if (MOCK_ADMIN_STUDENT_ROWS.some((r) => r.student_id === studentId)) {
+			throw new Error('Student ID already exists.');
+		}
+		if (MOCK_ADMIN_STUDENT_ROWS.some((r) => r.email.toLowerCase() === email)) {
+			throw new Error('Email already exists.');
+		}
+		const row: AdminStudentResponse = {
+			id: Math.max(...MOCK_ADMIN_STUDENT_ROWS.map((r) => r.id), 0) + 1,
+			student_id: studentId,
+			first_name: String(p.first_name ?? ''),
+			middle_name: (p.middle_name as string | null) ?? null,
+			last_name: String(p.last_name ?? ''),
+			email,
+			program_code: mockProgramCodeFor(Number(p.program_id)),
+			year_level_label: mockYearLabelFor(Number(p.year_level_id)),
+			section: p.section ? String(p.section) : null,
+			is_active: true,
+			face_enrolled: false,
+			created_at: new Date().toISOString(),
+			scan_count: 0,
+		};
+		MOCK_ADMIN_STUDENT_ROWS.push(row);
+		return row;
+	},
 };
 
 export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse> = {
 	url: '/admin/students',
 	method: 'GET',
-	mock: () => ({ ...MOCK_ADMIN_STUDENTS.items[0], face_enrolled_at: null, face_embedding_version: 1 }),
+	mock: (_params, suffix, body, method) => {
+		if (method === 'DELETE') {
+			const row = findMockStudentRow(suffix);
+			if (row.is_active) throw new Error('Only inactive students can be deleted.');
+			MOCK_ADMIN_STUDENT_ROWS.splice(MOCK_ADMIN_STUDENT_ROWS.indexOf(row), 1);
+			return undefined as unknown as AdminStudentDetailResponse;
+		}
+		if (method === 'PATCH') {
+			const row = findMockStudentRow(suffix);
+			const p = (body ?? {}) as MockStudentPayload;
+			if (p.first_name !== undefined) row.first_name = String(p.first_name);
+			if (p.last_name !== undefined) row.last_name = String(p.last_name);
+			if (p.email !== undefined) row.email = String(p.email).trim().toLowerCase();
+			if (p.section !== undefined) row.section = p.section ? String(p.section) : null;
+			if (typeof p.is_active === 'boolean') row.is_active = p.is_active;
+			if (p.program_id !== undefined)
+				row.program_code = mockProgramCodeFor(Number(p.program_id));
+			if (p.year_level_id !== undefined)
+				row.year_level_label = mockYearLabelFor(Number(p.year_level_id));
+			return toMockDetail(row);
+		}
+		return toMockDetail(findMockStudentRow(suffix));
+	},
 };
 
 export const AdminStudentImportEndpoint: EndpointDef<StudentImportResult> = {
@@ -674,33 +951,27 @@ const MOCK_PROGRAMS: Paginated<ProgramResponse> = {
 	size: 20,
 };
 
+const ordinal = (n: number): string =>
+	n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
+
+const mockYear = (id: number, programId: number, yearNumber: number): YearLevelResponse => ({
+	id,
+	program_id: programId,
+	year_number: yearNumber,
+	label: `${ordinal(yearNumber)} Year`,
+	term_structure: {
+		terms: [
+			{ code: '1st', label: '1st Semester' },
+			{ code: '2nd', label: '2nd Semester' },
+		],
+	},
+	sort_order: yearNumber,
+});
+
+// 1st-6th Year for every mock program (ids 1-6 → program 1, 7-12 → program 2).
 const MOCK_YEARS: YearLevelResponse[] = [
-	{
-		id: 1,
-		program_id: 1,
-		year_number: 1,
-		label: '1st Year',
-		term_structure: {
-			terms: [
-				{ code: '1st', label: '1st Semester' },
-				{ code: '2nd', label: '2nd Semester' },
-			],
-		},
-		sort_order: 1,
-	},
-	{
-		id: 2,
-		program_id: 1,
-		year_number: 2,
-		label: '2nd Year',
-		term_structure: {
-			terms: [
-				{ code: '1st', label: '1st Semester' },
-				{ code: '2nd', label: '2nd Semester' },
-			],
-		},
-		sort_order: 2,
-	},
+	...[1, 2, 3, 4, 5, 6].map((n, i) => mockYear(i + 1, 1, n)),
+	...[1, 2, 3, 4, 5, 6].map((n, i) => mockYear(i + 7, 2, n)),
 ];
 
 export const AdminProgramsEndpoint: EndpointDef<Paginated<ProgramResponse>> = {
@@ -718,13 +989,28 @@ export const AdminProgramCreateEndpoint: EndpointDef<ProgramResponse> = {
 export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 	url: '/admin/programs',
 	method: 'GET',
-	mock: () => ({ ...MOCK_PROGRAMS.items[0], year_levels: MOCK_YEARS }),
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const program = MOCK_PROGRAMS.items.find((p) => p.id === id) ?? MOCK_PROGRAMS.items[0];
+		return {
+			...program,
+			year_levels: MOCK_YEARS.filter((y) => y.program_id === program.id),
+		};
+	},
 };
 
 export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
 	url: '/admin/programs',
 	method: 'GET',
-	mock: () => ({ items: MOCK_YEARS, total: MOCK_YEARS.length, page: 1, size: 50 }),
+	mock: (_params, suffix) => {
+		// Suffix looks like `/3/years` — only that program's years come back.
+		const programId = parseInt(suffix?.match(/\/(\d+)\/years/)?.[1] ?? '', 10);
+		const items =
+			Number.isFinite(programId) && programId > 0
+				? MOCK_YEARS.filter((y) => y.program_id === programId)
+				: [...MOCK_YEARS];
+		return { items, total: items.length, page: 1, size: 50 };
+	},
 };
 
 export const AdminYearLevelDetailEndpoint: EndpointDef<YearLevelResponse> = {
