@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
@@ -281,7 +281,7 @@ class SessionService:
         offline-sync banner, and ``students`` lists every enrolled student
         with their scan status (unscanned reads as absent).
         """
-        row: Session = await self._get_owned_or_404(session_id, professor_id)
+        row: Session = await self._get_scoped_or_404(session_id, professor_id)
         now: datetime = _utcnow()
         students: Sequence[Student] = await self._enrolled_students(row.offering_id)
         records: Sequence[Attendance] = await self._attendance_rows(session_id)
@@ -346,7 +346,7 @@ class SessionService:
         self, *, session_id: int, professor_id: int
     ) -> SessionCloseResponse:
         """Manually close session scanning; already-closed closes are no-ops."""
-        row: Session = await self._get_owned_or_404(session_id, professor_id)
+        row: Session = await self._get_scoped_or_404(session_id, professor_id)
         now: datetime = _utcnow()
 
         if row.expires_at is None or row.expires_at > now:
@@ -724,13 +724,82 @@ class SessionService:
 
         return offering
 
-    async def _get_owned_or_404(self, session_id: int, professor_id: int) -> Session:
+    async def _get_scoped_or_404(
+        self, session_id: int, professor_id: int
+    ) -> Session:
+        """Resolve a session the professor may act on.
+
+        `Session.professor_id` records who opened the session and nothing more,
+        so a co-teacher is not excluded from one merely because somebody else
+        opened it. Ownership is checked first and the assignment is only looked
+        up when it fails, which keeps the common case to a single row fetch.
+
+        `session.professor_id` is never written here: attribution stays with
+        whoever opened the session even though access does not.
+        """
         row: Session | None = await self._sessions.get(session_id)
 
-        if row is None or row.professor_id != professor_id:
+        if row is None:
             raise SessionNotFoundException(session_id)
 
+        if row.professor_id != professor_id:
+            await self._require_assignment(
+                offering_id=row.offering_id, professor_id=professor_id
+            )
+
         return row
+
+    async def _assigned_offering_exists(
+        self, offering_id: int, professor_id: int
+    ) -> bool:
+        """Whether the professor currently holds an assignment for the offering."""
+        today: date = date.today()
+        row: CourseProfessor | None = (
+            await self._session.scalars(
+                select(CourseProfessor)
+                .where(
+                    CourseProfessor.offering_id == offering_id,
+                    CourseProfessor.professor_id == professor_id,
+                    CourseProfessor.effective_from <= today,
+                    or_(
+                        CourseProfessor.effective_to.is_(None),
+                        CourseProfessor.effective_to >= today,
+                    ),
+                )
+                .limit(1)
+            )
+        ).one_or_none()
+
+        return row is not None
+
+    @staticmethod
+    def _assigned_offering_clause(
+        offering_id: Any, professor_id: int
+    ) -> ColumnElement[bool]:
+        """`EXISTS` an effective assignment for this offering and professor.
+
+        A subquery rather than a join so a professor holding several assignments
+        on one offering repeats no rows, and built inline so the calling
+        statement stays a single query. The assignment window is anchored to
+        today, so this must only ever widen a scope - never replace ownership
+        with it, or a professor loses sight of their own past sessions once an
+        assignment's `effective_to` passes.
+        """
+        today: date = date.today()
+
+        return (
+            select(CourseProfessor.offering_id)
+            .where(
+                CourseProfessor.offering_id == offering_id,
+                CourseProfessor.professor_id == professor_id,
+                CourseProfessor.effective_from <= today,
+                or_(
+                    CourseProfessor.effective_to.is_(None),
+                    CourseProfessor.effective_to >= today,
+                ),
+            )
+            .exists()
+        )
 
     async def _require_assignment(self, *, offering_id: int, professor_id: int) -> None:
         today: date = date.today()

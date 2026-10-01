@@ -319,8 +319,31 @@ def test_get_active_session_counts_tiles_and_banner() -> None:
     assert by_number["S003"].status == "absent"
 
 
-def test_get_active_session_rejects_other_professor() -> None:
-    session = _FakeSession(objs=(_session(),), rows={})
+def test_get_active_session_rejects_a_professor_outside_the_team() -> None:
+    """No ownership and no assignment: the session is not theirs to project."""
+    session = _FakeSession(objs=(_session(),), rows={CourseProfessor: []})
+    service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
+
+    with pytest.raises(OfferingAssignmentNotFoundException):
+        _run(service.get_active_session(session_id=50, professor_id=999))
+
+
+def test_get_active_session_admits_a_coteacher() -> None:
+    """Someone else opened it, but the offering is assigned to this professor."""
+    session = _FakeSession(
+        objs=(_session(),),
+        rows={CourseProfessor: [_assignment(offering_id=10, professor_id=999)]},
+    )
+    service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
+
+    active = _run(service.get_active_session(session_id=50, professor_id=999))
+
+    assert active.id == 50
+
+
+def test_a_missing_session_is_not_reported_as_a_missing_assignment() -> None:
+    """A wrong id must stay a 404 on the session, whatever the professor holds."""
+    session = _FakeSession(objs=(), rows={CourseProfessor: [_assignment()]})
     service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
 
     with pytest.raises(SessionNotFoundException):
