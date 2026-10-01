@@ -724,6 +724,18 @@ List professor's active course assignments with program/year badges.
 
 ### Sessions
 
+**Session scope (D62).** `sessions.professor_id` records who *opened* a session;
+it is attribution, not authorization (D8). Every endpoint below admits a
+professor who either opened the session or holds a current `course_professors`
+assignment on its offering, and a professor with neither claim gets
+`404 assignment_not_found`. The column is never rewritten, so history stays
+attributed to whoever opened the session. The three read endpoints
+(`GET /professor/sessions`, `/sessions/history`, `/professor/attendance`) scope
+as a union of both claims rather than replacing ownership with the assignment -
+an assignment window is anchored to today, so an assignment-only scope would
+hide a professor's own past sessions once that assignment's `effective_to`
+passes. The same rule governs the excuse endpoints under `/professor`.
+
 #### `GET /professor/sessions`
 
 |                  |                                                                                                                                        |
@@ -740,7 +752,7 @@ Open a new attendance session.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
 | **Response 201** | `{ id, session_code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration`                                                                                                                          |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 404 `assignment_not_found`                                                                                                                          |
 | **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49).                                |
 
 #### `GET /professor/sessions/active/{id}`

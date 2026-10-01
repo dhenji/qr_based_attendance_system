@@ -1001,14 +1001,13 @@
   co-teaching professor, which is the intended effect. No route, schema, enum,
   migration or OpenAPI response-shape change; the exception classes and their
   codes are unchanged.
-- **Known asymmetry:** `features/session/service.py` still scopes
-  `get_active_session`, `close_session`, `list_professor_sessions` and
-  `get_session_history` to `Session.professor_id == professor.id`, so a
-  co-teacher can now act on a shared session's excuses but cannot open its live
-  view, close it, or find it in `GET /professor/sessions`. That slice is Phase 4/5
-  scope, is consumed by the professor projector, and `close_session` in
-  particular is a heavier action than approving an excuse, so it is deliberately
-  not widened here. Resolving it is a separate decision.
+- **Known asymmetry:** *(resolved by ADR-062.)* `features/session/service.py`
+  originally scoped `get_active_session`, `close_session`,
+  `list_professor_sessions`, `get_session_history` and `get_professor_attendance`
+  to `Session.professor_id == professor.id`, so a co-teacher could act on a
+  shared session's excuses but could not open its live view, close it, or find
+  it in `GET /professor/sessions`. ADR-062 widens all five on the same
+  assignment basis.
 - **Testing:** `test_a_coteacher_can_approve_a_request` and
   `test_a_coteacher_sees_the_request_in_their_queue` pin the widened access,
   and `test_an_unassigned_professor_cannot_approve` /
@@ -1018,3 +1017,91 @@
   and no queue entries. All four fail against the ownership-gated code.
 - **Extends:** ADR-020 and ADR-021 (the excuse state machine and the three
   initiation paths, neither of which names an owning professor).
+### ADR-062: Session Access Is Attribution Plus Teaching Assignment
+
+- **Decision (D62):** `Session.professor_id` is attribution, not authorization.
+  All five professor-facing session surfaces in `features/session/service.py` now
+  admit a professor who either opened the session or holds a current
+  `course_professors` assignment on its offering: `get_active_session`,
+  `close_session`, `list_professor_sessions`, `get_session_history`, and
+  `get_professor_attendance`. The column is never written, so history stays
+  attributed to whoever opened the session. A professor with neither claim gets
+  the existing `404 assignment_not_found`.
+  The live-action pair (`get_active_session`, `close_session`) resolves through a
+  new `_get_scoped_or_404`. The three historical reads (`_sessions_stmt`,
+  renamed from `_owned_sessions_stmt`, and `_attendance_stmt`) scope with a
+  `Session.professor_id == professor_id OR EXISTS(...)` union.
+- **Date:** 2026-10-02
+- **Status:** Accepted
+- **Context:** This resolves the asymmetry ADR-061 recorded rather than left
+  standing, and applies the same reasoning to the slice that was holding it up.
+  Three facts made the ownership rule indefensible on its own terms.
+  **(a) The column is documented as attribution.** `admin-manual.md` §4.2 says
+  "the system attributes each _session_ to the professor who opened it", and D8
+  states "History is never rewritten. Sessions opened by Professor Smith remain
+  under Professor Smith's name" - a rationale for keeping the column, not for
+  gating reads on it. **(b) The contract states no such rule.** None of the five
+  endpoints in `api-contracts.md` carries a scope sentence; the only mention
+  anywhere in `docs/architecture/` was the compressed role row at
+  `security-model.md:94`, which merges "own courses" (assignment-backed) and
+  "own sessions" (ownership-backed) into one phrase - plausibly where the drift
+  started. **(c) The frontend has always been assignment-scoped and could not
+  have implemented ownership anyway.** `GET /professor/courses`, the
+  create-session selector ("Your active assignments this term", wireframes.md
+  §3.2a), the attendance filters ("Cross-session roster across your courses")
+  and the history header ("Past sessions across your courses") are all
+  assignment-based, while no professor id appears in any of the six response
+  DTOs, so the frontend has no data with which to compare identity. The backend
+  was the only party holding a concept nothing else shared.
+- **Rationale:** Two different rules for the two kinds of surface, because they
+  answer different questions. The live-action pair is about *now*, so ownership
+  first and assignment only when that fails is both correct and cheap - the
+  common case stays a single row fetch. The historical reads are about the past,
+  where the assignment window is the wrong tool: `_require_assignment` is
+  anchored to `date.today()`, so scoping on assignment alone would empty a
+  professor's own history the day that assignment's `effective_to` passes, which
+  is precisely what `Session.professor_id` exists to prevent. Hence a union for
+  reads and a fallback for actions. The `EXISTS` is built inline in the calling
+  statement rather than as a separate query, both to avoid repeating rows for a
+  professor holding several assignments on one offering and to keep the read
+  paths at one round-trip each. `close_session` is widened deliberately: the
+  Close control is rendered unconditionally (`active/[id]/+page.svelte:309-316`,
+  gated only on status) and drawn unconditionally in `wireframes.md` §3.3, and
+  since `SessionAlreadyActiveException` is per-offering (`service.py:195-208`,
+  with no professor term), a co-teacher running a shared class has no other way
+  to end the window they were handed.
+- **Divergence from ADR-061:** the excuse slice reports a missing assignment as
+  `403 not_assigned` (`ProfessorNotAssignedException`) while this slice reports
+  `404 assignment_not_found` (`OfferingAssignmentNotFoundException`). Same
+  semantic failure, two codes, in adjacent slices. This is historical accident
+  rather than design - the excuse slice needed a 403 and had no class to reuse,
+  while the session slice already had `_require_assignment` raising this one and
+  `api-contracts.md:323` already documents the code. Reusing it keeps this
+  change to zero new exception classes and zero new documented errors.
+  Unifying the two is a named follow-up; it was not done here because it would
+  churn the excuse slice's just-landed behaviour and its 403 assertions for no
+  behavioural gain.
+- **Consequences:** `_get_owned_or_404` is deleted. `_sessions_stmt` and
+  `_attendance_stmt` become instance methods so they can reach the shared
+  `_assigned_offering_clause`. A co-teacher's session list and ledger now agree,
+  which is what the frontend's `ensureDirectory()` join needs - it builds a
+  `session_id` -> offering directory from `listSessions()` and joins the ledger
+  onto it, so widening only one of the pair would have left rows rendering as
+  em dashes. Two OpenAPI summaries no longer say "own". No route, schema, enum,
+  migration or response-shape change; 65 paths and 89 operations before and
+  after. `ProfessorProfileRead.session_count` and the professor archive
+  hard-delete guard (`professor/service.py:392-402, 448-455`) remain
+  ownership-scoped, which is correct: a profile total should describe the
+  professor's own sessions, and the archive guard is a safety check.
+- **Testing:** `test_a_coteacher_can_close_a_shared_session`,
+  `test_get_active_session_admits_a_coteacher` and
+  `test_a_coteacher_sees_the_shared_sessions` pin the widening - the last
+  fails against the previous code. `test_get_active_session_rejects_a_professor_outside_the_team`,
+  `test_close_session_rejects_a_professor_outside_the_team`,
+  `test_a_lapsed_assignment_cannot_close_a_session` and
+  `test_session_list_excludes_a_professor_outside_the_team` pin that it is still
+  an assignment check. `test_past_sessions_stay_visible_after_an_assignment_ends`
+  and `test_a_lapsed_assignment_stops_showing_shared_history` pin the union
+  boundary in both directions and are the guards against replacing ownership
+  with assignment instead of widening it.
+- **Extends:** ADR-061 (whose Known-asymmetry bullet this resolves) and D8.
