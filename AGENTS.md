@@ -1,22 +1,22 @@
 # AGENTS.md — QR-Based Attendance System
 
-**FastAPI backend** (15 feature slices / 17 models + 4 Alembic migrations; 13 routers with routes, enrollment intentionally unmounted) + **SvelteKit frontend** (real API by default, mock opt-in via `PUBLIC_MOCK_MODE`; attendance ledger + excuse queue are hard-coded mock until their backend endpoints land). Backend has a pytest suite (300 cases / 21 files: 137 sync + 153 async) but **no linters, formatters, or CI**. `README.md` is current and accurate; when docs conflict, trust `README.md` + executable config over older guides.
+FastAPI backend (15 feature slices, 17 models, 4 Alembic migrations) + SvelteKit 2 / Svelte 5 frontend. Real API by default, mock opt-in via `PUBLIC_MOCK_MODE`. No linters, formatters, or CI. `README.md` is current; when docs conflict, trust `README.md` + executable config.
 
-## Repository State
+## Repo state
 
-- Remote: `git@github.com:CodeKharl/qr_based_attendance_system.git`. Branches/PRs against `main`.
-- Layout: `frontend/`, `backend/` (models + migrations + `Dockerfile.dev`), root `docker-compose.dev.yml`, `docs/`.
-- Root `.gitignore` ignores `.env`/`.env.*` but un-ignores `.env.example` and `.env.test`. `backend/.env` exists (ignored) — never commit it.
-- App is rebranded **"Attendly"** on the frontend landing page; docs/README still use "QR-Based Attendance System".
+- Remote `git@github.com:CodeKharl/qr_based_attendance_system.git`; PRs against `main`.
+- Layout: `frontend/`, `backend/` (`src/` + `alembic/` + `Dockerfile.dev`), root `docker-compose.dev.yml`, `docs/`.
+- Root `.gitignore` ignores `.env`/`.env.*` except `.env.example`/`.env.test`. `backend/.env` exists (ignored) — never commit it.
+- Frontend landing page brands the app "Attendly"; docs still say "QR-Based Attendance System".
 
-## Key Commands
+## Commands
 
-### Local Dev (Docker — recommended)
 ```bash
-docker compose -f docker-compose.dev.yml up --build          # API on :8000, Postgres on :5432, frontend on :5173, migrations run automatically
+docker compose -f docker-compose.dev.yml up --build          # API :8000, Postgres :5432, frontend :5173, migrations auto-run
+docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test  # backend suite in Docker
 ```
 
-### Manual Backend
+Manual backend (must run from `backend/` — imports are `features.*`, not `src.features.*`):
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
@@ -26,132 +26,56 @@ alembic upgrade head
 uvicorn main:app --app-dir src --reload
 ```
 
-### Backend Tests
+Backend tests — SQLite in-memory by default (no Docker needed); `DEBUG` + `JWT_SECRET` required because some tests build `Settings()` directly:
 ```bash
 cd backend
 DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test PYTHONPATH=src .venv/bin/python -m pytest src/tests -q  # same suite on Postgres
 ```
-`DEBUG=true` + a dummy `JWT_SECRET` are still required: the 137 sync tests build `Settings()` themselves. `src/tests/conftest.py` runs against **in-memory SQLite** by default (no Docker, no Postgres) and sets both vars for the fixtures it owns.
+Markers in `backend/pytest.ini`: `-m "not slow"`, `-m "not integration"`. No `--cov` in `addopts`; add `--cov=src/features --cov=src/shared --cov=src/core` explicitly when needed.
 
-To run the identical suite against a real Postgres, set `TEST_DATABASE_URL` — the fixture switches engine and the same tests run unmodified:
-
-```bash
-TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test \
-  PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
-```
-
-Coverage (deliberately no `--cov` in `addopts`, so a plain run stays fast):
-
-```bash
-PYTHONPATH=src .venv/bin/python -m pytest src/tests -q \
-  --cov=src/features --cov=src/shared --cov=src/core --cov-report=term-missing
-```
-
-### Frontend
+Frontend (`engine-strict=true` in `.npmrc` — install fails on wrong Node):
 ```bash
 cd frontend
 npm install
-cp .env.example .env               # only PUBLIC_* vars reach browser
-npm run dev                        # http://localhost:5173
-npm run check                      # typecheck (runs svelte-kit sync first; watch w/ check:watch)
+cp .env.example .env   # only PUBLIC_* reaches the browser
+npm run dev            # :5173
+npm run check          # typecheck (runs svelte-kit sync first)
 ```
 
-## Backend (`backend/`)
+## Backend
 
-- **Entry**: `src/main.py` — FastAPI app, `/health`, CORS, lifespan runs `SELECT 1` at startup (**fails to boot if DB unreachable**).
-- **Config**: `src/core/config.py` — pydantic-settings, `get_settings()` cached. Many settings in `.env.example`: backup pipeline, risk-scoring batch, face-match thresholds, account lockout/OTP, attachment storage, Turnstile.
-- **Database**: `src/core/database.py` — async engine + session factory + `Base(DeclarativeBase)`.
-- **Dependencies**: `src/api/deps.py` — `_get_db` (the session dep; **there is no public `get_db`**), `_get_current_user` / `_get_optional_current_user` (JWT/HTTPBearer), `require_role(*roles)`, plus `Auth/Admin/Program/Course/Student/Professor/Session/FaceEnrollmentServiceDep` annotated service deps. Use these names; the underscore-prefixed ones are the sanctioned spelling.
-- **Exceptions**: `src/core/exceptions.py` — `AppException` (caught by main.py handler), `DomainException` (422), `DatabaseException` (409). Feature slices add their own `exceptions.py` (11 exist).
-- **Security**: `src/core/security.py` — Argon2id hashing, JWT access/refresh tokens (plus pre-auth claim tokens), 6-digit OTP generation, **recovery-grant tokens** (`create_recovery_token` / `decode_recovery_token`, `type="recovery"`, TTL `recovery_token_expire_minutes`), **backup-code fingerprints** (`backup_code_fingerprint`, HMAC-SHA256 over `HMAC_SECRET_KEY` or `JWT_SECRET`), and **session codes + QR payloads** (`generate_session_code` / `verify_session_code`, 8-char base62 HMAC over the session id; `build_qr_payload`, versioned JSON `{v, code, offering, radius, pw, lw}`).
-- **Models** (all in `src/features/*/model.py`, subclass `core.database.Base`), 17 classes across 13 model files (`admin` and `face_enrollment` are model-less):
-  - `auth.User` + `auth.OtpCodes`
-  - `auth.MfaBackupCodes` (table `mfa_backup_codes`) — `code_hash` (Argon2id) **and** `code_fingerprint` (HMAC-SHA256, indexed) so verification is one indexed lookup + one hash instead of scanning every row
-  - `student.Student` — `user_id` unique FK to users (1:1); has `face_embedding` (LargeBinary), `face_enrolled_at`, `face_embedding_version`
-  - `professor.Professor` — `user_id` unique FK to users (1:1)
-  - `course.Course` (template) + `course.CourseOffering` — geofence `classroom_*` fields live here
-  - `course_professor.CourseProfessor` (table `course_professors`)
-  - `enrollment.Enrollment` — `student_id`, `offering_id`, `academic_year`, `semester`
-  - `session.Session` — `session_code` unique, `expires_at`, `classroom_radius_meters`
-  - `attendance.Attendance` (table `attendance_records`) — `liveness_evidence` (JSONB), `face_match_score` (NUMERIC(5,4)), `scanned_via`, `original_status`, `excuse_type`/`excuse_reason`/`excused_by`/`excused_at`, `excuse_request_id`
-  - `sync.SyncQueue`
-  - `excuse.ExcuseRequest` (table `excuse_requests`) — `initiated_by`/`initiated_via`, `reason`, `attachment_urls` (JSONB), `status`, `requested_at`, `reviewed_by`/`reviewed_at`
-  - `program.Program` + `program.YearLevel`
-  - `analytics.StudentRiskScore` (table `student_risk_scores`) — risk scoring infra
-  - `system.BackupLog` (table `backup_log`) — backup pipeline tracking
-- **Routers**: `src/api/router.py` mounts 13 routers under `/api` (no `prefix=` arg — prefixes baked into each `APIRouter`): 13 with routes — auth→`/api/auth` (15), admin→`/api/admin/users` (3), program→`/api/admin/programs` (10), course→`/api/admin/courses` (5), offering→`/api/admin/offerings` (10), student-admin→`/api/admin/students` (7), professor-admin→`/api/admin/professors` (6), face-enrollment→`/api/admin/face-enrollment` (2), session-professor(7)→`/api/professor` (courses, sessions list/history/create, active detail, close, attendance), professor-self(2)→`/api/professor` (profile read + password patch), student(8)→`/api/student` (sessions verify-code, face-embedding pull, profile read, profile password, schedule), attendance(3)→`/api/student` (scan, history, precheck) — the last two share one mount; inner paths must not collide. 57 unique paths / 78 method+path operations total. `enrollment/router.py` exists but is intentionally unmounted. One `APIRouter` per (feature, mount point); never mount the same router twice.
-- **Implemented layers**: `service.py` ×10 (auth, admin, program, course, student, professor, session, face_enrollment, course_professor, attendance), `schema.py` ×9 (same minus course_professor, plus attendance), `constants.py` ×8 (same plus attendance), `exceptions.py` ×11. `shared/{validators,base,captcha,rate_limit,dependencies,cache,pagination,mixins,email,enums,csv_import}.py` exists. Still model-only: sync, excuse, analytics, system. Still model + stub-router only: enrollment.
-- **Alembic**: 4 migrations — `679a319c12d6` (baseline, 16 tables), `2a437ca93c53` (adds `mfa_backup_codes`), `33eabbfbfa6a` (adds `mfa_backup_codes.code_fingerprint` + index), `c3e913d02be0` (adds `enrollments.created_at`). To add a table: write model → add `import features.X.model` to `alembic/env.py` → `alembic revision --autogenerate -m "..."` + `alembic upgrade head`. `alembic check` must report "No new upgrade operations detected" before you call the schema done.
-- **Shared**: `src/shared/enums.py` (13 StrEnum), `mixins.py`, `pagination.py`, `base.py` (BaseCRUD generic), `email.py`, `validators.py`, `captcha.py`, `rate_limit.py`, `dependencies.py`, `cache.py`, `csv_import.py`.
-- **Dockerfile.dev**: 3-stage — `builder` (venv at `/opt/venv`) → `runtime` (uvicorn) → `migrate` (alembic upgrade head).
+- Entry `src/main.py`: `/health`, CORS, lifespan `SELECT 1` on boot — **fails to boot if DB unreachable**. Only `AppException` has a handler; `DomainException` → 422, `DatabaseException` → 409.
+- Config `src/core/config.py`: pydantic-settings, `get_settings()` cached. `JWT_SECRET` required when `DEBUG=false`. `RECOVERY_TOKEN_EXPIRE_MINUTES` defaults to 5 in code but is missing from `backend/.env.example`.
+- Deps `src/api/deps.py`: use `_get_db` (no public `get_db`), `_get_current_user` / `_get_optional_current_user`, `require_role(*roles)` (`super_admin` passes `admin` checks), `*ServiceDep` annotated service deps. `_get_db` commits on success, rolls back on any exception.
+- Routers: `src/api/router.py` mounts under `/api` with **no `prefix=` arg — each `APIRouter` bakes its own prefix in**. One router per (feature, mount point); never mount the same router twice. `enrollment/router.py` is a stub and stays **unmounted**.
+  - `/api/professor` is shared: `session/router.py` owns courses/sessions/attendance; `professor/router.py` owns `profile*` only. Don't cross them.
+  - `/api/student` is shared: `student/router.py` (verify-code, face-embedding, schedule, profile) + `attendance/router.py` (scan, precheck, history). Inner paths must not collide.
+  - `course/` has two routers (`router.py` → `/admin/courses`, `offering_router.py` → `/admin/offerings`).
+  - Collection routes use `@router.get("")`, not `"/"` (trailing-slash redirect breaks the contract).
+- Services: admin CRUD slices (`program`, `course`, `student`, `professor`) are `class <Feature>Service` with one `BaseCRUD` per model via `<Feature>ServiceDep` (ADR-058). `SessionService` and `FaceEnrollmentService` are also classes. Everything else stays module-level functions (ADR-055).
+- Alembic: head is `c3e913d02be0` (4 migrations). New model → add `import features.X.model` to `alembic/env.py`, `alembic revision --autogenerate`, `alembic upgrade head`. `alembic check` must say "No new upgrade operations detected".
+- Models (17 classes, 13 files; `admin` + `face_enrollment` model-less): `Student.user_id` / `Professor.user_id` are unique FKs to `users.id` (1:1). Deletes use `ondelete=RESTRICT` — archive routes need a has-records guard (409); never relax to CASCADE. `DELETE /admin/programs/{id}` flips `programs.is_active` only; there is nothing to cascade to (no `is_active` on year levels, no program FK on courses).
+- Auth quirks: forgot-password step 2 returns a 5-min `type="recovery"` grant required to mint the OTP; unknown emails get a deterministic decoy question (ADR-056). `users.security_question_hash` stores the question in plaintext under a legacy name — only the answer is hashed; don't "fix" without revisiting the contract.
+- Scan flow (D27, rejection reasons D15): `POST /student/attendance/{scan,precheck}` resolve the student from the **authenticated user**, only *comparing* `payload.student_number` case-insensitively → `403 student_number_mismatch`. Same rule applies to any new student-facing endpoint taking an ID (e.g. excuse submit). Idempotency key is `user_id:session_id:X-Idempotency-Key`, 15-min TTL, process-local (like `rate_limit` — needs a shared store for multi-instance).
 
-## Frontend (`frontend/`)
+## Backend tests
 
-- **Stack**: SvelteKit 2 + Svelte 5, TypeScript strict. Deps: `html5-qrcode`, `zod`, `@mediapipe/tasks-vision` (no `chart.js`).
-- **Runes mode forced** via `vite.config.ts` `compilerOptions.runes` as a function (real code → `true`, `node_modules` → exempt) — write `$state`/`$props` runes, not legacy reactive declarations.
-- **Mock opt-in, not mock-first**: `src/lib/api/client.ts` sets `MOCK = PUBLIC_MOCK_MODE === 'true'` — real API calls by default; fixtures from `src/lib/api/endpoints.ts` (18 typed `EndpointDef`s) only when explicitly enabled.
-- **Pages** (24): `+page.svelte` (Attendly landing), `about`, `cookies`, `privacy-policy`, `auth/login`, `auth/register`, `auth/forgot-password`, `student/dashboard`, `student/scan`, `student/schedule`, `student/history`, `student/profile`, `student/settings`, `professor/dashboard`, `professor/courses`, `professor/reports`, `professor/sessions` (+ `create`, `history`, `active/[id]`), `professor/attendance`, `professor/excuse-requests`, `professor/profile`, `professor/settings`.
-- **Feature services**: `src/lib/features/{auth,student,session,attendance,liveness,sync,report,settings,excuse}/service.ts` (plus `professor/schedule.ts`, no `professor/service.ts`; plus `excuse/mock.ts`). Also: `auth/{security,errors,tokens}.ts` + `auth/mock.ts`, `report/mock.ts`, `professor/mock.ts`, `auth/store.svelte.ts` + `student/store.svelte.ts` (runes stores), `liveness/{model,service}.ts`, `liveness/components/{QRScanner,FaceScanner}.svelte`, `student/components/DashboardStats.svelte`, `report/components/{ReportBarChart,ReportTrendChart}.svelte`. No `schema.ts` exists under `src/lib/`. `attendance` (professor ledger) and `excuse` (review queue) services use a hard-coded `MOCK = true` — unlike the global `PUBLIC_MOCK_MODE` flag — until their backend endpoints land.
-- **Shared**: `src/lib/shared/types/` (`index/auth/user/student/professor/session/attendance/course/enrollment/excuse/liveness/sync`, mirror backend models), `constants/` (routes, status, roles), `utils/` (qr, geo/Haversine, format, gen).
-- `.npmrc` sets `engine-strict=true` — `npm install` fails if Node doesn't satisfy dep engine ranges.
-- Env: only `PUBLIC_*` vars reach browser (`PUBLIC_API_URL=http://localhost:8000`, `PUBLIC_MOCK_MODE=false`).
-- Planned architecture (see `docs/architecture/frontend-architecture.md`): feature-slice structure under `src/lib/features/` with `store.svelte.ts`, `service.ts`, `schema.ts`, `mock.ts`, `components/`.
+- 300 cases / 21 files: sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file.
+- `conftest.py` SQLite shims (SQLite-only, inert on Postgres): `JSONB`→`JSON`, `BigInteger`→`INTEGER` (else every `id` insert fails `NOT NULL`), aware-UTC `DateTime` (else `SessionService.create_session` raises `TypeError`), plus `PRAGMA foreign_keys=ON` (else RESTRICT guards pass vacuously).
+- DB tests must use `api_client` (httpx + ASGITransport, `_get_db` overridden). `test_client` is sync-only and never used as a context manager (entering it runs lifespan `SELECT 1` → needs live Postgres).
+- `api_client` commits only on success, so a **failing request rolls back the seed** — commit after seeding if a test issues two failing requests. Read `server_default` values before committing (else `MissingGreenlet`).
+- Autouse fixture clears four process-global caches: `attendance.service._IDEMPOTENCY_STORE`, `rate_limit._limiter._windows`, `auth.service._recovery_limiter._windows`, `shared.cache._cache._store`. Add any new module-level cache here.
 
-## Gotchas & Quirks
+## Frontend
 
-| Area | Detail |
-|------|--------|
-| DB connection | FastAPI lifespan runs `SELECT 1` at startup — container fails if Postgres not ready. Compose handles via `depends_on: condition: service_healthy`. |
-| Alembic model imports | `alembic/env.py` imports models using `features.*.model` (not `src.features...`). Must `cd backend` so imports resolve. All 13 feature models are already imported and the head migration is `c3e913d02be0` — only autogenerate if you actually add/change a model, and remember to add the new `import features.X.model`. |
-| Service classes | Admin CRUD slices (`/admin/*`: program, course, student-admin, professor-admin) implement `class <Feature>Service` with one `BaseCRUD` handle per model, reached via `<Feature>ServiceDep` in `api/deps.py` — a standing rule, not a per-slice argument (ADR-058). `face_enrollment` is also a class (`FaceEnrollmentService` + `FaceEnrollmentServiceDep`: session + `Settings`, ADR-059), as is `session` (`SessionService` + `SessionServiceDep`: session + `Settings`, owns professor sessions + attendance reads). Everything else (`shared/csv_import.py`) stays module-level functions (ADR-055); `course_professor/service.py` is a retained borderline class, not a precedent. |
-| Recovery flow | Step 2 of forgot-password returns a 5-min `type="recovery"` grant; a `forget_password` OTP cannot be minted without it. Unknown emails get a **deterministic** decoy question (ADR-056). |
-| Security question | Only the answer is Argon2id-hashed; `users.security_question_hash` holds the question in readable plaintext under a legacy name (ADR-056). Do not "fix" this without revisiting step 1's contract. |
-| Frontend mock mode | `MOCK = PUBLIC_MOCK_MODE === 'true'` in `src/lib/api/client.ts` — real API calls by default; mocks only when explicitly enabled. |
-| Env files | Backend reads `.env` from `backend/` (not root). Frontend reads `.env` from `frontend/`. Note: `recovery_token_expire_minutes` exists in `config.py` but `RECOVERY_TOKEN_EXPIRE_MINUTES` is missing from `backend/.env.example` (defaults to 5 in code). |
-| CORS | `CORS_ORIGINS` in backend `.env` must include frontend origin (`http://localhost:5173`). |
-| JWT secret | Required when `DEBUG=false` (validated in `config.py`); `HMAC_SECRET_KEY` used for session codes, and falls back to `JWT_SECRET` for backup-code fingerprints. |
-| Student/User link | `Student.user_id` is a unique FK to `users.id` (1:1). Same for `Professor.user_id`. |
-| Unmounted routers | `enrollment/router.py` exists but is intentionally unmounted — do not import it in `src/api/router.py`. |
-| Trailing slashes | Collection routes use `@router.get("")`/`@router.post("")` so the path matches the contract exactly (`/api/admin/users`, not `/api/admin/users/`). Using `"/"` adds a redirect. |
-| Phase 3 routing | Phase 3 landed 6 new mounts and must NOT re-mount `student/router.py` or `professor/router.py` (already live at `/api/student`, `/api/professor`) — it uses `student/admin_router.py` + `professor/admin_router.py` instead. `features/course/` has two routers (`router.py` → `/admin/courses`, `offering_router.py` → `/admin/offerings`). `enrollment/router.py` stays unmounted. Face enrollment is its own slice with no model/migration. Full rationale in ADR-057. |
-| Professor route ownership | The `/api/professor` mount is shared by two routers: `features/session/router.py` owns `/professor/courses`, `/professor/sessions/*` and `/professor/attendance`; `features/professor/router.py` owns `/professor/profile*` only. Do not add profile paths to the session router or session paths to the professor router. `GET /professor/excuse-requests` has no backend endpoint yet — the frontend excuse queue is mock-only (D21) until the excuse slice grows past its model. |
-| Phase 3 aggregates | `scan_count`, `course_count`, `year_level_count`, `terms_count`, `enrolled_count` are derived per request, not columns. `terms_count` = `sum(len(yl.term_structure["terms"]))` — the JSONB shape is `{terms:[{code,label}]}`, so bare `len(term_structure)` silently returns 1. `course_count` has no `courses.program_id` to count (D44) — it is `COUNT(DISTINCT course_offerings.course_id)` per program. The resulting N+1 is accepted at Phase 3 volumes (ADR-057/058). |
-| Phase 3 soft archive | `DELETE /admin/programs/{id}` flips `programs.is_active` **only** — `year_levels` has no `is_active` column and `courses` has no program FK (D44), so the contract's old "cascades year-levels/courses inactive" line is stale; there is nothing to cascade to (ADR-058). Do not invent a cascade. |
-| Phase 3 hard delete | `DELETE /admin/{students,professors}/{id}/archive` needs a has-records guard (409) — `enrollments`/`attendance_records`/`excuse_requests`/`sessions` are `ondelete=RESTRICT`, so the `is_active` check alone 500s. Do not relax them to CASCADE (ADR-057). |
-| Frontend typecheck | `npm run check` generates `.svelte-kit/` (gitignored) via `svelte-kit sync`. |
-| Backend tests | Suite is 300 cases / 21 files: 137 sync hand-rolled-fake tests + 153 DB-backed ones. **Known gap: the `program` slice has no test file**, so ADR-057's per-program aggregates (`terms_count` summing `term_structure["terms"]`, `course_count` via `COUNT(DISTINCT course_offerings.course_id)`) are untested. Every other slice has at least one. |
-| Test DB shims | `conftest.py` registers three SQLite-only dialect shims, without which the models cannot be tested off Postgres: `JSONB`→`JSON`; `BigInteger`→`INTEGER` (SQLite only auto-increments a column declared exactly `INTEGER PRIMARY KEY`, so every `id BIGINT` insert would fail `NOT NULL`); and a `DateTime` subclass returning **aware** UTC (SQLite `CURRENT_TIMESTAMP` is naive while Postgres `now()` on `timestamptz` is not — `SessionService.create_session` compares `created_at + duration` against an aware `scheduled_end_time` and raises `TypeError` without it). `PRAGMA foreign_keys=ON` is also required, or the `ondelete=RESTRICT` archive-guard tests pass against a database enforcing nothing. |
-| Sync + async tests coexist | `asyncio_mode = auto` only wraps `async def` tests. The 137 sync tests are functions calling `asyncio.run()`, and are unaffected. Don't mass-convert them to `async def`. |
-| Test process globals | `conftest.py` has an autouse fixture clearing **four** process-global caches: `attendance.service._IDEMPOTENCY_STORE`, `rate_limit._limiter._windows`, `auth.service._recovery_limiter._windows`, and `shared.cache._cache._store`. The scan route's 30-per-60s budget is process-global, so without that reset tests 429 each other. `_recovery_limiter` keys on the email, so recovery tests only stayed isolated while each used a distinct address. `_cache` keys face embeddings by `student.id` while the factory id counter restarts per test — student 1 in one test is the same cache key as student 1 in the last, so an enrolled face leaks into the next test. **Add to this list whenever you introduce a new module-level cache.** |
-| Scan ownership | `POST /student/attendance/{scan,precheck}` resolve the student from the **authenticated user** (`Student.user_id`), not from `payload.student_number`. The field stays in the body because `api-contracts.md:935` documents it, but it is only *compared* against the token, case-insensitively (`students.student_id` is upper-cased on write, the request field is only stripped) → `403 student_number_mismatch`. Otherwise any authenticated student could submit, then replay an idempotency key for, somebody else's attendance. **Any new student-facing endpoint taking a student identifier must do the same** — the excuse workflow (6.2 `submit_student_excuse`) has the same shape. |
-| Scan idempotency cache | Keyed `user_id:session_id:X-Idempotency-Key` (not the caller's key alone), valued as a monotonic deadline with a 15-min TTL (`IDEMPOTENCY_TTL_SECONDS`) and a size-triggered prune (`_IDEMPOTENCY_MAX_ENTRIES`). Process-local, so a multi-instance deployment still needs a shared store — same caveat as `rate_limit`. |
-| Failing request rolls back the seed | `api_client` commits only on success, so the *whole shared test transaction* is rolled back by a rejected request — seeded rows included. A test that issues two failing requests must `await test_db_session.commit()` after seeding, or the second gets `401 user_not_found` because the account the first one discarded is the one it authenticates. Also read any `server_default` values out of the `stack` dict before committing, or you get `MissingGreenlet`. |
-| `api_client` vs `test_client` | DB-backed API tests must use `api_client` (`httpx.AsyncClient` + `ASGITransport`, `_get_db` overridden to the test session). `TestClient` blocks on a thread portal and raises when called from inside a running event loop, so it is sync-only, and it is deliberately not used as a context manager — entering it runs the app lifespan, whose `SELECT 1` would need a live Postgres. |
+- Runes mode forced in `vite.config.ts` (function form, `node_modules` exempt) — write `$state`/`$props`, not legacy reactives. `envPrefix: ['VITE_','PUBLIC_']` is what lets `PUBLIC_*` reach the browser. Strict TS; deps are `html5-qrcode`, `zod`, `@mediapipe/tasks-vision` (no `chart.js`).
+- `src/lib/api/client.ts`: `MOCK = PUBLIC_MOCK_MODE === 'true'` (real API by default); all URLs prefixed with `/api`; handles three backend error envelopes (AppException dict, FastAPI 422 list, plain-string 401/403) + 401-refresh retry + `postForm`/`getText` for CSV import/template.
+- Still hard-coded `MOCK = true` (ignore the global flag): `excuse/service.ts` (backend model-only, no `GET /professor/excuse-requests` yet), `report/service.ts`, `sync/service.ts` (IndexedDB wrapper not built). Professor attendance ledger (`attendance/service.ts`) is real — it joins course/session identity client-side because the contract row carries only `scanned_at`.
+- Endpoints are named `EndpointDef`s in `src/lib/api/endpoints.ts` collected into an `endpoints` registry; feature slices live in `src/lib/features/` (`admin` included), shared types/constants/utils under `src/lib/shared/`. Admin routes (`src/routes/admin/...`) are real pages now — don't assume the old 24-page list is complete.
 
-## Docs Reference
+## Docs (only what agents actually need)
 
-Key docs an agent is likely to need (README.md links the full inventory):
-
-### Architecture
-- `docs/architecture/api-contracts.md` — full API endpoint inventory with request/response schemas
-- `docs/architecture/frontend-architecture.md` — production-ready frontend structure
-- `docs/architecture/migration-strategy.md` — Alembic migration plan (current → target → planned 19-table; 17 tables landed)
-- `docs/architecture/security-model.md` — threat model & mitigations (auth: OTP, lockout, Turnstile, security questions)
-- `docs/architecture/offline-first.md` — IndexedDB sync & conflict handling
-- `docs/architecture/excuse-workflow.md` — excuse state machine & permission matrix
-- `docs/architecture/face-enrollment.md` — 3-photo enrollment & embedding pipeline
-- `docs/architecture/risk-model.md` — at-risk prediction & batch job spec
-- `docs/architecture/data-flow.md` — sequence diagrams for all major flows
-
-### Developer
-- `docs/developer/feature-template.md` — vertical-slice checklist (model → router → frontend)
-- `docs/developer/coding-standards.md` — Python, TypeScript/Svelte, git conventions
-- `docs/developer/backend-setup.md` + `docs/developer/frontend-setup.md` — setup guides, seed script
-- `docs/project/roadmap.md` — 13-phase implementation roadmap (Phase 0 done, 12 is a gap)
-
-### Decision tracking & ops
-- `docs/project/decision-log.md` — authoritative decision log (D1–D60, e.g. D27 5-step scan flow, D15 rejection reasons, ADR-055 service classes, ADR-056 recovery hardening, ADR-057 Phase 3 routing, ADR-058 admin CRUD slice template, ADR-059 face-enrollment class, ADR-060 conformance audit)
-- `docs/operations/runbooks.md` — restore, rollback, unlock, re-enroll, key rotation
-- `docs/testing/test-plan.md` — portal×feature matrix & decision coverage
-- `docs/deployment/production-checklist.md` — secrets, CORS, storage, first-admin seeding
-- `docs/guides/{student,professor,admin}-manual.md` — end-user flows
+- `docs/architecture/api-contracts.md` — endpoint inventory (scan `student_number` field documented but comparison-only, see above).
+- `docs/project/decision-log.md` — authoritative (D1–D60, ADR-055–060); check before "fixing" odd-looking contracts.
+- `docs/project/roadmap.md` — 13 phases; Phase 12 is a flagged gap.
