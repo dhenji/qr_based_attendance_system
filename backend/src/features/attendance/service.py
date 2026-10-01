@@ -574,6 +574,11 @@ class AttendanceService:
         if (now - scanned_at).total_seconds() <= SYNC_STALE_SECONDS:
             return
 
+        # The row is queued, not archived: nothing has processed it yet, so it
+        # is what the active-session and system-settings pending counts report
+        # and what an operator's forced sync picks up. Replaying it is safe
+        # because the original idempotency key travels with it, so the replay
+        # returns the result already recorded here.
         self._session.add(
             SyncQueue(
                 record_data={
@@ -583,7 +588,7 @@ class AttendanceService:
                     "scanned_at": scanned_at.isoformat(),
                     "idempotency_key": idempotency_key,
                 },
-                status=QueueStatus.DONE.value,
+                status=QueueStatus.PENDING.value,
                 retry_count=0,
             )
         )
