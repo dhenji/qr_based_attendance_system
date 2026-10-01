@@ -167,10 +167,11 @@ const apiCall = async <T>(
 	const { method = 'GET', body, params, suffix = '' } = options;
 	const endpointDef = endpoints[endpoint];
 
-	// Mock mode — return mock data
+	// Mock mode — return mock data (call inputs forwarded so stateful mocks
+	// can filter/sort/paginate lists and apply CRUD payloads like the backend).
 	if (MOCK) {
 		if (endpointDef.mock) {
-			return endpointDef.mock() as unknown as T;
+			return endpointDef.mock(params, suffix, body, method) as unknown as T;
 		}
 		// Return stub structure
 		return {} as unknown as T;
@@ -237,7 +238,7 @@ export const postForm = async <T>(
 
 	if (MOCK) {
 		if (endpointDef.mock) {
-			return endpointDef.mock() as unknown as T;
+			return endpointDef.mock(params, suffix, undefined, 'POST') as unknown as T;
 		}
 		return {} as unknown as T;
 	}

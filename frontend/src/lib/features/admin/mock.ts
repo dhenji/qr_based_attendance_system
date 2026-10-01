@@ -7,7 +7,7 @@ import type { AdminProfessor, AdminStudent } from '$lib/shared/types';
 export const mockAdminStudents: AdminStudent[] = [
 	{
 		id: 1,
-		studentId: '2021-001',
+		studentId: '24-2132',
 		firstName: 'Alice',
 		middleName: 'M',
 		lastName: 'Santos',
@@ -22,7 +22,7 @@ export const mockAdminStudents: AdminStudent[] = [
 	},
 	{
 		id: 2,
-		studentId: '2022-002',
+		studentId: '24-1045',
 		firstName: 'Bob',
 		lastName: 'Cruz',
 		email: 'bob.cruz@isu.edu.ph',
