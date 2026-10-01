@@ -137,8 +137,8 @@
 			selected = updated;
 			notice =
 				decision === 'approved'
-					? `Approved — ${updated.studentName} is now excused (was ${updated.originalStatus}).`
-					: `Rejected — ${updated.studentName} keeps ${updated.originalStatus} status.`;
+					? `Approved — ${updated.studentName} is now excused (was ${originalLabel(updated.originalStatus)}).`
+					: `Rejected — ${updated.studentName} keeps ${originalLabel(updated.originalStatus)} status.`;
 			reloadToken += 1;
 		} catch (error) {
 			reviewError = error instanceof Error ? error.message : 'Review failed.';
@@ -196,6 +196,11 @@
 			: row.initiatedVia === 'prof_with_evidence'
 				? 'With evidence'
 				: 'Student request';
+
+	// Live rows carry no pre-excuse status (no professor-visible source), so
+	// they read `unknown` — render an em dash rather than a guessed value.
+	const originalLabel = (value: ExcuseOriginalStatus): string =>
+		value === 'unknown' ? '—' : value;
 
 	const truncated = (value: string, max = 64): string =>
 		value.length > max ? `${value.slice(0, max - 1)}…` : value;
@@ -330,7 +335,7 @@
 								<td class="reason">{truncated(row.reason)}</td>
 								<td>
 									<span class="status status-{row.status}">{row.status}</span>
-									<div class="status-sub">was {row.originalStatus}</div>
+									<div class="status-sub">was {originalLabel(row.originalStatus)}</div>
 								</td>
 								<td>
 									<button
@@ -402,7 +407,7 @@
 				</div>
 				<div>
 					<dt>Original status</dt>
-					<dd>{selected.originalStatus} → excused on approve (D22)</dd>
+					<dd>{originalLabel(selected.originalStatus)} → excused on approve (D22)</dd>
 				</div>
 				<div>
 					<dt>Reason</dt>
@@ -416,7 +421,7 @@
 						{:else}
 							<ul class="files">
 								{#each selected.attachmentNames as name (name)}
-									<li>{name} (mock — S3 presigned flow lands with D24)</li>
+										<li>{name} (S3 presigned flow lands with D24)</li>
 								{/each}
 							</ul>
 						{/if}

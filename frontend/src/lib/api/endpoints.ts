@@ -2036,6 +2036,45 @@ export const AdminStructureChangesEndpoint: EndpointDef<{ items: StructureChange
 	mock: () => ({ items: [...MOCK_STRUCTURE_ROWS] }),
 };
 
+// --- Professor excuse queue --------------------------------------------------
+//
+// Live routes on features/excuse/professor_router.py under the shared
+// /professor mount (never mounted twice). The list row is deliberately bare:
+// no student identity, course labels, or original status — those join
+// client-side in features/excuse/service.ts (same convention as the professor
+// attendance ledger). Review is POST with the id riding the suffix
+// (`/{rid}/review`). Quick-excuse stays mock-only until the backend can
+// resolve a typed student number to an integer student_id, so it has no def.
+export interface ExcuseRequestReadResponse {
+	id: number;
+	student_id: number;
+	session_id: number;
+	initiated_by: string;
+	initiated_via: string;
+	reason: string;
+	attachment_urls: string[] | null;
+	status: string;
+	requested_at: string;
+	reviewed_by: number | null;
+	reviewed_at: string | null;
+	review_notes: string | null;
+}
+
+export interface ExcuseReviewBody {
+	status: 'approved' | 'rejected';
+	review_notes?: string;
+}
+
+export const ExcuseListEndpoint: EndpointDef<Paginated<ExcuseRequestReadResponse>> = {
+	url: '/professor/excuse-requests',
+	method: 'GET',
+};
+
+export const ExcuseReviewEndpoint: EndpointDef<ExcuseRequestReadResponse> = {
+	url: '/professor/excuse-requests',
+	method: 'POST',
+};
+
 // Endpoint registry
 // Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
@@ -2067,6 +2106,9 @@ export const endpoints = {
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
+	// Professor excuse queue (list + review; quick-excuse stays mock-only)
+	excuseList: ExcuseListEndpoint,
+	excuseReview: ExcuseReviewEndpoint,
 	// Admin (students + professors)
 	adminStudents: AdminStudentsEndpoint,
 	adminStudentCreate: AdminStudentCreateEndpoint,
