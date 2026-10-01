@@ -63,9 +63,12 @@ class Settings(BaseSettings):
     risk_batch_workers: int = 4
     risk_batch_dry_run: bool = False
 
-    # Attachment storage (excuse evidence)
+    # Attachment storage (excuse evidence). `s3` reuses the backup_* bucket and
+    # credentials: the two features share one backend. `attachments_local_dir`
+    # only applies to the `local` dev backend.
     attachments_storage_type: str = "local"
     attachments_max_bytes: int = 5242880
+    attachments_local_dir: str = "./attachments"
 
     # Cloudfare Trunstile CAPTCHA (optional)
     turnstile_secret_key: str = ""
