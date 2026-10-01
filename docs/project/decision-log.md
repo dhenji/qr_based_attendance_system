@@ -952,3 +952,69 @@
   so the next reader sees the fix's scope in one place.
 - **Extends:** ADR-058 (whose §1.9 states the 404 fold-the-id and 409-reuse-the-name
   rules this audit checked) and ADR-059.
+### ADR-061: Excuse Authorization Is the Teaching Assignment, Not Session Ownership
+
+- **Decision (D61):** Any professor holding an effective `course_professors`
+  assignment for the session's offering may act on that session's excuses. The
+  `session.professor_id == professor.id` check is removed from every professor
+  path in `features/excuse/service.py` — quick-excuse, with-evidence,
+  excuse-all-absent, review, edit, and revoke — leaving
+  `_require_assignment` as the sole gate. `list_for_professor` is rescoped
+  from "sessions this professor owns" to "sessions on offerings this professor
+  is currently assigned to".
+- **Date:** 2026-10-02
+- **Status:** Accepted
+- **Context:** The slice contradicted itself. `excuse-workflow.md` §8 (and the
+  `request_submitted` copy in `notifications.py`) name the recipient as the
+  offering's "assigned professor(s)", and
+  `test_submit_also_notifies_a_co_teacher` pins that a co-teacher is mailed;
+  the mail then tells the recipient to "Review the request and approve or reject
+  it". But `review_excuse` resolved its session through `_get_owned_or_404`, so
+  that same co-teacher received `404 session_not_found` on the review route and
+  could not act on what they had just been asked to handle. §2.1 and §3 state
+  the precondition for all three paths as "professor has active assignment for
+  the course", with no ownership clause. D21 assigns the approve/reject decision
+  to "professor" without naming which one. The gap was an extra guard nobody
+  documented: the decision log had no entry for it, and the requirement's own
+  wording contradicted it.
+- **Rationale:** Assignment is the term the design docs use, and it is already
+  enforced — every method called `_require_assignment` immediately after the
+  ownership lookup, so the fix removes a redundant layer rather than a check.
+  Ownership is also the wrong invariant for a shared assignment: `sessions`
+  records one `professor_id`, so a co-taught session silently belongs to
+  whichever professor opened it, and the other is not a second-class professor.
+  The alternative — narrowing the recipient list to the session owner — was
+  rejected because it would contradict §8 and the existing co-teacher
+  notification test, and because a queue scoped to owned sessions would hide
+  from an authorized reviewer the very requests they can act on. The list uses
+  an `EXISTS` subquery on the assignment rather than a join, since a professor
+  can hold several assignments on one offering and a join would repeat every
+  request once per row.
+- **Consequences:** `_get_owned_or_404` is deleted; `_get_session_or_404` and
+  `_require_assignment` remain and are now the whole authorization story for the
+  slice. The failure mode for a professor outside the teaching team changes
+  from `404 session_not_found` to `403 not_assigned`, which is the more accurate
+  answer and the one §2.1 already implies. Any co-teacher can now quick-excuse,
+  bulk-excuse, revise and revoke on a shared session, and `excused_by` /
+  `reviewed_by` record whoever actually acted, so the audit trail still names a
+  real actor. `list_for_professor` returns more rows than before for a
+  co-teaching professor, which is the intended effect. No route, schema, enum,
+  migration or OpenAPI response-shape change; the exception classes and their
+  codes are unchanged.
+- **Known asymmetry:** `features/session/service.py` still scopes
+  `get_active_session`, `close_session`, `list_professor_sessions` and
+  `get_session_history` to `Session.professor_id == professor.id`, so a
+  co-teacher can now act on a shared session's excuses but cannot open its live
+  view, close it, or find it in `GET /professor/sessions`. That slice is Phase 4/5
+  scope, is consumed by the professor projector, and `close_session` in
+  particular is a heavier action than approving an excuse, so it is deliberately
+  not widened here. Resolving it is a separate decision.
+- **Testing:** `test_a_coteacher_can_approve_a_request` and
+  `test_a_coteacher_sees_the_request_in_their_queue` pin the widened access,
+  and `test_an_unassigned_professor_cannot_approve` /
+  `test_a_lapsed_assignment_cannot_approve` /
+  `test_an_unassigned_professor_sees_an_empty_queue` pin that it is still an
+  assignment check — an unassigned or lapsed professor gets `403 not_assigned`
+  and no queue entries. All four fail against the ownership-gated code.
+- **Extends:** ADR-020 and ADR-021 (the excuse state machine and the three
+  initiation paths, neither of which names an owning professor).

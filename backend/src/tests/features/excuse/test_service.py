@@ -19,15 +19,23 @@ alongside the field that is supposed to move.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.excuse.exceptions import ExcuseNotFoundException
+from features.excuse.exceptions import (
+    ExcuseNotFoundException,
+    ProfessorNotAssignedException,
+)
 from features.excuse.model import ExcuseRequest
-from features.excuse.schema import QuickExcuseRequest, StudentExcuseRequest
+from features.excuse.schema import (
+    ExcuseReviewRequest,
+    QuickExcuseRequest,
+    StudentExcuseRequest,
+)
 from features.excuse.service import ExcuseService
 from shared.enums import ExcuseInitiatedBy, ExcuseStatus, UserRole, ValidationStatus
 from tests.conftest import Factories
@@ -81,12 +89,45 @@ async def _seed(factories: Factories) -> dict[str, Any]:
     record = await factories.attendance(student, session, validation_status=ABSENT)
 
     return {
+        "admin": admin,
+        "offering": offering,
+        "professor": professor,
         "professor_user": professor_user,
         "session": session,
         "student": student,
         "student_user": student_user,
         "record": record,
     }
+
+
+async def _second_professor(
+    factories: Factories,
+    graph: dict[str, Any],
+    *,
+    assigned: bool = True,
+    effective_to: date | None = None,
+) -> tuple[Any, Any]:
+    """A second professor on the offering, and their account.
+
+    Assigned by default so the co-teaching cases read as a professor acting on
+    a session they share; `assigned=False` and a lapsed `effective_to` cover the
+    two ways the assignment check has to say no.
+    """
+    user = await factories.user(
+        role=UserRole.PROFESSOR.value, email="second.account@test"
+    )
+    professor = await factories.professor(
+        user=user, email="second.roster@test", last_name="Second"
+    )
+    if assigned:
+        await factories.assignment(
+            graph["offering"],
+            professor,
+            assigned_by=graph["admin"],
+            effective_to=effective_to,
+        )
+
+    return professor, user
 
 
 # -- actions -------------------------------------------------------------
@@ -359,3 +400,112 @@ async def test_initiated_by_is_preserved_on_the_professor_excuse(
 
     assert professor_excuse.initiated_by == ExcuseInitiatedBy.PROFESSOR.value
     assert professor_excuse.status == APPROVED
+
+
+# -- who is allowed to act ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_coteacher_can_approve_a_request(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """Assignment is what authorizes the action, not owning the session.
+
+    A co-teacher is a recipient when a request is filed, and the mail tells
+    them to review it, so they have to be able to.
+    """
+    graph = await _seed(factories)
+    request_id = await _student_request(test_db_session, graph)
+    _, second_user = await _second_professor(factories, graph)
+
+    reviewed = await _service(test_db_session).review_excuse(
+        user_id=second_user.id,
+        request_id=request_id,
+        payload=ExcuseReviewRequest(
+            status=APPROVED, review_notes="Medical certificate checks out."
+        ),
+    )
+
+    assert reviewed.status == APPROVED
+    await test_db_session.refresh(graph["record"])
+    assert graph["record"].validation_status == EXCUSED
+    assert graph["record"].original_status == ABSENT
+    assert graph["record"].excused_by == second_user.id
+
+
+@pytest.mark.asyncio
+async def test_a_coteacher_sees_the_request_in_their_queue(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """The queue has to show what the other methods will let them act on."""
+    graph = await _seed(factories)
+    request_id = await _student_request(test_db_session, graph)
+    _, second_user = await _second_professor(factories, graph)
+
+    queue = await _service(test_db_session).list_for_professor(
+        user_id=second_user.id, status=PENDING, page=1, size=20
+    )
+
+    assert [row.id for row in queue.items] == [request_id]
+    assert queue.total == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unassigned_professor_cannot_approve(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """Widening this to the teaching team must not open it to any professor."""
+    graph = await _seed(factories)
+    request_id = await _student_request(test_db_session, graph)
+    _, second_user = await _second_professor(factories, graph, assigned=False)
+
+    with pytest.raises(ProfessorNotAssignedException) as caught:
+        await _service(test_db_session).review_excuse(
+            user_id=second_user.id,
+            request_id=request_id,
+            payload=ExcuseReviewRequest(status=APPROVED),
+        )
+
+    assert caught.value.status_code == 403
+    assert caught.value.code == "not_assigned"
+    assert (await _excuse_row(test_db_session, request_id)).status == PENDING
+
+
+@pytest.mark.asyncio
+async def test_a_lapsed_assignment_cannot_approve(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """The window is the assignment's, so an ended one is not a current one."""
+    graph = await _seed(factories)
+    request_id = await _student_request(test_db_session, graph)
+    _, second_user = await _second_professor(
+        factories,
+        graph,
+        effective_to=factories.now.date() - timedelta(days=1),
+    )
+
+    with pytest.raises(ProfessorNotAssignedException):
+        await _service(test_db_session).review_excuse(
+            user_id=second_user.id,
+            request_id=request_id,
+            payload=ExcuseReviewRequest(status=APPROVED),
+        )
+
+    assert (await _excuse_row(test_db_session, request_id)).status == PENDING
+
+
+@pytest.mark.asyncio
+async def test_an_unassigned_professor_sees_an_empty_queue(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """The list is scoped the same way the actions are."""
+    graph = await _seed(factories)
+    await _student_request(test_db_session, graph)
+    _, second_user = await _second_professor(factories, graph, assigned=False)
+
+    queue = await _service(test_db_session).list_for_professor(
+        user_id=second_user.id, status=None, page=1, size=20
+    )
+
+    assert queue.items == []
+    assert queue.total == 0
