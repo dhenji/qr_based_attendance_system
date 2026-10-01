@@ -358,7 +358,8 @@
 					<FaceScanner active={livenessActive} onComplete={handleLivenessComplete} />
 				</div>
 				<p class="footnote">
-					Blink once, then turn your head left, return to center, turn right, and return to center.
+					Phase 2: blink once for face liveness — then the head-tilt check
+					starts automatically (left, center, right, center).
 					Your result is submitted to the attendance service for verification.
 				</p>
 				{#if submitting}
