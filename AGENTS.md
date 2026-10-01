@@ -61,7 +61,7 @@ npm run check          # typecheck (runs svelte-kit sync first)
 
 ## Backend tests
 
-- 300 cases / 21 files: sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file.
+- 357 cases / 23 files: sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file.
 - `conftest.py` SQLite shims (SQLite-only, inert on Postgres): `JSONB`→`JSON`, `BigInteger`→`INTEGER` (else every `id` insert fails `NOT NULL`), aware-UTC `DateTime` (else `SessionService.create_session` raises `TypeError`), plus `PRAGMA foreign_keys=ON` (else RESTRICT guards pass vacuously).
 - DB tests must use `api_client` (httpx + ASGITransport, `_get_db` overridden). `test_client` is sync-only and never used as a context manager (entering it runs lifespan `SELECT 1` → needs live Postgres).
 - `api_client` commits only on success, so a **failing request rolls back the seed** — commit after seeding if a test issues two failing requests. Read `server_default` values before committing (else `MissingGreenlet`).

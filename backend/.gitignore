@@ -29,3 +29,8 @@ htmlcov/
 # pg_dump .dump files in it. Phase 8 is not built yet, so nothing writes
 # there today.
 backups/
+
+# attachment uploads written by the `local` storage backend. config.py sets
+# attachments_local_dir="./attachments". Real student evidence, so it must
+# never be committed.
+attachments/

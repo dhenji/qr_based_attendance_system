@@ -8,6 +8,9 @@ from features.attendance.router import router as attendance_router
 from features.auth.router import router as auth_router
 from features.course.offering_router import router as offering_router
 from features.course.router import router as course_router
+from features.excuse.admin_router import router as excuse_admin_router
+from features.excuse.professor_router import router as excuse_professor_router
+from features.excuse.student_router import router as excuse_student_router
 from features.face_enrollment.router import router as face_enrollment_router
 from features.professor.admin_router import router as professor_admin_router
 from features.professor.router import router as professor_router
@@ -15,6 +18,7 @@ from features.program.router import router as program_router
 from features.session.router import router as session_router
 from features.student.admin_router import router as student_admin_router
 from features.student.router import router as student_router
+from features.upload.router import router as upload_router
 
 api_router = APIRouter(prefix="/api")
 
@@ -35,3 +39,7 @@ api_router.include_router(professor_admin_router, tags=["admin-professors"])
 api_router.include_router(course_router, tags=["courses"])
 api_router.include_router(offering_router, tags=["offerings"])
 api_router.include_router(face_enrollment_router, tags=["face-enrollment"])
+api_router.include_router(excuse_professor_router, tags=["excuses"])
+api_router.include_router(excuse_student_router, tags=["excuses"])
+api_router.include_router(excuse_admin_router, tags=["admin-excuses"])
+api_router.include_router(upload_router, tags=["upload"])

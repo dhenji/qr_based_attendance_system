@@ -33,6 +33,7 @@ work, not a code change.
 | student / professor       | `student_not_found` · `student_id_exists` · `student_email_exists` · `year_level_not_found` · `year_level_program_mismatch` · `year_number_exists` · `invalid_semester` · `professor_email_exists`                                                                                                                                      |
 | course / offering         | `offering_not_found` · `invalid_schedule_window`                                                                                                                                                                                                                                                               |
 | face enrollment           | `face_not_enrolled` · `face_embedding_not_found`                                                                                                                                                                                                                                                              |
+| attachments (storage)     | `invalid_attachment` · `file_too_large` · `storage_unconfigured`                                                                                                                                                                                                                                                |
 | attendance review queue   | `review_not_found` · `review_not_pending`
 | attendance scan           | `outside_geofence` · `liveness_failed` · `face_mismatch` · `duplicate_scan` · `student_number_mismatch`                                                                                                                                                                                                   |
 
@@ -1073,6 +1074,41 @@ and primary lists without composing several calls.
 | ---------------- | ---------------------------------------------------------------- |
 | **Role**         | admin                                                             |
 | **Response 200** | `{ student_count, professor_count, program_count, avg_rate, scans_today, pending_sync, recent_scans: [...] }` |
+
+---
+
+## Attachment Uploads
+
+Excuse evidence is uploaded straight to storage, so the file bytes never pass
+through the API (D24, `excuse-workflow.md` §7). The client mints a URL here, PUTs
+the bytes itself, then submits the excuse carrying the returned `object_url` — the
+database stores URL references only, never file bytes.
+
+#### `POST /upload/presigned-url`
+
+|                  |                                                                                |
+| ---------------- | ------------------------------------------------------------------------------ |
+| **Role**         | any authenticated account (student, professor, admin)                           |
+| **Request**      | `{ filename: string, size_bytes: int, content_type?: string }`                  |
+| **Response 200** | `{ upload_url, object_url, object_key, expires_in }`                             |
+| **Errors**       | `invalid_attachment` (400) · `file_too_large` (413) · `storage_unconfigured` (503) |
+
+| Constraint                  | Value                              | Enforced by                          |
+| --------------------------- | ---------------------------------- | ------------------------------------ |
+| Max file size               | 5 MiB (`ATTACHMENTS_MAX_BYTES`)    | rejected before any storage call      |
+| Allowed types               | PDF, JPG, PNG, HEIC                | filename extension, case-insensitive  |
+| Max attachments per request | 5                                  | the excuse schemas, not this endpoint |
+| Immutability                | uploaded objects are never deleted | no delete endpoint exists             |
+
+The content type handed to storage is derived from the validated extension, never
+taken from the client; a `content_type` contradicting the extension (e.g.
+`evidence.pdf` announced as `application/x-msdownload`) is rejected.
+
+Which backend serves the URL follows `ATTACHMENTS_STORAGE_TYPE`. `local` (the dev
+default) returns a `file://` URL and needs no dependency; `s3` presigns a
+`put_object` against the shared backup bucket and needs `boto3` plus
+`BACKUP_S3_BUCKET`. Attachments sit under their own `attachments/` key prefix, so
+backup retention pruning never touches them.
 
 ---
 
