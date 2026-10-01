@@ -10,6 +10,7 @@ import type { MeResponse, TokenResponse, User } from '$lib/shared/types';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import { Routes } from '$lib/shared/constants/routes';
+import { withMinDuration } from '$lib/shared/utils/timing';
 import { changePassword, login, me, register, verifyMfa } from '$lib/features/auth/service';
 import {
 	clearTokens,
@@ -64,6 +65,25 @@ export const defaultRouteFor = (user: User | null): string => {
 
 const toMessage = (error: unknown, fallback: string): string =>
 	error instanceof Error && error.message ? error.message : fallback;
+
+// Minimum time authState.loading stays true, so the submit-button spinner is
+// always perceivable. A fast response — a mock fixture, a cached token, a local
+// API — settles inside a single frame, and a spinner that appears for less than
+// one frame reads as "there is no spinner at all". This pads the flag, not the
+// request, so the underlying call is unaffected.
+const MIN_LOADING_MS = 400;
+
+// Runs `action` with authState.loading raised for at least MIN_LOADING_MS.
+// Callers keep their own try/catch for setting authState.error; only the
+// loading bookkeeping lives here.
+const withLoading = async <T>(action: () => Promise<T>): Promise<T> => {
+	authState.loading = true;
+	try {
+		return await withMinDuration(MIN_LOADING_MS, action);
+	} finally {
+		authState.loading = false;
+	}
+};
 
 // Map a /auth/me payload onto the view-model the UI holds. Lives here rather
 // than in the service so the wire types stay confined to the API layer.
@@ -162,45 +182,43 @@ export const restoreSession = (): Promise<User | null> => {
 // accepted but a second factor is still required (authState.mfaPending is then
 // true and holds the preauth token). Real failures reject.
 export const doLogin = async (email: string, password: string): Promise<User | null> => {
-	authState.loading = true;
 	authState.error = null;
-	try {
-		const tokens = await login(email, password);
+	return withLoading(async () => {
+		try {
+			const tokens = await login(email, password);
 
-		if (tokens.mfa_pending) {
-			// Password accepted but a second factor is required. Hold the preauth
-			// token and let the caller collect the code; there is no session yet.
-			clearTokens();
-			authState.mfaPending = true;
-			authState.preauthToken = tokens.preauth_token;
-			authState.status = 'anonymous';
-			return null;
+			if (tokens.mfa_pending) {
+				// Password accepted but a second factor is required. Hold the preauth
+				// token and let the caller collect the code; there is no session yet.
+				clearTokens();
+				authState.mfaPending = true;
+				authState.preauthToken = tokens.preauth_token;
+				authState.status = 'anonymous';
+				return null;
+			}
+
+			return await establishSession(tokens);
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Login failed. Please try again.');
+			throw error;
 		}
-
-		return await establishSession(tokens);
-	} catch (error: unknown) {
-		authState.error = toMessage(error, 'Login failed. Please try again.');
-		throw error;
-	} finally {
-		authState.loading = false;
-	}
+	});
 };
 
 // Complete an MFA-gated login with a 6-digit TOTP or a backup code.
 export const doMfaVerify = async (code: string): Promise<User> => {
-	authState.loading = true;
 	authState.error = null;
-	try {
-		const tokens = await verifyMfa(code, authState.preauthToken);
-		authState.mfaPending = false;
-		authState.preauthToken = null;
-		return await establishSession(tokens);
-	} catch (error: unknown) {
-		authState.error = toMessage(error, 'Verification failed. Please try again.');
-		throw error;
-	} finally {
-		authState.loading = false;
-	}
+	return withLoading(async () => {
+		try {
+			const tokens = await verifyMfa(code, authState.preauthToken);
+			authState.mfaPending = false;
+			authState.preauthToken = null;
+			return await establishSession(tokens);
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Verification failed. Please try again.');
+			throw error;
+		}
+	});
 };
 
 export const doRegister = async (input: {
@@ -211,34 +229,32 @@ export const doRegister = async (input: {
 	securityQuestion: string;
 	securityAnswer: string;
 }): Promise<User> => {
-	authState.loading = true;
 	authState.error = null;
-	try {
-		return await establishSession(await register(input));
-	} catch (error: unknown) {
-		authState.error = toMessage(error, 'Registration failed. Please try again.');
-		throw error;
-	} finally {
-		authState.loading = false;
-	}
+	return withLoading(async () => {
+		try {
+			return await establishSession(await register(input));
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Registration failed. Please try again.');
+			throw error;
+		}
+	});
 };
 
 export const doChangePassword = async (
 	currentPassword: string,
 	newPassword: string
 ): Promise<void> => {
-	authState.loading = true;
 	authState.error = null;
-	try {
-		await changePassword(currentPassword, newPassword);
-		if (authState.user) authState.user.mustChangePassword = false;
-		authState.mustChangePassword = false;
-	} catch (error: unknown) {
-		authState.error = toMessage(error, 'Password change failed.');
-		throw error;
-	} finally {
-		authState.loading = false;
-	}
+	return withLoading(async () => {
+		try {
+			await changePassword(currentPassword, newPassword);
+			if (authState.user) authState.user.mustChangePassword = false;
+			authState.mustChangePassword = false;
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Password change failed.');
+			throw error;
+		}
+	});
 };
 
 export const doLogout = async (): Promise<void> => {

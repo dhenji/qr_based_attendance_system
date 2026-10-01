@@ -61,11 +61,23 @@
 		padding: 16px;
 	}
 
-	/* Base spinner styles */
+	/* Base spinner styles.
+	 * The leading edge is currentColor so the ring stays legible in every context:
+	 * inside the navy .btn-primary submit buttons a hardcoded navy edge would be
+	 * the same colour as the background and the rotation would be invisible, while
+	 * on the light page backgrounds the inherited dark text colour reads correctly.
+	 * The track is currentColor at low alpha for the same reason. */
 	.spinner {
+		/* Fallback first: engines without color-mix drop the two lines below. */
 		border: 2px solid #e5e7eb;
-		border-top: 2px solid #1e3a5f;
+		border-top-color: currentColor;
+		border-color: color-mix(in srgb, currentColor 25%, transparent);
+		border-top-color: currentColor;
 		border-radius: 50%;
+		/* Defaults so the ring can never collapse to a zero-size dot if a size
+		 * class goes missing; the variants below still win on specificity. */
+		width: 24px;
+		height: 24px;
 		animation: spin-animation 0.8s linear infinite;
 		display: inline-block;
 	}
@@ -112,11 +124,6 @@
 
 		.loading-message {
 			color: #d1d5db;
-		}
-
-		.spinner {
-			border-color: #374151;
-			border-top-color: #60a5fa;
 		}
 	}
 </style>

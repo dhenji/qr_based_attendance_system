@@ -310,6 +310,9 @@ class ProfessorService:
             professor.is_active = True
 
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(professor)
 
         if courses is not None:
             await self._replace_assignments(
@@ -323,6 +326,8 @@ class ProfessorService:
     async def archive(self, *, professor_id: int) -> ProfessorRead:
         professor: Professor = await self._get_or_404(professor_id)
         await self._archive_row(professor)
+        # _archive_row flushes, which expires the server-side `updated_at`.
+        await self._session.refresh(professor)
 
         return await self._to_read(professor)
 
@@ -330,6 +335,9 @@ class ProfessorService:
         professor: Professor = await self._get_or_404(professor_id)
         professor.is_active = True
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(professor)
 
         return await self._to_read(professor)
 

@@ -465,6 +465,9 @@ class StudentService:
             await self._resolve_and_set_cohort(student, program_id, year_level_id)
 
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(student)
 
         return await self._to_read(student)
 
@@ -512,6 +515,9 @@ class StudentService:
         student.face_enrolled_at = None
         student.face_embedding_version = (student.face_embedding_version or 0) + 1
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(student)
 
         return await self._to_read(student)
 
@@ -519,6 +525,9 @@ class StudentService:
         student: Student = await self._get_or_404(student_id)
         student.is_active = True
         await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
+        # it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(student)
 
         return await self._to_read(student)
 

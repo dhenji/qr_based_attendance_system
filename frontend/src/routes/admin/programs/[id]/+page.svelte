@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -18,6 +19,8 @@
 		yearLevelCreateSchema,
 		yearLevelUpdateSchema,
 	} from '$lib/features/admin/programs/schema';
+	import { yearLabel } from '$lib/shared/utils/format';
+	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 	import type { YearLevel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 
@@ -37,7 +40,6 @@
 
 	let yearOpen = $state(false);
 	let y_number = $state('');
-	let y_label = $state('');
 	let y_terms = $state<{ code: string; label: string }[]>([]);
 	let yearError = $state<string | null>(null);
 	let yearBusy = $state(false);
@@ -56,6 +58,20 @@
 	});
 
 	const program = $derived(adminProgramDetailState.program);
+
+	type TermRow = { code: string; label: string };
+
+	// The user picks the code and the label; this only picks sensible starting
+	// values for a new row by taking whichever are not already in use, so the
+	// default never collides. Nothing here caps how many rows can be added.
+	const nextTermRow = (rows: TermRow[]): TermRow => {
+		const usedCodes = new Set(rows.map((r) => r.code));
+		const usedLabels = new Set(rows.map((r) => r.label));
+		return {
+			code: TERM_CODES.find((c) => !usedCodes.has(c)) ?? TERM_CODES[0],
+			label: TERM_LABELS.find((l) => !usedLabels.has(l)) ?? TERM_LABELS[0],
+		};
+	};
 
 	const openEdit = () => {
 		if (!program) return;
@@ -91,11 +107,21 @@
 		}
 	};
 
+	// Years still available to add: 1..total_years, minus any already created.
+	// Hiding the taken ones avoids the backend's 409 year_number_exists.
+	const availableYears = $derived.by(() => {
+		if (!program) return [] as number[];
+		const taken = new Set(program.yearLevels.map((y) => y.yearNumber));
+		return Array.from({ length: program.totalYears }, (_, i) => i + 1).filter(
+			(n) => !taken.has(n)
+		);
+	});
+
 	const openYear = () => {
 		yearError = null;
-		y_number = '';
-		y_label = '';
-		y_terms = [{ code: '1st', label: '1st Semester' }];
+		// Default to the first free year; the label is derived from it.
+		y_number = String(availableYears[0] ?? '');
+		y_terms = [nextTermRow([])];
 		yearOpen = true;
 	};
 
@@ -106,7 +132,7 @@
 		try {
 			const parsed = yearLevelCreateSchema.safeParse({
 				year_number: y_number,
-				label: y_label,
+				label: yearLabel(Number(y_number)),
 				terms: y_terms,
 			});
 			if (!parsed.success) {
@@ -173,7 +199,12 @@
 </script>
 
 <div class="page">
-	<p class="crumb"><a href={Routes.ADMIN_PROGRAMS}>Programs</a> / Detail</p>
+	<div class="page-top">
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>
+			← Back to Program Management
+		</button>
+		<p class="crumb"><a href={Routes.ADMIN_PROGRAMS}>Programs</a> / Detail</p>
+	</div>
 
 	{#if adminProgramDetailState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
@@ -204,7 +235,12 @@
 
 		<section class="years-head">
 			<h2 class="section-title">Year Levels</h2>
-			<button class="btn btn-primary" data-testid="add-year" onclick={openYear}>
+			<button
+				class="btn btn-primary"
+				data-testid="add-year"
+				disabled={availableYears.length === 0}
+				onclick={openYear}
+			>
 				<AppIcon name="plus" size={18} />
 				Add Year
 			</button>
@@ -227,7 +263,7 @@
 						</div>
 						<p class="muted">Terms: {termsText(year)}</p>
 						<div class="chips">
-							{#each year.terms as term (term.code)}
+							{#each year.terms as term, i (i)}
 								<span class="chip">{term.label}</span>
 							{/each}
 						</div>
@@ -268,22 +304,35 @@
 				<p class="error" role="alert">{yearError}</p>
 			{/if}
 			<div class="form">
-				<div class="grid2">
-					<label>Year number<input class="input" inputmode="numeric" bind:value={y_number} placeholder="1" /></label>
-					<label>Label<input class="input" bind:value={y_label} placeholder="1st Year" /></label>
-				</div>
+				<label>
+					Year
+					<select class="input" bind:value={y_number}>
+						{#each availableYears as n (n)}
+							<option value={n}>{yearLabel(n)}</option>
+						{/each}
+					</select>
+				</label>
+				<p class="hint">The label is generated from the year, so the two can't disagree.</p>
 				<div class="terms-edit">
 					<span class="terms-label">Terms</span>
 					{#each y_terms as term, i (i)}
 						<div class="grid2">
-							<input class="input" aria-label="Term code" placeholder="1st" bind:value={y_terms[i].code} />
-							<input class="input" aria-label="Term label" placeholder="1st Semester" bind:value={y_terms[i].label} />
+							<select class="input" aria-label="Term code" bind:value={y_terms[i].code}>
+								{#each TERM_CODES as c (c)}
+									<option value={c}>{c}</option>
+								{/each}
+							</select>
+							<select class="input" aria-label="Term label" bind:value={y_terms[i].label}>
+								{#each TERM_LABELS as l (l)}
+									<option value={l}>{l}</option>
+								{/each}
+							</select>
 						</div>
 					{/each}
 					<div class="terms-row">
 						<button
 							class="btn btn-secondary"
-							onclick={() => (y_terms = [...y_terms, { code: '', label: '' }])}
+							onclick={() => (y_terms = [...y_terms, nextTermRow(y_terms)])}
 						>
 							Add term
 						</button>
@@ -318,14 +367,22 @@
 				{/if}
 				{#each t_rows as term, i (i)}
 					<div class="grid2">
-						<input class="input" aria-label="Term code" placeholder="1st" bind:value={t_rows[i].code} />
-						<input class="input" aria-label="Term label" placeholder="1st Semester" bind:value={t_rows[i].label} />
+						<select class="input" aria-label="Term code" bind:value={t_rows[i].code}>
+							{#each TERM_CODES as c (c)}
+								<option value={c}>{c}</option>
+							{/each}
+						</select>
+						<select class="input" aria-label="Term label" bind:value={t_rows[i].label}>
+							{#each TERM_LABELS as l (l)}
+								<option value={l}>{l}</option>
+							{/each}
+						</select>
 					</div>
 				{/each}
 				<div class="terms-row">
 					<button
 						class="btn btn-secondary"
-						onclick={() => (t_rows = [...t_rows, { code: '', label: '' }])}
+						onclick={() => (t_rows = [...t_rows, nextTermRow(t_rows)])}
 					>
 						Add term
 					</button>
@@ -373,6 +430,15 @@
 		flex-direction: column;
 		gap: 1.5rem;
 		font-family: system-ui, sans-serif;
+	}
+
+	/* Back button + breadcrumb read as one header block, so the .page flex gap
+	 * (1.5rem) does not push them a full row apart. */
+	.page-top {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
 	}
 
 	.crumb {

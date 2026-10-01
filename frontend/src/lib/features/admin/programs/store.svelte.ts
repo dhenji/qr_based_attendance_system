@@ -9,7 +9,6 @@
 
 import type { Program, ProgramDetail, ProgramFilters } from '$lib/shared/types';
 import {
-	archiveProgram,
 	deleteYearLevel,
 	getProgram,
 	listPrograms,
@@ -77,17 +76,6 @@ export const toggleProgramActive = async (program: Program): Promise<void> => {
 		await refreshAdminPrograms();
 	} catch (e: unknown) {
 		adminProgramsState.actionError = toMessage(e, 'Failed to update program status');
-		throw e;
-	}
-};
-
-export const archiveProgramRow = async (id: number): Promise<void> => {
-	adminProgramsState.actionError = null;
-	try {
-		await archiveProgram(id);
-		await refreshAdminPrograms();
-	} catch (e: unknown) {
-		adminProgramsState.actionError = toMessage(e, 'Failed to archive program');
 		throw e;
 	}
 };

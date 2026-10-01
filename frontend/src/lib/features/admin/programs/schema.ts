@@ -5,6 +5,7 @@
 // year_number_exists, year_has_courses).
 
 import { z } from 'zod';
+import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 
 export const programCreateSchema = z.object({
 	code: z.string().trim().toUpperCase().min(2).max(20),
@@ -24,8 +25,8 @@ export const programUpdateSchema = z.object({
 export type ProgramUpdateInput = z.infer<typeof programUpdateSchema>;
 
 export const termSchema = z.object({
-	code: z.string().trim().min(1, 'Term code required').max(20),
-	label: z.string().trim().min(1, 'Term label required').max(50),
+	code: z.enum(TERM_CODES, { message: 'Pick a term code' }),
+	label: z.enum(TERM_LABELS, { message: 'Pick a term label' }),
 });
 
 export type TermInput = z.infer<typeof termSchema>;
