@@ -389,6 +389,30 @@ the factual record of what happened at scan time.
 | Professor rejects excuse       | Student               | In-app + email | "Your excuse for {course} on {date} was rejected. Reason: {review_notes}" |
 | Bulk Excuse All                | All affected students | In-app (batch) | "You have been excused for {course} on {date}. Reason: {reason}"          |
 
+**Implementation:** only the **email** half is built. Copy lives in
+`features/excuse/notifications.py` (pure subject/body builders, one per event);
+`features/excuse/service.py` resolves the recipients and hands the batch to
+`shared.email.dispatch_emails`, which sends off the request thread on an executor
+worker. Recipients are read from `users.email`, falling back to the
+`students.email` / `professors.email` roster column for a profile with no linked
+account.
+
+Two consequences worth knowing before deploying:
+
+- **The in-app channel is not implemented.** There is no notification table and
+  no read side, so nothing is recorded in-app and a missed notice is recovered
+  by re-opening the request. Adding the in-app half means a table, which is
+  deliberately out of scope here.
+- **Delivery is best-effort.** A relay failure is logged, never raised, so a
+  student's excuse request never fails because mail is down — and a notice that
+  fails to send is invisible to the sender. Grep the API log for
+  `Email sent to=` when verifying a deployment. See
+  [production-checklist.md](../deployment/production-checklist.md#7-email--smtp).
+
+The four events above are the whole set. `quick_excuse`, `excuse_with_evidence`,
+`edit_excuse` and `revoke_excuse` send nothing: the professor already knows they
+did it, and §8 lists no notice for them.
+
 ---
 
 ## 9. Reporting Impact (D36)
