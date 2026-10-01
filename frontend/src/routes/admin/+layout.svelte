@@ -24,18 +24,18 @@
 		}
 	});
 
-	// MVP nav: Dashboard, Students, Professors, Programs are live. Courses,
-	// Offerings, Analytics, Audit and Settings are declared disabled so the
-	// sidebar shows the portal shape without offering dead links.
+	// MVP nav: Dashboard, Students, Professors, Programs, Courses,
+	// Offerings, Analytics and Audit Logs are live. Settings is declared
+	// disabled so the sidebar shows the portal shape without dead links.
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
 		{ label: 'Professors', path: Routes.ADMIN_PROFESSORS, enabled: true, icon: 'professors' },
 		{ label: 'Programs', path: Routes.ADMIN_PROGRAMS, enabled: true, icon: 'programs' },
-		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: false, icon: 'courses' },
-		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: false, icon: 'offerings' },
-		{ label: 'Analytics', path: Routes.ADMIN, enabled: false, icon: 'reports' },
-		{ label: 'Audit Logs', path: Routes.ADMIN, enabled: false, icon: 'audit' },
+		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: true, icon: 'courses' },
+		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
+		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
+		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN, enabled: false, icon: 'settings' },
 	] as const;
 

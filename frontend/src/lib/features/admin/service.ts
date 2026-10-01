@@ -13,6 +13,9 @@
 import { del, get, getText, patch, post, postForm } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
+	AdminOffering,
+	AdminOfferingFilters,
+	AdminOfferingResponse,
 	AdminProfessor,
 	AdminProfessorCreatePayload,
 	AdminProfessorFilters,
@@ -210,4 +213,52 @@ export const importProfessors = async (file: File): Promise<ProfessorImportResul
 	const form = new FormData();
 	form.append('file', file);
 	return postForm<ProfessorImportResult>('adminProfessorImport', form);
+};
+
+// --- Offerings (professor assignment picker) ---------------------------------
+
+const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
+	id: o.id,
+	courseId: o.course_id,
+	programId: o.program_id,
+	yearLevelId: o.year_level_id,
+	semester: o.semester,
+	academicYear: o.academic_year,
+	sessionsPerWeek: o.sessions_per_week,
+	semesterWeeks: o.semester_weeks,
+	scheduleDays: o.schedule_days,
+	scheduleStartTime: o.schedule_start_time,
+	scheduleEndTime: o.schedule_end_time,
+	classroomName: o.classroom_name ?? undefined,
+	classroomLat: o.classroom_lat ?? undefined,
+	classroomLng: o.classroom_lng ?? undefined,
+	presentWindowMinutes: o.default_present_window_minutes,
+	lateWindowMinutes: o.default_late_window_minutes,
+	isActive: o.is_active,
+	enrolledCount: o.enrolled_count ?? 0,
+	createdAt: o.created_at,
+	updatedAt: o.updated_at,
+});
+
+export const offeringLabel = (o: AdminOffering): string =>
+	`Offering ${o.id} · Course ${o.courseId} · ${o.semester} ${o.academicYear}`;
+
+export const listOfferings = async (
+	filters: AdminOfferingFilters = {}
+): Promise<{ items: AdminOffering[]; total: number; page: number; size: number }> => {
+	const params: Record<string, string> = {};
+	if (filters.program_id !== undefined) params.program_id = String(filters.program_id);
+	if (filters.year_level_id !== undefined) params.year_level_id = String(filters.year_level_id);
+	if (filters.semester) params.semester = filters.semester;
+	if (filters.course_id !== undefined) params.course_id = String(filters.course_id);
+	if (filters.is_active !== undefined) params.is_active = String(filters.is_active);
+	params.page = String(filters.page ?? 1);
+	params.size = String(filters.size ?? 50);
+	const response = await get<Paginated<AdminOfferingResponse>>('adminOfferings', params);
+	return {
+		items: (response.items ?? []).map(toOffering),
+		total: response.total ?? 0,
+		page: response.page ?? 1,
+		size: response.size ?? 50,
+	};
 };

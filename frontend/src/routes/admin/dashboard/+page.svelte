@@ -8,15 +8,34 @@
 		initAdminProfessors,
 		initAdminStudents,
 	} from '$lib/features/admin/store.svelte';
+	import {
+		adminAttendanceState,
+		adminScansState,
+		initAttendanceOverview,
+		initRecentScans,
+	} from '$lib/features/admin/analytics/store.svelte';
+	import { listPrograms } from '$lib/features/admin/programs/service';
+	import { formatPercentage } from '$lib/shared/utils/format';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// Admin dashboard (wireframe 4.1). There is no GET /admin/dashboard on the
 	// backend (Phase-12 gap), so the KPI row is derived from the first page of
-	// the students/professors lists rather than hardcoded — the numbers can
-	// never contradict the roster pages.
-	onMount(() => {
+	// the students/professors/programs lists rather than hardcoded — the
+	// numbers can never contradict the roster pages. The scans feed and the
+	// attendance strip come from the contract-shaped analytics mocks until the
+	// analytics backend lands (Phase 7).
+	let programsTotal = $state<number | null>(null);
+
+	onMount(async () => {
 		initAdminStudents({}, 1, 1);
 		initAdminProfessors({}, 1, 1);
+		initRecentScans(10);
+		initAttendanceOverview();
+		try {
+			programsTotal = (await listPrograms({ page: 1, size: 1 })).total;
+		} catch {
+			programsTotal = null;
+		}
 	});
 
 	const today = $derived(
@@ -43,8 +62,8 @@
 		},
 		{
 			label: 'Programs',
-			value: '—',
-			sub: 'Phase 3 next',
+			value: programsTotal === null ? '—' : String(programsTotal),
+			sub: 'Live total',
 			loading: false,
 		},
 		{
@@ -107,6 +126,55 @@
 			<AppIcon name="users" size={18} />
 			Manage Professors
 		</button>
+	</section>
+
+	<section class="card">
+		<div class="section-head">
+			<h2 class="section-title">Attendance at a glance</h2>
+			<button class="link" onclick={() => goto(Routes.ADMIN_ATTENDANCE)}>Full overview →</button>
+		</div>
+		{#if adminAttendanceState.loading}
+			<p class="muted">Loading…</p>
+		{:else if adminAttendanceState.error}
+			<p class="error">{adminAttendanceState.error}</p>
+		{:else if adminAttendanceState.items.length === 0}
+			<p class="muted">No attendance data yet.</p>
+		{:else}
+			<ul class="strip">
+				{#each adminAttendanceState.items.slice(0, 4) as r (r.course_id)}
+					<li>
+						<span class="strong">{r.course_code}</span>
+						<span class="muted">{r.sessions_count} sessions · {formatPercentage(r.avg_rate)}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_ANALYTICS)}>
+			<AppIcon name="chart" size={18} />
+			Open Analytics
+		</button>
+	</section>
+
+	<section class="card">
+		<div class="section-head">
+			<h2 class="section-title">Recent scans</h2>
+		</div>
+		{#if adminScansState.loading}
+			<p class="muted">Loading…</p>
+		{:else if adminScansState.error}
+			<p class="error">{adminScansState.error}</p>
+		{:else if adminScansState.items.length === 0}
+			<p class="muted">No scans yet.</p>
+		{:else}
+			<ul class="scans">
+				{#each adminScansState.items as s (s.id)}
+					<li>
+						<span class="strong">{s.student_name}</span>
+						<span class="muted">{s.course_code} · {s.status} · {s.scanned_at.slice(0, 16).replace('T', ' ')}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</section>
 
 	<section class="card">
@@ -237,7 +305,61 @@
 		font-size: 1.0625rem;
 		font-weight: 700;
 		color: #1e293b;
+		margin: 0;
+	}
+
+	.section-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+		margin-bottom: 1rem;
+	}
+
+	.link {
+		background: none;
+		border: none;
+		padding: 0;
+		color: #2563eb;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.link:hover {
+		text-decoration: underline;
+	}
+
+	.strong {
+		font-weight: 700;
+	}
+
+	.strip,
+	.scans {
+		list-style: none;
 		margin: 0 0 1rem;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+	}
+
+	.strip li {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		border-bottom: 1px solid #f1f5f9;
+		padding-bottom: 0.625rem;
+	}
+
+	.scans li {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		border-bottom: 1px solid #f1f5f9;
+		padding-bottom: 0.625rem;
 	}
 
 	.steps {

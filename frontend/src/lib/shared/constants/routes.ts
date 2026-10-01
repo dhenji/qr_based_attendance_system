@@ -33,6 +33,9 @@ export const Routes = {
   ADMIN_PROGRAMS: "/admin/programs",
   ADMIN_COURSES: "/admin/courses",
   ADMIN_OFFERINGS: "/admin/offerings",
+  ADMIN_ANALYTICS: "/admin/analytics",
+  ADMIN_ATTENDANCE: "/admin/attendance",
+  ADMIN_AUDIT_LOGS: "/admin/audit-logs",
   ADMIN_PROFILE: "/admin/profile",
 
   ABOUT: "/about",
@@ -47,6 +50,15 @@ export const professorActiveSession = (id: number): string =>
 
 // The admin program detail route is parameterised by program id.
 export const adminProgram = (id: number): string => `${Routes.ADMIN_PROGRAMS}/${id}`;
+
+// The admin professor profile route is parameterised by professor id.
+export const adminProfessor = (id: number): string => `${Routes.ADMIN_PROFESSORS}/${id}`;
+
+// The admin course template route is parameterised by course id.
+export const adminCourse = (id: number): string => `${Routes.ADMIN_COURSES}/${id}`;
+
+// The admin offering route is parameterised by offering id.
+export const adminOffering = (id: number): string => `${Routes.ADMIN_OFFERINGS}/${id}`;
 
 // The create form has two variants (D11): the locked one is entered from a
 // course card and arrives with the offering pre-selected and read-only; the

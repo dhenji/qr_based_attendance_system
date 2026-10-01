@@ -8,12 +8,19 @@
 		refreshAdminProfessors,
 		toggleProfessorActive,
 	} from '$lib/features/admin/store.svelte';
-	import { createProfessor, updateProfessor } from '$lib/features/admin/service';
+	import {
+		createProfessor,
+		listOfferings,
+		offeringLabel,
+		updateProfessor,
+	} from '$lib/features/admin/service';
 	import {
 		adminProfessorCreateSchema,
 		adminProfessorUpdateSchema,
 	} from '$lib/features/admin/schema';
-	import type { AdminProfessor } from '$lib/shared/types';
+	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
+	import { goto } from '$app/navigation';
+	import { adminProfessor } from '$lib/shared/constants/routes';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
 	// the roster seeds the records professors claim at registration. Columns:
@@ -21,7 +28,7 @@
 
 	let search = $state('');
 	let department = $state('');
-	let statusFilter = $state<'all' | 'active' | 'archived'>('all');
+	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
 	let sortBy = $state<'last_name' | 'email' | 'created_at'>('last_name');
 	let sortDir = $state<'asc' | 'desc'>('asc');
 
@@ -38,6 +45,10 @@
 	let f_email = $state('');
 	let f_department = $state('');
 	let f_username = $state('');
+	let f_courses = $state<number[]>([]);
+	let offeringOptions = $state<AdminOffering[]>([]);
+	let offeringsLoading = $state(false);
+	let offeringsError = $state<string | null>(null);
 
 	const isActiveFilter = $derived(
 		statusFilter === 'all' ? undefined : statusFilter === 'active'
@@ -60,9 +71,29 @@
 			adminProfessorsState.size
 		);
 
+	const loadOfferings = async () => {
+		offeringsLoading = true;
+		offeringsError = null;
+		try {
+			const result = await listOfferings({ is_active: true, page: 1, size: 50 });
+			offeringOptions = result.items;
+		} catch (e: unknown) {
+			offeringsError = e instanceof Error && e.message ? e.message : 'Could not load offerings';
+		} finally {
+			offeringsLoading = false;
+		}
+	};
+
 	onMount(() => {
 		load(1);
+		loadOfferings();
 	});
+
+	const toggleCourse = (id: number) => {
+		f_courses = f_courses.includes(id)
+			? f_courses.filter((v) => v !== id)
+			: [...f_courses, id];
+	};
 
 	const applyFilters = () => {
 		load(1);
@@ -93,6 +124,8 @@
 		f_email = '';
 		f_department = '';
 		f_username = '';
+		f_courses = [];
+		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
 
@@ -105,6 +138,8 @@
 		f_email = p.email;
 		f_department = p.department ?? '';
 		f_username = '';
+		f_courses = (p.assigned_courses ?? []).map((c) => c.offering_id);
+		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
 
@@ -120,6 +155,7 @@
 					email: f_email,
 					department: f_department || undefined,
 					username: f_username || undefined,
+					courses: f_courses,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -133,6 +169,7 @@
 					email: d.email,
 					department: d.department || undefined,
 					username: d.username || undefined,
+					courses: d.courses.length > 0 ? d.courses : undefined,
 				});
 			} else {
 				const parsed = adminProfessorUpdateSchema.safeParse({
@@ -140,6 +177,7 @@
 					last_name: f_last_name || undefined,
 					email: f_email || undefined,
 					department: f_department || undefined,
+					courses: f_courses,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -151,6 +189,7 @@
 					last_name: d.last_name,
 					email: d.email,
 					department: d.department,
+					courses: d.courses,
 				});
 			}
 			formOpen = false;
@@ -212,7 +251,7 @@
 		<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={applyFilters}>
 			<option value="all">All statuses</option>
 			<option value="active">Active</option>
-			<option value="archived">Archived</option>
+			<option value="inactive">Inactive</option>
 		</select>
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
@@ -246,11 +285,24 @@
 					{#each adminProfessorsState.items as p (p.id)}
 						<tr>
 							<td>{fullName(p)}</td>
-							<td class="mono">{p.email}</td>
+							<td>
+								<button
+									class="link mono"
+									data-testid={`professor-email-${p.id}`}
+									aria-label={`View ${fullName(p)} profile`}
+									onclick={() => goto(adminProfessor(p.id))}
+								>
+									{p.email}
+								</button>
+							</td>
 							<td>{p.department ?? '—'}</td>
 							<td>{p.assigned_courses.length}</td>
 							<td>{p.claimStatus}</td>
-							<td>{p.isActive ? '✅' : '🚫'}</td>
+							<td>
+								<span class={p.isActive ? 'status-active' : 'status-inactive'}>
+									{p.isActive ? 'Active' : 'Inactive'}
+								</span>
+							</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => openEdit(p)}>Edit</button>
 								<button
@@ -310,7 +362,28 @@
 						<label>Username (claim slot)<input class="input" bind:value={f_username} placeholder="optional" /></label>
 					{/if}
 				</div>
-				<p class="hint">Course assignment happens on the Offerings screens (Phase 3 next); no user row is created until the professor self-registers.</p>
+				<fieldset class="courses">
+					<legend>Course assignments (offerings)</legend>
+					{#if offeringsLoading}
+						<p class="hint">Loading offerings…</p>
+					{:else if offeringsError}
+						<p class="error" role="alert">{offeringsError}</p>
+					{:else if offeringOptions.length === 0}
+						<p class="hint">No active offerings found.</p>
+					{:else}
+						{#each offeringOptions as o (o.id)}
+							<label class="check">
+								<input
+									type="checkbox"
+									checked={f_courses.includes(o.id)}
+									onchange={() => toggleCourse(o.id)}
+								/>
+								<span>{offeringLabel(o)}</span>
+							</label>
+						{/each}
+					{/if}
+				</fieldset>
+				<p class="hint">Assignments are saved with the professor (replaces the set on edit); no user row is created until the professor self-registers.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
@@ -327,7 +400,7 @@
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} is archived. This cannot be undone, and it fails
+				{fullName(deleteTarget)} is inactive. This cannot be undone, and it fails
 				with 409 if sessions still reference them.
 			</p>
 			{#if adminProfessorsState.actionError}
@@ -451,6 +524,26 @@
 	.mono {
 		font-variant-numeric: tabular-nums;
 		font-weight: 500;
+	}
+
+	.status-active,
+	.status-inactive {
+		display: inline-block;
+		padding: 0.125rem 0.625rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.status-active {
+		background: #dcfce7;
+		color: #16a34a;
+	}
+
+	.status-inactive {
+		background: #fee2e2;
+		color: #dc2626;
 	}
 
 	.row-actions {
@@ -623,6 +716,31 @@
 		font-size: 0.75rem;
 		color: #94a3b8;
 		margin: 0;
+	}
+
+	.courses {
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 0.75rem 0.875rem;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.courses legend {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: #334155;
+		padding: 0 0.375rem;
+	}
+
+	.courses .check {
+		flex-direction: row;
+		align-items: center;
+		gap: 0.5rem;
+		font-weight: 500;
+		cursor: pointer;
 	}
 
 	.modal-actions {

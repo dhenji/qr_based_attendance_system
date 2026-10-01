@@ -1,0 +1,523 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import {
+		adminAuditState,
+		adminStructureState,
+		initAdminAudit,
+		initStructureChanges,
+		type AuditSortColumn,
+	} from '$lib/features/admin/audit/store.svelte';
+	import {
+		AUDIT_CATEGORIES,
+		auditCsv,
+		downloadCsv,
+		type AuditLogRow,
+	} from '$lib/features/admin/audit/service';
+	import { auditFilterSchema } from '$lib/features/admin/audit/schema';
+	import { Routes } from '$lib/shared/constants/routes';
+
+	// Audit Logs (wireframe 4.8, `/admin/audit-logs`): system-wide action
+	// feed with date-range + category + search filters, sortable Time / User /
+	// Action columns, pagination, Print + CSV export. Rows are hybrid: live
+	// record-creation rows derived from roster lists (badged "system record")
+	// plus deterministic seed rows for operational actions until the Phase 8
+	// audit backend lands. The Structure tab lists program/year/course
+	// mutations with old/new values (D38, contracted academic-structure shape)
+	// and deep-links into Program Management.
+
+	type Tab = 'log' | 'structure';
+	const TABS = [
+		{ id: 'log', label: 'Action Log' },
+		{ id: 'structure', label: 'Academic Structure' },
+	] as const;
+
+	let tab = $state<Tab>('log');
+	let dateFrom = $state('');
+	let dateTo = $state('');
+	let category = $state('');
+	let search = $state('');
+	let formError = $state<string | null>(null);
+
+	const totalPages = $derived(
+		Math.max(1, Math.ceil(adminAuditState.total / adminAuditState.size))
+	);
+
+	// Client-side sorts over the loaded page (the feed takes no sort params).
+	const visibleItems = $derived.by(() => {
+		const items = [...adminAuditState.items];
+		const dir = adminAuditState.sortDir === 'asc' ? 1 : -1;
+		const key =
+			adminAuditState.sortBy === 'time'
+				? (r: AuditLogRow) => r.occurred_at
+				: adminAuditState.sortBy === 'user'
+					? (r: AuditLogRow) => r.actor_name
+					: (r: AuditLogRow) => r.action;
+		items.sort((a, b) => key(a).localeCompare(key(b)) * dir);
+		return items;
+	});
+
+	const load = (page = 1) =>
+		initAdminAudit(
+			{
+				date_from: dateFrom.trim() || undefined,
+				date_to: dateTo.trim() || undefined,
+				category: (category || undefined) as AuditLogRow['category'] | undefined,
+				search: search.trim() || undefined,
+			},
+			page,
+			adminAuditState.size
+		);
+
+	onMount(async () => {
+		await load(1);
+		await initStructureChanges();
+	});
+
+	const applyFilters = async () => {
+		formError = null;
+		const parsed = auditFilterSchema.safeParse({
+			date_from: dateFrom,
+			date_to: dateTo,
+			category,
+			search,
+		});
+		if (!parsed.success) {
+			formError = parsed.error.issues[0]?.message ?? 'Check the filters and try again.';
+			return;
+		}
+		await load(1);
+	};
+
+	const toggleSort = (column: AuditSortColumn) => {
+		if (adminAuditState.sortBy === column) {
+			adminAuditState.sortDir = adminAuditState.sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			adminAuditState.sortBy = column;
+			adminAuditState.sortDir = column === 'time' ? 'desc' : 'asc';
+		}
+	};
+
+	const sortArrow = (column: AuditSortColumn) =>
+		adminAuditState.sortBy === column
+			? adminAuditState.sortDir === 'asc'
+				? ' ▲'
+				: ' ▼'
+			: '';
+
+	const categoryLabel = (id: string): string =>
+		AUDIT_CATEGORIES.find((c) => c.id === id)?.label ?? id;
+
+	const onExport = () =>
+		downloadCsv(
+			`audit-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+			auditCsv(adminAuditState.items)
+		);
+
+	const formatTime = (iso: string): string => iso.slice(0, 16).replace('T', ' ');
+</script>
+
+<div class="page">
+	<header class="header">
+		<div>
+			<h1>Audit Logs</h1>
+			<p class="muted">Record creations are live system rows · operational actions are seeded until the Phase 8 audit backend lands</p>
+		</div>
+		<div class="header-actions">
+			<button class="btn btn-secondary" onclick={() => window.print()}>Print</button>
+			<button class="btn btn-primary" data-testid="export-logs" onclick={onExport}>Export Logs</button>
+		</div>
+	</header>
+
+	<nav class="tabs" aria-label="Audit sections">
+		{#each TABS as t (t.id)}
+			<button class:active={tab === t.id} onclick={() => (tab = t.id)}>{t.label}</button>
+		{/each}
+	</nav>
+
+	{#if tab === 'log'}
+		<section class="card filters" aria-label="Audit filters">
+			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
+			<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
+			<select class="input" aria-label="Action category filter" bind:value={category}>
+				<option value="">All actions</option>
+				{#each AUDIT_CATEGORIES as c (c.id)}
+					<option value={c.id}>{c.label}</option>
+				{/each}
+			</select>
+			<input
+				class="input search"
+				type="search"
+				placeholder="Search actor, action, entity…"
+				aria-label="Search audit logs"
+				bind:value={search}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') applyFilters();
+				}}
+			/>
+			<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
+			{#if formError}
+				<p class="error" role="alert">{formError}</p>
+			{/if}
+		</section>
+
+		{#if adminAuditState.loading}
+			<section class="card"><p class="muted">Loading…</p></section>
+		{:else if adminAuditState.error}
+			<section class="card"><p class="error">Could not load audit logs: {adminAuditState.error}</p></section>
+		{:else if visibleItems.length === 0}
+			<section class="card">
+				<p class="empty">No log entries match these filters.</p>
+			</section>
+		{:else}
+			<section class="card table-wrap">
+				<table>
+					<thead>
+						<tr>
+							<th><button class="th-btn" onclick={() => toggleSort('time')}>Time{sortArrow('time')}</button></th>
+							<th><button class="th-btn" onclick={() => toggleSort('user')}>User{sortArrow('user')}</button></th>
+							<th><button class="th-btn" onclick={() => toggleSort('action')}>Action{sortArrow('action')}</button></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each visibleItems as r (r.id)}
+							<tr>
+								<td class="nowrap">{formatTime(r.occurred_at)}</td>
+								<td>
+									<div class="strong">{r.actor_name}</div>
+									<div class="muted small">{r.actor_role}</div>
+								</td>
+								<td>
+									<div>
+										<span class="badge">{categoryLabel(r.category)}</span>
+										{#if r.origin === 'system'}
+											<span class="badge live">system record</span>
+										{/if}
+									</div>
+									<div class="strong">{r.action}</div>
+									<div class="muted small">{r.entity}{r.detail ? ` · ${r.detail}` : ''}</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				<div class="pager">
+					<button
+						class="btn btn-secondary"
+						disabled={adminAuditState.page <= 1}
+						onclick={() => load(adminAuditState.page - 1)}
+					>
+						‹ Prev
+					</button>
+					<span class="muted">Page {adminAuditState.page} of {totalPages} · {adminAuditState.total} entries</span>
+					<button
+						class="btn btn-secondary"
+						disabled={adminAuditState.page >= totalPages}
+						onclick={() => load(adminAuditState.page + 1)}
+					>
+						Next ›
+					</button>
+				</div>
+			</section>
+		{/if}
+	{:else}
+		<section class="card">
+			<div class="row-head">
+				<div>
+					<h2 class="card-title">Academic Structure Changes</h2>
+					<p class="muted">Manual, intentional, audited mutations (D38) — manage them in Program Management.</p>
+				</div>
+				<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>Edit Programs →</button>
+			</div>
+			{#if adminStructureState.loading}
+				<p class="muted">Loading…</p>
+			{:else if adminStructureState.error}
+				<p class="error">{adminStructureState.error}</p>
+			{:else if adminStructureState.items.length === 0}
+				<p class="empty">No structural changes recorded.</p>
+			{:else}
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr><th>When</th><th>Action</th><th>Entity</th><th>Change</th><th>By</th></tr>
+						</thead>
+						<tbody>
+							{#each adminStructureState.items as c (c.id)}
+								<tr>
+									<td class="nowrap">{formatTime(c.performed_at)}</td>
+									<td class="strong">{c.action.replace(/_/g, ' ')}</td>
+									<td>{c.entity_type} #{c.entity_id}</td>
+									<td>
+										{#if c.old_value}
+											<span class="muted small">{c.old_value} → </span>
+										{/if}
+										<span class="strong">{c.new_value ?? '—'}</span>
+									</td>
+									<td>{c.performed_by}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</section>
+	{/if}
+</div>
+
+<style>
+	.page {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+		font-family: system-ui, sans-serif;
+	}
+
+	.header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.header h1 {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.625rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0 0 0.25rem;
+	}
+
+	.muted {
+		color: #64748b;
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	.muted.small {
+		font-size: 0.75rem;
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 0.75rem;
+	}
+
+	.card {
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 1.5rem;
+		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+	}
+
+	.card-title {
+		margin: 0 0 0.375rem;
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: #1e293b;
+	}
+
+	.row-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+		margin-bottom: 1rem;
+	}
+
+	.tabs {
+		display: flex;
+		gap: 0.25rem;
+		border-bottom: 2px solid #e2e8f0;
+	}
+
+	.tabs button {
+		background: none;
+		border: none;
+		padding: 0.625rem 1rem;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		font-family: inherit;
+		color: #64748b;
+		cursor: pointer;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -2px;
+	}
+
+	.tabs button:hover {
+		color: #0f172a;
+	}
+
+	.tabs button.active {
+		color: #1e3a5f;
+		border-bottom-color: #1e3a5f;
+	}
+
+	.filters {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		align-items: center;
+	}
+
+	.input {
+		padding: 0.625rem 0.875rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-family: inherit;
+		color: #0f172a;
+		background: white;
+	}
+
+	.input:focus {
+		outline: 2px solid #2563eb;
+		outline-offset: 1px;
+		border-color: #2563eb;
+	}
+
+	.search {
+		flex: 1 1 200px;
+	}
+
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.875rem;
+	}
+
+	th,
+	td {
+		text-align: left;
+		padding: 0.625rem 0.5rem;
+		border-bottom: 1px solid #f1f5f9;
+		vertical-align: top;
+	}
+
+	th {
+		color: #64748b;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.nowrap {
+		white-space: nowrap;
+	}
+
+	.strong {
+		font-weight: 700;
+	}
+
+	td .strong {
+		font-size: 0.875rem;
+	}
+
+	.th-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.th-btn:hover {
+		color: #0f172a;
+	}
+
+	.badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #1e3a5f;
+		background: #e0e7ff;
+		margin: 0 0.375rem 0.25rem 0;
+	}
+
+	.badge.live {
+		color: #15803d;
+		background: #dcfce7;
+	}
+
+	.pager {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: 1rem;
+	}
+
+	.empty {
+		color: #64748b;
+		font-size: 0.9375rem;
+		margin: 0;
+	}
+
+	.error {
+		color: #dc2626;
+		font-size: 0.875rem;
+		margin: 0;
+		flex-basis: 100%;
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		border-radius: 8px;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: inherit;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: background 0.15s ease, border-color 0.15s ease;
+	}
+
+	.btn:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 2px;
+	}
+
+	.btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.btn-primary {
+		background: #1e3a5f;
+		border: 1px solid #1e3a5f;
+		color: white;
+	}
+
+	.btn-primary:hover:not(:disabled) {
+		background: #16324f;
+	}
+
+	.btn-secondary {
+		background: white;
+		border: 1px solid #cbd5e1;
+		color: #0f172a;
+	}
+
+	.btn-secondary:hover:not(:disabled) {
+		background: #f1f5f9;
+	}
+
+	.table-wrap {
+		overflow-x: auto;
+	}
+
+	@media (max-width: 640px) {
+		.card {
+			padding: 1.25rem;
+		}
+	}
+</style>
