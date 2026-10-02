@@ -89,12 +89,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -115,8 +115,8 @@
 		flex-direction: column;
 		gap: 0.25rem;
 		padding: 1.25rem;
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
 
@@ -124,21 +124,21 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.75rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		line-height: 1;
 	}
 
 	.kpi-label {
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.scan-btn {
 		display: block;
 		width: 100%;
 		padding: 1.125rem;
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		border: none;
 		border-radius: 8px;
 		font-size: 1rem;
@@ -152,17 +152,17 @@
 	}
 
 	.scan-btn:hover {
-		background: #16324f;
+		background: var(--brand-hover);
 		transform: translateY(-1px);
 		box-shadow: 0 6px 18px rgba(30, 58, 95, 0.3);
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 2rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 		transition: box-shadow 0.15s ease;
 	}
 
@@ -174,7 +174,7 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 1rem;
 	}
 
@@ -186,7 +186,7 @@
 
 	li {
 		padding: 0.75rem;
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--divider);
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem 0.5rem;
@@ -198,13 +198,13 @@
 	}
 
 	.empty {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		margin: 0;
 	}
 </style>

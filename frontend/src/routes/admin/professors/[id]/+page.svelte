@@ -156,11 +156,11 @@
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.profile-head {
@@ -174,7 +174,7 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.5rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
@@ -182,8 +182,8 @@
 		width: 3.5rem;
 		height: 3.5rem;
 		border-radius: 999px;
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -194,7 +194,7 @@
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -223,23 +223,23 @@
 	}
 
 	.status-active {
-		background: #dcfce7;
-		color: #16a34a;
+		background: var(--success-bg);
+		color: var(--success);
 	}
 
 	.status-inactive {
-		background: #fee2e2;
-		color: #dc2626;
+		background: var(--danger-bg);
+		color: var(--danger);
 	}
 
 	.claim {
-		background: #f1f5f9;
-		color: #64748b;
+		background: var(--divider);
+		color: var(--text-muted);
 	}
 
 	.claim.claimed {
-		background: #dcfce7;
-		color: #16a34a;
+		background: var(--success-bg);
+		color: var(--success);
 	}
 
 	.facts {
@@ -253,14 +253,14 @@
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: #64748b;
+		color: var(--text-muted);
 		margin-bottom: 0.25rem;
 	}
 
 	.facts dd {
 		margin: 0;
 		font-size: 0.9375rem;
-		color: #0f172a;
+		color: var(--text-strong);
 		font-weight: 500;
 	}
 
@@ -268,7 +268,7 @@
 		margin: 0 0 1rem;
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.courses {
@@ -278,11 +278,11 @@
 		flex-direction: column;
 		gap: 0.375rem;
 		font-size: 0.9375rem;
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
 	}
@@ -302,12 +302,12 @@
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn-secondary:hover {
-		background: #f1f5f9;
+		background: var(--divider);
 	}
 </style>

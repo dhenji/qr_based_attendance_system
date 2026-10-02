@@ -623,28 +623,28 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		margin: 0 0 0.25rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.muted {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 12px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-title {
 		margin: 0 0 1rem;
 		font-size: 1rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.filter-grid {
@@ -662,17 +662,17 @@
 	.form-label {
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.form-input {
 		padding: 0.625rem 0.75rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		font: inherit;
 		font-size: 0.9375rem;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 	}
 
 	.option-row {
@@ -693,7 +693,7 @@
 		margin-bottom: 0.5rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.choice {
@@ -702,12 +702,12 @@
 		gap: 0.375rem;
 		margin-right: 1rem;
 		font-size: 0.875rem;
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.warning {
 		margin: 1rem 0 0;
-		color: #b45309;
+		color: var(--warning-text);
 		font-size: 0.875rem;
 		font-weight: 600;
 	}
@@ -719,14 +719,14 @@
 		gap: 0.5rem;
 		margin: 1rem 0 0;
 		font-size: 0.875rem;
-		color: #1e3a5f;
+		color: var(--brand);
 	}
 
 	.link-button {
 		border: 0;
 		background: transparent;
 		padding: 0;
-		color: #2563eb;
+		color: var(--accent);
 		font: inherit;
 		font-weight: 600;
 		cursor: pointer;
@@ -743,12 +743,12 @@
 		position: relative;
 		display: inline-flex;
 		padding: 0.625rem 1rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 999px;
-		background: white;
+		background: var(--bg-card);
 		font-size: 0.875rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 		cursor: pointer;
 	}
 
@@ -761,13 +761,13 @@
 	}
 
 	.tab.selected {
-		background: #1e3a5f;
-		border-color: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.tab:focus-within {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -783,8 +783,8 @@
 		align-items: center;
 		gap: 0.25rem;
 		padding: 1rem;
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 12px;
 	}
 
@@ -792,7 +792,7 @@
 		font-size: 1.625rem;
 		font-weight: 800;
 		font-variant-numeric: tabular-nums;
-		color: #1e3a5f;
+		color: var(--brand);
 	}
 
 	.kpi-label {
@@ -800,13 +800,13 @@
 		font-weight: 700;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.table-wrap {
 		overflow: auto;
 		max-height: 24rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
 
@@ -821,19 +821,19 @@
 	td {
 		padding: 0.75rem;
 		text-align: left;
-		border-bottom: 1px solid #f1f5f9;
-		color: #0f172a;
+		border-bottom: 1px solid var(--divider);
+		color: var(--text-strong);
 	}
 
 	thead th {
 		position: sticky;
 		top: 0;
 		z-index: 1;
-		background: #f8fafc;
+		background: var(--bg-page);
 		font-size: 0.75rem;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	tbody tr:last-child td {
@@ -854,21 +854,21 @@
 	}
 
 	.btn-secondary {
-		background: white;
-		border-color: #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border-color: var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn:disabled {
-		background: #f8fafc;
-		border-color: #e2e8f0;
+		background: var(--bg-page);
+		border-color: var(--border);
 		color: #94a3b8;
 		cursor: not-allowed;
 	}
 
 	.error {
 		margin: 0 0 1rem;
-		color: #b91c1c;
+		color: var(--danger-strong);
 		font-weight: 600;
 	}
 

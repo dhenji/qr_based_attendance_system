@@ -75,12 +75,12 @@
 
 <style>
 	.error-boundary {
-		background: white;
-		border: 1px solid #fca5a5;
+		background: var(--bg-card);
+		border: 1px solid var(--danger-strong);
 		border-radius: 12px;
 		padding: 2.5rem 2rem;
 		margin: 1rem 0;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-sm);
 		position: relative;
 		overflow: hidden;
 	}
@@ -92,14 +92,14 @@
 		left: 0;
 		right: 0;
 		height: 4px;
-		background: linear-gradient(90deg, #dc2626, #ef4444);
+		background: linear-gradient(90deg, var(--danger), var(--danger));
 	}
 
 	.error-icon {
 		width: 56px;
 		height: 56px;
-		background: linear-gradient(135deg, #fee2e2, #fecaca);
-		color: #dc2626;
+		background: linear-gradient(135deg, var(--danger-bg), var(--danger-bg));
+		color: var(--danger);
 		border-radius: 12px;
 		display: flex;
 		align-items: center;
@@ -107,8 +107,8 @@
 		font-size: 1.5rem;
 		font-weight: 700;
 		margin: 0 auto 1.5rem;
-		border: 2px solid #fca5a5;
-		box-shadow: 0 2px 8px rgba(220, 38, 38, 0.1);
+		border: 2px solid var(--danger-strong);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.error-content {
@@ -119,13 +119,13 @@
 	.error-title {
 		font-size: 1.375rem;
 		font-weight: 700;
-		color: #1e3a5f;
+		color: var(--brand);
 		margin: 0 0 0.75rem 0;
 		letter-spacing: -0.025em;
 	}
 
 	.error-message {
-		color: #6b7280;
+		color: var(--text-muted);
 		margin: 0 0 1.5rem 0;
 		line-height: 1.6;
 		font-size: 0.9375rem;
@@ -134,34 +134,34 @@
 	.error-details {
 		margin: 1.5rem 0;
 		text-align: left;
-		background: #f9fafb;
+		background: var(--bg-muted);
 		border-radius: 8px;
-		border: 1px solid #e5e7eb;
+		border: 1px solid var(--border);
 		overflow: hidden;
 	}
 
 	.error-details summary {
 		cursor: pointer;
-		color: #1e3a5f;
+		color: var(--brand);
 		font-weight: 600;
 		padding: 1rem;
-		background: #f3f4f6;
-		border-bottom: 1px solid #e5e7eb;
+		background: var(--bg-muted);
+		border-bottom: 1px solid var(--border);
 		transition: background-color 0.15s;
 	}
 
 	.error-details summary:hover {
-		background: #e5e7eb;
+		background: var(--border);
 	}
 
 	.error-stack {
-		background: #ffffff;
+		background: var(--bg-card);
 		border: none;
 		border-radius: 0;
 		padding: 1rem;
 		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 		font-size: 0.8125rem;
-		color: #374151;
+		color: var(--text-secondary);
 		overflow-x: auto;
 		white-space: pre-wrap;
 		word-break: break-word;
@@ -192,14 +192,14 @@
 	}
 
 	.retry-button {
-		background: #1e3a5f;
-		color: white;
-		box-shadow: 0 2px 4px rgba(30, 58, 95, 0.2);
+		background: var(--brand);
+		color: var(--on-brand);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.retry-button:hover {
-		background: #16324f;
-		box-shadow: 0 4px 8px rgba(30, 58, 95, 0.3);
+		background: var(--brand-hover);
+		box-shadow: var(--shadow-sm);
 		transform: translateY(-1px);
 	}
 
@@ -214,17 +214,17 @@
 	}
 
 	.reload-button {
-		background: white;
-		color: #6b7280;
-		border: 1.5px solid #d1d5db;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+		background: var(--bg-card);
+		color: var(--text-muted);
+		border: 1.5px solid var(--border-strong);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.reload-button:hover {
-		background: #f9fafb;
-		border-color: #9ca3af;
-		color: #374151;
-		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+		background: var(--bg-muted);
+		border-color: var(--text-muted);
+		color: var(--text-secondary);
+		box-shadow: var(--shadow-sm);
 		transform: translateY(-1px);
 	}
 
@@ -232,52 +232,4 @@
 		transform: translateY(0);
 	}
 
-	/* Dark mode support */
-	@media (prefers-color-scheme: dark) {
-		.error-boundary {
-			background-color: #450a0a;
-			border-color: #7f1d1d;
-		}
-
-		.error-title {
-			color: #f87171;
-		}
-
-		.error-message {
-			color: #fca5a5;
-		}
-
-		.error-details summary {
-			color: #f87171;
-		}
-
-		.error-details summary:hover {
-			color: #fca5a5;
-		}
-
-		.error-stack {
-			background-color: #1f2937;
-			border-color: #374151;
-			color: #d1d5db;
-		}
-
-		.retry-button {
-			background-color: #dc2626;
-		}
-
-		.retry-button:hover {
-			background-color: #ef4444;
-		}
-
-		.reload-button {
-			background-color: #374151;
-			color: #d1d5db;
-			border-color: #6b7280;
-		}
-
-		.reload-button:hover {
-			background-color: #4b5563;
-			border-color: #9ca3af;
-		}
-	}
 </style>

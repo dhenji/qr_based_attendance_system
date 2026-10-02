@@ -102,20 +102,20 @@
 	.label,
 	.value {
 		font-size: 12px;
-		fill: #334155;
+		fill: var(--text-secondary);
 	}
 
 	.value {
 		font-weight: 700;
-		fill: #0f172a;
+		fill: var(--text-strong);
 	}
 
 	.bar {
-		fill: #2563eb;
+		fill: var(--accent);
 	}
 
 	.average {
-		stroke: #16a34a;
+		stroke: var(--success);
 		stroke-width: 2;
 		stroke-dasharray: 6 4;
 	}
@@ -123,11 +123,11 @@
 	.average-label {
 		font-size: 12px;
 		font-weight: 700;
-		fill: #15803d;
+		fill: var(--success);
 	}
 
 	.empty {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 </style>

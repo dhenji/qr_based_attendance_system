@@ -618,15 +618,15 @@
 	}
 
 	.offline-banner {
-		background: #fff7ed;
-		border: 1px solid #fed7aa;
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-bg);
 		border-radius: 8px;
 		padding: 0.625rem 1rem;
 		margin-bottom: 1rem;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		color: #c2410c;
+		color: var(--warning-text);
 		font-size: 0.875rem;
 	}
 
@@ -636,14 +636,14 @@
 	}
 
 	.banner-retry {
-		background: white;
-		border: 1px solid #fed7aa;
+		background: var(--bg-card);
+		border: 1px solid var(--warning-bg);
 		border-radius: 6px;
 		padding: 0.25rem 0.625rem;
 		font-family: inherit;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #c2410c;
+		color: var(--warning-text);
 		cursor: pointer;
 	}
 
@@ -653,8 +653,8 @@
 	}
 
 	.rejected-card {
-		background: #fef2f2;
-		border: 1px solid #fecaca;
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
 		border-radius: 8px;
 		padding: 0.625rem 1rem;
 		margin-bottom: 1rem;
@@ -669,7 +669,7 @@
 		justify-content: space-between;
 		gap: 0.5rem;
 		margin: 0;
-		color: #b91c1c;
+		color: var(--danger-strong);
 		font-size: 0.875rem;
 	}
 
@@ -680,8 +680,8 @@
 	}
 
 	.rejected-actions .banner-retry {
-		border-color: #fecaca;
-		color: #b91c1c;
+		border-color: var(--danger-bg);
+		color: var(--danger-strong);
 	}
 
 	.page {
@@ -704,7 +704,7 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #2563eb;
+		color: var(--accent);
 		font-weight: 600;
 		font-size: 0.875rem;
 		font-family: inherit;
@@ -719,24 +719,24 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.375rem;
 		font-weight: 700;
-		color: #1e3a5f;
+		color: var(--brand);
 		margin: 0;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.25rem;
 		margin-bottom: 1.25rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-title {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 1rem;
 	}
 
@@ -754,11 +754,11 @@
 		font-family: inherit;
 		outline: none;
 		transition: border-color 0.15s;
-		background: white;
+		background: var(--bg-card);
 	}
 
 	.form-input:focus {
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.code-input {
@@ -783,36 +783,36 @@
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
 	}
 
 	.btn-primary:hover {
-		background: #16324f;
-		border-color: #16324f;
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 		transform: translateY(-1px);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn-secondary:hover {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.btn-danger {
-		background: white;
-		border: 1px solid #dc2626;
-		color: #dc2626;
+		background: var(--bg-card);
+		border: 1px solid var(--danger);
+		color: var(--danger);
 	}
 
 	.btn-danger:hover {
-		background: #fef2f2;
+		background: var(--danger-bg);
 	}
 
 	.viewport {
@@ -826,16 +826,16 @@
 		justify-content: center;
 		position: relative;
 		overflow: hidden;
-		border: 2px dashed #e2e8f0;
+		border: 2px dashed var(--border);
 	}
 
 	.viewport.inactive {
-		background: #f1f5f9;
+		background: var(--bg-muted);
 	}
 
 	.inactive-content {
 		text-align: center;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.inactive-title {
@@ -907,7 +907,7 @@
 		left: 0;
 		right: 0;
 		height: 3px;
-		background: linear-gradient(90deg, transparent, #2563eb, transparent);
+		background: linear-gradient(90deg, transparent, var(--accent), transparent);
 		top: 50%;
 		animation: scan 2s ease-in-out infinite;
 		z-index: 2;
@@ -936,7 +936,7 @@
 	}
 
 	.footnote {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.8125rem;
 		margin-top: 1rem;
 		margin-bottom: 0;
@@ -954,7 +954,7 @@
 	}
 
 	.modal {
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
 		padding: 2rem;
 		max-width: 360px;
@@ -967,12 +967,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.75rem;
 	}
 
 	.modal-desc {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin-bottom: 1.5rem;
 	}
@@ -986,20 +986,20 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.8125rem;
 		font-family: inherit;
 		padding: 0;
 	}
 
 	.modal-link:hover {
-		color: #334155;
+		color: var(--text-secondary);
 		text-decoration: underline;
 	}
 
 	.result {
 		text-align: center;
-		color: white;
+		color: var(--on-brand);
 		max-width: 380px;
 		width: 100%;
 	}
@@ -1017,7 +1017,7 @@
 	}
 
 	.verified {
-		color: #16a34a;
+		color: var(--success);
 		font-weight: 600;
 	}
 
@@ -1033,7 +1033,7 @@
 		padding: 0.75rem 1rem;
 		margin-bottom: 1rem;
 		font-size: 0.875rem;
-		color: white;
+		color: var(--on-brand);
 	}
 
 	.reject-desc {
@@ -1070,7 +1070,7 @@
 
 	:global(.scan button:focus-visible),
 	:global(.scan input:focus-visible) {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>

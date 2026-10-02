@@ -1045,8 +1045,8 @@
 	}
 
 	.error {
-		color: #fecaca;
-		background: rgba(127, 29, 29, 0.7);
+		color: var(--danger-strong);
+		background: var(--danger-bg);
 		border-radius: 8px;
 		padding: 0.5rem 0.875rem;
 		font-size: 0.8125rem;

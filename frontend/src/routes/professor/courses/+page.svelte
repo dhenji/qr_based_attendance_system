@@ -189,12 +189,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -216,18 +216,18 @@
 		background: none;
 		border: none;
 		font-family: inherit;
-		color: #1e293b;
+		color: var(--text);
 		cursor: pointer;
 	}
 
 	.group-toggle:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
 	.group-chevron {
 		display: inline-flex;
-		color: #64748b;
+		color: var(--text-muted);
 		transition: transform 0.15s ease;
 	}
 
@@ -247,12 +247,12 @@
 	.group-rule {
 		flex: 1 1 auto;
 		height: 1px;
-		background: #e2e8f0;
+		background: var(--border);
 	}
 
 	.group-count {
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	/* --- Course cards -------------------------------------------------------- */
@@ -275,28 +275,28 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 1.5rem;
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 		transition: box-shadow 0.15s ease;
 	}
 
 	.course-list li:hover {
-		box-shadow: 0 6px 24px rgba(15, 23, 42, 0.1);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.course-title {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0;
 		line-height: 1.3;
 	}
 
 	.course-units {
-		color: #64748b;
+		color: var(--text-muted);
 		font-weight: 600;
 	}
 
@@ -313,9 +313,9 @@
 		gap: 0.3125rem;
 		padding: 0.1875rem 0.5rem;
 		border-radius: 6px;
-		background: #f1f5f9;
-		border: 1px solid #e2e8f0;
-		color: #334155;
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
+		color: var(--text-secondary);
 		font-size: 0.75rem;
 		font-weight: 700;
 		letter-spacing: 0.04em;
@@ -323,7 +323,7 @@
 
 	/* The lock marks the locked create-session variant (D11). */
 	.cohort-badge :global(svg) {
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	/* The role rides the assignment: a primary and an assistant can both
@@ -332,24 +332,24 @@
 		display: inline-block;
 		padding: 0.1875rem 0.5rem;
 		border-radius: 6px;
-		background: #f1f5f9;
-		border: 1px solid #e2e8f0;
-		color: #64748b;
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
+		color: var(--text-muted);
 		font-size: 0.75rem;
 		font-weight: 700;
 		letter-spacing: 0.04em;
 	}
 
 	.role-badge.primary {
-		background: #dcfce7;
-		border-color: #bbf7d0;
-		color: #16a34a;
+		background: var(--success-bg);
+		border-color: var(--success-bg);
+		color: var(--success);
 	}
 
 	.course-meta {
 		margin: 0.25rem 0 0;
 		font-size: 0.875rem;
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.course-term {
@@ -383,33 +383,33 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-primary:hover {
-		background: #16324f;
-		border-color: #16324f;
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 		transform: translateY(-1px);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	/* Reports deep-links to the offering-prefiltered reports page. */
 	.btn:disabled {
 		color: #94a3b8;
-		background: #f8fafc;
-		border-color: #e2e8f0;
+		background: var(--bg-page);
+		border-color: var(--border);
 		cursor: not-allowed;
 	}
 
@@ -421,25 +421,25 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 		font-size: 0.875rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.9375rem;
 		margin: 0;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 2rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.empty {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}

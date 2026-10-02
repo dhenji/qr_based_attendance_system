@@ -94,11 +94,11 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		background: #1e3a5f;
-		color: #f8fafc;
+		background: var(--brand);
+		color: var(--on-brand);
 		border-radius: 12px;
 		padding: 0.75rem 1rem;
-		box-shadow: 0 12px 32px rgba(15, 23, 42, 0.35);
+		box-shadow: var(--shadow-lg);
 		font-family: system-ui, sans-serif;
 	}
 
@@ -117,14 +117,14 @@
 	}
 
 	.install-text span {
-		color: #cbd5e1;
+		color: color-mix(in srgb, var(--on-brand) 80%, transparent);
 		font-size: 0.8125rem;
 	}
 
 	.install-btn {
 		margin-left: auto;
-		background: #f8fafc;
-		color: #1e3a5f;
+		background: var(--bg-page);
+		color: var(--brand);
 		border: none;
 		border-radius: 8px;
 		padding: 0.5rem 1rem;
@@ -138,7 +138,7 @@
 	.install-dismiss {
 		background: none;
 		border: none;
-		color: #94a3b8;
+		color: color-mix(in srgb, var(--on-brand) 70%, transparent);
 		font-size: 1rem;
 		cursor: pointer;
 		padding: 0.25rem;

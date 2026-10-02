@@ -119,13 +119,13 @@
 	}
 
 	.grid {
-		stroke: #e2e8f0;
+		stroke: var(--border);
 		stroke-width: 1;
 	}
 
 	.axis {
 		font-size: 12px;
-		fill: #64748b;
+		fill: var(--text-muted);
 	}
 
 	.legend {
@@ -136,7 +136,7 @@
 		margin: 0.75rem 0 0;
 		padding: 0;
 		font-size: 0.8125rem;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.swatch {
@@ -149,6 +149,6 @@
 
 	.empty {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 </style>

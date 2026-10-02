@@ -284,12 +284,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -304,18 +304,18 @@
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.card-title {
 		margin: 0 0 0.375rem;
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.row-head {
@@ -330,7 +330,7 @@
 	.tabs {
 		display: flex;
 		gap: 0.25rem;
-		border-bottom: 2px solid #e2e8f0;
+		border-bottom: 2px solid var(--border);
 	}
 
 	.tabs button {
@@ -340,19 +340,19 @@
 		font-size: 0.9375rem;
 		font-weight: 600;
 		font-family: inherit;
-		color: #64748b;
+		color: var(--text-muted);
 		cursor: pointer;
 		border-bottom: 2px solid transparent;
 		margin-bottom: -2px;
 	}
 
 	.tabs button:hover {
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.tabs button.active {
-		color: #1e3a5f;
-		border-bottom-color: #1e3a5f;
+		color: var(--brand);
+		border-bottom-color: var(--brand);
 	}
 
 	.filters {
@@ -364,18 +364,18 @@
 
 	.input {
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 	}
 
 	.input:focus {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 1px;
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.search {
@@ -392,12 +392,12 @@
 	td {
 		text-align: left;
 		padding: 0.625rem 0.5rem;
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--divider);
 		vertical-align: top;
 	}
 
 	th {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -426,7 +426,7 @@
 	}
 
 	.th-btn:hover {
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.badge {
@@ -435,14 +435,14 @@
 		border-radius: 999px;
 		font-size: 0.75rem;
 		font-weight: 600;
-		color: #1e3a5f;
-		background: #e0e7ff;
+		color: var(--brand);
+		background: var(--info-bg);
 		margin: 0 0.375rem 0.25rem 0;
 	}
 
 	.badge.live {
-		color: #15803d;
-		background: #dcfce7;
+		color: var(--success);
+		background: var(--success-bg);
 	}
 
 	.pager {
@@ -454,13 +454,13 @@
 	}
 
 	.empty {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0;
 		flex-basis: 100%;
@@ -482,7 +482,7 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -492,23 +492,23 @@
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: #16324f;
+		background: var(--brand-hover);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn-secondary:hover:not(:disabled) {
-		background: #f1f5f9;
+		background: var(--divider);
 	}
 
 	.table-wrap {

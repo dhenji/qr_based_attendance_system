@@ -310,12 +310,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -326,11 +326,11 @@
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.filters {
@@ -342,18 +342,18 @@
 
 	.input {
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 	}
 
 	.input:focus {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 1px;
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.search {
@@ -370,12 +370,12 @@
 	td {
 		text-align: left;
 		padding: 0.625rem 0.5rem;
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--divider);
 		vertical-align: middle;
 	}
 
 	th {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -388,13 +388,13 @@
 		border-radius: 999px;
 		font-size: 0.75rem;
 		font-weight: 600;
-		color: #15803d;
-		background: #dcfce7;
+		color: var(--success);
+		background: var(--success-bg);
 	}
 
 	.badge.inactive {
-		color: #64748b;
-		background: #f1f5f9;
+		color: var(--text-muted);
+		background: var(--divider);
 	}
 
 	.th-btn {
@@ -408,7 +408,7 @@
 	}
 
 	.th-btn:hover {
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.row-actions {
@@ -421,7 +421,7 @@
 		background: none;
 		border: none;
 		padding: 0;
-		color: #2563eb;
+		color: var(--accent);
 		font-size: 0.8125rem;
 		font-weight: 600;
 		cursor: pointer;
@@ -453,13 +453,13 @@
 	}
 
 	.empty {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
 	}
@@ -480,7 +480,7 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -490,36 +490,36 @@
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: #16324f;
+		background: var(--brand-hover);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn-secondary:hover:not(:disabled) {
-		background: #f1f5f9;
+		background: var(--divider);
 	}
 
 	.btn-ghost {
-		background: #f1f5f9;
+		background: var(--divider);
 		border: 1px solid transparent;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.modal-overlay {
 		position: fixed;
 		inset: 0;
 		z-index: 100;
-		background: rgba(15, 23, 42, 0.5);
+		background: var(--overlay);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -531,9 +531,9 @@
 		max-width: 520px;
 		max-height: 90vh;
 		overflow-y: auto;
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
-		box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		font-family: system-ui, sans-serif;
 	}
@@ -542,7 +542,7 @@
 		margin: 0 0 1rem;
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.form {
@@ -557,7 +557,7 @@
 		gap: 0.375rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.grid2 {
@@ -568,7 +568,7 @@
 
 	.hint {
 		font-size: 0.75rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 		margin: 0;
 	}
 

@@ -32,10 +32,10 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 2.5rem 1.5rem;
-		background: #1e3a5f;
+		background: var(--brand);
 		border-radius: 8px;
-		color: white;
-		box-shadow: 0 8px 24px rgba(30, 58, 95, 0.25);
+		color: var(--on-brand);
+		box-shadow: var(--shadow-sm);
 		text-align: center;
 	}
 
@@ -48,7 +48,7 @@
 
 	.rate-value.placeholder {
 		font-size: 2.5rem;
-		color: rgba(255, 255, 255, 0.9);
+		color: color-mix(in srgb, var(--on-brand) 90%, transparent);
 	}
 
 	.rate-label {
@@ -59,6 +59,6 @@
 
 	.rate-hint {
 		font-size: 0.8125rem;
-		color: rgba(255, 255, 255, 0.85);
+		color: color-mix(in srgb, var(--on-brand) 85%, transparent);
 	}
 </style>

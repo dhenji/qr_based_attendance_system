@@ -30,7 +30,7 @@
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.75rem 1.5rem;
-		background: #1e3a5f;
+		background: var(--brand);
 		box-shadow: 0 2px 12px rgba(15, 23, 42, 0.25);
 		box-sizing: border-box;
 		font-family: 'DM Sans', system-ui, sans-serif;
@@ -50,7 +50,7 @@
 	}
 
 	.nav-name {
-		color: white;
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 1.125rem;
 		white-space: nowrap;
@@ -67,7 +67,7 @@
 	.nav-link {
 		padding: 0.5rem 0.875rem;
 		border-radius: 8px;
-		color: #e2e8f0;
+		color: var(--border);
 		font-size: 0.9375rem;
 		font-weight: 500;
 		text-decoration: none;
@@ -77,6 +77,6 @@
 
 	.nav-link:hover {
 		background: rgba(255, 255, 255, 0.1);
-		color: white;
+		color: var(--on-brand);
 	}
 </style>

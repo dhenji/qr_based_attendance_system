@@ -149,7 +149,7 @@
 	.shell {
 		min-height: 100vh;
 		font-family: system-ui, sans-serif;
-		background: #f8fafc;
+		background: var(--bg-page);
 		overflow-x: hidden;
 	}
 
@@ -162,7 +162,7 @@
 		align-items: center;
 		gap: 0.875rem;
 		padding: 0.75rem 1.5rem;
-		background: #1e3a5f;
+		background: var(--brand);
 		box-shadow: 0 2px 12px rgba(15, 23, 42, 0.25);
 	}
 
@@ -176,7 +176,7 @@
 		border: none;
 		border-radius: 8px;
 		background: transparent;
-		color: #cbd5e1;
+		color: var(--border-strong);
 		cursor: pointer;
 		flex-shrink: 0;
 	}
@@ -184,7 +184,7 @@
 	.menu-btn:hover,
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
-		color: white;
+		color: var(--on-brand);
 	}
 
 	.brand {
@@ -202,7 +202,7 @@
 	}
 
 	.brand-name {
-		color: white;
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 1.125rem;
 		white-space: nowrap;
@@ -241,8 +241,8 @@
 		gap: 0.25rem;
 		width: 220px;
 		flex-shrink: 0;
-		background: white;
-		border-right: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border-right: 1px solid var(--border);
 		padding: 1rem 0.75rem;
 		transition: width 0.2s ease;
 	}
@@ -257,7 +257,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		width: 100%;
-		color: #334155;
+		color: var(--text-secondary);
 		text-decoration: none;
 		padding: 0.625rem 0.75rem;
 		border-radius: 8px;
@@ -274,13 +274,13 @@
 	}
 
 	.nav-link:hover:not(.disabled) {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 		transform: translateX(2px);
 	}
 
 	.nav-link.active {
-		background: #2563eb;
-		color: white;
+		background: var(--accent);
+		color: var(--on-brand);
 		box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
 	}
 
@@ -316,7 +316,7 @@
 		position: fixed;
 		inset: 0;
 		z-index: 100;
-		background: rgba(15, 23, 42, 0.5);
+		background: var(--overlay);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -326,9 +326,9 @@
 	.modal {
 		width: 100%;
 		max-width: 360px;
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
-		box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		text-align: center;
 		font-family: system-ui, sans-serif;
@@ -338,7 +338,7 @@
 		margin: 0 0 0.375rem;
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.modal-text {
@@ -365,21 +365,21 @@
 	}
 
 	.btn-ghost {
-		background: #f1f5f9;
-		color: #334155;
+		background: var(--bg-muted);
+		color: var(--text-secondary);
 	}
 
 	.btn-ghost:hover {
-		background: #e2e8f0;
+		background: var(--border);
 	}
 
 	.btn-danger {
-		background: #dc2626;
-		color: white;
+		background: var(--danger);
+		color: var(--on-brand);
 	}
 
 	.btn-danger:hover {
-		background: #b91c1c;
+		background: var(--danger-strong);
 	}
 
 	@media (max-width: 640px) {
