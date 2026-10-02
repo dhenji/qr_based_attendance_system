@@ -22,6 +22,8 @@ import type {
 	AdminRosterItemResponse,
 	AdminStudentDetailResponse,
 	AdminStudentResponse,
+	AdminUserCreateResponse,
+	AdminUserResponse,
 	AnalyticsAtRiskItemResponse,
 	AnalyticsComparisonItemResponse,
 	AnalyticsOverviewResponse,
@@ -2187,6 +2189,150 @@ export const AdminStructureChangesEndpoint: EndpointDef<{ items: StructureChange
 	mock: () => ({ items: [...MOCK_STRUCTURE_ROWS] }),
 };
 
+// --- Admin users (super_admin only) -------------------------------------------
+//
+// Mirrors backend/src/features/admin/router.py (prefix /admin/users, mounted
+// once in api/router.py): GET "" list (search/role/is_active/page/size),
+// POST "" create (201 + temp_password once), PATCH /{id}/deactivate (204,
+// self-deactivation rejected). Creatable roles are admin/professor/student —
+// super_admin is seeded, never created via API. Real API by default; mocks
+// only when PUBLIC_MOCK_MODE=true.
+
+// Seeded super_admin account for mock mode (frontend-only; the real first
+// super_admin is seeded at deployment and the backend is untouched here).
+// Mock login accepts this email with any non-empty password (see
+// features/auth/mock.ts MOCK_SUPER_ADMIN).
+const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
+	{
+		id: 1,
+		email: 'superadmin@isu.edu.ph',
+		username: 'superadmin',
+		role: 'super_admin',
+		first_name: 'Super',
+		last_name: 'Admin',
+		is_active: true,
+		must_change_password: false,
+		last_login: null,
+		created_at: '2025-08-01T08:00:00.000Z',
+	},
+	{
+		id: 2,
+		email: 'admin@isu.edu.ph',
+		username: 'admin',
+		role: 'admin',
+		first_name: 'Admin',
+		last_name: 'User',
+		is_active: true,
+		must_change_password: false,
+		last_login: null,
+		created_at: '2025-08-15T08:00:00.000Z',
+	},
+	{
+		id: 3,
+		email: 'maria.c.delacruz@isu.edu.ph',
+		username: 'mdelacruz',
+		role: 'professor',
+		first_name: 'Maria',
+		last_name: 'Dela Cruz',
+		is_active: true,
+		must_change_password: false,
+		last_login: null,
+		created_at: '2025-09-01T08:00:00.000Z',
+	},
+];
+
+const mockAdminUsersList = (
+	params?: Record<string, string>
+): Paginated<AdminUserResponse> => {
+	let rows = [...MOCK_ADMIN_USER_ROWS];
+	const search = params?.search?.trim().toLowerCase();
+	if (search) {
+		rows = rows.filter((r) =>
+			`${r.email} ${r.username ?? ''} ${r.first_name ?? ''} ${r.last_name ?? ''}`
+				.toLowerCase()
+				.includes(search)
+		);
+	}
+	if (params?.role) {
+		rows = rows.filter((r) => r.role === params.role);
+	}
+	if (params?.is_active !== undefined) {
+		const active = params.is_active === 'true';
+		rows = rows.filter((r) => r.is_active === active);
+	}
+	rows.sort((a, b) => a.id - b.id);
+	const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+	const total = rows.length;
+	const totalPages = Math.max(1, Math.ceil(total / size));
+	const page = Math.min(Math.max(parseInt(params?.page ?? '1', 10) || 1, 1), totalPages);
+	return { items: rows.slice((page - 1) * size, page * size), total, page, size };
+};
+
+interface MockAdminUserPayload {
+	email?: unknown;
+	role?: unknown;
+	first_name?: unknown;
+	middle_name?: unknown;
+	last_name?: unknown;
+	username?: unknown;
+}
+
+export const AdminUsersEndpoint: EndpointDef<Paginated<AdminUserResponse>> = {
+	url: '/admin/users',
+	method: 'GET',
+	mock: (params) => mockAdminUsersList(params),
+};
+
+export const AdminUserCreateEndpoint: EndpointDef<AdminUserCreateResponse> = {
+	url: '/admin/users',
+	method: 'POST',
+	mock: (_params, _suffix, body) => {
+		const p = (body ?? {}) as MockAdminUserPayload;
+		const email = String(p.email ?? '').trim().toLowerCase();
+		const role = String(p.role ?? '').trim();
+		if (!email) throw new Error('Email is required.');
+		if (role === 'super_admin') {
+			throw new Error('super_admin accounts cannot be created; the first one is seeded at deployment');
+		}
+		if (!['admin', 'professor', 'student'].includes(role)) {
+			throw new Error('Role must be admin, professor, or student.');
+		}
+		if (MOCK_ADMIN_USER_ROWS.some((r) => r.email.toLowerCase() === email)) {
+			throw new Error('Email already exists.');
+		}
+		const username = String(p.username ?? '').trim() || null;
+		if (username && MOCK_ADMIN_USER_ROWS.some((r) => (r.username ?? '').toLowerCase() === username.toLowerCase())) {
+			throw new Error('Username already exists.');
+		}
+		const row: AdminUserResponse = {
+			id: Math.max(...MOCK_ADMIN_USER_ROWS.map((r) => r.id), 0) + 1,
+			email,
+			username,
+			role: role as AdminUserResponse['role'],
+			first_name: String(p.first_name ?? '').trim() || null,
+			last_name: String(p.last_name ?? '').trim() || null,
+			is_active: true,
+			must_change_password: true,
+			last_login: null,
+			created_at: new Date().toISOString(),
+		};
+		MOCK_ADMIN_USER_ROWS.push(row);
+		return { ...row, temp_password: `Temp-${Math.random().toString(36).slice(2, 10)}!` };
+	},
+};
+
+export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'PATCH',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('User not found.');
+		row.is_active = false;
+		return undefined as unknown as void;
+	},
+};
+
 // --- Professor excuse queue --------------------------------------------------
 //
 // Live routes on features/excuse/professor_router.py under the shared
@@ -2294,6 +2440,10 @@ export const endpoints = {
 	// Admin audit logs (Phase 8 backend; designed shape)
 	adminAuditLogs: AdminAuditLogsEndpoint,
 	adminStructureChanges: AdminStructureChangesEndpoint,
+	// Admin users (super_admin only)
+	adminUsers: AdminUsersEndpoint,
+	adminUserCreate: AdminUserCreateEndpoint,
+	adminUserDeactivate: AdminUserDeactivateEndpoint,
 	// Admin courses (templates, D44)
 	adminCourses: AdminCoursesEndpoint,
 	adminCourseCreate: AdminCourseCreateEndpoint,

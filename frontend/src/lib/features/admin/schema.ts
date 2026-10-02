@@ -63,3 +63,19 @@ export const csvFileSchema = z
 	.refine((f) => f.name.toLowerCase().endsWith('.csv'), 'File must end in .csv')
 	.refine((f) => f.size > 0, 'File is empty')
 	.refine((f) => f.size <= 5 * 1024 * 1024, 'File must be under 5 MB');
+
+// Admin user create (super_admin only). Mirrors backend
+// features/admin/schema.py AdminUserCreate: creatable roles are
+// admin/professor/student — super_admin is seeded, never created via API.
+export const adminUserCreateSchema = z.object({
+	email: emailField,
+	role: z.enum(['admin', 'professor', 'student'], {
+		message: 'Pick a role',
+	}),
+	first_name: nameField,
+	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
+	last_name: nameField,
+	username: z.string().trim().min(3).max(150).optional().or(z.literal('')),
+});
+
+export type AdminUserCreateInput = z.infer<typeof adminUserCreateSchema>;

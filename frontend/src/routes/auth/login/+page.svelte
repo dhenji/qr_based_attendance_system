@@ -12,6 +12,7 @@
 	} from '$lib/features/auth/store.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import ErrorBoundary from '$lib/components/ErrorBoundary.svelte';
+	import { isMockMode } from '$lib/api/client';
 
 	// 'credentials' -> 'mfa' (when the account has MFA enabled) -> 'change-password'
 	// (when an admin issued a temporary password).
@@ -139,6 +140,15 @@
 		</div>
 
 		<div class="card">
+			{#if isMockMode()}
+				<p class="hint mock-hint" data-testid="mock-accounts">
+					Mock mode — sign in with any password as
+					<span class="mono">superadmin@isu.edu.ph</span>,
+					<span class="mono">admin@isu.edu.ph</span>,
+					<span class="mono">maria.c.delacruz@isu.edu.ph</span>, or
+					<span class="mono">jose.p.rizal@isu.edu.ph</span>.
+				</p>
+			{/if}
 			<ErrorBoundary {error} retryButton={false}>
 				{#snippet children()}
 
@@ -392,6 +402,21 @@
 
 	.hint.warn {
 		color: var(--danger);
+	}
+
+	.mock-hint {
+		font-size: 0.8125rem;
+		line-height: 1.6;
+		background: var(--bg-muted);
+		border: 1px dashed var(--border-strong);
+		border-radius: 8px;
+		padding: 0.625rem 0.875rem;
+		margin: 0 0 1rem;
+	}
+
+	.mock-hint .mono {
+		font-family: monospace;
+		font-size: 0.75rem;
 	}
 
 	.pwd-wrap {

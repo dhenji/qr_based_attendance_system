@@ -11,12 +11,16 @@ import type {
 	AdminProfessorFilters,
 	AdminStudent,
 	AdminStudentFilters,
+	AdminUser,
+	AdminUserFilters,
 } from '$lib/shared/types';
 import {
+	deactivateUser,
 	hardDeleteProfessor,
 	hardDeleteStudent,
 	listProfessors,
 	listStudents,
+	listUsers,
 	setProfessorActive,
 	setStudentActive,
 } from '$lib/features/admin/service';
@@ -144,6 +148,56 @@ export const deleteArchivedProfessor = async (id: number): Promise<void> => {
 		await refreshAdminProfessors();
 	} catch (e: unknown) {
 		adminProfessorsState.actionError = toMessage(e, 'Failed to delete professor');
+		throw e;
+	}
+};
+
+// Admin users (super_admin only): list state for /admin/users. Create returns
+// the temp password once (held by the page, not the store); deactivate is
+// one-way — the backend mounts no reactivate route.
+export const adminUsersState = $state({
+	items: [] as AdminUser[],
+	total: 0,
+	page: 1,
+	size: 20,
+	filters: {} as Omit<AdminUserFilters, 'page' | 'size'>,
+	loading: false,
+	error: null as string | null,
+	actionError: null as string | null,
+});
+
+export const initAdminUsers = async (
+	filters: AdminUserFilters = {},
+	page = 1,
+	size = 20
+): Promise<void> => {
+	adminUsersState.loading = true;
+	adminUsersState.error = null;
+	try {
+		const result = await listUsers({ ...filters, page, size });
+		adminUsersState.items = result.items;
+		adminUsersState.total = result.total;
+		adminUsersState.page = result.page;
+		adminUsersState.size = result.size;
+		adminUsersState.filters = filters;
+	} catch (e: unknown) {
+		adminUsersState.error = toMessage(e, 'Failed to load users');
+	} finally {
+		adminUsersState.loading = false;
+	}
+};
+
+export const refreshAdminUsers = async (): Promise<void> => {
+	await initAdminUsers(adminUsersState.filters, adminUsersState.page, adminUsersState.size);
+};
+
+export const deactivateAdminUser = async (user: AdminUser): Promise<void> => {
+	adminUsersState.actionError = null;
+	try {
+		await deactivateUser(user.id);
+		await refreshAdminUsers();
+	} catch (e: unknown) {
+		adminUsersState.actionError = toMessage(e, 'Failed to deactivate user');
 		throw e;
 	}
 };

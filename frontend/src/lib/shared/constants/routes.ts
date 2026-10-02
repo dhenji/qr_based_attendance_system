@@ -36,6 +36,7 @@ export const Routes = {
   ADMIN_ANALYTICS: "/admin/analytics",
   ADMIN_ATTENDANCE: "/admin/attendance",
   ADMIN_AUDIT_LOGS: "/admin/audit-logs",
+  ADMIN_USERS: "/admin/users",
   ADMIN_PROFILE: "/admin/profile",
   ADMIN_SYSTEM_SETTINGS: "/admin/system/settings",
 

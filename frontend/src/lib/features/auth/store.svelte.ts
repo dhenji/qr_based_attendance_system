@@ -46,6 +46,10 @@ export const isProfessor = () => authState.user?.role === 'professor';
 export const isAdmin = () =>
 	authState.user?.role === 'admin' || authState.user?.role === 'super_admin';
 
+// Super-admin only gate for /admin/users (backend require_role(SUPER_ADMIN)).
+// Plain admins share the rest of the admin portal via isAdmin().
+export const isSuperAdmin = () => authState.user?.role === 'super_admin';
+
 // Where to send a freshly authenticated user.
 //
 // Students and professors go to their portals; admins go to the admin

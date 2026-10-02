@@ -48,6 +48,22 @@ const MOCK_ADMIN: MeResponse = {
 	claim_status: null,
 };
 
+// Seeded super_admin for mock mode (frontend-only; the real first super_admin
+// is seeded at deployment — backend untouched). Sign in with this email + any
+// non-empty password to exercise the /admin/users UI.
+const MOCK_SUPER_ADMIN: MeResponse = {
+	...MOCK_STUDENT,
+	id: 9,
+	role: 'super_admin',
+	first_name: 'Super',
+	last_name: 'Admin',
+	email: 'superadmin@isu.edu.ph',
+	face_enrolled: null,
+	face_enrolled_at: null,
+	face_embedding_version: null,
+	claim_status: null,
+};
+
 const delay = <T>(value: T): Promise<T> => Promise.resolve(value);
 
 const studentTokens: TokenResponse = {
@@ -74,12 +90,25 @@ const adminTokens: TokenResponse = {
 	must_change_password: false,
 };
 
+const superAdminTokens: TokenResponse = {
+	access_token: 'mock-access-token-super-admin',
+	refresh_token: 'mock-refresh-token-super-admin',
+	mfa_pending: false,
+	preauth_token: null,
+	must_change_password: false,
+};
+
 // Who the last mock login signed in as, so /auth/me returns a matching identity
 // instead of always claiming to be the student.
 let signedInAs: MeResponse = MOCK_STUDENT;
 
 export const mockLogin = async (email: string): Promise<TokenResponse> => {
 	const normalized = email.trim().toLowerCase();
+
+	if (normalized === MOCK_SUPER_ADMIN.email) {
+		signedInAs = MOCK_SUPER_ADMIN;
+		return delay(superAdminTokens);
+	}
 
 	if (normalized === MOCK_ADMIN.email) {
 		signedInAs = MOCK_ADMIN;
@@ -96,7 +125,9 @@ export const mockLogin = async (email: string): Promise<TokenResponse> => {
 		return delay(studentTokens);
 	}
 
-	throw new Error('Invalid email or password.');
+	throw new Error(
+		`Unknown mock account. Use ${MOCK_SUPER_ADMIN.email}, ${MOCK_ADMIN.email}, ${MOCK_PROFESSOR.email}, or ${MOCK_STUDENT.email} with any password.`
+	);
 };
 
 export const mockRegister = async (): Promise<TokenResponse> => {
@@ -107,6 +138,7 @@ export const mockRegister = async (): Promise<TokenResponse> => {
 export const mockMe = async (): Promise<MeResponse> => delay(signedInAs);
 
 export const mockMfaVerify = async (): Promise<TokenResponse> => {
+	if (signedInAs === MOCK_SUPER_ADMIN) return delay(superAdminTokens);
 	if (signedInAs === MOCK_ADMIN) return delay(adminTokens);
 	return delay(signedInAs === MOCK_PROFESSOR ? professorTokens : studentTokens);
 };
