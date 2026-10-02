@@ -8,12 +8,19 @@
 		refreshAdminProfessors,
 		toggleProfessorActive,
 	} from '$lib/features/admin/store.svelte';
-	import { createProfessor, updateProfessor } from '$lib/features/admin/service';
+	import {
+		createProfessor,
+		listOfferings,
+		offeringLabel,
+		updateProfessor,
+	} from '$lib/features/admin/service';
 	import {
 		adminProfessorCreateSchema,
 		adminProfessorUpdateSchema,
 	} from '$lib/features/admin/schema';
-	import type { AdminProfessor } from '$lib/shared/types';
+	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
+	import { goto } from '$app/navigation';
+	import { adminProfessor } from '$lib/shared/constants/routes';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
 	// the roster seeds the records professors claim at registration. Columns:
@@ -21,7 +28,7 @@
 
 	let search = $state('');
 	let department = $state('');
-	let statusFilter = $state<'all' | 'active' | 'archived'>('all');
+	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
 	let sortBy = $state<'last_name' | 'email' | 'created_at'>('last_name');
 	let sortDir = $state<'asc' | 'desc'>('asc');
 
@@ -38,6 +45,10 @@
 	let f_email = $state('');
 	let f_department = $state('');
 	let f_username = $state('');
+	let f_courses = $state<number[]>([]);
+	let offeringOptions = $state<AdminOffering[]>([]);
+	let offeringsLoading = $state(false);
+	let offeringsError = $state<string | null>(null);
 
 	const isActiveFilter = $derived(
 		statusFilter === 'all' ? undefined : statusFilter === 'active'
@@ -60,9 +71,29 @@
 			adminProfessorsState.size
 		);
 
+	const loadOfferings = async () => {
+		offeringsLoading = true;
+		offeringsError = null;
+		try {
+			const result = await listOfferings({ is_active: true, page: 1, size: 50 });
+			offeringOptions = result.items;
+		} catch (e: unknown) {
+			offeringsError = e instanceof Error && e.message ? e.message : 'Could not load offerings';
+		} finally {
+			offeringsLoading = false;
+		}
+	};
+
 	onMount(() => {
 		load(1);
+		loadOfferings();
 	});
+
+	const toggleCourse = (id: number) => {
+		f_courses = f_courses.includes(id)
+			? f_courses.filter((v) => v !== id)
+			: [...f_courses, id];
+	};
 
 	const applyFilters = () => {
 		load(1);
@@ -93,6 +124,8 @@
 		f_email = '';
 		f_department = '';
 		f_username = '';
+		f_courses = [];
+		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
 
@@ -105,6 +138,8 @@
 		f_email = p.email;
 		f_department = p.department ?? '';
 		f_username = '';
+		f_courses = (p.assigned_courses ?? []).map((c) => c.offering_id);
+		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
 
@@ -120,6 +155,7 @@
 					email: f_email,
 					department: f_department || undefined,
 					username: f_username || undefined,
+					courses: f_courses,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -133,6 +169,7 @@
 					email: d.email,
 					department: d.department || undefined,
 					username: d.username || undefined,
+					courses: d.courses.length > 0 ? d.courses : undefined,
 				});
 			} else {
 				const parsed = adminProfessorUpdateSchema.safeParse({
@@ -140,6 +177,7 @@
 					last_name: f_last_name || undefined,
 					email: f_email || undefined,
 					department: f_department || undefined,
+					courses: f_courses,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -151,6 +189,7 @@
 					last_name: d.last_name,
 					email: d.email,
 					department: d.department,
+					courses: d.courses,
 				});
 			}
 			formOpen = false;
@@ -212,7 +251,7 @@
 		<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={applyFilters}>
 			<option value="all">All statuses</option>
 			<option value="active">Active</option>
-			<option value="archived">Archived</option>
+			<option value="inactive">Inactive</option>
 		</select>
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
@@ -246,11 +285,24 @@
 					{#each adminProfessorsState.items as p (p.id)}
 						<tr>
 							<td>{fullName(p)}</td>
-							<td class="mono">{p.email}</td>
+							<td>
+								<button
+									class="link mono"
+									data-testid={`professor-email-${p.id}`}
+									aria-label={`View ${fullName(p)} profile`}
+									onclick={() => goto(adminProfessor(p.id))}
+								>
+									{p.email}
+								</button>
+							</td>
 							<td>{p.department ?? '—'}</td>
 							<td>{p.assigned_courses.length}</td>
 							<td>{p.claimStatus}</td>
-							<td>{p.isActive ? '✅' : '🚫'}</td>
+							<td>
+								<span class={p.isActive ? 'status-active' : 'status-inactive'}>
+									{p.isActive ? 'Active' : 'Inactive'}
+								</span>
+							</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => openEdit(p)}>Edit</button>
 								<button
@@ -310,7 +362,28 @@
 						<label>Username (claim slot)<input class="input" bind:value={f_username} placeholder="optional" /></label>
 					{/if}
 				</div>
-				<p class="hint">Course assignment happens on the Offerings screens (Phase 3 next); no user row is created until the professor self-registers.</p>
+				<fieldset class="courses">
+					<legend>Course assignments (offerings)</legend>
+					{#if offeringsLoading}
+						<p class="hint">Loading offerings…</p>
+					{:else if offeringsError}
+						<p class="error" role="alert">{offeringsError}</p>
+					{:else if offeringOptions.length === 0}
+						<p class="hint">No active offerings found.</p>
+					{:else}
+						{#each offeringOptions as o (o.id)}
+							<label class="check">
+								<input
+									type="checkbox"
+									checked={f_courses.includes(o.id)}
+									onchange={() => toggleCourse(o.id)}
+								/>
+								<span>{offeringLabel(o)}</span>
+							</label>
+						{/each}
+					{/if}
+				</fieldset>
+				<p class="hint">Assignments are saved with the professor (replaces the set on edit); no user row is created until the professor self-registers.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
@@ -327,7 +400,7 @@
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} is archived. This cannot be undone, and it fails
+				{fullName(deleteTarget)} is inactive. This cannot be undone, and it fails
 				with 409 if sessions still reference them.
 			</p>
 			{#if adminProfessorsState.actionError}
@@ -363,12 +436,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -379,11 +452,11 @@
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.filters {
@@ -395,18 +468,18 @@
 
 	.input {
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 	}
 
 	.input:focus {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 1px;
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.search {
@@ -423,12 +496,12 @@
 	td {
 		text-align: left;
 		padding: 0.625rem 0.5rem;
-		border-bottom: 1px solid #f1f5f9;
+		border-bottom: 1px solid var(--divider);
 		vertical-align: middle;
 	}
 
 	th {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -445,12 +518,32 @@
 	}
 
 	.th-btn:hover {
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.mono {
 		font-variant-numeric: tabular-nums;
 		font-weight: 500;
+	}
+
+	.status-active,
+	.status-inactive {
+		display: inline-block;
+		padding: 0.125rem 0.625rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.status-active {
+		background: var(--success-bg);
+		color: var(--success);
+	}
+
+	.status-inactive {
+		background: var(--danger-bg);
+		color: var(--danger);
 	}
 
 	.row-actions {
@@ -463,7 +556,7 @@
 		background: none;
 		border: none;
 		padding: 0;
-		color: #2563eb;
+		color: var(--accent);
 		font-size: 0.8125rem;
 		font-weight: 600;
 		cursor: pointer;
@@ -474,7 +567,7 @@
 	}
 
 	.link.danger {
-		color: #dc2626;
+		color: var(--danger);
 	}
 
 	.sr {
@@ -494,13 +587,13 @@
 	}
 
 	.empty {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
 	}
@@ -521,7 +614,7 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -531,42 +624,42 @@
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: #16324f;
+		background: var(--brand-hover);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn-secondary:hover:not(:disabled) {
-		background: #f1f5f9;
+		background: var(--divider);
 	}
 
 	.btn-ghost {
-		background: #f1f5f9;
+		background: var(--divider);
 		border: 1px solid transparent;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.btn-danger {
-		background: #dc2626;
-		border: 1px solid #dc2626;
-		color: white;
+		background: var(--danger);
+		border: 1px solid var(--danger);
+		color: var(--on-brand);
 	}
 
 	.modal-overlay {
 		position: fixed;
 		inset: 0;
 		z-index: 100;
-		background: rgba(15, 23, 42, 0.5);
+		background: var(--overlay);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -578,9 +671,9 @@
 		max-width: 520px;
 		max-height: 90vh;
 		overflow-y: auto;
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
-		box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		font-family: system-ui, sans-serif;
 	}
@@ -589,13 +682,13 @@
 		margin: 0 0 1rem;
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.modal-text {
 		margin: 0 0 1.5rem;
 		font-size: 0.9375rem;
-		color: #475569;
+		color: var(--text-secondary);
 	}
 
 	.form {
@@ -610,7 +703,7 @@
 		gap: 0.375rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.grid2 {
@@ -621,8 +714,33 @@
 
 	.hint {
 		font-size: 0.75rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 		margin: 0;
+	}
+
+	.courses {
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.75rem 0.875rem;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.courses legend {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+		padding: 0 0.375rem;
+	}
+
+	.courses .check {
+		flex-direction: row;
+		align-items: center;
+		gap: 0.5rem;
+		font-weight: 500;
+		cursor: pointer;
 	}
 
 	.modal-actions {

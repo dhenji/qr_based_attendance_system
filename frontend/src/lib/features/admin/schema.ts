@@ -42,6 +42,7 @@ export const adminProfessorCreateSchema = z.object({
 	email: emailField,
 	department: z.string().trim().max(100).optional().or(z.literal('')),
 	username: z.string().trim().min(3).max(150).optional().or(z.literal('')),
+	courses: z.array(z.coerce.number().int().positive()).default([]),
 });
 
 export type AdminProfessorCreateInput = z.infer<typeof adminProfessorCreateSchema>;
@@ -52,6 +53,7 @@ export const adminProfessorUpdateSchema = z.object({
 	email: emailField.optional(),
 	department: z.string().trim().max(100).optional().or(z.literal('')),
 	is_active: z.boolean().optional(),
+	courses: z.array(z.coerce.number().int().positive()).optional(),
 });
 
 export type AdminProfessorUpdateInput = z.infer<typeof adminProfessorUpdateSchema>;

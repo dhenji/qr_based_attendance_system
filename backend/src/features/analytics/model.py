@@ -45,12 +45,12 @@ class StudentRiskScore(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     student_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("students.id", ondelete="CASCADE"),
+        ForeignKey("students.id", ondelete="RESTRICT"),
         index=True,
     )
     offering_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("course_offerings.id", ondelete="CASCADE"),
+        ForeignKey("course_offerings.id", ondelete="RESTRICT"),
         index=True,
     )
     semester: Mapped[str] = mapped_column(String(20))

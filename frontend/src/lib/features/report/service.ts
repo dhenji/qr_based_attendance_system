@@ -1,15 +1,23 @@
 // features/report/service.ts
-// Professor-facing report queries over deterministic mock history.
+// Professor-facing report queries.
+//
+// Live first: per-session aggregates come from GET /professor/sessions/history
+// (server-computed present/late/absent counts plus compliance/participation
+// rates, so no client-side denominator guessing), with course identity joined
+// from the professor courses store. When the backend is unreachable or the
+// app runs with PUBLIC_MOCK_MODE=true, the deterministic mock history below
+// backs the same shapes instead.
 //
 // Field names intentionally mirror the professor report contracts in
-// docs/architecture/api-contracts.md so the future backend swap stays
-// mechanical. The backend will replace these aggregations; the page should not
-// need to change.
+// docs/architecture/api-contracts.md so a future dedicated report endpoint
+// stays a mechanical swap; the page should not need to change.
 
+import { isMockMode } from '$lib/api/client';
 import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+import { initProfessorCourses, professorState } from '$lib/features/professor/store.svelte';
+import { listSessionHistory, type SessionHistoryRow } from '$lib/features/session/service';
 import { REPORT_SESSIONS, type ReportSessionRecord } from '$lib/features/report/mock';
-
-const MOCK = true;
+import type { ProfessorCourseSummary } from '$lib/shared/types';
 
 export type ReportGranularity = 'daily' | 'weekly' | 'monthly';
 export type ReportMetric = 'compliance' | 'participation';
@@ -111,10 +119,77 @@ const bucketFor = (dateKey: string, granularity: ReportGranularity): AggregateBu
 	};
 };
 
-const filterSessions = (filters: ReportFilters): ReportSessionRecord[] => {
-	if (!MOCK) throw new Error('Report data is unavailable until professor report endpoints land.');
-	const start = filters.from <= filters.to ? filters.from : filters.to;
-	const end = filters.from <= filters.to ? filters.to : filters.from;
+export type ReportDataSource = 'live' | 'demo';
+
+export type ReportMeta = {
+	dataSource: ReportDataSource;
+	truncated: boolean;
+};
+
+// Course directory the report filters and identity joins read. One entry per
+// offering × section (live summaries carry a sections array; the mock fixture
+// carries one section string per entry, which already matches this shape).
+export type ReportCourseDir = {
+	offeringId: number;
+	courseId: number;
+	courseCode: string;
+	courseName: string;
+	programCode: string;
+	yearLevelLabel: string;
+	section: string;
+	enrolledCount: number;
+};
+
+export const toReportDirectory = (courses: ProfessorCourseSummary[]): ReportCourseDir[] => {
+	const directory: ReportCourseDir[] = [];
+	for (const course of courses) {
+		const sections = course.sections.length > 0 ? course.sections : ['—'];
+		for (const section of sections) {
+			directory.push({
+				offeringId: course.offeringId,
+				courseId: course.courseId,
+				courseCode: course.courseCode,
+				courseName: course.courseName,
+				programCode: course.programCode,
+				yearLevelLabel: course.yearLevelLabel,
+				section,
+				enrolledCount: course.enrolledCount
+			});
+		}
+	}
+	return directory;
+};
+
+// Warms the directory from GET /professor/courses. Returns the mock fixture
+// (live: false) when the app runs without a backend or the courses call
+// fails, so filter options and identity joins always have something to read.
+export const initReportDirectory = async (): Promise<{
+	directory: ReportCourseDir[];
+	live: boolean;
+}> => {
+	if (isMockMode()) return { directory: PROFESSOR_COURSES, live: false };
+	if (professorState.courses.length === 0 && !professorState.coursesError) {
+		await initProfessorCourses();
+	}
+	if (professorState.coursesError || professorState.courses.length === 0) {
+		return { directory: PROFESSOR_COURSES, live: false };
+	}
+	return { directory: toReportDirectory(professorState.courses), live: true };
+};
+
+// History paging budget: professors hold a handful of offerings, so a few
+// hundred closed sessions cover any sane date range. Past the cap the oldest
+// sessions are dropped and truncated is set so the page can say so.
+const LIVE_HISTORY_PAGE_SIZE = 100;
+const LIVE_HISTORY_MAX_SESSIONS = 500;
+
+const rangeOf = (filters: ReportFilters): { start: string; end: string } => ({
+	start: filters.from <= filters.to ? filters.from : filters.to,
+	end: filters.from <= filters.to ? filters.to : filters.from
+});
+
+const filterMockSessions = (filters: ReportFilters): ReportSessionRecord[] => {
+	const { start, end } = rangeOf(filters);
 
 	return REPORT_SESSIONS.filter(
 		(session) =>
@@ -125,6 +200,98 @@ const filterSessions = (filters: ReportFilters): ReportSessionRecord[] => {
 			session.date >= start &&
 			session.date <= end
 	);
+};
+
+// History rows carry no excused count, only the two server-computed rates.
+// eligible = present + late + excused is recovered from the participation
+// rate (exact up to rounding), so excused is the residual. summarize() only
+// consumes present and eligible, so the split never affects the displayed
+// rates beyond ±1 seat of rounding.
+const toLiveRecord = (row: SessionHistoryRow, directory: ReportCourseDir[]): ReportSessionRecord => {
+	const identity = directory.find((item) => item.offeringId === row.offering_id) ?? null;
+	const enrolled = row.enrolled_count ?? identity?.enrolledCount ?? 0;
+	const eligible = enrolled === 0 ? 0 : Math.round(row.participation_rate * enrolled);
+	return {
+		sessionId: String(row.id),
+		offeringId: row.offering_id,
+		courseId: identity?.courseId ?? 0,
+		courseCode: row.course_code,
+		courseName: row.course_name,
+		programCode: identity?.programCode ?? '',
+		yearLevelLabel: identity?.yearLevelLabel ?? '',
+		section: row.section,
+		date: row.created_at.slice(0, 10),
+		startTime: row.created_at.slice(11, 16),
+		endTime: '',
+		enrolled,
+		present: row.present_count,
+		late: row.late_count,
+		excused: Math.max(0, eligible - row.present_count - row.late_count),
+		absent: row.absent_count
+	};
+};
+
+const matchesLiveFilters = (
+	session: ReportSessionRecord,
+	filters: ReportFilters,
+	start: string,
+	end: string
+): boolean => {
+	if (filters.program !== 'All' && session.programCode !== filters.program) return false;
+	if (filters.year !== 'All' && session.yearLevelLabel !== filters.year) return false;
+	if (filters.course !== 'All' && session.courseCode !== filters.course) return false;
+	if (filters.section !== 'All') {
+		// Live sections join as a ", "-separated set per offering, so a
+		// single-section filter matches by membership rather than equality.
+		const sections = session.section.split(',').map((entry) => entry.trim());
+		if (!sections.includes(filters.section)) return false;
+	}
+	return session.date >= start && session.date <= end;
+};
+
+const fetchLiveSessions = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[]
+): Promise<{ sessions: ReportSessionRecord[]; truncated: boolean }> => {
+	const { start, end } = rangeOf(filters);
+	const rows: SessionHistoryRow[] = [];
+	let total = Number.POSITIVE_INFINITY;
+	let page = 1;
+	while (rows.length < total && rows.length < LIVE_HISTORY_MAX_SESSIONS) {
+		const response = await listSessionHistory({
+			from: start,
+			to: end,
+			page,
+			size: LIVE_HISTORY_PAGE_SIZE,
+			sortBy: 'date',
+			sortDir: 'desc'
+		});
+		total = response.total;
+		if ((response.items ?? []).length === 0) break;
+		rows.push(...response.items);
+		page += 1;
+	}
+	const truncated = total > rows.length;
+	const sessions = rows
+		.slice(0, LIVE_HISTORY_MAX_SESSIONS)
+		.map((row) => toLiveRecord(row, directory))
+		.filter((session) => matchesLiveFilters(session, filters, start, end));
+	return { sessions, truncated };
+};
+
+const fetchSessions = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[]
+): Promise<{ sessions: ReportSessionRecord[]; meta: ReportMeta }> => {
+	if (isMockMode()) {
+		return { sessions: filterMockSessions(filters), meta: { dataSource: 'demo', truncated: false } };
+	}
+	try {
+		const { sessions, truncated } = await fetchLiveSessions(filters, directory);
+		return { sessions, meta: { dataSource: 'live', truncated } };
+	} catch {
+		return { sessions: filterMockSessions(filters), meta: { dataSource: 'demo', truncated: false } };
+	}
 };
 
 const summarize = (sessions: ReportSessionRecord[]) => {
@@ -151,23 +318,26 @@ export const defaultReportRange = (days = 30): { from: string; to: string } => {
 	return { from: toDateKey(from), to: toDateKey(to) };
 };
 
-export const getReportFilterOptions = () => {
+export const getReportFilterOptions = (directory: ReportCourseDir[] = PROFESSOR_COURSES) => {
 	const unique = (values: string[]): string[] => [...new Set(values)].sort();
 	const courses = new Map<string, string>();
-	for (const course of PROFESSOR_COURSES) {
+	for (const course of directory) {
 		if (!courses.has(course.courseCode)) courses.set(course.courseCode, course.courseName);
 	}
 
 	return {
-		programs: unique(PROFESSOR_COURSES.map((course) => course.programCode)),
-		years: unique(PROFESSOR_COURSES.map((course) => course.yearLevelLabel)),
+		programs: unique(directory.map((course) => course.programCode)),
+		years: unique(directory.map((course) => course.yearLevelLabel)),
 		courses: [...courses].map(([code, name]) => ({ code, name })).sort((a, b) => a.code.localeCompare(b.code)),
-		sections: unique(PROFESSOR_COURSES.map((course) => course.section))
+		sections: unique(directory.map((course) => course.section))
 	};
 };
 
-export const getAllCoursesReport = async (filters: ReportFilters) => {
-	const sessions = filterSessions(filters);
+export const getAllCoursesReport = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[] = PROFESSOR_COURSES
+) => {
+	const { sessions, meta } = await fetchSessions(filters, directory);
 	const buckets = new Map<string, AggregateBucket & { present: number; eligible: number }>();
 
 	for (const session of sessions) {
@@ -198,12 +368,16 @@ export const getAllCoursesReport = async (filters: ReportFilters) => {
 		total_sessions: sessions.length,
 		total_students: totals.seats,
 		avg_compliance: totals.compliance_rate,
-		avg_participation: totals.participation_rate
+		avg_participation: totals.participation_rate,
+		meta
 	};
 };
 
-export const getComparisonReport = async (filters: ReportFilters) => {
-	const sessions = filterSessions(filters);
+export const getComparisonReport = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[] = PROFESSOR_COURSES
+) => {
+	const { sessions, meta } = await fetchSessions(filters, directory);
 	const groups = new Map<number, ReportSessionRecord[]>();
 	for (const session of sessions) {
 		const group = groups.get(session.offeringId) ?? [];
@@ -237,12 +411,16 @@ export const getComparisonReport = async (filters: ReportFilters) => {
 						`${b.program_code}${b.year_level_label}${b.section}`
 					)
 				: a.course_code.localeCompare(b.course_code)
-		)
+		),
+		meta
 	};
 };
 
-export const getTrendsReport = async (filters: ReportFilters) => {
-	const sessions = filterSessions(filters);
+export const getTrendsReport = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[] = PROFESSOR_COURSES
+) => {
+	const { sessions, meta } = await fetchSessions(filters, directory);
 	const points = new Map<string, { bucket: AggregateBucket; offering: ReportSessionRecord; present: number; eligible: number; seats: number }>();
 
 	for (const session of sessions) {
@@ -274,7 +452,8 @@ export const getTrendsReport = async (filters: ReportFilters) => {
 		metric: filters.metric,
 		items: items.sort((a, b) =>
 			a.date === b.date ? a.offering_id - b.offering_id : a.date < b.date ? -1 : 1
-		)
+		),
+		meta
 	};
 };
 

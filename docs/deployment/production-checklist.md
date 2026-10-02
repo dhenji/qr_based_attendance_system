@@ -280,24 +280,38 @@ psql "$DATABASE_URL" -c \
 ### Required For
 
 - OTP codes (claim registration, password reset)
-- Account notifications (optional)
+- Excuse notifications (request submitted, approved, rejected, bulk)
 
 ### Configuration
 
-| Item          | Check                               |
-| ------------- | ----------------------------------- |
-| SMTP host     | Set in env or config                |
-| SMTP port     | 587 (TLS) or 465 (SSL)              |
-| SMTP username | Set                                 |
-| SMTP password | Set (not in git)                    |
-| From address  | `noreply@yourdomain.com` or similar |
-| OTP expiry    | Reasonable (5–15 minutes)           |
+| Variable              | Check                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `SMTP_HOST`           | Relay hostname. **Leave empty to disable email entirely** — messages are logged instead of sent, and no endpoint fails |
+| `SMTP_PORT`           | `587` (STARTTLS) or `465` (implicit SSL)                                                                            |
+| `SMTP_USER`           | Set, unless the relay takes no credentials                                                                           |
+| `SMTP_PASSWORD`       | Set (not in git)                                                                                                     |
+| `SMTP_FROM`           | `noreply@yourdomain.com` or similar. Falls back to `SMTP_USER`, then to `noreply@localhost`                          |
+| `SMTP_START_TLS`      | `true` on port 587. Ignored when `SMTP_USE_SSL=true` — set it to `false` there or the handshake is attempted twice |
+| `SMTP_USE_SSL`        | `true` for port 465 only                                                                                             |
+| `SMTP_TIMEOUT_SECONDS`| `10` is fine for most relays                                                                                         |
+
+Delivery is best-effort by design: `shared/email.py` logs and returns on any
+SMTP error rather than raising, and notifications are sent off the request
+thread, so a dead relay costs a log line and never a 5xx. A relay that silently
+rejects everything looks exactly like a working one, so verify rather than
+assume.
 
 ### Verification
 
 ```bash
 # Test OTP email delivery
 # (Register a test user and verify OTP arrives)
+```
+
+```bash
+# Confirm a notification was handed to a relay: with SMTP_HOST set, submit an
+# excuse request and look for "Email sent to=" in the API logs.
+docker compose -f docker-compose.dev.yml logs api | grep "Email sent to="
 ```
 
 ---

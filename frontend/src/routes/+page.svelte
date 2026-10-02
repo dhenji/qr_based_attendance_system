@@ -205,8 +205,8 @@
 	.landing {
 		min-height: 100vh;
 		font-family: 'DM Sans', system-ui, sans-serif;
-		background: #f8fafc;
-		color: #1e293b;
+		background: var(--bg-page);
+		color: var(--text);
 	}
 
 	.nav {
@@ -220,7 +220,7 @@
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.75rem 1.5rem;
-		background: #1e3a5f;
+		background: var(--brand);
 		box-shadow: 0 2px 12px rgba(15, 23, 42, 0.25);
 	}
 
@@ -238,7 +238,7 @@
 	}
 
 	.nav-name {
-		color: white;
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 1.125rem;
 		white-space: nowrap;
@@ -255,7 +255,7 @@
 	.nav-link {
 		padding: 0.5rem 0.875rem;
 		border-radius: 8px;
-		color: #e2e8f0;
+		color: var(--border);
 		font-size: 0.9375rem;
 		font-weight: 500;
 		text-decoration: none;
@@ -265,7 +265,7 @@
 
 	.nav-link:hover {
 		background: rgba(255, 255, 255, 0.1);
-		color: white;
+		color: var(--on-brand);
 	}
 
 	.hero {
@@ -284,7 +284,7 @@
 		font-weight: 700;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: #2563eb;
+		color: var(--accent);
 		margin: 0 0 0.75rem;
 	}
 
@@ -299,7 +299,7 @@
 	.hero-sub {
 		font-size: 1.125rem;
 		line-height: 1.6;
-		color: #475569;
+		color: var(--text-secondary);
 		margin: 0 0 1.75rem;
 		max-width: 34rem;
 	}
@@ -316,9 +316,9 @@
 		align-items: center;
 		justify-content: center;
 		gap: 0.5rem;
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 		font-weight: 600;
 		font-size: 1rem;
 		padding: 0.8125rem 1.375rem;
@@ -330,8 +330,8 @@
 	}
 
 	.btn-primary:hover {
-		background: #16324f;
-		border-color: #16324f;
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 		transform: translateY(-1px);
 		box-shadow: 0 8px 20px rgba(30, 58, 95, 0.32);
 	}
@@ -340,9 +340,9 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 		font-weight: 600;
 		font-size: 1rem;
 		padding: 0.8125rem 1.375rem;
@@ -353,7 +353,7 @@
 	}
 
 	.btn-ghost:hover {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 		transform: translateY(-1px);
 	}
 
@@ -366,14 +366,14 @@
 		width: 300px;
 		max-width: 100%;
 		border-radius: 28px;
-		background: #16324f;
+		background: var(--brand-hover);
 		padding: 10px;
 		box-shadow: 0 30px 70px rgba(15, 23, 42, 0.3);
 		animation: float 6s ease-in-out infinite;
 	}
 
 	.phone-screen {
-		background: #f8fafc;
+		background: var(--bg-page);
 		border-radius: 20px;
 		overflow: hidden;
 	}
@@ -383,20 +383,20 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.875rem 1rem;
-		border-bottom: 1px solid #e2e8f0;
+		border-bottom: 1px solid var(--border);
 	}
 
 	.screen-dot {
 		width: 10px;
 		height: 10px;
 		border-radius: 50%;
-		background: #16a34a;
+		background: var(--success);
 	}
 
 	.screen-title {
 		font-size: 0.875rem;
 		font-weight: 600;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.scan-area {
@@ -415,7 +415,7 @@
 		position: absolute;
 		width: 22px;
 		height: 22px;
-		border: 0 solid #94a3b8;
+		border: 0 solid var(--border-strong);
 	}
 
 	.corner.tl {
@@ -451,7 +451,7 @@
 	}
 
 	.qr {
-		background: white;
+		background: var(--bg-card);
 		padding: 8px;
 		border-radius: 8px;
 		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
@@ -461,15 +461,15 @@
 
 	.scan-hint {
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.status-pill {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		background: #16a34a;
-		color: white;
+		background: var(--success);
+		color: var(--on-brand);
 		font-size: 0.8125rem;
 		font-weight: 600;
 		padding: 0.5rem 0.875rem;
@@ -486,7 +486,7 @@
 	}
 
 	.how {
-		border-top: 1px solid #e2e8f0;
+		border-top: 1px solid var(--border);
 	}
 
 	h2 {
@@ -504,8 +504,8 @@
 
 	.step-card {
 		position: relative;
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
 		transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -518,8 +518,8 @@
 		left: 0;
 		width: 22px;
 		height: 22px;
-		border-top: 2px solid #2563eb;
-		border-left: 2px solid #2563eb;
+		border-top: 2px solid var(--accent);
+		border-left: 2px solid var(--accent);
 		border-top-left-radius: 8px;
 	}
 
@@ -535,8 +535,8 @@
 		width: 32px;
 		height: 32px;
 		border-radius: 8px;
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 0.9375rem;
 		margin-bottom: 1rem;
@@ -553,12 +553,12 @@
 	.feature p {
 		font-size: 0.9375rem;
 		line-height: 1.55;
-		color: #475569;
+		color: var(--text-secondary);
 		margin: 0;
 	}
 
 	.features {
-		border-top: 1px solid #e2e8f0;
+		border-top: 1px solid var(--border);
 	}
 
 	.feature-grid {
@@ -568,8 +568,8 @@
 	}
 
 	.feature {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
 		transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -587,13 +587,13 @@
 		width: 52px;
 		height: 52px;
 		border-radius: 8px;
-		background: #f1f5f9;
-		color: #1e3a5f;
+		background: var(--bg-muted);
+		color: var(--brand);
 		margin-bottom: 1rem;
 	}
 
 	.portals {
-		border-top: 1px solid #e2e8f0;
+		border-top: 1px solid var(--border);
 	}
 
 	.portal-grid {
@@ -606,8 +606,8 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		text-decoration: none;
 		padding: 1.75rem;
 		border-radius: 8px;
@@ -616,14 +616,14 @@
 	}
 
 	.portal-card:hover {
-		background: #16324f;
+		background: var(--brand-hover);
 		transform: translateY(-2px);
 		box-shadow: 0 12px 28px rgba(30, 58, 95, 0.3);
 	}
 
 	/* Portals that don't exist yet — no hover lift, muted so it reads as inert. */
 	.portal-card.is-disabled {
-		background: #475569;
+		background: var(--text-secondary);
 		box-shadow: none;
 		cursor: default;
 	}
@@ -637,7 +637,7 @@
 	.portal-card p {
 		font-size: 0.9375rem;
 		line-height: 1.5;
-		color: #cbd5e1;
+		color: var(--border-strong);
 		margin: 0;
 	}
 
@@ -647,7 +647,7 @@
 		gap: 0.375rem;
 		font-weight: 600;
 		font-size: 0.9375rem;
-		color: #bfdbfe;
+		color: var(--info-bg);
 		margin-top: 0.5rem;
 	}
 
@@ -743,7 +743,7 @@
 
 	:global(a:focus-visible),
 	:global(button:focus-visible) {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>

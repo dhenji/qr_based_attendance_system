@@ -10,6 +10,14 @@
 		verifySessionCode,
 		type SessionVerification
 	} from '$lib/features/liveness/service';
+	import {
+		cacheSession,
+		flushQueue,
+		getCachedSession,
+		queue,
+		retryDelayMs,
+		type QueuedScan
+	} from '$lib/features/sync/service';
 	import { initStudent, studentState } from '$lib/features/student/store.svelte';
 	import { APIError } from '$lib/api/client';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -28,7 +36,13 @@
 	let showFailure = $state(false);
 	let verifying = $state(false);
 	let submitting = $state(false);
-	let offline = $state(false);
+	let offline = $state(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+	let pendingCount = $state(0);
+	let rejectedItems = $state<QueuedScan[]>([]);
+	let showQueued = $state(false);
+	let queuedCode = $state('');
+	let flushing = $state(false);
+	let retryTimerId: ReturnType<typeof setTimeout> | null = null;
 	let scanError = $state<string | null>(null);
 	let rejectionReason = $state('');
 	let resultStatus = $state<'present' | 'late'>('present');
@@ -70,8 +84,59 @@
 		return getErrorMessage(error, fallback);
 	};
 
+	// Network failures surface as plain TypeErrors (api/client.ts); APIError
+	// means the server responded — including 4xx rejections — and must never
+	// be queued, because the server already decided those.
+	const isNetworkError = (error: unknown): boolean => !(error instanceof APIError);
+
+	const refreshQueueState = async () => {
+		try {
+			pendingCount = await queue.getPendingCount();
+			rejectedItems = await queue.getRejected();
+		} catch {
+			pendingCount = 0;
+			rejectedItems = [];
+		}
+	};
+
+	const clearRetryTimer = () => {
+		if (retryTimerId) clearTimeout(retryTimerId);
+		retryTimerId = null;
+	};
+
+	const flushNow = async () => {
+		if (flushing) return;
+		flushing = true;
+		try {
+			const result = await flushQueue();
+			await refreshQueueState();
+			if (result.failed > 0) {
+				const pending = await queue.getPending().catch(() => []);
+				const worst = pending.reduce((max, item) => Math.max(max, item.attempts), 0);
+				clearRetryTimer();
+				retryTimerId = setTimeout(() => void flushNow(), retryDelayMs(worst));
+			}
+		} finally {
+			flushing = false;
+		}
+	};
+
+	const retryRejected = async (id: string) => {
+		await queue.updateStatus(id, 'pending').catch(() => undefined);
+		await flushNow();
+	};
+
+	const discardRejected = async (id: string) => {
+		await queue.remove(id).catch(() => undefined);
+		await refreshQueueState();
+	};
+
+	const rejectedMessage = (code: string | null): string =>
+		(code && SCAN_ERROR_MESSAGES[code]) || 'The attendance scan was rejected.';
+
 	onDestroy(() => {
 		clearCountdown();
+		clearRetryTimer();
 	});
 
 	onMount(() => {
@@ -79,6 +144,21 @@
 		if (!studentState.student && !studentState.loading) {
 			void initStudent();
 		}
+		const handleOnline = () => {
+			offline = false;
+			void flushNow();
+		};
+		const handleOffline = () => {
+			offline = true;
+		};
+		window.addEventListener('online', handleOnline);
+		window.addEventListener('offline', handleOffline);
+		void refreshQueueState();
+		if (navigator.onLine) void flushNow();
+		return () => {
+			window.removeEventListener('online', handleOnline);
+			window.removeEventListener('offline', handleOffline);
+		};
 	});
 
 	const verifyCode = async (code: string, openScanner: boolean) => {
@@ -91,11 +171,40 @@
 			const verifiedSession = await verifySessionCode(normalizedCode);
 			sessionCode = normalizedCode;
 			session = verifiedSession;
+			void cacheSession({
+				session_id: verifiedSession.sessionId,
+				code: normalizedCode,
+				course_code: verifiedSession.courseCode,
+				course_name: verifiedSession.courseName,
+				expires_at: verifiedSession.expiresAt,
+				geofence: verifiedSession.geofence
+			}).catch(() => undefined);
 			showFailure = false;
 			rejectionReason = '';
 			if (openScanner) goToQr();
 			else startLiveness();
 		} catch (error) {
+			// Offline with a fresh cached config for this code: the session was
+			// verified before the signal dropped, so the scan may proceed —
+			// the server re-validates everything on sync.
+			if (isNetworkError(error)) {
+				const cached = await getCachedSession(normalizedCode).catch(() => null);
+				if (cached) {
+					sessionCode = normalizedCode;
+					session = {
+						sessionId: cached.session_id,
+						courseCode: cached.course_code,
+						courseName: cached.course_name,
+						expiresAt: cached.expires_at,
+						geofence: cached.geofence
+					};
+					showFailure = false;
+					rejectionReason = '';
+					if (openScanner) goToQr();
+					else startLiveness();
+					return;
+				}
+			}
 			scanError = toUserMessage(error, 'Unable to verify the session code');
 		} finally {
 			verifying = false;
@@ -124,6 +233,7 @@
 		showPermission = false;
 		showSuccess = false;
 		showFailure = false;
+		showQueued = false;
 		scannedAt = '';
 		step = 'liveness';
 		livenessActive = true;
@@ -145,11 +255,13 @@
 		scanError = null;
 		rejectionReason = '';
 		scannedAt = '';
+		showQueued = false;
 		step = 'entry';
 	};
 
 	const retryLiveness = () => {
 		showFailure = false;
+		showQueued = false;
 		rejectionReason = '';
 		scanError = null;
 		startLiveness();
@@ -191,10 +303,13 @@
 		submitting = true;
 		showSuccess = false;
 		showFailure = false;
+		showQueued = false;
 		scanError = null;
 
+		let gps: { lat: number; lng: number; accuracy: number } | null = null;
+		let reachedSubmit = false;
 		try {
-			const gps = await getCurrentPosition();
+			gps = await getCurrentPosition();
 			if (
 				!validateGPS(
 					gps.lat,
@@ -207,6 +322,7 @@
 				throw new Error('You are outside the attendance geofence');
 			}
 
+			reachedSubmit = true;
 			const result = await submitAttendanceScan({
 				sessionId: session.sessionId,
 				studentNumber,
@@ -235,8 +351,35 @@
 				}
 			}, 1000);
 		} catch (error) {
-			rejectionReason = toUserMessage(error, 'Unable to submit the attendance scan');
-			showFailure = true;
+			// The scan completed locally but the POST never reached the server:
+			// queue the evidence (device-time scanned_at) for automatic sync.
+			// Anything before the POST — GPS, geofence, server rejections —
+			// keeps the failure overlay, since there is nothing valid to queue.
+			if (reachedSubmit && gps && session && isNetworkError(error)) {
+				try {
+					await queue.enqueue({
+						type: 'attendance_scan',
+						payload: {
+							sessionId: session.sessionId,
+							sessionCode,
+							studentNumber,
+							gps,
+							livenessEvidence,
+							scannedAt: new Date().toISOString()
+						}
+					});
+					await refreshQueueState();
+					livenessActive = false;
+					showQueued = true;
+					queuedCode = sessionCode;
+				} catch {
+					rejectionReason = toUserMessage(error, 'Unable to submit the attendance scan');
+					showFailure = true;
+				}
+			} else {
+				rejectionReason = toUserMessage(error, 'Unable to submit the attendance scan');
+				showFailure = true;
+			}
 		} finally {
 			submitting = false;
 		}
@@ -249,10 +392,35 @@
 </script>
 
 <div class="scan">
-	{#if offline}
+	{#if offline || pendingCount > 0}
 		<div class="offline-banner">
-			You are offline · Records will sync when connected.
-			<span class="offline-count">3 pending</span>
+			{#if offline}
+				You are offline · Records will sync when connected.
+			{:else}
+				Back online · Syncing queued records.
+			{/if}
+			{#if pendingCount > 0}
+				<span class="offline-count">{pendingCount} pending</span>
+			{/if}
+			{#if !offline && pendingCount > 0}
+				<button class="banner-retry" onclick={() => void flushNow()} disabled={flushing}>
+					{flushing ? 'Syncing…' : 'Retry now'}
+				</button>
+			{/if}
+		</div>
+	{/if}
+
+	{#if rejectedItems.length > 0}
+		<div class="rejected-card" role="status">
+			{#each rejectedItems as item (item.id)}
+				<p class="rejected-row">
+					<span>{item.payload.sessionCode} · {rejectedMessage(item.lastError)}</span>
+					<span class="rejected-actions">
+						<button class="banner-retry" onclick={() => void retryRejected(item.id)}>Retry</button>
+						<button class="banner-retry" onclick={() => void discardRejected(item.id)}>Discard</button>
+					</span>
+				</p>
+			{/each}
 		</div>
 	{/if}
 
@@ -358,7 +526,8 @@
 					<FaceScanner active={livenessActive} onComplete={handleLivenessComplete} />
 				</div>
 				<p class="footnote">
-					Blink once, then turn your head left, return to center, turn right, and return to center.
+					Phase 2: blink once for face liveness — then the head-tilt check
+					starts automatically (left, center, right, center).
 					Your result is submitted to the attendance service for verification.
 				</p>
 				{#if submitting}
@@ -407,6 +576,23 @@
 		</div>
 	{/if}
 
+	<!-- Queued Overlay -->
+	{#if showQueued}
+		<div class="overlay">
+			<div class="result">
+				<h3 class="result-title">Evidence saved</h3>
+				<p class="result-line">{studentName}</p>
+				<p class="result-line">
+					{session?.courseCode ?? queuedCode} — {session?.courseName ?? ''}
+				</p>
+				<p class="reject-desc">
+					You are offline. The scan will verify automatically after sync.
+				</p>
+				<button class="btn-primary try-again" onclick={backToEntry}>Done</button>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Failure Overlay -->
 	{#if showFailure}
 		<div class="overlay">
@@ -432,20 +618,70 @@
 	}
 
 	.offline-banner {
-		background: #fff7ed;
-		border: 1px solid #fed7aa;
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-bg);
 		border-radius: 8px;
 		padding: 0.625rem 1rem;
 		margin-bottom: 1rem;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		color: #c2410c;
+		color: var(--warning-text);
 		font-size: 0.875rem;
 	}
 
 	.offline-count {
 		margin-left: auto;
+		font-weight: 700;
+	}
+
+	.banner-retry {
+		background: var(--bg-card);
+		border: 1px solid var(--warning-bg);
+		border-radius: 6px;
+		padding: 0.25rem 0.625rem;
+		font-family: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--warning-text);
+		cursor: pointer;
+	}
+
+	.banner-retry:disabled {
+		opacity: 0.6;
+		cursor: wait;
+	}
+
+	.rejected-card {
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
+		border-radius: 8px;
+		padding: 0.625rem 1rem;
+		margin-bottom: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.rejected-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin: 0;
+		color: var(--danger-strong);
+		font-size: 0.875rem;
+	}
+
+	.rejected-actions {
+		display: flex;
+		gap: 0.375rem;
+		flex-shrink: 0;
+	}
+
+	.rejected-actions .banner-retry {
+		border-color: var(--danger-bg);
+		color: var(--danger-strong);
 	}
 
 	.page {
@@ -468,7 +704,7 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #2563eb;
+		color: var(--accent);
 		font-weight: 600;
 		font-size: 0.875rem;
 		font-family: inherit;
@@ -483,24 +719,24 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.375rem;
 		font-weight: 700;
-		color: #1e3a5f;
+		color: var(--brand);
 		margin: 0;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.25rem;
 		margin-bottom: 1.25rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-title {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 1rem;
 	}
 
@@ -518,11 +754,11 @@
 		font-family: inherit;
 		outline: none;
 		transition: border-color 0.15s;
-		background: white;
+		background: var(--bg-card);
 	}
 
 	.form-input:focus {
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.code-input {
@@ -547,36 +783,36 @@
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
 	}
 
 	.btn-primary:hover {
-		background: #16324f;
-		border-color: #16324f;
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 		transform: translateY(-1px);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn-secondary:hover {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.btn-danger {
-		background: white;
-		border: 1px solid #dc2626;
-		color: #dc2626;
+		background: var(--bg-card);
+		border: 1px solid var(--danger);
+		color: var(--danger);
 	}
 
 	.btn-danger:hover {
-		background: #fef2f2;
+		background: var(--danger-bg);
 	}
 
 	.viewport {
@@ -590,16 +826,16 @@
 		justify-content: center;
 		position: relative;
 		overflow: hidden;
-		border: 2px dashed #e2e8f0;
+		border: 2px dashed var(--border);
 	}
 
 	.viewport.inactive {
-		background: #f1f5f9;
+		background: var(--bg-muted);
 	}
 
 	.inactive-content {
 		text-align: center;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.inactive-title {
@@ -671,7 +907,7 @@
 		left: 0;
 		right: 0;
 		height: 3px;
-		background: linear-gradient(90deg, transparent, #2563eb, transparent);
+		background: linear-gradient(90deg, transparent, var(--accent), transparent);
 		top: 50%;
 		animation: scan 2s ease-in-out infinite;
 		z-index: 2;
@@ -700,7 +936,7 @@
 	}
 
 	.footnote {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.8125rem;
 		margin-top: 1rem;
 		margin-bottom: 0;
@@ -718,7 +954,7 @@
 	}
 
 	.modal {
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
 		padding: 2rem;
 		max-width: 360px;
@@ -731,12 +967,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.75rem;
 	}
 
 	.modal-desc {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin-bottom: 1.5rem;
 	}
@@ -750,20 +986,20 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.8125rem;
 		font-family: inherit;
 		padding: 0;
 	}
 
 	.modal-link:hover {
-		color: #334155;
+		color: var(--text-secondary);
 		text-decoration: underline;
 	}
 
 	.result {
 		text-align: center;
-		color: white;
+		color: var(--on-brand);
 		max-width: 380px;
 		width: 100%;
 	}
@@ -781,7 +1017,7 @@
 	}
 
 	.verified {
-		color: #16a34a;
+		color: var(--success);
 		font-weight: 600;
 	}
 
@@ -797,7 +1033,7 @@
 		padding: 0.75rem 1rem;
 		margin-bottom: 1rem;
 		font-size: 0.875rem;
-		color: white;
+		color: var(--on-brand);
 	}
 
 	.reject-desc {
@@ -834,7 +1070,7 @@
 
 	:global(.scan button:focus-visible),
 	:global(.scan input:focus-visible) {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>

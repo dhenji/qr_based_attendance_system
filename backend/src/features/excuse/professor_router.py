@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated
+import json
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.exceptions import RequestValidationError
 
 from api.deps import ExcuseServiceDep, require_role
 from features.auth.model import User
@@ -53,11 +55,35 @@ async def excuse_student(
 ) -> ExcuseActionResponse:
     # One route covers both professor paths: a body carrying
     # `attachment_urls` is Path B (prof with evidence), otherwise Path A
-    # (quick-excuse). The key is inspected before validation so a Path B
-    # payload can never validate as Path A and silently drop its evidence.
-    body: dict = await request.json()
+    # (quick-excuse). The key is inspected by presence (not truthiness) so a
+    # Path B payload with an empty list still validates as Path B and returns
+    # a 422 instead of silently dropping its evidence intent. Malformed JSON
+    # raises the standard FastAPI 422 list envelope (never a 500).
+    try:
+        body: Any = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise RequestValidationError(
+            errors=[
+                {
+                    "loc": ("body",),
+                    "msg": "Invalid JSON body",
+                    "type": "value_error.jsondecode",
+                }
+            ]
+        )
 
-    if body.get("attachment_urls"):
+    if not isinstance(body, dict):
+        raise RequestValidationError(
+            errors=[
+                {
+                    "loc": ("body",),
+                    "msg": "JSON body must be an object",
+                    "type": "type_error.dict",
+                }
+            ]
+        )
+
+    if "attachment_urls" in body:
         payload_with_evidence = ProfWithEvidenceRequest.model_validate(body)
         return await service.excuse_with_evidence(
             user_id=user.id,

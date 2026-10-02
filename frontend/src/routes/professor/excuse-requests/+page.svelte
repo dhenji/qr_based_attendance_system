@@ -5,7 +5,12 @@
 		reviewExcuseRequest,
 		type ExcuseFilters
 	} from '$lib/features/excuse/service';
+	import { isMockMode } from '$lib/api/client';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+	import {
+		initProfessorCourses,
+		professorState
+	} from '$lib/features/professor/store.svelte';
 	import type { ExcuseOriginalStatus, ExcuseRequest, ExcuseStatus } from '$lib/shared/types/excuse';
 	import { formatDate } from '$lib/shared/utils/format';
 
@@ -14,8 +19,40 @@
 	const PAGE_SIZE = 10;
 
 	const statusOptions: Array<'All' | ExcuseStatus> = ['All', 'pending', 'approved', 'rejected'];
-	const courseOptions = [...new Set(PROFESSOR_COURSES.map((c) => c.courseCode))].sort();
 	const originalOptions: ExcuseOriginalStatus[] = ['absent', 'late', 'rejected'];
+
+	// Course directory: mock fixtures until the live assignments warm it. The
+	// queue rows already join live course identity in excuse/service.ts, so the
+	// filter options and quick-excuse lookup read the same source — a
+	// professor whose real courses differ from the fixtures gets working
+	// filters instead of options that match nothing.
+	type DirectoryEntry = {
+		courseCode: string;
+		courseName: string;
+		section: string;
+		offeringId: number;
+	};
+
+	let directory = $state<DirectoryEntry[]>(PROFESSOR_COURSES);
+	const courseOptions = $derived([...new Set(directory.map((c) => c.courseCode))].sort());
+
+	$effect(() => {
+		let cancelled = false;
+		if (isMockMode()) return;
+		void initProfessorCourses().then(() => {
+			if (cancelled || professorState.coursesError) return;
+			const warmed: DirectoryEntry[] = professorState.courses.map((c) => ({
+				courseCode: c.courseCode,
+				courseName: c.courseName,
+				section: c.sections.length > 0 ? c.sections.join(', ') : '—',
+				offeringId: c.offeringId
+			}));
+			if (warmed.length > 0) directory = warmed;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	let search = $state('');
 	let course = $state('All');
@@ -38,13 +75,20 @@
 	let quickOpen = $state(false);
 	let quickStudentNumber = $state('');
 	let quickStudentName = $state('');
-	let quickCourse = $state(courseOptions[0] ?? 'CS101');
+	let quickCourse = $state('CS101');
 	let quickOriginal = $state<ExcuseOriginalStatus>('absent');
 	let quickReason = $state('');
 	let quickBusy = $state(false);
 	let quickError = $state<string | null>(null);
 
 	let notice = $state<string | null>(null);
+
+	// Reset selections the warmed directory invalidates (same convention as
+	// the reports page filters).
+	$effect(() => {
+		if (course !== 'All' && !courseOptions.includes(course)) course = 'All';
+		if (!courseOptions.includes(quickCourse)) quickCourse = courseOptions[0] ?? 'CS101';
+	});
 
 	const buildFilters = (): ExcuseFilters => {
 		let start = from || undefined;
@@ -137,8 +181,8 @@
 			selected = updated;
 			notice =
 				decision === 'approved'
-					? `Approved — ${updated.studentName} is now excused (was ${updated.originalStatus}).`
-					: `Rejected — ${updated.studentName} keeps ${updated.originalStatus} status.`;
+					? `Approved — ${updated.studentName} is now excused (was ${originalLabel(updated.originalStatus)}).`
+					: `Rejected — ${updated.studentName} keeps ${originalLabel(updated.originalStatus)} status.`;
 			reloadToken += 1;
 		} catch (error) {
 			reviewError = error instanceof Error ? error.message : 'Review failed.';
@@ -163,7 +207,7 @@
 		quickBusy = true;
 		quickError = null;
 		try {
-			const offering = PROFESSOR_COURSES.find((c) => c.courseCode === quickCourse);
+			const offering = directory.find((c) => c.courseCode === quickCourse);
 			const created = await quickExcuse({
 				studentNumber: quickStudentNumber,
 				studentName: quickStudentName || quickStudentNumber,
@@ -196,6 +240,11 @@
 			: row.initiatedVia === 'prof_with_evidence'
 				? 'With evidence'
 				: 'Student request';
+
+	// Live rows carry no pre-excuse status (no professor-visible source), so
+	// they read `unknown` — render an em dash rather than a guessed value.
+	const originalLabel = (value: ExcuseOriginalStatus): string =>
+		value === 'unknown' ? '—' : value;
 
 	const truncated = (value: string, max = 64): string =>
 		value.length > max ? `${value.slice(0, max - 1)}…` : value;
@@ -330,7 +379,7 @@
 								<td class="reason">{truncated(row.reason)}</td>
 								<td>
 									<span class="status status-{row.status}">{row.status}</span>
-									<div class="status-sub">was {row.originalStatus}</div>
+									<div class="status-sub">was {originalLabel(row.originalStatus)}</div>
 								</td>
 								<td>
 									<button
@@ -402,7 +451,7 @@
 				</div>
 				<div>
 					<dt>Original status</dt>
-					<dd>{selected.originalStatus} → excused on approve (D22)</dd>
+					<dd>{originalLabel(selected.originalStatus)} → excused on approve (D22)</dd>
 				</div>
 				<div>
 					<dt>Reason</dt>
@@ -416,7 +465,7 @@
 						{:else}
 							<ul class="files">
 								{#each selected.attachmentNames as name (name)}
-									<li>{name} (mock — S3 presigned flow lands with D24)</li>
+										<li>{name} (S3 presigned flow lands with D24)</li>
 								{/each}
 							</ul>
 						{/if}
@@ -487,7 +536,7 @@
 					<input
 						id="quick-number"
 						class="form-input"
-						placeholder="24-0001"
+						placeholder="ID number as printed on the student card"
 						bind:value={quickStudentNumber}
 					/>
 				</div>
@@ -574,13 +623,13 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 	}
 
@@ -588,30 +637,30 @@
 		margin: 0;
 		padding: 0.75rem 1rem;
 		border-radius: 8px;
-		background: #f0fdf4;
-		border: 1px solid #bbf7d0;
-		color: #15803d;
+		background: var(--success-bg);
+		border: 1px solid var(--success-bg);
+		color: var(--success);
 		font-size: 0.875rem;
 		font-weight: 600;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 12px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.empty {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 	}
 
 	.error {
 		margin: 0.75rem 0 0;
-		color: #b91c1c;
+		color: var(--danger-strong);
 		font-weight: 600;
 		font-size: 0.875rem;
 	}
@@ -633,22 +682,22 @@
 		font-size: 0.8125rem;
 		font-weight: 600;
 		letter-spacing: 0.02em;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.form-input {
 		padding: 0.625rem 0.75rem;
-		border: 1.5px solid #d1d5db;
+		border: 1.5px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 		outline: none;
 	}
 
 	.form-input:focus {
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.area {
@@ -675,40 +724,40 @@
 	}
 
 	.btn-primary {
-		background: #2563eb;
-		color: white;
-		border-color: #2563eb;
+		background: var(--accent);
+		color: var(--on-brand);
+		border-color: var(--accent);
 		white-space: nowrap;
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: #1d4ed8;
+		background: var(--accent-hover);
 	}
 
 	.btn-ghost {
-		background: white;
-		border-color: #cbd5e1;
-		color: #1e3a5f;
+		background: var(--bg-card);
+		border-color: var(--border-strong);
+		color: var(--brand);
 	}
 
 	.btn-ghost:hover:not(:disabled) {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.btn-secondary {
-		background: #f1f5f9;
-		color: #334155;
-		border-color: #e2e8f0;
+		background: var(--bg-muted);
+		color: var(--text-secondary);
+		border-color: var(--border);
 	}
 
 	.btn-danger {
-		background: #dc2626;
-		color: white;
-		border-color: #dc2626;
+		background: var(--danger);
+		color: var(--on-brand);
+		border-color: var(--danger);
 	}
 
 	.btn-danger:hover:not(:disabled) {
-		background: #b91c1c;
+		background: var(--danger-strong);
 	}
 
 	.btn:disabled {
@@ -734,18 +783,18 @@
 	th {
 		text-align: left;
 		padding: 0.75rem 1rem;
-		background: #f8fafc;
-		border-bottom: 1px solid #e2e8f0;
+		background: var(--bg-page);
+		border-bottom: 1px solid var(--border);
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	td {
 		padding: 0.75rem 1rem;
-		border-top: 1px solid #f1f5f9;
+		border-top: 1px solid var(--divider);
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 		vertical-align: top;
 	}
 
@@ -762,7 +811,7 @@
 	.course-sub,
 	.status-sub {
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.mono {
@@ -784,37 +833,37 @@
 	}
 
 	.status-pending {
-		color: #b45309;
-		background: #fffbeb;
-		border: 1px solid #fde68a;
+		color: var(--warning-text);
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-bg);
 	}
 
 	.status-approved {
-		color: #15803d;
-		background: #f0fdf4;
-		border: 1px solid #bbf7d0;
+		color: var(--success);
+		background: var(--success-bg);
+		border: 1px solid var(--success-bg);
 	}
 
 	.status-rejected {
-		color: #b91c1c;
-		background: #fef2f2;
-		border: 1px solid #fecaca;
+		color: var(--danger-strong);
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
 	}
 
 	.mini {
-		background: white;
-		border: 1px solid #cbd5e1;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
 		border-radius: 6px;
 		padding: 0.375rem 0.75rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
 		font-family: inherit;
-		color: #1e3a5f;
+		color: var(--brand);
 		cursor: pointer;
 	}
 
 	.mini:hover {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.table-foot {
@@ -822,14 +871,14 @@
 		flex-direction: column;
 		gap: 1rem;
 		padding: 1.25rem 1.5rem;
-		border-top: 1px solid #f1f5f9;
+		border-top: 1px solid var(--divider);
 	}
 
 	.average {
 		margin: 0;
 		font-size: 0.9375rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.pages {
@@ -843,9 +892,9 @@
 		min-width: 2.375rem;
 		padding: 0.4375rem 0.625rem;
 		border-radius: 8px;
-		border: 1px solid #cbd5e1;
-		background: white;
-		color: #0f172a;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
 		font: inherit;
 		font-size: 0.8125rem;
 		font-weight: 600;
@@ -853,24 +902,24 @@
 	}
 
 	.page:hover:not(:disabled) {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.page:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 1px;
 	}
 
 	.page.current {
-		background: #1e3a5f;
-		border-color: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.page:disabled:not(.current) {
 		color: #94a3b8;
-		background: #f8fafc;
-		border-color: #e2e8f0;
+		background: var(--bg-page);
+		border-color: var(--border);
 		cursor: not-allowed;
 	}
 
@@ -886,7 +935,7 @@
 		position: fixed;
 		inset: 0;
 		z-index: 100;
-		background: rgba(15, 23, 42, 0.5);
+		background: var(--overlay);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -898,9 +947,9 @@
 		max-width: 560px;
 		max-height: 90vh;
 		overflow-y: auto;
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
-		box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+		box-shadow: var(--shadow-lg);
 		padding: 1.5rem;
 		font-family: system-ui, sans-serif;
 	}
@@ -908,13 +957,13 @@
 	.modal h2 {
 		margin: 0 0 0.25rem;
 		font-size: 1.125rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.modal-sub {
 		margin: 0 0 1rem;
 		font-size: 0.875rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.detail {
@@ -933,13 +982,13 @@
 	.detail dt {
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.detail dd {
 		margin: 0;
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.files {

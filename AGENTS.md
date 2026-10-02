@@ -57,15 +57,16 @@ npm run check          # typecheck (runs svelte-kit sync first)
 - Alembic: head is `c3e913d02be0` (4 migrations). New model → add `import features.X.model` to `alembic/env.py`, `alembic revision --autogenerate`, `alembic upgrade head`. `alembic check` must say "No new upgrade operations detected".
 - Models (17 classes, 13 files; `admin` + `face_enrollment` model-less): `Student.user_id` / `Professor.user_id` are unique FKs to `users.id` (1:1). Deletes use `ondelete=RESTRICT` — archive routes need a has-records guard (409); never relax to CASCADE. `DELETE /admin/programs/{id}` flips `programs.is_active` only; there is nothing to cascade to (no `is_active` on year levels, no program FK on courses).
 - Auth quirks: forgot-password step 2 returns a 5-min `type="recovery"` grant required to mint the OTP; unknown emails get a deterministic decoy question (ADR-056). `users.security_question_hash` stores the question in plaintext under a legacy name — only the answer is hashed; don't "fix" without revisiting the contract.
+- Email: `shared/email.py` is the one delivery path — real `smtplib`, stdlib only, and it **never raises** (`debug` logs, empty `SMTP_HOST` logs+skips, otherwise implicit TLS 465 / STARTTLS 587). `SMTP_*` in `core/config.py` is deliberately unvalidated (unlike `JWT_SECRET`) so a deployment without a relay still boots. `send_otp_email` keeps its old signature because `auth/service.py` calls it inline; new code that must not block uses `dispatch_emails` (one executor job per batch, futures parked in `shared.email._PENDING`). Excuse notifications: copy in `features/excuse/notifications.py` (pure builders), recipient resolution + dispatch in `ExcuseService`, always last in the method so a raise sends nothing. Recipients read `users.email` first, then the profile's roster `email`. Only §8's four events notify — `quick_excuse`/`excuse_with_evidence`/`edit_excuse`/`revoke_excuse` are silent, and the in-app half is unimplemented (no table, by design).
 - Scan flow (D27, rejection reasons D15): `POST /student/attendance/{scan,precheck}` resolve the student from the **authenticated user**, only *comparing* `payload.student_number` case-insensitively → `403 student_number_mismatch`. Same rule applies to any new student-facing endpoint taking an ID (e.g. excuse submit). Idempotency key is `user_id:session_id:X-Idempotency-Key`, 15-min TTL, process-local (like `rate_limit` — needs a shared store for multi-instance).
 
 ## Backend tests
 
-- 357 cases / 23 files: sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file.
+- 386 cases / 25 files: sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file, and `features/excuse/` has only `test_notifications.py` (the full excuse-service cover is still unwritten).
 - `conftest.py` SQLite shims (SQLite-only, inert on Postgres): `JSONB`→`JSON`, `BigInteger`→`INTEGER` (else every `id` insert fails `NOT NULL`), aware-UTC `DateTime` (else `SessionService.create_session` raises `TypeError`), plus `PRAGMA foreign_keys=ON` (else RESTRICT guards pass vacuously).
 - DB tests must use `api_client` (httpx + ASGITransport, `_get_db` overridden). `test_client` is sync-only and never used as a context manager (entering it runs lifespan `SELECT 1` → needs live Postgres).
 - `api_client` commits only on success, so a **failing request rolls back the seed** — commit after seeding if a test issues two failing requests. Read `server_default` values before committing (else `MissingGreenlet`).
-- Autouse fixture clears four process-global caches: `attendance.service._IDEMPOTENCY_STORE`, `rate_limit._limiter._windows`, `auth.service._recovery_limiter._windows`, `shared.cache._cache._store`. Add any new module-level cache here.
+- Autouse fixture clears five process-global caches: `attendance.service._IDEMPOTENCY_STORE`, `rate_limit._limiter._windows`, `auth.service._recovery_limiter._windows`, `shared.cache._cache._store`, `shared.email._PENDING`. Add any new module-level cache here.
 
 ## Frontend
 
@@ -77,5 +78,5 @@ npm run check          # typecheck (runs svelte-kit sync first)
 ## Docs (only what agents actually need)
 
 - `docs/architecture/api-contracts.md` — endpoint inventory (scan `student_number` field documented but comparison-only, see above).
-- `docs/project/decision-log.md` — authoritative (D1–D60, ADR-055–060); check before "fixing" odd-looking contracts.
+- `docs/project/decision-log.md` — authoritative (D1–D62, ADR-055–062); check before "fixing" odd-looking contracts.
 - `docs/project/roadmap.md` — 13 phases; Phase 12 is a flagged gap.

@@ -162,9 +162,13 @@ const apiCall = async <T>(
 		// Extra path segment for id-in-path routes, e.g. `/active/${id}` or
 		// `/${id}/close` for the professor session detail/close endpoints.
 		suffix?: string;
+		// Extra request headers, merged by fetchWithAuth (auth + JSON
+		// Content-Type still applied there). Used for X-Idempotency-Key on
+		// offline-queue replays (docs/architecture/offline-first.md).
+		headers?: Record<string, string>;
 	} = {}
 ): Promise<T> => {
-	const { method = 'GET', body, params, suffix = '' } = options;
+	const { method = 'GET', body, params, suffix = '', headers } = options;
 	const endpointDef = endpoints[endpoint];
 
 	// Mock mode — return mock data (call inputs forwarded so stateful mocks
@@ -187,6 +191,7 @@ const apiCall = async <T>(
 	const init: RequestInit = {
 		method,
 		body: body === undefined ? undefined : JSON.stringify(body),
+		...(headers === undefined ? {} : { headers })
 	};
 
 	return request<T>(url.toString(), init, false);
@@ -205,8 +210,9 @@ export const post = <T>(
 	endpoint: keyof typeof endpoints,
 	body?: unknown,
 	params?: Record<string, string>,
-	suffix?: string
-) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix });
+	suffix?: string,
+	headers?: Record<string, string>
+) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix, headers });
 
 export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
 	apiCall<T>(endpoint, { method: 'PUT', body, params });

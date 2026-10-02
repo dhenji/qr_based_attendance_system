@@ -91,7 +91,7 @@ Student scans QR or types code → server verifies
 | ------------- | ----------------------------------------------------------- |
 | `super_admin` | All admin access + platform/system-level management         |
 | `admin`       | All endpoints + system settings + backup + analytics        |
-| `professor`   | `/professor/*` — own courses, sessions, attendance, reports |
+| `professor`   | `/professor/*` — assigned courses, sessions, attendance, reports |
 | `student`     | `/student/*` — own scan, history, schedule, excuse requests |
 
 ---

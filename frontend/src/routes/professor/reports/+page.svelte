@@ -9,8 +9,11 @@
 		getComparisonReport,
 		getReportFilterOptions,
 		getTrendsReport,
+		initReportDirectory,
+		type ReportCourseDir,
 		type ReportFilters,
 		type ReportGranularity,
+		type ReportMeta,
 		type ReportMetric
 	} from '$lib/features/report/service';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
@@ -33,7 +36,11 @@
 	];
 	const TREND_COLORS = ['#2563eb', '#16a34a', '#9333ea', '#ca8a04', '#0d9488', '#dc2626'];
 
-	const filterOptions = getReportFilterOptions();
+	// Course directory: mock fixture until the live assignments warm it. The
+	// report queries and filter options read this, so warming it re-runs the
+	// load effect below with live identity joins.
+	let directory = $state<ReportCourseDir[]>(PROFESSOR_COURSES);
+	const filterOptions = $derived(getReportFilterOptions(directory));
 	const initialRange = defaultReportRange();
 
 	let tab = $state<Tab>('all');
@@ -54,6 +61,18 @@
 	let aggregate = $state<Awaited<ReturnType<typeof getAllCoursesReport>> | null>(null);
 	let comparison = $state<Awaited<ReturnType<typeof getComparisonReport>> | null>(null);
 	let trends = $state<Awaited<ReturnType<typeof getTrendsReport>> | null>(null);
+	let reportMeta = $state<ReportMeta>({ dataSource: 'demo', truncated: false });
+
+	$effect(() => {
+		let cancelled = false;
+		void initReportDirectory().then(({ directory: warmed }) => {
+			if (cancelled || warmed === directory) return;
+			directory = warmed;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	const requestedOfferingId = $derived.by(() => {
 		const raw = page.url.searchParams.get('offering');
@@ -75,7 +94,7 @@
 			return;
 		}
 
-		const offering = PROFESSOR_COURSES.find((item) => item.offeringId === wanted);
+		const offering = directory.find((item) => item.offeringId === wanted);
 		if (!offering) {
 			prefilteredOfferingId = null;
 			unknownOffering = true;
@@ -91,7 +110,7 @@
 	});
 
 	const availableCourses = $derived(
-		PROFESSOR_COURSES.filter(
+		directory.filter(
 			(item) =>
 				(program === 'All' || item.programCode === program) &&
 				(year === 'All' || item.yearLevelLabel === year)
@@ -124,6 +143,7 @@
 		};
 		const activeTab = tab;
 		reloadToken;
+		const activeDirectory = directory;
 
 		let cancelled = false;
 		isLoading = true;
@@ -132,21 +152,24 @@
 		const load = async () => {
 			try {
 				if (activeTab === 'all') {
-					const data = await getAllCoursesReport(query);
+					const data = await getAllCoursesReport(query, activeDirectory);
 					if (cancelled) return;
 					aggregate = data;
+					reportMeta = data.meta;
 					comparison = null;
 					trends = null;
 				} else if (activeTab === 'comparison') {
-					const data = await getComparisonReport(query);
+					const data = await getComparisonReport(query, activeDirectory);
 					if (cancelled) return;
 					comparison = data;
+					reportMeta = data.meta;
 					aggregate = null;
 					trends = null;
 				} else {
-					const data = await getTrendsReport(query);
+					const data = await getTrendsReport(query, activeDirectory);
 					if (cancelled) return;
 					trends = data;
+					reportMeta = data.meta;
 					aggregate = null;
 					comparison = null;
 				}
@@ -167,7 +190,7 @@
 	const prefilteredOffering = $derived(
 		prefilteredOfferingId === null
 			? null
-			: (PROFESSOR_COURSES.find((item) => item.offeringId === prefilteredOfferingId) ?? null)
+			: (directory.find((item) => item.offeringId === prefilteredOfferingId) ?? null)
 	);
 	const prefilterActive = $derived(
 		prefilteredOffering !== null &&
@@ -292,7 +315,18 @@
 	<header class="header">
 		<div>
 			<h1>Attendance Reports</h1>
-			<p class="muted">Mock report data until professor report endpoints land.</p>
+			<p class="muted">
+				{#if reportMeta.dataSource === 'live'}
+					Live attendance data from your session history.
+				{:else}
+					Demo report data — live session history is unavailable.
+				{/if}
+			</p>
+			{#if reportMeta.truncated}
+				<p class="warning" role="status">
+					Showing the 500 most recent sessions in this range; narrow the dates to see older ones.
+				</p>
+			{/if}
 		</div>
 	</header>
 
@@ -440,6 +474,10 @@
 								<td>{formatPercentage(item.compliance_rate * 100)}</td>
 								<td>{formatPercentage(item.participation_rate * 100)}</td>
 							</tr>
+						{:else}
+							<tr>
+								<td colspan="5" class="muted">No sessions in this range.</td>
+							</tr>
 						{/each}
 					</tbody>
 				</table>
@@ -488,6 +526,10 @@
 								<td>{formatPercentage(item.compliance_rate * 100)}</td>
 								<td>{formatPercentage(item.participation_rate * 100)}</td>
 							</tr>
+						{:else}
+							<tr>
+								<td colspan="6" class="muted">No sessions in this range.</td>
+							</tr>
 						{/each}
 					</tbody>
 				</table>
@@ -531,6 +573,10 @@
 								<td>{item.course_code}</td>
 								<td>{item.cohort}</td>
 								<td>{formatPercentage(item.rate * 100)}</td>
+							</tr>
+						{:else}
+							<tr>
+								<td colspan="4" class="muted">No sessions in this range.</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -577,28 +623,28 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		margin: 0 0 0.25rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.muted {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 12px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-title {
 		margin: 0 0 1rem;
 		font-size: 1rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.filter-grid {
@@ -616,17 +662,17 @@
 	.form-label {
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.form-input {
 		padding: 0.625rem 0.75rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		font: inherit;
 		font-size: 0.9375rem;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 	}
 
 	.option-row {
@@ -647,7 +693,7 @@
 		margin-bottom: 0.5rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.choice {
@@ -656,12 +702,12 @@
 		gap: 0.375rem;
 		margin-right: 1rem;
 		font-size: 0.875rem;
-		color: #0f172a;
+		color: var(--text-strong);
 	}
 
 	.warning {
 		margin: 1rem 0 0;
-		color: #b45309;
+		color: var(--warning-text);
 		font-size: 0.875rem;
 		font-weight: 600;
 	}
@@ -673,14 +719,14 @@
 		gap: 0.5rem;
 		margin: 1rem 0 0;
 		font-size: 0.875rem;
-		color: #1e3a5f;
+		color: var(--brand);
 	}
 
 	.link-button {
 		border: 0;
 		background: transparent;
 		padding: 0;
-		color: #2563eb;
+		color: var(--accent);
 		font: inherit;
 		font-weight: 600;
 		cursor: pointer;
@@ -697,12 +743,12 @@
 		position: relative;
 		display: inline-flex;
 		padding: 0.625rem 1rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 999px;
-		background: white;
+		background: var(--bg-card);
 		font-size: 0.875rem;
 		font-weight: 600;
-		color: #334155;
+		color: var(--text-secondary);
 		cursor: pointer;
 	}
 
@@ -715,13 +761,13 @@
 	}
 
 	.tab.selected {
-		background: #1e3a5f;
-		border-color: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.tab:focus-within {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -737,8 +783,8 @@
 		align-items: center;
 		gap: 0.25rem;
 		padding: 1rem;
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 12px;
 	}
 
@@ -746,7 +792,7 @@
 		font-size: 1.625rem;
 		font-weight: 800;
 		font-variant-numeric: tabular-nums;
-		color: #1e3a5f;
+		color: var(--brand);
 	}
 
 	.kpi-label {
@@ -754,13 +800,13 @@
 		font-weight: 700;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.table-wrap {
 		overflow: auto;
 		max-height: 24rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
 
@@ -775,19 +821,19 @@
 	td {
 		padding: 0.75rem;
 		text-align: left;
-		border-bottom: 1px solid #f1f5f9;
-		color: #0f172a;
+		border-bottom: 1px solid var(--divider);
+		color: var(--text-strong);
 	}
 
 	thead th {
 		position: sticky;
 		top: 0;
 		z-index: 1;
-		background: #f8fafc;
+		background: var(--bg-page);
 		font-size: 0.75rem;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	tbody tr:last-child td {
@@ -808,21 +854,21 @@
 	}
 
 	.btn-secondary {
-		background: white;
-		border-color: #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border-color: var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn:disabled {
-		background: #f8fafc;
-		border-color: #e2e8f0;
+		background: var(--bg-page);
+		border-color: var(--border);
 		color: #94a3b8;
 		cursor: not-allowed;
 	}
 
 	.error {
 		margin: 0 0 1rem;
-		color: #b91c1c;
+		color: var(--danger-strong);
 		font-weight: 600;
 	}
 

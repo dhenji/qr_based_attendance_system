@@ -5,6 +5,7 @@
 		getSessionHistory,
 		type StudentHistoryStatus,
 	} from '$lib/features/student/service';
+	import { buildCsv } from '$lib/features/report/service';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 
 	type Status = StudentHistoryStatus;
@@ -142,42 +143,81 @@
 	const badgeLabel = (status: Status): string =>
 		status.charAt(0).toUpperCase() + status.slice(1);
 
-	// Server owns status/sort/page; course + search filter the fetched page
+	// Server owns status/sort/page; course + search filter the fetched rows
 	// client-side (course_id mapping needs a schedule that has no backend yet).
-	const filtered = $derived(
-		rows.filter((r) => {
-			if (filterCourse !== 'All' && r.course !== filterCourse) return false;
-			if (
-				search &&
-				!r.course.toLowerCase().includes(search.toLowerCase()) &&
-				!r.date.toLowerCase().includes(search.toLowerCase()) &&
-				!r.courseName.toLowerCase().includes(search.toLowerCase())
-			) {
-				return false;
-			}
-			return true;
-		})
-	);
+	const matchesFilters = (r: Row): boolean => {
+		if (filterCourse !== 'All' && r.course !== filterCourse) return false;
+		if (
+			search &&
+			!r.course.toLowerCase().includes(search.toLowerCase()) &&
+			!r.date.toLowerCase().includes(search.toLowerCase()) &&
+			!r.courseName.toLowerCase().includes(search.toLowerCase())
+		) {
+			return false;
+		}
+		return true;
+	};
+
+	const filtered = $derived(rows.filter(matchesFilters));
 
 	const pages = $derived(Math.max(1, Math.ceil(total / PER_PAGE)));
 	const paged = $derived(filtered);
 
-	const exportCsv = () => {
-		if (filtered.length === 0) {
-			alert('No records to export.');
-			return;
+	let exporting = $state(false);
+	let exportError: string | null = $state(null);
+
+	// Full filtered-set export: the table shows one server page at a time, so
+	// the export pages through every server page itself (cap 2000 rows) and
+	// re-applies the client-side course + search filter to the complete set.
+	const EXPORT_PAGE_SIZE = 100;
+	const EXPORT_MAX_ROWS = 2000;
+
+	const exportCsv = async () => {
+		if (exporting) return;
+		exporting = true;
+		exportError = null;
+		try {
+			const status = filterStatus !== 'All' ? (filterStatus.toLowerCase() as Status) : undefined;
+			const all: Row[] = [];
+			let exportPage = 1;
+			let exportTotal = Number.POSITIVE_INFINITY;
+			while (all.length < exportTotal && all.length < EXPORT_MAX_ROWS) {
+				const res = await getSessionHistory({
+					status,
+					sortBy: sortKey,
+					sortDir: sortAsc ? 'asc' : 'desc',
+					page: exportPage,
+					size: EXPORT_PAGE_SIZE
+				});
+				exportTotal = res.total;
+				const items = res.items ?? [];
+				if (items.length === 0) break;
+				all.push(...items.map(toRow));
+				exportPage += 1;
+			}
+			const records = all.filter(matchesFilters);
+			if (records.length === 0) {
+				exportError = 'No records to export.';
+				return;
+			}
+			const header = ['Date', 'Course code', 'Course name', 'Status', 'Time', 'Scanned at'];
+			const body = records.map((r) => [r.date, r.course, r.courseName, r.status, r.time, r.scannedAt]);
+			const blob = new Blob([buildCsv(header, body)], { type: 'text/csv;charset=utf-8' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			const stamp = new Date().toISOString().slice(0, 10);
+			const scope = filterStatus !== 'All' ? filterStatus.toLowerCase() : 'all';
+			a.download = `attendance-history-${scope}-${stamp}.csv`.replace(/[^a-z0-9._-]+/gi, '-');
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			exportError = e instanceof Error ? e.message : 'Export failed. Please try again.';
+		} finally {
+			exporting = false;
 		}
-		const header = 'Date,Course,Status,Time';
-		const body = filtered
-			.map((r) => [r.date, r.course, r.status, r.time].join(','))
-			.join('\r\n');
-		const blob = new Blob([`${header}\r\n${body}`], { type: 'text/csv;charset=utf-8' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = 'attendance-history.csv';
-		a.click();
-		URL.revokeObjectURL(url);
 	};
 
 	const doPrint = () => {
@@ -240,8 +280,13 @@
 
 		<div class="actions">
 			<button class="btn-ghost" onclick={doPrint}>Print</button>
-			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
+			<button class="btn-ghost" onclick={exportCsv} disabled={exporting}>
+				{exporting ? 'Exporting…' : 'Export CSV'}
+			</button>
 		</div>
+		{#if exportError}
+			<p class="export-error" role="status">{exportError}</p>
+		{/if}
 	</div>
 
 	<div class="card table-card">
@@ -337,21 +382,21 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.subtitle {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 		min-width: 0;
 	}
 
@@ -387,14 +432,14 @@
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
+		color: var(--text-strong);
 		outline: none;
 		transition: border-color 0.15s;
-		background: white;
+		background: var(--bg-card);
 	}
 
 	.form-input:focus {
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.actions {
@@ -404,20 +449,20 @@
 	}
 
 	.btn-ghost {
-		background: white;
-		border: 1px solid #cbd5e1;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		padding: 0.5rem 1rem;
 		font-size: 0.875rem;
 		font-weight: 600;
 		font-family: inherit;
-		color: #1e3a5f;
+		color: var(--brand);
 		cursor: pointer;
 		transition: background 0.15s ease;
 	}
 
 	.btn-ghost:hover {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.table-card {
@@ -439,8 +484,8 @@
 	th {
 		text-align: left;
 		padding: 0;
-		border-bottom: 1px solid #e2e8f0;
-		background: #f8fafc;
+		border-bottom: 1px solid var(--border);
+		background: var(--bg-page);
 	}
 
 	.th-btn {
@@ -453,12 +498,12 @@
 		font-family: inherit;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #64748b;
+		color: var(--text-muted);
 		cursor: pointer;
 	}
 
 	.th-btn:hover {
-		color: #1e3a5f;
+		color: var(--brand);
 	}
 
 	.sort-glyph {
@@ -467,9 +512,9 @@
 
 	td {
 		padding: 0.75rem 1rem;
-		border-top: 1px solid #f1f5f9;
+		border-top: 1px solid var(--divider);
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.mono {
@@ -490,33 +535,33 @@
 	}
 
 	.badge.present {
-		color: #15803d;
-		background: #f0fdf4;
-		border: 1px solid #bbf7d0;
+		color: var(--success);
+		background: var(--success-bg);
+		border: 1px solid var(--success-bg);
 	}
 
 	.badge.absent {
-		color: #b91c1c;
-		background: #fef2f2;
-		border: 1px solid #fecaca;
+		color: var(--danger-strong);
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
 	}
 
 	.badge.pending {
-		color: #b45309;
-		background: #fffbeb;
-		border: 1px solid #fde68a;
+		color: var(--warning-text);
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-bg);
 	}
 
 	.badge.late {
-		color: #c2410c;
-		background: #fff7ed;
-		border: 1px solid #fed7aa;
+		color: var(--warning-text);
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-bg);
 	}
 
 	.badge.excused {
-		color: #1d4ed8;
-		background: #eff6ff;
-		border: 1px solid #bfdbfe;
+		color: var(--accent-hover);
+		background: var(--info-bg);
+		border: 1px solid var(--info-bg);
 	}
 
 	.badge.rejected {
@@ -529,15 +574,22 @@
 		margin-left: 0.75rem;
 	}
 
+	.export-error {
+		flex-basis: 100%;
+		margin: 0;
+		color: var(--danger-strong);
+		font-size: 0.875rem;
+	}
+
 	.empty-row {
 		text-align: center;
-		color: #64748b;
+		color: var(--text-muted);
 		padding: 2rem 1rem;
 	}
 
 	.pagination {
 		padding: 0.75rem 1rem;
-		border-top: 1px solid #e2e8f0;
+		border-top: 1px solid var(--border);
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -545,24 +597,24 @@
 
 	.page-btn {
 		background: none;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		padding: 0.25rem 0.625rem;
 		font-family: inherit;
 		font-size: 0.875rem;
-		color: #1e3a5f;
+		color: var(--brand);
 		cursor: pointer;
 	}
 
 	.page-btn:hover:not(:disabled) {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.page-btn.active {
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		font-weight: 700;
-		border-color: #1e3a5f;
+		border-color: var(--brand);
 	}
 
 	.page-btn:disabled {
@@ -571,7 +623,7 @@
 	}
 
 	:global(.page :is(button, input, select):focus-visible) {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 

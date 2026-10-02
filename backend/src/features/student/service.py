@@ -10,6 +10,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password, verify_password
+from features.analytics.model import StudentRiskScore
 from features.attendance.model import Attendance
 from features.auth.model import User
 from features.course.model import Course, CourseOffering
@@ -661,7 +662,7 @@ class StudentService:
         if student.is_active:
             raise StudentNotArchivedException(student.id)
 
-        for model in (Enrollment, Attendance, ExcuseRequest):
+        for model in (Enrollment, Attendance, ExcuseRequest, StudentRiskScore):
             count: int = (
                 await self._session.scalar(
                     select(func.count())

@@ -47,21 +47,30 @@ export const submitAttendanceScan = async (input: {
 	livenessEvidence: LivenessEvidence;
 	faceMatchScore?: number;
 	scannedAt: string;
+	// Queue replay id: sent as X-Idempotency-Key so a retried offline scan
+	// can never double-record (docs/architecture/offline-first.md).
+	idempotencyKey?: string;
 }): Promise<AttendanceScanResult> => {
-	const response = await post<AttendanceScanResponse>('attendanceScan', {
-		session_id: input.sessionId,
-		student_number: input.studentNumber,
-		gps: input.gps,
-		liveness_evidence: {
-			blink_detected: input.livenessEvidence.blinkDetected,
-			head_turn_left: input.livenessEvidence.headTurnLeft,
-			head_turn_right: input.livenessEvidence.headTurnRight,
-			ear_samples: input.livenessEvidence.earSamples,
-			pnp_evidence: input.livenessEvidence.pnpEvidence,
+	const response = await post<AttendanceScanResponse>(
+		'attendanceScan',
+		{
+			session_id: input.sessionId,
+			student_number: input.studentNumber,
+			gps: input.gps,
+			liveness_evidence: {
+				blink_detected: input.livenessEvidence.blinkDetected,
+				head_turn_left: input.livenessEvidence.headTurnLeft,
+				head_turn_right: input.livenessEvidence.headTurnRight,
+				ear_samples: input.livenessEvidence.earSamples,
+				pnp_evidence: input.livenessEvidence.pnpEvidence,
+			},
+			...(input.faceMatchScore === undefined ? {} : { face_match_score: input.faceMatchScore }),
+			scanned_at: input.scannedAt,
 		},
-		...(input.faceMatchScore === undefined ? {} : { face_match_score: input.faceMatchScore }),
-		scanned_at: input.scannedAt,
-	});
+		undefined,
+		undefined,
+		input.idempotencyKey === undefined ? undefined : { 'X-Idempotency-Key': input.idempotencyKey }
+	);
 
 	return {
 		id: response.id,

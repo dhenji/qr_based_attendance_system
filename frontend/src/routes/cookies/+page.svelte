@@ -46,7 +46,7 @@
 	.page {
 		min-height: 100vh;
 		font-family: 'DM Sans', system-ui, sans-serif;
-		background: #f8fafc;
+		background: var(--bg-page);
 	}
 
 	.nav {
@@ -58,7 +58,7 @@
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.75rem 1.5rem;
-		background: #1e3a5f;
+		background: var(--brand);
 		box-shadow: 0 2px 12px rgba(15, 23, 42, 0.25);
 	}
 
@@ -76,7 +76,7 @@
 	}
 
 	.nav-name {
-		color: white;
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 1.125rem;
 	}
@@ -84,7 +84,7 @@
 	.back-link {
 		padding: 0.5rem 0.875rem;
 		border-radius: 8px;
-		color: #e2e8f0;
+		color: var(--border);
 		font-size: 0.9375rem;
 		font-weight: 500;
 		text-decoration: none;
@@ -93,7 +93,7 @@
 
 	.back-link:hover {
 		background: rgba(255, 255, 255, 0.1);
-		color: white;
+		color: var(--on-brand);
 	}
 
 	.content {
@@ -103,35 +103,35 @@
 	}
 
 	h1 {
-		color: #1e293b;
+		color: var(--text);
 		font-size: 2rem;
 		font-weight: 700;
 		margin: 0 0 0.75rem;
 	}
 
 	.lead {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 1.125rem;
 		line-height: 1.6;
 		margin: 0 0 2rem;
 	}
 
 	h2 {
-		color: #1e293b;
+		color: var(--text);
 		font-size: 1.375rem;
 		font-weight: 700;
 		margin: 2rem 0 0.75rem;
 	}
 
 	.body {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 1rem;
 		line-height: 1.7;
 		margin: 0 0 1rem;
 	}
 
 	.list {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 1rem;
 		line-height: 1.7;
 		margin: 0 0 1rem;

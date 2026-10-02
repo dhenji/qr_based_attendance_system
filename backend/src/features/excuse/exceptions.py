@@ -17,8 +17,29 @@ class ExcuseNotFoundException(ExcuseDomainException):
     status_code: int = 404
     code: str = "excuse_not_found"
 
-    def __init__(self, request_id: int) -> None:
-        super().__init__(message=f"Excuse request {request_id} not found")
+    def __init__(
+        self,
+        request_id: int | None = None,
+        *,
+        student_id: int | None = None,
+        session_id: int | None = None,
+    ) -> None:
+        """Missing excuse.
+
+        Callers holding a real id pass it positionally. Callers resolving an
+        excuse by (student, session) have no id yet, and reporting a placeholder
+        such as 0 would send the professor a meaningless "request 0 not found",
+        so they name the student and session instead.
+        """
+        if request_id is not None:
+            message = f"Excuse request {request_id} not found"
+        else:
+            message = (
+                f"No professor-issued excuse for student {student_id} "
+                f"in session {session_id}"
+            )
+
+        super().__init__(message=message)
 
 
 class SessionNotFoundException(ExcuseDomainException):
@@ -65,6 +86,39 @@ class ProfessorNotAssignedException(ExcuseDomainException):
     def __init__(self, offering_id: int) -> None:
         super().__init__(
             message=f"Professor is not assigned to offering {offering_id}"
+        )
+
+
+class ProfessorNotFoundException(ExcuseDomainException):
+    """404 - no professor profile is linked to the authenticated user."""
+
+    status_code: int = 404
+    code: str = "professor_not_found"
+
+    def __init__(self, user_id: int) -> None:
+        super().__init__(
+            message=f"No professor profile found for user {user_id}"
+        )
+
+
+class ExcuseNotEligibleException(ExcuseDomainException):
+    """422 - the attendance record is not in an excusable state.
+
+    Only `absent`, `late` and `rejected` records may be excused or have an
+    excuse requested. `present` and `pending` records are not eligible —
+    reported distinctly from `already_excused` so clients can tell "nothing
+    to excuse" apart from "already excused".
+    """
+
+    status_code: int = 422
+    code: str = "excuse_not_eligible"
+
+    def __init__(self, student_id: int, session_id: int) -> None:
+        super().__init__(
+            message=(
+                f"Student {student_id} has no excusable record "
+                f"for session {session_id}"
+            )
         )
 
 

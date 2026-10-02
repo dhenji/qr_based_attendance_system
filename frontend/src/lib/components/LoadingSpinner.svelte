@@ -39,7 +39,7 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background-color: rgba(255, 255, 255, 0.9);
+		background-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -69,7 +69,7 @@
 	 * The track is currentColor at low alpha for the same reason. */
 	.spinner {
 		/* Fallback first: engines without color-mix drop the two lines below. */
-		border: 2px solid #e5e7eb;
+		border: 2px solid var(--border);
 		border-top-color: currentColor;
 		border-color: color-mix(in srgb, currentColor 25%, transparent);
 		border-top-color: currentColor;
@@ -100,7 +100,7 @@
 	}
 
 	.loading-message {
-		color: #374151;
+		color: var(--text-secondary);
 		font-size: 14px;
 		font-weight: 500;
 		margin-left: 8px;
@@ -116,14 +116,4 @@
 		}
 	}
 
-	/* Dark mode support */
-	@media (prefers-color-scheme: dark) {
-		.loading-overlay {
-			background-color: rgba(17, 24, 39, 0.9);
-		}
-
-		.loading-message {
-			color: #d1d5db;
-		}
-	}
 </style>

@@ -1,10 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { studentState, initStudent } from '$lib/features/student/store.svelte';
+	import { faceCacheState, refreshFaceCache } from '$lib/features/student/face.svelte';
 	import { formatDate } from '$lib/shared/utils/format';
 
+	const faceCacheLabel = $derived(
+		faceCacheState.state === 'current' || faceCacheState.state === 'updated'
+			? `Cached on this device${faceCacheState.version !== null ? ` (v${faceCacheState.version})` : ''}`
+			: faceCacheState.state === 'absent'
+				? 'No face data on file'
+				: 'Offline face data unavailable'
+	);
+
 	onMount(() => {
-		initStudent();
+		void initStudent().then(() => {
+			// Re-pull on profile visits: an admin may have enrolled or
+			// re-enrolled the student after sign-in.
+			const profile = studentState.student;
+			if (profile?.email) void refreshFaceCache(profile.email, profile.faceEnrolled);
+		});
 	});
 
 	const student = $derived(studentState.student);
@@ -75,6 +89,9 @@
 				<span class="muted">Version {student.faceEmbeddingVersion ?? '—'}</span>
 			</div>
 			<p class="muted">Enrolled: {student.faceEnrolledAt ? formatDate(student.faceEnrolledAt) : '—'}</p>
+			{#if student.faceEnrolled}
+				<p class="muted">Offline-ready: {faceCacheLabel}</p>
+			{/if}
 		</section>
 
 		<section class="card">
@@ -110,29 +127,29 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-title {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 1rem;
 	}
 
@@ -147,8 +164,8 @@
 		width: 72px;
 		height: 72px;
 		border-radius: 50%;
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -163,14 +180,14 @@
 		grid-template-columns: max-content 1fr;
 		gap: 0.5rem 1.5rem;
 		font-size: 0.9375rem;
-		color: #334155;
+		color: var(--text-secondary);
 		min-width: 0;
 	}
 
 	.field {
 		font-size: 0.8125rem;
 		font-weight: 700;
-		color: #64748b;
+		color: var(--text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.02em;
 		padding-top: 0.0625rem;
@@ -189,13 +206,13 @@
 		border-radius: 999px;
 		font-size: 0.8125rem;
 		font-weight: 700;
-		background: #f1f5f9;
-		color: #64748b;
+		background: var(--bg-muted);
+		color: var(--text-muted);
 	}
 
 	.badge.ok {
-		background: #dcfce7;
-		color: #16a34a;
+		background: var(--success-bg);
+		color: var(--success);
 	}
 
 	.qr-tile {
@@ -209,7 +226,7 @@
 	.qr-placeholder {
 		width: 128px;
 		height: 128px;
-		border: 2px dashed #cbd5e1;
+		border: 2px dashed var(--border-strong);
 		border-radius: 8px;
 		display: flex;
 		align-items: center;
@@ -223,7 +240,7 @@
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 0.9375rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.qr-note {
@@ -232,10 +249,10 @@
 
 	.admin-note {
 		padding: 0.75rem 1rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		background: #f8fafc;
-		color: #64748b;
+		background: var(--bg-page);
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		text-align: center;
 	}
@@ -246,11 +263,11 @@
 	}
 
 	.empty {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 2rem;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}

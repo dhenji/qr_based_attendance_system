@@ -45,7 +45,7 @@ ProfessorUser = Annotated[User, Depends(require_role(UserRole.PROFESSOR))]
 @router.get(
     "/courses",
     response_model=PaginatedResponse[AssignedOfferingItem],
-    summary="List own active course assignments",
+    summary="List active course assignments",
 )
 async def list_own_courses(
     user: ProfessorUser,
@@ -61,7 +61,7 @@ async def list_own_courses(
 @router.get(
     "/sessions",
     response_model=PaginatedResponse[SessionListItem],
-    summary="List own sessions",
+    summary="List sessions for the assigned offerings",
 )
 async def list_sessions(
     user: ProfessorUser,

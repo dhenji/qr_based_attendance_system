@@ -67,10 +67,10 @@ class ProfessorNotArchivedException(ProfessorDomainException):
 
 
 class ProfessorHasRecordsException(ProfessorDomainException):
-    """409 - the archived professor still has sessions referencing them.
+    """409 - the archived professor still has sessions or assignments.
 
-    `sessions.professor_id` is `ondelete="RESTRICT"` (`course_professors` is
-    CASCADE and needs no guard), so the delete is rejected before the FK
+    `sessions.professor_id` and `course_professors.professor_id` are both
+    `ondelete="RESTRICT"`, so the delete is rejected before the FK
     violation surfaces as a 500.
     """
 

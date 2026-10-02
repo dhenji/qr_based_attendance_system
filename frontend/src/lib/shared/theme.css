@@ -1,0 +1,81 @@
+/* Shared theme tokens — light default, dark via [data-theme="dark"].
+ * Light values preserve the pre-existing palette pixel-for-pixel; dark values
+ * are the slate-based dark theme. Pages/components consume these via
+ * var(--...) instead of hardcoded hex so the Settings theme toggle works app-wide.
+ * No backend involvement: preference stays in localStorage (settings_prefs). */
+
+:root {
+	color-scheme: light;
+	--bg-page: #f8fafc;
+	--bg-card: #ffffff;
+	--bg-muted: #f1f5f9;
+	--bg-input: #ffffff;
+	--bg-hover: #f1f5f9;
+	--border: #e2e8f0;
+	--border-strong: #cbd5e1;
+	--divider: #f1f5f9;
+	--text: #1e293b;
+	--text-strong: #0f172a;
+	--text-secondary: #334155;
+	--text-muted: #64748b;
+	--brand: #1e3a5f;
+	--brand-hover: #16324f;
+	--on-brand: #ffffff;
+	--accent: #2563eb;
+	--accent-hover: #1d4ed8;
+	--danger: #dc2626;
+	--danger-strong: #b91c1c;
+	--danger-bg: #fee2e2;
+	--success: #15803d;
+	--success-bg: #dcfce7;
+	--warning-text: #b45309;
+	--warning-bg: #fef3c7;
+	--info-text: #0369a1;
+	--info-bg: #eff6ff;
+	--overlay: rgba(15, 23, 42, 0.5);
+	--shadow-sm: 0 4px 16px rgba(15, 23, 42, 0.06);
+	--shadow-lg: 0 20px 40px rgba(15, 23, 42, 0.25);
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--bg-page: #0f172a;
+	--bg-card: #1e293b;
+	--bg-muted: #334155;
+	--bg-input: #1e293b;
+	--bg-hover: #334155;
+	--border: #334155;
+	--border-strong: #475569;
+	--divider: #334155;
+	--text: #f1f5f9;
+	--text-strong: #f8fafc;
+	--text-secondary: #cbd5e1;
+	--text-muted: #94a3b8;
+	--brand: #3b82f6;
+	--brand-hover: #2563eb;
+	--on-brand: #ffffff;
+	--accent: #60a5fa;
+	--accent-hover: #93c5fd;
+	--danger: #f87171;
+	--danger-strong: #fca5a5;
+	--danger-bg: rgba(127, 29, 29, 0.45);
+	--success: #4ade80;
+	--success-bg: rgba(20, 83, 45, 0.45);
+	--warning-text: #fcd34d;
+	--warning-bg: rgba(120, 53, 15, 0.45);
+	--info-text: #7dd3fc;
+	--info-bg: rgba(12, 74, 110, 0.45);
+	--overlay: rgba(2, 6, 23, 0.7);
+	--shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.4);
+	--shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* Base page surface so the theme covers areas outside cards. */
+html {
+	background-color: var(--bg-page);
+}
+
+body {
+	background-color: var(--bg-page);
+	color: var(--text);
+}

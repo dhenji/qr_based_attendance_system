@@ -326,7 +326,7 @@ Checks performed locally before queuing:
 | Check                   | Source                             | Offline Available           |
 | ----------------------- | ---------------------------------- | --------------------------- |
 | Session code validity   | Cached session config              | Yes (if previously fetched) |
-| Student number format   | Regex `^\d{2}-\d{4}$`              | Yes                         |
+| Student number format   | Free-form ID as printed on the card (3–50 chars, upper-cased; the conventional `YY-NNNN` shape is not validated) | Yes |
 | GPS within geofence     | Haversine vs cached session coords | Yes                         |
 | Liveness (blink, turns) | MediaPipe WASM                     | Yes                         |
 | Face match score        | face-api.js vs cached embedding    | Yes                         |

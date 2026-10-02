@@ -429,12 +429,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -443,11 +443,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 2rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	/* --- Fields -------------------------------------------------------------- */
@@ -468,33 +468,33 @@
 		font-size: 0.8125rem;
 		font-weight: 600;
 		letter-spacing: 0.02em;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.form-input {
 		padding: 0.625rem 0.75rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
-		background: white;
+		color: var(--text-strong);
+		background: var(--bg-card);
 	}
 
 	.form-input:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 1px;
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.form-input.invalid {
-		border-color: #dc2626;
+		border-color: var(--danger);
 	}
 
 	.hint {
 		margin: 0;
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	/* A blocking reason, not a suggestion — this is what silently disables
@@ -503,7 +503,7 @@
 		margin: 0;
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #b91c1c;
+		color: var(--danger-strong);
 	}
 
 	/* --- Locked course panel (D11) ------------------------------------------- */
@@ -513,8 +513,8 @@
 		flex-direction: column;
 		gap: 0.25rem;
 		padding: 1rem;
-		background: #f8fafc;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-page);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
 
@@ -522,11 +522,11 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.locked-head :global(svg) {
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.locked-name {
@@ -537,7 +537,7 @@
 
 	.locked-meta {
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	/* --- Location callout ---------------------------------------------------- */
@@ -550,27 +550,27 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 		padding: 0.75rem;
-		background: #f0f9ff;
-		border: 1px solid #bae6fd;
+		background: var(--info-bg);
+		border: 1px solid var(--info-bg);
 		border-radius: 8px;
 		font-size: 0.8125rem;
-		color: #0369a1;
+		color: var(--info-text);
 	}
 
 	/* Once overridden, the callout is reporting the session's geofence rather
 	   than the course's, so it gets the amber treatment to say so. */
 	.location.overridden {
-		background: #fffbeb;
+		background: var(--warning-bg);
 		border-color: #fcd34d;
-		color: #b45309;
+		color: var(--warning-text);
 	}
 
 	.location-tag {
 		margin-left: auto;		padding: 0.125rem 0.5rem;
 		border-radius: 6px;
-		background: #fef3c7;
+		background: var(--warning-bg);
 		border: 1px solid #fcd34d;
-		color: #b45309;
+		color: var(--warning-text);
 		font-size: 0.6875rem;
 		font-weight: 700;
 		letter-spacing: 0.04em;
@@ -586,8 +586,8 @@
 		gap: 0.4375rem;
 		margin-top: 0.25rem;
 		padding: 1rem;
-		background: #f8fafc;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-page);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
 
@@ -602,9 +602,9 @@
 	.radius-btn {
 		padding: 0.5rem 1rem;
 		border-radius: 8px;
-		border: 1px solid #cbd5e1;
-		background: white;
-		color: #0f172a;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
 		font-family: inherit;
 		font-size: 0.8125rem;
 		font-weight: 600;
@@ -613,18 +613,18 @@
 	}
 
 	.radius-btn:hover {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 	}
 
 	.radius-btn:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
 	.radius-btn.selected {
-		background: #1e3a5f;
-		border-color: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	/* --- D13 window check ---------------------------------------------------- */
@@ -636,15 +636,15 @@
 		gap: 0.75rem;
 		padding: 0.75rem 1rem;
 		border-radius: 8px;
-		background: #f0fdf4;
-		border: 1px solid #bbf7d0;
-		color: #15803d;
+		background: var(--success-bg);
+		border: 1px solid var(--success-bg);
+		color: var(--success);
 	}
 
 	.check.bad {
-		background: #fef2f2;
-		border-color: #fecaca;
-		color: #b91c1c;
+		background: var(--danger-bg);
+		border-color: var(--danger-bg);
+		color: var(--danger-strong);
 	}
 
 	.check-math {
@@ -661,8 +661,8 @@
 		gap: 0.5rem;
 		padding: 1.5rem;
 		border-radius: 12px;
-		background: #f8fafc;
-		border: 2px dashed #cbd5e1;
+		background: var(--bg-page);
+		border: 2px dashed var(--border-strong);
 		text-align: center;
 		/* Query container so .preview-code can size itself against the width it
 		   actually has, rather than against the viewport. */
@@ -670,7 +670,7 @@
 	}
 
 	.preview.generated {
-		background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
 		border: 2px solid #22c55e;
 		border-style: solid;
 	}
@@ -680,11 +680,11 @@
 		font-weight: 700;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	.preview.generated .preview-label {
-		color: #16a34a;
+		color: var(--success);
 	}
 
 	/* Sized from the container, not the viewport. The code is `XX-XXXX` — seven
@@ -698,7 +698,7 @@
 		font-weight: 700;
 		letter-spacing: 0.15em;
 		line-height: 1;
-		color: #1e3a5f;
+		color: var(--brand);
 		max-width: 100%;
 		overflow-wrap: anywhere;
 	}
@@ -711,7 +711,7 @@
 	.preview-hint {
 		margin: 0.25rem 0 0;
 		font-size: 0.8125rem;
-		color: #64748b;
+		color: var(--text-muted);
 	}
 
 	/* --- Actions ------------------------------------------------------------- */
@@ -738,46 +738,46 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
 	.btn-primary {
 		flex: 1 1 auto;
-		background: #1e3a5f;
-		border: 1px solid #1e3a5f;
-		color: white;
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		color: var(--on-brand);
 		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: #16324f;
-		border-color: #16324f;
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 		transform: translateY(-1px);
 	}
 
 	.btn-secondary {
-		background: white;
-		border: 1px solid #cbd5e1;
-		color: #0f172a;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
 	}
 
 	.btn:disabled {
 		color: #94a3b8;
-		background: #f8fafc;
-		border-color: #e2e8f0;
+		background: var(--bg-page);
+		border-color: var(--border);
 		cursor: not-allowed;
 		box-shadow: none;
 	}
 
 	.error {
 		margin: 0;
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 	}
 
 	.empty {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
 	}

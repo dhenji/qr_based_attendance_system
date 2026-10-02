@@ -20,7 +20,7 @@ attendance-system/
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
 │   │   │   ├── dependencies.py       # pagination + reusable annotated deps
 │   │   │   ├── captcha.py            # Cloudflare Turnstile siteverify (key-gated no-op when unset)
-│   │   │   ├── email.py              # SMTP sender (OTP emails)
+│   │   │   ├── email.py              # SMTP sender (OTP + excuse notifications), config-gated no-op when SMTP_HOST unset
 │   │   │   ├── cache.py              # LRU cache (O(1) student lookup)
 │   │   │   ├── rate_limit.py         # in-process sliding-window limiter
 │   │   │   ├── validators.py         # password policy, email/ID normalization

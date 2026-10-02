@@ -29,7 +29,7 @@
 		| 'detecting'
 		| 'passed';
 
-	type ChallengeStage = 'blink' | 'left' | 'left_center' | 'right' | 'right_center' | 'complete';
+	type ChallengeStage = 'blink' | 'blink_success' | 'left' | 'left_center' | 'right' | 'right_center' | 'complete';
 
 	let status = $state<FaceStatus>('initializing');
 	let challengeStage = $state<ChallengeStage>('blink');
@@ -56,6 +56,8 @@
 	let countdown = $state(0);
 	let beginDetection = $state(false);
 	let countdownTimerId: ReturnType<typeof setInterval> | null = null;
+	let blinkCountdown = $state(0);
+	let blinkSuccessTimerId: ReturnType<typeof setInterval> | null = null;
 
 	// Live handles: landmarker for detection, drawing for the overlay renderer.
 	let landmarker: {
@@ -86,10 +88,11 @@
 	let lastYaw = 0;
 	let peakLeftYaw = 0;
 	let peakRightYaw = 0;
-	let poseHoldFrames = 0;
-	let centerHoldFrames = 0;
+	let poseHoldFrames = $state(0);
+	let centerHoldFrames = $state(0);
 	let stageStartedAt = 0;
 	let completionSent = false;
+	let startToken = 0;
 	// EMA-smoothed EAR; damps single-frame landmark jitter.
 	let smoothedEar = 1;
 	// Per-user open-eye baseline and closing-phase bookkeeping for blink math.
@@ -205,8 +208,55 @@
 
 	// Per-status instruction shown to the user before detection begins.
 	const preHintText = $derived(
-		countdown > 0 ? `${challengeMessage || 'Get ready'} \u2026 ${countdown}` : 'Face model loading\u2026'
+		countdown > 0 ? `${challengeMessage || 'Get ready'} … ${countdown}` : 'Face model loading…'
 	);
+
+	// Hold progress 0..1 for the on-camera progress bar during tilt stages.
+	const holdProgress = $derived.by(() => {
+		if (challengeStage === 'left' || challengeStage === 'right') {
+			return Math.min(1, poseHoldFrames / POSE_HOLD_FRAMES);
+		}
+		if (challengeStage === 'left_center' || challengeStage === 'right_center') {
+			return Math.min(1, centerHoldFrames / CENTER_HOLD_FRAMES);
+		}
+		return 0;
+	});
+
+	// True during a tilt stage while the user should be moving or holding —
+	// drives the on-camera arrow cue.
+	const showTurnCue = $derived(
+		beginDetection &&
+			(challengeStage === 'left' ||
+				challengeStage === 'left_center' ||
+				challengeStage === 'right' ||
+				challengeStage === 'right_center')
+	);
+
+	const turnCue = $derived.by(() => {
+		switch (challengeStage) {
+			case 'left':
+				return { arrow: '←', label: 'Turn left' };
+			case 'left_center':
+				return { arrow: '◎', label: 'Back to center' };
+			case 'right':
+				return { arrow: '→', label: 'Turn right' };
+			case 'right_center':
+				return { arrow: '◎', label: 'Back to center' };
+			default:
+				return { arrow: '', label: '' };
+		}
+	});
+
+	// Wipe the overlay canvas so a stopped session never leaves a frozen
+	// wireframe behind (the "stuck to old face" report on retry).
+	const clearView = () => {
+		try {
+			const ctx = canvas?.getContext('2d');
+			ctx?.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+		} catch {
+			// Canvas may not be bound yet on early teardown — safe to skip.
+		}
+	};
 
 	// Per-status instruction shown to the user.
 	const hintText = $derived.by(() => {
@@ -227,21 +277,35 @@
 				return 'Center your face in the oval';
 			case 'looking':
 				switch (challengeStage) {
+					case 'blink_success':
+						return '';
 					case 'left':
-						return 'Turn your head to your left';
+						return 'Turn your head to your left ←';
 					case 'left_center':
-						return 'Return your head to center';
+						return 'Return your head to center ◎';
 					case 'right':
-						return 'Turn your head to your right';
+						return 'Turn your head to your right →';
 					case 'right_center':
-						return 'Return your head to center';
+						return 'Return your head to center ◎';
 					case 'complete':
 						return 'Verified';
 					default:
 						return 'Look at the camera and blink once';
 				}
 			case 'detecting':
-				return challengeStage === 'blink' ? 'Eyes closing \u2014 blink fully\u2026' : 'Hold still\u2026';
+				if (challengeStage === 'blink') return 'Eyes closing — blink fully…';
+				switch (challengeStage) {
+					case 'left':
+						return 'Holding left turn… keep it there ←';
+					case 'left_center':
+						return 'Centering… hold still ◎';
+					case 'right':
+						return 'Holding right turn… keep it there →';
+					case 'right_center':
+						return 'Centering… hold still ◎';
+					default:
+						return 'Hold still…';
+				}
 			case 'passed':
 				return 'Verified';
 			default:
@@ -270,6 +334,7 @@
 	// Guarantee no camera/model leaks when the component is removed.
 	onDestroy(() => {
 		clearCountdown();
+		clearBlinkSuccess();
 		stop();
 	});
 
@@ -278,6 +343,41 @@
 			clearInterval(countdownTimerId);
 			countdownTimerId = null;
 		}
+	};
+
+	const clearBlinkSuccess = () => {
+		if (blinkSuccessTimerId) {
+			clearInterval(blinkSuccessTimerId);
+			blinkSuccessTimerId = null;
+		}
+		blinkCountdown = 0;
+	};
+
+	// Phase 2 → Phase 3 handoff: freeze tilt detection for 3s while the
+	// success card replaces the viewport. The camera stream and RAF loop
+	// keep running underneath so resume is instant; yaw state is reset so
+	// the head-turn starts from a clean baseline.
+	const startBlinkSuccessPause = () => {
+		clearBlinkSuccess();
+		challengeStage = 'blink_success';
+		status = 'passed';
+		yawBaseline = null;
+		yawSource = null;
+		yawSamples = [];
+		peakLeftYaw = 0;
+		peakRightYaw = 0;
+		poseHoldFrames = 0;
+		centerHoldFrames = 0;
+		blinkCountdown = 3;
+		blinkSuccessTimerId = setInterval(() => {
+			blinkCountdown -= 1;
+			if (blinkCountdown <= 0) {
+				clearBlinkSuccess();
+				challengeStage = 'left';
+				status = 'looking';
+				stageStartedAt = performance.now();
+			}
+		}, 1000);
 	};
 
 	const startCountdown = (message = '') => {
@@ -298,6 +398,7 @@
 	};
 
 	const resetChallenge = () => {
+		clearBlinkSuccess();
 		challengeStage = 'blink';
 		challengeMessage = '';
 		blinkFired = false;
@@ -325,6 +426,8 @@
 	// Boot sequence: reuse the shared warm landmarker, open the front camera,
 	// then loop detection per frame.
 	const start = async () => {
+		startToken += 1;
+		const token = startToken;
 		error = null;
 		challengeStage = 'blink';
 		challengeMessage = '';
@@ -349,10 +452,13 @@
 		status = 'initializing';
 		beginDetection = false;
 		clearCountdown();
+		clearBlinkSuccess();
+		clearView();
 
 		try {
 			// Grab the pre-warmed model instance — no re-download or re-compile.
 			const loaded = await initFaceModel();
+			if (token !== startToken) return;
 			landmarker = loaded.landmarker;
 			faceOval = loaded.connections.faceOval;
 			leftEye = loaded.connections.leftEye;
@@ -364,6 +470,11 @@
 				video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
 				audio: false,
 			});
+			if (token !== startToken) {
+				stream.getTracks().forEach((t) => t.stop());
+				stream = null;
+				return;
+			}
 			video.srcObject = stream;
 			await video.play();
 
@@ -378,9 +489,13 @@
 					canvas.width = video.videoWidth;
 					canvas.height = video.videoHeight;
 					stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-					if (!drawing && drawingCtor) {
-					drawing = new drawingCtor(canvas.getContext('2d') as CanvasRenderingContext2D);
 				}
+				// Recreate the overlay renderer whenever it's missing (e.g. after
+				// stop() dropped it on retry with the same resolution, where the
+				// resize branch above never runs). Kept separate so a retry never
+				// loses the wireframe.
+				if (!drawing && drawingCtor && canvas.width) {
+					drawing = new drawingCtor(canvas.getContext('2d') as CanvasRenderingContext2D);
 				}
 				if (video.currentTime !== lastVideoTime) {
 					lastVideoTime = video.currentTime;
@@ -407,11 +522,12 @@
 
 	// draw
 	// Overlay the detected face oval + eyes onto the canvas as a wireframe.
+	// Always clears first so a lost face never leaves a frozen overlay behind.
 	const draw = (result: FaceResult) => {
-		if (!result.faceLandmarks?.length || !drawing) return;
-		const ctx = canvas.getContext('2d');
+		const ctx = canvas?.getContext('2d');
 		if (!ctx) return;
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		if (!result.faceLandmarks?.length || !drawing) return;
 		const lm = result.faceLandmarks[0];
 		drawing.drawConnectors(lm, faceOval, { color: '#94a3b8', lineWidth: 2 });
 		drawing.drawConnectors(lm, leftEye, { color: '#4f9cf9', lineWidth: 2 });
@@ -419,6 +535,9 @@
 	};
 
 	const evaluate = (result: FaceResult) => {
+		// Frozen during the blink-success card: keep the preview alive but
+		// ignore frames so the 3s pause can't time out or pollute yaw stats.
+		if (challengeStage === 'blink_success') return;
 		if (beginDetection && stageStartedAt > 0 && performance.now() - stageStartedAt > STAGE_TIMEOUT_MS) {
 			resetChallenge();
 			return;
@@ -505,10 +624,7 @@
 				status = 'looking';
 				if (isBlink && !blinkFired) {
 					blinkFired = true;
-					challengeStage = 'left';
-					poseHoldFrames = 0;
-					centerHoldFrames = 0;
-					stageStartedAt = performance.now();
+					startBlinkSuccessPause();
 				}
 				return;
 			}
@@ -553,7 +669,18 @@
 			return;
 		}
 		if (
-			(challengeStage === 'left_center' || challengeStage === 'right_center') &&
+			challengeStage === 'left_center' &&
+			centerHoldFrames >= CENTER_HOLD_FRAMES
+		) {
+			challengeStage = 'right';
+			status = 'looking';
+			poseHoldFrames = 0;
+			centerHoldFrames = 0;
+			stageStartedAt = performance.now();
+			return;
+		}
+		if (
+			challengeStage === 'right_center' &&
 			centerHoldFrames >= CENTER_HOLD_FRAMES
 		) {
 			challengeStage = 'complete';
@@ -579,19 +706,49 @@
 	};
 
 	// stop
-	// Tear down everything: animation loop, camera stream, and renderer.
+	// Tear down everything: animation loop, camera stream, renderer, and the
+	// frozen last frame — a retry must restart from a clean live view.
 	const stop = () => {
+		startToken += 1;
 		clearCountdown();
+		clearBlinkSuccess();
 		cancelAnimationFrame(rafId);
 		rafId = 0;
 		countdown = 0;
 		beginDetection = false;
+		challengeStage = 'blink';
+		challengeMessage = '';
+		status = 'initializing';
 		blinkFired = false;
 		closedFrames = 0;
 		earSamples = [];
+		smoothedEar = 1;
+		earBaseline = null;
+		idleFrames = 0;
+		blinkMinEar = 1;
+		yawSamples = [];
+		yawBaseline = null;
+		yawSource = null;
+		lastYaw = 0;
+		peakLeftYaw = 0;
+		peakRightYaw = 0;
+		poseHoldFrames = 0;
+		centerHoldFrames = 0;
+		stageStartedAt = 0;
+		completionSent = false;
+		lastVideoTime = -1;
+		clearView();
 		stream?.getTracks().forEach((t) => t.stop());
 		stream = null;
-		if (video) video.srcObject = null;
+		try {
+			if (video) {
+				video.pause();
+				video.srcObject = null;
+				video.load();
+			}
+		} catch {
+			if (video) video.srcObject = null;
+		}
 		// The landmarker is shared and stays warm — only drop our references.
 		landmarker = null;
 		drawing = null;
@@ -606,14 +763,45 @@
 	<div class="stage" bind:this={stage}>
 		<video bind:this={video} autoplay muted playsinline></video>
 		<canvas bind:this={canvas}></canvas>
-		<!-- Static guide oval: user must keep their face inside this dashed ellipse. -->
-		<div class="face-guide" class:aligned aria-hidden="true"></div>
-		{#if !error}
+		{#if challengeStage !== 'blink_success'}
+			<!-- Static guide oval: user must keep their face inside this dashed ellipse. -->
+			<div class="face-guide" class:aligned aria-hidden="true"></div>
+		{/if}
+		{#if showTurnCue && challengeStage !== 'blink_success'}
+			<div class="turn-cue" aria-hidden="true">
+				<span
+					class="turn-arrow"
+					style={challengeStage === 'left'
+						? '--nudge: -6px'
+						: challengeStage === 'right'
+							? '--nudge: 6px'
+							: '--nudge: 0px'}>{turnCue.arrow}</span>
+				<span class="turn-label">{turnCue.label}</span>
+				<div
+					class="hold-bar"
+					role="presentation"
+				>
+					<div
+						class="hold-fill"
+						style={`width: ${Math.round(holdProgress * 100)}%`}
+					></div>
+				</div>
+			</div>
+		{/if}
+		{#if !error && challengeStage !== 'blink_success'}
 			<div class="hint" class:passed={status === 'passed' && beginDetection}>{hintText}</div>
 		{/if}
 		{#if countdown > 0}
 			<div class="countdown-overlay" aria-live="polite">
 				<span class="countdown-number">{countdown}</span>
+			</div>
+		{/if}
+		{#if challengeStage === 'blink_success'}
+			<div class="blink-success" aria-live="polite">
+				<div class="success-icon" aria-hidden="true">✓</div>
+				<h3 class="success-title">Face liveness successful</h3>
+				<p class="success-sub">Starting head-tilt check in {blinkCountdown}s…</p>
+				<span class="blink-count">{blinkCountdown}</span>
 			</div>
 		{/if}
 	</div>
@@ -670,6 +858,71 @@
 		background: rgba(34, 197, 94, 0.08);
 	}
 
+	/* On-camera directional cue for the tilt phase: arrow + label chip with
+		a hold-progress bar underneath. Text alternative stays in .hint. */
+	.turn-cue {
+		position: absolute;
+		top: 0.75rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 3;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.375rem;
+		pointer-events: none;
+	}
+
+	.turn-arrow {
+		width: 3rem;
+		height: 3rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: white;
+		background: rgba(37, 99, 235, 0.85);
+		border-radius: 50%;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+		animation: nudge 1.2s ease-in-out infinite;
+	}
+
+	.turn-label {
+		color: white;
+		background: rgba(15, 23, 42, 0.75);
+		padding: 0.25rem 0.75rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		border-radius: 99px;
+		white-space: nowrap;
+	}
+
+	.hold-bar {
+		width: 8rem;
+		height: 0.375rem;
+		background: rgba(255, 255, 255, 0.25);
+		border-radius: 99px;
+		overflow: hidden;
+	}
+
+	.hold-fill {
+		height: 100%;
+		background: #22c55e;
+		border-radius: 99px;
+		transition: width 0.1s linear;
+	}
+
+	@keyframes nudge {
+		0%,
+		100% {
+			transform: translateX(0);
+		}
+		50% {
+			transform: translateX(var(--nudge, 4px));
+		}
+	}
+
 	.hint {
 		position: absolute;
 		left: 0;
@@ -713,6 +966,60 @@
 		animation: pulse 1s ease-in-out infinite;
 	}
 
+	/* Phase 2 → 3 handoff card: replaces the viewport for 3s while the
+		camera stream keeps running underneath (detection paused). */
+	.blink-success {
+		position: absolute;
+		inset: 0;
+		z-index: 5;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		text-align: center;
+		color: white;
+		background: linear-gradient(160deg, #16a34a, #15803d);
+		border-radius: 10px;
+		padding: 1.5rem;
+	}
+
+	.success-icon {
+		width: 3.5rem;
+		height: 3.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 1.75rem;
+		font-weight: 700;
+		color: #16a34a;
+		background: white;
+		border-radius: 50%;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+	}
+
+	.success-title {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 1.25rem;
+		font-weight: 700;
+		margin: 0.5rem 0 0;
+	}
+
+	.success-sub {
+		color: rgba(255, 255, 255, 0.85);
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	.blink-count {
+		font-family: 'DM Sans', system-ui, sans-serif;
+		font-size: 3rem;
+		font-weight: 700;
+		line-height: 1;
+		margin-top: 0.5rem;
+		animation: pulse 1s ease-in-out infinite;
+	}
+
 	@keyframes pulse {
 		0%,
 		100% {
@@ -729,11 +1036,17 @@
 		.countdown-number {
 			animation: none;
 		}
+		.blink-count {
+			animation: none;
+		}
+		.turn-arrow {
+			animation: none;
+		}
 	}
 
 	.error {
-		color: #fecaca;
-		background: rgba(127, 29, 29, 0.7);
+		color: var(--danger-strong);
+		background: var(--danger-bg);
 		border-radius: 8px;
 		padding: 0.5rem 0.875rem;
 		font-size: 0.8125rem;

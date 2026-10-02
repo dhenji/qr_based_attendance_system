@@ -12,6 +12,7 @@ from core.config import Settings, get_settings
 from core.database import database
 from core.security import decode_access_token, extract_user_id
 from features.admin.service import AdminService
+from features.analytics.service import AnalyticsService
 from features.attendance.service import AttendanceService
 from features.auth.model import User
 from features.auth.service import AuthService
@@ -195,6 +196,12 @@ async def _get_excuse_service(
     return ExcuseService(session)
 
 
+async def _get_analytics_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> AnalyticsService:
+    return AnalyticsService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
@@ -204,6 +211,7 @@ ProfessorServiceDep = Annotated[ProfessorService, Depends(_get_professor_service
 SessionServiceDep = Annotated[SessionService, Depends(_get_session_service)]
 AttendanceServiceDep = Annotated[AttendanceService, Depends(_get_attendance_service)]
 ExcuseServiceDep = Annotated[ExcuseService, Depends(_get_excuse_service)]
+AnalyticsServiceDep = Annotated[AnalyticsService, Depends(_get_analytics_service)]
 
 
 FaceEnrollmentServiceDep = Annotated[

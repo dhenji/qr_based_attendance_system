@@ -24,18 +24,18 @@
 		}
 	});
 
-	// MVP nav: Dashboard, Students, Professors, Programs are live. Courses,
-	// Offerings, Analytics, Audit and Settings are declared disabled so the
-	// sidebar shows the portal shape without offering dead links.
+	// MVP nav: Dashboard, Students, Professors, Programs, Courses,
+	// Offerings, Analytics and Audit Logs are live. Settings is declared
+	// disabled so the sidebar shows the portal shape without dead links.
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
 		{ label: 'Professors', path: Routes.ADMIN_PROFESSORS, enabled: true, icon: 'professors' },
 		{ label: 'Programs', path: Routes.ADMIN_PROGRAMS, enabled: true, icon: 'programs' },
-		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: false, icon: 'courses' },
-		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: false, icon: 'offerings' },
-		{ label: 'Analytics', path: Routes.ADMIN, enabled: false, icon: 'reports' },
-		{ label: 'Audit Logs', path: Routes.ADMIN, enabled: false, icon: 'audit' },
+		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: true, icon: 'courses' },
+		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
+		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
+		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN, enabled: false, icon: 'settings' },
 	] as const;
 
@@ -163,7 +163,7 @@
 	.shell {
 		min-height: 100vh;
 		font-family: system-ui, sans-serif;
-		background: #f8fafc;
+		background: var(--bg-page);
 		overflow-x: hidden;
 	}
 
@@ -176,8 +176,8 @@
 		align-items: center;
 		gap: 0.875rem;
 		padding: 0.75rem 1.5rem;
-		background: #1e3a5f;
-		box-shadow: 0 2px 12px rgba(15, 23, 42, 0.25);
+		background: var(--brand);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.menu-btn,
@@ -190,7 +190,7 @@
 		border: none;
 		border-radius: 8px;
 		background: transparent;
-		color: #cbd5e1;
+		color: var(--border-strong);
 		cursor: pointer;
 		flex-shrink: 0;
 	}
@@ -198,7 +198,7 @@
 	.menu-btn:hover,
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
-		color: white;
+		color: var(--on-brand);
 	}
 
 	.brand {
@@ -216,7 +216,7 @@
 	}
 
 	.brand-name {
-		color: white;
+		color: var(--on-brand);
 		font-weight: 700;
 		font-size: 1.125rem;
 		white-space: nowrap;
@@ -255,8 +255,8 @@
 		gap: 0.25rem;
 		width: 220px;
 		flex-shrink: 0;
-		background: white;
-		border-right: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border-right: 1px solid var(--border);
 		padding: 1rem 0.75rem;
 		transition: width 0.2s ease;
 	}
@@ -271,7 +271,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		width: 100%;
-		color: #334155;
+		color: var(--text-secondary);
 		text-decoration: none;
 		padding: 0.625rem 0.75rem;
 		border-radius: 8px;
@@ -288,18 +288,18 @@
 	}
 
 	.nav-link:hover:not(.disabled) {
-		background: #f1f5f9;
+		background: var(--bg-hover);
 		transform: translateX(2px);
 	}
 
 	.nav-link.active {
-		background: #2563eb;
-		color: white;
-		box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+		background: var(--accent);
+		color: var(--on-brand);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.nav-link.disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 
@@ -330,7 +330,7 @@
 		position: fixed;
 		inset: 0;
 		z-index: 100;
-		background: rgba(15, 23, 42, 0.5);
+		background: var(--overlay);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -340,9 +340,9 @@
 	.modal {
 		width: 100%;
 		max-width: 360px;
-		background: white;
+		background: var(--bg-card);
 		border-radius: 12px;
-		box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		text-align: center;
 		font-family: system-ui, sans-serif;
@@ -352,13 +352,13 @@
 		margin: 0 0 0.375rem;
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.modal-text {
 		margin: 0 0 1.5rem;
 		font-size: 0.9375rem;
-		color: #475569;
+		color: var(--text-secondary);
 	}
 
 	.modal-actions {
@@ -379,21 +379,21 @@
 	}
 
 	.btn-ghost {
-		background: #f1f5f9;
-		color: #334155;
+		background: var(--bg-muted);
+		color: var(--text-secondary);
 	}
 
 	.btn-ghost:hover {
-		background: #e2e8f0;
+		background: var(--border);
 	}
 
 	.btn-danger {
-		background: #dc2626;
-		color: white;
+		background: var(--danger);
+		color: var(--on-brand);
 	}
 
 	.btn-danger:hover {
-		background: #b91c1c;
+		background: var(--danger-strong);
 	}
 
 	@media (max-width: 640px) {

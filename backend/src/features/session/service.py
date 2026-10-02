@@ -7,17 +7,17 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
-from core.security import generate_session_code
+from core.security import build_qr_payload, generate_session_code
 from features.attendance.model import Attendance
 from features.course.exceptions import (
-    OfferingAssignmentNotFoundException,
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
@@ -125,7 +125,13 @@ def _session_status(
 
 
 class SessionService:
-    """Professor-owned attendance sessions and their attendance views.
+    """Attendance sessions and the professor-facing views of them.
+
+    ``Session.professor_id`` records who opened a session; it is attribution,
+    not authorization. Access is the union of that and a current teaching
+    assignment on the session's offering, so a co-teacher is not locked out of a
+    session somebody else opened. The column is never rewritten, so history
+    stays attributed to whoever opened it.
 
     Sessions carry no status column: a session reads as active while its
     ``expires_at`` lies in the future and closed otherwise. Closing stamps
@@ -176,17 +182,23 @@ class SessionService:
         )
         await self._stamp_session(row, duration, now)
 
+        # Canonical QR serialization: build_qr_payload owns the versioned
+        # compact-key JSON contract ({v,code,offering,radius,pw,lw}); QRPayload
+        # validates the same JSON so the contract is exercised on every open.
+        qr_json: str = build_qr_payload(
+            row.id,
+            row.session_code,
+            offering.id,
+            radius,
+            windows.present,
+            windows.late,
+        )
+
         return SessionRead(
             id=row.id,
             session_code=row.session_code,
             offering_id=offering.id,
-            qr_payload=QRPayload(
-                code=row.session_code,
-                offering=offering.id,
-                radius=radius,
-                pw=windows.present,
-                lw=windows.late,
-            ),
+            qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_end_time=row.scheduled_end_time,
             created_at=row.created_at or now,
@@ -281,7 +293,7 @@ class SessionService:
         offline-sync banner, and ``students`` lists every enrolled student
         with their scan status (unscanned reads as absent).
         """
-        row: Session = await self._get_owned_or_404(session_id, professor_id)
+        row: Session = await self._get_scoped_or_404(session_id, professor_id)
         now: datetime = _utcnow()
         students: Sequence[Student] = await self._enrolled_students(row.offering_id)
         records: Sequence[Attendance] = await self._attendance_rows(session_id)
@@ -346,7 +358,7 @@ class SessionService:
         self, *, session_id: int, professor_id: int
     ) -> SessionCloseResponse:
         """Manually close session scanning; already-closed closes are no-ops."""
-        row: Session = await self._get_owned_or_404(session_id, professor_id)
+        row: Session = await self._get_scoped_or_404(session_id, professor_id)
         now: datetime = _utcnow()
 
         if row.expires_at is None or row.expires_at > now:
@@ -363,6 +375,12 @@ class SessionService:
         404 when the code matches no session, 410 when the session's window
         has closed (a missing expiry reads as closed, mirroring
         ``_session_status``).
+
+        NOTE: lookup is by the stored ``session_code`` column, not by
+        recomputing ``verify_session_code(code, session_id)`` — the request
+        carries the code alone with no session id to verify against.
+        ``verify_session_code`` remains the offline/typed-code helper for
+        callers that already hold both values.
         """
         row: Session | None = (
             await self._session.scalars(
@@ -421,7 +439,7 @@ class SessionService:
     ) -> PaginatedResponse[SessionListItem]:
         page, size = _normalize_page(page, size)
         now: datetime = _utcnow()
-        stmt: Select[tuple[Session]] = self._owned_sessions_stmt(
+        stmt: Select[tuple[Session]] = self._sessions_stmt(
             professor_id,
             offering_id=offering_id,
             date_from=date_from,
@@ -492,7 +510,7 @@ class SessionService:
         """
         page, size = _normalize_page(page, size)
         now: datetime = _utcnow()
-        stmt: Select[tuple[Session]] = self._owned_sessions_stmt(
+        stmt: Select[tuple[Session]] = self._sessions_stmt(
             professor_id,
             offering_id=offering_id,
             date_from=date_from,
@@ -623,13 +641,21 @@ class SessionService:
         """Base join for one professor's attendance rows, plus every filter.
 
         ``CourseOffering`` is joined only when a course filter is present so
-        the unfiltered query keeps its original join set.
+        the unfiltered query keeps its original join set. Scope is the same union
+        as ``_sessions_stmt`` - opened or assigned - and the two have to widen
+        together: the ledger is read alongside a session directory built from
+        ``_sessions_stmt``, so a mismatch leaves rows with nothing to join to.
         """
         stmt: Select[tuple[Attendance]] = (
             select(Attendance)
             .join(Session, Session.id == Attendance.session_id)
             .join(Student, Student.id == Attendance.student_id)
-            .where(Session.professor_id == professor_id)
+            .where(
+                or_(
+                    Session.professor_id == professor_id,
+                    self._assigned_offering_clause(Session.offering_id, professor_id),
+                )
+            )
         )
 
         if course_id is not None:
@@ -698,17 +724,25 @@ class SessionService:
 
     # -- internals --------------------------------------------------------
 
-    @staticmethod
-    def _owned_sessions_stmt(
+    def _sessions_stmt(
+        self,
         professor_id: int,
         *,
         offering_id: int | None,
         date_from: datetime | None,
         date_to: datetime | None,
     ) -> Select[tuple[Session]]:
-        """Sessions owned by one professor, narrowed by the shared filters."""
+        """Sessions the professor opened, or is assigned to teach.
+
+        A union rather than a replacement. The assignment window is anchored to
+        today, so scoping on assignment alone would take a professor's own past
+        sessions out of reach the day that assignment's `effective_to` passes.
+        """
         stmt: Select[tuple[Session]] = select(Session).where(
-            Session.professor_id == professor_id
+            or_(
+                Session.professor_id == professor_id,
+                self._assigned_offering_clause(Session.offering_id, professor_id),
+            )
         )
         stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
@@ -724,15 +758,69 @@ class SessionService:
 
         return offering
 
-    async def _get_owned_or_404(self, session_id: int, professor_id: int) -> Session:
+    async def _get_scoped_or_404(
+        self, session_id: int, professor_id: int
+    ) -> Session:
+        """Resolve a session the professor may act on.
+
+        `Session.professor_id` records who opened the session and nothing more,
+        so a co-teacher is not excluded from one merely because somebody else
+        opened it. Ownership is checked first and the assignment is only looked
+        up when it fails, which keeps the common case to a single row fetch.
+
+        `session.professor_id` is never written here: attribution stays with
+        whoever opened the session even though access does not.
+        """
         row: Session | None = await self._sessions.get(session_id)
 
-        if row is None or row.professor_id != professor_id:
+        if row is None:
             raise SessionNotFoundException(session_id)
+
+        if row.professor_id != professor_id:
+            await self._require_assignment(
+                offering_id=row.offering_id, professor_id=professor_id
+            )
 
         return row
 
+    @staticmethod
+    def _assigned_offering_clause(
+        offering_id: ColumnElement[int], professor_id: int
+    ) -> ColumnElement[bool]:
+        """`EXISTS` an effective assignment for this offering and professor.
+
+        A subquery rather than a join so a professor holding several assignments
+        on one offering repeats no rows, and built inline so the calling
+        statement stays a single query. The assignment window is anchored to
+        today, so this must only ever widen a scope - never replace ownership
+        with it, or a professor loses sight of their own past sessions once an
+        assignment's `effective_to` passes.
+        """
+        today: date = date.today()
+
+        return (
+            select(CourseProfessor.offering_id)
+            .where(
+                CourseProfessor.offering_id == offering_id,
+                CourseProfessor.professor_id == professor_id,
+                CourseProfessor.effective_from <= today,
+                or_(
+                    CourseProfessor.effective_to.is_(None),
+                    CourseProfessor.effective_to >= today,
+                ),
+            )
+            .exists()
+        )
+
     async def _require_assignment(self, *, offering_id: int, professor_id: int) -> None:
+        """Require a current teaching assignment; 403 when outside the team.
+
+        Unified with the excuse slice (`not_assigned`): an authenticated
+        professor without an effective `course_professors` row is forbidden,
+        not lost — 404 would conflate "no such session" with "not your
+        course". The admin remove path (`course/service.py`) keeps its 404
+        (nothing to remove), which answers a different question.
+        """
         today: date = date.today()
         row: CourseProfessor | None = (
             await self._session.scalars(
@@ -752,7 +840,7 @@ class SessionService:
         ).one_or_none()
 
         if row is None:
-            raise OfferingAssignmentNotFoundException(offering_id, professor_id)
+            raise ProfessorNotAssignedException(offering_id)
 
     async def _resolve_duration(
         self, payload: SessionCreate, offering: CourseOffering

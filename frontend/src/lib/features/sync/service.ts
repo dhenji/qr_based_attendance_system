@@ -1,81 +1,352 @@
 // features/sync/service.ts
-// IndexedDB offline queue
+// Offline scan outbox over IndexedDB (docs/architecture/offline-first.md).
+//
+// Real persistence by default: failed scan submissions enqueue with their
+// device-time scanned_at and drain oldest-first through the live scan
+// endpoint with X-Idempotency-Key = queue id (the backend keys idempotency
+// on user_id:session_id:key, so replays never double-record). Server 4xx
+// rejections are terminal (rejected + last_error); only network failures
+// stay pending with exponential backoff.
+//
+// Two fallbacks share one code path: PUBLIC_MOCK_MODE=true and environments
+// without IndexedDB (SSR, some private modes) use an in-memory map instead —
+// same shapes, lost on reload. flushQueue is a no-op in mock mode (there is
+// no backend to drain into).
 
-import type { SyncQueueRecord } from '$lib/shared/types';
+import { APIError, isMockMode } from '$lib/api/client';
+import type { LivenessEvidence } from '$lib/shared/types';
+import { submitAttendanceScan } from '$lib/features/liveness/service';
 
-// MOCK flag — swap to false when IndexedDB sync (docs/architecture/offline-first.md) is implemented
-const MOCK = true;
+export type QueuedScanPayload = {
+	sessionId: number;
+	sessionCode: string;
+	studentNumber: string;
+	gps: { lat: number; lng: number; accuracy: number };
+	livenessEvidence: LivenessEvidence;
+	faceMatchScore?: number;
+	scannedAt: string;
+};
+
+export type QueuedScanStatus = 'pending' | 'syncing' | 'synced' | 'rejected';
+
+export type QueuedScan = {
+	id: string;
+	type: 'attendance_scan';
+	status: QueuedScanStatus;
+	payload: QueuedScanPayload;
+	createdAt: string;
+	updatedAt: string;
+	attempts: number;
+	maxAttempts: number;
+	lastError: string | null;
+};
+
+export type CachedSession = {
+	session_id: number;
+	code: string;
+	course_code: string;
+	course_name: string;
+	expires_at: string;
+	geofence: { radius: number; lat: number; lng: number };
+	cached_at: string;
+};
+
+const DB_NAME = 'attendly';
+const DB_VERSION = 2;
+const QUEUE_STORE = 'attendance_queue';
+const SESSION_STORE = 'session_cache';
+export const FACE_STORE = 'face_embeddings';
+export const KEY_STORE = 'face_keys';
+
+// Synced rows are history, not work: prune them a week after they land so
+// the store stays bounded to genuinely actionable items.
+const SYNCED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_ATTEMPTS = 25;
+
+// Retry delay: min(30s * 2^retry_count, 30 minutes) per offline-first.md.
+export const retryDelayMs = (retryCount: number): number =>
+	Math.min(30_000 * 2 ** Math.max(0, retryCount), 30 * 60 * 1000);
+
+// --- IndexedDB plumbing ------------------------------------------------------
+
+export const openAppDb = (): Promise<IDBDatabase> =>
+	new Promise((resolve, reject) => {
+		if (typeof indexedDB === 'undefined') {
+			reject(new Error('IndexedDB is unavailable'));
+			return;
+		}
+		const request = indexedDB.open(DB_NAME, DB_VERSION);
+		request.onupgradeneeded = () => {
+			const db = request.result;
+			if (!db.objectStoreNames.contains(QUEUE_STORE)) {
+				const store = db.createObjectStore(QUEUE_STORE, { keyPath: 'id' });
+				store.createIndex('status', 'status');
+			}
+			if (!db.objectStoreNames.contains(SESSION_STORE)) {
+				db.createObjectStore(SESSION_STORE, { keyPath: 'session_id' });
+			}
+			// v2: face-embedding cache (keyPath 'student') + device keys
+			// (keyPath 'id'). Existing v1 stores carry over untouched.
+			if (!db.objectStoreNames.contains(FACE_STORE)) {
+				db.createObjectStore(FACE_STORE, { keyPath: 'student' });
+			}
+			if (!db.objectStoreNames.contains(KEY_STORE)) {
+				db.createObjectStore(KEY_STORE, { keyPath: 'id' });
+			}
+		};
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error ?? new Error('Unable to open offline queue'));
+	});
+
+const requestToPromise = <T>(request: IDBRequest<T>): Promise<T> =>
+	new Promise((resolve, reject) => {
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error ?? new Error('Offline queue access failed'));
+	});
+
+const withStore = async <T>(
+	storeName: string,
+	mode: IDBTransactionMode,
+	run: (store: IDBObjectStore) => Promise<T>
+): Promise<T> => {
+	const db = await openAppDb();
+	try {
+		const transaction = db.transaction(storeName, mode);
+		const result = await run(transaction.objectStore(storeName));
+		await new Promise<void>((resolve, reject) => {
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () => reject(transaction.error ?? new Error('Offline queue write failed'));
+			transaction.onabort = () => reject(transaction.error ?? new Error('Offline queue write aborted'));
+		});
+		return result;
+	} finally {
+		db.close();
+	}
+};
+
+// Generic IndexedDB access against the shared database, for sibling slices
+// (face-embedding cache). Callers own their fallback when storage is
+// unavailable — these throw.
+export const idbGet = async <T>(storeName: string, key: IDBValidKey): Promise<T | undefined> =>
+	withStore(storeName, 'readonly', (store) => requestToPromise(store.get(key) as IDBRequest<T | undefined>));
+
+export const idbGetAll = async <T>(storeName: string): Promise<T[]> =>
+	withStore(storeName, 'readonly', (store) => requestToPromise(store.getAll() as IDBRequest<T[]>));
+
+export const idbPut = async (storeName: string, value: unknown): Promise<void> =>
+	withStore(storeName, 'readwrite', async (store) => void requestToPromise(store.put(value)));
+
+export const idbDelete = async (storeName: string, key: IDBValidKey): Promise<void> =>
+	withStore(storeName, 'readwrite', async (store) => void requestToPromise(store.delete(key)));
+
+// In-memory fallback (mock mode or no IndexedDB): same row shapes, lost on reload.
+const memoryQueue = new Map<string, QueuedScan>();
+const memorySessions = new Map<number, CachedSession>();
+let idbUnusable = false;
+
+const useMemory = (): boolean => isMockMode() || idbUnusable || typeof indexedDB === 'undefined';
+
+const idbOrMemory = async <T>(fn: () => Promise<T>, fallback: () => T): Promise<T> => {
+	if (useMemory()) return fallback();
+	try {
+		return await fn();
+	} catch {
+		idbUnusable = true;
+		return fallback();
+	}
+};
+
+// --- Queue -------------------------------------------------------------------
+
+const nowIso = (): string => new Date().toISOString();
+const newId = (): string =>
+	typeof crypto !== 'undefined' && 'randomUUID' in crypto
+		? crypto.randomUUID()
+		: Math.random().toString(36).substring(2, 15);
+
+const listRows = (): Promise<QueuedScan[]> =>
+	idbOrMemory(
+		() => idbGetAll<QueuedScan>(QUEUE_STORE),
+		() => [...memoryQueue.values()]
+	);
+
+const writeRow = (row: QueuedScan): Promise<void> =>
+	idbOrMemory(
+		() => idbPut(QUEUE_STORE, row),
+		() => void memoryQueue.set(row.id, row)
+	);
+
+const deleteRow = (id: string): Promise<void> =>
+	idbOrMemory(
+		() => idbDelete(QUEUE_STORE, id),
+		() => void memoryQueue.delete(id)
+	);
+
+const byOldest = (a: QueuedScan, b: QueuedScan): number =>
+	a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt);
 
 // queue
-// Offline sync queue stored in IndexedDB. Every method returns mock data while
-// MOCK is true, and is a no-op/placeholder once the real IndexedDB wrapper lands.
+// Offline scan outbox. Enqueue is duplicate-safe: a scan for a session that
+// already has a pending/syncing item returns the existing item instead of
+// queueing twice (spec: local duplicate check).
 export const queue = {
-	// Enqueue a record for offline sync
-	enqueue: async (
-		record: Omit<SyncQueueRecord, 'id' | 'createdAt' | 'attempts' | 'maxAttempts'>
-	) => {
-		if (MOCK) {
-			const id = Math.random().toString(36).substring(2, 15);
-			return {
-				id,
-				type: record.type,
-				status: 'pending' as const,
-				payload: record.payload,
-				createdAt: new Date().toISOString(),
-				attempts: 0,
-				maxAttempts: 3,
-			};
-		}
-		return {
-			id: Math.random().toString(36).substring(2, 15),
-			type: record.type,
-			status: 'pending' as const,
-			payload: record.payload,
-			createdAt: new Date().toISOString(),
+	// Enqueue a completed scan submission for later sync
+	enqueue: async (record: Omit<QueuedScan, 'id' | 'createdAt' | 'updatedAt' | 'attempts' | 'maxAttempts' | 'status' | 'lastError'>): Promise<QueuedScan> => {
+		const rows = await listRows();
+		const existing = rows.find(
+			(row) =>
+				row.payload.sessionId === record.payload.sessionId &&
+				(row.status === 'pending' || row.status === 'syncing')
+		);
+		if (existing) return existing;
+		const createdAt = nowIso();
+		const row: QueuedScan = {
+			...record,
+			id: newId(),
+			status: 'pending',
+			createdAt,
+			updatedAt: createdAt,
 			attempts: 0,
-			maxAttempts: 3,
+			maxAttempts: DEFAULT_MAX_ATTEMPTS,
+			lastError: null
 		};
+		await writeRow(row);
+		return row;
 	},
 
-	// Dequeue next record
-	dequeue: async () => {
-		if (MOCK) {
-			return {
-				id: Math.random().toString(36).substring(2, 15),
-				type: 'attendance_scan' as const,
-				status: 'synced' as const,
-				payload: {},
-				createdAt: new Date(Date.now() - 3600000).toISOString(),
-				attempts: 1,
-				maxAttempts: 3,
-			};
-		}
-		return null;
+	// Oldest pending item (next to sync)
+	dequeue: async (): Promise<QueuedScan | null> => {
+		const rows = await listRows();
+		return rows.filter((row) => row.status === 'pending').sort(byOldest)[0] ?? null;
 	},
 
 	// Update record status
-	updateStatus: async (_id: string, _status: SyncQueueRecord['status']) => {
-		if (MOCK) {
-			return;
-		}
-		return;
+	updateStatus: async (id: string, status: QueuedScanStatus): Promise<void> => {
+		const rows = await listRows();
+		const row = rows.find((entry) => entry.id === id);
+		if (!row) return;
+		await writeRow({ ...row, status, updatedAt: nowIso() });
 	},
 
-	// Get all pending records
-	getPending: async () => {
-		if (MOCK) {
-			return [
-				{
-					id: 'rec-1',
-					type: 'attendance_scan' as const,
-					status: 'pending' as const,
-					payload: { sessionId: 1, studentId: 'student-1' },
-					createdAt: new Date(Date.now() - 3600000).toISOString(),
-					attempts: 1,
-					maxAttempts: 3,
-				},
-			];
-		}
-		return [];
+	// All pending (or mid-sync) records, oldest first
+	getPending: async (): Promise<QueuedScan[]> => {
+		const rows = await listRows();
+		return rows
+			.filter((row) => row.status === 'pending' || row.status === 'syncing')
+			.sort(byOldest);
 	},
+
+	// Actionable queue depth for the scan banner (pending + syncing + rejected)
+	getPendingCount: async (): Promise<number> => {
+		const rows = await listRows();
+		return rows.filter((row) => row.status !== 'synced').length;
+	},
+
+	// Rejected items stay visible until the student discards them
+	getRejected: async (): Promise<QueuedScan[]> => {
+		const rows = await listRows();
+		return rows.filter((row) => row.status === 'rejected').sort(byOldest);
+	},
+
+	// Discard a rejected (or stale pending) item
+	remove: async (id: string): Promise<void> => {
+		await deleteRow(id);
+	}
+};
+
+const toScanBody = (payload: QueuedScanPayload) => ({
+	sessionId: payload.sessionId,
+	studentNumber: payload.studentNumber,
+	gps: payload.gps,
+	livenessEvidence: payload.livenessEvidence,
+	...(payload.faceMatchScore === undefined ? {} : { faceMatchScore: payload.faceMatchScore }),
+	scannedAt: payload.scannedAt
+});
+
+// flushQueue
+// Drain pending items oldest-first through the live scan endpoint, one
+// idempotent replay each (X-Idempotency-Key = queue id). Stops at the first
+// network failure — the rest would fail the same way — and leaves backoff
+// scheduling to the caller via retryDelayMs.
+export const flushQueue = async (): Promise<{ synced: number; rejected: number; failed: number }> => {
+	if (isMockMode()) return { synced: 0, rejected: 0, failed: 0 };
+	const pending = (await listRows())
+		.filter((row) => row.status === 'pending')
+		.sort(byOldest);
+	let synced = 0;
+	let rejected = 0;
+	let failed = 0;
+	for (const item of pending) {
+		await queue.updateStatus(item.id, 'syncing');
+		try {
+			await submitAttendanceScan({ ...toScanBody(item.payload), idempotencyKey: item.id });
+			await queue.updateStatus(item.id, 'synced');
+			synced += 1;
+		} catch (error) {
+			if (error instanceof APIError) {
+				// The server decided: terminal, with its reason code preserved
+				// for the user-facing message.
+				const rows = await listRows();
+				const row = rows.find((entry) => entry.id === item.id);
+				if (row) {
+					await writeRow({ ...row, status: 'rejected', updatedAt: nowIso(), lastError: error.code });
+				}
+				rejected += 1;
+			} else {
+				// Still offline: back to pending with backoff; stop draining.
+				const rows = await listRows();
+				const row = rows.find((entry) => entry.id === item.id);
+				if (row) {
+					const attempts = row.attempts + 1;
+					if (attempts >= row.maxAttempts) {
+						await writeRow({ ...row, status: 'rejected', updatedAt: nowIso(), attempts, lastError: 'sync_retries_exhausted' });
+						rejected += 1;
+					} else {
+						await writeRow({ ...row, status: 'pending', updatedAt: nowIso(), attempts });
+						failed += 1;
+					}
+				} else {
+					failed += 1;
+				}
+				break;
+			}
+		}
+	}
+	await pruneSynced();
+	return { synced, rejected, failed };
+};
+
+const pruneSynced = async (): Promise<void> => {
+	const cutoff = Date.now() - SYNCED_RETENTION_MS;
+	const rows = await listRows();
+	for (const row of rows) {
+		if (row.status === 'synced' && Date.parse(row.updatedAt) < cutoff) {
+			await deleteRow(row.id);
+		}
+	}
+};
+
+// --- Session cache ------------------------------------------------------------
+// Snapshots of verified session configs so a student who verified the code
+// and then lost signal can still complete the scan offline. Freshness = the
+// session's own expires_at: an entry for a closed session is never reused.
+
+export const cacheSession = async (entry: Omit<CachedSession, 'cached_at'>): Promise<void> => {
+	const row: CachedSession = { ...entry, cached_at: nowIso() };
+	await idbOrMemory(
+		() => idbPut(SESSION_STORE, row),
+		() => void memorySessions.set(row.session_id, row)
+	);
+};
+
+export const getCachedSession = async (code: string): Promise<CachedSession | null> => {
+	const normalized = code.trim();
+	const rows: CachedSession[] = await idbOrMemory(
+		() => idbGetAll<CachedSession>(SESSION_STORE),
+		() => [...memorySessions.values()]
+	);
+	const match = rows.find((entry) => entry.code === normalized) ?? null;
+	if (!match) return null;
+	if (Date.parse(match.expires_at) <= Date.now()) return null;
+	return match;
 };

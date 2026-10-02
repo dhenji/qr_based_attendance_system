@@ -8,6 +8,7 @@
 		savePrefs,
 		type SettingsPrefs,
 	} from '$lib/features/settings/service';
+	import { applyTheme, setTheme as persistTheme } from '$lib/features/settings/theme';
 
 	const prefs = $state<SettingsPrefs>({ ...DEFAULT_PREFS });
 
@@ -17,16 +18,9 @@
 		applyTheme(loaded.theme);
 	});
 
-	function applyTheme(theme: 'light' | 'dark') {
-		if (typeof document !== 'undefined') {
-			document.documentElement.dataset.theme = theme;
-		}
-	}
-
 	function setTheme(theme: 'light' | 'dark') {
 		prefs.theme = theme;
-		savePrefs({ ...prefs });
-		applyTheme(theme);
+		persistTheme(theme);
 	}
 
 	function flip<K extends 'pushNotifications' | 'emailNotifications' | 'shareGps' | 'cameraScanning'>(key: K) {
@@ -116,7 +110,7 @@
 				</button>
 			</div>
 		</div>
-		<p class="muted note">Dark mode preview only — full styling arrives later.</p>
+		<p class="muted note">Applies instantly across the app and is remembered on this device.</p>
 	</section>
 
 	<section class="card">
@@ -231,12 +225,12 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
@@ -251,18 +245,18 @@
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 1.5rem;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-title {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 1rem;
 	}
 
@@ -270,7 +264,7 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 0.9375rem;
 		font-weight: 700;
-		color: #334155;
+		color: var(--text-secondary);
 		margin: 0 0 0.75rem;
 	}
 
@@ -284,20 +278,20 @@
 
 	.row-label {
 		font-size: 0.9375rem;
-		color: #334155;
+		color: var(--text-secondary);
 	}
 
 	.segmented {
 		display: inline-flex;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		overflow: hidden;
 	}
 
 	.segment {
 		border: none;
-		background: white;
-		color: #64748b;
+		background: var(--bg-card);
+		color: var(--text-muted);
 		padding: 0.5rem 1rem;
 		font-size: 0.875rem;
 		font-weight: 600;
@@ -306,8 +300,8 @@
 	}
 
 	.segment.active {
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.switch-row {
@@ -339,7 +333,7 @@
 	.slider {
 		position: absolute;
 		inset: 0;
-		background: #cbd5e1;
+		background: var(--border-strong);
 		border-radius: 999px;
 		transition: background 0.15s ease;
 	}
@@ -351,13 +345,13 @@
 		height: 18px;
 		left: 3px;
 		top: 3px;
-		background: white;
+		background: var(--bg-card);
 		border-radius: 50%;
 		transition: transform 0.15s ease;
 	}
 
 	.switch input:checked + .slider {
-		background: #2563eb;
+		background: var(--accent);
 	}
 
 	.switch input:checked + .slider::before {
@@ -365,7 +359,7 @@
 	}
 
 	.switch input:focus-visible + .slider {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -377,7 +371,7 @@
 		display: block;
 		font-size: 0.8125rem;
 		font-weight: 700;
-		color: #64748b;
+		color: var(--text-muted);
 		margin-bottom: 0.375rem;
 	}
 
@@ -385,17 +379,17 @@
 	.field select {
 		width: 100%;
 		padding: 0.625rem 0.75rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		background: white;
-		color: #334155;
+		background: var(--bg-card);
+		color: var(--text-secondary);
 		font-size: 0.9375rem;
 		font-family: system-ui, sans-serif;
 	}
 
 	.field input:focus-visible,
 	.field select:focus-visible {
-		outline: 2px solid #2563eb;
+		outline: 2px solid var(--accent);
 		outline-offset: -1px;
 	}
 
@@ -404,8 +398,8 @@
 		padding: 0.625rem 1.25rem;
 		border: none;
 		border-radius: 8px;
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 		font-size: 0.9375rem;
 		font-weight: 700;
 		font-family: system-ui, sans-serif;
@@ -415,7 +409,7 @@
 	}
 
 	.btn:hover:not(:disabled) {
-		background: #16324f;
+		background: var(--brand-hover);
 	}
 
 	.btn:disabled {
@@ -424,18 +418,18 @@
 	}
 
 	.btn.ghost {
-		background: white;
-		color: #1e3a5f;
-		border: 1px solid #cbd5e1;
+		background: var(--bg-card);
+		color: var(--brand);
+		border: 1px solid var(--border-strong);
 	}
 
 	.btn.ghost:hover {
-		background: #f8fafc;
+		background: var(--bg-page);
 	}
 
 	.divider {
 		border: none;
-		border-top: 1px solid #f1f5f9;
+		border-top: 1px solid var(--divider);
 		margin: 1.25rem 0;
 	}
 
@@ -445,13 +439,13 @@
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0 0 0.75rem;
 	}
 
 	.success {
-		color: #16a34a;
+		color: var(--success);
 		font-size: 0.875rem;
 		margin: 0.75rem 0 0;
 	}
