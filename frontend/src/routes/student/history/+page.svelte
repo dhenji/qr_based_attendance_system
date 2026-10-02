@@ -6,6 +6,7 @@
 		type StudentHistoryStatus,
 	} from '$lib/features/student/service';
 	import { buildCsv } from '$lib/features/report/service';
+	import { flushQueue, queue, type QueuedScan } from '$lib/features/sync/service';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 
 	type Status = StudentHistoryStatus;
@@ -85,8 +86,71 @@
 		}
 	};
 
+	// Offline queue strip: actionable local scans (pending/syncing/rejected)
+	// render above the server table and never merge into it, so the server
+	// total, pagination, and summary math stay exact. Synced rows are
+	// excluded — the server history picks them up after the flush.
+	type QueueRow = {
+		id: string;
+		sessionCode: string;
+		date: string;
+		time: string;
+		status: 'pending' | 'rejected';
+		reason: string | null;
+	};
+
+	let queueRows = $state<QueueRow[]>([]);
+	let queueBusy = $state(false);
+
+	const toQueueRow = (item: QueuedScan): QueueRow => ({
+		id: item.id,
+		sessionCode: item.payload.sessionCode,
+		date: formatDate(item.payload.scannedAt),
+		time: formatTime(item.payload.scannedAt),
+		status: item.status === 'rejected' ? 'rejected' : 'pending',
+		reason: item.lastError
+	});
+
+	const refreshQueue = async () => {
+		try {
+			const [pending, rejected] = await Promise.all([queue.getPending(), queue.getRejected()]);
+			queueRows = [...pending, ...rejected].map(toQueueRow);
+		} catch {
+			queueRows = [];
+		}
+	};
+
+	const syncNow = async () => {
+		if (queueBusy) return;
+		queueBusy = true;
+		try {
+			await flushQueue();
+		} finally {
+			await refreshQueue();
+			queueBusy = false;
+		}
+	};
+
+	const retryQueued = async (id: string) => {
+		await queue.updateStatus(id, 'pending').catch(() => undefined);
+		await syncNow();
+	};
+
+	const discardQueued = async (id: string) => {
+		await queue.remove(id).catch(() => undefined);
+		await refreshQueue();
+	};
+
 	onMount(() => {
 		void load();
+		void refreshQueue();
+		const handleVisible = () => {
+			if (document.visibilityState === 'visible') void refreshQueue();
+		};
+		document.addEventListener('visibilitychange', handleVisible);
+		return () => {
+			document.removeEventListener('visibilitychange', handleVisible);
+		};
 	});
 
 	// Reload server page when the server-side controls change. rows/total/
@@ -288,6 +352,43 @@
 			<p class="export-error" role="status">{exportError}</p>
 		{/if}
 	</div>
+
+	{#if queueRows.length > 0}
+		<section class="card queue-card" aria-label="Pending sync">
+			<div class="queue-head">
+				<h2 class="section-title">Pending sync ({queueRows.length})</h2>
+				<button class="btn-ghost" disabled={queueBusy} onclick={() => void syncNow()}>
+					{queueBusy ? 'Syncing…' : 'Sync now'}
+				</button>
+			</div>
+			<p class="muted">These scans live on this device only — they are not attendance records yet.</p>
+			<ul class="queue-list">
+				{#each queueRows as item (item.id)}
+					<li class="queue-row">
+						<span
+							class="badge"
+							class:pending={item.status === 'pending'}
+							class:rejected={item.status === 'rejected'}
+							title={item.reason ?? undefined}
+						>
+							{item.status === 'pending' ? 'Queued' : 'Rejected'}
+						</span>
+						<span class="mono">{item.date}</span>
+						<span class="mono">{item.time}</span>
+						<span class="course" title={item.reason ?? 'Session scan awaiting upload'}>
+							Session {item.sessionCode}
+						</span>
+						{#if item.status === 'rejected'}
+							<span class="queue-actions">
+								<button class="btn-ghost btn-small" onclick={() => void retryQueued(item.id)}>Retry</button>
+								<button class="btn-ghost btn-small" onclick={() => void discardQueued(item.id)}>Discard</button>
+							</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 
 	<div class="card table-card">
 		<div class="scroll">
@@ -577,8 +678,65 @@
 	.export-error {
 		flex-basis: 100%;
 		margin: 0;
-		color: var(--danger-strong);
+		color: #b91c1c;
 		font-size: 0.875rem;
+	}
+
+	.queue-card {
+		padding: 1rem 1.25rem;
+	}
+
+	.queue-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.section-title {
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0;
+	}
+
+	.muted {
+		color: #64748b;
+		font-size: 0.875rem;
+		margin: 0.5rem 0 0;
+	}
+
+	.queue-list {
+		list-style: none;
+		margin: 0.75rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.queue-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		padding: 0.625rem 0.875rem;
+		border: 1px solid #f1f5f9;
+		border-radius: 8px;
+		background: #f8fafc;
+		font-size: 0.9375rem;
+		color: #1e293b;
+	}
+
+	.queue-actions {
+		display: flex;
+		gap: 0.375rem;
+		margin-left: auto;
+	}
+
+	.btn-small {
+		padding: 0.25rem 0.625rem;
+		font-size: 0.8125rem;
 	}
 
 	.empty-row {
