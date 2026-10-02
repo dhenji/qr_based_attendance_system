@@ -21,10 +21,12 @@ from features.excuse.exceptions import (
     AlreadyExcusedException,
     AttendanceNotFoundException,
     DuplicateExcuseException,
+    ExcuseNotEligibleException,
     ExcuseNotFoundException,
     ExcuseNotPendingException,
     NotEnrolledException,
     ProfessorNotAssignedException,
+    ProfessorNotFoundException,
     SessionNotFoundException,
     StudentNotFoundException,
 )
@@ -371,7 +373,12 @@ class ExcuseService:
     async def revoke_excuse(
         self, *, user_id: int, student_id: int, session_id: int
     ) -> RevokeExcuseResponse:
-        """Revoke a professor-issued excuse and restore the prior status."""
+        """Revoke a professor-issued excuse and restore the prior status.
+
+        The revoked request is marked `rejected` (there is no distinct
+        `revoked` status by design — rejection is the terminal state and
+        `original_status` on the attendance row preserves the audit trail).
+        """
         professor: Professor = await self._resolve_professor(user_id)
         session: Session = await self._get_session_or_404(session_id)
         await self._require_assignment(
@@ -755,7 +762,7 @@ class ExcuseService:
         ).one_or_none()
 
         if professor is None or not professor.is_active:
-            raise ProfessorNotAssignedException(0)
+            raise ProfessorNotFoundException(user_id)
 
         return professor
 
@@ -832,7 +839,7 @@ class ExcuseService:
             ValidationStatus.LATE.value,
             ValidationStatus.REJECTED.value,
         ):
-            raise AlreadyExcusedException(student_id, session_id)
+            raise ExcuseNotEligibleException(student_id, session_id)
 
     @staticmethod
     def _require_reviewable(
@@ -840,6 +847,13 @@ class ExcuseService:
     ) -> None:
         if record.validation_status == ValidationStatus.EXCUSED.value:
             raise AlreadyExcusedException(student_id, session_id)
+
+        if record.validation_status not in (
+            ValidationStatus.ABSENT.value,
+            ValidationStatus.LATE.value,
+            ValidationStatus.REJECTED.value,
+        ):
+            raise ExcuseNotEligibleException(student_id, session_id)
 
     async def _require_no_open_request(
         self, student_id: int, session_id: int

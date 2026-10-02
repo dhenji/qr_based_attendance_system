@@ -383,7 +383,7 @@ class ProfessorService:
         )
 
     async def hard_delete(self, *, professor_id: int) -> None:
-        """Permanently delete an archived professor with no sessions."""
+        """Permanently delete an archived professor with no sessions or assignments."""
         professor: Professor = await self._get_or_404(professor_id)
 
         if professor.is_active:
@@ -399,6 +399,18 @@ class ProfessorService:
         )
 
         if session_count:
+            raise ProfessorHasRecordsException(professor.id)
+
+        assignment_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseProfessor)
+                .where(CourseProfessor.professor_id == professor.id)
+            )
+            or 0
+        )
+
+        if assignment_count:
             raise ProfessorHasRecordsException(professor.id)
 
         await self._session.delete(professor)

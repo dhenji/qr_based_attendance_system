@@ -89,6 +89,39 @@ class ProfessorNotAssignedException(ExcuseDomainException):
         )
 
 
+class ProfessorNotFoundException(ExcuseDomainException):
+    """404 - no professor profile is linked to the authenticated user."""
+
+    status_code: int = 404
+    code: str = "professor_not_found"
+
+    def __init__(self, user_id: int) -> None:
+        super().__init__(
+            message=f"No professor profile found for user {user_id}"
+        )
+
+
+class ExcuseNotEligibleException(ExcuseDomainException):
+    """422 - the attendance record is not in an excusable state.
+
+    Only `absent`, `late` and `rejected` records may be excused or have an
+    excuse requested. `present` and `pending` records are not eligible —
+    reported distinctly from `already_excused` so clients can tell "nothing
+    to excuse" apart from "already excused".
+    """
+
+    status_code: int = 422
+    code: str = "excuse_not_eligible"
+
+    def __init__(self, student_id: int, session_id: int) -> None:
+        super().__init__(
+            message=(
+                f"Student {student_id} has no excusable record "
+                f"for session {session_id}"
+            )
+        )
+
+
 class NotEnrolledException(ExcuseDomainException):
     """403 - the student is not enrolled in the session offering."""
 

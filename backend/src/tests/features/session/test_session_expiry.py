@@ -30,10 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings
 from features.attendance.model import Attendance
 from features.course.exceptions import (
-    OfferingAssignmentNotFoundException,
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course_professor.model import CourseProfessor
 from features.session.exceptions import (
     SessionAlreadyActiveException,
@@ -213,7 +213,7 @@ async def test_create_session_requires_current_assignment(
     stack, service = await open_session(factories, settings)
     stranger = await factories.professor()
 
-    with pytest.raises(OfferingAssignmentNotFoundException):
+    with pytest.raises(ProfessorNotAssignedException):
         await service.create_session(
             professor_id=stranger.id,
             payload=SessionCreate(offering_id=stack["offering"].id),
@@ -394,8 +394,8 @@ async def test_close_session_rejects_a_professor_outside_the_team(
 ) -> None:
     """Neither owner nor co-teacher, so there is no assignment to act on.
 
-    The 404 is about the missing assignment, not about the session going
-    missing, which is what the old ownership rule reported.
+    A 403 about the missing assignment, not a 404 about the session going
+    missing (which is what the old ownership rule reported).
     """
 
     stack, service = await open_session(factories, settings)
@@ -405,11 +405,11 @@ async def test_close_session_rejects_a_professor_outside_the_team(
     )
     stranger = await factories.professor()
 
-    with pytest.raises(OfferingAssignmentNotFoundException) as caught:
+    with pytest.raises(ProfessorNotAssignedException) as caught:
         await service.close_session(session_id=opened.id, professor_id=stranger.id)
 
-    assert caught.value.status_code == 404
-    assert caught.value.code == "assignment_not_found"
+    assert caught.value.status_code == 403
+    assert caught.value.code == "not_assigned"
 
 
 async def test_a_coteacher_can_close_a_shared_session(
@@ -465,7 +465,7 @@ async def test_a_lapsed_assignment_cannot_close_a_session(
         effective_to=factories.now.date() - timedelta(days=1),
     )
 
-    with pytest.raises(OfferingAssignmentNotFoundException):
+    with pytest.raises(ProfessorNotAssignedException):
         await service.close_session(session_id=opened.id, professor_id=previous.id)
 
     row = await test_db_session.get(Session, opened.id)
