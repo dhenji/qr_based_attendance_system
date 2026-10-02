@@ -83,7 +83,7 @@ export interface Paginated<T> {
 
 export interface EndpointDef<T> {
 	url: string;
-	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+	method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 	// Mocks receive the same inputs as the real call so stateful fixtures
 	// (e.g. admin roster CRUD) can read path ids from `suffix` and payloads
 	// from `body`, and branch on `method` when one def serves several verbs.
@@ -1962,6 +1962,142 @@ export const AdminRecentScansEndpoint: EndpointDef<{ items: RecentScanResponse[]
 	},
 };
 
+// --- Admin system settings (no backend; contract-shaped mocks) ----------------
+// api-contracts.md §System Settings & Backups: GET/PATCH /admin/system/settings
+// (app_settings KV seeded from env defaults), GET/POST /admin/backups,
+// POST /admin/system/sync/flush, POST /admin/system/cleanup. Real API by
+// default; mocks only when PUBLIC_MOCK_MODE=true. PATCH/flush/cleanup mutate
+// module state so saves visibly stick for the session.
+
+export interface SystemSettingsResponse {
+	geofence_default_radius: number;
+	present_window_default: number;
+	late_window_default: number;
+	backup_retention_daily: number;
+	backup_retention_monthly: number;
+	pending_sync_count: number;
+}
+
+export interface BackupLogItemResponse {
+	id: number;
+	filename: string;
+	kind: 'full' | 'analytics';
+	size_bytes: number;
+	storage_backend: 'local' | 's3';
+	started_at: string;
+	finished_at: string | null;
+	status: 'started' | 'completed' | 'failed';
+}
+
+const MOCK_SYSTEM_SETTINGS: SystemSettingsResponse = {
+	geofence_default_radius: 50,
+	present_window_default: 5,
+	late_window_default: 10,
+	backup_retention_daily: 30,
+	backup_retention_monthly: 12,
+	pending_sync_count: 3
+};
+
+const mockBackupAt = (daysAgo: number, time: string): string => {
+	const date = new Date();
+	date.setHours(0, 0, 0, 0);
+	date.setDate(date.getDate() - daysAgo);
+	return `${date.toISOString().slice(0, 10)}T${time}.000Z`;
+};
+
+const MOCK_BACKUP_ROWS: BackupLogItemResponse[] = [
+	{
+		id: 31,
+		filename: 'attendance_full_2026-09-28T030000Z.dump.gpg',
+		kind: 'full',
+		size_bytes: 43_008_512,
+		storage_backend: 'local',
+		started_at: mockBackupAt(1, '03:00:00'),
+		finished_at: mockBackupAt(1, '03:04:12'),
+		status: 'completed'
+	},
+	{
+		id: 30,
+		filename: 'attendance_full_2026-09-27T030000Z.dump.gpg',
+		kind: 'full',
+		size_bytes: 41_943_040,
+		storage_backend: 'local',
+		started_at: mockBackupAt(2, '03:00:00'),
+		finished_at: mockBackupAt(2, '03:03:58'),
+		status: 'completed'
+	}
+];
+
+export const SystemSettingsGetEndpoint: EndpointDef<SystemSettingsResponse> = {
+	url: '/admin/system/settings',
+	method: 'GET',
+	mock: () => ({ ...MOCK_SYSTEM_SETTINGS })
+};
+
+export const SystemSettingsPatchEndpoint: EndpointDef<SystemSettingsResponse> = {
+	url: '/admin/system/settings',
+	method: 'PATCH',
+	mock: (_params, _suffix, body) => {
+		const patch = (body ?? {}) as Partial<SystemSettingsResponse>;
+		const numericKeys = [
+			'geofence_default_radius',
+			'present_window_default',
+			'late_window_default',
+			'backup_retention_daily',
+			'backup_retention_monthly'
+		] as const;
+		for (const key of numericKeys) {
+			const value = patch[key];
+			if (typeof value === 'number' && Number.isFinite(value)) {
+				MOCK_SYSTEM_SETTINGS[key] = value;
+			}
+		}
+		return { ...MOCK_SYSTEM_SETTINGS };
+	}
+};
+
+export const SystemBackupsEndpoint: EndpointDef<{ items: BackupLogItemResponse[] }> = {
+	url: '/admin/backups',
+	method: 'GET',
+	mock: () => ({ items: [...MOCK_BACKUP_ROWS] })
+};
+
+export const SystemBackupTriggerEndpoint: EndpointDef<{ backup_id: number; status: 'started' }> = {
+	url: '/admin/backups',
+	method: 'POST',
+	mock: () => {
+		const nextId = Math.max(0, ...MOCK_BACKUP_ROWS.map((r) => r.id)) + 1;
+		const now = new Date().toISOString();
+		MOCK_BACKUP_ROWS.unshift({
+			id: nextId,
+			filename: `attendance_full_${now.replace(/[-:]/g, '').slice(0, 15)}Z.dump.gpg`,
+			kind: 'full',
+			size_bytes: 0,
+			storage_backend: 'local',
+			started_at: now,
+			finished_at: null,
+			status: 'started'
+		});
+		return { backup_id: nextId, status: 'started' };
+	}
+};
+
+export const SystemSyncFlushEndpoint: EndpointDef<{ processed: number; succeeded: number; failed: number }> = {
+	url: '/admin/system/sync/flush',
+	method: 'POST',
+	mock: () => {
+		const processed = MOCK_SYSTEM_SETTINGS.pending_sync_count;
+		MOCK_SYSTEM_SETTINGS.pending_sync_count = 0;
+		return { processed, succeeded: processed, failed: 0 };
+	}
+};
+
+export const SystemCleanupEndpoint: EndpointDef<{ removed: number }> = {
+	url: '/admin/system/cleanup',
+	method: 'POST',
+	mock: () => ({ removed: 14 })
+};
+
 // --- Admin audit logs (Phase 8 backend; designed shape) ----------------------
 //
 // No audit contract or table exists yet, so the shape is designed from
@@ -2125,6 +2261,13 @@ export const endpoints = {
 	// Professor excuse queue (list + review; quick-excuse stays mock-only)
 	excuseList: ExcuseListEndpoint,
 	excuseReview: ExcuseReviewEndpoint,
+	// Admin system settings (mock-only until the backend lands)
+	systemSettings: SystemSettingsGetEndpoint,
+	systemSettingsPatch: SystemSettingsPatchEndpoint,
+	systemBackups: SystemBackupsEndpoint,
+	systemBackupTrigger: SystemBackupTriggerEndpoint,
+	systemSyncFlush: SystemSyncFlushEndpoint,
+	systemCleanup: SystemCleanupEndpoint,
 	// Admin (students + professors)
 	adminStudents: AdminStudentsEndpoint,
 	adminStudentCreate: AdminStudentCreateEndpoint,

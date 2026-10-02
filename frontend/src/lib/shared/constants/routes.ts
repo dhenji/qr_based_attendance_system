@@ -37,6 +37,7 @@ export const Routes = {
   ADMIN_ATTENDANCE: "/admin/attendance",
   ADMIN_AUDIT_LOGS: "/admin/audit-logs",
   ADMIN_PROFILE: "/admin/profile",
+  ADMIN_SYSTEM_SETTINGS: "/admin/system/settings",
 
   ABOUT: "/about",
   PRIVACY_POLICY: "/privacy-policy",
