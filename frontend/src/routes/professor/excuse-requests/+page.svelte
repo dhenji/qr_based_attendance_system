@@ -5,7 +5,12 @@
 		reviewExcuseRequest,
 		type ExcuseFilters
 	} from '$lib/features/excuse/service';
+	import { isMockMode } from '$lib/api/client';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+	import {
+		initProfessorCourses,
+		professorState
+	} from '$lib/features/professor/store.svelte';
 	import type { ExcuseOriginalStatus, ExcuseRequest, ExcuseStatus } from '$lib/shared/types/excuse';
 	import { formatDate } from '$lib/shared/utils/format';
 
@@ -14,8 +19,40 @@
 	const PAGE_SIZE = 10;
 
 	const statusOptions: Array<'All' | ExcuseStatus> = ['All', 'pending', 'approved', 'rejected'];
-	const courseOptions = [...new Set(PROFESSOR_COURSES.map((c) => c.courseCode))].sort();
 	const originalOptions: ExcuseOriginalStatus[] = ['absent', 'late', 'rejected'];
+
+	// Course directory: mock fixtures until the live assignments warm it. The
+	// queue rows already join live course identity in excuse/service.ts, so the
+	// filter options and quick-excuse lookup read the same source — a
+	// professor whose real courses differ from the fixtures gets working
+	// filters instead of options that match nothing.
+	type DirectoryEntry = {
+		courseCode: string;
+		courseName: string;
+		section: string;
+		offeringId: number;
+	};
+
+	let directory = $state<DirectoryEntry[]>(PROFESSOR_COURSES);
+	const courseOptions = $derived([...new Set(directory.map((c) => c.courseCode))].sort());
+
+	$effect(() => {
+		let cancelled = false;
+		if (isMockMode()) return;
+		void initProfessorCourses().then(() => {
+			if (cancelled || professorState.coursesError) return;
+			const warmed: DirectoryEntry[] = professorState.courses.map((c) => ({
+				courseCode: c.courseCode,
+				courseName: c.courseName,
+				section: c.sections.length > 0 ? c.sections.join(', ') : '—',
+				offeringId: c.offeringId
+			}));
+			if (warmed.length > 0) directory = warmed;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	let search = $state('');
 	let course = $state('All');
@@ -38,13 +75,20 @@
 	let quickOpen = $state(false);
 	let quickStudentNumber = $state('');
 	let quickStudentName = $state('');
-	let quickCourse = $state(courseOptions[0] ?? 'CS101');
+	let quickCourse = $state('CS101');
 	let quickOriginal = $state<ExcuseOriginalStatus>('absent');
 	let quickReason = $state('');
 	let quickBusy = $state(false);
 	let quickError = $state<string | null>(null);
 
 	let notice = $state<string | null>(null);
+
+	// Reset selections the warmed directory invalidates (same convention as
+	// the reports page filters).
+	$effect(() => {
+		if (course !== 'All' && !courseOptions.includes(course)) course = 'All';
+		if (!courseOptions.includes(quickCourse)) quickCourse = courseOptions[0] ?? 'CS101';
+	});
 
 	const buildFilters = (): ExcuseFilters => {
 		let start = from || undefined;
@@ -163,7 +207,7 @@
 		quickBusy = true;
 		quickError = null;
 		try {
-			const offering = PROFESSOR_COURSES.find((c) => c.courseCode === quickCourse);
+			const offering = directory.find((c) => c.courseCode === quickCourse);
 			const created = await quickExcuse({
 				studentNumber: quickStudentNumber,
 				studentName: quickStudentName || quickStudentNumber,
