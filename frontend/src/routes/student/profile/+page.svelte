@@ -1,10 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { studentState, initStudent } from '$lib/features/student/store.svelte';
+	import { faceCacheState, refreshFaceCache } from '$lib/features/student/face.svelte';
 	import { formatDate } from '$lib/shared/utils/format';
 
+	const faceCacheLabel = $derived(
+		faceCacheState.state === 'current' || faceCacheState.state === 'updated'
+			? `Cached on this device${faceCacheState.version !== null ? ` (v${faceCacheState.version})` : ''}`
+			: faceCacheState.state === 'absent'
+				? 'No face data on file'
+				: 'Offline face data unavailable'
+	);
+
 	onMount(() => {
-		initStudent();
+		void initStudent().then(() => {
+			// Re-pull on profile visits: an admin may have enrolled or
+			// re-enrolled the student after sign-in.
+			const profile = studentState.student;
+			if (profile?.email) void refreshFaceCache(profile.email, profile.faceEnrolled);
+		});
 	});
 
 	const student = $derived(studentState.student);
@@ -75,6 +89,9 @@
 				<span class="muted">Version {student.faceEmbeddingVersion ?? '—'}</span>
 			</div>
 			<p class="muted">Enrolled: {student.faceEnrolledAt ? formatDate(student.faceEnrolledAt) : '—'}</p>
+			{#if student.faceEnrolled}
+				<p class="muted">Offline-ready: {faceCacheLabel}</p>
+			{/if}
 		</section>
 
 		<section class="card">

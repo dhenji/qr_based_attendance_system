@@ -18,6 +18,7 @@ import {
 	hydrateTokens,
 	setTokens,
 } from '$lib/features/auth/tokens';
+import { refreshFaceCache } from '$lib/features/student/face.svelte';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous';
 
@@ -126,6 +127,10 @@ const establishSession = async (tokens: TokenResponse): Promise<User> => {
 	authState.status = 'authenticated';
 	authState.mustChangePassword = tokens.must_change_password || current.must_change_password;
 	authState.error = null;
+	// Face-embedding pull (D29): background, never blocks the sign-in.
+	if (current.role === 'student') {
+		void refreshFaceCache(current.email, current.face_enrolled ?? false);
+	}
 	return user;
 };
 
@@ -159,6 +164,9 @@ export const restoreSession = (): Promise<User | null> => {
 			authState.user = toUser(current);
 			authState.status = 'authenticated';
 			authState.mustChangePassword = current.must_change_password;
+			if (current.role === 'student') {
+				void refreshFaceCache(current.email, current.face_enrolled ?? false);
+			}
 			return authState.user;
 		})
 		.catch(() => {

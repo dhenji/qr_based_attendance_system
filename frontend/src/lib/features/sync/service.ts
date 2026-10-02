@@ -52,9 +52,11 @@ export type CachedSession = {
 };
 
 const DB_NAME = 'attendly';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const QUEUE_STORE = 'attendance_queue';
 const SESSION_STORE = 'session_cache';
+export const FACE_STORE = 'face_embeddings';
+export const KEY_STORE = 'face_keys';
 
 // Synced rows are history, not work: prune them a week after they land so
 // the store stays bounded to genuinely actionable items.
@@ -67,7 +69,7 @@ export const retryDelayMs = (retryCount: number): number =>
 
 // --- IndexedDB plumbing ------------------------------------------------------
 
-const openDb = (): Promise<IDBDatabase> =>
+export const openAppDb = (): Promise<IDBDatabase> =>
 	new Promise((resolve, reject) => {
 		if (typeof indexedDB === 'undefined') {
 			reject(new Error('IndexedDB is unavailable'));
@@ -82,6 +84,14 @@ const openDb = (): Promise<IDBDatabase> =>
 			}
 			if (!db.objectStoreNames.contains(SESSION_STORE)) {
 				db.createObjectStore(SESSION_STORE, { keyPath: 'session_id' });
+			}
+			// v2: face-embedding cache (keyPath 'student') + device keys
+			// (keyPath 'id'). Existing v1 stores carry over untouched.
+			if (!db.objectStoreNames.contains(FACE_STORE)) {
+				db.createObjectStore(FACE_STORE, { keyPath: 'student' });
+			}
+			if (!db.objectStoreNames.contains(KEY_STORE)) {
+				db.createObjectStore(KEY_STORE, { keyPath: 'id' });
 			}
 		};
 		request.onsuccess = () => resolve(request.result);
@@ -99,7 +109,7 @@ const withStore = async <T>(
 	mode: IDBTransactionMode,
 	run: (store: IDBObjectStore) => Promise<T>
 ): Promise<T> => {
-	const db = await openDb();
+	const db = await openAppDb();
 	try {
 		const transaction = db.transaction(storeName, mode);
 		const result = await run(transaction.objectStore(storeName));
@@ -113,6 +123,21 @@ const withStore = async <T>(
 		db.close();
 	}
 };
+
+// Generic IndexedDB access against the shared database, for sibling slices
+// (face-embedding cache). Callers own their fallback when storage is
+// unavailable — these throw.
+export const idbGet = async <T>(storeName: string, key: IDBValidKey): Promise<T | undefined> =>
+	withStore(storeName, 'readonly', (store) => requestToPromise(store.get(key) as IDBRequest<T | undefined>));
+
+export const idbGetAll = async <T>(storeName: string): Promise<T[]> =>
+	withStore(storeName, 'readonly', (store) => requestToPromise(store.getAll() as IDBRequest<T[]>));
+
+export const idbPut = async (storeName: string, value: unknown): Promise<void> =>
+	withStore(storeName, 'readwrite', async (store) => void requestToPromise(store.put(value)));
+
+export const idbDelete = async (storeName: string, key: IDBValidKey): Promise<void> =>
+	withStore(storeName, 'readwrite', async (store) => void requestToPromise(store.delete(key)));
 
 // In-memory fallback (mock mode or no IndexedDB): same row shapes, lost on reload.
 const memoryQueue = new Map<string, QueuedScan>();
@@ -141,19 +166,19 @@ const newId = (): string =>
 
 const listRows = (): Promise<QueuedScan[]> =>
 	idbOrMemory(
-		() => withStore(QUEUE_STORE, 'readonly', (store) => requestToPromise(store.getAll())),
+		() => idbGetAll<QueuedScan>(QUEUE_STORE),
 		() => [...memoryQueue.values()]
 	);
 
 const writeRow = (row: QueuedScan): Promise<void> =>
 	idbOrMemory(
-		() => withStore(QUEUE_STORE, 'readwrite', async (store) => void requestToPromise(store.put(row))),
+		() => idbPut(QUEUE_STORE, row),
 		() => void memoryQueue.set(row.id, row)
 	);
 
 const deleteRow = (id: string): Promise<void> =>
 	idbOrMemory(
-		() => withStore(QUEUE_STORE, 'readwrite', async (store) => void requestToPromise(store.delete(id))),
+		() => idbDelete(QUEUE_STORE, id),
 		() => void memoryQueue.delete(id)
 	);
 
@@ -309,7 +334,7 @@ const pruneSynced = async (): Promise<void> => {
 export const cacheSession = async (entry: Omit<CachedSession, 'cached_at'>): Promise<void> => {
 	const row: CachedSession = { ...entry, cached_at: nowIso() };
 	await idbOrMemory(
-		() => withStore(SESSION_STORE, 'readwrite', async (store) => void requestToPromise(store.put(row))),
+		() => idbPut(SESSION_STORE, row),
 		() => void memorySessions.set(row.session_id, row)
 	);
 };
@@ -317,7 +342,7 @@ export const cacheSession = async (entry: Omit<CachedSession, 'cached_at'>): Pro
 export const getCachedSession = async (code: string): Promise<CachedSession | null> => {
 	const normalized = code.trim();
 	const rows: CachedSession[] = await idbOrMemory(
-		() => withStore(SESSION_STORE, 'readonly', (store) => requestToPromise(store.getAll())),
+		() => idbGetAll<CachedSession>(SESSION_STORE),
 		() => [...memorySessions.values()]
 	);
 	const match = rows.find((entry) => entry.code === normalized) ?? null;

@@ -406,6 +406,21 @@ export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
 	}),
 };
 
+// Student face-embedding pull (D29) — live on features/student/router.py
+// (GET /student/me/face-embedding?current_version=N). 200 carries the
+// base64 blob for a newer version; 204 (client resolves to undefined) means
+// the cached version is current; 404 means no enrollment on file.
+export interface StudentFaceEmbeddingResponse {
+	version: number;
+	embedding: string;
+}
+
+export const StudentFaceEmbeddingEndpoint: EndpointDef<StudentFaceEmbeddingResponse | undefined> = {
+	url: '/student/me/face-embedding',
+	method: 'GET',
+	mock: () => undefined,
+};
+
 // --- Professor --------------------------------------------------------------
 //
 // GET /professor/profile is fully implemented on the backend
@@ -2103,6 +2118,7 @@ export const endpoints = {
 	studentProfile: StudentProfileEndpoint,
 	studentDashboard: StudentDashboardEndpoint,
 	studentHistory: StudentHistoryEndpoint,
+	studentFaceEmbedding: StudentFaceEmbeddingEndpoint,
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
