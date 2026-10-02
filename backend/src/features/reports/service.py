@@ -1,0 +1,452 @@
+from __future__ import annotations
+
+from collections import Counter
+from collections.abc import Sequence
+from datetime import date, datetime
+from typing import Any
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from features.analytics.schema import TrendGranularity
+from features.attendance.model import Attendance
+from features.course.model import Course, CourseOffering
+from features.course_professor.model import CourseProfessor
+from features.enrollment.model import Enrollment
+from features.reports.schema import (
+    AllCoursesItem,
+    AllCoursesResponse,
+    ReportMetric,
+    ReportsComparisonItem,
+    ReportsComparisonResponse,
+    ReportsTrendItem,
+    ReportsTrendResponse,
+)
+from features.session.model import Session
+from shared.datetimes import ensure_aware
+from shared.enums import ValidationStatus
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.query import apply_if
+
+
+def _rates(
+    present: int, late: int, excused: int, enrolled: int
+) -> tuple[float, float]:
+    """Compliance (present/total) and participation ((p+l+e)/total) rates."""
+    if enrolled <= 0:
+        return 0.0, 0.0
+
+    return (
+        round(present / enrolled, 4),
+        round((present + late + excused) / enrolled, 4),
+    )
+
+
+def _bucket_key(moment: datetime, granularity: TrendGranularity) -> date:
+    day: date = ensure_aware(moment).date()
+
+    match granularity:
+        case "daily":
+            return day
+        case "weekly":
+            return date.fromordinal(day.toordinal() - day.weekday())
+        case _:
+            return day.replace(day=1)
+
+
+def _normalize_paging(page: int, size: int) -> tuple[int, int]:
+    return max(page, 1), min(max(size, 1), MAX_PAGE_SIZE)
+
+
+def _pick_rate(
+    compliance: float, participation: float, metric: ReportMetric
+) -> float:
+    match metric:
+        case "participation":
+            return participation
+        case _:
+            return compliance
+
+
+class ReportsService:
+    """Professor-scoped attendance aggregates over the assignment union.
+
+    Scope is sessions the professor opened plus offerings they are currently
+    assigned to — the same union the session ledger reads, so the on-screen
+    rows and these aggregates never disagree about whose sessions they show.
+    Read-only; the transaction boundary stays in the request dependency.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_all_courses(
+        self,
+        *,
+        professor_id: int,
+        granularity: TrendGranularity = "daily",
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> AllCoursesResponse:
+        """Bucketed totals across every offering in the professor's union."""
+        offerings: Sequence[CourseOffering] = await self._scoped_offerings(
+            professor_id, None, None, None
+        )
+        offering_ids: list[int] = [row.id for row in offerings]
+        sessions: Sequence[Session] = await self._sessions_in(
+            offering_ids, date_from, date_to
+        )
+        enrolled_by_offering = await self._enrolled_by_offering(offering_ids)
+        buckets, bucket_tallies = await self._bucketed(
+            sessions, granularity, date_from, date_to
+        )
+        items: list[AllCoursesItem] = []
+
+        for key in sorted(set(buckets) | set(bucket_tallies)):
+            bucket: list[Session] = buckets.get(key, [])
+            tally: Counter[str] = bucket_tallies.get(key, Counter())
+            expected: int = _expected_for(bucket, enrolled_by_offering)
+            compliance, participation = _rates(
+                tally.get(ValidationStatus.PRESENT.value, 0),
+                tally.get(ValidationStatus.LATE.value, 0),
+                tally.get(ValidationStatus.EXCUSED.value, 0),
+                expected,
+            )
+            items.append(
+                AllCoursesItem(
+                    date=key,
+                    total_sessions=len(bucket),
+                    total_students=len(
+                        {
+                            student
+                            for row in bucket
+                            for student in enrolled_by_offering.get(
+                                row.offering_id, set()
+                            )
+                        }
+                    ),
+                    compliance_rate=compliance,
+                    participation_rate=participation,
+                )
+            )
+
+        expected_all: int = _expected_for(sessions, enrolled_by_offering)
+        tallies_all: Counter[str] = await self._tallies(
+            [row.id for row in sessions]
+        )
+        avg_compliance, avg_participation = _rates(
+            tallies_all.get(ValidationStatus.PRESENT.value, 0),
+            tallies_all.get(ValidationStatus.LATE.value, 0),
+            tallies_all.get(ValidationStatus.EXCUSED.value, 0),
+            expected_all,
+        )
+
+        return AllCoursesResponse(
+            items=items,
+            avg_compliance=avg_compliance,
+            avg_participation=avg_participation,
+        )
+
+    async def get_comparison(
+        self,
+        *,
+        professor_id: int,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> ReportsComparisonResponse:
+        """Per-course rates over the union, sliced by program/year/semester."""
+        page, size = _normalize_paging(page, size)
+        offerings: Sequence[CourseOffering] = await self._scoped_offerings(
+            professor_id, program_id, year_level_id, semester
+        )
+
+        if not offerings:
+            return ReportsComparisonResponse(items=[], total=0, page=page, size=size)
+
+        by_course: dict[int, list[CourseOffering]] = {}
+
+        for row in sorted(offerings, key=lambda item: item.id):
+            by_course.setdefault(row.course_id, []).append(row)
+
+        course_map: dict[int, Course] = await self._course_map(sorted(by_course))
+        enrolled_by_offering = await self._enrolled_by_offering(
+            [row.id for row in offerings]
+        )
+        items: list[ReportsComparisonItem] = []
+
+        for course_id in sorted(by_course):
+            rows: list[CourseOffering] = by_course[course_id]
+            offering_ids: list[int] = [row.id for row in rows]
+            sessions: Sequence[Session] = await self._sessions_in(
+                offering_ids, date_from, date_to
+            )
+            tallies: Counter[str] = await self._tallies(
+                [row.id for row in sessions]
+            )
+            compliance, participation = _rates(
+                tallies.get(ValidationStatus.PRESENT.value, 0),
+                tallies.get(ValidationStatus.LATE.value, 0),
+                tallies.get(ValidationStatus.EXCUSED.value, 0),
+                _expected_for(sessions, enrolled_by_offering),
+            )
+            first: CourseOffering = rows[0]
+            course: Course | None = course_map.get(course_id)
+            items.append(
+                ReportsComparisonItem(
+                    course_id=course_id,
+                    course_code=course.course_code if course else "",
+                    program_id=first.program_id,
+                    year_level_id=first.year_level_id,
+                    compliance_rate=compliance,
+                    participation_rate=participation,
+                    total_sessions=len(sessions),
+                )
+            )
+
+        return ReportsComparisonResponse(
+            items=items[(page - 1) * size : page * size],
+            total=len(items),
+            page=page,
+            size=size,
+        )
+
+    async def get_trends(
+        self,
+        *,
+        professor_id: int,
+        course_ids: Sequence[int] | None = None,
+        metric: ReportMetric = "compliance",
+        granularity: TrendGranularity = "daily",
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> ReportsTrendResponse:
+        """One rate series per course, bucketed by the chosen granularity."""
+        page, size = _normalize_paging(page, size)
+        offerings: Sequence[CourseOffering] = await self._scoped_offerings(
+            professor_id, None, None, None, course_ids
+        )
+
+        if not offerings:
+            return ReportsTrendResponse(items=[], total=0, page=page, size=size)
+
+        by_course: dict[int, list[CourseOffering]] = {}
+
+        for row in sorted(offerings, key=lambda item: item.id):
+            by_course.setdefault(row.course_id, []).append(row)
+
+        course_map: dict[int, Course] = await self._course_map(sorted(by_course))
+        enrolled_by_offering = await self._enrolled_by_offering(
+            [row.id for row in offerings]
+        )
+        items: list[ReportsTrendItem] = []
+
+        for course_id in sorted(by_course):
+            rows: list[CourseOffering] = by_course[course_id]
+            offering_ids: list[int] = [row.id for row in rows]
+            sessions: Sequence[Session] = await self._sessions_in(
+                offering_ids, date_from, date_to
+            )
+            buckets, bucket_tallies = await self._bucketed(
+                sessions, granularity, date_from, date_to
+            )
+            course: Course | None = course_map.get(course_id)
+
+            for key in sorted(set(buckets) | set(bucket_tallies)):
+                bucket: list[Session] = buckets.get(key, [])
+                tally: Counter[str] = bucket_tallies.get(key, Counter())
+                compliance, participation = _rates(
+                    tally.get(ValidationStatus.PRESENT.value, 0),
+                    tally.get(ValidationStatus.LATE.value, 0),
+                    tally.get(ValidationStatus.EXCUSED.value, 0),
+                    _expected_for(bucket, enrolled_by_offering),
+                )
+                items.append(
+                    ReportsTrendItem(
+                        date=key,
+                        course_id=course_id,
+                        course_code=course.course_code if course else "",
+                        rate=_pick_rate(compliance, participation, metric),
+                    )
+                )
+
+        ordered: list[ReportsTrendItem] = sorted(
+            items, key=lambda item: (item.date, item.course_id)
+        )
+
+        return ReportsTrendResponse(
+            items=ordered[(page - 1) * size : page * size],
+            total=len(ordered),
+            page=page,
+            size=size,
+        )
+
+    async def _scoped_offerings(
+        self,
+        professor_id: int,
+        program_id: int | None,
+        year_level_id: int | None,
+        semester: str | None,
+        course_ids: Sequence[int] | None = None,
+    ) -> Sequence[CourseOffering]:
+        """Union offerings narrowed by the optional slicing filters."""
+        union_ids: list[int] = await self._union_offering_ids(professor_id)
+
+        if not union_ids:
+            return []
+
+        stmt = select(CourseOffering).where(CourseOffering.id.in_(union_ids))
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        stmt = apply_if(
+            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
+
+        if course_ids:
+            stmt = stmt.where(CourseOffering.course_id.in_(course_ids))
+
+        return (
+            await self._session.scalars(stmt.order_by(CourseOffering.id.asc()))
+        ).all()
+
+    async def _union_offering_ids(self, professor_id: int) -> list[int]:
+        """Offerings the professor opened a session in or is assigned to.
+
+        The assignment window mirrors the session ledger and the professor
+        cards: effective today with an open end. Ownership is never replaced
+        by it, or past sessions vanish once an assignment lapses.
+        """
+        today: date = date.today()
+        opened = select(Session.offering_id).where(
+            Session.professor_id == professor_id
+        )
+        assigned = select(CourseProfessor.offering_id).where(
+            CourseProfessor.professor_id == professor_id,
+            CourseProfessor.effective_from <= today,
+            or_(
+                CourseProfessor.effective_to.is_(None),
+                CourseProfessor.effective_to >= today,
+            ),
+        )
+        rows: Sequence[int] = (
+            await self._session.scalars(opened.union(assigned))
+        ).all()
+
+        return sorted(set(rows))
+
+    async def _sessions_in(
+        self,
+        offering_ids: list[int],
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> Sequence[Session]:
+        if not offering_ids:
+            return []
+
+        stmt = select(Session).where(Session.offering_id.in_(offering_ids))
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+
+        return (await self._session.scalars(stmt)).all()
+
+    async def _enrolled_by_offering(
+        self, offering_ids: list[int]
+    ) -> dict[int, set[int]]:
+        if not offering_ids:
+            return {}
+
+        rows: Sequence[tuple[int, int]] = (
+            await self._session.execute(
+                select(Enrollment.offering_id, Enrollment.student_id).where(
+                    Enrollment.offering_id.in_(offering_ids)
+                )
+            )
+        ).all()  # type: ignore[assignment]
+        grouped: dict[int, set[int]] = {}
+
+        for offering_id, student_id in rows:
+            grouped.setdefault(offering_id, set()).add(student_id)
+
+        return grouped
+
+    async def _tallies(self, session_ids: list[int]) -> Counter[str]:
+        if not session_ids:
+            return Counter()
+
+        rows: Sequence[tuple[str, int]] = (
+            await self._session.execute(
+                select(Attendance.validation_status, func.count())
+                .where(Attendance.session_id.in_(session_ids))
+                .group_by(Attendance.validation_status)
+            )
+        ).all()  # type: ignore[assignment]
+
+        return Counter({status: count for status, count in rows})
+
+    async def _bucketed(
+        self,
+        sessions: Sequence[Session],
+        granularity: TrendGranularity,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> tuple[dict[date, list[Session]], dict[date, Counter[str]]]:
+        """Sessions and their attendance tallies grouped by period start."""
+        buckets: dict[date, list[Session]] = {}
+
+        for row in sessions:
+            if row.created_at is None:
+                continue
+
+            buckets.setdefault(
+                _bucket_key(row.created_at, granularity), []
+            ).append(row)
+
+        session_ids: list[int] = [row.id for row in sessions]
+        tallies: dict[date, Counter[str]] = {}
+
+        if session_ids:
+            stmt = select(
+                Attendance.timestamp, Attendance.validation_status
+            ).where(Attendance.session_id.in_(session_ids))
+            stmt = apply_if(
+                stmt, date_from, lambda v: Attendance.timestamp >= v
+            )
+            stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+            rows: Sequence[tuple[Any, str]] = (
+                await self._session.execute(stmt)
+            ).all()  # type: ignore[assignment]
+
+            for stamped_at, status in rows:
+                if stamped_at is None:
+                    continue
+
+                key: date = _bucket_key(stamped_at, granularity)
+                tallies.setdefault(key, Counter())[status] += 1
+
+        return buckets, tallies
+
+    async def _course_map(self, course_ids: list[int]) -> dict[int, Course]:
+        if not course_ids:
+            return {}
+
+        rows: Sequence[Course] = (
+            await self._session.scalars(
+                select(Course).where(Course.id.in_(course_ids))
+            )
+        ).all()
+
+        return {row.id: row for row in rows}
+
+
+def _expected_for(
+    sessions: Sequence[Session], enrolled_by_offering: dict[int, set[int]]
+) -> int:
+    return sum(
+        len(enrolled_by_offering.get(row.offering_id, set())) for row in sessions
+    )
