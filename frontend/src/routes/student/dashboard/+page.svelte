@@ -66,7 +66,7 @@
 					<li>
 						<strong>{course.courseCode}</strong> — {course.courseName}
 						<span class="muted">
-							({course.scheduleDays.join(', ')} {course.scheduleStartTime}–{course.scheduleEndTime})
+							({course.scheduleDays} {course.scheduleStartTime}–{course.scheduleEndTime})
 						</span>
 					</li>
 				{/each}

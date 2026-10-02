@@ -1,5 +1,9 @@
 import { post } from '$lib/api/client';
-import type { AttendanceScanResponse, SessionVerificationResponse } from '$lib/api/endpoints';
+import type {
+	AttendancePrecheckResponse,
+	AttendanceScanResponse,
+	SessionVerificationResponse,
+} from '$lib/api/endpoints';
 import type { LivenessEvidence } from '$lib/shared/types';
 import { isWithinGeofence } from '$lib/shared/utils/geo';
 
@@ -17,6 +21,38 @@ export interface AttendanceScanResult {
 	scannedAt: string;
 	expiresAt: string;
 }
+
+// Scan precheck (D27 step-2 gate) — read-only, never writes attendance.
+// The backend resolves the student from the authenticated user and only
+// compares payload.student_number case-insensitively (403
+// student_number_mismatch on spoof). 200 flags enrolled/already_scanned,
+// which submitAttendanceScan would reject as 403 not_enrolled /
+// 409 duplicate_scan. No idempotency key: the route reads none.
+export interface AttendancePrecheckResult {
+	enrolled: boolean;
+	alreadyScanned: boolean;
+	studentId: string;
+	studentName: string;
+	section?: string;
+}
+
+export const precheckScan = async (input: {
+	sessionId: number;
+	studentNumber: string;
+}): Promise<AttendancePrecheckResult> => {
+	const response = await post<AttendancePrecheckResponse>('attendancePrecheck', {
+		session_id: input.sessionId,
+		student_number: input.studentNumber,
+	});
+
+	return {
+		enrolled: response.enrolled,
+		alreadyScanned: response.already_scanned,
+		studentId: response.student.student_id,
+		studentName: response.student.name,
+		section: response.student.section ?? undefined,
+	};
+};
 
 export const verifySessionCode = async (code: string): Promise<SessionVerification> => {
 	const response = await post<SessionVerificationResponse>('sessionQR', { code: code.trim() });

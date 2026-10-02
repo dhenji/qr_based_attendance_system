@@ -144,3 +144,11 @@ export const mockMfaVerify = async (): Promise<TokenResponse> => {
 };
 
 export const mockNoop = async (): Promise<void> => delay(undefined);
+
+// Mock forgot-password recovery (wizard preview without a backend).
+// Mirrors the live 4-step shape: question -> 5-min grant -> OTP -> reset.
+export const mockForgotPassword = async (): Promise<{ question: string; set: boolean }> =>
+	delay({ question: 'What was the name of your first pet?', set: true });
+
+export const mockForgotPasswordVerify = async (): Promise<{ recoveryToken: string }> =>
+	delay({ recoveryToken: 'mock-recovery-token' });

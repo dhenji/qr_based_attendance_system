@@ -1,24 +1,39 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onDestroy } from 'svelte';
-	import { loadSecurityQA, DEFAULT_QUESTION, DEFAULT_ANSWER } from '$lib/features/auth/security';
+	import { APIError } from '$lib/api/client';
+	import {
+		forgotPassword,
+		forgotPasswordVerify,
+		requestOtp,
+		resetPassword,
+		verifyOtp,
+	} from '$lib/features/auth/service';
+	import { Routes } from '$lib/shared/constants/routes';
+
+	// Forgot-password recovery (ADR-056), live against the backend:
+	//  1. POST /auth/forgot-password {email} -> {question} (decoy for unknown
+	//     emails — always render it, never hint at account existence).
+	//  2. POST /auth/forgot-password/verify {email, answer} -> recovery_token
+	//     (5-min grant held in memory; 423 recovery_locked on lockout).
+	//  3. OTP request (grant-gated) + verify; Resend re-requests for real.
+	//  4. POST /auth/reset-password {email, otp_code, new_password}.
+	// No Turnstile widget exists yet — turnstile_token is sent null and the
+	// backend no-ops when its secret is empty.
 
 	let step = $state(1);
 	let email = $state('');
-	let captcha = $state('');
 	let answer = $state('');
 	let otp = $state<string[]>(['', '', '', '', '', '']);
 	let newPwd = $state('');
 	let confirmPwd = $state('');
 	let showNewPwd = $state(false);
 	let showConfirmPwd = $state(false);
-	let attempts = $state(3);
+	let busy = $state(false);
 	let error = $state('');
 
-	let securityQuestion: string = $state(DEFAULT_QUESTION);
-	let securityAnswer: string = $state(DEFAULT_ANSWER);
-
-	let captchaCode = $state('2D8MQA');
+	let securityQuestion = $state('');
+	let recoveryToken = $state<string | null>(null);
 
 	let otpInputs: HTMLInputElement[] = $state([]);
 	let countdown = $state(300);
@@ -49,14 +64,18 @@
 		if (intervalId) clearInterval(intervalId);
 	});
 
-	function refreshCaptcha() {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-		let code = '';
-		for (let i = 0; i < 6; i++) {
-			code += chars[Math.floor(Math.random() * chars.length)];
-		}
-		captchaCode = code;
-	}
+	const toMessage = (e: unknown, fallback: string): string => {
+		if (e instanceof APIError && e.code === 'recovery_locked') return e.message;
+		if (e instanceof APIError && e.code === 'security_answer_invalid')
+			return 'Incorrect answer. Check your security answer and try again.';
+		if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired'))
+			return e.code === 'otp_expired' ? 'That code has expired. Request a new one.' : 'That code is incorrect. Check your email and try again.';
+		if (e instanceof APIError && e.code === 'unrecognized_email')
+			return 'No account matches that email. Contact an administrator.';
+		if (e instanceof APIError && e.code === 'password_policy_violation')
+			return 'Password does not meet the required policy.';
+		return e instanceof Error && e.message ? e.message : fallback;
+	};
 
 	function startCountdown() {
 		if (intervalId) clearInterval(intervalId);
@@ -70,51 +89,62 @@
 		}, 1000);
 	}
 
-	function handleStep1() {
-		if (!email) {
+	async function handleStep1() {
+		if (!email.trim()) {
 			error = 'Email is required';
 			return;
 		}
-		if (captcha.toUpperCase() !== captchaCode) {
-			error = 'Captcha incorrect';
-			return;
-		}
+		busy = true;
 		error = '';
-		const saved = loadSecurityQA(email);
-		securityQuestion = saved?.question ?? DEFAULT_QUESTION;
-		securityAnswer = saved?.answer ?? DEFAULT_ANSWER;
-		step = 2;
+		try {
+			const result = await forgotPassword(email);
+			securityQuestion = result.question;
+			step = 2;
+		} catch (e: unknown) {
+			error = toMessage(e, 'Could not start recovery. Please try again.');
+		} finally {
+			busy = false;
+		}
 	}
 
-	function handleStep2() {
-		if (!answer) {
+	async function handleStep2() {
+		if (!answer.trim()) {
 			error = 'Answer is required';
 			return;
 		}
-		if (answer.toLowerCase() !== securityAnswer.toLowerCase()) {
-			attempts -= 1;
-			if (attempts <= 0) {
-				error = 'Account temporarily locked due to too many failed attempts.';
-				return;
-			}
-			error = `Wrong answer. ${attempts} attempt${attempts !== 1 ? 's' : ''} remaining.`;
-			return;
-		}
+		busy = true;
 		error = '';
-		step = 3;
-		startCountdown();
+		try {
+			const grant = await forgotPasswordVerify(email, answer);
+			recoveryToken = grant.recoveryToken;
+			await requestOtp(email, 'forget_password', grant.recoveryToken);
+			step = 3;
+			startCountdown();
+		} catch (e: unknown) {
+			error = toMessage(e, 'Verification failed. Please try again.');
+		} finally {
+			busy = false;
+		}
 	}
 
-	function handleStep3() {
+	async function handleStep3() {
 		if (otp.some((d) => !d)) {
 			error = 'Enter all 6 digits';
 			return;
 		}
+		busy = true;
 		error = '';
-		step = 4;
+		try {
+			await verifyOtp(email, otp.join(''), 'forget_password');
+			step = 4;
+		} catch (e: unknown) {
+			error = toMessage(e, 'Code verification failed. Please try again.');
+		} finally {
+			busy = false;
+		}
 	}
 
-	function handleStep4() {
+	async function handleStep4() {
 		if (!newPwd || !confirmPwd) {
 			error = 'Both fields required';
 			return;
@@ -127,9 +157,17 @@
 			error = 'Password does not meet all requirements.';
 			return;
 		}
+		busy = true;
 		error = '';
-		success = true;
-		setTimeout(() => goto('/auth/login'), 1500);
+		try {
+			await resetPassword(email, otp.join(''), newPwd);
+			success = true;
+			setTimeout(() => goto(Routes.LOGIN), 1500);
+		} catch (e: unknown) {
+			error = toMessage(e, 'Password reset failed. Please try again.');
+		} finally {
+			busy = false;
+		}
 	}
 
 	function onOtpInput(i: number, value: string) {
@@ -145,9 +183,21 @@
 		}
 	}
 
-	function resend() {
-		startCountdown();
+	async function resend() {
+		busy = true;
 		error = '';
+		try {
+			if (!recoveryToken) {
+				error = 'Session expired. Restart recovery from step 1.';
+				return;
+			}
+			await requestOtp(email, 'forget_password', recoveryToken);
+			startCountdown();
+		} catch (e: unknown) {
+			error = toMessage(e, 'Could not resend the code. Please try again.');
+		} finally {
+			busy = false;
+		}
 	}
 </script>
 
@@ -187,18 +237,10 @@
 							value={email} oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
 					</div>
 
-					<div class="field">
-						<label class="form-label" for="fp-captcha">Captcha</label>
-						<div class="captcha-row">
-							<div class="captcha-display">{captchaCode}</div>
-							<button class="captcha-refresh" onclick={refreshCaptcha}>↻</button>
-						</div>
-						<input class="form-input" id="fp-captcha" placeholder="Enter code above"
-							value={captcha} oninput={(e) => { captcha = (e.target as HTMLInputElement).value; }} />
-					</div>
-
-					<button class="btn-primary" onclick={handleStep1}>Continue</button>
-					<button class="back-btn" onclick={() => goto('/auth/login')}>← Back to Login</button>
+					<button class="btn-primary" onclick={handleStep1} disabled={busy}>
+						{busy ? 'Checking…' : 'Continue'}
+					</button>
+					<button class="back-btn" onclick={() => goto(Routes.LOGIN)}>← Back to Login</button>
 				</div>
 			{:else if step === 2}
 				<div class="step-panel">
@@ -217,13 +259,9 @@
 							value={answer} oninput={(e) => { answer = (e.target as HTMLInputElement).value; }} />
 					</div>
 
-					{#if attempts < 3}
-						<div class="warning-banner">
-							{attempts} attempt{attempts !== 1 ? 's' : ''} remaining, then the account locks.
-						</div>
-					{/if}
-
-					<button class="btn-primary" onclick={handleStep2}>Verify</button>
+					<button class="btn-primary" onclick={handleStep2} disabled={busy}>
+						{busy ? 'Verifying…' : 'Verify'}
+					</button>
 				</div>
 			{:else if step === 3}
 				<div class="step-panel">
@@ -247,10 +285,14 @@
 
 					<div class="expiry">
 						Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong>.
-						<button class="resend-btn" onclick={resend} disabled={countdown > 0 && countdown < 300}>Resend code</button>
+						<button class="resend-btn" onclick={resend} disabled={busy || (countdown > 0 && countdown < 300)}>
+							{busy ? 'Sending…' : 'Resend code'}
+						</button>
 					</div>
 
-					<button class="btn-primary" onclick={handleStep3}>Verify</button>
+					<button class="btn-primary" onclick={handleStep3} disabled={busy}>
+						{busy ? 'Verifying…' : 'Verify'}
+					</button>
 				</div>
 			{:else}
 				<div class="step-panel">
@@ -315,8 +357,8 @@
 						</div>
 					{/if}
 
-					<button class="btn-primary" onclick={handleStep4} disabled={success}>
-						{success ? 'Password updated' : 'Reset password'}
+					<button class="btn-primary" onclick={handleStep4} disabled={success || busy}>
+						{success ? 'Password updated' : busy ? 'Resetting…' : 'Reset password'}
 					</button>
 				</div>
 			{/if}
@@ -503,47 +545,6 @@
 		color: var(--text-secondary);
 	}
 
-	.captcha-row {
-		display: flex;
-		gap: 0.5rem;
-		margin-bottom: 0.5rem;
-	}
-
-	.captcha-display {
-		flex: 1;
-		background: var(--bg-muted);
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		padding: 0.625rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		text-align: center;
-		font-family: monospace;
-		font-weight: 700;
-		font-size: 1.125rem;
-		letter-spacing: 0.25em;
-		color: var(--brand);
-		user-select: none;
-	}
-
-	.captcha-refresh {
-		background: var(--bg-muted);
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		width: 44px;
-		cursor: pointer;
-		font-size: 1.125rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-	}
-
-	.captcha-refresh:hover {
-		background: var(--border);
-	}
-
 	.question-panel {
 		background: var(--bg-page);
 		border: 1px solid var(--border-strong);
@@ -554,16 +555,6 @@
 		color: var(--brand);
 		font-style: italic;
 		font-weight: 500;
-	}
-
-	.warning-banner {
-		background: var(--warning-bg);
-		border: 1px solid var(--warning-bg);
-		border-radius: 8px;
-		padding: 0.5rem 0.75rem;
-		margin-bottom: 1rem;
-		color: var(--warning-text);
-		font-size: 0.8rem;
 	}
 
 	.otp-row {

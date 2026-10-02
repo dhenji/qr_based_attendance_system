@@ -19,6 +19,8 @@ import type {
 	TokenResponse,
 } from '$lib/shared/types';
 import {
+	mockForgotPassword,
+	mockForgotPasswordVerify,
 	mockLogin,
 	mockMe,
 	mockMfaVerify,
@@ -27,12 +29,17 @@ import {
 } from '$lib/features/auth/mock';
 
 // Send a 6-digit OTP. `claim` proves ownership of a roster email before the
-// account is created; `forget_password` additionally requires a recovery grant
-// obtained from the security-question step.
-export const requestOtp = async (email: string, purpose: OtpPurpose = 'claim'): Promise<void> => {
+// account is created; `forget_password` additionally requires the recovery
+// grant minted by forgotPasswordVerify (Step 2 of the recovery wizard).
+export const requestOtp = async (
+	email: string,
+	purpose: OtpPurpose = 'claim',
+	recoveryToken?: string
+): Promise<void> => {
 	if (isMockMode()) return mockNoop();
 
 	const body: OtpRequest = { email: email.trim().toLowerCase(), purpose };
+	if (recoveryToken) body.recovery_token = recoveryToken;
 	await post<void>('authOtpRequest', body);
 };
 
@@ -121,4 +128,63 @@ export const changePassword = async (currentPassword: string, newPassword: strin
 		new_password: newPassword,
 	};
 	await post<void>('authChangePassword', body);
+};
+
+// Forgot-password recovery (ADR-056), mirroring the 4-step wizard:
+//  1. forgotPassword(email) -> { question } (decoy for unknown emails).
+//  2. forgotPasswordVerify(email, answer) -> { recovery_token } (5-min grant).
+//  3. requestOtp(email, 'forget_password', recoveryToken) + verifyOtp.
+//  4. resetPassword(email, otpCode, newPassword) -> 204.
+// Throws APIError: 'security_answer_invalid' (400), 'recovery_locked' (423),
+// 'otp_invalid' / 'otp_expired' (400), 'unrecognized_email' (404),
+// 'password_policy_violation' (422), 'invalid_captcha' (400).
+export interface ForgotPasswordQuestion {
+	question: string;
+	set: boolean;
+}
+
+export const forgotPassword = async (email: string): Promise<ForgotPasswordQuestion> => {
+	if (isMockMode()) return mockForgotPassword();
+
+	return post<ForgotPasswordQuestion>('authForgotPassword', {
+		email: email.trim().toLowerCase()
+	});
+};
+
+export const forgotPasswordVerify = async (
+	email: string,
+	answer: string
+): Promise<{ recoveryToken: string }> => {
+	if (isMockMode()) return mockForgotPasswordVerify();
+
+	const response = await post<{ recovery_token: string }>('authForgotPasswordVerify', {
+		email: email.trim().toLowerCase(),
+		answer: answer.trim()
+	});
+	return { recoveryToken: response.recovery_token };
+};
+
+export const resetPassword = async (
+	email: string,
+	otpCode: string,
+	newPassword: string
+): Promise<void> => {
+	if (isMockMode()) return mockNoop();
+
+	await post<void>('authResetPassword', {
+		email: email.trim().toLowerCase(),
+		otp_code: otpCode.trim(),
+		new_password: newPassword
+	});
+};
+
+// Set/update the signed-in account's security question + answer (the pair
+// the forgot-password wizard quizzes). Authenticated; 204, no content back.
+export const setSecurityQuestion = async (question: string, answer: string): Promise<void> => {
+	if (isMockMode()) return mockNoop();
+
+	await post<void>('authSecurityQuestion', {
+		question: question.trim(),
+		answer: answer.trim()
+	});
 };

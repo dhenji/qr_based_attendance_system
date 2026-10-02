@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { studentState, initStudent } from '$lib/features/student/store.svelte';
 	import { authState } from '$lib/features/auth/store.svelte';
-	import { SECURITY_QUESTIONS, saveSecurityQA, loadSecurityQA } from '$lib/features/auth/security';
+	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
+	import { setSecurityQuestion } from '$lib/features/auth/service';
 	import { Routes } from '$lib/shared/constants/routes';
 	import {
 		DEFAULT_PREFS,
@@ -31,16 +32,20 @@
 		savePrefs({ ...prefs });
 	}
 
-	// Security Question
+	// Security Question — live on POST /auth/security-question. The server
+	// is the source of truth (GET /auth/me security_question_set); nothing
+	// is mirrored to localStorage.
 	let questionOpen = $state(false);
-	const email = $derived(authState.user?.email ?? 'local');
-	const existingQuestion = $derived(loadSecurityQA(email)?.question ?? null);
+	let questionBusy = $state(false);
+	// Server truth (GET /auth/me security_question_set), flipped locally on
+	// save so the label updates without a session round-trip.
+	const hasQuestion = $derived(authState.user?.securityQuestionSet === true);
 	let question = $state('');
 	let answer = $state('');
 	let securityError = $state('');
 	let securityMsg = $state('');
 
-	function onSaveQuestion() {
+	async function onSaveQuestion() {
 		securityError = '';
 		securityMsg = '';
 		if (!question) {
@@ -51,10 +56,18 @@
 			securityError = 'Security answer is required';
 			return;
 		}
-		saveSecurityQA(email, question, answer.trim());
-		securityMsg = 'Security question saved.';
-		questionOpen = false;
-		answer = '';
+		questionBusy = true;
+		try {
+			await setSecurityQuestion(question, answer.trim());
+			if (authState.user) authState.user.securityQuestionSet = true;
+			securityMsg = 'Security question saved.';
+			questionOpen = false;
+			answer = '';
+		} catch (e: unknown) {
+			securityError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+		} finally {
+			questionBusy = false;
+		}
 	}
 
 	// Face Enrollment
@@ -128,14 +141,12 @@
 		<hr class="divider" />
 
 		<h3 class="sub-title">Security Question</h3>
-		{#if existingQuestion || securityMsg}
-			<p class="muted">
-				Current: {existingQuestion ?? 'Saved'}
-			</p>
+		{#if hasQuestion}
+			<p class="muted">Current: Set</p>
 		{/if}
 		{#if !questionOpen}
 			<button class="btn ghost" onclick={() => (questionOpen = true)}>
-				{existingQuestion ? 'Change Security Question' : 'Set Security Question'}
+				{hasQuestion ? 'Change Security Question' : 'Set Security Question'}
 			</button>
 			{#if securityMsg && !questionOpen}<p class="success">{securityMsg}</p>{/if}
 		{:else}
@@ -154,7 +165,9 @@
 			</div>
 			{#if securityError}<p class="error">{securityError}</p>{/if}
 			<div class="action-row">
-				<button class="btn" onclick={onSaveQuestion}>Save</button>
+				<button class="btn" onclick={onSaveQuestion} disabled={questionBusy}>
+					{questionBusy ? 'Saving…' : 'Save'}
+				</button>
 				<button class="btn ghost" onclick={() => (questionOpen = false)}>Cancel</button>
 			</div>
 		{/if}

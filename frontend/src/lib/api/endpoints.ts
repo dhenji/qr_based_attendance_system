@@ -12,6 +12,7 @@ import type {
 import type {
 	StudentDashboardResponse,
 	StudentProfileResponse,
+	ScheduleResponse,
 } from '$lib/shared/types';
 import type {
 	AdminAssignmentResponse,
@@ -130,6 +131,36 @@ export const AttendanceScanEndpoint: EndpointDef<AttendanceScanResponse> = {
 		scanned_at: new Date().toISOString(),
 		expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
 	}),
+};
+
+// Scan precheck (D27 step-2 gate) — live on features/attendance/router.py
+// (POST /student/attendance/precheck). Read-only: resolves the student from
+// the authenticated user, comparing payload.student_number case-insensitively
+// (403 student_number_mismatch on spoof). 200 flags enrolled/already_scanned
+// (which scan would raise as 403 not_enrolled / 409 duplicate_scan);
+// 404 session_not_found, 410 session_expired still raise.
+export interface AttendancePrecheckResponse {
+	enrolled: boolean;
+	already_scanned: boolean;
+	student: {
+		student_id: string;
+		name: string;
+		section: string | null;
+	};
+}
+
+export const AttendancePrecheckEndpoint: EndpointDef<AttendancePrecheckResponse> = {
+	url: '/student/attendance/precheck',
+	method: 'POST',
+	mock: (_params, _suffix, body) => {
+		const p = (body ?? {}) as { student_number?: unknown };
+		const studentNumber = String(p.student_number ?? '').trim().toUpperCase() || '24-0001';
+		return {
+			enrolled: true,
+			already_scanned: false,
+			student: { student_id: studentNumber, name: 'Jose Rizal', section: 'A' },
+		};
+	},
 };
 
 // Session CRUD (professor) — real routes on features/session/router.py.
@@ -315,6 +346,59 @@ export const AuthChangePasswordEndpoint: EndpointDef<void> = {
 	mock: () => undefined,
 };
 
+// Forgot-password recovery (ADR-056). Four steps against the live backend
+// (features/auth/router.py + service.py):
+//  1. POST /auth/forgot-password {email} -> {question, set} (decoy question
+//     for unknown emails — always render it, never hint at existence).
+//  2. POST /auth/forgot-password/verify {email, answer} -> {recovery_token}
+//     (5-min type=recovery JWT; 400 security_answer_invalid,
+//     423 recovery_locked after repeated failures).
+//  3. POST /auth/otp/request {email, purpose=forget_password, recovery_token}
+//     -> 204, then POST /auth/otp/verify {email, purpose, code} -> 204
+//     (existing AuthOtpRequest/Verify defs; pass purpose + recovery_token).
+//  4. POST /auth/reset-password {email, otp_code, new_password} -> 204
+//     (server re-verifies the OTP). Turnstile is sent as null — the backend
+//     no-ops when its secret is empty.
+export interface ForgotPasswordResponse {
+	question: string;
+	set: boolean;
+}
+
+export const ForgotPasswordEndpoint: EndpointDef<ForgotPasswordResponse> = {
+	url: '/auth/forgot-password',
+	method: 'POST',
+	mock: () => ({
+		question: 'What was the name of your first pet?',
+		set: true,
+	}),
+};
+
+export interface ForgotPasswordVerifyResponse {
+	recovery_token: string;
+}
+
+export const ForgotPasswordVerifyEndpoint: EndpointDef<ForgotPasswordVerifyResponse> = {
+	url: '/auth/forgot-password/verify',
+	method: 'POST',
+	mock: () => ({ recovery_token: 'mock-recovery-token' }),
+};
+
+export const ResetPasswordEndpoint: EndpointDef<void> = {
+	url: '/auth/reset-password',
+	method: 'POST',
+	mock: () => undefined,
+};
+
+// Set/update security question (authenticated) —
+// POST /auth/security-question {question, answer} -> 204. The question is
+// stored server-side (plaintext under a legacy column name); only the answer
+// is hashed. Registration sets the first pair; this updates it.
+export const SecurityQuestionEndpoint: EndpointDef<void> = {
+	url: '/auth/security-question',
+	method: 'POST',
+	mock: () => undefined,
+};
+
 // --- Student ----------------------------------------------------------------
 
 export const StudentProfileEndpoint: EndpointDef<StudentProfileResponse> = {
@@ -408,6 +492,67 @@ export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
 	}),
 };
 
+// Student excuse requests — live on features/excuse/student_router.py.
+// Submit creates a pending request (201); the professor reviews it in the
+// queue. Reason floor is 20 chars here (REASON_MIN_LENGTH_STUDENT), not the
+// professor 10. Attachments expect presigned-upload URLs (D24) — the UI
+// collects no files until that flow lands, so submits are reason-only.
+// List/detail read the student's own rows (a 404 doubles as not-yours).
+export interface StudentExcuseSubmitResponse {
+	id: number;
+	status: string;
+	requested_at: string;
+}
+
+export const StudentExcuseSubmitEndpoint: EndpointDef<StudentExcuseSubmitResponse> = {
+	url: '/student/excuse-requests',
+	method: 'POST',
+	mock: () => ({
+		id: Math.floor(Math.random() * 10000) + 1,
+		status: 'pending',
+		requested_at: new Date().toISOString(),
+	}),
+};
+
+export interface StudentExcuseItemResponse {
+	id: number;
+	student_id: number;
+	session_id: number;
+	initiated_by: string;
+	initiated_via: string;
+	reason: string;
+	attachment_urls: string[] | null;
+	status: string;
+	requested_at: string;
+	reviewed_by: number | null;
+	reviewed_at: string | null;
+	review_notes: string | null;
+}
+
+export const StudentExcuseListEndpoint: EndpointDef<Paginated<StudentExcuseItemResponse>> = {
+	url: '/student/excuse-requests',
+	method: 'GET',
+	mock: () => ({ items: [], total: 0, page: 1, size: 20 }),
+};
+
+export const StudentExcuseDetailEndpoint: EndpointDef<StudentExcuseItemResponse> = {
+	url: '/student/excuse-requests',
+	method: 'GET',
+	mock: (_params, suffix) => ({
+		id: parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '0', 10) || 0,
+		student_id: 0,
+		session_id: 0,
+		initiated_by: 'student',
+		initiated_via: 'request',
+		reason: '',
+		attachment_urls: null,
+		status: 'pending',
+		requested_at: new Date().toISOString(),
+		reviewed_by: null,
+		reviewed_at: null,
+		review_notes: null,
+	}),
+};
 // Student face-embedding pull (D29) — live on features/student/router.py
 // (GET /student/me/face-embedding?current_version=N). 200 carries the
 // base64 blob for a newer version; 204 (client resolves to undefined) means
@@ -421,6 +566,47 @@ export const StudentFaceEmbeddingEndpoint: EndpointDef<StudentFaceEmbeddingRespo
 	url: '/student/me/face-embedding',
 	method: 'GET',
 	mock: () => undefined,
+};
+
+// Student schedule — live on features/student/router.py
+// (GET /student/schedule, no params; identity from the Bearer token).
+// One row per active enrollment ordered by offering_id; empty enrollments
+// return { offerings: [] }.
+export const StudentScheduleEndpoint: EndpointDef<ScheduleResponse> = {
+	url: '/student/schedule',
+	method: 'GET',
+	mock: () => ({
+		offerings: [
+			{
+				offering_id: 1,
+				course_id: 1,
+				course_code: 'CS101',
+				course_name: 'Software Engineering 1',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem 2025-2026',
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Room 301',
+				professor_name: 'John Smith',
+			},
+			{
+				offering_id: 2,
+				course_id: 2,
+				course_name: 'Data Structures',
+				course_code: 'CS102',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem 2025-2026',
+				schedule_days: 'TTh',
+				schedule_start_time: '13:00:00',
+				schedule_end_time: '14:30:00',
+				classroom_name: null,
+				professor_name: null,
+			},
+		],
+	}),
 };
 
 // --- Professor --------------------------------------------------------------
@@ -2340,8 +2526,11 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 // no student identity, course labels, or original status — those join
 // client-side in features/excuse/service.ts (same convention as the professor
 // attendance ledger). Review is POST with the id riding the suffix
-// (`/{rid}/review`). Quick-excuse stays mock-only until the backend can
-// resolve a typed student number to an integer student_id, so it has no def.
+// (`/{rid}/review`). Per-record actions ride
+// `/professor/sessions/{sid}/attendance/{stid}/excuse` (POST quick, PATCH
+// edit, DELETE revoke); bulk rides `/{sid}/excuse-all-absent`. Like the
+// queue defs these carry no `mock`: mock mode is served by the in-memory
+// store in features/excuse/service.ts (see api/client.ts stub fallback).
 export interface ExcuseRequestReadResponse {
 	id: number;
 	student_id: number;
@@ -2372,6 +2561,60 @@ export const ExcuseReviewEndpoint: EndpointDef<ExcuseRequestReadResponse> = {
 	method: 'POST',
 };
 
+// Professor-initiated excuse (Path A quick / Path B with evidence) —
+// POST /professor/sessions/{sid}/attendance/{stid}/excuse. Path is chosen
+// server-side by presence of the `attachment_urls` key (absent → quick,
+// present → evidence); Path B stays unwired client-side until the S3
+// presigned upload flow (D24) lands, so the UI sends reason-only bodies.
+export interface ExcuseActionResponse {
+	excuse_request_id: number;
+	status: string;
+	original_status: string | null;
+	new_status: string;
+}
+
+export const ExcuseQuickEndpoint: EndpointDef<ExcuseActionResponse> = {
+	url: '/professor/sessions',
+	method: 'POST',
+};
+
+// Edit a professor-issued excuse —
+// PATCH /professor/sessions/{sid}/attendance/{stid}/excuse
+// { reason?: 10..2000 chars, review_notes?: ≤2000 } (at least one required).
+export interface ExcuseEditBody {
+	reason?: string;
+	review_notes?: string;
+}
+
+export const ExcuseEditEndpoint: EndpointDef<ExcuseRequestReadResponse> = {
+	url: '/professor/sessions',
+	method: 'PATCH',
+};
+
+// Revoke a professor-issued excuse —
+// DELETE /professor/sessions/{sid}/attendance/{stid}/excuse (no body).
+// Sets the excuse rejected and restores attendance to original_status.
+export interface ExcuseRevokeResponse {
+	reverted_to: string | null;
+}
+
+export const ExcuseRevokeEndpoint: EndpointDef<ExcuseRevokeResponse> = {
+	url: '/professor/sessions',
+	method: 'DELETE',
+};
+
+// Excuse all absent records in a session (idempotent) —
+// POST /professor/sessions/{sid}/excuse-all-absent { reason: 10..2000 }.
+export interface ExcuseBulkResponse {
+	excused_count: number;
+	reason: string;
+}
+
+export const ExcuseBulkEndpoint: EndpointDef<ExcuseBulkResponse> = {
+	url: '/professor/sessions',
+	method: 'POST',
+};
+
 // Endpoint registry
 // Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
@@ -2379,6 +2622,8 @@ export const endpoints = {
 	sessionQR: SessionQREndpoint,
 	// Attendance scan
 	attendanceScan: AttendanceScanEndpoint,
+	// Scan precheck (D27 step-2 gate, read-only)
+	attendancePrecheck: AttendancePrecheckEndpoint,
 	// Session CRUD
 	sessionList: SessionListEndpoint,
 	sessionCreate: SessionCreateEndpoint,
@@ -2396,17 +2641,30 @@ export const endpoints = {
 	authMe: AuthMeEndpoint,
 	authMfaVerify: AuthMfaVerifyEndpoint,
 	authChangePassword: AuthChangePasswordEndpoint,
+	authForgotPassword: ForgotPasswordEndpoint,
+	authForgotPasswordVerify: ForgotPasswordVerifyEndpoint,
+	authResetPassword: ResetPasswordEndpoint,
+	authSecurityQuestion: SecurityQuestionEndpoint,
 	// Student
 	studentProfile: StudentProfileEndpoint,
 	studentDashboard: StudentDashboardEndpoint,
 	studentHistory: StudentHistoryEndpoint,
 	studentFaceEmbedding: StudentFaceEmbeddingEndpoint,
+	studentSchedule: StudentScheduleEndpoint,
+	studentExcuseSubmit: StudentExcuseSubmitEndpoint,
+	studentExcuseList: StudentExcuseListEndpoint,
+	studentExcuseDetail: StudentExcuseDetailEndpoint,
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
 	// Professor excuse queue (list + review; quick-excuse stays mock-only)
 	excuseList: ExcuseListEndpoint,
 	excuseReview: ExcuseReviewEndpoint,
+	// Professor per-record excuse actions + bulk (suffix carries the ids)
+	excuseQuick: ExcuseQuickEndpoint,
+	excuseEdit: ExcuseEditEndpoint,
+	excuseRevoke: ExcuseRevokeEndpoint,
+	excuseBulk: ExcuseBulkEndpoint,
 	// Admin system settings (mock-only until the backend lands)
 	systemSettings: SystemSettingsGetEndpoint,
 	systemSettingsPatch: SystemSettingsPatchEndpoint,

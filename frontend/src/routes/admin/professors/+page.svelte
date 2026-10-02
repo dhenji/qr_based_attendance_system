@@ -20,7 +20,7 @@
 	} from '$lib/features/admin/schema';
 	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
 	import { goto } from '$app/navigation';
-	import { adminProfessor } from '$lib/shared/constants/routes';
+	import { adminProfessor, Routes } from '$lib/shared/constants/routes';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
 	// the roster seeds the records professors claim at registration. Columns:
@@ -220,6 +220,9 @@
 			<p class="muted">Seeded records professors claim at registration · {adminProfessorsState.total} total</p>
 		</div>
 		<div class="header-actions">
+			<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROFESSORS_ARCHIVE)}>
+				Archive
+			</button>
 			<button class="btn btn-primary" data-testid="add-professor" onclick={openCreate}>
 				<AppIcon name="plus" size={18} />
 				Add

@@ -1,10 +1,13 @@
 <script lang="ts">
 	import {
+		editExcuse,
 		listExcuseRequests,
 		quickExcuse,
+		revokeExcuse,
 		reviewExcuseRequest,
 		type ExcuseFilters
 	} from '$lib/features/excuse/service';
+	import { listSessions } from '$lib/features/session/service';
 	import { isMockMode } from '$lib/api/client';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 	import {
@@ -80,6 +83,26 @@
 	let quickReason = $state('');
 	let quickBusy = $state(false);
 	let quickError = $state<string | null>(null);
+	// Real sessions for the quick-excuse picker (warmed when the modal
+	// opens; falls back to the course directory when the list is empty).
+	let quickSessions = $state<Array<{ id: number; code: string }>>([]);
+	let quickSessionId = $state<number | null>(null);
+
+	// Detail-modal edit/revoke for professor-issued rows (quick /
+	// prof_with_evidence carry integer ids; student requests 404 on edit
+	// server-side, so those buttons stay hidden for them).
+	let editMode = $state(false);
+	let editReason = $state('');
+	let editNotes = $state('');
+	let editBusy = $state(false);
+	let editError = $state<string | null>(null);
+	let revokeAsk = $state(false);
+	let revokeBusy = $state(false);
+	let revokeError = $state<string | null>(null);
+
+	const canModify = (row: QueueRow): boolean =>
+		row.status === 'approved' &&
+		(row.initiatedVia === 'quick' || row.initiatedVia === 'prof_with_evidence');
 
 	let notice = $state<string | null>(null);
 
@@ -160,13 +183,21 @@
 		selected = row;
 		reviewNotes = '';
 		reviewError = null;
+		editMode = false;
+		editReason = row.reason;
+		editNotes = row.reviewNotes ?? '';
+		editError = null;
+		revokeAsk = false;
+		revokeError = null;
 	};
 
 	const closeDetail = () => {
-		if (reviewBusy) return;
+		if (reviewBusy || editBusy || revokeBusy) return;
 		selected = null;
 		reviewNotes = '';
 		reviewError = null;
+		editMode = false;
+		revokeAsk = false;
 	};
 
 	const doReview = async (decision: 'approved' | 'rejected') => {
@@ -194,6 +225,18 @@
 	const openQuick = () => {
 		quickOpen = true;
 		quickError = null;
+		// Warm real sessions so the excuse attaches to an actual session id
+		// instead of a fabricated one (the submit itself stays in-memory:
+		// typed numbers cannot resolve to integer ids without backend help).
+		void listSessions({ size: 50 })
+			.then(({ items }) => {
+				if (items.length === 0) return;
+				quickSessions = items.map((item) => ({ id: item.id, code: item.sessionCode }));
+				if (quickSessionId === null || !quickSessions.some((s) => s.id === quickSessionId)) {
+					quickSessionId = quickSessions[0].id;
+				}
+			})
+			.catch(() => undefined);
 	};
 
 	const closeQuick = () => {
@@ -208,14 +251,15 @@
 		quickError = null;
 		try {
 			const offering = directory.find((c) => c.courseCode === quickCourse);
+			const picked = quickSessions.find((s) => s.id === quickSessionId) ?? null;
 			const created = await quickExcuse({
 				studentNumber: quickStudentNumber,
 				studentName: quickStudentName || quickStudentNumber,
 				section: offering?.section ?? '—',
 				courseCode: quickCourse,
 				courseName: offering?.courseName ?? quickCourse,
-				sessionId: offering?.offeringId ?? 1,
-				sessionCode: 'QUICK',
+				sessionId: picked?.id ?? offering?.offeringId ?? 1,
+				sessionCode: picked?.code ?? 'QUICK',
 				originalStatus: quickOriginal,
 				reason: quickReason
 			});
@@ -231,6 +275,46 @@
 			quickError = error instanceof Error ? error.message : 'Quick-excuse failed.';
 		} finally {
 			quickBusy = false;
+		}
+	};
+
+	const doEditExcuse = async () => {
+		if (!selected || editBusy) return;
+		editBusy = true;
+		editError = null;
+		try {
+			const updated = await editExcuse(selected, {
+				reason: editReason,
+				reviewNotes: editNotes
+			});
+			selected = updated;
+			editMode = false;
+			notice = `Excuse #${updated.id} updated.`;
+			reloadToken += 1;
+		} catch (error) {
+			editError = error instanceof Error ? error.message : 'Edit failed.';
+		} finally {
+			editBusy = false;
+		}
+	};
+
+	const doRevokeExcuse = async () => {
+		if (!selected || revokeBusy) return;
+		revokeBusy = true;
+		revokeError = null;
+		try {
+			const result = await revokeExcuse(selected);
+			selected = { ...selected, status: 'rejected' };
+			revokeAsk = false;
+			notice =
+				result.revertedTo !== null
+					? `Excuse #${selected.id} revoked — record reverted to ${result.revertedTo}.`
+					: `Excuse #${selected.id} revoked.`;
+			reloadToken += 1;
+		} catch (error) {
+			revokeError = error instanceof Error ? error.message : 'Revoke failed.';
+		} finally {
+			revokeBusy = false;
 		}
 	};
 
@@ -517,9 +601,111 @@
 					</button>
 				</div>
 			{:else}
-				<div class="modal-actions">
-					<button class="btn btn-ghost" type="button" onclick={closeDetail}>Close</button>
-				</div>
+				{#if canModify(selected)}
+					{#if editMode}
+						<label class="form-label" for="edit-reason">Reason (min 10 chars)</label>
+						<textarea
+							id="edit-reason"
+							class="form-input area"
+							rows={3}
+							bind:value={editReason}
+						></textarea>
+						<label class="form-label" for="edit-notes">Review notes</label>
+						<textarea
+							id="edit-notes"
+							class="form-input area"
+							rows={2}
+							placeholder="Optional context for the change…"
+							bind:value={editNotes}
+						></textarea>
+						{#if editError}
+							<p class="error">{editError}</p>
+						{/if}
+						<div class="modal-actions">
+							<button
+								class="btn btn-ghost"
+								type="button"
+								disabled={editBusy}
+								onclick={() => {
+									editMode = false;
+									editReason = selected?.reason ?? '';
+									editNotes = selected?.reviewNotes ?? '';
+									editError = null;
+								}}
+							>
+								Cancel
+							</button>
+							<button
+								class="btn btn-primary"
+								type="button"
+								disabled={editBusy}
+								onclick={() => void doEditExcuse()}
+							>
+								{editBusy ? 'Saving…' : 'Save'}
+							</button>
+						</div>
+					{:else if revokeAsk}
+						<p class="modal-sub">
+							Revoke this excuse? The attendance record reverts to its original
+							status. This cannot be undone from here.
+						</p>
+						{#if revokeError}
+							<p class="error">{revokeError}</p>
+						{/if}
+						<div class="modal-actions">
+							<button
+								class="btn btn-ghost"
+								type="button"
+								disabled={revokeBusy}
+								onclick={() => {
+									revokeAsk = false;
+									revokeError = null;
+								}}
+							>
+								Cancel
+							</button>
+							<button
+								class="btn btn-danger"
+								type="button"
+								disabled={revokeBusy}
+								onclick={() => void doRevokeExcuse()}
+							>
+								{revokeBusy ? 'Revoking…' : 'Revoke excuse'}
+							</button>
+						</div>
+					{:else}
+						{#if revokeError}
+							<p class="error">{revokeError}</p>
+						{/if}
+						<div class="modal-actions">
+							<button class="btn btn-ghost" type="button" onclick={closeDetail}>Close</button>
+							<button
+								class="btn btn-secondary"
+								type="button"
+								onclick={() => {
+									editMode = true;
+									editError = null;
+								}}
+							>
+								Edit
+							</button>
+							<button
+								class="btn btn-danger"
+								type="button"
+								onclick={() => {
+									revokeAsk = true;
+									revokeError = null;
+								}}
+							>
+								Revoke
+							</button>
+						</div>
+					{/if}
+				{:else}
+					<div class="modal-actions">
+						<button class="btn btn-ghost" type="button" onclick={closeDetail}>Close</button>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</div>
@@ -557,8 +743,22 @@
 						{/each}
 					</select>
 				</div>
+			{#if quickSessions.length > 0}
 				<div class="field">
-					<label class="form-label" for="quick-original">Original status</label>
+					<label class="form-label" for="quick-session">Session</label>
+					<select
+						id="quick-session"
+						class="form-input"
+						bind:value={quickSessionId}
+					>
+						{#each quickSessions as session (session.id)}
+							<option value={session.id}>#{session.id} · {session.code}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
+			<div class="field">
+				<label class="form-label" for="quick-original">Original status</label>
 					<select id="quick-original" class="form-input" bind:value={quickOriginal}>
 						{#each originalOptions as option (option)}
 							<option value={option}>{option}</option>

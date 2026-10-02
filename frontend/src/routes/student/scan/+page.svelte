@@ -5,6 +5,7 @@
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import {
+		precheckScan,
 		submitAttendanceScan,
 		validateGPS,
 		verifySessionCode,
@@ -25,11 +26,23 @@
 	import { formatTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
-	type Step = 'entry' | 'qr' | 'liveness';
+	type Step = 'entry' | 'id' | 'qr' | 'liveness';
 
 	let sessionCode = $state('');
 	let session = $state<SessionVerification | null>(null);
 	let step = $state<Step>('entry');
+	// D27 step-2 ID gate: the number is editable and compared server-side
+	// case-insensitively (403 student_number_mismatch on spoof). Identity
+	// always resolves from the authenticated user — the input can never
+	// impersonate another student. pendingNext remembers whether the ID
+	// check was entered from manual entry (→ QR) or a QR scan (→ liveness).
+	let idNumber = $state('');
+	let checkingId = $state(false);
+	let verifiedNumber = $state('');
+	let verifiedName = $state('');
+	let pendingNext = $state<'qr' | 'liveness'>('qr');
+	let precheckFailed = $state(false);
+	let alreadyScannedStop = $state(false);
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
@@ -71,6 +84,8 @@
 		liveness_failed: 'Liveness check failed. Please try again in good lighting.',
 		face_mismatch: 'Face did not match the enrolled record. Please try again.',
 		not_enrolled: 'You are not enrolled in this course offering.',
+		student_number_mismatch: 'That ID number does not match your account.',
+		student_not_found: 'No student record found for your account. Contact an administrator.',
 		session_expired: 'This session has closed for scanning.',
 		session_not_found: 'Session not found. Check the code and try again.',
 	};
@@ -197,12 +212,15 @@
 			}).catch(() => undefined);
 			showFailure = false;
 			rejectionReason = '';
-			if (openScanner) goToQr();
-			else startLiveness();
+			precheckFailed = false;
+			alreadyScannedStop = false;
+			if (openScanner) goToId('qr');
+			else goToId('liveness');
 		} catch (error) {
 			// Offline with a fresh cached config for this code: the session was
 			// verified before the signal dropped, so the scan may proceed —
-			// the server re-validates everything on sync.
+			// the server re-validates everything on sync. Precheck is a server
+			// gate and cannot run offline, so it is skipped here.
 			if (isNetworkError(error)) {
 				const cached = await getCachedSession(normalizedCode).catch(() => null);
 				if (cached) {
@@ -235,6 +253,52 @@
 		void verifyCode(code, false);
 	};
 
+	// D27 step-2 gate: enrollment + duplicate check before GPS/face run.
+	// Flags (not raises) enrolled/already_scanned; hard-stops on both.
+	// Offline skips the gate — the server re-validates on submit/sync.
+	const checkId = async () => {
+		if (!session || checkingId) return;
+		const entered = idNumber.trim();
+		if (!entered) {
+			scanError = 'Enter your student ID number to continue.';
+			return;
+		}
+
+		checkingId = true;
+		scanError = null;
+		try {
+			const result = await precheckScan({ sessionId: session.sessionId, studentNumber: entered });
+			if (!result.enrolled) {
+				precheckFailed = true;
+				rejectionReason = SCAN_ERROR_MESSAGES.not_enrolled;
+				showFailure = true;
+				return;
+			}
+			if (result.alreadyScanned) {
+				precheckFailed = true;
+				alreadyScannedStop = true;
+				rejectionReason = SCAN_ERROR_MESSAGES.duplicate_scan;
+				showFailure = true;
+				return;
+			}
+			verifiedNumber = entered;
+			verifiedName = result.studentName;
+			if (pendingNext === 'qr') goToQr();
+			else startLiveness();
+		} catch (error) {
+			if (isNetworkError(error)) {
+				// Offline: proceed without the gate; submit queues for sync.
+				verifiedNumber = entered;
+				if (pendingNext === 'qr') goToQr();
+				else startLiveness();
+				return;
+			}
+			scanError = toUserMessage(error, 'Unable to check your ID number');
+		} finally {
+			checkingId = false;
+		}
+	};
+
 	const goToQr = () => {
 		qrActive = false;
 		livenessActive = false;
@@ -242,6 +306,22 @@
 		showFailure = false;
 		step = 'qr';
 		showPermission = true;
+	};
+
+	const goToId = (next: 'qr' | 'liveness') => {
+		qrActive = false;
+		livenessActive = false;
+		showSuccess = false;
+		showFailure = false;
+		precheckFailed = false;
+		alreadyScannedStop = false;
+		verifiedNumber = '';
+		verifiedName = '';
+		// Prefill from the signed-in profile; the student may correct it —
+		// the backend compares case-insensitively and 403s on mismatch.
+		if (!idNumber) idNumber = studentNumber;
+		pendingNext = next;
+		step = 'id';
 	};
 
 	const startLiveness = () => {
@@ -267,6 +347,10 @@
 		showPermission = false;
 		showSuccess = false;
 		showFailure = false;
+		precheckFailed = false;
+		alreadyScannedStop = false;
+		verifiedNumber = '';
+		verifiedName = '';
 		session = null;
 		scanError = null;
 		rejectionReason = '';
@@ -309,7 +393,10 @@
 			showFailure = true;
 			return;
 		}
-		if (!studentNumber) {
+		// Prefer the precheck-verified number; fall back to the profile when
+		// the gate was skipped offline.
+		const submitNumber = verifiedNumber || studentNumber;
+		if (!submitNumber) {
 			rejectionReason = 'Student profile is unavailable. Reload and try again.';
 			showFailure = true;
 			return;
@@ -341,7 +428,7 @@
 			reachedSubmit = true;
 			const result = await submitAttendanceScan({
 				sessionId: session.sessionId,
-				studentNumber,
+				studentNumber: submitNumber,
 				gps,
 				livenessEvidence,
 				scannedAt: new Date().toISOString(),
@@ -378,7 +465,7 @@
 						payload: {
 							sessionId: session.sessionId,
 							sessionCode,
-							studentNumber,
+							studentNumber: submitNumber,
 							gps,
 							livenessEvidence,
 							scannedAt: new Date().toISOString()
@@ -474,8 +561,49 @@
 			</section>
 
 			<p class="footnote">
-				Verify the session code to open the QR scanner, then complete face liveness.
+				Verify the session code, confirm your student ID, then open the QR scanner and complete face liveness.
 			</p>
+		</div>
+	{:else if step === 'id'}
+		<div class="page">
+			<div class="page-header">
+				<button class="back-btn" onclick={backToEntry}>
+					← <span>Back</span>
+				</button>
+				<h1>Confirm Student ID</h1>
+			</div>
+
+			<!-- D27 step 2: ID-number gate (enrollment + duplicate check) -->
+			<section class="card">
+				<h2 class="section-title">
+					{session?.courseCode ?? 'Session'}{session ? ` — ${session.courseName}` : ''}
+				</h2>
+				<div class="code-row">
+					<input
+						class="form-input code-input"
+						placeholder="Student ID (e.g. 24-0001)"
+						aria-label="Student ID number"
+						value={idNumber}
+						oninput={(e) => { idNumber = (e.target as HTMLInputElement).value.toUpperCase(); }}
+						onkeydown={(e) => { if (e.key === 'Enter') void checkId(); }}
+					/>
+					<button
+						class="btn-secondary"
+						disabled={checkingId}
+						onclick={() => void checkId()}
+					>
+						{checkingId ? 'Checking…' : 'Check'}
+					</button>
+				</div>
+				{#if verifiedName}
+					<p class="footnote">Checked in as {verifiedName}.</p>
+				{:else}
+					<p class="footnote">
+						Prefilled from your signed-in profile — correct it if needed. The server
+						compares it to your account and rejects mismatches.
+					</p>
+				{/if}
+			</section>
 		</div>
 	{:else if step === 'qr'}
 		<div class="page">
@@ -618,9 +746,28 @@
 				<p class="reject-desc">
 					The attendance service rejected this scan. You can try again.
 				</p>
-				<button class="btn-primary try-again" onclick={retryLiveness}>
-					Try Again
-				</button>
+				{#if alreadyScannedStop}
+					<button class="btn-primary try-again" onclick={() => goto(Routes.HISTORY)}>
+						View History
+					</button>
+					<button
+						class="btn-primary try-again"
+						onclick={() => { showFailure = false; alreadyScannedStop = false; precheckFailed = false; }}
+					>
+						Back
+					</button>
+				{:else if precheckFailed}
+					<button
+						class="btn-primary try-again"
+						onclick={() => { showFailure = false; precheckFailed = false; }}
+					>
+						Try Again
+					</button>
+				{:else}
+					<button class="btn-primary try-again" onclick={retryLiveness}>
+						Try Again
+					</button>
+				{/if}
 			</div>
 		</div>
 	{/if}

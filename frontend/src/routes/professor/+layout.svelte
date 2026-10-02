@@ -17,10 +17,8 @@
 		await restoreSession();
 	});
 
-	// Dashboard, My Courses, Sessions, History, Attendance, Excuses,
-	// Reports, Profile, and Settings exist so far. The rest are declared
-	// disabled so the sidebar shows the shape of the portal without offering
-	// dead links.
+	// Professor portal nav: Dashboard, My Courses, Sessions, History,
+	// Attendance, Excuses, Reports, Profile, and Settings are all live.
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.PROFESSOR_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'My Courses', path: Routes.PROFESSOR_COURSES, enabled: true, icon: 'courses' },
@@ -115,27 +113,18 @@
 	<div class="body">
 		<aside class="sidebar" class:collapsed>
 			{#each navItems as item (item.label)}
-				{#if item.enabled}
-					<a
-						class="nav-link"
-						class:active={isActive(item.path)}
-						href={item.path}
-						title={item.label}
-						aria-current={isActive(item.path) ? 'page' : undefined}
-					>
-						<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							{@html iconPaths[item.icon]}
-						</svg>
-						<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
-					</a>
-				{:else}
-					<span class="nav-link disabled" title={`${item.label} (coming soon)`}>
-						<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							{@html iconPaths[item.icon]}
-						</svg>
-						<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
-					</span>
-				{/if}
+				<a
+					class="nav-link"
+					class:active={isActive(item.path)}
+					href={item.path}
+					title={item.label}
+					aria-current={isActive(item.path) ? 'page' : undefined}
+				>
+					<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						{@html iconPaths[item.icon]}
+					</svg>
+					<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
+				</a>
 			{/each}
 		</aside>
 
@@ -288,7 +277,7 @@
 		padding: 0.625rem;
 	}
 
-	.nav-link:hover:not(.disabled) {
+	.nav-link:hover {
 		background: var(--bg-hover);
 		transform: translateX(2px);
 	}
@@ -297,11 +286,6 @@
 		background: var(--accent);
 		color: var(--on-brand);
 		box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-	}
-
-	.nav-link.disabled {
-		color: #94a3b8;
-		cursor: not-allowed;
 	}
 
 	.nav-icon {
