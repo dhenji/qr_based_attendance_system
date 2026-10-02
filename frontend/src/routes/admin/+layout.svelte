@@ -25,8 +25,8 @@
 	});
 
 	// MVP nav: Dashboard, Students, Professors, Programs, Courses,
-	// Offerings, Analytics and Audit Logs are live. Settings is declared
-	// disabled so the sidebar shows the portal shape without dead links.
+	// Offerings, Analytics, Audit Logs and Settings are live (settings reads
+	// contract-shaped mocks until the system backend lands).
 	const navItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
@@ -36,7 +36,7 @@
 		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
 		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
 		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
-		{ label: 'Settings', path: Routes.ADMIN, enabled: false, icon: 'settings' },
+		{ label: 'Settings', path: Routes.ADMIN_SYSTEM_SETTINGS, enabled: true, icon: 'settings' },
 	] as const;
 
 	const iconPaths: Record<string, string> = {
