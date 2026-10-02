@@ -9,8 +9,11 @@
 		getComparisonReport,
 		getReportFilterOptions,
 		getTrendsReport,
+		initReportDirectory,
+		type ReportCourseDir,
 		type ReportFilters,
 		type ReportGranularity,
+		type ReportMeta,
 		type ReportMetric
 	} from '$lib/features/report/service';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
@@ -33,7 +36,11 @@
 	];
 	const TREND_COLORS = ['#2563eb', '#16a34a', '#9333ea', '#ca8a04', '#0d9488', '#dc2626'];
 
-	const filterOptions = getReportFilterOptions();
+	// Course directory: mock fixture until the live assignments warm it. The
+	// report queries and filter options read this, so warming it re-runs the
+	// load effect below with live identity joins.
+	let directory = $state<ReportCourseDir[]>(PROFESSOR_COURSES);
+	const filterOptions = $derived(getReportFilterOptions(directory));
 	const initialRange = defaultReportRange();
 
 	let tab = $state<Tab>('all');
@@ -54,6 +61,18 @@
 	let aggregate = $state<Awaited<ReturnType<typeof getAllCoursesReport>> | null>(null);
 	let comparison = $state<Awaited<ReturnType<typeof getComparisonReport>> | null>(null);
 	let trends = $state<Awaited<ReturnType<typeof getTrendsReport>> | null>(null);
+	let reportMeta = $state<ReportMeta>({ dataSource: 'demo', truncated: false });
+
+	$effect(() => {
+		let cancelled = false;
+		void initReportDirectory().then(({ directory: warmed }) => {
+			if (cancelled || warmed === directory) return;
+			directory = warmed;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	const requestedOfferingId = $derived.by(() => {
 		const raw = page.url.searchParams.get('offering');
@@ -75,7 +94,7 @@
 			return;
 		}
 
-		const offering = PROFESSOR_COURSES.find((item) => item.offeringId === wanted);
+		const offering = directory.find((item) => item.offeringId === wanted);
 		if (!offering) {
 			prefilteredOfferingId = null;
 			unknownOffering = true;
@@ -91,7 +110,7 @@
 	});
 
 	const availableCourses = $derived(
-		PROFESSOR_COURSES.filter(
+		directory.filter(
 			(item) =>
 				(program === 'All' || item.programCode === program) &&
 				(year === 'All' || item.yearLevelLabel === year)
@@ -124,6 +143,7 @@
 		};
 		const activeTab = tab;
 		reloadToken;
+		const activeDirectory = directory;
 
 		let cancelled = false;
 		isLoading = true;
@@ -132,21 +152,24 @@
 		const load = async () => {
 			try {
 				if (activeTab === 'all') {
-					const data = await getAllCoursesReport(query);
+					const data = await getAllCoursesReport(query, activeDirectory);
 					if (cancelled) return;
 					aggregate = data;
+					reportMeta = data.meta;
 					comparison = null;
 					trends = null;
 				} else if (activeTab === 'comparison') {
-					const data = await getComparisonReport(query);
+					const data = await getComparisonReport(query, activeDirectory);
 					if (cancelled) return;
 					comparison = data;
+					reportMeta = data.meta;
 					aggregate = null;
 					trends = null;
 				} else {
-					const data = await getTrendsReport(query);
+					const data = await getTrendsReport(query, activeDirectory);
 					if (cancelled) return;
 					trends = data;
+					reportMeta = data.meta;
 					aggregate = null;
 					comparison = null;
 				}
@@ -167,7 +190,7 @@
 	const prefilteredOffering = $derived(
 		prefilteredOfferingId === null
 			? null
-			: (PROFESSOR_COURSES.find((item) => item.offeringId === prefilteredOfferingId) ?? null)
+			: (directory.find((item) => item.offeringId === prefilteredOfferingId) ?? null)
 	);
 	const prefilterActive = $derived(
 		prefilteredOffering !== null &&
@@ -292,7 +315,18 @@
 	<header class="header">
 		<div>
 			<h1>Attendance Reports</h1>
-			<p class="muted">Mock report data until professor report endpoints land.</p>
+			<p class="muted">
+				{#if reportMeta.dataSource === 'live'}
+					Live attendance data from your session history.
+				{:else}
+					Demo report data — live session history is unavailable.
+				{/if}
+			</p>
+			{#if reportMeta.truncated}
+				<p class="warning" role="status">
+					Showing the 500 most recent sessions in this range; narrow the dates to see older ones.
+				</p>
+			{/if}
 		</div>
 	</header>
 
@@ -440,6 +474,10 @@
 								<td>{formatPercentage(item.compliance_rate * 100)}</td>
 								<td>{formatPercentage(item.participation_rate * 100)}</td>
 							</tr>
+						{:else}
+							<tr>
+								<td colspan="5" class="muted">No sessions in this range.</td>
+							</tr>
 						{/each}
 					</tbody>
 				</table>
@@ -488,6 +526,10 @@
 								<td>{formatPercentage(item.compliance_rate * 100)}</td>
 								<td>{formatPercentage(item.participation_rate * 100)}</td>
 							</tr>
+						{:else}
+							<tr>
+								<td colspan="6" class="muted">No sessions in this range.</td>
+							</tr>
 						{/each}
 					</tbody>
 				</table>
@@ -531,6 +573,10 @@
 								<td>{item.course_code}</td>
 								<td>{item.cohort}</td>
 								<td>{formatPercentage(item.rate * 100)}</td>
+							</tr>
+						{:else}
+							<tr>
+								<td colspan="4" class="muted">No sessions in this range.</td>
 							</tr>
 						{/each}
 					</tbody>

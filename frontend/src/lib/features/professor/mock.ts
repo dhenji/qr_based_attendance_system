@@ -5,9 +5,10 @@
 // features/professor/service.ts, and the sessions loop (list/create/live/
 // history) plus the attendance ledger read their real endpoints via
 // features/session/service.ts and features/attendance/service.ts — this
-// fixture no longer backs any of those. Reports and excuse-requests still
-// read it from here until their slices connect (neither has a backend route
-// yet). Kept in its own module so the remaining call sites stay readable.
+// fixture no longer backs any of those. Reports read live session history
+// first and keep this only as the PUBLIC_MOCK_MODE=true fallback (and as the
+// filter-options directory until the live assignments warm). Kept in its own
+// module so the remaining call sites stay readable.
 // The field set mirrors the GET /professor/courses contract
 // (docs/architecture/api-contracts.md) in camelCase, plus the offering columns
 // the session-create form needs (D44 moved the window defaults here from
