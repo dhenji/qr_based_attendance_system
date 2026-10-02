@@ -27,6 +27,12 @@ import type {
 	AdminStudentFilters,
 	AdminStudentResponse,
 	AdminStudentUpdatePayload,
+	AdminUser,
+	AdminUserCreatePayload,
+	AdminUserCreateResponse,
+	AdminUserFilters,
+	AdminUserResponse,
+	AdminUserRole,
 	ProfessorImportResult,
 	StudentImportResult,
 } from '$lib/shared/types';
@@ -213,6 +219,60 @@ export const importProfessors = async (file: File): Promise<ProfessorImportResul
 	const form = new FormData();
 	form.append('file', file);
 	return postForm<ProfessorImportResult>('adminProfessorImport', form);
+};
+
+// --- Users (super_admin only) --------------------------------------------------
+//
+// Wraps backend features/admin/router.py (/api/admin/users): list (search /
+// role / is_active / page / size), create (201 + temp_password returned once),
+// deactivate (PATCH /{id}/deactivate, 204, rejects self-deactivation).
+// Collection routes use the bare url (no trailing slash); the id rides the
+// `suffix`. Real API by default; mocks only when PUBLIC_MOCK_MODE=true.
+
+export const toAdminUser = (u: AdminUserResponse | AdminUserCreateResponse): AdminUser => ({
+	id: u.id,
+	email: u.email,
+	username: u.username ?? undefined,
+	role: u.role as AdminUserRole,
+	firstName: u.first_name ?? undefined,
+	lastName: u.last_name ?? undefined,
+	isActive: u.is_active,
+	mustChangePassword: u.must_change_password,
+	lastLogin: u.last_login ?? undefined,
+	createdAt: u.created_at,
+});
+
+const userParams = (f: AdminUserFilters): Record<string, string> => {
+	const params: Record<string, string> = {};
+	if (f.search) params.search = f.search;
+	if (f.role) params.role = f.role;
+	if (f.is_active !== undefined) params.is_active = String(f.is_active);
+	params.page = String(f.page ?? 1);
+	params.size = String(f.size ?? 20);
+	return params;
+};
+
+export const listUsers = async (
+	filters: AdminUserFilters = {}
+): Promise<{ items: AdminUser[]; total: number; page: number; size: number }> => {
+	const response = await get<Paginated<AdminUserResponse>>('adminUsers', userParams(filters));
+	return {
+		items: (response.items ?? []).map(toAdminUser),
+		total: response.total ?? 0,
+		page: response.page ?? 1,
+		size: response.size ?? 20,
+	};
+};
+
+export const createUser = async (
+	payload: AdminUserCreatePayload
+): Promise<{ user: AdminUser; tempPassword: string }> => {
+	const response = await post<AdminUserCreateResponse>('adminUserCreate', payload);
+	return { user: toAdminUser(response), tempPassword: response.temp_password };
+};
+
+export const deactivateUser = async (id: number): Promise<void> => {
+	await patch<void>('adminUserDeactivate', undefined, undefined, `/${id}/deactivate`);
 };
 
 // --- Offerings (professor assignment picker) ---------------------------------

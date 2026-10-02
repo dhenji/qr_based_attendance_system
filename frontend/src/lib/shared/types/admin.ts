@@ -511,3 +511,61 @@ export interface ProfessorImportResult {
 	duplicates: number;
 	errors: CsvImportError[];
 }
+
+// --- Admin users (super_admin only, D60) --------------------------------------
+//
+// Wire shapes mirror backend/src/features/admin/schema.py exactly
+// (snake_case): AdminUserRead + AdminUserCreateResponse (temp_password
+// returned once on create). Only super_admin can list/create/deactivate;
+// creatable roles are admin/professor/student (super_admin is seeded, 422).
+
+export type AdminUserRole = 'super_admin' | 'admin' | 'professor' | 'student';
+
+export type AdminCreatableRole = 'admin' | 'professor' | 'student';
+
+export interface AdminUserResponse {
+	id: number;
+	email: string;
+	username: string | null;
+	role: AdminUserRole;
+	first_name: string | null;
+	last_name: string | null;
+	is_active: boolean;
+	must_change_password: boolean;
+	last_login: string | null;
+	created_at: string;
+}
+
+export interface AdminUserCreateResponse extends AdminUserResponse {
+	temp_password: string;
+}
+
+export interface AdminUser {
+	id: number;
+	email: string;
+	username?: string;
+	role: AdminUserRole;
+	firstName?: string;
+	lastName?: string;
+	isActive: boolean;
+	mustChangePassword: boolean;
+	lastLogin?: string;
+	createdAt: string;
+}
+
+export interface AdminUserCreatePayload {
+	email: string;
+	role: AdminCreatableRole;
+	first_name: string;
+	middle_name?: string;
+	last_name: string;
+	username?: string;
+}
+
+export interface AdminUserFilters {
+	search?: string;
+	role?: AdminUserRole;
+	is_active?: boolean;
+	page?: number;
+	size?: number;
+}

@@ -6,6 +6,7 @@
 		authState,
 		doLogout,
 		isAdmin,
+		isSuperAdmin,
 		restoreSession,
 	} from '$lib/features/auth/store.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -26,8 +27,10 @@
 
 	// MVP nav: Dashboard, Students, Professors, Programs, Courses,
 	// Offerings, Analytics, Audit Logs and Settings are live (settings reads
-	// contract-shaped mocks until the system backend lands).
-	const navItems = [
+	// contract-shaped mocks until the system backend lands). Users is
+	// super_admin-only (backend require_role(SUPER_ADMIN)) and stays hidden
+	// for plain admins.
+	const baseNavItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
 		{ label: 'Professors', path: Routes.ADMIN_PROFESSORS, enabled: true, icon: 'professors' },
@@ -38,6 +41,13 @@
 		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN_SYSTEM_SETTINGS, enabled: true, icon: 'settings' },
 	] as const;
+
+	const navItems = $derived([
+		...baseNavItems,
+		...(isSuperAdmin()
+			? [{ label: 'Users', path: Routes.ADMIN_USERS, enabled: true, icon: 'users' } as const]
+			: []),
+	]);
 
 	const iconPaths: Record<string, string> = {
 		dashboard:
@@ -56,6 +66,8 @@
 			'<path d="M4 20h16"/><path d="M7 20v-6"/><path d="M12 20V6"/><path d="M17 20v-9"/>',
 		audit:
 			'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
+		users:
+			'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6"/><path d="M18 14.8c2.1.7 3.5 2.4 3.5 5.2"/>',
 		settings:
 			'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
 	};
