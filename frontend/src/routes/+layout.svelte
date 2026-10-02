@@ -1,14 +1,15 @@
 <script lang="ts">
-	import favicon from '$lib/assets/favicon.svg';
+	import InstallPrompt from '$lib/components/InstallPrompt.svelte';
 
 	let { children } = $props();
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" type="image/svg+xml" href="/qr-attend-logo.svg" />
 </svelte:head>
 
 {@render children()}
+<InstallPrompt />
 
 <style>
 	:global(html) {
