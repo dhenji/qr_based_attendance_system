@@ -3,10 +3,12 @@
 //
 // Real API by default; in-memory mock only when PUBLIC_MOCK_MODE=true (see
 // api/client.ts). List + review hit the live backend
-// (features/excuse/professor_router.py); quick-excuse stays mock-only because
-// its route needs an integer student_id in the path and no professor endpoint
-// returns student ids (only numbers/names) — there is nothing to resolve a
-// typed student number with, so wiring it needs backend help.
+// (features/excuse/professor_router.py), as do quick/edit/revoke/bulk by
+// integer id. The typed-number quick flow stays in-memory: no professor
+// endpoint returns integer student ids (only numbers/names), so a typed
+// student number cannot be resolved to the id the per-record routes need
+// without backend help. Path B (evidence upload) waits on the S3 presigned
+// flow (D24).
 //
 // The list row is deliberately bare (ids only): session/course labels join
 // client-side from the session + courses directory, the same convention as
@@ -23,9 +25,13 @@
 //   -> { excuse_request_id, status: "approved", original_status, new_status }
 
 import { EXCUSE_REQUESTS } from '$lib/features/excuse/mock';
-import { get, isMockMode, post } from '$lib/api/client';
+import { del, get, isMockMode, patch, post } from '$lib/api/client';
 import type {
+	ExcuseActionResponse,
+	ExcuseBulkResponse,
+	ExcuseEditBody,
 	ExcuseRequestReadResponse,
+	ExcuseRevokeResponse,
 	ExcuseReviewBody,
 	Paginated,
 } from '$lib/api/endpoints';
@@ -131,6 +137,7 @@ const mapReadRow = (read: ExcuseRequestReadResponse): ExcuseRequest => {
 	const identity = session ? courseIdentityFor(session.offeringId) : null;
 	return {
 		id: read.id,
+		studentId: read.student_id,
 		studentNumber: `#${read.student_id}`,
 		studentName: `Student #${read.student_id}`,
 		section: '—',
@@ -308,10 +315,13 @@ export type QuickExcuseInput = {
 
 // quickExcuse
 // Professor-initiated excuse (Path A): creates an immediately-approved row.
-// MOCK-ONLY even in real mode: the live route needs an integer student_id in
-// the path and no professor endpoint returns student ids, so a typed student
-// number cannot be resolved without backend help. New rows live in the
-// in-memory store (visible until reload).
+//
+// Typed-number flow (queue quick modal, live-session rows): no professor
+// endpoint returns integer student ids — only numbers/names — so a typed
+// number cannot be resolved to the integer id the live route needs. That
+// flow stays in-memory (mock store below in MOCK mode; same in-memory row in
+// real mode with a clear note), while quickExcuseByIds below serves callers
+// that already hold integer ids (queue rows carry student_id).
 // Reason min 10 chars per excuse-workflow.md Path A modal spec. Path B
 // (prof_with_evidence file upload) stays a TODO until S3 presigned flow (D24)
 // exists — the service accepts attachment names but the page does not collect
@@ -325,6 +335,10 @@ export const quickExcuse = async (input: QuickExcuseInput): Promise<ExcuseReques
 	const now = new Date().toISOString();
 	const row: ExcuseRequest = {
 		id: nextId,
+		// Unknown: typed numbers cannot be resolved to integer ids without
+		// backend help (see above). Edit/revoke on such rows throw a clear
+		// error instead of guessing an id.
+		studentId: -1,
 		studentNumber: input.studentNumber.trim(),
 		studentName: input.studentName.trim() || input.studentNumber.trim(),
 		section: (input.section ?? '').trim() || '—',
@@ -344,6 +358,170 @@ export const quickExcuse = async (input: QuickExcuseInput): Promise<ExcuseReques
 	nextId += 1;
 	store = [row, ...store];
 	return row;
+};
+
+// --- Per-record actions by integer id ---------------------------------------
+//
+// Wraps POST/PATCH/DELETE
+// /professor/sessions/{sid}/attendance/{stid}/excuse plus POST
+// /professor/sessions/{sid}/excuse-all-absent. Real API by default;
+// in-memory mock store when PUBLIC_MOCK_MODE=true (same convention as
+// list/review above). Path B (evidence upload) stays unwired until D24.
+
+const excusePathSuffix = (sessionId: number, studentId: number): string =>
+	`/${sessionId}/attendance/${studentId}/excuse`;
+
+const requireIds = (row: { studentId: number; sessionId: number }): void => {
+	if (!Number.isInteger(row.studentId) || row.studentId < 0) {
+		throw new Error('This excuse has no resolvable student record — integer ids need backend support.');
+	}
+};
+
+const requireReason = (reason: string): string => {
+	const clean = reason.trim();
+	if (clean.length < 10) throw new Error('Reason must be at least 10 characters.');
+	return clean;
+};
+
+// quickExcuseByIds — Path A quick-excuse for callers holding integer ids.
+// Returns the backend action summary (the created row id + status flip).
+export const quickExcuseByIds = async (
+	sessionId: number,
+	studentId: number,
+	reason: string
+): Promise<{ excuseRequestId: number; originalStatus: string | null; newStatus: string }> => {
+	const clean = requireReason(reason);
+	if (MOCK) {
+		const now = new Date().toISOString();
+		store = [
+			{
+				id: nextId,
+				studentId,
+				studentNumber: `#${studentId}`,
+				studentName: `Student #${studentId}`,
+				section: '—',
+				courseCode: '—',
+				courseName: '',
+				sessionId,
+				sessionCode: `S-${sessionId}`,
+				sessionDate: now,
+				initiatedVia: 'quick' as ExcuseInitiatedVia,
+				reason: clean,
+				status: 'approved',
+				originalStatus: 'unknown',
+				requestedAt: now,
+				reviewedAt: now,
+				attachmentNames: []
+			},
+			...store
+		];
+		nextId += 1;
+		return { excuseRequestId: nextId - 1, originalStatus: null, newStatus: 'excused' };
+	}
+
+	const response = await post<ExcuseActionResponse>(
+		'excuseQuick',
+		{ reason: clean },
+		undefined,
+		excusePathSuffix(sessionId, studentId)
+	);
+	countsCache = null;
+	return {
+		excuseRequestId: response.excuse_request_id,
+		originalStatus: response.original_status,
+		newStatus: response.new_status
+	};
+};
+
+// editExcuse — PATCH a professor-issued excuse (reason and/or review_notes,
+// at least one required). Returns the updated queue row.
+export const editExcuse = async (
+	row: ExcuseRequest,
+	input: { reason?: string; reviewNotes?: string }
+): Promise<ExcuseRequest> => {
+	const reason = (input.reason ?? '').trim();
+	const notes = (input.reviewNotes ?? '').trim();
+	if (reason.length > 0 && reason.length < 10)
+		throw new Error('Reason must be at least 10 characters.');
+	if (reason.length === 0 && notes.length === 0)
+		throw new Error('Provide a reason, review notes, or both.');
+
+	if (MOCK) {
+		const index = store.findIndex((item) => item.id === row.id);
+		if (index === -1) throw new Error('Excuse request not found.');
+		const updated: ExcuseRequest = {
+			...store[index],
+			reason: reason.length > 0 ? reason : store[index].reason,
+			reviewNotes: notes.length > 0 ? notes : store[index].reviewNotes
+		};
+		store[index] = updated;
+		return updated;
+	}
+
+	requireIds(row);
+	await ensureDirectory();
+	const body: ExcuseEditBody = {};
+	if (reason.length > 0) body.reason = reason;
+	if (notes.length > 0) body.review_notes = notes;
+	const read = await patch<ExcuseRequestReadResponse>(
+		'excuseEdit',
+		body,
+		undefined,
+		excusePathSuffix(row.sessionId, row.studentId)
+	);
+	countsCache = null;
+	return mapReadRow(read);
+};
+
+// revokeExcuse — DELETE a professor-issued excuse. The backend marks the
+// excuse rejected and restores attendance to original_status; returns what it
+// reverted to.
+export const revokeExcuse = async (row: ExcuseRequest): Promise<{ revertedTo: string | null }> => {
+	if (MOCK) {
+		const index = store.findIndex((item) => item.id === row.id);
+		if (index === -1) throw new Error('Excuse request not found.');
+		store[index] = { ...store[index], status: 'rejected' };
+		return { revertedTo: store[index].originalStatus };
+	}
+
+	requireIds(row);
+	const response = await del<ExcuseRevokeResponse>(
+		'excuseRevoke',
+		undefined,
+		excusePathSuffix(row.sessionId, row.studentId)
+	);
+	countsCache = null;
+	return { revertedTo: response.reverted_to };
+};
+
+// excuseAllAbsent — POST /professor/sessions/{sid}/excuse-all-absent.
+// Idempotent server-side (only `absent` rows flip; re-run excuses 0).
+export const excuseAllAbsent = async (
+	sessionId: number,
+	reason: string
+): Promise<{ excusedCount: number }> => {
+	const clean = requireReason(reason);
+	if (MOCK) {
+		let count = 0;
+		store = store.map((item) => {
+			if (item.sessionId === sessionId && item.status === 'pending' && item.originalStatus === 'absent') {
+				count += 1;
+				const now = new Date().toISOString();
+				return { ...item, status: 'approved' as const, reviewedAt: now };
+			}
+			return item;
+		});
+		return { excusedCount: count };
+	}
+
+	const response = await post<ExcuseBulkResponse>(
+		'excuseBulk',
+		{ reason: clean },
+		undefined,
+		`/${sessionId}/excuse-all-absent`
+	);
+	countsCache = null;
+	return { excusedCount: response.excused_count };
 };
 
 // resetExcuseStore — test/dev helper to restore fixtures after mutations.

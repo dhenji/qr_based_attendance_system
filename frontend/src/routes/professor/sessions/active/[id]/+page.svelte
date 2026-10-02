@@ -6,6 +6,11 @@
 		closeSession,
 		getActiveSession
 	} from '$lib/features/session/service';
+	import {
+		excuseAllAbsent,
+		quickExcuse
+	} from '$lib/features/excuse/service';
+	import { isMockMode } from '$lib/api/client';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
 
 	type LiveSession = Awaited<ReturnType<typeof getActiveSession>>;
@@ -15,8 +20,10 @@
 	const EXPIRING_SOON_SECONDS = 5 * 60;
 	const PAGE_SIZE = 10;
 
-	// No excuse actions: there are no excuse endpoints on the backend yet, so
-	// the feed is read-only and the Action column is gone with them.
+	// Excuse actions: bulk excuse-all-absent hits the live backend (it needs
+	// only the session id). Per-row quick-excuse resolves through the mock
+	// store: live feed rows carry student numbers, and no professor endpoint
+	// returns the integer student ids the per-record routes need.
 	type SortKey = 'time' | 'name' | 'status';
 	type SortDirection = 'asc' | 'desc';
 	type FeedRow = LiveSession['students'][number];
@@ -51,6 +58,89 @@
 	let sortDirection = $state<SortDirection>('asc');
 	let currentPage = $state(1);
 	let tableScroller = $state<HTMLDivElement | undefined>(undefined);
+
+	// Excuse-action modal state. Per-row excuse is mock-backed (see note
+	// above); bulk excuse-all-absent is live.
+	let excuseTarget = $state<FeedRow | null>(null);
+	let excuseReason = $state('');
+	let excuseBusy = $state(false);
+	let excuseError = $state<string | null>(null);
+	let bulkOpen = $state(false);
+	let bulkReason = $state('');
+	let bulkBusy = $state(false);
+	let bulkError = $state<string | null>(null);
+	let bulkDone = $state<string | null>(null);
+
+	const isExcusable = (status: FeedRow['status']) =>
+		status === 'absent' || status === 'late' || status === 'rejected';
+
+	const openExcuse = (row: FeedRow) => {
+		excuseTarget = row;
+		excuseReason = '';
+		excuseError = null;
+	};
+
+	const submitExcuse = async () => {
+		if (!excuseTarget || !session || excuseBusy) return;
+		const reason = excuseReason.trim();
+		if (reason.length < 10) {
+			excuseError = 'Reason must be at least 10 characters.';
+			return;
+		}
+		excuseBusy = true;
+		excuseError = null;
+		try {
+			if (!isMockMode()) {
+				// Live feed rows carry student numbers only; the per-record
+				// routes need integer ids no professor endpoint returns.
+				throw new Error(
+					'Per-student excuse needs backend support to resolve this row — use Excuse all absent or the review queue instead.'
+				);
+			}
+			await quickExcuse({
+				studentNumber: excuseTarget.studentNumber,
+				studentName: excuseTarget.name,
+				section: excuseTarget.section ?? undefined,
+				courseCode: session.offeringCode,
+				courseName: session.offeringName,
+				sessionId: session.id,
+				sessionCode: session.sessionCode,
+				originalStatus: excuseTarget.status as 'absent' | 'late' | 'rejected',
+				reason
+			});
+			excuseTarget = null;
+			reloadToken += 1;
+		} catch (error: unknown) {
+			excuseError = error instanceof Error && error.message ? error.message : 'Excuse failed.';
+		} finally {
+			excuseBusy = false;
+		}
+	};
+
+	const submitBulk = async () => {
+		if (!session || bulkBusy) return;
+		const reason = bulkReason.trim();
+		if (reason.length < 10) {
+			bulkError = 'Reason must be at least 10 characters.';
+			return;
+		}
+		bulkBusy = true;
+		bulkError = null;
+		try {
+			const result = await excuseAllAbsent(session.id, reason);
+			bulkDone =
+				result.excusedCount === 0
+					? 'No absent records to excuse — the session is already clear.'
+					: `${result.excusedCount} absent record${result.excusedCount === 1 ? '' : 's'} excused.`;
+			bulkOpen = false;
+			bulkReason = '';
+			reloadToken += 1;
+		} catch (error: unknown) {
+			bulkError = error instanceof Error && error.message ? error.message : 'Bulk excuse failed.';
+		} finally {
+			bulkBusy = false;
+		}
+	};
 
 	$effect(() => {
 		const id = sessionId;
@@ -410,6 +500,7 @@
 								<span class="sort-arrow" class:active={sortKey === 'status'} aria-hidden="true">{sortArrow('status')}</span>
 							</button>
 						</th>
+						<th scope="col"><span class="sr-only">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -424,6 +515,15 @@
 								{/if}
 							</td>
 							<td><span class="status status-{student.status}">{student.status}</span></td>
+							<td class="row-action">
+								{#if isExcusable(student.status)}
+									<button class="link" type="button" onclick={() => openExcuse(student)}>
+										Excuse
+									</button>
+								{:else if student.status === 'excused'}
+									<span class="muted">Excused</span>
+								{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -482,22 +582,29 @@
 		<section class="card excuse-all">
 			<div>
 				<h2 class="section-title">Excuse actions</h2>
-				<p class="muted">
-					Quick-excuse, editing, revoking, and bulk excuse need excuse endpoints,
-					which the backend does not expose yet. The feed above stays read-only
-					until that slice lands.
-				</p>
+				{#if bulkDone}
+					<p class="muted" role="status">{bulkDone}</p>
+				{:else}
+					<p class="muted">
+						Excuse every absent record in this session at once (idempotent —
+						re-running excuses nothing new). Per-row excuses use the mock
+						preview; the review queue handles real per-student cases.
+					</p>
+				{/if}
 			</div>
+			<button class="btn btn-secondary" type="button" onclick={() => { bulkOpen = true; bulkError = null; }}>
+				Excuse all absent
+			</button>
 		</section>
 
 		<div class="footer">
-			<button class="btn btn-secondary" type="button" disabled title="Export is the next slice">
+			<button class="btn btn-secondary" type="button" disabled title="Server-side export is not available">
 				Export Current
 			</button>
-			<button class="btn btn-secondary" type="button" disabled title="Print is the next slice">
+			<button class="btn btn-secondary" type="button" onclick={() => window.print()}>
 				Print
 			</button>
-			<button class="btn btn-secondary" type="button" disabled title="History is the next slice">
+			<button class="btn btn-secondary" type="button" onclick={() => goto(Routes.PROFESSOR_SESSIONS_HISTORY)}>
 				View All
 			</button>
 			{#if closedSession}
@@ -510,6 +617,60 @@
 				</button>
 			{/if}
 		</div>
+
+		{#if excuseTarget}
+			<div class="overlay" role="presentation">
+				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="excuse-title">
+					<h3 class="modal-title" id="excuse-title">Excuse {excuseTarget.name}</h3>
+					<p class="modal-desc">
+						{excuseTarget.studentNumber} · Section {excuseTarget.section ?? '—'} ·
+						currently {excuseTarget.status}
+					</p>
+					{#if excuseError}
+						<p class="error" role="alert">{excuseError}</p>
+					{/if}
+					<label class="field">
+						Reason (min 10 characters)
+						<textarea class="form-input" rows="3" bind:value={excuseReason}></textarea>
+					</label>
+					<div class="modal-actions">
+						<button class="btn btn-ghost" type="button" onclick={() => (excuseTarget = null)}>
+							Cancel
+						</button>
+						<button class="btn btn-primary" type="button" disabled={excuseBusy} onclick={() => void submitExcuse()}>
+							{excuseBusy ? 'Saving…' : 'Excuse'}
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		{#if bulkOpen}
+			<div class="overlay" role="presentation">
+				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="bulk-title">
+					<h3 class="modal-title" id="bulk-title">Excuse all absent</h3>
+					<p class="modal-desc">
+						Every record currently marked absent in this session will be excused.
+						Already-excused rows are untouched; running this twice excuses nothing new.
+					</p>
+					{#if bulkError}
+						<p class="error" role="alert">{bulkError}</p>
+					{/if}
+					<label class="field">
+						Reason (min 10 characters)
+						<textarea class="form-input" rows="3" bind:value={bulkReason}></textarea>
+					</label>
+					<div class="modal-actions">
+						<button class="btn btn-ghost" type="button" onclick={() => (bulkOpen = false)}>
+							Cancel
+						</button>
+						<button class="btn btn-primary" type="button" disabled={bulkBusy} onclick={() => void submitBulk()}>
+							{bulkBusy ? 'Saving…' : 'Excuse all absent'}
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -1058,6 +1219,76 @@
 		justify-content: flex-end;
 		gap: 0.75rem;
 		margin-top: 1.25rem;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+	}
+
+	.row-action {
+		white-space: nowrap;
+	}
+
+	.link {
+		background: none;
+		border: none;
+		padding: 0;
+		color: var(--accent);
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.link:hover {
+		text-decoration: underline;
+	}
+
+	.overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+		background: var(--overlay);
+	}
+
+	.modal-desc {
+		margin: 0 0 1rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+	}
+
+	.form-input {
+		width: 100%;
+		padding: 0.625rem 0.75rem;
+		border: 1px solid var(--border-strong);
+		border-radius: 8px;
+		font: inherit;
+		font-size: 0.9375rem;
+		color: var(--text-strong);
+		background: var(--bg-card);
+		resize: vertical;
+	}
+
+	.form-input:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
+		border-color: var(--accent);
 	}
 
 	.footer {

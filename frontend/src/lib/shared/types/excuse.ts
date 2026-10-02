@@ -16,6 +16,10 @@ export type ExcuseOriginalStatus = 'absent' | 'late' | 'rejected' | 'unknown';
 
 export interface ExcuseRequest {
   id: number;
+  // Integer roster ids from the bare list row. studentId feeds the
+  // per-record excuse paths (quick/edit/revoke need it in the URL);
+  // studentNumber stays the display string (`#<id>` fallback in real mode).
+  studentId: number;
   studentNumber: string;
   studentName: string;
   section: string;

@@ -1,17 +1,18 @@
 // features/excuse/mock.ts
-// Mock-only fixtures for the professor excuse queue (D21 Paths A/B/C).
+// Mock-only fixtures for the professor excuse queue (D21 Paths A/B/C),
+// served when PUBLIC_MOCK_MODE=true (see api/client.ts).
 //
-// The backend excuse slice is model-only (excuse/model.py exists, no
-// service/router/schema yet), and GET /professor/excuse-requests is a
-// contract row without a live endpoint — so the queue reads from here.
 // Field set mirrors the contract list item in camelCase (see
-// $lib/shared/types/excuse.ts). Delete with the mock when the endpoint lands.
+// $lib/shared/types/excuse.ts). `studentId` values are fixture stand-ins:
+// the live list row carries real integer ids, but no professor endpoint
+// resolves a typed student number to one.
 
 import type { ExcuseRequest } from '$lib/shared/types/excuse';
 
 export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	{
 		id: 1,
+		studentId: 7,
 		studentNumber: '24-0007',
 		studentName: 'Alice Santos',
 		section: 'A',
@@ -29,6 +30,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 2,
+		studentId: 12,
 		studentNumber: '24-0012',
 		studentName: 'Ben Reyes',
 		section: 'A',
@@ -46,6 +48,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 3,
+		studentId: 19,
 		studentNumber: '24-0019',
 		studentName: 'Cora Cruz',
 		section: 'B',
@@ -63,6 +66,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 4,
+		studentId: 23,
 		studentNumber: '24-0023',
 		studentName: 'Dan Mendoza',
 		section: 'A',
@@ -80,6 +84,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 5,
+		studentId: 31,
 		studentNumber: '24-0031',
 		studentName: 'Ella Torres',
 		section: 'A',
@@ -97,6 +102,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 6,
+		studentId: 4,
 		studentNumber: '24-0004',
 		studentName: 'Frank Garcia',
 		section: 'B',
@@ -110,10 +116,11 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 		status: 'pending',
 		originalStatus: 'absent',
 		requestedAt: '2026-09-23T08:10:00.000Z',
-		attachmentNames: ['tournament-cert-frank-garcia.pdf', 'coach-letter.jpg']
+		attachmentNames: ['tournament-cert-frank-garcia.jpg', 'coach-letter.jpg']
 	},
 	{
 		id: 7,
+		studentId: 15,
 		studentNumber: '24-0015',
 		studentName: 'Grace Santos',
 		section: 'A',
@@ -132,6 +139,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 8,
+		studentId: 9,
 		studentNumber: '24-0009',
 		studentName: 'Henry Cruz',
 		section: 'A',
@@ -150,6 +158,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 9,
+		studentId: 27,
 		studentNumber: '24-0027',
 		studentName: 'Ivy Reyes',
 		section: 'B',
@@ -169,6 +178,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 10,
+		studentId: 33,
 		studentNumber: '24-0033',
 		studentName: 'Jonas Mendoza',
 		section: 'A',
@@ -186,6 +196,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 11,
+		studentId: 41,
 		studentNumber: '24-0041',
 		studentName: 'Katrina Torres',
 		section: 'A',
@@ -203,6 +214,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 	},
 	{
 		id: 12,
+		studentId: 52,
 		studentNumber: '24-0052',
 		studentName: 'Luis Garcia',
 		section: 'B',

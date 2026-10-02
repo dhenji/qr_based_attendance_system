@@ -6,10 +6,11 @@
 // display names join client-side from the professor courses store, because
 // session rows carry only offering_id.
 //
-// Not owned here: excuse actions. There are no excuse endpoints on the
-// backend yet, so excuseStudent / editStudentExcuse / revokeStudentExcuse /
-// excuseAllAbsent stay as documented stubs that throw — the live view hides
-// those buttons until the excuse slice lands.
+// Not owned here: excuse actions live in features/excuse/service.ts
+// (quickExcuseByIds / editExcuse / revokeExcuse / excuseAllAbsent), which
+// wraps the live excuse router by integer id. Live-session rows carry only
+// student numbers, so pages resolve through the excuse queue (which keeps
+// integer ids) or use the mock typed-number quickExcuse in mock mode.
 
 import { get, post } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
@@ -193,46 +194,6 @@ export const closeSession = async (sessionId: number) => {
 		status: response.status,
 		finalCounts: response.final_counts,
 	};
-};
-
-// excuseStudent
-// Professor quick-excuse for an absent or late student. No excuse endpoint
-// exists on the backend yet, so this stays a stub that throws — the live
-// view hides excuse actions until the excuse slice lands.
-export const excuseStudent = async (
-	_sessionId: number,
-	_studentNumber: string,
-	_input: { reason: string; notes?: string }
-): Promise<never> => {
-	throw new Error('Excuse actions are unavailable until excuse endpoints land.');
-};
-
-// editStudentExcuse
-// Same stub status as excuseStudent (see above).
-export const editStudentExcuse = async (
-	_sessionId: number,
-	_studentNumber: string,
-	_input: { reason?: string; notes?: string }
-): Promise<never> => {
-	throw new Error('Excuse actions are unavailable until excuse endpoints land.');
-};
-
-// revokeStudentExcuse
-// Same stub status as excuseStudent (see above).
-export const revokeStudentExcuse = async (
-	_sessionId: number,
-	_studentNumber: string
-): Promise<never> => {
-	throw new Error('Excuse actions are unavailable until excuse endpoints land.');
-};
-
-// excuseAllAbsent
-// Same stub status as excuseStudent (see above).
-export const excuseAllAbsent = async (
-	_sessionId: number,
-	_input: { reason: string; notes?: string }
-): Promise<never> => {
-	throw new Error('Excuse actions are unavailable until excuse endpoints land.');
 };
 
 // getActiveSession

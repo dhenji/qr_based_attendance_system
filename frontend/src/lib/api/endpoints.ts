@@ -2412,8 +2412,11 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 // no student identity, course labels, or original status — those join
 // client-side in features/excuse/service.ts (same convention as the professor
 // attendance ledger). Review is POST with the id riding the suffix
-// (`/{rid}/review`). Quick-excuse stays mock-only until the backend can
-// resolve a typed student number to an integer student_id, so it has no def.
+// (`/{rid}/review`). Per-record actions ride
+// `/professor/sessions/{sid}/attendance/{stid}/excuse` (POST quick, PATCH
+// edit, DELETE revoke); bulk rides `/{sid}/excuse-all-absent`. Like the
+// queue defs these carry no `mock`: mock mode is served by the in-memory
+// store in features/excuse/service.ts (see api/client.ts stub fallback).
 export interface ExcuseRequestReadResponse {
 	id: number;
 	student_id: number;
@@ -2441,6 +2444,60 @@ export const ExcuseListEndpoint: EndpointDef<Paginated<ExcuseRequestReadResponse
 
 export const ExcuseReviewEndpoint: EndpointDef<ExcuseRequestReadResponse> = {
 	url: '/professor/excuse-requests',
+	method: 'POST',
+};
+
+// Professor-initiated excuse (Path A quick / Path B with evidence) —
+// POST /professor/sessions/{sid}/attendance/{stid}/excuse. Path is chosen
+// server-side by presence of the `attachment_urls` key (absent → quick,
+// present → evidence); Path B stays unwired client-side until the S3
+// presigned upload flow (D24) lands, so the UI sends reason-only bodies.
+export interface ExcuseActionResponse {
+	excuse_request_id: number;
+	status: string;
+	original_status: string | null;
+	new_status: string;
+}
+
+export const ExcuseQuickEndpoint: EndpointDef<ExcuseActionResponse> = {
+	url: '/professor/sessions',
+	method: 'POST',
+};
+
+// Edit a professor-issued excuse —
+// PATCH /professor/sessions/{sid}/attendance/{stid}/excuse
+// { reason?: 10..2000 chars, review_notes?: ≤2000 } (at least one required).
+export interface ExcuseEditBody {
+	reason?: string;
+	review_notes?: string;
+}
+
+export const ExcuseEditEndpoint: EndpointDef<ExcuseRequestReadResponse> = {
+	url: '/professor/sessions',
+	method: 'PATCH',
+};
+
+// Revoke a professor-issued excuse —
+// DELETE /professor/sessions/{sid}/attendance/{stid}/excuse (no body).
+// Sets the excuse rejected and restores attendance to original_status.
+export interface ExcuseRevokeResponse {
+	reverted_to: string | null;
+}
+
+export const ExcuseRevokeEndpoint: EndpointDef<ExcuseRevokeResponse> = {
+	url: '/professor/sessions',
+	method: 'DELETE',
+};
+
+// Excuse all absent records in a session (idempotent) —
+// POST /professor/sessions/{sid}/excuse-all-absent { reason: 10..2000 }.
+export interface ExcuseBulkResponse {
+	excused_count: number;
+	reason: string;
+}
+
+export const ExcuseBulkEndpoint: EndpointDef<ExcuseBulkResponse> = {
+	url: '/professor/sessions',
 	method: 'POST',
 };
 
@@ -2482,6 +2539,11 @@ export const endpoints = {
 	// Professor excuse queue (list + review; quick-excuse stays mock-only)
 	excuseList: ExcuseListEndpoint,
 	excuseReview: ExcuseReviewEndpoint,
+	// Professor per-record excuse actions + bulk (suffix carries the ids)
+	excuseQuick: ExcuseQuickEndpoint,
+	excuseEdit: ExcuseEditEndpoint,
+	excuseRevoke: ExcuseRevokeEndpoint,
+	excuseBulk: ExcuseBulkEndpoint,
 	// Admin system settings (mock-only until the backend lands)
 	systemSettings: SystemSettingsGetEndpoint,
 	systemSettingsPatch: SystemSettingsPatchEndpoint,

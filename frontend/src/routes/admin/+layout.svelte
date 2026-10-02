@@ -38,8 +38,10 @@
 		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: true, icon: 'courses' },
 		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
 		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
+		{ label: 'Attendance', path: Routes.ADMIN_ATTENDANCE, enabled: true, icon: 'reports' },
 		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN_SYSTEM_SETTINGS, enabled: true, icon: 'settings' },
+		{ label: 'Profile', path: Routes.ADMIN_PROFILE, enabled: true, icon: 'profile' },
 	] as const;
 
 	const navItems = $derived([
@@ -70,6 +72,8 @@
 			'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6"/><path d="M18 14.8c2.1.7 3.5 2.4 3.5 5.2"/>',
 		settings:
 			'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
+		profile:
+			'<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/>',
 	};
 
 	let collapsed = $state(true);
@@ -126,27 +130,18 @@
 	<div class="body">
 		<aside class="sidebar" class:collapsed>
 			{#each navItems as item (item.label)}
-				{#if item.enabled}
-					<a
-						class="nav-link"
-						class:active={isActive(item.path)}
-						href={item.path}
-						title={item.label}
-						aria-current={isActive(item.path) ? 'page' : undefined}
-					>
-						<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							{@html iconPaths[item.icon]}
-						</svg>
-						<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
-					</a>
-				{:else}
-					<span class="nav-link disabled" title={`${item.label} (coming soon)`}>
-						<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							{@html iconPaths[item.icon]}
-						</svg>
-						<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
-					</span>
-				{/if}
+				<a
+					class="nav-link"
+					class:active={isActive(item.path)}
+					href={item.path}
+					title={item.label}
+					aria-current={isActive(item.path) ? 'page' : undefined}
+				>
+					<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						{@html iconPaths[item.icon]}
+					</svg>
+					<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
+				</a>
 			{/each}
 		</aside>
 
@@ -299,7 +294,7 @@
 		padding: 0.625rem;
 	}
 
-	.nav-link:hover:not(.disabled) {
+	.nav-link:hover {
 		background: var(--bg-hover);
 		transform: translateX(2px);
 	}
@@ -308,11 +303,6 @@
 		background: var(--accent);
 		color: var(--on-brand);
 		box-shadow: var(--shadow-sm);
-	}
-
-	.nav-link.disabled {
-		color: var(--text-muted);
-		cursor: not-allowed;
 	}
 
 	.nav-icon {

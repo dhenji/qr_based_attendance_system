@@ -322,6 +322,9 @@
 				<AppIcon name="file" size={18} />
 				Import
 			</button>
+			<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_STUDENTS_ARCHIVE)}>
+				Archive
+			</button>
 			<button class="btn btn-primary" data-testid="add-student" onclick={openCreate}>
 				<AppIcon name="plus" size={18} />
 				Add

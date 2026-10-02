@@ -1,16 +1,18 @@
 <script lang="ts">
+	import { Routes } from '$lib/shared/constants/routes';
+
 	let { children } = $props();
 </script>
 
 <header class="nav">
-	<a class="nav-brand" href="/">
+	<a class="nav-brand" href={Routes.HOME}>
 		<img src="/qr-attend-logo.svg" alt="Attendly logo" class="nav-logo" />
 		<span class="nav-name">Attendly</span>
 	</a>
 	<nav class="nav-links" aria-label="Auth">
-		<a class="nav-link" href="/about">About</a>
-		<a class="nav-link" href="/privacy-policy">Privacy Policy</a>
-		<a class="nav-link" href="/cookies">Cookies</a>
+		<a class="nav-link" href={Routes.ABOUT}>About</a>
+		<a class="nav-link" href={Routes.PRIVACY_POLICY}>Privacy Policy</a>
+		<a class="nav-link" href={Routes.COOKIES}>Cookies</a>
 	</nav>
 </header>
 

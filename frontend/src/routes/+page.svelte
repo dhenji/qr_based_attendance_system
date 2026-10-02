@@ -31,29 +31,25 @@
 			desc: 'Scan, view your schedule, and track your attendance rate.',
 			path: '/student/dashboard',
 			cta: 'Open dashboard',
-			ready: true,
 		},
 		{
 			label: 'Professor portal',
 			desc: 'Create sessions and review attendance for every meeting.',
 			path: Routes.PROFESSOR_DASHBOARD,
 			cta: 'Open dashboard',
-			ready: true,
 		},
 		{
-			// The admin portal is still being built — linking to it would 404.
 			label: 'Admin portal',
 			desc: 'Manage rosters, courses, and attendance records.',
-			path: '',
-			cta: 'Coming soon',
-			ready: false,
+			path: Routes.ADMIN_DASHBOARD,
+			cta: 'Open dashboard',
 		},
 	];
 
 	const navLinks = [
-		{ label: 'About', path: '/about' },
-		{ label: 'Privacy Policy', path: '/privacy-policy' },
-		{ label: 'Cookies', path: '/cookies' },
+		{ label: 'About', path: Routes.ABOUT },
+		{ label: 'Privacy Policy', path: Routes.PRIVACY_POLICY },
+		{ label: 'Cookies', path: Routes.COOKIES },
 	];
 
 	// Single source of truth for where a signed-in user lands, so the header
@@ -177,25 +173,17 @@
 		<h2>Made for students, professors, and admins.</h2>
 		<div class="portal-grid">
 			{#each portals as portal}
-				{#if portal.ready}
-					<a class="portal-card" href={portal.path}>
-						<h3>{portal.label}</h3>
-						<p>{portal.desc}</p>
-						<span class="portal-cta">
-							{portal.cta}
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M5 12h14" />
-								<path d="m13 6 6 6-6 6" />
-							</svg>
-						</span>
-					</a>
-				{:else}
-					<div class="portal-card is-disabled" aria-disabled="true">
-						<h3>{portal.label}</h3>
-						<p>{portal.desc}</p>
-						<span class="portal-cta">{portal.cta}</span>
-					</div>
-				{/if}
+				<a class="portal-card" href={portal.path}>
+					<h3>{portal.label}</h3>
+					<p>{portal.desc}</p>
+					<span class="portal-cta">
+						{portal.cta}
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M5 12h14" />
+							<path d="m13 6 6 6-6 6" />
+						</svg>
+					</span>
+				</a>
 			{/each}
 		</div>
 	</section>
@@ -619,13 +607,6 @@
 		background: var(--brand-hover);
 		transform: translateY(-2px);
 		box-shadow: 0 12px 28px rgba(30, 58, 95, 0.3);
-	}
-
-	/* Portals that don't exist yet — no hover lift, muted so it reads as inert. */
-	.portal-card.is-disabled {
-		background: var(--text-secondary);
-		box-shadow: none;
-		cursor: default;
 	}
 
 	.portal-card h3 {
