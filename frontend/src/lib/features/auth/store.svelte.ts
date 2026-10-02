@@ -100,6 +100,7 @@ const toUser = (me: MeResponse): User => ({
 	lastName: me.last_name,
 	mfaEnabled: me.mfa_enabled,
 	mustChangePassword: me.must_change_password,
+	securityQuestionSet: me.security_question_set,
 });
 
 const reset = () => {

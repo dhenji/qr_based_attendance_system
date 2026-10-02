@@ -11,6 +11,10 @@ export interface User {
   lastName?: string | null;
   mfaEnabled?: boolean;
   mustChangePassword?: boolean;
+  // Mirrors GET /auth/me security_question_set — server-side source of truth
+  // for whether a recovery question exists (replaces the old localStorage
+  // mirror). Absent on older cached shapes.
+  securityQuestionSet?: boolean;
   iat?: number;
   exp?: number;
 }

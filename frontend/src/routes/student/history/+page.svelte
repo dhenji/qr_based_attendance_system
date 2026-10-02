@@ -3,6 +3,10 @@
 	import { APIError } from '$lib/api/client';
 	import {
 		getSessionHistory,
+		listStudentExcuses,
+		submitStudentExcuse,
+		type StudentExcuseRequest,
+		type StudentHistoryRow,
 		type StudentHistoryStatus,
 	} from '$lib/features/student/service';
 	import { buildCsv } from '$lib/features/report/service';
@@ -12,12 +16,14 @@
 	type Status = StudentHistoryStatus;
 	type Row = {
 		id: number;
+		sessionId: number;
 		date: string;
 		course: string;
 		courseName: string;
 		status: Status;
 		time: string;
 		scannedAt: string;
+		excuseReason?: string;
 	};
 	type SortKey = 'date' | 'course' | 'status' | 'time';
 
@@ -43,20 +49,16 @@
 
 	const PER_PAGE = 5;
 
-	const toRow = (item: {
-		id: number;
-		courseCode: string;
-		courseName: string;
-		status: Status;
-		scannedAt: string;
-	}): Row => ({
+	const toRow = (item: StudentHistoryRow): Row => ({
 		id: item.id,
+		sessionId: item.sessionId,
 		date: formatDate(item.scannedAt),
 		course: item.courseCode,
 		courseName: item.courseName,
 		status: item.status,
 		time: formatTime(item.scannedAt),
 		scannedAt: item.scannedAt,
+		excuseReason: item.excuseReason,
 	});
 
 	const load = async () => {
@@ -73,6 +75,7 @@
 			rows = res.items.map(toRow);
 			total = res.total;
 			summary = res.summary;
+			void loadMyRequests();
 		} catch (e) {
 			loadError =
 				e instanceof APIError
@@ -207,6 +210,9 @@
 	const badgeLabel = (status: Status): string =>
 		status.charAt(0).toUpperCase() + status.slice(1);
 
+	const excuseLabel = (status: StudentExcuseRequest['status']): string =>
+		status.charAt(0).toUpperCase() + status.slice(1);
+
 	// Server owns status/sort/page; course + search filter the fetched rows
 	// client-side (course_id mapping needs a schedule that has no backend yet).
 	const matchesFilters = (r: Row): boolean => {
@@ -286,6 +292,77 @@
 
 	const doPrint = () => {
 		window.print();
+	};
+
+	// Student excuse requests (Path C submit side). Only absent/late/rejected
+	// rows are excusable server-side (422 excuse_not_eligible otherwise); a
+	// second submit while one is pending fails with 409 duplicate_excuse.
+	// Reason floor is 20 chars (REASON_MIN_LENGTH_STUDENT). No file input:
+	// attachments expect presigned-upload URLs (D24), unbuilt.
+	const canRequestExcuse = (status: Status): boolean =>
+		status === 'absent' || status === 'late' || status === 'rejected';
+
+	const EXCUSE_ERROR_MESSAGES: Record<string, string> = {
+		duplicate_excuse: 'You already have a pending request for this session.',
+		excuse_not_eligible: 'Only absent, late, or rejected records can be excused.',
+		already_excused: 'This record is already excused.',
+		not_enrolled: 'You are not enrolled in this course offering.',
+		attendance_not_found: 'No attendance record found for this session.',
+		session_not_found: 'Session not found.',
+		student_not_found: 'No student record found for your account. Contact an administrator.',
+	};
+
+	const toExcuseMessage = (error: unknown, fallback: string): string => {
+		if (error instanceof APIError && error.code && EXCUSE_ERROR_MESSAGES[error.code]) {
+			return EXCUSE_ERROR_MESSAGES[error.code];
+		}
+		return error instanceof Error && error.message ? error.message : fallback;
+	};
+
+	let excuseTarget = $state<Row | null>(null);
+	let excuseReason = $state('');
+	let excuseBusy = $state(false);
+	let excuseError: string | null = $state(null);
+	let excuseNotice: string | null = $state(null);
+
+	let myRequests = $state<StudentExcuseRequest[]>([]);
+	let myRequestsError: string | null = $state(null);
+
+	const loadMyRequests = async () => {
+		try {
+			const result = await listStudentExcuses({ page: 1, size: 20 });
+			myRequests = result.items;
+			myRequestsError = null;
+		} catch {
+			myRequestsError = 'Excuse requests could not be loaded.';
+		}
+	};
+
+	const openExcuse = (row: Row) => {
+		excuseTarget = row;
+		excuseReason = '';
+		excuseError = null;
+	};
+
+	const submitExcuse = async () => {
+		if (!excuseTarget || excuseBusy) return;
+		const reason = excuseReason.trim();
+		if (reason.length < 20) {
+			excuseError = 'Reason must be at least 20 characters.';
+			return;
+		}
+		excuseBusy = true;
+		excuseError = null;
+		try {
+			await submitStudentExcuse({ sessionId: excuseTarget.sessionId, reason });
+			excuseTarget = null;
+			excuseNotice = 'Excuse request submitted — your professor will review it.';
+			await loadMyRequests();
+		} catch (error) {
+			excuseError = toExcuseMessage(error, 'Could not submit the excuse request.');
+		} finally {
+			excuseBusy = false;
+		}
 	};
 </script>
 
@@ -399,23 +476,24 @@
 						<th><button class="th-btn" onclick={() => handleSort('course')}>Course<span class="sort-glyph">{sortGlyph('course')}</span></button></th>
 						<th><button class="th-btn" onclick={() => handleSort('status')}>Status<span class="sort-glyph">{sortGlyph('status')}</span></button></th>
 						<th><button class="th-btn" onclick={() => handleSort('time')}>Time<span class="sort-glyph">{sortGlyph('time')}</span></button></th>
+						<th><span class="sr-only">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if loading}
 						<tr>
-							<td class="empty-row" colspan="4">Loading attendance history…</td>
+							<td class="empty-row" colspan="5">Loading attendance history…</td>
 						</tr>
 					{:else if loadError}
 						<tr>
-							<td class="empty-row" colspan="4">
+							<td class="empty-row" colspan="5">
 								{loadError}
 								<button class="btn-ghost retry-btn" onclick={reload}>Retry</button>
 							</td>
 						</tr>
 					{:else if filtered.length === 0}
 						<tr>
-							<td class="empty-row" colspan="4">No matching records</td>
+							<td class="empty-row" colspan="5">No matching records</td>
 						</tr>
 					{:else}
 						{#each paged as r (r.id)}
@@ -436,6 +514,17 @@
 									</span>
 								</td>
 								<td class="mono">{r.time}</td>
+								<td>
+									{#if canRequestExcuse(r.status)}
+										<button
+											class="btn-ghost btn-small"
+											title={r.excuseReason ? `Previously: ${r.excuseReason}` : 'Request an excuse for this session'}
+											onclick={() => openExcuse(r)}
+										>
+											Request Excuse
+										</button>
+									{/if}
+								</td>
 							</tr>
 						{/each}
 					{/if}
@@ -467,6 +556,79 @@
 			</button>
 		</div>
 	</div>
+
+	{#if excuseNotice}
+		<p class="notice" role="status">{excuseNotice}</p>
+	{/if}
+
+	<div class="card table-card">
+		<div class="requests-head">
+			<h2 class="requests-title">My excuse requests</h2>
+			<span class="muted">{myRequests.length} shown</span>
+		</div>
+		{#if myRequestsError}
+			<p class="error">{myRequestsError}</p>
+		{:else if myRequests.length === 0}
+			<p class="muted">No excuse requests yet. Use Request Excuse on an absent, late, or rejected row above.</p>
+		{:else}
+			<ul class="requests">
+				{#each myRequests as request (request.id)}
+					<li class="request-row">
+						<span
+							class="badge"
+							class:present={request.status === 'approved'}
+							class:pending={request.status === 'pending'}
+							class:rejected={request.status === 'rejected'}
+						>
+							{excuseLabel(request.status)}
+						</span>
+						<span class="request-text">
+							Session #{request.sessionId} · {request.reason}
+							{#if request.reviewNotes}
+								<span class="muted"> — Professor note: {request.reviewNotes}</span>
+							{/if}
+						</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+
+	{#if excuseTarget}
+		<div class="overlay" role="presentation">
+			<div class="modal" role="dialog" aria-modal="true" aria-labelledby="excuse-title">
+				<h2 id="excuse-title">Request excuse</h2>
+				<p class="modal-sub">
+					{excuseTarget.course} · {excuseTarget.date} {excuseTarget.time} · currently {excuseTarget.status}
+				</p>
+				<label class="form-label" for="excuse-reason">Reason (min 20 characters)</label>
+				<textarea
+					id="excuse-reason"
+					class="form-input area"
+					rows={4}
+					placeholder="Explain why you missed or were late to this session…"
+					bind:value={excuseReason}
+				></textarea>
+				<p class="hint">{excuseReason.trim().length}/2000 · evidence upload is not available yet</p>
+				{#if excuseError}
+					<p class="error">{excuseError}</p>
+				{/if}
+				<div class="modal-actions">
+					<button class="btn-ghost" type="button" disabled={excuseBusy} onclick={() => (excuseTarget = null)}>
+						Cancel
+					</button>
+					<button
+						class="btn-primary"
+						type="button"
+						disabled={excuseBusy}
+						onclick={() => void submitExcuse()}
+					>
+						{excuseBusy ? 'Submitting…' : 'Submit request'}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -579,7 +741,7 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		min-width: 480px;
+		min-width: 560px;
 	}
 
 	th {
@@ -704,6 +866,148 @@
 		color: #64748b;
 		font-size: 0.875rem;
 		margin: 0.5rem 0 0;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+	}
+
+	.notice {
+		background: var(--success-bg);
+		border: 1px solid var(--success-bg);
+		border-radius: 8px;
+		padding: 0.625rem 1rem;
+		color: var(--success);
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	.error {
+		color: #b91c1c;
+		font-size: 0.875rem;
+		margin: 0.5rem 0 0;
+	}
+
+	.requests-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 1rem 1.25rem 0;
+	}
+
+	.requests-title {
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: #1e293b;
+		margin: 0;
+	}
+
+	.requests {
+		list-style: none;
+		margin: 0.75rem 0 0;
+		padding: 0 1.25rem 1.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.request-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		padding: 0.625rem 0.875rem;
+		border: 1px solid #f1f5f9;
+		border-radius: 8px;
+		background: #f8fafc;
+		font-size: 0.9375rem;
+		color: #1e293b;
+	}
+
+	.request-text {
+		flex: 1 1 16rem;
+	}
+
+	.overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+		background: rgba(15, 23, 42, 0.5);
+	}
+
+	.modal {
+		width: 100%;
+		max-width: 28rem;
+		background: var(--bg-card);
+		border-radius: 12px;
+		box-shadow: var(--shadow-lg);
+		padding: 1.5rem;
+	}
+
+	.modal h2 {
+		margin: 0 0 0.375rem;
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.modal-sub {
+		margin: 0 0 1rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+	}
+
+	.form-label {
+		display: block;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+		margin-bottom: 0.375rem;
+	}
+
+	.area {
+		width: 100%;
+		resize: vertical;
+	}
+
+	.hint {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		margin: 0.375rem 0 0;
+	}
+
+	.modal-actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		margin-top: 1.25rem;
+	}
+
+	.btn-primary {
+		background: var(--brand);
+		border: 1px solid var(--brand);
+		border-radius: 8px;
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: inherit;
+		color: #fff;
+		cursor: pointer;
+	}
+
+	.btn-primary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.queue-list {

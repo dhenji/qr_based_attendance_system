@@ -6,8 +6,11 @@
 // GET /student/attendance/history. Scan delegates to
 // features/liveness/service.ts in real mode.
 
-import { get, isMockMode } from '$lib/api/client';
+import { get, isMockMode, post } from '$lib/api/client';
 import type {
+	Paginated,
+	StudentExcuseItemResponse,
+	StudentExcuseSubmitResponse,
 	StudentHistoryResponse,
 	StudentHistoryStatus,
 } from '$lib/api/endpoints';
@@ -165,6 +168,65 @@ export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
 
 export const getDashboard = async (): Promise<StudentDashboardResponse> => {
 	return get<StudentDashboardResponse>('studentDashboard');
+};
+
+// Student excuse requests — live on features/excuse/student_router.py.
+// Submit creates a pending professor-reviewed request (201); list reads the
+// student's own rows newest-first. Reason floor is 20 chars
+// (REASON_MIN_LENGTH_STUDENT). Reason-only submits: attachments expect
+// presigned-upload URLs (D24), which the UI does not collect yet.
+// Real API by default; deterministic mocks only when PUBLIC_MOCK_MODE=true.
+export interface StudentExcuseRequest {
+	id: number;
+	sessionId: number;
+	reason: string;
+	status: 'pending' | 'approved' | 'rejected';
+	requestedAt: string;
+	reviewedAt?: string;
+	reviewNotes?: string;
+}
+
+const toStudentExcuse = (item: StudentExcuseItemResponse): StudentExcuseRequest => ({
+	id: item.id,
+	sessionId: item.session_id,
+	reason: item.reason,
+	status: item.status === 'approved' || item.status === 'rejected' ? item.status : 'pending',
+	requestedAt: item.requested_at,
+	reviewedAt: item.reviewed_at ?? undefined,
+	reviewNotes: item.review_notes ?? undefined,
+});
+
+export const submitStudentExcuse = async (input: {
+	sessionId: number;
+	reason: string;
+}): Promise<StudentExcuseRequest> => {
+	const reason = input.reason.trim();
+	if (reason.length < 20) throw new Error('Reason must be at least 20 characters.');
+	const response = await post<StudentExcuseSubmitResponse>('studentExcuseSubmit', {
+		session_id: input.sessionId,
+		reason,
+	});
+	const now = new Date().toISOString();
+	return {
+		id: response.id,
+		sessionId: input.sessionId,
+		reason,
+		status: 'pending',
+		requestedAt: response.requested_at ?? now,
+	};
+};
+
+export const listStudentExcuses = async (
+	params: { page?: number; size?: number } = {}
+): Promise<{ items: StudentExcuseRequest[]; total: number }> => {
+	const response = await get<Paginated<StudentExcuseItemResponse>>('studentExcuseList', {
+		page: String(params.page ?? 1),
+		size: String(params.size ?? 20),
+	});
+	return {
+		items: (response.items ?? []).map(toStudentExcuse),
+		total: response.total ?? 0,
+	};
 };
 
 // Attendance scan
