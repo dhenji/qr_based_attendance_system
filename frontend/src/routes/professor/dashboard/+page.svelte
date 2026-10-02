@@ -2,17 +2,22 @@
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { formatPercentage } from '$lib/shared/utils/format';
-	import {
-		Routes,
-		professorActiveSession,
-		professorSessionCreate,
-	} from '$lib/shared/constants/routes';
+	import { Routes, professorActiveSession } from '$lib/shared/constants/routes';
 
-	// Fixture data. The professor session endpoints are still prefix-only router
-	// stubs on the backend, so this page is driven by local data until the
-	// service layer lands. The KPI row is derived from the list below it rather
-	// than hardcoded, so the numbers can never contradict the sessions shown.
-	type SessionStatus = 'active' | 'upcoming' | 'completed';
+	import { onMount } from 'svelte';
+	import { listSessions, listSessionHistory } from '$lib/features/session/service';
+	import {
+		initProfessorCourses,
+		professorState
+	} from '$lib/features/professor/store.svelte';
+
+	// Live data. Today's sessions come from GET /professor/sessions (status is
+	// backend-computed: active vs closed), enrolled totals from
+	// GET /professor/courses, and the weekly compliance KPI from
+	// GET /professor/sessions/history. There is no "upcoming" state: the
+	// backend never schedules future sessions — a session is created open —
+	// so an empty day honestly shows no sessions plus a New Session action.
+	type SessionStatus = 'active' | 'closed';
 
 	type DashboardSession = {
 		id: number;
@@ -20,79 +25,109 @@
 		code: string;
 		name: string;
 		section: string;
-		room: string;
-		startsAt: string;
 		endsAt: string;
 		scanned: number;
 		enrolled: number;
 		status: SessionStatus;
+		createdAt: string;
 	};
 
 	// Status colours follow the wireframe status palette (docs/design/wireframes.md).
 	const STATUS_COLORS: Record<SessionStatus, string> = {
 		active: '#16a34a',
-		upcoming: '#ca8a04',
-		completed: '#94a3b8',
+		closed: '#94a3b8'
 	};
 
-	const sessions: DashboardSession[] = [
-		{
-			id: 1,
-			offeringId: 1,
-			code: 'CS101',
-			name: 'Software Engineering',
-			section: 'A',
-			room: 'Room 204',
-			startsAt: '8:30 AM',
-			endsAt: '10:00 AM',
-			scanned: 18,
-			enrolled: 30,
-			status: 'active',
-		},
-		{
-			id: 2,
-			offeringId: 2,
-			code: 'MATH202',
-			name: 'Calculus 2',
-			section: 'B',
-			room: 'Room 105',
-			startsAt: '1:00 PM',
-			endsAt: '2:30 PM',
-			scanned: 0,
-			enrolled: 25,
-			status: 'upcoming',
-		},
-		{
-			id: 3,
-			offeringId: 3,
-			code: 'PHYS303',
-			name: 'Physics 3',
-			section: 'A',
-			room: 'Lab 2',
-			startsAt: '3:30 PM',
-			endsAt: '5:00 PM',
-			scanned: 34,
-			enrolled: 40,
-			status: 'completed',
-		},
-	];
+	const toLocalKey = (date: Date): string =>
+		`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-	// A same-day average across the week; not derivable from today's snapshot.
-	const AVG_ATTENDANCE = 92;
+	const formatClock = (iso: string | null): string => {
+		if (!iso) return '—';
+		const parsed = new Date(iso);
+		if (Number.isNaN(parsed.getTime())) return '—';
+		return parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+	};
+
+	let sessions = $state<DashboardSession[]>([]);
+	let enrolledTotal = $state(0);
+	let avgCompliance = $state<number | null>(null);
+	let loading = $state(true);
+	let loadError = $state<string | null>(null);
 
 	const today = $derived(
 		new Date().toLocaleDateString(undefined, {
 			weekday: 'long',
 			year: 'numeric',
 			month: 'long',
-			day: 'numeric',
+			day: 'numeric'
 		})
 	);
 
+	const load = async () => {
+		loading = true;
+		loadError = null;
+		try {
+			if (professorState.courses.length === 0 && !professorState.coursesError) {
+				await initProfessorCourses();
+			}
+			const courses = professorState.courses;
+			enrolledTotal = courses.reduce((total, course) => total + course.enrolledCount, 0);
+
+			const key = toLocalKey(new Date());
+			const { items } = await listSessions({ from: key, to: key, size: 100 });
+			sessions = items
+				.map((item) => {
+					const course = courses.find((entry) => entry.offeringId === item.offeringId);
+					// Prefer the offering's current enrollment; fall back to the
+					// session's own scanned + absent counts when the course
+					// directory has no entry for this offering.
+					const seats =
+						course?.enrolledCount ??
+						item.presentCount + item.lateCount + item.absentCount;
+					return {
+						id: item.id,
+						offeringId: item.offeringId,
+						code: item.courseCode,
+						name: item.courseName,
+						section: item.section,
+						endsAt: item.status === 'active' ? formatClock(item.expiresAt) : formatClock(item.createdAt),
+						scanned: item.presentCount + item.lateCount,
+						enrolled: seats,
+						status: item.status,
+						createdAt: item.createdAt
+					};
+				})
+				.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+			const weekAgo = new Date();
+			weekAgo.setDate(weekAgo.getDate() - 6);
+			const history = await listSessionHistory({
+				from: toLocalKey(weekAgo),
+				to: key,
+				page: 1,
+				size: 100
+			});
+			avgCompliance = history.items.length > 0 ? history.avg_compliance : null;
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Unable to load dashboard.';
+			sessions = [];
+			avgCompliance = null;
+		} finally {
+			loading = false;
+		}
+	};
+
+	onMount(() => {
+		void load();
+	});
+
 	// The live session gets its own hero card, so everything else drops into the
-	// compact list. At most one session can be live at a time in this view.
+	// compact list. At most one session is live at a time per offering; the
+	// first active one takes the hero.
 	const liveSession = $derived(sessions.find((s) => s.status === 'active'));
-	const otherSessions = $derived(sessions.filter((s) => s.status !== 'active'));
+	const otherSessions = $derived(
+		sessions.filter((s) => s.status !== 'active' || s.id !== liveSession?.id)
+	);
 
 	const scanPercent = (session: DashboardSession) =>
 		session.enrolled === 0 ? 0 : Math.round((session.scanned / session.enrolled) * 100);
@@ -100,23 +135,23 @@
 	const kpis = $derived([
 		{
 			label: 'Active Sessions',
-			value: `${sessions.filter((s) => s.status === 'active').length}/${sessions.length}`,
-			sub: 'Today',
+			value: loading ? '—' : `${sessions.filter((s) => s.status === 'active').length}/${sessions.length}`,
+			sub: 'Today'
 		},
 		{
 			label: 'Students',
-			value: String(sessions.reduce((total, s) => total + s.enrolled, 0)),
-			sub: 'Enrolled total',
+			value: loading ? '—' : String(enrolledTotal),
+			sub: 'Enrolled total'
 		},
 		{
-			label: 'Avg Attendance',
-			value: formatPercentage(AVG_ATTENDANCE),
-			sub: 'This week',
-		},
+			label: 'Avg Compliance',
+			value: loading || avgCompliance === null ? '—' : formatPercentage(avgCompliance * 100),
+			sub: 'This week'
+		}
 	]);
 
 	const statusText = (session: DashboardSession) => {
-		if (session.status === 'upcoming') return `Not started · ${session.startsAt}`;
+		if (session.status === 'active') return `Open · ${session.scanned}/${session.enrolled} scanned`;
 		return `Closed · ${session.scanned}/${session.enrolled} scanned`;
 	};
 </script>
@@ -129,7 +164,16 @@
 		</div>
 	</header>
 
-	{#if liveSession}
+	{#if loadError}
+		<section class="card">
+			<p class="error">{loadError}</p>
+			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Try again</button>
+		</section>
+	{:else if loading}
+		<section class="card">
+			<p class="muted">Loading today's sessions…</p>
+		</section>
+	{:else if liveSession}
 		<section class="hero">
 			<article class="live-card">
 				<span class="live-rail" style="background: {STATUS_COLORS.active}" aria-hidden="true"></span>
@@ -144,7 +188,7 @@
 					</div>
 
 					<p class="live-sub">
-						{liveSession.section} · {liveSession.room}
+						Section {liveSession.section}
 					</p>
 
 					<div class="live-stats">
@@ -193,15 +237,17 @@
 		</section>
 	{/if}
 
-	<section class="kpis">
-		{#each kpis as kpi (kpi.label)}
-			<div class="kpi">
-				<span class="kpi-value">{kpi.value}</span>
-				<span class="kpi-label">{kpi.label}</span>
-				<span class="kpi-sub">{kpi.sub}</span>
-			</div>
-		{/each}
-	</section>
+	{#if !loadError && !loading}
+		<section class="kpis">
+			{#each kpis as kpi (kpi.label)}
+				<div class="kpi">
+					<span class="kpi-value">{kpi.value}</span>
+					<span class="kpi-label">{kpi.label}</span>
+					<span class="kpi-sub">{kpi.sub}</span>
+				</div>
+			{/each}
+		</section>
+	{/if}
 
 	<section class="actions">
 		<button
@@ -222,45 +268,49 @@
 		</button>
 	</section>
 
-	<section class="card">
-		<h2 class="section-title">Today's Sessions</h2>
-		{#if otherSessions.length > 0}
-			<ul>
-				{#each otherSessions as session (session.id)}
-					<li>
-						<span
-							class="row-rail"
-							style="background: {STATUS_COLORS[session.status]}"
-							aria-hidden="true"
-						></span>
-						<div class="row-main">
-							<span class="row-title">{session.code} — {session.name}</span>
-							<span class="row-data">
-								<span
-									class="row-dot"
-									style="background: {STATUS_COLORS[session.status]}"
-									aria-hidden="true"
-								></span>
-								{statusText(session)} · {session.section}
-							</span>
-						</div>
-						{#if session.status === 'upcoming'}
-							<button
-								class="btn btn-secondary"
-								onclick={() => goto(professorSessionCreate(session.offeringId))}
-							>
-								Open Session
-							</button>
-						{:else}
-							<span class="row-tag">Closed</span>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		{:else}
-			<p class="empty">No other sessions scheduled today.</p>
-		{/if}
-	</section>
+	{#if !loadError && !loading}
+		<section class="card">
+			<h2 class="section-title">Today's Sessions</h2>
+			{#if otherSessions.length > 0}
+				<ul>
+					{#each otherSessions as session (session.id)}
+						<li>
+							<span
+								class="row-rail"
+								style="background: {STATUS_COLORS[session.status]}"
+								aria-hidden="true"
+							></span>
+							<div class="row-main">
+								<span class="row-title">{session.code} — {session.name}</span>
+								<span class="row-data">
+									<span
+										class="row-dot"
+										style="background: {STATUS_COLORS[session.status]}"
+										aria-hidden="true"
+									></span>
+									{statusText(session)} · Section {session.section}
+								</span>
+							</div>
+							{#if session.status === 'active'}
+								<button
+									class="btn btn-secondary"
+									onclick={() => goto(professorActiveSession(session.id))}
+								>
+									View Live
+								</button>
+							{:else}
+								<span class="row-tag">Closed</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{:else if !liveSession}
+				<p class="empty">No sessions today. Open one to start taking attendance.</p>
+			{:else}
+				<p class="empty">No other sessions today.</p>
+			{/if}
+		</section>
+	{/if}
 </div>
 
 <style>
@@ -616,6 +666,12 @@
 		color: #64748b;
 		font-size: 0.9375rem;
 		margin: 0;
+	}
+
+	.error {
+		color: #b91c1c;
+		font-size: 0.9375rem;
+		margin: 0 0 1rem;
 	}
 
 	@media (max-width: 640px) {
