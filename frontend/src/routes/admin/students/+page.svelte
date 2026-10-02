@@ -462,7 +462,7 @@
 			{/if}
 			<div class="form">
 				{#if !editing}
-					<label>Student ID<input class="input" bind:value={f_student_id} placeholder="24-2132" /></label>
+					<label>Student ID<input class="input" bind:value={f_student_id} placeholder="ID number as printed on the student card" /></label>
 				{/if}
 				<div class="grid2">
 					<label>First name<input class="input" bind:value={f_first_name} /></label>

@@ -536,7 +536,7 @@
 					<input
 						id="quick-number"
 						class="form-input"
-						placeholder="24-0001"
+						placeholder="ID number as printed on the student card"
 						bind:value={quickStudentNumber}
 					/>
 				</div>
