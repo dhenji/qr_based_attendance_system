@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import time
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Sequence
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
+from shared.datetimes import ensure_aware
+from shared.enums import RiskLevel, ValidationStatus
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.query import apply_if
+from features.analytics.batch import run_risk_batch
 from features.analytics.model import StudentRiskScore
 from features.analytics.schema import (
     AtRiskItem,
@@ -27,19 +32,11 @@ from features.enrollment.model import Enrollment
 from features.program.model import Program, YearLevel
 from features.session.model import Session
 from features.student.model import Student
-from shared.enums import RiskLevel, ValidationStatus
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.query import apply_if
 
 
-def _ensure_aware(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-
-    return value
-
-
-def _rates(present: int, late: int, excused: int, enrolled: int) -> tuple[float, float]:
+def _rates(
+    present: int, late: int, excused: int, enrolled: int
+) -> tuple[float, float]:
     """Compliance (present/total) and participation ((p+l+e)/total) rates."""
     if enrolled <= 0:
         return 0.0, 0.0
@@ -61,15 +58,15 @@ def _normalize_paging(page: int, size: int) -> tuple[int, int]:
 
 
 def _bucket_key(moment: datetime, granularity: TrendGranularity) -> date:
-    day: date = _ensure_aware(moment).date()
+    day: date = ensure_aware(moment).date()
 
-    if granularity == "daily":
-        return day
-
-    if granularity == "weekly":
-        return date.fromordinal(day.toordinal() - day.weekday())
-
-    return day.replace(day=1)
+    match granularity:
+        case "daily":
+            return day
+        case "weekly":
+            return date.fromordinal(day.toordinal() - day.weekday())
+        case _:
+            return day.replace(day=1)
 
 
 def _offerings_stmt(
@@ -146,7 +143,36 @@ async def _tallies_for_sessions(
 def _expected_for(
     sessions: Sequence[Session], enrolled_by_offering: dict[int, set[int]]
 ) -> int:
-    return sum(len(enrolled_by_offering.get(row.offering_id, set())) for row in sessions)
+    return sum(
+        len(enrolled_by_offering.get(row.offering_id, set())) for row in sessions
+    )
+
+
+def _to_at_risk_item(
+    score: StudentRiskScore,
+    student: Student,
+    program: Program,
+    year_level: YearLevel,
+    course: Course,
+) -> AtRiskItem:
+    """Map one stored risk row plus its joins to the contract item."""
+    features: dict = score.features or {}
+    return AtRiskItem(
+        student_id=score.student_id,
+        student_name=_full_name(
+            student.first_name, student.middle_name, student.last_name
+        ),
+        program=program.code,
+        year_level=year_level.label,
+        offering_id=score.offering_id,
+        course_code=course.course_code,
+        course_name=course.course_name,
+        absence_rate=float(features.get("absence_rate", 0.0)),
+        max_streak=int(features.get("max_streak", 0)),
+        trend_slope=float(features.get("trend_slope", 0.0)),
+        risk_level=RiskLevel(score.risk_level),
+        computed_at=ensure_aware(score.computed_at),
+    )
 
 
 class AnalyticsService:
@@ -434,30 +460,15 @@ class AnalyticsService:
         )
         rows: Sequence[tuple[
             StudentRiskScore, Student, Program, YearLevel, CourseOffering, Course
-        ]] = (await self._session.execute(ordered.offset((page - 1) * size).limit(size))).all()  # type: ignore[assignment]
-        items: list[AtRiskItem] = []
-
-        for score, student, program, year_level, _offering, course in rows:
-            features: dict = score.features or {}
-
-            items.append(
-                AtRiskItem(
-                    student_id=score.student_id,
-                    student_name=_full_name(
-                        student.first_name, student.middle_name, student.last_name
-                    ),
-                    program=program.code,
-                    year_level=year_level.label,
-                    offering_id=score.offering_id,
-                    course_code=course.course_code,
-                    course_name=course.course_name,
-                    absence_rate=float(features.get("absence_rate", 0.0)),
-                    max_streak=int(features.get("max_streak", 0)),
-                    trend_slope=float(features.get("trend_slope", 0.0)),
-                    risk_level=RiskLevel(score.risk_level),
-                    computed_at=_ensure_aware(score.computed_at),
-                )
+        ]] = (
+            await self._session.execute(
+                ordered.offset((page - 1) * size).limit(size)
             )
+        ).all()  # type: ignore[assignment]
+        items: list[AtRiskItem] = [
+            _to_at_risk_item(score, student, program, year_level, course)
+            for score, student, program, year_level, _offering, course in rows
+        ]
 
         return AtRiskResponse(items=items, total=total, page=page, size=size)
 
@@ -478,54 +489,43 @@ class AnalyticsService:
         stmt = select(
             Enrollment.student_id, Enrollment.offering_id, Enrollment.semester
         )
+        stmt = apply_if(stmt, student_id, lambda v: Enrollment.student_id == v)
+        stmt = apply_if(stmt, offering_id, lambda v: Enrollment.offering_id == v)
 
-        if student_id is not None:
-            stmt = stmt.where(Enrollment.student_id == student_id)
-
-        if offering_id is not None:
-            stmt = stmt.where(Enrollment.offering_id == offering_id)
-
-        if semester is not None and offering_id is not None:
-            stmt = stmt.where(Enrollment.semester == semester)
-        elif semester is not None and student_id is None and offering_id is None:
-            stmt = stmt.where(Enrollment.semester == semester)
-        elif student_id is None and offering_id is None and semester is None:
+        # `semester` scopes the query only when it rides with `offering_id` or
+        # stands alone; beside `student_id` it is ignored by design.
+        semester_scoped = offering_id is not None or (
+            student_id is None and semester is not None
+        )
+        stmt = apply_if(
+            stmt,
+            semester if semester_scoped else None,
+            lambda v: Enrollment.semester == v,
+        )
+        if student_id is None and offering_id is None and semester is None:
             stmt = stmt.join(
                 CourseOffering, CourseOffering.id == Enrollment.offering_id
             ).where(CourseOffering.is_active.is_(True))
 
-        rows: Sequence[tuple[int, int, str]] = (await self._session.execute(stmt)).all()  # type: ignore[assignment]
+        rows: Sequence[tuple[int, int, str]] = (
+            await self._session.execute(stmt)
+        ).all()  # type: ignore[assignment]
 
         return list(dict.fromkeys(rows))
 
     async def _compute_and_upsert(
         self, targets: list[tuple[int, int, str]]
     ) -> tuple[int, int, int, int]:
-        """Count stored levels for the target set without writing rows.
-
-        The heuristic compute plus UPSERT replaces this body without changing
-        the caller: same targets in, same (processed, high, medium, low) out,
-        with writes added.
-        """
+        """Compute heuristic risk for the target set and persist the rows."""
         if not targets:
             return 0, 0, 0, 0
 
-        student_ids: list[int] = list({student_id for student_id, _, _ in targets})
-        offering_ids: list[int] = list({offering_id for _, offering_id, _ in targets})
-        levels: Sequence[str] = (
-            await self._session.scalars(
-                select(StudentRiskScore.risk_level)
-                .where(StudentRiskScore.student_id.in_(student_ids))
-                .where(StudentRiskScore.offering_id.in_(offering_ids))
-            )
-        ).all()
-        counts: Counter[str] = Counter(levels)
-
+        summary = await run_risk_batch(self._session, targets)
         return (
-            len(targets),
-            counts.get(RiskLevel.HIGH.value, 0),
-            counts.get(RiskLevel.MEDIUM.value, 0),
-            counts.get(RiskLevel.LOW.value, 0),
+            summary["processed"],
+            summary["high"],
+            summary["medium"],
+            summary["low"],
         )
 
     async def refresh_risk(
