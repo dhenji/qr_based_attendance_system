@@ -15,6 +15,7 @@
 		flushQueue,
 		getCachedSession,
 		queue,
+		registerOutboxSync,
 		retryDelayMs,
 		type QueuedScan
 	} from '$lib/features/sync/service';
@@ -153,11 +154,26 @@
 		};
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
-		void refreshQueueState();
+		// Service-worker Background Sync relay: a worker wake-up (e.g. after
+		// a browser restart) asks open pages to run the authed drain.
+		const handleWorkerMessage = (event: MessageEvent) => {
+			if ((event.data as { type?: unknown } | null)?.type === 'FLUSH_OUTBOX') {
+				void flushNow();
+			}
+		};
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.addEventListener('message', handleWorkerMessage);
+		}
+		void refreshQueueState().then(() => {
+			if (pendingCount > 0) void registerOutboxSync().catch(() => undefined);
+		});
 		if (navigator.onLine) void flushNow();
 		return () => {
 			window.removeEventListener('online', handleOnline);
 			window.removeEventListener('offline', handleOffline);
+			if ('serviceWorker' in navigator) {
+				navigator.serviceWorker.removeEventListener('message', handleWorkerMessage);
+			}
 		};
 	});
 

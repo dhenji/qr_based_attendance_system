@@ -67,6 +67,28 @@ const DEFAULT_MAX_ATTEMPTS = 25;
 export const retryDelayMs = (retryCount: number): number =>
 	Math.min(30_000 * 2 ** Math.max(0, retryCount), 30 * 60 * 1000);
 
+// registerOutboxSync
+// Best-effort Background Sync wake-up so a browser-restart or worker wake can
+// nudge open pages to drain. The worker only relays FLUSH_OUTBOX messages —
+// the authed replay stays in flushQueue (the worker cannot read the
+// localStorage token). Never rejects; unsupported browsers just skip it.
+export const registerOutboxSync = async (): Promise<void> => {
+	try {
+		if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+		const registration = await navigator.serviceWorker.ready;
+		const syncManager = (
+			registration as ServiceWorkerRegistration & {
+				sync?: { register: (tag: string) => Promise<void> };
+			}
+		).sync;
+		if (!syncManager) return;
+		await syncManager.register('attendly-outbox');
+	} catch {
+		// No service worker / SyncManager (Firefox, iOS): the page-driven
+		// online-event and retry-timer paths already cover the drain.
+	}
+};
+
 // --- IndexedDB plumbing ------------------------------------------------------
 
 export const openAppDb = (): Promise<IDBDatabase> =>
@@ -211,6 +233,8 @@ export const queue = {
 			lastError: null
 		};
 		await writeRow(row);
+		// Nudge a future worker wake-up; never breaks the enqueue itself.
+		void registerOutboxSync().catch(() => undefined);
 		return row;
 	},
 
