@@ -107,10 +107,11 @@ class StudentNotArchivedException(StudentDomainException):
 class StudentHasRecordsException(StudentDomainException):
     """409 - the archived student still has referencing rows.
 
-    `enrollments`, `attendance_records` and `excuse_requests` reference
-    `students.id` with `ondelete="RESTRICT"`, so the delete is rejected
-    before the FK violation surfaces as a 500. The FKs stay `RESTRICT` on
-    purpose: cascading them would silently destroy attendance history.
+    `enrollments`, `attendance_records`, `excuse_requests` and
+    `student_risk_scores` reference `students.id` with `ondelete="RESTRICT"`,
+    so the delete is rejected before the FK violation surfaces as a 500.
+    The FKs stay `RESTRICT` on purpose: cascading them would silently
+    destroy attendance history.
     """
 
     status_code: int = 409

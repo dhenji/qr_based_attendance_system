@@ -728,7 +728,9 @@ List professor's active course assignments with program/year badges.
 it is attribution, not authorization (D8). Every endpoint below admits a
 professor who either opened the session or holds a current `course_professors`
 assignment on its offering, and a professor with neither claim gets
-`404 assignment_not_found`. The column is never rewritten, so history stays
+`403 not_assigned` (unified with the excuse slice; the admin remove path keeps
+its `404 assignment_not_found`, which answers "nothing to remove"). The column
+is never rewritten, so history stays
 attributed to whoever opened the session. The three read endpoints
 (`GET /professor/sessions`, `/sessions/history`, `/professor/attendance`) scope
 as a union of both claims rather than replacing ownership with the assignment -
@@ -752,7 +754,7 @@ Open a new attendance session.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
 | **Response 201** | `{ id, session_code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 404 `assignment_not_found`                                                                                                                          |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 403 `not_assigned`                                                                                                                          |
 | **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49).                                |
 
 #### `GET /professor/sessions/active/{id}`
@@ -785,6 +787,7 @@ Quick-excuse a student for this session.
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Request**      | `{ reason: string }`                                                                |
 | **Response 201** | `{ excuse_request_id, status: "approved", original_status, new_status: "excused" }` |
+| **Errors**       | `404 attendance_not_found` · `409 already_excused` · `422 excuse_not_eligible` (`present`/`pending` records) · `403 not_assigned` · `404 professor_not_found` |
 | **Notes**        | `new_status`/`original_status` are DTO fields mapping `attendance_records.validation_status`. |
 
 #### `PATCH /professor/sessions/{id}/attendance/{sid}/excuse`
@@ -1008,10 +1011,11 @@ as the list endpoint.
 
 Submit an excuse request with evidence.
 
-|                  |                                                                        |
-| ---------------- | ---------------------------------------------------------------------- |
-| **Request**      | `multipart/form-data: session_id=int, reason=string, attachment=File?` |
-| **Response 201** | `{ id, status: "pending", requested_at }`                              |
+|                  |                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------- |
+| **Request**      | JSON `{ session_id: int, reason: string, attachment_urls: string[1..5] }` (presigned-upload flow; the `multipart/form-data` form is superseded) |
+| **Response 201** | `{ id, status: "pending", requested_at }`                                         |
+| **Errors**       | `404 attendance_not_found` · `403 not_enrolled` · `409 already_excused` (record already excused) · `422 excuse_not_eligible` (record is `present`/`pending`, nothing to excuse) · `409 duplicate_excuse` |
 
 #### `GET /student/excuse-requests`
 

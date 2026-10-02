@@ -9,10 +9,10 @@ import pytest
 from core.config import Settings
 from features.attendance.model import Attendance
 from features.course.exceptions import (
-    OfferingAssignmentNotFoundException,
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.session.exceptions import (
@@ -267,7 +267,7 @@ def test_create_session_requires_assignment() -> None:
     session = _FakeSession(objs=(_offering(), _course()), rows={}, counts=[None])
     service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
 
-    with pytest.raises(OfferingAssignmentNotFoundException):
+    with pytest.raises(ProfessorNotAssignedException):
         _run(
             service.create_session(
                 professor_id=9, payload=SessionCreate(offering_id=10)
@@ -324,7 +324,7 @@ def test_get_active_session_rejects_a_professor_outside_the_team() -> None:
     session = _FakeSession(objs=(_session(),), rows={CourseProfessor: []})
     service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
 
-    with pytest.raises(OfferingAssignmentNotFoundException):
+    with pytest.raises(ProfessorNotAssignedException):
         _run(service.get_active_session(session_id=50, professor_id=999))
 
 

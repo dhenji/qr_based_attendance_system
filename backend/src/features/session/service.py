@@ -11,13 +11,13 @@ from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
-from core.security import generate_session_code
+from core.security import build_qr_payload, generate_session_code
 from features.attendance.model import Attendance
 from features.course.exceptions import (
-    OfferingAssignmentNotFoundException,
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
@@ -182,17 +182,23 @@ class SessionService:
         )
         await self._stamp_session(row, duration, now)
 
+        # Canonical QR serialization: build_qr_payload owns the versioned
+        # compact-key JSON contract ({v,code,offering,radius,pw,lw}); QRPayload
+        # validates the same JSON so the contract is exercised on every open.
+        qr_json: str = build_qr_payload(
+            row.id,
+            row.session_code,
+            offering.id,
+            radius,
+            windows.present,
+            windows.late,
+        )
+
         return SessionRead(
             id=row.id,
             session_code=row.session_code,
             offering_id=offering.id,
-            qr_payload=QRPayload(
-                code=row.session_code,
-                offering=offering.id,
-                radius=radius,
-                pw=windows.present,
-                lw=windows.late,
-            ),
+            qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_end_time=row.scheduled_end_time,
             created_at=row.created_at or now,
@@ -369,6 +375,12 @@ class SessionService:
         404 when the code matches no session, 410 when the session's window
         has closed (a missing expiry reads as closed, mirroring
         ``_session_status``).
+
+        NOTE: lookup is by the stored ``session_code`` column, not by
+        recomputing ``verify_session_code(code, session_id)`` — the request
+        carries the code alone with no session id to verify against.
+        ``verify_session_code`` remains the offline/typed-code helper for
+        callers that already hold both values.
         """
         row: Session | None = (
             await self._session.scalars(
@@ -801,6 +813,14 @@ class SessionService:
         )
 
     async def _require_assignment(self, *, offering_id: int, professor_id: int) -> None:
+        """Require a current teaching assignment; 403 when outside the team.
+
+        Unified with the excuse slice (`not_assigned`): an authenticated
+        professor without an effective `course_professors` row is forbidden,
+        not lost — 404 would conflate "no such session" with "not your
+        course". The admin remove path (`course/service.py`) keeps its 404
+        (nothing to remove), which answers a different question.
+        """
         today: date = date.today()
         row: CourseProfessor | None = (
             await self._session.scalars(
@@ -820,7 +840,7 @@ class SessionService:
         ).one_or_none()
 
         if row is None:
-            raise OfferingAssignmentNotFoundException(offering_id, professor_id)
+            raise ProfessorNotAssignedException(offering_id)
 
     async def _resolve_duration(
         self, payload: SessionCreate, offering: CourseOffering

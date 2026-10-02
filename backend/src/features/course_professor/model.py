@@ -27,11 +27,11 @@ class CourseProfessor(CreatedAtMixin, Base):
 
     offering_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("course_offerings.id", ondelete="CASCADE"),
+        ForeignKey("course_offerings.id", ondelete="RESTRICT"),
     )
     professor_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("professors.id", ondelete="CASCADE"),
+        ForeignKey("professors.id", ondelete="RESTRICT"),
     )
     effective_from: Mapped[date] = mapped_column(Date)
     is_primary: Mapped[bool] = mapped_column(Boolean, server_default=false())
