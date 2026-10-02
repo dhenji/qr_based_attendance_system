@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from shared.enums import RiskLevel
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE
+
+TrendGranularity = Literal["daily", "weekly", "monthly"]
+
+
+class OverviewResponse(BaseModel):
+    total_students: int
+    total_courses: int
+    avg_compliance_rate: float
+    avg_participation_rate: float
+    total_sessions: int
+
+
+class CourseComparisonItem(BaseModel):
+    course_id: int
+    course_code: str
+    program_id: int
+    year_level_id: int
+    compliance_rate: float
+    participation_rate: float
+    total_sessions: int
+
+
+class CourseComparisonResponse(BaseModel):
+    items: list[CourseComparisonItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE
+
+
+class TrendItem(BaseModel):
+    date: date
+    compliance_rate: float
+    participation_rate: float
+    total_sessions: int
+
+
+class TrendResponse(BaseModel):
+    items: list[TrendItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE
+
+
+class AtRiskItem(BaseModel):
+    student_id: int
+    student_name: str
+    program: str
+    year_level: str
+    offering_id: int
+    course_code: str
+    course_name: str
+    absence_rate: float
+    max_streak: int
+    trend_slope: float
+    risk_level: RiskLevel
+    computed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AtRiskResponse(BaseModel):
+    items: list[AtRiskItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE
+
+
+class RefreshRiskResponse(BaseModel):
+    processed: int
+    high: int
+    medium: int
+    low: int
+    duration_ms: int
