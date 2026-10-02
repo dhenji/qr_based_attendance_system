@@ -51,3 +51,42 @@ export interface StudentDashboardResponse {
   today_schedule: unknown[];
   recent_activity: unknown[];
 }
+
+// GET /student/schedule
+// Wire shapes mirror backend/src/features/student/schema.py ScheduleItem /
+// ScheduleResponse exactly (snake_case): one row per active enrollment,
+// ordered by offering_id. Empty enrollments return { offerings: [] }.
+export interface ScheduleItemResponse {
+  offering_id: number;
+  course_id: number;
+  course_code: string;
+  course_name: string;
+  program_code: string;
+  year_level_label: string;
+  semester: string;
+  schedule_days: string;
+  schedule_start_time: string;
+  schedule_end_time: string;
+  classroom_name: string | null;
+  professor_name: string | null;
+}
+
+export interface ScheduleResponse {
+  offerings: ScheduleItemResponse[];
+}
+
+// ScheduledClass is the camelCase view-model pages render.
+export interface ScheduledClass {
+  offeringId: number;
+  courseId: number;
+  courseCode: string;
+  courseName: string;
+  programCode: string;
+  yearLevelLabel: string;
+  semester: string;
+  scheduleDays: string;
+  scheduleStartTime: string;
+  scheduleEndTime: string;
+  classroomName?: string;
+  professorName?: string;
+}

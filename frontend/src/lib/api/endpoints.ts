@@ -12,6 +12,7 @@ import type {
 import type {
 	StudentDashboardResponse,
 	StudentProfileResponse,
+	ScheduleResponse,
 } from '$lib/shared/types';
 import type {
 	AdminAssignmentResponse,
@@ -130,6 +131,36 @@ export const AttendanceScanEndpoint: EndpointDef<AttendanceScanResponse> = {
 		scanned_at: new Date().toISOString(),
 		expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
 	}),
+};
+
+// Scan precheck (D27 step-2 gate) — live on features/attendance/router.py
+// (POST /student/attendance/precheck). Read-only: resolves the student from
+// the authenticated user, comparing payload.student_number case-insensitively
+// (403 student_number_mismatch on spoof). 200 flags enrolled/already_scanned
+// (which scan would raise as 403 not_enrolled / 409 duplicate_scan);
+// 404 session_not_found, 410 session_expired still raise.
+export interface AttendancePrecheckResponse {
+	enrolled: boolean;
+	already_scanned: boolean;
+	student: {
+		student_id: string;
+		name: string;
+		section: string | null;
+	};
+}
+
+export const AttendancePrecheckEndpoint: EndpointDef<AttendancePrecheckResponse> = {
+	url: '/student/attendance/precheck',
+	method: 'POST',
+	mock: (_params, _suffix, body) => {
+		const p = (body ?? {}) as { student_number?: unknown };
+		const studentNumber = String(p.student_number ?? '').trim().toUpperCase() || '24-0001';
+		return {
+			enrolled: true,
+			already_scanned: false,
+			student: { student_id: studentNumber, name: 'Jose Rizal', section: 'A' },
+		};
+	},
 };
 
 // Session CRUD (professor) — real routes on features/session/router.py.
@@ -421,6 +452,47 @@ export const StudentFaceEmbeddingEndpoint: EndpointDef<StudentFaceEmbeddingRespo
 	url: '/student/me/face-embedding',
 	method: 'GET',
 	mock: () => undefined,
+};
+
+// Student schedule — live on features/student/router.py
+// (GET /student/schedule, no params; identity from the Bearer token).
+// One row per active enrollment ordered by offering_id; empty enrollments
+// return { offerings: [] }.
+export const StudentScheduleEndpoint: EndpointDef<ScheduleResponse> = {
+	url: '/student/schedule',
+	method: 'GET',
+	mock: () => ({
+		offerings: [
+			{
+				offering_id: 1,
+				course_id: 1,
+				course_code: 'CS101',
+				course_name: 'Software Engineering 1',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem 2025-2026',
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Room 301',
+				professor_name: 'John Smith',
+			},
+			{
+				offering_id: 2,
+				course_id: 2,
+				course_name: 'Data Structures',
+				course_code: 'CS102',
+				program_code: 'BSCS',
+				year_level_label: '1st Year',
+				semester: '1st Sem 2025-2026',
+				schedule_days: 'TTh',
+				schedule_start_time: '13:00:00',
+				schedule_end_time: '14:30:00',
+				classroom_name: null,
+				professor_name: null,
+			},
+		],
+	}),
 };
 
 // --- Professor --------------------------------------------------------------
@@ -2379,6 +2451,8 @@ export const endpoints = {
 	sessionQR: SessionQREndpoint,
 	// Attendance scan
 	attendanceScan: AttendanceScanEndpoint,
+	// Scan precheck (D27 step-2 gate, read-only)
+	attendancePrecheck: AttendancePrecheckEndpoint,
 	// Session CRUD
 	sessionList: SessionListEndpoint,
 	sessionCreate: SessionCreateEndpoint,
@@ -2401,6 +2475,7 @@ export const endpoints = {
 	studentDashboard: StudentDashboardEndpoint,
 	studentHistory: StudentHistoryEndpoint,
 	studentFaceEmbedding: StudentFaceEmbeddingEndpoint,
+	studentSchedule: StudentScheduleEndpoint,
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,

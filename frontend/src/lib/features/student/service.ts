@@ -1,10 +1,10 @@
 // features/student/service.ts
 // Student-facing service: profile, schedule, history, scan.
 //
-// Profile and dashboard hit their endpoint defs (backend routes pending —
-// the store falls back on 404). Schedule stays empty (GET /student/schedule
-// has no backend yet). History is live on GET /student/attendance/history.
-// Scan delegates to features/liveness/service.ts in real mode.
+// Profile and dashboard hit their endpoint defs (the store falls back on
+// 404). Schedule is live on GET /student/schedule. History is live on
+// GET /student/attendance/history. Scan delegates to
+// features/liveness/service.ts in real mode.
 
 import { get, isMockMode } from '$lib/api/client';
 import type {
@@ -14,7 +14,9 @@ import type {
 
 export type { StudentHistoryStatus };
 import type {
-	Course,
+	ScheduleItemResponse,
+	ScheduleResponse,
+	ScheduledClass,
 	Student,
 	StudentDashboardResponse,
 	StudentProfileResponse,
@@ -58,10 +60,28 @@ export const updateProfile = async (_updates: Partial<Student>): Promise<Student
 	return null;
 };
 
-// Schedule — no backend yet (GET /student/schedule unimplemented).
-// Empty rather than invented rows.
-export const getSchedule = async (): Promise<Course[]> => {
-	return [];
+// Schedule — live on GET /student/schedule (no params; identity from the
+// Bearer token). One row per active enrollment ordered by offering_id;
+// empty enrollments return { offerings: [] }. Real API by default; mocks
+// only when PUBLIC_MOCK_MODE=true (see api/client.ts).
+const toScheduledClass = (o: ScheduleItemResponse): ScheduledClass => ({
+	offeringId: o.offering_id,
+	courseId: o.course_id,
+	courseCode: o.course_code,
+	courseName: o.course_name,
+	programCode: o.program_code,
+	yearLevelLabel: o.year_level_label,
+	semester: o.semester,
+	scheduleDays: o.schedule_days,
+	scheduleStartTime: o.schedule_start_time,
+	scheduleEndTime: o.schedule_end_time,
+	classroomName: o.classroom_name ?? undefined,
+	professorName: o.professor_name ?? undefined,
+});
+
+export const getSchedule = async (): Promise<ScheduledClass[]> => {
+	const response = await get<ScheduleResponse>('studentSchedule');
+	return (response.offerings ?? []).map(toScheduledClass);
 };
 
 export type StudentHistoryFilters = {

@@ -1,7 +1,7 @@
 // features/student/store.svelte.ts
 // Student dashboard + scan state using Svelte 5 runes ($state object store)
 
-import type { Course, LivenessEvidence, Student, StudentDashboardResponse } from '$lib/shared/types';
+import type { LivenessEvidence, ScheduledClass, Student, StudentDashboardResponse } from '$lib/shared/types';
 import {
 	getProfile,
 	updateProfile,
@@ -53,7 +53,7 @@ const EMPTY_DASHBOARD: StudentDashboardResponse = {
 export const studentState = $state({
 	student: null as Student | null,
 	dashboard: { ...EMPTY_DASHBOARD } as StudentDashboardResponse,
-	courses: [] as Course[],
+	courses: [] as ScheduledClass[],
 	history: [] as SessionHistoryItem[],
 	loading: false,
 	error: null as string | null,
