@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import time
 from collections import Counter
 from datetime import date, datetime
@@ -550,3 +552,66 @@ class AnalyticsService:
             low=low,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+
+    async def export_course_comparison(
+        self,
+        *,
+        format: str = "csv",
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_ids: Sequence[int] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> str:
+        """Per-course rows rendered as CSV text for the admin export download.
+
+        Only CSV is built here: no PDF writer is installed, so `pdf` is a
+        422 rather than a silently dropped option. Generation and backup-log
+        persistence stay separate — this returns text, the router streams it.
+        """
+        if format != "csv":
+            raise DomainException(
+                "PDF export is not available yet; request format csv",
+                code="validation_error",
+                field="format",
+            )
+
+        compared: CourseComparisonResponse = await self.get_course_comparison(
+            program_id=program_id,
+            year_level_id=year_level_id,
+            semester=semester,
+            course_ids=course_ids,
+            date_from=date_from,
+            date_to=date_to,
+            page=DEFAULT_PAGE,
+            size=MAX_PAGE_SIZE,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "course_id",
+                "course_code",
+                "program_id",
+                "year_level_id",
+                "compliance_rate",
+                "participation_rate",
+                "total_sessions",
+            ]
+        )
+
+        for item in compared.items:
+            writer.writerow(
+                [
+                    item.course_id,
+                    item.course_code,
+                    item.program_id,
+                    item.year_level_id,
+                    item.compliance_rate,
+                    item.participation_rate,
+                    item.total_sessions,
+                ]
+            )
+
+        return buffer.getvalue()

@@ -80,3 +80,16 @@ class RefreshRiskResponse(BaseModel):
     medium: int
     low: int
     duration_ms: int
+
+
+ExportFormat = Literal["csv", "pdf"]
+
+
+class AnalyticsExportRequest(BaseModel):
+    format: ExportFormat = "csv"
+    program_id: int | None = None
+    year_level_id: int | None = None
+    semester: str | None = None
+    course_ids: list[int] | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
