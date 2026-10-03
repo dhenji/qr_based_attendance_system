@@ -4,7 +4,7 @@ import csv
 import io
 import time
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
 from sqlalchemy import Select, func, select
@@ -16,14 +16,17 @@ from shared.enums import RiskLevel, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.query import apply_if
 from features.analytics.batch import run_risk_batch
-from features.analytics.model import StudentRiskScore
+from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.analytics.schema import (
     AtRiskItem,
     AtRiskResponse,
     CourseComparisonItem,
     CourseComparisonResponse,
     OverviewResponse,
+    PromoteStagingResponse,
     RefreshRiskResponse,
+    RiskStagingItem,
+    RiskStagingResponse,
     TrendGranularity,
     TrendItem,
     TrendResponse,
@@ -174,6 +177,35 @@ def _to_at_risk_item(
         trend_slope=float(features.get("trend_slope", 0.0)),
         risk_level=RiskLevel(score.risk_level),
         computed_at=ensure_aware(score.computed_at),
+    )
+
+
+def _to_staging_item(
+    staged: StudentRiskScoreStaging,
+    student: Student,
+    program: Program,
+    year_level: YearLevel,
+    course: Course,
+) -> RiskStagingItem:
+    """Map one staged dry-run row plus its joins to the review item."""
+    features: dict = staged.features or {}
+    promoted_at = staged.promoted_at
+    return RiskStagingItem(
+        student_id=staged.student_id,
+        student_name=_full_name(
+            student.first_name, student.middle_name, student.last_name
+        ),
+        program=program.code,
+        year_level=year_level.label,
+        offering_id=staged.offering_id,
+        course_code=course.course_code,
+        course_name=course.course_name,
+        absence_rate=float(features.get("absence_rate", 0.0)),
+        max_streak=int(features.get("max_streak", 0)),
+        trend_slope=float(features.get("trend_slope", 0.0)),
+        risk_level=RiskLevel(staged.risk_level),
+        computed_at=ensure_aware(staged.computed_at),
+        promoted_at=ensure_aware(promoted_at) if promoted_at is not None else None,
     )
 
 
@@ -550,6 +582,181 @@ class AnalyticsService:
             high=high,
             medium=medium,
             low=low,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def list_staged(
+        self,
+        *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        risk_level: RiskLevel | str | None = None,
+        unpromoted_only: bool = False,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> RiskStagingResponse:
+        """Read staged dry-run rows without touching live scores."""
+        page, size = _normalize_paging(page, size)
+        stmt = (
+            select(
+                StudentRiskScoreStaging,
+                Student,
+                Program,
+                YearLevel,
+                CourseOffering,
+                Course,
+            )
+            .join(Student, Student.id == StudentRiskScoreStaging.student_id)
+            .join(YearLevel, YearLevel.id == Student.year_level_id)
+            .join(Program, Program.id == YearLevel.program_id)
+            .join(
+                CourseOffering,
+                CourseOffering.id == StudentRiskScoreStaging.offering_id,
+            )
+            .join(Course, Course.id == CourseOffering.course_id)
+        )
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        stmt = apply_if(
+            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(
+            stmt, semester, lambda v: StudentRiskScoreStaging.semester == v
+        )
+        stmt = apply_if(
+            stmt,
+            RiskLevel(risk_level) if risk_level is not None else None,
+            lambda v: StudentRiskScoreStaging.risk_level == v.value,
+        )
+        if unpromoted_only:
+            stmt = stmt.where(StudentRiskScoreStaging.promoted_at.is_(None))
+        ordered = stmt.order_by(
+            StudentRiskScoreStaging.risk_probability.desc(),
+            StudentRiskScoreStaging.computed_at.desc(),
+            StudentRiskScoreStaging.id.desc(),
+        )
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(ordered.subquery())
+            )
+            or 0
+        )
+        rows: Sequence[tuple[
+            StudentRiskScoreStaging, Student, Program, YearLevel, CourseOffering, Course
+        ]] = (
+            await self._session.execute(
+                ordered.offset((page - 1) * size).limit(size)
+            )
+        ).all()  # type: ignore[assignment]
+        items: list[RiskStagingItem] = [
+            _to_staging_item(staged, student, program, year_level, course)
+            for staged, student, program, year_level, _offering, course in rows
+        ]
+
+        return RiskStagingResponse(items=items, total=total, page=page, size=size)
+
+    async def promote_staged(
+        self,
+        *,
+        student_id: int | None = None,
+        offering_id: int | None = None,
+        semester: str | None = None,
+    ) -> PromoteStagingResponse:
+        """Copy unpromoted staged rows into live scores and stamp them."""
+        started: float = time.perf_counter()
+        if offering_id is not None and semester is None:
+            raise DomainException(
+                "semester is required when offering_id is set",
+                code="validation_error",
+                field="semester",
+            )
+
+        stmt = select(StudentRiskScoreStaging).where(
+            StudentRiskScoreStaging.promoted_at.is_(None)
+        )
+        stmt = apply_if(stmt, student_id, lambda v: StudentRiskScoreStaging.student_id == v)
+        stmt = apply_if(stmt, offering_id, lambda v: StudentRiskScoreStaging.offering_id == v)
+        semester_scoped = offering_id is not None or (
+            student_id is None and semester is not None
+        )
+        stmt = apply_if(
+            stmt,
+            semester if semester_scoped else None,
+            lambda v: StudentRiskScoreStaging.semester == v,
+        )
+        staged_rows: Sequence[StudentRiskScoreStaging] = (
+            await self._session.scalars(stmt)
+        ).all()
+
+        skipped_stmt = select(StudentRiskScoreStaging).where(
+            StudentRiskScoreStaging.promoted_at.is_not(None)
+        )
+        skipped_stmt = apply_if(
+            skipped_stmt, student_id, lambda v: StudentRiskScoreStaging.student_id == v
+        )
+        skipped_stmt = apply_if(
+            skipped_stmt, offering_id, lambda v: StudentRiskScoreStaging.offering_id == v
+        )
+        skipped_stmt = apply_if(
+            skipped_stmt,
+            semester if semester_scoped else None,
+            lambda v: StudentRiskScoreStaging.semester == v,
+        )
+        skipped: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(skipped_stmt.subquery())
+            )
+            or 0
+        )
+
+        if staged_rows:
+            student_ids = list({row.student_id for row in staged_rows})
+            offering_ids = list({row.offering_id for row in staged_rows})
+            live_rows: Sequence[StudentRiskScore] = (
+                await self._session.scalars(
+                    select(StudentRiskScore)
+                    .where(StudentRiskScore.student_id.in_(student_ids))
+                    .where(StudentRiskScore.offering_id.in_(offering_ids))
+                )
+            ).all()
+            by_key = {
+                (row.student_id, row.offering_id, row.semester, row.computed_day): row
+                for row in live_rows
+            }
+
+            promoted_at = datetime.now(timezone.utc)
+            for staged in staged_rows:
+                key = (
+                    staged.student_id,
+                    staged.offering_id,
+                    staged.semester,
+                    staged.computed_day,
+                )
+                live = by_key.get(key)
+                if live is None:
+                    live = StudentRiskScore(
+                        student_id=staged.student_id,
+                        offering_id=staged.offering_id,
+                        semester=staged.semester,
+                        risk_probability=staged.risk_probability,
+                        risk_level=staged.risk_level,
+                        features=staged.features,
+                        computed_at=staged.computed_at,
+                        computed_day=staged.computed_day,
+                    )
+                    self._session.add(live)
+                    by_key[key] = live
+                else:
+                    live.risk_probability = staged.risk_probability
+                    live.risk_level = staged.risk_level
+                    live.features = staged.features
+                    live.computed_at = staged.computed_at
+                staged.promoted_at = promoted_at
+            await self._session.flush()
+
+        return PromoteStagingResponse(
+            promoted=len(staged_rows),
+            skipped=skipped,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
 

@@ -25,7 +25,7 @@ from features.analytics.constants import (
     WEIGHT_SYNC_LAG,
     WEIGHT_TREND_SLOPE,
 )
-from features.analytics.model import StudentRiskScore
+from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.attendance.model import Attendance
 from features.course.model import CourseOffering
 from features.enrollment.model import Enrollment
@@ -370,6 +370,60 @@ async def _upsert_scores(
     return high, medium, low
 
 
+async def _stage_scores(
+    session: AsyncSession,
+    scored: list[_ScoredTarget],
+    student_ids: list[int],
+    offering_ids: list[int],
+    computed_day: date,
+    computed_at: datetime,
+) -> tuple[int, int, int]:
+    existing: Sequence[StudentRiskScoreStaging] = (
+        await session.scalars(
+            select(StudentRiskScoreStaging)
+            .where(StudentRiskScoreStaging.student_id.in_(student_ids))
+            .where(StudentRiskScoreStaging.offering_id.in_(offering_ids))
+            .where(StudentRiskScoreStaging.computed_day == computed_day)
+        )
+    ).all()
+    by_key = {
+        (row.student_id, row.offering_id, row.semester): row for row in existing
+    }
+
+    high = medium = low = 0
+    for item in scored:
+        match item.level:
+            case RiskLevel.HIGH:
+                high += 1
+            case RiskLevel.MEDIUM:
+                medium += 1
+            case _:
+                low += 1
+        row = by_key.get((item.student_id, item.offering_id, item.semester))
+        if row is None:
+            session.add(
+                StudentRiskScoreStaging(
+                    student_id=item.student_id,
+                    offering_id=item.offering_id,
+                    semester=item.semester,
+                    risk_probability=item.probability,
+                    risk_level=item.level.value,
+                    features=item.features,
+                    computed_at=computed_at,
+                    computed_day=computed_day,
+                    promoted_at=None,
+                )
+            )
+        else:
+            row.risk_probability = item.probability
+            row.risk_level = item.level.value
+            row.features = item.features
+            row.computed_at = computed_at
+            row.promoted_at = None
+    await session.flush()
+    return high, medium, low
+
+
 async def run_risk_batch(
     session: AsyncSession,
     targets: list[tuple[int, int, str]] | None = None,
@@ -396,13 +450,19 @@ async def run_risk_batch(
 
     chunk_size = max(int(cfg.risk_batch_chunk_size or 1000), 1)
     scored = _score_targets(resolved, expected, grouped, moment, cfg, chunk_size)
-    high, medium, low = await _upsert_scores(
-        session, scored, student_ids, offering_ids, moment.date(), moment
-    )
+    if cfg.risk_batch_dry_run:
+        high, medium, low = await _stage_scores(
+            session, scored, student_ids, offering_ids, moment.date(), moment
+        )
+    else:
+        high, medium, low = await _upsert_scores(
+            session, scored, student_ids, offering_ids, moment.date(), moment
+        )
 
     duration_ms = int((time.perf_counter() - started) * 1000)
     logger.info(
-        "risk batch: total=%d high=%d medium=%d low=%d duration_ms=%d",
+        "risk batch%s: total=%d high=%d medium=%d low=%d duration_ms=%d",
+        " (dry-run)" if cfg.risk_batch_dry_run else "",
         len(scored),
         high,
         medium,

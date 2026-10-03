@@ -82,6 +82,37 @@ class RefreshRiskResponse(BaseModel):
     duration_ms: int
 
 
+class RiskStagingItem(BaseModel):
+    student_id: int
+    student_name: str
+    program: str
+    year_level: str
+    offering_id: int
+    course_code: str
+    course_name: str
+    absence_rate: float
+    max_streak: int
+    trend_slope: float
+    risk_level: RiskLevel
+    computed_at: datetime
+    promoted_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RiskStagingResponse(BaseModel):
+    items: list[RiskStagingItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE
+
+
+class PromoteStagingResponse(BaseModel):
+    promoted: int
+    skipped: int
+    duration_ms: int
+
+
 ExportFormat = Literal["csv", "pdf"]
 
 
