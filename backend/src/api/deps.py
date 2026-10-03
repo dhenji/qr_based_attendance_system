@@ -21,6 +21,7 @@ from features.excuse.service import ExcuseService
 from features.face_enrollment.service import FaceEnrollmentService
 from features.professor.service import ProfessorService
 from features.program.service import ProgramService
+from features.reports.service import ReportsService
 from features.session.service import SessionService
 from features.student.service import StudentService
 from shared.enums import UserRole
@@ -202,6 +203,12 @@ async def _get_analytics_service(
     return AnalyticsService(session)
 
 
+async def _get_reports_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> ReportsService:
+    return ReportsService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
@@ -212,6 +219,7 @@ SessionServiceDep = Annotated[SessionService, Depends(_get_session_service)]
 AttendanceServiceDep = Annotated[AttendanceService, Depends(_get_attendance_service)]
 ExcuseServiceDep = Annotated[ExcuseService, Depends(_get_excuse_service)]
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(_get_analytics_service)]
+ReportsServiceDep = Annotated[ReportsService, Depends(_get_reports_service)]
 
 
 FaceEnrollmentServiceDep = Annotated[

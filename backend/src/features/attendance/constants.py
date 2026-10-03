@@ -67,3 +67,10 @@ REVIEW_NOTE_MAX_LENGTH: int = 1000
 # Where a reviewer's free-text note is stored: `attendance_records` has no
 # dedicated column, so it rides inside the existing JSONB evidence blob.
 REVIEW_NOTE_EVIDENCE_KEY: str = "review_note"
+
+RECENT_SCANS_DEFAULT_LIMIT: int = 10
+RECENT_SCANS_MAX_LIMIT: int = 100
+
+# Minimum gap between first-half and second-half compliance rates before a
+# per-course trend counts as moving up or down.
+OVERVIEW_TREND_EPSILON: float = 0.01

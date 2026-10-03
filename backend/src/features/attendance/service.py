@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import csv
+import io
 import math
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -21,6 +24,8 @@ from features.attendance.constants import (
     HISTORY_SORT_DIRS,
     HISTORY_SORT_FIELDS,
     IDEMPOTENCY_TTL_SECONDS,
+    OVERVIEW_TREND_EPSILON,
+    RECENT_SCANS_MAX_LIMIT,
     REVIEW_DECISIONS,
     REVIEW_DEFAULT_STATUS,
     REVIEW_NOTE_EVIDENCE_KEY,
@@ -46,13 +51,18 @@ from features.attendance.schema import (
     HistorySummary,
     LivenessEvidence,
     LivenessReviewItem,
+    OverviewItem,
+    OverviewResponse,
     PrecheckRequest,
     PrecheckResponse,
+    RecentScanItem,
+    RecentScansResponse,
     ResolveReviewResponse,
     ScanRequest,
     ScanResponse,
 )
 from features.course.model import Course, CourseOffering
+from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.session.exceptions import (
     DuplicateScanException,
@@ -1114,3 +1124,306 @@ class AttendanceService:
             reviewed_by=actor_id,
             reviewed_at=_utcnow(),
         )
+
+    async def get_overview(
+        self,
+        *,
+        course_id: int | None = None,
+        professor_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> OverviewResponse:
+        """Per-course sessions, compliance rate, and trend over the filter set."""
+        offering_ids: list[int] = await self._overview_offering_ids(
+            course_id, professor_id
+        )
+
+        if not offering_ids:
+            return OverviewResponse(items=[])
+
+        offerings: Sequence[CourseOffering] = (
+            await self._session.scalars(
+                select(CourseOffering).where(CourseOffering.id.in_(offering_ids))
+            )
+        ).all()
+
+        if not offerings:
+            return OverviewResponse(items=[])
+
+        sessions: Sequence[Session] = await self._overview_sessions(
+            offering_ids, date_from, date_to
+        )
+        enrolled_by_offering: dict[int, set[int]] = (
+            await self._overview_enrollments(offering_ids)
+        )
+        tallies: Counter[int] = await self._overview_present_counts(
+            [row.id for row in sessions]
+        )
+        enrolled_by_session: dict[int, int] = {
+            row.id: len(enrolled_by_offering.get(row.offering_id, set()))
+            for row in sessions
+        }
+        sessions_by_course: dict[int, list[Session]] = {}
+
+        for row in sessions:
+            offering = next((o for o in offerings if o.id == row.offering_id), None)
+
+            if offering is None:
+                continue
+
+            sessions_by_course.setdefault(offering.course_id, []).append(row)
+
+        course_ids: list[int] = sorted({offering.course_id for offering in offerings})
+        course_map: dict[int, Course] = (
+            {
+                row.id: row
+                for row in (
+                    await self._session.scalars(
+                        select(Course).where(Course.id.in_(course_ids))
+                    )
+                ).all()
+            }
+            if course_ids
+            else {}
+        )
+        items: list[OverviewItem] = []
+
+        for current_id in course_ids:
+            course_sessions: list[Session] = sorted(
+                sessions_by_course.get(current_id, []),
+                key=lambda row: (_ensure_aware(row.created_at), row.id),
+            )
+            course: Course | None = course_map.get(current_id)
+            expected: int = sum(
+                enrolled_by_session.get(row.id, 0) for row in course_sessions
+            )
+            present: int = sum(tallies.get(row.id, 0) for row in course_sessions)
+            avg_rate: float = (
+                round(present / expected, 4) if expected > 0 else 0.0
+            )
+
+            items.append(
+                OverviewItem(
+                    course_id=current_id,
+                    course_code=course.course_code if course else "",
+                    course_name=course.course_name if course else "",
+                    sessions_count=len(course_sessions),
+                    avg_rate=avg_rate,
+                    trend=self._overview_trend(
+                        course_sessions, tallies, enrolled_by_session
+                    ),
+                )
+            )
+
+        items.sort(key=lambda item: (item.course_code, item.course_id))
+
+        return OverviewResponse(items=items)
+
+    async def _overview_offering_ids(
+        self, course_id: int | None, professor_id: int | None
+    ) -> list[int]:
+        stmt = select(CourseOffering.id)
+        stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
+
+        if professor_id is not None:
+            today: date = datetime.now(timezone.utc).date()
+            assigned = (
+                select(CourseProfessor.offering_id)
+                .where(CourseProfessor.professor_id == professor_id)
+                .where(CourseProfessor.effective_from <= today)
+                .where(
+                    (CourseProfessor.effective_to.is_(None))
+                    | (CourseProfessor.effective_to >= today)
+                )
+            )
+            stmt = stmt.where(CourseOffering.id.in_(assigned))
+
+        return list((await self._session.scalars(stmt)).all())
+
+    async def _overview_sessions(
+        self,
+        offering_ids: list[int],
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> Sequence[Session]:
+        if not offering_ids:
+            return []
+
+        stmt = select(Session).where(Session.offering_id.in_(offering_ids))
+        stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+
+        return (await self._session.scalars(stmt)).all()
+
+    async def _overview_enrollments(
+        self, offering_ids: list[int]
+    ) -> dict[int, set[int]]:
+        if not offering_ids:
+            return {}
+
+        rows: Sequence[tuple[int, int]] = (
+            await self._session.execute(
+                select(Enrollment.offering_id, Enrollment.student_id).where(
+                    Enrollment.offering_id.in_(offering_ids)
+                )
+            )
+        ).all()  # type: ignore[assignment]
+        grouped: dict[int, set[int]] = {}
+
+        for offering_id, student_id in rows:
+            grouped.setdefault(offering_id, set()).add(student_id)
+
+        return grouped
+
+    async def _overview_present_counts(
+        self, session_ids: list[int]
+    ) -> Counter[int]:
+        """Present-scan counts keyed by session id."""
+        if not session_ids:
+            return Counter()
+
+        rows: Sequence[tuple[int, int]] = (
+            await self._session.execute(
+                select(Attendance.session_id, func.count())
+                .where(Attendance.session_id.in_(session_ids))
+                .where(
+                    Attendance.validation_status == ValidationStatus.PRESENT.value
+                )
+                .group_by(Attendance.session_id)
+            )
+        ).all()  # type: ignore[assignment]
+
+        return Counter({session_id: count for session_id, count in rows})
+
+    @staticmethod
+    def _overview_trend(
+        ordered: list[Session],
+        present_by_session: Counter[int],
+        enrolled_by_session: dict[int, int],
+    ) -> str:
+        """Half-split trend: second-half compliance vs first-half compliance."""
+        if len(ordered) < 2:
+            return "flat"
+
+        mid: int = len(ordered) // 2
+
+        def _rate(session_ids: list[int]) -> float:
+            expected: int = sum(
+                enrolled_by_session.get(session_id, 0)
+                for session_id in session_ids
+            )
+
+            if expected <= 0:
+                return 0.0
+
+            present: int = sum(
+                present_by_session.get(session_id, 0) for session_id in session_ids
+            )
+
+            return present / expected
+
+        first_ids: list[int] = [row.id for row in ordered[:mid]]
+        second_ids: list[int] = [row.id for row in ordered[mid:]]
+        diff: float = _rate(second_ids) - _rate(first_ids)
+
+        if diff > OVERVIEW_TREND_EPSILON:
+            return "up"
+
+        if diff < -OVERVIEW_TREND_EPSILON:
+            return "down"
+
+        return "flat"
+
+    async def get_recent_scans(self, *, limit: int = 10) -> RecentScansResponse:
+        """Latest scans newest-first, capped by the requested limit."""
+        capped: int = min(max(limit, 1), RECENT_SCANS_MAX_LIMIT)
+        records: Sequence[Attendance] = (
+            await self._session.scalars(
+                select(Attendance)
+                .order_by(Attendance.timestamp.desc(), Attendance.id.desc())
+                .limit(capped)
+            )
+        ).all()
+
+        if not records:
+            return RecentScansResponse(items=[])
+
+        students, sessions, offerings, courses = await self._load_review_maps(
+            records
+        )
+        items: list[RecentScanItem] = []
+
+        for record in records:
+            student = students.get(record.student_id)
+            db_session = sessions.get(record.session_id)
+
+            if student is None or db_session is None:
+                continue
+
+            offering = offerings.get(db_session.offering_id)
+            course = courses.get(offering.course_id) if offering else None
+
+            if course is None:
+                continue
+
+            items.append(
+                RecentScanItem(
+                    id=record.id,
+                    scanned_at=record.timestamp,
+                    student_name=" ".join(
+                        part
+                        for part in (
+                            student.first_name,
+                            student.middle_name,
+                            student.last_name,
+                        )
+                        if part
+                    ),
+                    course_code=course.course_code,
+                    status=record.validation_status,
+                )
+            )
+
+        return RecentScansResponse(items=items)
+
+    async def export_overview_csv(
+        self,
+        *,
+        course_id: int | None = None,
+        professor_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> str:
+        """Full overview filter set rendered as CSV text for download."""
+        overview: OverviewResponse = await self.get_overview(
+            course_id=course_id,
+            professor_id=professor_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "course_id",
+                "course_code",
+                "course_name",
+                "sessions_count",
+                "avg_rate",
+                "trend",
+            ]
+        )
+
+        for item in overview.items:
+            writer.writerow(
+                [
+                    item.course_id,
+                    item.course_code,
+                    item.course_name,
+                    item.sessions_count,
+                    item.avg_rate,
+                    item.trend,
+                ]
+            )
+
+        return buffer.getvalue()
