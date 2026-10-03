@@ -73,7 +73,14 @@ from features.session.model import Session
 from features.student.exceptions import NotEnrolledException, StudentNotFoundException
 from features.student.model import Student
 from features.sync.model import SyncQueue
-from shared.enums import QueueStatus, SyncStatus, ValidationStatus
+from shared.audit import record_audit
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    QueueStatus,
+    SyncStatus,
+    ValidationStatus,
+)
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -1116,7 +1123,29 @@ class AttendanceService:
         else:
             status = ValidationStatus.REJECTED.value
 
+        previous: str = row.validation_status
         await self._apply_resolution(row, evidence, status, note)
+
+        # Approving restores a computed present/late status and rejecting marks
+        # the record `rejected`, so both rewrite a student's attendance outcome
+        # on an administrator's judgement. The note alone lives inside
+        # `liveness_evidence`; this is what ties the outcome to the person.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=(
+                AuditAction.APPROVE
+                if decision == "approve"
+                else AuditAction.REJECT
+            ),
+            entity_type=AuditEntity.ATTENDANCE_RECORD,
+            entity_id=row.id,
+            old_value={"validation_status": previous},
+            new_value={
+                "validation_status": row.validation_status,
+                "review_note": note,
+            },
+        )
 
         return ResolveReviewResponse(
             id=row.id,

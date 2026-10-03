@@ -97,12 +97,12 @@ async def create_student(
 )
 async def import_students(
     file: Annotated[UploadFile, File(description="students.csv")],
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> StudentImportResult:
     content: bytes = await file.read()
 
-    return await service.import_roster(content=content)
+    return await service.import_roster(content=content, actor_id=user.id)
 
 
 @router.get(
@@ -140,10 +140,12 @@ async def get_student(
 async def update_student(
     student_id: int,
     payload: StudentUpdate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> StudentRead:
-    return await service.update(student_id=student_id, payload=payload)
+    return await service.update(
+        student_id=student_id, payload=payload, actor_id=user.id
+    )
 
 
 @router.delete(
@@ -153,7 +155,7 @@ async def update_student(
 )
 async def hard_delete_student(
     student_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> None:
-    await service.hard_delete(student_id=student_id)
+    await service.hard_delete(student_id=student_id, actor_id=user.id)

@@ -57,5 +57,11 @@ STRUCTURAL_ENTITY_TYPES: tuple[str, ...] = (
     "course_offering",
 )
 
+# Query-string caps for the GET /admin/audit-logs filters. Both mirror the
+# `audit_logs` column widths (`String(50)`); a longer filter could never match a
+# stored value, so rejecting it at the edge beats an always-empty page.
+ENTITY_TYPE_MAX_LENGTH: int = 50
+ACTION_MAX_LENGTH: int = 50
+
 # Timestamped object name for analytics CSVs persisted through backup storage.
 EXPORT_FILENAME_PREFIX: str = "analytics_"

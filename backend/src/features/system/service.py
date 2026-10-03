@@ -28,9 +28,9 @@ import logging
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +59,8 @@ from features.system.constants import (
     WORK_GZ_NAME,
 )
 from features.system.exceptions import (
+    AuditDateRangeInvalidException,
+    AuditFilterInvalidException,
     BackupFailedException,
     BackupInProgressException,
     BackupNotFoundException,
@@ -68,15 +70,26 @@ from features.system.model import AppSetting, AuditLog, BackupLog
 from features.system.schema import (
     AcademicStructureListResponse,
     AcademicStructureRead,
+    AuditLogListResponse,
+    AuditLogRead,
     BackupListResponse,
     BackupRead,
     SystemSettingsRead,
     SystemSettingsUpdate,
 )
 from features.sync.model import SyncQueue
+from shared.audit import record_audit
 from shared.datetimes import ensure_aware
-from shared.enums import BackupKind, BackupStatus, BackupStorage, QueueStatus
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    BackupKind,
+    BackupStatus,
+    BackupStorage,
+    QueueStatus,
+)
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.query import apply_if
 from shared.storage import StorageUnconfiguredException, s3_client
 
 logger = logging.getLogger(__name__)
@@ -181,7 +194,11 @@ class SystemService:
         self._settings = settings or get_settings()
 
     async def run_backup(
-        self, *, kind: str = BackupKind.FULL.value, now: datetime | None = None
+        self,
+        *,
+        kind: str = BackupKind.FULL.value,
+        now: datetime | None = None,
+        actor_id: int | None = None,
     ) -> BackupLog:
         """Run the full pipeline and return the finished log row.
 
@@ -189,6 +206,11 @@ class SystemService:
         the row ``completed`` with size/hash/backend on success or ``failed``
         with the error on any failure, then prunes. Refuses to run while
         another backup holds the in-process lock.
+
+        `actor_id` is the admin who asked for the run, or None for the nightly
+        cron. `BackupLog` already records the operational outcome; the audit
+        row records who asked and how it ended, which is what makes an
+        unprompted export visible.
         """
         if kind not in (BackupKind.FULL.value, BackupKind.ANALYTICS.value):
             raise BackupFailedException(f"Unknown backup kind {kind!r}")
@@ -249,6 +271,22 @@ class SystemService:
                 row.finished_at = datetime.now(timezone.utc)
                 row.status = BackupStatus.COMPLETED.value
                 await self._session.flush()
+
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.CREATE,
+                entity_type=AuditEntity.BACKUP,
+                entity_id=row.id,
+                new_value={
+                    "kind": row.kind,
+                    "filename": row.filename,
+                    "status": row.status,
+                    "size_bytes": row.size_bytes,
+                    "storage_backend": row.storage_backend,
+                    "sha256": row.sha256,
+                },
+            )
 
             await self.prune_retention()
             return row
@@ -342,10 +380,18 @@ class SystemService:
         )
 
     async def update_system_settings(
-        self, patch: SystemSettingsUpdate
+        self, patch: SystemSettingsUpdate, actor_id: int | None = None
     ) -> SystemSettingsRead:
-        """Persist the provided fields, then return the full current view."""
+        """Persist the provided fields, then return the full current view.
+
+        Geofence radius and the present/late windows decide who counts as on
+        time and who counts as inside the classroom, so every change is
+        recorded with its previous value. A key that does not exist yet has no
+        previous value: `old_value` is then null on that field.
+        """
         updates = patch.model_dump(exclude_none=True)
+        changes: dict[str, dict[str, Any]] = {}
+
         for key, field in (
             (SETTING_GEOFENCE_RADIUS, "geofence_default_radius"),
             (SETTING_PRESENT_WINDOW, "present_window_default"),
@@ -358,11 +404,30 @@ class SystemService:
             row = await self._session.scalar(
                 select(AppSetting).where(AppSetting.key == key)
             )
+            # Read the old value before the write; after it the row no longer
+            # distinguishes what was there from what was just put there.
+            previous: Any = row.value if row is not None else None
+
             if row is None:
                 self._session.add(AppSetting(key=key, value=str(updates[field])))
             else:
                 row.value = str(updates[field])
+
+            changes[field] = {"old": previous, "new": str(updates[field])}
+
         await self._session.flush()
+
+        if changes:
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.UPDATE,
+                entity_type=AuditEntity.APP_SETTING,
+                entity_id=None,
+                old_value={name: c["old"] for name, c in changes.items()},
+                new_value={name: c["new"] for name, c in changes.items()},
+            )
+
         return await self.get_system_settings()
 
     async def list_backups(self, *, page: int = DEFAULT_PAGE, size: int = DEFAULT_PAGE_SIZE) -> BackupListResponse:
@@ -404,6 +469,98 @@ class SystemService:
         ).all()
         return AcademicStructureListResponse(
             items=[AcademicStructureRead.model_validate(row) for row in rows],
+            total=int(total or 0),
+            page=page,
+            size=size,
+        )
+
+    async def list_audit_logs(
+        self,
+        *,
+        entity_type: str | None = None,
+        action: str | None = None,
+        performed_by: int | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> AuditLogListResponse:
+        """Newest-first page of the whole audit trail, optionally filtered.
+
+        Unlike `list_academic_structure`, which is pinned to the four
+        structural entity types, this endpoint spans every `entity_type` the
+        writer records — including the two that carry no single-column id
+        (`course_professor` and the batch-level `import` / settings rows).
+
+        `entity_type` and `action` are validated against the recorded
+        vocabulary. They are free-form columns, so an unrecognised value would
+        otherwise return an empty page that reads as "nothing happened".
+
+        `date_from` is inclusive from 00:00 UTC and `date_to` inclusive to the
+        end of that day, so `date_from == date_to` selects exactly one day.
+        """
+        page = max(page, 1)
+        size = min(max(size, 1), MAX_PAGE_SIZE)
+
+        # A blank query parameter is "no filter", not an unknown value: a client
+        # that sends its form fields verbatim sends `?entity_type=` for an unset
+        # dropdown, and rejecting that would be a 422 on a request that asked for
+        # nothing in particular.
+        entity_type = entity_type or None
+        action = action or None
+
+        # `in` against the StrEnum compares by value, so a plain query string
+        # matches the member without unwrapping it first.
+        if entity_type is not None and entity_type not in AuditEntity:
+            raise AuditFilterInvalidException("entity_type", entity_type)
+
+        if action is not None and action not in AuditAction:
+            raise AuditFilterInvalidException("action", action)
+
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise AuditDateRangeInvalidException()
+
+        scope = select(AuditLog)
+
+        for value, column in (
+            (entity_type, AuditLog.entity_type),
+            (action, AuditLog.action),
+        ):
+            scope = apply_if(scope, value, lambda v, c=column: c == v)
+
+        scope = apply_if(
+            scope, performed_by, lambda v: AuditLog.performed_by == v
+        )
+
+        # Half-open on the upper bound so `date_to` covers the whole day.
+        scope = apply_if(
+            scope,
+            date_from,
+            lambda v: AuditLog.performed_at
+            >= datetime.combine(v, dt_time.min, tzinfo=timezone.utc),
+        )
+        scope = apply_if(
+            scope,
+            date_to,
+            lambda v: AuditLog.performed_at
+            < datetime.combine(
+                v + timedelta(days=1), dt_time.min, tzinfo=timezone.utc
+            ),
+        )
+
+        total = await self._session.scalar(
+            select(func.count()).select_from(scope.subquery())
+        )
+        rows = (
+            await self._session.scalars(
+                scope.order_by(AuditLog.performed_at.desc(), AuditLog.id.desc())
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+
+        return AuditLogListResponse(
+            items=[AuditLogRead.model_validate(row) for row in rows],
             total=int(total or 0),
             page=page,
             size=size,
@@ -695,6 +852,9 @@ async def run_scheduled_backup(settings: Settings | None = None) -> int | None:
     async with track(JOB_BACKUP), database.get_session() as session:
         service = SystemService(session, cfg)
         try:
+            # `actor_id` stays None: a cron run has no authenticated actor, and
+            # the audit row rides this wrapper's own commit the same way the
+            # `backup_log` row does.
             row = await service.run_backup(kind=BackupKind.FULL.value)
             await session.commit()
         except BackupInProgressException:

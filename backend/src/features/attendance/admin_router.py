@@ -133,9 +133,7 @@ async def resolve_liveness_review(
     service: AttendanceServiceDep,
 ) -> ResolveReviewResponse:
     # The note rides inside `liveness_evidence` (attendance_records has no
-    # dedicated column). The prompt also asks for an audit-log row here;
-    # there is no audit table until Phase 8, so the decision is recorded on
-    # the record itself for now.
+    # dedicated column); the service also writes the audit row.
     return await service.resolve_review(
         record_id=record_id,
         decision=body.decision,

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from collections.abc import Sequence
+import logging
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -11,6 +13,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
+from core.database import database
 from core.security import (
     PREAUTH_TOKEN_TYPE,
     RECOVERY_TOKEN_TYPE,
@@ -65,10 +68,13 @@ from features.auth.schema import (
 )
 from features.professor.model import Professor
 from features.student.model import Student
+from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.email import send_otp_email
-from shared.enums import OtpPurpose, UserRole
+from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
 from shared.rate_limit import FixedWindowLimiter
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 _recovery_limiter = FixedWindowLimiter()
 
@@ -94,6 +100,93 @@ def _decoy_question(email: str, settings: Settings) -> str:
     ) % len(SECURITY_QUESTION_POOL)
 
     return SECURITY_QUESTION_POOL[index]
+
+
+def _account_snapshot(user: User) -> dict[str, Any]:
+    """The mutable account-state columns, and nothing else.
+
+    Deliberately excludes the email, the password hash and every MFA secret:
+    these dicts land in `audit_logs`, which every admin can read.
+    """
+    return {
+        "failed_login_attempts": user.failed_login_attempts,
+        "is_locked": user.is_locked,
+        "locked_at": user.locked_at.isoformat() if user.locked_at else None,
+        "must_change_password": user.must_change_password,
+    }
+
+
+@asynccontextmanager
+async def _lockout_transaction() -> AsyncIterator[AsyncSession]:
+    """A session that commits, for writes that must outlive a failed request.
+
+    Every write on the login path describes a request that is about to raise
+    `InvalidCredentialsException`, and `_get_db` rolls its transaction back on
+    any exception. A counter written there would be discarded along with the
+    audit row, which means the lockout threshold is never actually reached —
+    the counter is the lockout mechanism, so it has to commit on its own.
+
+    Failures are logged and swallowed: audit bookkeeping must never be the
+    reason a login stops working.
+    """
+    async with database.get_session() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("Lockout bookkeeping failed")
+
+
+async def _clear_expired_lockout(user_id: int) -> None:
+    """Release a lock whose window has elapsed, and record the release."""
+    async with _lockout_transaction() as session:
+        user: User | None = await session.get(User, user_id)
+
+        if user is None:
+            return
+
+        old_value: dict[str, Any] = _account_snapshot(user)
+        user.is_locked = False
+        user.locked_at = None
+        user.failed_login_attempts = 0
+
+        await record_audit(
+            session,
+            actor_id=None,
+            action=AuditAction.UNLOCK,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value=_account_snapshot(user),
+        )
+
+
+async def _register_failed_attempt(user_id: int, lockout_attempts: int) -> None:
+    """Count one wrong password and lock the account on the threshold."""
+    async with _lockout_transaction() as session:
+        user: User | None = await session.get(User, user_id)
+
+        if user is None:
+            return
+
+        old_value: dict[str, Any] = _account_snapshot(user)
+        user.failed_login_attempts += 1
+        locked: bool = user.failed_login_attempts >= lockout_attempts
+
+        if locked:
+            user.is_locked = True
+            user.locked_at = datetime.now(timezone.utc)
+
+        await record_audit(
+            session,
+            actor_id=None,
+            action=AuditAction.LOCK if locked else AuditAction.LOGIN_FAILED,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value=_account_snapshot(user),
+        )
 
 
 class AuthService:
@@ -259,18 +352,10 @@ class AuthService:
                 remaining: int = int((locked_until - now).total_seconds() // 60) + 1
                 raise AccountLockedException(remaining)
 
-            user.is_locked = False
-            user.locked_at = None
-            user.failed_login_attempts = 0
+            await _clear_expired_lockout(user.id)
 
         if not verify_password(password, user.password_hash):
-            user.failed_login_attempts += 1
-
-            if user.failed_login_attempts >= self._settings.lockout_attempts:
-                user.is_locked = True
-                user.locked_at = now
-
-            await self._session.flush()
+            await _register_failed_attempt(user.id, self._settings.lockout_attempts)
             raise InvalidCredentialsException()
 
         user.failed_login_attempts = 0
@@ -389,12 +474,23 @@ class AuthService:
         if user is None or not user.is_active:
             raise UnrecognizedEmailException()
 
+        old_value: dict[str, Any] = _account_snapshot(user)
+
         user.password_hash = hash_password(new_password)
         user.failed_login_attempts = 0
         user.is_locked = False
         user.locked_at = None
         user.must_change_password = False
 
+        await record_audit(
+            self._session,
+            actor_id=user.id,
+            action=AuditAction.PASSWORD_RESET,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value=_account_snapshot(user),
+        )
         await self._session.flush()
 
     async def change_password(

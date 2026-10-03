@@ -44,8 +44,9 @@ from features.session.schema import (
 )
 from features.student.model import Student
 from features.sync.model import SyncQueue
+from shared.audit import record_audit
 from shared.base import BaseCRUD
-from shared.enums import QueueStatus, ValidationStatus
+from shared.enums import AuditAction, AuditEntity, QueueStatus, ValidationStatus
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -146,7 +147,7 @@ class SessionService:
         self._offerings: BaseCRUD[CourseOffering] = BaseCRUD(CourseOffering, session)
 
     async def create_session(
-        self, *, professor_id: int, payload: SessionCreate
+        self, *, professor_id: int, payload: SessionCreate, actor_id: int | None = None
     ) -> SessionRead:
         """Open a new attendance session for an offering.
 
@@ -181,6 +182,17 @@ class SessionService:
             now=now,
         )
         await self._stamp_session(row, duration, now)
+
+        # After the stamp, not before: `session_code` is still the random
+        # placeholder until `_stamp_session` derives it from the assigned id.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.OPEN,
+            entity_type=AuditEntity.SESSION,
+            entity_id=row.id,
+            new_value=self._session_snapshot(row),
+        )
 
         # Canonical QR serialization: build_qr_payload owns the versioned
         # compact-key JSON contract ({v,code,offering,radius,pw,lw}); QRPayload
@@ -355,19 +367,49 @@ class SessionService:
         ]
 
     async def close_session(
-        self, *, session_id: int, professor_id: int
+        self, *, session_id: int, professor_id: int, actor_id: int | None = None
     ) -> SessionCloseResponse:
         """Manually close session scanning; already-closed closes are no-ops."""
         row: Session = await self._get_scoped_or_404(session_id, professor_id)
         now: datetime = _utcnow()
 
         if row.expires_at is None or row.expires_at > now:
+            old_value: dict[str, Any] = self._session_snapshot(row)
             row.expires_at = now
             await self._session.flush()
+
+            # Inside the guard on purpose: closing an already-closed session
+            # changes nothing, so it must not appear in the trail as though it
+            # did.
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.CLOSE,
+                entity_type=AuditEntity.SESSION,
+                entity_id=row.id,
+                old_value=old_value,
+                new_value=self._session_snapshot(row),
+            )
 
         counts, _ = _summarize(await self._attendance_rows(session_id))
 
         return SessionCloseResponse(id=row.id, final_counts=counts)
+
+    @staticmethod
+    def _session_snapshot(row: Session) -> dict[str, Any]:
+        """The audited columns of a session.
+
+        `session_code` is included: it is the value students type in, so it is
+        part of what an administrator reviewing a session needs to see.
+        """
+        return {
+            "offering_id": row.offering_id,
+            "professor_id": row.professor_id,
+            "session_code": row.session_code,
+            "scheduled_start_time": row.scheduled_start_time.isoformat(),
+            "scheduled_end_time": row.scheduled_end_time.isoformat(),
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        }
 
     async def verify_code(self, *, code: str) -> VerifyCodeResponse:
         """Resolve a student-typed/scanned session code to its session config.

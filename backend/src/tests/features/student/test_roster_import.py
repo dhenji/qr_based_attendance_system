@@ -13,6 +13,8 @@ from features.student.exceptions import (
 )
 from features.student.model import Student
 from features.student.service import StudentService, parse_roster_csv
+from features.system.model import AuditLog
+from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -174,14 +176,23 @@ def test_import_roster_creates_duplicates_and_errors() -> None:
         "S004,Carol,,Tan,carol@example.com,UNKNOWN,C,1\n"
     ).encode()
 
-    result = _run(StudentService(session).import_roster(content=content))
+    result = _run(
+        StudentService(session).import_roster(content=content, actor_id=None)
+    )
 
     assert result.imported == 1
     assert result.duplicates == 1
     assert [e.line for e in result.errors] == [4, 5]
-    assert len(session.added) == 1
+    assert len(session.added) == 2
     assert session.added[0].student_id == "S002"
     assert session.added[0].year_level_id == 1
+    # One aggregate row for the upload, not one per imported student.
+    audit = session.added[1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.IMPORT
+    assert audit.entity_type == AuditEntity.STUDENT
+    assert audit.entity_id is None
+    assert audit.new_value == {"imported": 1, "duplicates": 1, "errors": 2}
 
 
 def test_import_roster_resolves_year_label() -> None:
@@ -193,7 +204,9 @@ def test_import_roster_resolves_year_label() -> None:
     )
     content = (f"{HEADER}\nS009,Zed,,Roe,zed@example.com,BSCS,Z,1st year\n").encode()
 
-    result = _run(StudentService(session).import_roster(content=content))
+    result = _run(
+        StudentService(session).import_roster(content=content, actor_id=None)
+    )
 
     assert result.imported == 1
     assert result.duplicates == 0
@@ -204,29 +217,40 @@ def test_hard_delete_active_raises_not_archived() -> None:
     session = _FakeSession(objs=(_student(is_active=True),))
 
     with pytest.raises(StudentNotArchivedException) as exc_info:
-        _run(StudentService(session).hard_delete(student_id=1))
+        _run(StudentService(session).hard_delete(student_id=1, actor_id=None))
 
     assert exc_info.value.code == "not_archived"
     assert session.deleted == []
+    # The guard rejects the delete, so it must not leave a trail row either:
+    # `record_audit` rides the caller's transaction and would roll back with it.
+    assert session.added == []
 
 
 def test_hard_delete_with_enrollments_raises_has_records() -> None:
     session = _FakeSession(objs=(_student(is_active=False),), counts=[1])
 
     with pytest.raises(StudentHasRecordsException) as exc_info:
-        _run(StudentService(session).hard_delete(student_id=1))
+        _run(StudentService(session).hard_delete(student_id=1, actor_id=None))
 
     assert exc_info.value.code == "student_has_records"
     assert session.deleted == []
+    assert session.added == []
 
 
 def test_hard_delete_clean_archived_deletes() -> None:
     student = _student(is_active=False)
     session = _FakeSession(objs=(student,), counts=[0, 0, 0])
 
-    _run(StudentService(session).hard_delete(student_id=1))
+    _run(StudentService(session).hard_delete(student_id=1, actor_id=None))
 
     assert session.deleted == [student]
+    audit = session.added[-1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.DELETE
+    assert audit.entity_type == AuditEntity.STUDENT
+    assert audit.entity_id == student.id
+    assert audit.old_value["student_id"] == student.student_id
+    assert audit.new_value is None
 
 
 def test_list_carries_profile_enrichments() -> None:
