@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -8,12 +10,14 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.exceptions import DomainException
 from features.analytics.schema import TrendGranularity
 from features.attendance.model import Attendance
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.reports.schema import (
+    DEFAULT_EXPORT_INCLUDE,
     AllCoursesItem,
     AllCoursesResponse,
     ReportMetric,
@@ -23,6 +27,8 @@ from features.reports.schema import (
     ReportsTrendResponse,
 )
 from features.session.model import Session
+from features.session.service import SessionService
+from features.student.model import Student
 from shared.datetimes import ensure_aware
 from shared.enums import ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -286,6 +292,155 @@ class ReportsService:
             page=page,
             size=size,
         )
+
+    async def export_attendance(
+        self,
+        *,
+        professor_id: int,
+        course_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        format: str = "csv",
+        include: Sequence[str] | None = None,
+        statuses: Sequence[ValidationStatus | str] | None = None,
+    ) -> str:
+        """Per-scan rows for the professor's union rendered as CSV text.
+
+        Scope is sessions the professor opened or is currently assigned to —
+        the same row-level union the session ledger reads, so the download
+        never disagrees with the on-screen table. Only CSV is built here:
+        no PDF writer is installed, so `pdf` is a 422 rather than a
+        silently dropped option. Generation and file persistence stay
+        separate — this returns text, the router streams it.
+        """
+        if format != "csv":
+            raise DomainException(
+                "PDF export is not available yet; request format csv",
+                code="validation_error",
+                field="format",
+            )
+
+        wanted: set[str] = (
+            set(include) if include is not None else set(DEFAULT_EXPORT_INCLUDE)
+        )
+        stmt = (
+            select(Attendance)
+            .join(Session, Session.id == Attendance.session_id)
+            .join(Student, Student.id == Attendance.student_id)
+            .where(
+                or_(
+                    Session.professor_id == professor_id,
+                    SessionService._assigned_offering_clause(
+                        Session.offering_id, professor_id
+                    ),
+                )
+            )
+        )
+
+        if course_id is not None:
+            stmt = stmt.join(
+                CourseOffering, CourseOffering.id == Session.offering_id
+            ).where(CourseOffering.course_id == course_id)
+
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+
+        if statuses:
+            stmt = stmt.where(
+                Attendance.validation_status.in_(
+                    [
+                        s.value if isinstance(s, ValidationStatus) else str(s)
+                        for s in statuses
+                    ]
+                )
+            )
+
+        records: Sequence[Attendance] = (
+            await self._session.scalars(
+                stmt.order_by(Attendance.timestamp.asc(), Attendance.id.asc())
+            )
+        ).all()
+        students: dict[int, Student] = await self._students_by_id(
+            {row.student_id for row in records}
+        )
+
+        header: list[str] = ["session_id"]
+
+        if "student_id" in wanted:
+            header.append("student_id")
+
+        if "name" in wanted:
+            header.append("name")
+
+        if "timestamp" in wanted:
+            header.append("timestamp")
+
+        if "gps" in wanted:
+            header.extend(["gps_lat", "gps_lng"])
+
+        if "liveness" in wanted:
+            header.append("face_match_score")
+
+        header.append("status")
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(header)
+
+        for record in records:
+            student: Student | None = students.get(record.student_id)
+
+            if student is None:
+                continue
+
+            row: list[Any] = [record.session_id]
+
+            if "student_id" in wanted:
+                row.append(student.student_id)
+
+            if "name" in wanted:
+                row.append(f"{student.first_name} {student.last_name}")
+
+            if "timestamp" in wanted:
+                row.append(
+                    record.timestamp.isoformat()
+                    if record.timestamp is not None
+                    else ""
+                )
+
+            if "gps" in wanted:
+                row.extend(
+                    [
+                        record.gps_lat if record.gps_lat is not None else "",
+                        record.gps_lng if record.gps_lng is not None else "",
+                    ]
+                )
+
+            if "liveness" in wanted:
+                row.append(
+                    float(record.face_match_score)
+                    if record.face_match_score is not None
+                    else ""
+                )
+
+            row.append(record.validation_status)
+            writer.writerow(row)
+
+        return buffer.getvalue()
+
+    async def _students_by_id(
+        self, student_ids: set[int]
+    ) -> dict[int, Student]:
+        if not student_ids:
+            return {}
+
+        rows: Sequence[Student] = (
+            await self._session.scalars(
+                select(Student).where(Student.id.in_(student_ids))
+            )
+        ).all()
+
+        return {row.id: row for row in rows}
 
     async def _scoped_offerings(
         self,
