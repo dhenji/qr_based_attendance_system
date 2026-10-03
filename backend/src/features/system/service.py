@@ -27,6 +27,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -35,7 +36,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
+from core.database import database
 from core.exceptions import DomainException
+from core.scheduler import JOB_BACKUP, track
 from features.system.constants import (
     ERROR_MAX_CHARS,
     EXPORT_FILENAME_PREFIX,
@@ -660,3 +663,55 @@ class SystemService:
                         path.unlink(missing_ok=True)
                     except OSError:
                         logger.warning("Local prune delete failed for %s", path)
+
+
+async def run_scheduled_backup(settings: Settings | None = None) -> int | None:
+    """Cron entry point: run one full backup and commit; None when skipped.
+
+    Same reasoning as the risk batch for owning the transaction:
+    `SystemService.run_backup` only `flush()`es, relying on the request
+    dependency to commit, so a cron run has to commit the `backup_log` row
+    itself or lose it.
+
+    The unconfigured-key preflight is the reason this is a wrapper rather than
+    a call to `run_backup`. Without an encryption key the pipeline cannot
+    succeed, and letting it fail would write a `failed` row every night - the
+    admin Backup panel would fill with failures nobody caused and the real ones
+    would be lost in the noise. Skipping before touching the database keeps the
+    failure visible as one CRITICAL log line instead. `run_backup` itself is
+    unchanged, so a manual trigger still fails loudly on the row.
+
+    Returns the new backup id, or None when the run was skipped.
+    """
+    cfg = settings or get_settings()
+    if not cfg.backup_encryption_key:
+        logger.critical(
+            "Scheduled backup skipped: BACKUP_ENCRYPTION_KEY is not set"
+        )
+        return None
+
+    started = time.perf_counter()
+    logger.info("Scheduled backup started")
+    async with track(JOB_BACKUP), database.get_session() as session:
+        service = SystemService(session, cfg)
+        try:
+            row = await service.run_backup(kind=BackupKind.FULL.value)
+            await session.commit()
+        except BackupInProgressException:
+            await session.rollback()
+            logger.warning(
+                "Scheduled backup skipped: a backup is already running"
+            )
+            return None
+        except Exception:
+            await session.rollback()
+            logger.exception("Scheduled backup failed")
+            return None
+
+    logger.info(
+        "Scheduled backup completed: %s (%d bytes in %.1fs)",
+        row.filename,
+        row.size_bytes,
+        time.perf_counter() - started,
+    )
+    return row.id

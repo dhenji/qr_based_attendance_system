@@ -607,7 +607,7 @@ async def auth_headers(
 def reset_process_globals() -> Any:
     """Clear module-level caches that would otherwise leak across tests.
 
-    Five of them, all process-global:
+    Six of them, all process-global:
 
     - `features.attendance.service._IDEMPOTENCY_STORE` is the scan
       idempotency cache, keyed by user/session/caller-supplied key. A scan
@@ -627,8 +627,15 @@ def reset_process_globals() -> Any:
     - `shared.email._PENDING` holds the futures of in-flight notification
       sends. A test that dispatches an email parks one there, and the next test
       would inherit it (and any `SMTP_*` monkeypatch it was queued under).
+    - `core.scheduler._IN_FLIGHT` and the scheduler singleton. A test that
+      starts a scheduler or enters `track()` leaves both behind; worse, a
+      started scheduler stays bound to the loop that has just closed, so the
+      next test's `start()` would try to reuse a dead loop. `reset_scheduler()`
+      is sync because this fixture is - by teardown there is no loop left to
+      await `shutdown()` on.
     """
 
+    from core import scheduler as core_scheduler
     from features.attendance import service as attendance_service
     from features.auth import service as auth_service
     from shared import cache, email, rate_limit
@@ -639,6 +646,7 @@ def reset_process_globals() -> Any:
         auth_service._recovery_limiter._windows.clear()
         cache._cache._store.clear()
         email._PENDING.clear()
+        core_scheduler.reset_scheduler()
 
     _clear()
     yield

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     backup_retention_daily: int = 30
     backup_retention_monthly: int = 12
     backup_exclude_otp_codes: bool = False
+    # Nightly full-backup schedule. 03:00 is what the admin System Settings
+    # panel displays as the last backup time, and it clears the 02:00 risk
+    # batch so the two heavy jobs never overlap.
+    backup_cron: str = "0 3 * * *"
 
     # Attendance defaults (D13, geofence). The two window values mirror
     # `shared.constants.DEFAULT_PRESENT_WINDOW_MINUTES` /
@@ -62,6 +66,17 @@ class Settings(BaseSettings):
     risk_batch_chunk_size: int = 1000
     risk_batch_workers: int = 4
     risk_batch_dry_run: bool = False
+
+    # Background scheduler. `scheduler_enabled` is the kill switch for dev
+    # (`uvicorn --reload` restarts the scheduler on every save) and for any
+    # deployment that wants crons handled outside the API process.
+    # `scheduler_timezone` is a zoneinfo name; an unknown one falls back to UTC
+    # with a warning rather than failing the boot, because a slim container
+    # image may ship without the tz database. `scheduler_misfire_grace_seconds`
+    # is how long a delayed run is still worth starting.
+    scheduler_enabled: bool = True
+    scheduler_timezone: str = "UTC"
+    scheduler_misfire_grace_seconds: int = 300
 
     # Attachment storage (excuse evidence). `s3` reuses the backup_* bucket and
     # credentials: the two features share one backend. `attachments_local_dir`

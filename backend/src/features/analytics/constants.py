@@ -25,3 +25,8 @@ WEIGHT_TREND_SLOPE: float = 0.20
 
 # Decimals kept on the stored feature snapshot.
 FEATURE_DECIMALS: int = 4
+
+# Runtime budget for one batch, covering 10k active enrollments. Crossing it is
+# reported, never enforced: partial results are written either way, so the run
+# finishes and a warning goes out rather than the scores being abandoned.
+RISK_BATCH_RUNTIME_BUDGET_MS: int = 300_000

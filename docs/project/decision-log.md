@@ -1105,3 +1105,94 @@
   boundary in both directions and are the guards against replacing ownership
   with assignment instead of widening it.
 - **Extends:** ADR-061 (whose Known-asymmetry bullet this resolves) and D8.
+
+---
+
+## 8.1 Background Jobs
+
+### ADR-063: The API Process Owns the Nightly Cron Jobs
+
+- **Decision (D63):** The nightly risk batch and the nightly full backup are
+  scheduled inside the FastAPI process by APScheduler, started and stopped by
+  the application lifespan. Each job body is a thin adapter in the feature that
+  owns the work, and each adapter owns its own transaction.
+- **Date:** 2026-10-03
+- **Status:** Accepted
+- **Context:** `RISK_BATCH_CRON` has been in `core/config.py` since the
+  analytics slice landed, and the backup pipeline's own docstrings have
+  anticipated a scheduler job, but nothing actually fired either one — both ran
+  only when an admin triggered them by hand. `risk-model.md` §5 and
+  `monitoring.md` §3-4 both describe nightly automation and both document a
+  backup-freshness SLO that nothing could satisfy. The deployment plan is a
+  single API process, so an external worker (Celery, a cron-on-the-host) would be
+  a second moving part to operate for two jobs.
+- **Rationale:**
+  - **Two wrappers, not two bare calls.** `run_risk_batch` and
+    `SystemService.run_backup` only ever `flush()`; the request dependency
+    commits on the way out. A cron run has no request, so each adapter opens
+    `database.get_session()` (which commits nothing) and commits itself.
+    Calling the service functions directly from a job would silently discard
+    every row it wrote — the worst possible failure mode, since the job would
+    log a healthy-looking summary.
+  - **Adapters live in their features, the scheduler does not.**
+    `core/scheduler.py` imports nothing from `features` or `shared`, preserving
+    the stdlib → third-party → core → shared → features ordering. The job bodies
+    sit next to the code they run (`analytics/batch.py`,
+    `system/service.py`) and `main.py` — which already imports every feature via
+    `api.router` — wires them together.
+  - **A failed job must not take the scheduler down.** Both adapters catch,
+    log and return. A night is lost either way; the process dying would lose
+    tomorrow as well.
+  - **A malformed cron raises at boot.** The trigger is built during
+    `register()`, so a typo in `RISK_BATCH_CRON` fails where an operator is
+    watching the log, rather than becoming a cron that silently never fires.
+  - **The unconfigured backup is skipped, not failed.** With no
+    `BACKUP_ENCRYPTION_KEY` the pipeline cannot succeed. Letting it fail would
+    write a `failed` `backup_log` row every night until someone noticed, and the
+    real failures would drown in the noise. The adapter preflights and logs one
+    CRITICAL line instead, leaving `run_backup` itself untouched so a manual
+    trigger still fails loudly and visibly on its row.
+- **Known limitations, stated rather than inherited:**
+  - **Process-local, single instance.** Neither the in-flight set nor the backup
+    lock crosses processes, exactly like the scan idempotency store and the rate
+    limiter. Running more than one worker process would fire every job once per
+    process. `Dockerfile.dev` passes no `--workers`, so this holds today; a
+    shared job store or a Postgres advisory lock is the fix and is not in place.
+  - **The nightly backup needs system binaries.** The pipeline shells out to
+    `pg_dump`, `gzip` and `openssl`. The dev image installs none of them, and
+    the sample production `Dockerfile` in `deployment-workflow.md` installs no
+    system packages at all, so on that image the nightly backup fails with
+    `backup_failed`. The image belongs to the deployment work, not here; noted
+    in `production-checklist.md`.
+  - **`SCHEDULER_TIMEZONE` defaults to UTC**, which is what a container without
+    a configured `TZ` already was. `risk-model.md` says "02:00 server time", so
+    this is a clarification, not a change. An unresolvable zone warns and falls
+    back rather than failing the boot: a cron that never fires is a silent
+    data-loss bug, and a slim image may ship without the tz database.
+- **Divergence from the backup endpoint:** `POST /admin/backups` declares
+  `202 Accepted` but fully awaits the pipeline before responding
+  (`features/system/router.py`). Left alone — the scheduled path and the manual
+  path share `run_backup`, so making the endpoint fire-and-forget is a contract
+  change and a separate decision.
+- **Consequences:** One `AsyncIOScheduler` per process, with
+  `max_instances=1` (a slow run is skipped, not stacked) and `coalesce=True` (a
+  backlog of missed fires collapses into one). `start`/`shutdown` are idempotent
+  and `register` replaces by name — `uvicorn --reload` re-enters the lifespan on
+  every file save, and APScheduler's `replace_existing` flag does not dedupe
+  jobs added before `start()`. Shutdown stops the scheduler with `wait=False`,
+  then cancels in-flight job tasks under a bounded timeout, and only then
+  disposes the engine: returning first would leave a job holding a connection
+  that is about to be closed underneath it. `core/scheduler.py` exposes
+  `scheduled_job_running()` for the admin maintenance endpoints' concurrency
+  guard; it reports scheduled runs only, so it composes with
+  `is_backup_running()` (which also sees manual triggers) rather than replacing
+  it. No new route, no new model, no migration: OpenAPI is unchanged at 84 paths
+  / 110 operations. `RISK_BATCH_WORKERS` remains unread dead config.
+- **Testing:** `tests/features/system/test_scheduler.py` (20 cases) pins job
+  registration from both crons, idempotent `start`, teardown emptying
+  `get_jobs()`, `SCHEDULER_ENABLED=false` registering nothing, a malformed cron
+  raising at registration, timezone fallback, in-flight tracking clearing on
+  raise, shutdown cancelling a running job without hanging, the drain refusing
+  to cancel its own caller, and both adapters committing their rows — which is
+  the assertion that fails against the direct-call version. The retention test
+  seeds three rows because pruning deliberately never leaves fewer than two.
