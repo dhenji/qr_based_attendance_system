@@ -26,6 +26,7 @@ from features.program.exceptions import YearLevelNotFoundException
 from features.program.model import Program, YearLevel
 from features.student.model import Student
 from features.system.model import AuditLog
+from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -432,10 +433,23 @@ def test_remove_professor_sets_today() -> None:
     session = _FakeSession(objs=(_offering(),), rows={CourseProfessor: [_assignment()]})
 
     effective_to = _run(
-        CourseService(session).remove_professor(offering_id=10, professor_id=7)
+        CourseService(session).remove_professor(
+            offering_id=10, professor_id=7, actor_id=99
+        )
     )
 
     assert effective_to == date.today()
+
+    # Effective-dated, not deleted: the audit row records the end date.
+    audit = session.added[-1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.UNASSIGN
+    assert audit.entity_type == AuditEntity.COURSE_PROFESSOR
+    # No surrogate id to point at: `course_professors` has a composite PK.
+    assert audit.entity_id is None
+    assert audit.performed_by == 99
+    assert audit.old_value["effective_to"] is None
+    assert audit.new_value["effective_to"] == date.today().isoformat()
 
 
 def test_remove_professor_missing_404() -> None:

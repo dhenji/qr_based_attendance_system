@@ -49,3 +49,34 @@ class BackupNotFoundException(SystemDomainException):
 
     def __init__(self, backup_id: int) -> None:
         super().__init__(message=f"Backup {backup_id} not found")
+
+
+class AuditFilterInvalidException(SystemDomainException):
+    """422 - an audit filter names a value outside the recorded vocabulary.
+
+    Rejected rather than passed through: the columns are free-form strings, so
+    an unrecognised `entity_type` or `action` would otherwise come back as an
+    empty page and read as "nothing happened", which is the opposite of what an
+    administrator filtering the trail needs to be able to trust.
+    """
+
+    status_code: int = 422
+    code: str = "invalid_audit_filter"
+
+    def __init__(self, field: str, value: str) -> None:
+        super().__init__(
+            message=f"Unknown {field} '{value}'", field=field
+        )
+
+
+class AuditDateRangeInvalidException(SystemDomainException):
+    """422 - `date_from` is later than `date_to`."""
+
+    status_code: int = 422
+    code: str = "invalid_audit_date_range"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="date_from must not be later than date_to",
+            field="date_from",
+        )

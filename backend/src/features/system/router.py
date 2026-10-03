@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
 from api.deps import SystemServiceDep, require_role
 from features.auth.model import User
+from features.system.constants import ACTION_MAX_LENGTH, ENTITY_TYPE_MAX_LENGTH
 from features.system.schema import (
     AcademicStructureListResponse,
+    AuditLogListResponse,
     BackupListResponse,
     BackupTriggerResponse,
     SystemSettingsRead,
@@ -16,8 +19,9 @@ from features.system.schema import (
 from shared.enums import UserRole
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
-# This module owns /admin/system/* and /admin/backups/* ONLY. Both paths are
-# unique across the mounted admin routers, so one router covers the slice.
+# This module owns /admin/system/*, /admin/backups/* and /admin/audit-logs
+# ONLY. All three paths are unique across the mounted admin routers, so one
+# router covers the slice.
 router = APIRouter(prefix="/admin")
 
 AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
@@ -42,10 +46,10 @@ async def get_system_settings(
 )
 async def update_system_settings(
     patch: SystemSettingsUpdate,
-    _: AdminUser,
+    user: AdminUser,
     service: SystemServiceDep,
 ) -> SystemSettingsRead:
-    return await service.update_system_settings(patch)
+    return await service.update_system_settings(patch, actor_id=user.id)
 
 
 @router.get(
@@ -60,6 +64,33 @@ async def list_academic_structure(
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> AcademicStructureListResponse:
     return await service.list_academic_structure(page=page, size=size)
+
+
+@router.get(
+    "/audit-logs",
+    response_model=AuditLogListResponse,
+    summary="List the audit trail (filterable, paginated)",
+)
+async def list_audit_logs(
+    _: AdminUser,
+    service: SystemServiceDep,
+    entity_type: str | None = Query(default=None, max_length=ENTITY_TYPE_MAX_LENGTH),
+    action: str | None = Query(default=None, max_length=ACTION_MAX_LENGTH),
+    performed_by: int | None = Query(default=None, ge=1),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> AuditLogListResponse:
+    return await service.list_audit_logs(
+        entity_type=entity_type,
+        action=action,
+        performed_by=performed_by,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        size=size,
+    )
 
 
 @router.get(
@@ -83,10 +114,10 @@ async def list_backups(
     summary="Trigger a full backup",
 )
 async def trigger_backup(
-    _: AdminUser,
+    user: AdminUser,
     service: SystemServiceDep,
 ) -> BackupTriggerResponse:
-    row = await service.run_backup(kind="full")
+    row = await service.run_backup(kind="full", actor_id=user.id)
     return BackupTriggerResponse(backup_id=row.id)
 
 

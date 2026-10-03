@@ -42,7 +42,7 @@ async def enroll_face(
     front: Annotated[UploadFile, File(description="Front-facing photo")],
     left: Annotated[UploadFile, File(description="Left-profile photo")],
     right: Annotated[UploadFile, File(description="Right-profile photo")],
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: FaceEnrollmentServiceDep,
 ) -> FaceEnrollmentResponse:
     front_bytes: bytes = await front.read()
@@ -57,4 +57,5 @@ async def enroll_face(
         front_content_type=front.content_type,
         left_content_type=left.content_type,
         right_content_type=right.content_type,
+        actor_id=user.id,
     )

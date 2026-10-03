@@ -70,7 +70,15 @@ class BackupTriggerResponse(BaseModel):
     status: Literal["started"] = "started"
 
 
-class AcademicStructureRead(BaseModel):
+class AuditLogRead(BaseModel):
+    """One audit trail row.
+
+    The stored shape, unaltered: `entity_type` + `entity_id` identify the
+    subject and `old_value`/`new_value` are the JSON snapshots the writer took.
+    Nothing is derived here, so an administrator reading this endpoint sees what
+    was actually recorded.
+    """
+
     id: int
     action: str
     entity_type: str
@@ -83,8 +91,23 @@ class AcademicStructureRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AcademicStructureRead(AuditLogRead):
+    """The `audit_logs` row, scoped to the four structural entity types.
+
+    A subclass rather than a copy so the two endpoints cannot drift apart; the
+    name is kept because it is already in the published OpenAPI schema.
+    """
+
+
 class AcademicStructureListResponse(BaseModel):
     items: list[AcademicStructureRead] = Field(default_factory=list)
+    total: int = 0
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE
+
+
+class AuditLogListResponse(BaseModel):
+    items: list[AuditLogRead] = Field(default_factory=list)
     total: int = 0
     page: int = DEFAULT_PAGE
     size: int = DEFAULT_PAGE_SIZE

@@ -10,6 +10,53 @@ class UserRole(StrEnum):
     STUDENT = "student"
 
 
+class AuditEntity(StrEnum):
+    """The `entity_type` vocabulary of the audit trail.
+
+    The column is free-form `String(50)`, so this enum is the contract rather
+    than a database constraint: adding a member is a code change, and the
+    reader endpoint rejects a filter outside it.
+    """
+
+    PROGRAM = "program"
+    YEAR_LEVEL = "year_level"
+    COURSE = "course"
+    COURSE_OFFERING = "course_offering"
+    STUDENT = "student"
+    PROFESSOR = "professor"
+    ENROLLMENT = "enrollment"
+    COURSE_PROFESSOR = "course_professor"
+    EXCUSE = "excuse"
+    SESSION = "session"
+    FACE_ENROLLMENT = "face_enrollment"
+    ATTENDANCE_RECORD = "attendance_record"
+    BACKUP = "backup"
+    APP_SETTING = "app_setting"
+    USER = "user"
+
+
+class AuditAction(StrEnum):
+    """The `action` vocabulary of the audit trail. See `AuditEntity`."""
+
+    CREATE = "create"
+    UPDATE = "update"
+    ARCHIVE = "archive"
+    DELETE = "delete"
+    IMPORT = "import"
+    ENROLL = "enroll"
+    ASSIGN = "assign"
+    UNASSIGN = "unassign"
+    OPEN = "open"
+    CLOSE = "close"
+    APPROVE = "approve"
+    REJECT = "reject"
+    REVOKE = "revoke"
+    LOCK = "lock"
+    UNLOCK = "unlock"
+    LOGIN_FAILED = "login_failed"
+    PASSWORD_RESET = "password_reset"
+
+
 class OtpPurpose(StrEnum):
     CLAIM = "claim"
     FORGET_PASSWORD = "forget_password"

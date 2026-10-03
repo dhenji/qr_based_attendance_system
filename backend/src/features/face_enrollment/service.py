@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +11,9 @@ from features.face_enrollment.exceptions import InvalidImageException
 from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
+from shared.audit import record_audit
 from shared.cache import invalidate_face_embedding
+from shared.enums import AuditAction, AuditEntity
 
 _EMBEDDING_DIM: int = 128
 
@@ -95,6 +98,7 @@ class FaceEnrollmentService:
         front_content_type: str | None = None,
         left_content_type: str | None = None,
         right_content_type: str | None = None,
+        actor_id: int | None = None,
     ) -> FaceEnrollmentResponse:
         """Store a new face enrollment, superseding any previous one."""
         student: Student | None = await self._session.get(Student, student_id)
@@ -114,6 +118,7 @@ class FaceEnrollmentService:
                 max_bytes=self._settings.attachments_max_bytes,
             )
 
+        old_value: dict[str, Any] = self._face_snapshot(student)
         student.face_embedding = _stub_embedding_blob(
             version=self._settings.face_embedding_version
         )
@@ -123,6 +128,16 @@ class FaceEnrollmentService:
 
         invalidate_face_embedding(student.id)
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.FACE_ENROLLMENT,
+            entity_id=student.id,
+            old_value=old_value,
+            new_value=self._face_snapshot(student),
+        )
+
         assert student.face_enrolled_at is not None
 
         return FaceEnrollmentResponse(
@@ -131,7 +146,9 @@ class FaceEnrollmentService:
             face_embedding_version=student.face_embedding_version or 0,
         )
 
-    async def revoke_face_enrollment(self, *, student_id: int) -> None:
+    async def revoke_face_enrollment(
+        self, *, student_id: int, actor_id: int | None = None
+    ) -> None:
         """Clear face data without deactivating the student record.
 
         The version is bumped rather than reset so devices holding a cached copy
@@ -143,9 +160,37 @@ class FaceEnrollmentService:
         if student is None:
             raise StudentNotFoundException(student_id)
 
+        old_value: dict[str, Any] = self._face_snapshot(student)
         student.face_embedding = None
         student.face_enrolled_at = None
         student.face_embedding_version = (student.face_embedding_version or 0) + 1
         await self._session.flush()
 
         invalidate_face_embedding(student.id)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.REVOKE,
+            entity_type=AuditEntity.FACE_ENROLLMENT,
+            entity_id=student.id,
+            old_value=old_value,
+            new_value=self._face_snapshot(student),
+        )
+
+    @staticmethod
+    def _face_snapshot(student: Student) -> dict[str, Any]:
+        """Face state without the embedding.
+
+        The blob is encrypted at rest and is deliberately never copied into an
+        audit row; `face_embedding_version` is the signal that it changed.
+        """
+        return {
+            "enrolled": student.face_embedding is not None,
+            "face_enrolled_at": (
+                student.face_enrolled_at.isoformat()
+                if student.face_enrolled_at
+                else None
+            ),
+            "face_embedding_version": student.face_embedding_version or 0,
+        }

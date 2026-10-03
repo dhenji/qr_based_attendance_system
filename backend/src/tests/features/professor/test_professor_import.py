@@ -12,6 +12,8 @@ from features.professor.exceptions import (
 )
 from features.professor.model import Professor
 from features.professor.service import ProfessorService, parse_professor_roster_csv
+from features.system.model import AuditLog
+from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -127,42 +129,60 @@ def test_import_roster_creates_duplicates_and_errors() -> None:
         "Bob,,Cruz,not-an-email,CS\n"
     ).encode()
 
-    result = _run(ProfessorService(session).import_roster(content=content))
+    result = _run(
+        ProfessorService(session).import_roster(content=content, actor_id=None)
+    )
 
     assert result.imported == 1
     assert result.duplicates == 1
     assert [e.line for e in result.errors] == [4]
-    assert len(session.added) == 1
+    assert len(session.added) == 2
     assert session.added[0].email == "alan@example.com"
+    # One aggregate row for the upload, not one per imported professor.
+    audit = session.added[1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.IMPORT
+    assert audit.entity_type == AuditEntity.PROFESSOR
+    assert audit.entity_id is None
+    assert audit.new_value == {"imported": 1, "duplicates": 1, "errors": 1}
 
 
 def test_hard_delete_active_raises_not_archived() -> None:
     session = _FakeSession(objs=(_professor(is_active=True),))
 
     with pytest.raises(ProfessorNotArchivedException) as exc_info:
-        _run(ProfessorService(session).hard_delete(professor_id=7))
+        _run(ProfessorService(session).hard_delete(professor_id=7, actor_id=None))
 
     assert exc_info.value.code == "not_archived"
     assert session.deleted == []
+    assert session.added == []
 
 
 def test_hard_delete_with_sessions_raises_has_records() -> None:
     session = _FakeSession(objs=(_professor(is_active=False),), counts=[2])
 
     with pytest.raises(ProfessorHasRecordsException) as exc_info:
-        _run(ProfessorService(session).hard_delete(professor_id=7))
+        _run(ProfessorService(session).hard_delete(professor_id=7, actor_id=None))
 
     assert exc_info.value.code == "professor_has_records"
     assert session.deleted == []
+    assert session.added == []
 
 
 def test_hard_delete_clean_archived_deletes() -> None:
     professor = _professor(is_active=False)
     session = _FakeSession(objs=(professor,), counts=[0])
 
-    _run(ProfessorService(session).hard_delete(professor_id=7))
+    _run(ProfessorService(session).hard_delete(professor_id=7, actor_id=None))
 
     assert session.deleted == [professor]
+    audit = session.added[-1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.DELETE
+    assert audit.entity_type == AuditEntity.PROFESSOR
+    assert audit.entity_id == professor.id
+    assert audit.old_value["email"] == professor.email
+    assert audit.new_value is None
 
 
 def test_list_carries_claim_status() -> None:

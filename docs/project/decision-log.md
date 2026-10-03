@@ -1196,3 +1196,158 @@
   to cancel its own caller, and both adapters committing their rows — which is
   the assertion that fails against the direct-call version. The retention test
   seeds three rows because pruning deliberately never leaves fewer than two.
+
+## 8.2 Audit Trail
+
+### ADR-064: The Audit Vocabulary Is an Enum, Not a Database Constraint
+
+- **Decision (D64):** `audit_logs.action` and `audit_logs.entity_type` stay
+  free-form `String(50)` columns, constrained in code by two `StrEnum`s
+  (`shared/enums.py::AuditAction`, `AuditEntity`) that `record_audit` is typed
+  against and that the reader endpoint validates filters with. Writes cover
+  every sensitive mutation across all slices, and are read through one new
+  endpoint, `GET /admin/audit-logs`.
+- **Date:** 2026-10-03
+- **Status:** Accepted
+- **Context:** `audit_logs` and `shared/audit.py::record_audit` landed with the
+  academic-structure work, but only `program` and `course` ever called it — six
+  call sites each. Everything else the security model calls "logged" was in fact
+  recorded nowhere, or only as a comment on the row itself. Two comments and one
+  contract note still said "there is no audit table until Phase 8", and
+  `api-contracts.md` already promised a `GET /admin/audit-logs` route that no
+  router defined. The frontend has a fully-mocked audit page waiting on it.
+- **Rationale:**
+  - **The helper already existed; only call sites were missing.** `record_audit`
+    flushes into the caller's transaction and never commits, which is what makes
+    an audit row roll back with the mutation it describes. A rejected mutation
+    therefore leaves no trail — correct, and asserted at every call site.
+  - **An enum, not a `CheckConstraint`.** A constraint would be stronger, but it
+    is a migration and a breaking change against existing rows, and it would
+    make adding an action a deploy-order problem. The column stays permissive;
+    the enum is the contract. `audit_logs.action` still has **no index**, so an
+    `action`-only filter is a sequential scan — fine at MVP volume, and the first
+    thing to add if the table grows.
+  - **`entity_type` + `entity_id` is not always enough to name a row, so
+    `entity_id` is nullable.** `course_professors` has a composite primary key
+    and no surrogate id; the `app_setting` rows a settings PATCH writes have no
+    id either; and the `import` / `enroll` rows describe a batch rather than a
+    row. Those carry their identity in `old_value` / `new_value`.
+  - **Batch mutations are aggregated; per-item ones are not.** A roster import
+    writes one row with `imported` / `duplicates` / `errors` counts — a 400-line
+    upload would otherwise bury every other action in the trail. A bulk excuse
+    run writes one row per student, because each excuse is an independently
+    revocable entity with its own id.
+  - **Snapshots are hand-listed, never serialised generically.** Each slice has a
+    `_<entity>_snapshot` static method naming exactly the audited columns. A
+    generic model dump would eventually copy a password hash or an encrypted face
+    embedding into a table every admin can read; the face snapshots carry
+    `face_embedding_version` precisely so the blob never has to be there.
+  - **A rejected filter is an error, not an empty page.** Because the columns are
+    free-form, an unrecognised `entity_type` would match nothing and read as
+    "no such activity" — the one conclusion an audit query must never let a
+    reader draw by accident. Hence 422 `invalid_audit_filter` and
+    `invalid_audit_date_range`. A *blank* filter is still "no filter", so a
+    client that posts its form fields verbatim does not get a 422.
+  - **`GET /admin/audit-logs` returns the stored row unaltered** — the same eight
+    fields `GET /admin/system/academic-structure` already returns, and
+    `AcademicStructureRead` is now a subclass of the new `AuditLogRead` so the
+    two cannot drift. Nothing is derived: no `actor_name` join, no `category`
+    mapping. `academic-structure` stays pinned to the four structural entity
+    types; widening it would change an endpoint that already has consumers.
+- **A live defect this surfaced, and fixed:** `AuthService.login` incremented
+  `failed_login_attempts`, set `is_locked`, flushed, and then raised
+  `InvalidCredentialsException`. `_get_db` rolls back on any exception, so
+  **the counter was discarded on every failed login and the lockout threshold
+  was never reached** — account lockout did not work at all. No test covered it.
+  Lockout bookkeeping now runs through `_lockout_transaction`, which opens its
+  own session and commits, the same shape ADR-063 gave the cron adapters. This
+  is the one deliberate exception to "services only `flush()`", and it exists
+  because the alternative is a security control that silently does nothing.
+  `lock`, `login_failed` and `unlock` rows are written there, with
+  `performed_by = None` since no actor is authenticated at that point.
+- **Known limitations, stated rather than inherited:**
+  - **The counter is read-then-written, not atomic.** Two concurrent wrong
+    passwords for the same account can lose an increment. The row lock during
+    `UPDATE` serialises the writes but not the preceding `SELECT`. Pre-existing
+    in shape, but newly reachable now that the counter persists at all; the fix
+    is an atomic `SET failed_login_attempts = failed_login_attempts + 1`.
+  - **No admin-initiated lockout or password reset is auditable, because neither
+    exists.** `api-contracts.md` documents `POST /admin/users/{id}/reset-password`
+    and its student and professor equivalents; none is implemented. There is no
+    admin unlock route either, anywhere in the contract. `is_locked` is only ever
+    cleared by a successful login after the window elapses, or by a completed
+    self-service reset. Both gaps need the endpoints first; this decision records
+    them rather than inventing the surface.
+  - **`change_password` is not audited**, only `reset_password`. The security
+    model lists lockout and failed logins but not a self-service password change
+    with the current password. Reasonable to revisit alongside the admin routes.
+  - **The frontend still mocks the audit page.** Its designed response shape
+    (`occurred_at` / `actor_name` / `actor_role` / `category` / `entity` /
+    `detail`, in `shared/types/admin.ts`) does not match the stored columns.
+    Reconciling it is a frontend change and was deliberately left out of a
+    backend slice.
+- **Consequences:** OpenAPI 84 → 85 paths, 110 → 111 operations. No new model,
+  and no migration of its own — `audit_logs` already exists, from the
+  academic-structure work (`f4a9c2b7d103`). One unrelated conformance migration
+  (`b1c4e7f0a2d6`) ships alongside it; see ADR-065. 583 tests, up from 531.
+- **Testing:** `tests/features/auth/test_login_lockout.py` (12 cases) is the
+  regression test for the rollback defect: two of them drive
+  `POST /api/auth/login` over HTTP specifically because the service-level tests
+  never touch `_get_db`'s rollback and would pass against the broken version.
+  `tests/features/system/test_audit_logs_http.py` (26) covers the read contract,
+  including that the two audit endpoints stay scoped apart.
+  `tests/features/system/test_audit_call_sites_http.py` (14) drives the mutations
+  that only exist behind a route. The two pre-existing fake-session suites assert
+  their own writes now that those services add audit rows.
+
+## 8.3 Schema Conformance
+
+### ADR-065: The Model Is the Authoritative Schema; Migrations Converge Onto It
+
+- **Decision (D65):** `alembic check` reports no drift, repository-wide, and
+  `alembic check` is the only guard that keeps it that way. When a model and an
+  already-applied migration disagree, the model is right and a **new forward
+  migration** reconciles the database.
+- **Date:** 2026-10-03
+- **Status:** Accepted
+- **Context:** `alembic check` has failed on `app_settings` since Phase 12.0
+  landed. Migration `e7f8a9b0c1d2` created the table with a `UniqueConstraint`
+  on `key` **and** a separate non-unique index on the same column, while
+  `system/model.py` declares `key = mapped_column(String(100), unique=True,
+  index=True)` — which in SQLAlchemy means *one* unique index and no separate
+  constraint. Three operations were reported: drop the constraint, drop the
+  index, recreate the index as unique.
+- **Rationale:**
+  - **The constraint was the redundant half, not the model.** Postgres already
+    implements `UNIQUE` as an index, so the extra `ix_app_settings_key` was dead
+    weight *and* non-unique. `key` is load-bearing: `_stored_settings`
+    collapses rows with `{row.key: row.value for row in rows}` and seeds missing
+    keys, so duplicates would vanish silently into last-write-wins rather than
+    raise. Uniqueness is now declared once, by the unique index, and verified
+    enforced.
+  - **Fixed forward, never by editing an applied revision.** `e7f8a9b0c1d2` has
+    run in every environment that has migrated, so rewriting it forks the chain.
+    `b1c4e7f0a2d6` converges instead, and its `downgrade()` restores the old
+    shape exactly.
+  - **Safe on existing data.** The original constraint has enforced uniqueness
+    since the table was created, so no duplicate keys can exist and the new
+    unique index cannot fail. Postgres DDL is transactional and alembic runs
+    each revision in a transaction, so the drop-and-recreate has no window in
+    which a concurrent write could slip a duplicate in.
+- **Why it went unnoticed, and why no test will catch the next one:**
+  `tests/conftest.py` builds the test schema with `Base.metadata.create_all`,
+  straight from the models — the migration chain is never exercised by the
+  suite at all. A test asserting `app_settings.key` is unique would pass
+  identically against both schemas, because both are derived from the same
+  model. The suite can detect a *model* bug; it is structurally incapable of
+  detecting *migration* drift.
+  This is why the rule needs stating. Reading `alembic/versions/` shows a
+  constraint and an index; the model shows one unique index; the intuitive move
+  is to reconcile by deleting `unique=True` from the model — which the suite
+  would not object to, and which would leave two writers racing to insert the
+  same key with nothing to stop them. **Fix the migration, never the model.**
+- **Consequences:** head is `b1c4e7f0a2d6`, 9 migrations.
+  `b1c4e7f0a2d6_converge_app_settings_key_index.py` is the only added migration;
+  no model changed, so the 583 tests are unaffected and none of them cover it.
+  There is no CI and nothing runs `alembic check` automatically, so the guard is
+  manual — recorded in `AGENTS.md` rather than left to memory.

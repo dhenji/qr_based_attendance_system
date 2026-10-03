@@ -163,18 +163,29 @@ Excuse evidence attachments (photos, documents) are:
 
 All sensitive operations are logged in the audit trail:
 
-| Action                                           | Logged |
-| ------------------------------------------------ | ------ |
-| Student enrollment/unenrollment                  | Yes    |
-| Professor assignment changes                     | Yes    |
-| Excuse create/approve/revoke                     | Yes    |
-| Session open/close                               | Yes    |
-| Face enrollment/re-enrollment                    | Yes    |
-| Backup create/restore                            | Yes    |
-| Academic structure changes (program/year/course) | Yes    |
-| System settings changes                          | Yes    |
-| Account lockout/unlock                           | Yes    |
-| Failed login attempts                            | Yes    |
+| Action                                           | Logged | Trail row                                        |
+| ------------------------------------------------ | ------ | ----------------------------------------------- |
+| Student enrollment/unenrollment                  | Yes    | `enroll` / `enrollment`                         |
+| Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
+| Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
+| Session open/close                               | Yes    | `open` / `close` on `session`                   |
+| Face enrollment/re-enrollment                    | Yes    | `update` / `revoke` on `face_enrollment`        |
+| Backup create/restore                            | Yes    | `create` on `backup`. **Restore is not implemented** — only download |
+| Academic structure changes (program/year/course) | Yes    | `create` / `update` / `archive` / `delete`      |
+| System settings changes                          | Yes    | `update` on `app_setting`, with the previous value |
+| Account lockout/unlock                           | Yes    | `lock` / `unlock` on `user`. **Admin-initiated unlock is not implemented** |
+| Failed login attempts                            | Yes    | `login_failed` on `user`, `performed_by` null |
+| Password reset                                   | Yes    | `password_reset` on `user`. **Only the self-service route exists** |
+| Liveness review resolve                          | Yes    | `approve` / `reject` on `attendance_record`     |
+
+Read the trail through `GET /admin/audit-logs` (admin-only, filterable by
+`entity_type` / `action` / `performed_by` / date range).
+`GET /admin/system/academic-structure` reads the same table scoped to the four
+structural entity types.
+
+Two rows above are marked unimplemented because the surface does not exist yet:
+there is no admin account unlock route and no admin password reset route. See
+ADR-064.
 
 ---
 

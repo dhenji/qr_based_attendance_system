@@ -13,6 +13,8 @@ from features.face_enrollment.exceptions import InvalidImageException
 from features.face_enrollment.service import FaceEnrollmentService
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
+from features.system.model import AuditLog
+from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -23,12 +25,18 @@ _PHOTO = b"\xff\xd8\xff fake-jpeg-bytes"
 class _FakeSession:
     def __init__(self, *, objs: tuple = ()):
         self.store = {(type(o), o.id): o for o in objs}
+        self.added: list = []
 
     async def get(self, model, ident):
         return self.store.get((model, ident))
 
     async def flush(self):
         pass
+
+    def add(self, obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = len(self.added) + 100
+        self.added.append(obj)
 
 
 def _service(session, settings: Any = _SETTINGS):
@@ -118,7 +126,9 @@ def test_status_unknown_student_404() -> None:
 def test_enroll_writes_stub_blob_and_bumps_version() -> None:
     session = _FakeSession(objs=(_student(),))
 
-    result = _run(_service(session).enroll_face(student_id=1, **_enroll_kwargs()))
+    result = _run(
+        _service(session).enroll_face(student_id=1, actor_id=7, **_enroll_kwargs())
+    )
 
     student = session.store[(Student, 1)]
     assert student.face_embedding is not None
@@ -131,6 +141,20 @@ def test_enroll_writes_stub_blob_and_bumps_version() -> None:
     assert result.student_id == 1
     assert result.face_embedding_version == 1
     assert result.face_enrolled_at == student.face_enrolled_at
+
+    audit = session.added[-1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.UPDATE
+    assert audit.entity_type == AuditEntity.FACE_ENROLLMENT
+    assert audit.entity_id == student.id
+    assert audit.performed_by == 7
+    assert audit.old_value == {
+        "enrolled": False,
+        "face_enrolled_at": None,
+        "face_embedding_version": 0,
+    }
+    assert audit.new_value["enrolled"] is True
+    assert audit.new_value["face_embedding_version"] == 1
 
 
 def test_enroll_unknown_student_404() -> None:
@@ -187,12 +211,19 @@ def test_revoke_clears_blob_and_bumps_version() -> None:
         )
     )
 
-    _run(_service(session).revoke_face_enrollment(student_id=1))
+    _run(_service(session).revoke_face_enrollment(student_id=1, actor_id=7))
 
     student = session.store[(Student, 1)]
     assert student.face_embedding is None
     assert student.face_enrolled_at is None
     assert student.face_embedding_version == 3
+
+    audit = session.added[-1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.REVOKE
+    assert audit.entity_type == AuditEntity.FACE_ENROLLMENT
+    assert audit.old_value["enrolled"] is True
+    assert audit.new_value["enrolled"] is False
 
 
 def test_revoke_unknown_student_404() -> None:

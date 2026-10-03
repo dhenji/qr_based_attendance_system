@@ -471,6 +471,35 @@ List structural changes (audit log for program/year/course mutations).
 | **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }`                                                                                                              |
 | **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. |
 
+#### `GET /admin/audit-logs`
+
+The full audit trail — every sensitive mutation, not just the structural ones.
+
+|                  |                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?entity_type=&action=&performed_by=&date_from=&date_to=&page=1&size=20`                                                                 |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], total, page, size }`              |
+| **Notes**        | Admin-only. Filters AND-combine and are each optional; a blank value (`?action=`) means "no filter". `date_from` is inclusive from 00:00 UTC, `date_to` inclusive to the end of that day, so `date_from == date_to` selects one day. |
+
+**Vocabulary.** `entity_type` is one of `program`, `year_level`, `course`,
+`course_offering`, `student`, `professor`, `enrollment`, `course_professor`,
+`excuse`, `session`, `face_enrollment`, `attendance_record`, `backup`,
+`app_setting`, `user`. `action` is one of `create`, `update`, `archive`,
+`delete`, `import`, `enroll`, `assign`, `unassign`, `open`, `close`, `approve`,
+`reject`, `revoke`, `lock`, `unlock`, `login_failed`, `password_reset`. A value
+outside either list is **422 `invalid_audit_filter`** rather than an empty page,
+so a mistyped filter can never read as "nothing happened". An inverted range is
+**422 `invalid_audit_date_range`**.
+
+**`entity_id` is nullable.** It is null for `course_professor` (composite
+primary key, so there is no single-column id), for the `app_setting` rows a
+PATCH writes, and for the aggregate `import` / `enroll` rows that describe a
+batch. Those rows are identified by `old_value`/`new_value` instead.
+
+**`performed_by` is nullable.** It is null when nobody was authenticated: a
+lockout or failed login triggered by an anonymous attempt, or the nightly cron.
+The subject is still `entity_type` + `entity_id`.
+
 #### `GET /admin/backups`
 
 |                  |                                                                                                          |
@@ -579,7 +608,7 @@ Approve or reject a flagged record.
 | ---------------- | --------------------------------------------------------------------------------- |
 | **Request**      | `{ decision: "approve" \| "reject", note?: string }`                              |
 | **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
-| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. `note` (≤1000 chars, stripped) is stored as `liveness_evidence.review_note` and returned by the list endpoint's `evidence`. Resolving an already-resolved record is 409 `review_not_pending`. **Audit logging is deferred to PROMPT 8.7** — no audit table exists until Phase 8, so the decision is currently recorded only on the attendance row. |
+| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. `note` (≤1000 chars, stripped) is stored as `liveness_evidence.review_note` and returned by the list endpoint's `evidence`. Resolving an already-resolved record is 409 `review_not_pending`. The decision is also written to the audit trail as `approve` / `reject` on `attendance_record`, visible on `GET /admin/audit-logs`. |
 
 ### Students, Professors & Archive
 
@@ -729,6 +758,10 @@ admins; admins manage students/professors. Password resets set a temp password
 | POST   | `/admin/professors/{id}/reset-password` | Reset linked professor-account password (temp once)| admin        |
 
 **Reset response:** `{ temp_password: string }` — shown once. All resets audited.
+
+> **Not implemented.** None of the three `reset-password` routes above exists yet;
+> only the self-service `POST /auth/reset-password` is built, and that one writes
+> a `password_reset` audit row. See ADR-064 for the gap this leaves in the trail.
 
 ---
 

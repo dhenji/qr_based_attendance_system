@@ -26,6 +26,7 @@ from features.program.schema import (
 )
 from shared.audit import record_audit
 from shared.base import BaseCRUD
+from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
 
@@ -52,8 +53,8 @@ class ProgramService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="create",
-            entity_type="program",
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.PROGRAM,
             entity_id=program.id,
             new_value=self._program_snapshot(program),
         )
@@ -157,8 +158,8 @@ class ProgramService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="update",
-            entity_type="program",
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.PROGRAM,
             entity_id=program.id,
             old_value=old_value,
             new_value=self._program_snapshot(program),
@@ -184,8 +185,8 @@ class ProgramService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="archive",
-            entity_type="program",
+            action=AuditAction.ARCHIVE,
+            entity_type=AuditEntity.PROGRAM,
             entity_id=program.id,
             old_value=old_value,
             new_value=self._program_snapshot(program),
@@ -250,8 +251,8 @@ class ProgramService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="create",
-            entity_type="year_level",
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.YEAR_LEVEL,
             entity_id=year_level.id,
             new_value=self._year_snapshot(year_level),
         )
@@ -282,8 +283,8 @@ class ProgramService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="update",
-            entity_type="year_level",
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.YEAR_LEVEL,
             entity_id=year_level.id,
             old_value=old_value,
             new_value=self._year_snapshot(year_level),
@@ -315,8 +316,8 @@ class ProgramService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="delete",
-            entity_type="year_level",
+            action=AuditAction.DELETE,
+            entity_type=AuditEntity.YEAR_LEVEL,
             entity_id=year_id,
             old_value=old_value,
         )

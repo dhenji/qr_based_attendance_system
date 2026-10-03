@@ -46,6 +46,7 @@ from features.student.schema import (
     StudentRead,
     StudentUpdate,
 )
+from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.cache import get_face_embedding_cached
 from shared.csv_import import (
@@ -58,6 +59,7 @@ from shared.csv_import import (
     strip_lower,
     strip_upper,
 )
+from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
 
@@ -448,7 +450,9 @@ class StudentService:
 
         return stmt
 
-    async def update(self, *, student_id: int, payload: StudentUpdate) -> StudentRead:
+    async def update(
+        self, *, student_id: int, payload: StudentUpdate, actor_id: int | None
+    ) -> StudentRead:
         student: Student = await self._get_or_404(student_id)
         values: dict[str, Any] = payload.model_dump(exclude_unset=True)
 
@@ -458,7 +462,7 @@ class StudentService:
 
         for field, value in values.items():
             if handler := self._FIELD_HANDLERS.get(field):
-                await handler(self, student, value, student_id)
+                await handler(self, student, value, student_id, actor_id)
             else:
                 setattr(student, field, value)
 
@@ -470,11 +474,18 @@ class StudentService:
         # it is expired and would raise MissingGreenlet if read synchronously.
         await self._session.refresh(student)
 
+        # No audit row for the field edits themselves: only the archive and
+        # reactivate transitions are trail-worthy here, and `is_active` routes
+        # through `archive()`/`reactivate()` below. Auditing here too would log
+        # the same transition twice on a PATCH that flips `is_active`.
         return await self._to_read(student)
 
     async def _handle_email(
-        self, student: Student, value: str, student_id: int
+        self, student: Student, value: str, student_id: int, actor_id: int | None
     ) -> None:
+        # `actor_id` is unused: only `is_active` needs to reach the audited
+        # archive/reactivate methods. It is accepted because `_FIELD_HANDLERS`
+        # calls every handler with one signature.
         if value != student.email:
             existing: Student | None = await self._students.get_by(email=value)
             if existing is not None and existing.id != student.id:
@@ -482,12 +493,15 @@ class StudentService:
         student.email = value
 
     async def _handle_is_active(
-        self, student: Student, value: bool, student_id: int
+        self, student: Student, value: bool, student_id: int, actor_id: int | None
     ) -> None:
+        # Both directions route through the dedicated method so a PATCH that
+        # flips `is_active` is audited on exactly the same path as a direct
+        # call, and appears once rather than twice.
         if value is False:
-            await self.archive(student_id=student.id)
+            await self.archive(student_id=student.id, actor_id=actor_id)
         else:
-            student.is_active = True
+            await self.reactivate(student_id=student.id, actor_id=actor_id)
 
     async def _resolve_and_set_cohort(
         self, student: Student, program_id: int | None, year_level_id: int | None
@@ -508,8 +522,9 @@ class StudentService:
         "is_active": _handle_is_active,
     }
 
-    async def archive(self, *, student_id: int) -> StudentRead:
+    async def archive(self, *, student_id: int, actor_id: int | None) -> StudentRead:
         student: Student = await self._get_or_404(student_id)
+        old_value: dict[str, Any] = self._student_snapshot(student)
         student.is_active = False
         # Face revocation: an archived identity must not stay matchable.
         student.face_embedding = None
@@ -520,15 +535,38 @@ class StudentService:
         # it is expired and would raise MissingGreenlet if read synchronously.
         await self._session.refresh(student)
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.ARCHIVE,
+            entity_type=AuditEntity.STUDENT,
+            entity_id=student.id,
+            old_value=old_value,
+            new_value=self._student_snapshot(student),
+        )
+
         return await self._to_read(student)
 
-    async def reactivate(self, *, student_id: int) -> StudentRead:
+    async def reactivate(
+        self, *, student_id: int, actor_id: int | None
+    ) -> StudentRead:
         student: Student = await self._get_or_404(student_id)
+        old_value: dict[str, Any] = self._student_snapshot(student)
         student.is_active = True
         await self._session.flush()
         # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
         # it is expired and would raise MissingGreenlet if read synchronously.
         await self._session.refresh(student)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.STUDENT,
+            entity_id=student.id,
+            old_value=old_value,
+            new_value=self._student_snapshot(student),
+        )
 
         return await self._to_read(student)
 
@@ -563,7 +601,9 @@ class StudentService:
 
         await self._session.flush()
 
-    async def import_roster(self, *, content: bytes) -> StudentImportResult:
+    async def import_roster(
+        self, *, content: bytes, actor_id: int | None
+    ) -> StudentImportResult:
         """Create NEW roster students from a CSV upload.
 
         Unlike offering bulk-enroll (which attaches existing students),
@@ -588,6 +628,22 @@ class StudentService:
                 errors.append(error)
 
         await self._session.flush()
+
+        # One row for the upload, not one per student: a 400-line roster would
+        # bury every other action in the trail. `entity_id` is null because the
+        # subject is the batch, which has no row of its own.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.IMPORT,
+            entity_type=AuditEntity.STUDENT,
+            entity_id=None,
+            new_value={
+                "imported": state.imported,
+                "duplicates": state.duplicates,
+                "errors": len(errors),
+            },
+        )
 
         errors.sort(key=lambda e: e.line)
 
@@ -655,7 +711,7 @@ class StudentService:
 
         return None
 
-    async def hard_delete(self, *, student_id: int) -> None:
+    async def hard_delete(self, *, student_id: int, actor_id: int | None) -> None:
         """Permanently delete an archived student with no referencing rows."""
         student: Student = await self._get_or_404(student_id)
 
@@ -675,8 +731,44 @@ class StudentService:
             if count:
                 raise StudentHasRecordsException(student.id)
 
+        # Snapshot before the delete: the instance is detached once flushed.
+        old_value: dict[str, Any] = self._student_snapshot(student)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.DELETE,
+            entity_type=AuditEntity.STUDENT,
+            entity_id=student.id,
+            old_value=old_value,
+        )
+
         await self._session.delete(student)
         await self._session.flush()
+
+    @staticmethod
+    def _student_snapshot(student: Student) -> dict[str, Any]:
+        """The audited columns of a student row.
+
+        The face embedding is deliberately absent — it is an encrypted blob and
+        `audit_logs` is readable by every admin. `face_embedding_version` is
+        kept because it is the signal that the embedding changed.
+        """
+        return {
+            "student_id": student.student_id,
+            "first_name": student.first_name,
+            "last_name": student.last_name,
+            "email": student.email,
+            "year_level_id": student.year_level_id,
+            "section": student.section,
+            "is_active": student.is_active,
+            "face_enrolled_at": (
+                student.face_enrolled_at.isoformat()
+                if student.face_enrolled_at
+                else None
+            ),
+            "face_embedding_version": student.face_embedding_version or 0,
+        }
 
     async def _get_or_404(self, student_id: int) -> Student:
         student: Student | None = await self._students.get(student_id)
