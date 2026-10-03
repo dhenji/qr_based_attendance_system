@@ -140,13 +140,17 @@ export const applyStagingFilters = async (
 // staging list (promoted rows drop out of the unpromoted view) and the live
 // At-Risk tab so the two never disagree.
 export const promoteStaging = async (
-	filters: RiskStagingFilters = {}
+	listFilters: RiskStagingFilters = {}
 ): Promise<void> => {
 	adminAnalyticsState.actionError = null;
 	try {
-		adminStagingState.lastPromote = await promoteRiskStaging(filters);
+		// The POST honors semester scope only — program/year/risk/paging are
+		// list-side filters the backend ignores, so they stay out of the call.
+		adminStagingState.lastPromote = await promoteRiskStaging({
+			semester: listFilters.semester,
+		});
 		await Promise.all([
-			applyStagingFilters(filters),
+			applyStagingFilters(listFilters),
 			(async () => {
 				adminAnalyticsState.atRisk = await getAtRisk(adminAnalyticsState.filters);
 			})(),

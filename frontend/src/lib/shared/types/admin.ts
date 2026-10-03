@@ -440,6 +440,9 @@ export interface RiskStagingFilters {
 	unpromoted_only?: boolean;
 	page?: number;
 	size?: number;
+	// Promote-scope keys only (the POST ignores every other filter).
+	student_id?: number;
+	offering_id?: number;
 }
 
 export interface AttendanceOverviewItemResponse {

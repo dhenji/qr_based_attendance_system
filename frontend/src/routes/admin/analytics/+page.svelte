@@ -17,6 +17,7 @@ import {
 	comparisonCsv,
 	downloadCsv,
 	enrichComparison,
+	fetchAnalyticsExportCsv,
 	overviewCsv,
 	stagingCsv,
 	trendsCsv,
@@ -235,7 +236,27 @@ import { isMockMode } from '$lib/api/client';
 	const exportOverview = () => {
 		if (overview) downloadCsv(`analytics-overview-${stamp()}.csv`, overviewCsv(overview));
 	};
-	const exportComparison = () => downloadCsv(`analytics-comparison-${stamp()}.csv`, comparisonCsv(comparison));
+	// Server-first comparison export (POST /admin/analytics/export): per-course
+	// rows straight from the backend for the rail's filter set. Mock mode and
+	// unreachable backends fall back to the client-side aggregate CSV.
+	const exportComparison = async () => {
+		const filename = `analytics-comparison-${stamp()}.csv`;
+		try {
+			downloadCsv(
+				filename,
+				await fetchAnalyticsExportCsv({
+					program_id: programFilter ? Number(programFilter) : undefined,
+					year_level_id: yearFilter ? Number(yearFilter) : undefined,
+					semester: semesterFilter.trim() || undefined,
+					course_ids: selectedCourseIds.length > 0 ? selectedCourseIds : undefined,
+					date_from: dateFrom.trim() || undefined,
+					date_to: dateTo.trim() || undefined,
+				})
+			);
+		} catch {
+			downloadCsv(filename, comparisonCsv(comparison));
+		}
+	};
 	const exportTrends = () =>
 		downloadCsv(`analytics-trends-${stamp()}.csv`, trendsCsv(adminAnalyticsState.trends));
 	const exportAtRisk = () =>
@@ -532,8 +553,11 @@ import { isMockMode } from '$lib/api/client';
 			{/if}
 			{#if promoteOpen}
 				<div class="confirm" role="alertdialog" aria-label="Confirm promote">
-					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'} under the current filters?</p>
-					<p class="muted small">Promoted rows leave this review list and appear in At-Risk.</p>
+					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'}?</p>
+					<p class="muted small">
+						Promote acts on the whole semester scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
+						and risk filters narrow this review list only. Promoted rows leave the list and appear in At-Risk.
+					</p>
 					<div class="confirm-actions">
 						<button class="btn btn-secondary" onclick={() => (promoteOpen = false)}>Cancel</button>
 						<button class="btn btn-primary" disabled={stagingBusy} onclick={onPromote}>Confirm Promote</button>

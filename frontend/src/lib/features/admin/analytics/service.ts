@@ -12,7 +12,7 @@
 // thresholds (D35) live in schema.ts as named constants mirroring the future
 // backend heuristic; the backend remains the source of truth.
 
-import { get, getText, post } from '$lib/api/client';
+import { get, getText, post, postText, type QueryParams } from '$lib/api/client';
 import { buildCsv } from '$lib/features/report/service';
 import type {
 	AdminAnalyticsFilters,
@@ -35,12 +35,15 @@ import type {
 
 export type AnalyticsMetric = 'compliance' | 'participation';
 
-const analyticsParams = (f: AdminAnalyticsFilters): Record<string, string> => {
-	const params: Record<string, string> = {};
+const analyticsParams = (f: AdminAnalyticsFilters): QueryParams => {
+	const params: QueryParams = {};
 	if (f.program_id !== undefined) params.program_id = String(f.program_id);
 	if (f.year_level_id !== undefined) params.year_level_id = String(f.year_level_id);
 	if (f.semester) params.semester = f.semester;
-	if (f.course_ids && f.course_ids.length > 0) params.course_ids = f.course_ids.join(',');
+	// Repeated keys (?course_ids=1&course_ids=2): FastAPI parses these into
+	// list[int]; a comma-joined string does not split server-side.
+	if (f.course_ids && f.course_ids.length > 0)
+		params.course_ids = f.course_ids.map(String);
 	if (f.date_from) params.date_from = f.date_from;
 	if (f.date_to) params.date_to = f.date_to;
 	if (f.granularity) params.granularity = f.granularity;
@@ -134,10 +137,19 @@ export const listRiskStaging = async (
 ): Promise<RiskStagingResponse> =>
 	get<RiskStagingResponse>('adminRiskStaging', stagingParams(filters));
 
+// Promote accepts only the backend's scope keys (student_id/offering_id/
+// semester) — program, year level, risk level, paging, and unpromoted_only
+// are list-only filters the POST silently ignores, so sending them would
+// promote beyond the reviewed set while claiming otherwise.
 export const promoteRiskStaging = async (
-	filters: RiskStagingFilters = {}
-): Promise<PromoteStagingResponse> =>
-	post<PromoteStagingResponse>('adminRiskStagingPromote', undefined, stagingParams(filters));
+	filters: Pick<RiskStagingFilters, 'student_id' | 'offering_id' | 'semester'> = {}
+): Promise<PromoteStagingResponse> => {
+	const params: Record<string, string> = {};
+	if (filters.student_id !== undefined) params.student_id = String(filters.student_id);
+	if (filters.offering_id !== undefined) params.offering_id = String(filters.offering_id);
+	if (filters.semester) params.semester = filters.semester;
+	return post<PromoteStagingResponse>('adminRiskStagingPromote', undefined, params);
+};
 
 export const stagingCsv = (rows: RiskStagingItemResponse[]): string =>
 	buildCsv(
@@ -250,6 +262,23 @@ export const attendanceOverviewCsv = (rows: AttendanceOverviewItemResponse[]): s
 export const fetchAttendanceOverviewCsv = (
 	filters: AttendanceOverviewFilters = {}
 ): Promise<string> => getText('/admin/attendance/overview/export', overviewParams(filters));
+
+// Server CSV export (POST /admin/analytics/export, backend #136). Body
+// mirrors AnalyticsExportRequest; per-course rows for the filter set, so the
+// download matches the Comparison tab. Throws in mock mode and when the
+// backend is unreachable — the Export tab falls back to the client-side
+// builders above.
+export type AnalyticsExportBody = {
+	program_id?: number;
+	year_level_id?: number;
+	semester?: string;
+	course_ids?: number[];
+	date_from?: string;
+	date_to?: string;
+};
+
+export const fetchAnalyticsExportCsv = (body: AnalyticsExportBody): Promise<string> =>
+	postText('/admin/analytics/export', { format: 'csv', ...body });
 
 export const downloadCsv = (filename: string, csv: string): void => {
 	const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
