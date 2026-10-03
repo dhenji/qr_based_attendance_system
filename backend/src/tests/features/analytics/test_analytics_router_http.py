@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
-from features.analytics.model import StudentRiskScore
+from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from shared.enums import UserRole, ValidationStatus
 from tests.conftest import Factories
 
@@ -283,3 +283,125 @@ async def test_late_scan_lowers_compliance(
     assert body["total_students"] == 2
     assert body["avg_compliance_rate"] == 0.5
     assert body["avg_participation_rate"] == 1.0
+
+
+async def _seed_staged(factories: Factories, seed: dict[str, Any]) -> None:
+    await factories._make(
+        StudentRiskScoreStaging,
+        student_id=seed["student"].id,
+        offering_id=seed["offering"].id,
+        semester="1ST_SEM",
+        risk_probability=0.85,
+        risk_level="high",
+        features={"absence_rate": 0.8, "max_streak": 4, "trend_slope": 0.05},
+        computed_day=date(2026, 9, 30),
+    )
+
+
+async def test_risk_staging_requires_admin(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    seed = await _seed(factories)
+
+    response = await api_client.get(
+        "/api/admin/analytics/risk-staging",
+        headers=await auth_headers(seed["student_user"]),
+    )
+
+    assert response.status_code == 403
+
+
+async def test_risk_staging_lists_seeded_rows(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    seed = await _seed(factories)
+    await _seed_staged(factories, seed)
+
+    response = await api_client.get(
+        "/api/admin/analytics/risk-staging",
+        headers=await _admin_headers(auth_headers, seed),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    (item,) = body["items"]
+    assert item["student_id"] == seed["student"].id
+    assert item["risk_level"] == "high"
+    assert item["promoted_at"] is None
+
+
+async def test_risk_staging_unpromoted_only_hides_promoted(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    seed = await _seed(factories)
+    await _seed_staged(factories, seed)
+    headers = await _admin_headers(auth_headers, seed)
+
+    promoted = await api_client.post(
+        "/api/admin/analytics/risk-staging/promote",
+        headers=headers,
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["promoted"] == 1
+
+    hidden = await api_client.get(
+        "/api/admin/analytics/risk-staging?unpromoted_only=true",
+        headers=headers,
+    )
+    assert hidden.status_code == 200
+    assert hidden.json()["total"] == 0
+
+    shown = await api_client.get(
+        "/api/admin/analytics/risk-staging",
+        headers=headers,
+    )
+    assert shown.status_code == 200
+    assert shown.json()["total"] == 1
+    assert shown.json()["items"][0]["promoted_at"] is not None
+
+
+async def test_risk_staging_promote_round_trip(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    seed = await _seed(factories)
+    await _seed_staged(factories, seed)
+    headers = await _admin_headers(auth_headers, seed)
+
+    first = await api_client.post(
+        "/api/admin/analytics/risk-staging/promote",
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert first.json()["promoted"] == 1
+    assert first.json()["skipped"] == 0
+
+    second = await api_client.post(
+        "/api/admin/analytics/risk-staging/promote",
+        headers=headers,
+    )
+
+    assert second.status_code == 200
+    assert second.json()["promoted"] == 0
+    assert second.json()["skipped"] == 1
+
+    live = await api_client.get(
+        "/api/admin/analytics/at-risk?risk_level=high",
+        headers=headers,
+    )
+    assert live.status_code == 200
+    assert live.json()["total"] == 1
+
+
+async def test_risk_staging_promote_offering_requires_semester(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    seed = await _seed(factories)
+
+    response = await api_client.post(
+        f"/api/admin/analytics/risk-staging/promote?offering_id={seed['offering'].id}",
+        headers=await _admin_headers(auth_headers, seed),
+    )
+
+    assert response.status_code == 422

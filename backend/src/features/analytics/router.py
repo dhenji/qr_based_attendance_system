@@ -12,7 +12,9 @@ from features.analytics.schema import (
     AtRiskResponse,
     CourseComparisonResponse,
     OverviewResponse,
+    PromoteStagingResponse,
     RefreshRiskResponse,
+    RiskStagingResponse,
     TrendGranularity,
     TrendResponse,
 )
@@ -153,6 +155,52 @@ async def refresh_risk(
     _rate_limited: None = Depends(rate_limit(1, 60)),
 ) -> RefreshRiskResponse:
     return await service.refresh_risk(
+        student_id=student_id,
+        offering_id=offering_id,
+        semester=semester,
+    )
+
+
+@router.get(
+    "/risk-staging",
+    response_model=RiskStagingResponse,
+    summary="Review staged dry-run risk scores before promoting",
+)
+async def get_risk_staging(
+    _: AdminUser,
+    service: AnalyticsServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    risk_level: RiskLevel | None = Query(default=None),
+    unpromoted_only: bool = Query(default=False),
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> RiskStagingResponse:
+    return await service.list_staged(
+        program_id=program_id,
+        year_level_id=year_level_id,
+        semester=semester,
+        risk_level=risk_level,
+        unpromoted_only=unpromoted_only,
+        page=page,
+        size=size,
+    )
+
+
+@router.post(
+    "/risk-staging/promote",
+    response_model=PromoteStagingResponse,
+    summary="Copy staged dry-run scores into live risk scores",
+)
+async def promote_risk_staging(
+    _: AdminUser,
+    service: AnalyticsServiceDep,
+    student_id: int | None = Query(default=None, gt=0),
+    offering_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+) -> PromoteStagingResponse:
+    return await service.promote_staged(
         student_id=student_id,
         offering_id=offering_id,
         semester=semester,

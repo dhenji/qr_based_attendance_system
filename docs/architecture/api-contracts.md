@@ -417,7 +417,31 @@ no async job. Rate-limited to 1 call per 60 seconds per admin.
 | ---------------- | -------------------------------------------------------- |
 | **Query**        | `student_id?` `offering_id?` `semester?` (all optional)  |
 | **Response 200** | `{ processed: N, high: X, medium: Y, low: Z, duration_ms: T }` |
-| **Notes**        | No filter = run the full batch. `student_id` refreshes one student across their offerings; `offering_id` refreshes all students in a course offering (`semester` required when `offering_id` is set). Sourced from `risk-model.md` §6. |
+| **Notes**        | No filter = run the full batch. `student_id` refreshes one student across their offerings; `offering_id` refreshes all students in a course offering (`semester` required when `offering_id` is set). Sourced from `risk-model.md` §6. When `RISK_BATCH_DRY_RUN=true`, results are staged instead of going live (see `risk-staging` below). |
+
+#### `GET /admin/analytics/risk-staging`
+
+Review staged dry-run risk scores before promoting them to live scores (admin-only).
+Staging is populated by the risk batch / `refresh-risk` while `RISK_BATCH_DRY_RUN=true`;
+live `student_risk_scores` are untouched until `promote`.
+
+|                  |                                                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Role**         | admin                                                                                                                                                         |
+| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high&unpromoted_only=false&...` |
+| **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at, promoted_at }], ... }` |
+
+#### `POST /admin/analytics/risk-staging/promote`
+
+Copy unpromoted staged rows into live `student_risk_scores` (UPSERT per student/offering/semester/day)
+and stamp them `promoted_at` (admin-only). Already-promoted rows in scope are counted as `skipped`.
+
+|                  |                                                         |
+| ---------------- | ------------------------------------------------------- |
+| **Role**         | admin                                                   |
+| **Query**        | `student_id?` `offering_id?` `semester?` (all optional) |
+| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`           |
+| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
 
 ---
 

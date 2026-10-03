@@ -15,7 +15,7 @@ from features.analytics.batch import (
     linear_regression_slope,
     run_risk_batch,
 )
-from features.analytics.model import StudentRiskScore
+from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.analytics.service import AnalyticsService
 from shared.enums import RiskLevel
 from tests.conftest import Factories
@@ -225,3 +225,86 @@ async def test_refresh_risk_requires_semester_with_offering(
     service = AnalyticsService(test_db_session)
     with pytest.raises(Exception):
         await service.refresh_risk(offering_id=1)
+
+
+def _dry_run_settings(settings: Settings) -> Settings:
+    return settings.model_copy(update={"risk_batch_dry_run": True})
+
+
+async def test_dry_run_writes_staging_only(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    now: datetime,
+    settings: Settings,
+) -> None:
+    stack = await _high_absence_stack(factories, now)
+    summary = await run_risk_batch(
+        test_db_session, now=now, settings=_dry_run_settings(settings)
+    )
+    assert summary["processed"] == 1
+    assert summary["high"] == 1
+
+    staged = (await test_db_session.scalars(select(StudentRiskScoreStaging))).all()
+    assert len(staged) == 1
+    assert staged[0].student_id == stack["student"].id
+    assert staged[0].promoted_at is None
+
+    live = (await test_db_session.scalars(select(StudentRiskScore))).all()
+    assert live == []
+
+
+async def test_dry_run_is_idempotent_same_day(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    now: datetime,
+    settings: Settings,
+) -> None:
+    await _high_absence_stack(factories, now)
+    dry = _dry_run_settings(settings)
+    await run_risk_batch(test_db_session, now=now, settings=dry)
+    await run_risk_batch(test_db_session, now=now, settings=dry)
+    count = len(
+        (await test_db_session.scalars(select(StudentRiskScoreStaging))).all()
+    )
+    assert count == 1
+
+
+async def test_promote_copies_to_live_and_stamps(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    now: datetime,
+    settings: Settings,
+) -> None:
+    stack = await _high_absence_stack(factories, now)
+    await run_risk_batch(
+        test_db_session, now=now, settings=_dry_run_settings(settings)
+    )
+    service = AnalyticsService(test_db_session)
+
+    listed = await service.list_staged()
+    assert listed.total == 1
+    assert listed.items[0].promoted_at is None
+
+    result = await service.promote_staged()
+    assert result.promoted == 1
+    assert result.skipped == 0
+
+    live = (await test_db_session.scalars(select(StudentRiskScore))).all()
+    assert len(live) == 1
+    assert live[0].student_id == stack["student"].id
+    assert live[0].risk_level == "high"
+
+    staged = (await test_db_session.scalars(select(StudentRiskScoreStaging))).all()
+    assert staged[0].promoted_at is not None
+
+    again = await service.promote_staged()
+    assert again.promoted == 0
+    assert again.skipped == 1
+
+
+async def test_promote_requires_semester_with_offering(
+    test_db_session: AsyncSession,
+) -> None:
+    service = AnalyticsService(test_db_session)
+    with pytest.raises(Exception):
+        await service.promote_staged(offering_id=1)
