@@ -15,8 +15,11 @@ import type {
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewFilters,
 	AttendanceOverviewItemResponse,
+	PromoteStagingResponse,
 	RecentScanResponse,
 	RiskRefreshResponse,
+	RiskStagingFilters,
+	RiskStagingItemResponse,
 } from '$lib/shared/types';
 import {
 	getAnalyticsComparison,
@@ -25,6 +28,8 @@ import {
 	getAtRisk,
 	getAttendanceOverview,
 	getRecentScans,
+	listRiskStaging,
+	promoteRiskStaging,
 	refreshRiskScores,
 	type AnalyticsMetric,
 	type EnrichedComparisonRow,
@@ -47,6 +52,19 @@ export const adminAttendanceState = $state({
 	items: [] as AttendanceOverviewItemResponse[],
 	loading: false,
 	error: null as string | null,
+});
+
+// Dry-run staging review (backend #137): staged rows plus paging, separate
+// from the live At-Risk tab. lastPromote carries the most recent promote
+// result for the confirmation summary.
+export const adminStagingState = $state({
+	items: [] as RiskStagingItemResponse[],
+	total: 0,
+	page: 1,
+	size: 20,
+	loading: false,
+	error: null as string | null,
+	lastPromote: null as PromoteStagingResponse | null,
 });
 
 export const adminScansState = $state({
@@ -96,6 +114,45 @@ export const refreshAtRisk = async (): Promise<void> => {
 		adminAnalyticsState.atRisk = await getAtRisk(adminAnalyticsState.filters);
 	} catch (e: unknown) {
 		adminAnalyticsState.actionError = toMessage(e, 'Failed to refresh risk scores');
+		throw e;
+	}
+};
+
+export const applyStagingFilters = async (
+	filters: RiskStagingFilters = {}
+): Promise<void> => {
+	adminStagingState.loading = true;
+	adminStagingState.error = null;
+	try {
+		const response = await listRiskStaging({ unpromoted_only: true, ...filters });
+		adminStagingState.items = response.items ?? [];
+		adminStagingState.total = response.total;
+		adminStagingState.page = response.page;
+		adminStagingState.size = response.size;
+	} catch (e: unknown) {
+		adminStagingState.error = toMessage(e, 'Failed to load staged risk scores');
+	} finally {
+		adminStagingState.loading = false;
+	}
+};
+
+// Promote staged rows in scope into the live scores, then re-read both the
+// staging list (promoted rows drop out of the unpromoted view) and the live
+// At-Risk tab so the two never disagree.
+export const promoteStaging = async (
+	filters: RiskStagingFilters = {}
+): Promise<void> => {
+	adminAnalyticsState.actionError = null;
+	try {
+		adminStagingState.lastPromote = await promoteRiskStaging(filters);
+		await Promise.all([
+			applyStagingFilters(filters),
+			(async () => {
+				adminAnalyticsState.atRisk = await getAtRisk(adminAnalyticsState.filters);
+			})(),
+		]);
+	} catch (e: unknown) {
+		adminAnalyticsState.actionError = toMessage(e, 'Failed to promote staged risk scores');
 		throw e;
 	}
 };

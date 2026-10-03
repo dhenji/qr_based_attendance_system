@@ -2,22 +2,27 @@
 	import { onMount } from 'svelte';
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
-	import {
-		adminAnalyticsState,
-		applyAnalyticsFilters,
-		rateFor,
-		refreshAtRisk,
-		setAnalyticsMetric,
-	} from '$lib/features/admin/analytics/store.svelte';
-	import {
-		atRiskCsv,
-		comparisonCsv,
-		downloadCsv,
-		enrichComparison,
-		overviewCsv,
-		trendsCsv,
-		type AnalyticsMetric,
-	} from '$lib/features/admin/analytics/service';
+import {
+	adminAnalyticsState,
+	adminStagingState,
+	applyAnalyticsFilters,
+	applyStagingFilters,
+	promoteStaging,
+	rateFor,
+	refreshAtRisk,
+	setAnalyticsMetric,
+} from '$lib/features/admin/analytics/store.svelte';
+import {
+	atRiskCsv,
+	comparisonCsv,
+	downloadCsv,
+	enrichComparison,
+	overviewCsv,
+	stagingCsv,
+	trendsCsv,
+	type AnalyticsMetric,
+} from '$lib/features/admin/analytics/service';
+import { isMockMode } from '$lib/api/client';
 	import {
 		analyticsFilterSchema,
 		defaultAnalyticsRange,
@@ -27,22 +32,23 @@
 	import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 	import { formatPercentage } from '$lib/shared/utils/format';
 
-	// Analytics & Reports (wireframe 4.7, D33): one page, five tabs —
-	// Overview, Comparison, Trends, At-Risk, Export — over a shared cascading
-	// filter rail (Program → Year → Term → Courses multi → Date range →
-	// Granularity). Same course appears once per cohort (D6/D34). The backend
-	// for these endpoints does not exist yet, so numbers come from
-	// contract-shaped mocks (deterministic and mutually consistent); the
-	// filter rail reads live programs/courses endpoints for its options.
-	// Compliance (present/total) is the default metric; participation
-	// ((present+late+excused)/total) is a render toggle (D36).
+	// Analytics & Reports (wireframe 4.7, D33): one page, six tabs —
+	// Overview, Comparison, Trends, At-Risk, Staging, Export — over a shared
+	// cascading filter rail (Program → Year → Term → Courses multi → Date
+	// range → Granularity). Same course appears once per cohort (D6/D34).
+	// Numbers come from the live analytics backend (#136, mocks only when
+	// PUBLIC_MOCK_MODE=true); the filter rail reads live programs/courses
+	// endpoints for its options. Compliance (present/total) is the default
+	// metric; participation ((present+late+excused)/total) is a render
+	// toggle (D36).
 
-	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'export';
+	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'export';
 	const TABS = [
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'comparison', label: 'Comparison' },
 		{ id: 'trends', label: 'Trends' },
 		{ id: 'atrisk', label: 'At-Risk' },
+		{ id: 'staging', label: 'Staging' },
 		{ id: 'export', label: 'Export' },
 	] as const;
 
@@ -163,6 +169,7 @@
 			return;
 		}
 		await applyAnalyticsFilters(currentFilters());
+		if (tab === 'staging') await applyStagingFilters(stagingFilters());
 		const programIds = new Set([
 			...adminAnalyticsState.comparison.map((r) => r.program_id),
 			...(programFilter ? [Number(programFilter)] : []),
@@ -233,6 +240,46 @@
 		downloadCsv(`analytics-trends-${stamp()}.csv`, trendsCsv(adminAnalyticsState.trends));
 	const exportAtRisk = () =>
 		downloadCsv(`analytics-atrisk-${stamp()}.csv`, atRiskCsv(adminAnalyticsState.atRisk));
+	const exportStaging = () =>
+		downloadCsv(`analytics-staging-${stamp()}.csv`, stagingCsv(adminStagingState.items));
+
+	// Dry-run staging review (backend #137): staged rows under the rail's
+	// program/year/semester/risk filters, unpromoted only. Promote copies the
+	// in-scope rows into the live scores and refreshes both lists.
+	const stagingFilters = () => ({
+		program_id: programFilter ? Number(programFilter) : undefined,
+		year_level_id: yearFilter ? Number(yearFilter) : undefined,
+		semester: semesterFilter.trim() || undefined,
+		risk_level: riskLevel || undefined,
+		unpromoted_only: true,
+	});
+	const stagingSorted = $derived.by(() => {
+		const rows = [...adminStagingState.items];
+		const dir = nameSortDir === 'asc' ? 1 : -1;
+		rows.sort((a, b) => a.student_name.localeCompare(b.student_name) * dir);
+		return rows;
+	});
+	let stagingBusy = $state(false);
+	let promoteOpen = $state(false);
+
+	// Lazy load: staging reads only when its tab opens (it pages separately
+	// from the main datasets above).
+	$effect(() => {
+		if (tab === 'staging') void applyStagingFilters(stagingFilters());
+	});
+
+	const onPromote = async () => {
+		if (stagingBusy) return;
+		stagingBusy = true;
+		promoteOpen = false;
+		try {
+			await promoteStaging(stagingFilters());
+		} catch {
+			// Surfaced via the store's actionError.
+		} finally {
+			stagingBusy = false;
+		}
+	};
 
 	const riskBadge = (level: string): string =>
 		level === 'high' ? 'badge high' : level === 'medium' ? 'badge medium' : 'badge low';
@@ -244,7 +291,7 @@
 	<header class="header">
 		<div>
 			<h1>Analytics &amp; Reports</h1>
-			<p class="muted">Aggregates served by contract mocks until the analytics backend lands (Phase 7)</p>
+			<p class="muted">Aggregates from the live analytics backend (mocks only when PUBLIC_MOCK_MODE=true)</p>
 		</div>
 		<div class="header-actions" role="group" aria-label="Rate metric">
 			<button
@@ -463,6 +510,85 @@
 				</div>
 			{/if}
 		</section>
+	{:else if tab === 'staging'}
+		<section class="card">
+			<div class="row-head">
+				<div>
+					<h2 class="card-title">Staging Review</h2>
+					<p class="muted">Dry-run batch output (D35) · promoting copies unpromoted rows into the live At-Risk scores</p>
+				</div>
+				<button class="btn btn-primary" disabled={stagingBusy || stagingSorted.length === 0} onclick={() => (promoteOpen = true)}>
+					{stagingBusy ? 'Promoting…' : 'Promote to Live'}
+				</button>
+			</div>
+			{#if adminAnalyticsState.actionError}
+				<p class="error" role="alert">{adminAnalyticsState.actionError}</p>
+			{/if}
+			{#if adminStagingState.lastPromote}
+				<p class="muted" role="status">
+					Last promote: {adminStagingState.lastPromote.promoted} promoted ·
+					{adminStagingState.lastPromote.skipped} skipped ({adminStagingState.lastPromote.duration_ms} ms)
+				</p>
+			{/if}
+			{#if promoteOpen}
+				<div class="confirm" role="alertdialog" aria-label="Confirm promote">
+					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'} under the current filters?</p>
+					<p class="muted small">Promoted rows leave this review list and appear in At-Risk.</p>
+					<div class="confirm-actions">
+						<button class="btn btn-secondary" onclick={() => (promoteOpen = false)}>Cancel</button>
+						<button class="btn btn-primary" disabled={stagingBusy} onclick={onPromote}>Confirm Promote</button>
+					</div>
+				</div>
+			{/if}
+			<div class="filters inline">
+				<select class="input" aria-label="Risk level filter" bind:value={riskLevel} onchange={apply}>
+					<option value="">All levels</option>
+					<option value="high">High</option>
+					<option value="medium">Medium</option>
+					<option value="low">Low</option>
+				</select>
+			</div>
+			{#if adminStagingState.loading}
+				<p class="muted">Loading staged scores…</p>
+			{:else if adminStagingState.error}
+				<p class="error" role="alert">{adminStagingState.error}</p>
+			{:else if stagingSorted.length === 0}
+				{#if isMockMode()}
+					<p class="empty">Staging review needs a backend dry-run batch — unavailable in mock mode.</p>
+				{:else}
+					<p class="empty">No staged scores match these filters. Run a dry-run batch, then review here before promoting.</p>
+				{/if}
+			{:else}
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th><button class="th-btn" onclick={() => (nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc')}>Name{nameSortDir === 'asc' ? ' ▲' : ' ▼'}</button></th>
+								<th>Course</th>
+								<th>Absence</th>
+								<th>Streak</th>
+								<th>Trend</th>
+								<th>Risk</th>
+								<th>Computed</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each stagingSorted as r (r.student_id)}
+								<tr>
+									<td class="strong">{r.student_name}<div class="muted small">#{r.student_id} · {r.program} {r.year_level}</div></td>
+									<td>{r.course_code}<div class="muted small">{r.course_name}</div></td>
+									<td>{formatPercentage(r.absence_rate)}</td>
+									<td>{r.max_streak}</td>
+									<td>{trendArrow(r.trend_slope)}</td>
+									<td><span class={riskBadge(r.risk_level)}>{r.risk_level}</span></td>
+									<td class="muted small">{r.computed_at.slice(0, 10)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</section>
 	{:else if tab === 'export'}
 		<section class="card">
 			<h2 class="card-title">Export</h2>
@@ -472,6 +598,7 @@
 				<div><div><div class="strong">Course comparison</div><div class="muted small">{comparison.length} cohort rows</div></div><button class="btn btn-secondary" onclick={exportComparison}>Download CSV</button></div>
 				<div><div><div class="strong">Trends</div><div class="muted small">{adminAnalyticsState.trends.length} periods</div></div><button class="btn btn-secondary" onclick={exportTrends}>Download CSV</button></div>
 				<div><div><div class="strong">At-risk students</div><div class="muted small">{adminAnalyticsState.atRisk.length} rows</div></div><button class="btn btn-secondary" onclick={exportAtRisk}>Download CSV</button></div>
+				<div><div><div class="strong">Staging review</div><div class="muted small">{adminStagingState.items.length} rows</div></div><button class="btn btn-secondary" onclick={exportStaging}>Download CSV</button></div>
 			</div>
 		</section>
 	{/if}
@@ -758,6 +885,20 @@
 		font-size: 0.875rem;
 		margin: 0;
 		flex-basis: 100%;
+	}
+
+	.confirm {
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 1rem 1.25rem;
+		margin: 1rem 0;
+		background: var(--bg-muted, transparent);
+	}
+
+	.confirm-actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
 	}
 
 	.btn {
