@@ -24,6 +24,7 @@ from features.program.schema import (
     YearLevelRead,
     YearLevelUpdate,
 )
+from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
@@ -35,7 +36,9 @@ class ProgramService:
         self._programs: BaseCRUD[Program] = BaseCRUD(Program, session)
         self._years: BaseCRUD[YearLevel] = BaseCRUD(YearLevel, session)
 
-    async def create(self, *, payload: ProgramCreate) -> ProgramRead:
+    async def create(
+        self, *, payload: ProgramCreate, actor_id: int | None = None
+    ) -> ProgramRead:
         if await self._programs.get_by(code=payload.code) is not None:
             raise ProgramCodeExistsException(payload.code)
 
@@ -44,6 +47,15 @@ class ProgramService:
             name=payload.name,
             description=payload.description,
             total_years=payload.total_years,
+        )
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="create",
+            entity_type="program",
+            entity_id=program.id,
+            new_value=self._program_snapshot(program),
         )
 
         return ProgramRead(**self._read_fields(program))
@@ -126,8 +138,11 @@ class ProgramService:
             terms_count=self._terms_count(year_levels),
         )
 
-    async def update(self, *, program_id: int, payload: ProgramUpdate) -> ProgramRead:
+    async def update(
+        self, *, program_id: int, payload: ProgramUpdate, actor_id: int | None = None
+    ) -> ProgramRead:
         program: Program = await self._get_or_404(program_id)
+        old_value = self._program_snapshot(program)
 
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(program, field, value)
@@ -138,6 +153,16 @@ class ProgramService:
         # synchronous SELECT in async context, which raises MissingGreenlet and
         # 500s the request. Reload explicitly so the read is a plain attribute hit.
         await self._session.refresh(program)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="update",
+            entity_type="program",
+            entity_id=program.id,
+            old_value=old_value,
+            new_value=self._program_snapshot(program),
+        )
 
         year_levels: Sequence[YearLevel] = await self._year_levels(program_id)
 
@@ -150,10 +175,21 @@ class ProgramService:
             )
         )
 
-    async def archive(self, *, program_id: int) -> None:
+    async def archive(self, *, program_id: int, actor_id: int | None = None) -> None:
         program: Program = await self._get_or_404(program_id)
+        old_value = self._program_snapshot(program)
         program.is_active = False
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="archive",
+            entity_type="program",
+            entity_id=program.id,
+            old_value=old_value,
+            new_value=self._program_snapshot(program),
+        )
 
     async def list_years(
         self, *, program_id: int, page: int, size: int
@@ -187,7 +223,7 @@ class ProgramService:
         )
 
     async def create_year(
-        self, *, program_id: int, payload: YearLevelCreate
+        self, *, program_id: int, payload: YearLevelCreate, actor_id: int | None = None
     ) -> YearLevelRead:
         await self._get_or_404(program_id)
 
@@ -211,6 +247,15 @@ class ProgramService:
             ),
         )
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="create",
+            entity_type="year_level",
+            entity_id=year_level.id,
+            new_value=self._year_snapshot(year_level),
+        )
+
         return YearLevelRead.model_validate(year_level)
 
     async def get_year(self, *, program_id: int, year_id: int) -> YearLevelRead:
@@ -219,19 +264,38 @@ class ProgramService:
         )
 
     async def update_year(
-        self, *, program_id: int, year_id: int, payload: YearLevelUpdate
+        self,
+        *,
+        program_id: int,
+        year_id: int,
+        payload: YearLevelUpdate,
+        actor_id: int | None = None,
     ) -> YearLevelRead:
         year_level: YearLevel = await self._get_year_or_404(program_id, year_id)
+        old_value = self._year_snapshot(year_level)
 
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(year_level, field, value)
 
         await self._session.flush()
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="update",
+            entity_type="year_level",
+            entity_id=year_level.id,
+            old_value=old_value,
+            new_value=self._year_snapshot(year_level),
+        )
+
         return YearLevelRead.model_validate(year_level)
 
-    async def delete_year(self, *, program_id: int, year_id: int) -> None:
+    async def delete_year(
+        self, *, program_id: int, year_id: int, actor_id: int | None = None
+    ) -> None:
         year_level: YearLevel = await self._get_year_or_404(program_id, year_id)
+        old_value = self._year_snapshot(year_level)
 
         offering_count: int = (
             await self._session.scalar(
@@ -247,6 +311,15 @@ class ProgramService:
 
         await self._session.delete(year_level)
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="delete",
+            entity_type="year_level",
+            entity_id=year_id,
+            old_value=old_value,
+        )
 
     async def _get_or_404(self, program_id: int) -> Program:
         program: Program | None = await self._programs.get(program_id)
@@ -290,6 +363,26 @@ class ProgramService:
             len((year_level.term_structure or {}).get("terms") or [])
             for year_level in year_levels
         )
+
+    @staticmethod
+    def _program_snapshot(program: Program) -> dict[str, Any]:
+        return {
+            "code": program.code,
+            "name": program.name,
+            "description": program.description,
+            "total_years": program.total_years,
+            "is_active": program.is_active,
+        }
+
+    @staticmethod
+    def _year_snapshot(year_level: YearLevel) -> dict[str, Any]:
+        return {
+            "program_id": year_level.program_id,
+            "year_number": year_level.year_number,
+            "label": year_level.label,
+            "term_structure": year_level.term_structure,
+            "sort_order": year_level.sort_order,
+        }
 
     @staticmethod
     def _read_fields(

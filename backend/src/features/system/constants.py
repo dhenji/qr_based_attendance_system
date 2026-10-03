@@ -48,5 +48,14 @@ RETENTION_DAILY_MAX: int = 365
 RETENTION_MONTHLY_MIN: int = 1
 RETENTION_MONTHLY_MAX: int = 120
 
+# Entity types surfaced by GET /admin/system/academic-structure. Assignment
+# changes (course_professors) and enrollments are audited separately.
+STRUCTURAL_ENTITY_TYPES: tuple[str, ...] = (
+    "program",
+    "year_level",
+    "course",
+    "course_offering",
+)
+
 # Timestamped object name for analytics CSVs persisted through backup storage.
 EXPORT_FILENAME_PREFIX: str = "analytics_"

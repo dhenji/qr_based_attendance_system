@@ -25,6 +25,7 @@ from features.professor.model import Professor
 from features.program.exceptions import YearLevelNotFoundException
 from features.program.model import Program, YearLevel
 from features.student.model import Student
+from features.system.model import AuditLog
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -257,7 +258,11 @@ def test_create_offering_ok() -> None:
 
     assert read.enrolled_count == 0
     assert read.semester == "1ST"
-    assert len(session.added) == 1
+    assert [type(obj) for obj in session.added] == [CourseOffering, AuditLog]
+    audit = session.added[1]
+    assert audit.action == "create"
+    assert audit.entity_type == "course_offering"
+    assert audit.entity_id == read.id
 
 
 def test_create_offering_duplicate_409() -> None:
