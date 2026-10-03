@@ -152,13 +152,42 @@ const request = async <T>(url: string, init: RequestInit, alreadyRetried: boolea
 	return response.json() as Promise<T>;
 };
 
+// Query values accept arrays for repeated keys (?course_ids=1&course_ids=2)
+// — FastAPI parses those into list[int], while a comma-joined string does
+// not split server-side.
+export type QueryParams = Record<string, string | string[]>;
+
+const appendParams = (url: URL, params?: QueryParams): void => {
+	if (!params) return;
+	for (const [key, value] of Object.entries(params)) {
+		if (Array.isArray(value)) {
+			for (const entry of value) url.searchParams.append(key, entry);
+		} else {
+			url.searchParams.append(key, value);
+		}
+	}
+};
+
+// Mocks predate repeated keys and parse comma-joined values (e.g.
+// parseCourseIds), so arrays collapse to comma strings on the mock path
+// while the live path above repeats the key.
+const forMock = (params?: QueryParams): Record<string, string> | undefined => {
+	if (!params) return undefined;
+	return Object.fromEntries(
+		Object.entries(params).map(([key, value]) => [
+			key,
+			Array.isArray(value) ? value.join(',') : value,
+		])
+	);
+};
+
 // Generic API call handler
 const apiCall = async <T>(
 	endpoint: keyof typeof endpoints,
 	options: {
 		method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 		body?: unknown;
-		params?: Record<string, string>;
+		params?: QueryParams;
 		// Extra path segment for id-in-path routes, e.g. `/active/${id}` or
 		// `/${id}/close` for the professor session detail/close endpoints.
 		suffix?: string;
@@ -175,18 +204,14 @@ const apiCall = async <T>(
 	// can filter/sort/paginate lists and apply CRUD payloads like the backend).
 	if (MOCK) {
 		if (endpointDef.mock) {
-			return endpointDef.mock(params, suffix, body, method) as unknown as T;
+			return endpointDef.mock(forMock(params), suffix, body, method) as unknown as T;
 		}
 		// Return stub structure
 		return {} as unknown as T;
 	}
 
 	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix}`, BASE_URL);
-	if (params) {
-		Object.entries(params).forEach(([key, value]) => {
-			url.searchParams.append(key, value);
-		});
-	}
+	appendParams(url, params);
 
 	const init: RequestInit = {
 		method,
@@ -202,31 +227,31 @@ const apiCall = async <T>(
 // id-in-path segment (e.g. `/active/${id}`).
 export const get = <T>(
 	endpoint: keyof typeof endpoints,
-	params?: Record<string, string>,
+	params?: QueryParams,
 	suffix?: string
 ) => apiCall<T>(endpoint, { method: 'GET', params, suffix });
 
 export const post = <T>(
 	endpoint: keyof typeof endpoints,
 	body?: unknown,
-	params?: Record<string, string>,
+	params?: QueryParams,
 	suffix?: string,
 	headers?: Record<string, string>
 ) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix, headers });
 
-export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: Record<string, string>) =>
+export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: QueryParams) =>
 	apiCall<T>(endpoint, { method: 'PUT', body, params });
 
 export const patch = <T>(
 	endpoint: keyof typeof endpoints,
 	body?: unknown,
-	params?: Record<string, string>,
+	params?: QueryParams,
 	suffix?: string
 ) => apiCall<T>(endpoint, { method: 'PATCH', body, params, suffix });
 
 export const del = <T>(
 	endpoint: keyof typeof endpoints,
-	params?: Record<string, string>,
+	params?: QueryParams,
 	suffix?: string
 ) => apiCall<T>(endpoint, { method: 'DELETE', params, suffix });
 
@@ -237,24 +262,20 @@ export const del = <T>(
 export const postForm = async <T>(
 	endpoint: keyof typeof endpoints,
 	form: FormData,
-	params?: Record<string, string>,
+	params?: QueryParams,
 	suffix?: string
 ): Promise<T> => {
 	const endpointDef = endpoints[endpoint];
 
 	if (MOCK) {
 		if (endpointDef.mock) {
-			return endpointDef.mock(params, suffix, undefined, 'POST') as unknown as T;
+			return endpointDef.mock(forMock(params), suffix, undefined, 'POST') as unknown as T;
 		}
 		return {} as unknown as T;
 	}
 
 	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix ?? ''}`, BASE_URL);
-	if (params) {
-		Object.entries(params).forEach(([key, value]) => {
-			url.searchParams.append(key, value);
-		});
-	}
+	appendParams(url, params);
 
 	const headers = new Headers();
 	if (authToken) {
@@ -296,17 +317,13 @@ export const postForm = async <T>(
 // and filtered CSV exports (GET /admin/attendance/overview/export). Text/csv
 // routes have no endpoint def (they return text, not JSON), so the path is
 // passed directly. Returns the CSV text for client-side download.
-export const getText = async (path: string, params?: Record<string, string>): Promise<string> => {
+export const getText = async (path: string, params?: QueryParams): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV download is unavailable in mock mode');
 	}
 
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
-	if (params) {
-		Object.entries(params).forEach(([key, value]) => {
-			url.searchParams.append(key, value);
-		});
-	}
+	appendParams(url, params);
 
 	const doFetch = async (alreadyRetried: boolean): Promise<string> => {
 		const response = await fetchWithAuth(url.toString(), { method: 'GET' });
