@@ -62,10 +62,10 @@ async def list_programs(
 )
 async def create_program(
     payload: ProgramCreate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> ProgramRead:
-    return await service.create(payload=payload)
+    return await service.create(payload=payload, actor_id=user.id)
 
 
 @router.get(
@@ -89,10 +89,10 @@ async def get_program(
 async def update_program(
     program_id: int,
     payload: ProgramUpdate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> ProgramRead:
-    return await service.update(program_id=program_id, payload=payload)
+    return await service.update(program_id=program_id, payload=payload, actor_id=user.id)
 
 
 @router.delete(
@@ -102,10 +102,10 @@ async def update_program(
 )
 async def archive_program(
     program_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> None:
-    await service.archive(program_id=program_id)
+    await service.archive(program_id=program_id, actor_id=user.id)
 
 
 @router.get(
@@ -132,10 +132,12 @@ async def list_year_levels(
 async def create_year_level(
     program_id: int,
     payload: YearLevelCreate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> YearLevelRead:
-    return await service.create_year(program_id=program_id, payload=payload)
+    return await service.create_year(
+        program_id=program_id, payload=payload, actor_id=user.id
+    )
 
 
 @router.get(
@@ -161,11 +163,11 @@ async def update_year_level(
     program_id: int,
     year_id: int,
     payload: YearLevelUpdate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> YearLevelRead:
     return await service.update_year(
-        program_id=program_id, year_id=year_id, payload=payload
+        program_id=program_id, year_id=year_id, payload=payload, actor_id=user.id
     )
 
 
@@ -177,7 +179,7 @@ async def update_year_level(
 async def delete_year_level(
     program_id: int,
     year_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> None:
-    await service.delete_year(program_id=program_id, year_id=year_id)
+    await service.delete_year(program_id=program_id, year_id=year_id, actor_id=user.id)

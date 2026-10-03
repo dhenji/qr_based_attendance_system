@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from api.deps import SystemServiceDep, require_role
 from features.auth.model import User
 from features.system.schema import (
+    AcademicStructureListResponse,
     BackupListResponse,
     BackupTriggerResponse,
     SystemSettingsRead,
@@ -45,6 +46,20 @@ async def update_system_settings(
     service: SystemServiceDep,
 ) -> SystemSettingsRead:
     return await service.update_system_settings(patch)
+
+
+@router.get(
+    "/system/academic-structure",
+    response_model=AcademicStructureListResponse,
+    summary="List structural changes (program/year/course/offering audit)",
+)
+async def list_academic_structure(
+    _: AdminUser,
+    service: SystemServiceDep,
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> AcademicStructureListResponse:
+    return await service.list_academic_structure(page=page, size=size)
 
 
 @router.get(

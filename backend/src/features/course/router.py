@@ -48,10 +48,10 @@ async def list_courses(
 )
 async def create_course(
     payload: CourseCreate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> CourseRead:
-    return await service.create(payload=payload)
+    return await service.create(payload=payload, actor_id=user.id)
 
 
 @router.get(
@@ -75,10 +75,10 @@ async def get_course(
 async def update_course(
     course_id: int,
     payload: CourseUpdate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> CourseRead:
-    return await service.update(course_id=course_id, payload=payload)
+    return await service.update(course_id=course_id, payload=payload, actor_id=user.id)
 
 
 @router.delete(
@@ -88,7 +88,7 @@ async def update_course(
 )
 async def archive_course(
     course_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> None:
-    await service.archive(course_id=course_id)
+    await service.archive(course_id=course_id, actor_id=user.id)

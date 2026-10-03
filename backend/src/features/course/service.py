@@ -43,6 +43,7 @@ from features.program.exceptions import (
 )
 from features.program.model import Program, YearLevel
 from features.student.model import Student
+from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.csv_import import (
     CsvColumn,
@@ -149,7 +150,9 @@ class CourseService:
 
     # -- course template CRUD (unchanged) -------------------------------
 
-    async def create(self, *, payload: CourseCreate) -> CourseRead:
+    async def create(
+        self, *, payload: CourseCreate, actor_id: int | None = None
+    ) -> CourseRead:
         if await self._courses.get_by(course_code=payload.course_code) is not None:
             raise CourseCodeExistsException(payload.course_code)
 
@@ -158,6 +161,15 @@ class CourseService:
             course_name=payload.course_name,
             units=payload.units,
             session_duration_hours=payload.session_duration_hours,
+        )
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="create",
+            entity_type="course",
+            entity_id=course.id,
+            new_value=self._course_snapshot(course),
         )
 
         return CourseRead.model_validate(course)
@@ -197,8 +209,11 @@ class CourseService:
             size=size,
         )
 
-    async def update(self, *, course_id: int, payload: CourseUpdate) -> CourseRead:
+    async def update(
+        self, *, course_id: int, payload: CourseUpdate, actor_id: int | None = None
+    ) -> CourseRead:
         course: Course = await self._get_or_404(course_id)
+        old_value = self._course_snapshot(course)
 
         if (
             "course_code" in payload.model_fields_set
@@ -216,12 +231,43 @@ class CourseService:
         # it is expired and would raise MissingGreenlet if read synchronously.
         await self._session.refresh(course)
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="update",
+            entity_type="course",
+            entity_id=course.id,
+            old_value=old_value,
+            new_value=self._course_snapshot(course),
+        )
+
         return CourseRead.model_validate(course)
 
-    async def archive(self, *, course_id: int) -> None:
+    async def archive(self, *, course_id: int, actor_id: int | None = None) -> None:
         course: Course = await self._get_or_404(course_id)
+        old_value = self._course_snapshot(course)
         course.is_active = False
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="archive",
+            entity_type="course",
+            entity_id=course.id,
+            old_value=old_value,
+            new_value=self._course_snapshot(course),
+        )
+
+    @staticmethod
+    def _course_snapshot(course: Course) -> dict[str, Any]:
+        return {
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "units": course.units,
+            "session_duration_hours": float(course.session_duration_hours),
+            "is_active": course.is_active,
+        }
 
     async def _get_or_404(self, course_id: int) -> Course:
         course: Course | None = await self._courses.get(course_id)
@@ -233,7 +279,9 @@ class CourseService:
 
     # -- offering CRUD ---------------------------------------------------
 
-    async def create_offering(self, *, payload: OfferingCreate) -> OfferingRead:
+    async def create_offering(
+        self, *, payload: OfferingCreate, actor_id: int | None = None
+    ) -> OfferingRead:
         course: Course = await self._get_or_404(payload.course_id)
         await self._require_program(payload.program_id)
         await self._require_year_level(payload.program_id, payload.year_level_id)
@@ -245,6 +293,15 @@ class CourseService:
         await self._require_no_duplicate_offering(payload)
 
         offering: CourseOffering = await self._offerings.create(**payload.model_dump())
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="create",
+            entity_type="course_offering",
+            entity_id=offering.id,
+            new_value=self._offering_snapshot(offering),
+        )
 
         return await self._to_offering_read(offering)
 
@@ -302,10 +359,15 @@ class CourseService:
         )
 
     async def update_offering(
-        self, *, offering_id: int, payload: OfferingUpdate
+        self,
+        *,
+        offering_id: int,
+        payload: OfferingUpdate,
+        actor_id: int | None = None,
     ) -> OfferingRead:
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
         changes: dict[str, Any] = payload.model_dump(exclude_unset=True)
+        old_value = self._offering_snapshot(offering)
 
         # Validate against the merged result, before touching the ORM object.
         # A PATCH that moves only `schedule_start_time` past the stored end
@@ -333,12 +395,35 @@ class CourseService:
         # it is expired and would raise MissingGreenlet if read synchronously.
         await self._session.refresh(offering)
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="update",
+            entity_type="course_offering",
+            entity_id=offering.id,
+            old_value=old_value,
+            new_value=self._offering_snapshot(offering),
+        )
+
         return await self._to_offering_read(offering)
 
-    async def archive_offering(self, *, offering_id: int) -> None:
+    async def archive_offering(
+        self, *, offering_id: int, actor_id: int | None = None
+    ) -> None:
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        old_value = self._offering_snapshot(offering)
         offering.is_active = False
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action="archive",
+            entity_type="course_offering",
+            entity_id=offering.id,
+            old_value=old_value,
+            new_value=self._offering_snapshot(offering),
+        )
 
     # -- professor assignments -------------------------------------------
 
@@ -689,6 +774,27 @@ class CourseService:
             created_at=offering.created_at,
             updated_at=offering.updated_at,
         )
+
+    @staticmethod
+    def _offering_snapshot(offering: CourseOffering) -> dict[str, Any]:
+        return {
+            "course_id": offering.course_id,
+            "program_id": offering.program_id,
+            "year_level_id": offering.year_level_id,
+            "semester": offering.semester,
+            "academic_year": offering.academic_year,
+            "sessions_per_week": offering.sessions_per_week,
+            "semester_weeks": offering.semester_weeks,
+            "schedule_days": offering.schedule_days,
+            "schedule_start_time": offering.schedule_start_time.isoformat(),
+            "schedule_end_time": offering.schedule_end_time.isoformat(),
+            "classroom_name": offering.classroom_name,
+            "classroom_lat": offering.classroom_lat,
+            "classroom_lng": offering.classroom_lng,
+            "default_present_window_minutes": offering.default_present_window_minutes,
+            "default_late_window_minutes": offering.default_late_window_minutes,
+            "is_active": offering.is_active,
+        }
 
     @staticmethod
     def _check_windows(course: Course, present_minutes: int, late_minutes: int) -> None:

@@ -465,9 +465,11 @@ and stamp them `promoted_at` (admin-only). Already-promoted rows in scope are co
 
 List structural changes (audit log for program/year/course mutations).
 
-|                  |                                                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }` |
+|                  |                                                                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?page=1&size=20`                                                                                                                                                                                                      |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }`                                                                                                              |
+| **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. |
 
 #### `GET /admin/backups`
 

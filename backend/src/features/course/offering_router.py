@@ -70,10 +70,10 @@ async def list_offerings(
 )
 async def create_offering(
     payload: OfferingCreate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> OfferingRead:
-    return await service.create_offering(payload=payload)
+    return await service.create_offering(payload=payload, actor_id=user.id)
 
 
 @router.get(
@@ -97,10 +97,12 @@ async def get_offering(
 async def update_offering(
     offering_id: int,
     payload: OfferingUpdate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> OfferingRead:
-    return await service.update_offering(offering_id=offering_id, payload=payload)
+    return await service.update_offering(
+        offering_id=offering_id, payload=payload, actor_id=user.id
+    )
 
 
 @router.delete(
@@ -110,10 +112,10 @@ async def update_offering(
 )
 async def archive_offering(
     offering_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> None:
-    await service.archive_offering(offering_id=offering_id)
+    await service.archive_offering(offering_id=offering_id, actor_id=user.id)
 
 
 @router.get(
