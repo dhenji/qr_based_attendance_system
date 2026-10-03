@@ -45,8 +45,9 @@ npm run check          # typecheck (runs svelte-kit sync first)
 
 ## Backend
 
-- Entry `src/main.py`: `/health`, CORS, lifespan `SELECT 1` on boot — **fails to boot if DB unreachable**. Only `AppException` has a handler; `DomainException` → 422, `DatabaseException` → 409.
+- Entry `src/main.py`: `/health`, CORS, lifespan `SELECT 1` on boot — **fails to boot if DB unreachable**. The lifespan also starts/stops the cron scheduler. Only `AppException` has a handler; `DomainException` → 422, `DatabaseException` → 409.
 - Config `src/core/config.py`: pydantic-settings, `get_settings()` cached. `JWT_SECRET` required when `DEBUG=false`. `RECOVERY_TOKEN_EXPIRE_MINUTES` defaults to 5 in code but is missing from `backend/.env.example`.
+- Scheduler: `src/core/scheduler.py` owns the APScheduler lifecycle (`get_scheduler()`, `BackgroundScheduler`) and imports nothing from `features`/`shared`. Job bodies are adapters in their own feature — `analytics/batch.py::run_scheduled_risk_batch`, `system/service.py::run_scheduled_backup` — and each **commits its own transaction**, because the services only `flush()` and `_get_db` is request-only. Crons: `RISK_BATCH_CRON` (02:00), `BACKUP_CRON` (03:00), both overridable via `SCHEDULER_ENABLED`/`_TIMEZONE`/`_MISFIRE_GRACE_SECONDS`. See ADR-063.
 - Deps `src/api/deps.py`: use `_get_db` (no public `get_db`), `_get_current_user` / `_get_optional_current_user`, `require_role(*roles)` (`super_admin` passes `admin` checks), `*ServiceDep` annotated service deps. `_get_db` commits on success, rolls back on any exception.
 - Routers: `src/api/router.py` mounts under `/api` with **no `prefix=` arg — each `APIRouter` bakes its own prefix in**. One router per (feature, mount point); never mount the same router twice. `enrollment/router.py` is a stub and stays **unmounted**.
   - `/api/professor` is shared: `session/router.py` owns courses/sessions/attendance; `professor/router.py` owns `profile*` only. Don't cross them.
@@ -62,11 +63,11 @@ npm run check          # typecheck (runs svelte-kit sync first)
 
 ## Backend tests
 
-- 386 cases / 25 files: sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file, and `features/excuse/` has only `test_notifications.py` (the full excuse-service cover is still unwritten).
+- 531 collected cases / 35 files (203 sync + 295 async test functions, plus 33 parametrized expansions): sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file, and `features/excuse/` has only `test_notifications.py` (the full excuse-service cover is still unwritten).
 - `conftest.py` SQLite shims (SQLite-only, inert on Postgres): `JSONB`→`JSON`, `BigInteger`→`INTEGER` (else every `id` insert fails `NOT NULL`), aware-UTC `DateTime` (else `SessionService.create_session` raises `TypeError`), plus `PRAGMA foreign_keys=ON` (else RESTRICT guards pass vacuously).
 - DB tests must use `api_client` (httpx + ASGITransport, `_get_db` overridden). `test_client` is sync-only and never used as a context manager (entering it runs lifespan `SELECT 1` → needs live Postgres).
 - `api_client` commits only on success, so a **failing request rolls back the seed** — commit after seeding if a test issues two failing requests. Read `server_default` values before committing (else `MissingGreenlet`).
-- Autouse fixture clears five process-global caches: `attendance.service._IDEMPOTENCY_STORE`, `rate_limit._limiter._windows`, `auth.service._recovery_limiter._windows`, `shared.cache._cache._store`, `shared.email._PENDING`. Add any new module-level cache here.
+- Autouse fixture clears six process-global caches: `attendance.service._IDEMPOTENCY_STORE`, `rate_limit._limiter._windows`, `auth.service._recovery_limiter._windows`, `shared.cache._cache._store`, `shared.email._PENDING`, plus the scheduler (`core.scheduler.reset_scheduler()`, which clears `_IN_FLIGHT` and unbinds the singleton). Add any new module-level cache here.
 
 ## Frontend
 

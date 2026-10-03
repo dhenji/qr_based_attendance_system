@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Coroutine
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -13,14 +14,42 @@ from api.router import api_router
 from core.config import Settings, get_settings
 from core.database import database
 from core.exceptions import AppException
+from core.scheduler import JOB_BACKUP, JOB_RISK_BATCH, get_scheduler
+from features.analytics.batch import run_scheduled_risk_batch
+from features.system.service import run_scheduled_backup
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    cfg = get_settings()
     async with database.engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
-    yield
-    await database.dispose()
+
+    scheduler = get_scheduler()
+    if cfg.scheduler_enabled:
+        # Risk first: it is the cheaper of the two and its 02:00 slot clears
+        # the 03:00 backup, so on a slow night the backup is what gets squeezed
+        # rather than the scores.
+        scheduler.register(
+            JOB_RISK_BATCH, cfg.risk_batch_cron, run_scheduled_risk_batch
+        )
+        scheduler.register(JOB_BACKUP, cfg.backup_cron, run_scheduled_backup)
+        scheduler.start()
+    else:
+        logger.info(
+            "Background scheduler disabled (SCHEDULER_ENABLED=false); "
+            "no cron jobs registered"
+        )
+
+    try:
+        yield
+    finally:
+        # Before the engine is disposed: shutdown cancels whatever is still
+        # running and waits for it to release its connection.
+        await scheduler.shutdown()
+        await database.dispose()
 
 
 app = FastAPI(title="QR Based Attendance System")

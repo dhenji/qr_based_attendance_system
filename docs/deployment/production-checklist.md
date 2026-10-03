@@ -57,6 +57,10 @@
 | `RISK_SYNC_LAG_HIGH`             | Yes      | `5`                        | D35                                                           |
 | `RISK_TREND_NEGATIVE`            | Yes      | `-0.05`                    | D35                                                           |
 | `RISK_BATCH_CRON`                | Yes      | `0 2 * * *`                | Nightly 2 AM                                                  |
+| `BACKUP_CRON`                    | Yes      | `0 3 * * *`                | Nightly 3 AM. An hour after `RISK_BATCH_CRON`, so the two heavy jobs never overlap |
+| `SCHEDULER_ENABLED`              | No       | `true`                     | Set `false` to run the API with no cron jobs at all            |
+| `SCHEDULER_TIMEZONE`             | No       | `UTC`                      | zoneinfo name. An unknown one logs a warning and falls back to UTC |
+| `SCHEDULER_MISFIRE_GRACE_SECONDS`| No       | `300`                      | How late a missed run may still start                          |
 | `ATTACHMENTS_STORAGE_TYPE`       | Yes      | `local` or `s3`            | Same as backup storage                                        |
 | `ATTACHMENTS_MAX_BYTES`          | Yes      | `5242880`                  | 5 MiB                                                         |
 
@@ -259,9 +263,16 @@ psql "$DATABASE_URL" -c \
 
 | Item                    | Check                                                   |
 | ----------------------- | ------------------------------------------------------- |
-| Backup cron configured  | `RISK_BATCH_CRON="0 2 * * *"` or custom backup schedule |
+| Backup cron configured  | `BACKUP_CRON="0 3 * * *"` (an hour after the 02:00 risk batch) |
+| Cron owner              | Crons run **in the API process**. `SCHEDULER_ENABLED=false` hands them to an external scheduler instead |
 | Retention pruning       | Runs after backup (30 daily, 12 monthly)                |
 | Encryption key rotation | Documented procedure in runbook 6                       |
+| `pg_dump` present       | The image needs `postgresql-client`, or the nightly backup fails with `backup_failed` |
+
+> **Open defect:** the sample production `Dockerfile` in
+> `deployment-workflow.md` installs no system packages, so it has neither
+> `postgresql-client` nor `openssl`. On that image the nightly backup cannot
+> succeed. Fix belongs with the image, not with the scheduler.
 
 ### Verification
 
