@@ -24,14 +24,14 @@ import {
 	type AnalyticsMetric,
 } from '$lib/features/admin/analytics/service';
 import { isMockMode } from '$lib/api/client';
-	import {
-		analyticsFilterSchema,
-		defaultAnalyticsRange,
-	} from '$lib/features/admin/analytics/schema';
-	import { listCourses } from '$lib/features/admin/courses/service';
-	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
-	import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
-	import { formatPercentage } from '$lib/shared/utils/format';
+import {
+	analyticsFilterSchema,
+	defaultAnalyticsRange,
+} from '$lib/features/admin/analytics/schema';
+import { listCourses } from '$lib/features/admin/courses/service';
+import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
+import { formatPercentage } from '$lib/shared/utils/format';
 
 	// Analytics & Reports (wireframe 4.7, D33): one page, six tabs —
 	// Overview, Comparison, Trends, At-Risk, Staging, Export — over a shared
