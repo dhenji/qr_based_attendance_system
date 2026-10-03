@@ -12,7 +12,9 @@ export interface SessionVerification {
 	courseCode: string;
 	courseName: string;
 	expiresAt: string;
-	geofence: { radius: number; lat: number; lng: number };
+	// Center null = no classroom coordinates; both the server and the scan
+	// page skip the geofence check in that case.
+	geofence: { radius: number; lat: number | null; lng: number | null };
 }
 
 export interface AttendanceScanResult {

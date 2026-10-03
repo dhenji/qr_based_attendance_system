@@ -47,7 +47,9 @@ export type CachedSession = {
 	course_code: string;
 	course_name: string;
 	expires_at: string;
-	geofence: { radius: number; lat: number; lng: number };
+	// Center null = no classroom coordinates (mirrors VerifyGeofence); the
+	// scan pre-check skips geofence in that case, same as the server.
+	geofence: { radius: number; lat: number | null; lng: number | null };
 	cached_at: string;
 };
 

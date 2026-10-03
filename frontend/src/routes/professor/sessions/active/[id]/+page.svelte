@@ -10,6 +10,11 @@
 		excuseAllAbsent,
 		quickExcuse
 	} from '$lib/features/excuse/service';
+	import {
+		buildCsv,
+		fetchProfessorReportsCsv
+	} from '$lib/features/report/service';
+	import { professorState } from '$lib/features/professor/store.svelte';
 	import { isMockMode } from '$lib/api/client';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
 
@@ -58,6 +63,55 @@
 	let sortDirection = $state<SortDirection>('asc');
 	let currentPage = $state(1);
 	let tableScroller = $state<HTMLDivElement | undefined>(undefined);
+	let exporting = $state(false);
+
+	// Server-first export (POST /professor/reports/export) scoped to the
+	// session's course. Mock mode and unreachable backends fall back to the
+	// live feed rows on screen, so Export Current always produces a file.
+	const saveExport = (text: string, filename: string) => {
+		const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(url);
+	};
+	const exportCurrent = async () => {
+		const current = session;
+		if (!current || exporting) return;
+		exporting = true;
+		const filename = `session-${current.id}-attendance.csv`;
+		try {
+			const course =
+				professorState.courses.find((c) => c.offeringId === current.offeringId) ?? null;
+			saveExport(
+				await fetchProfessorReportsCsv(
+					course ? { course_id: course.courseId } : {}
+				),
+				filename
+			);
+		} catch {
+			saveExport(
+				buildCsv(
+					['student_number', 'name', 'section', 'status', 'scanned_at', 'excuse_reason'],
+					current.students.map((s) => [
+						s.studentNumber,
+						s.name,
+						s.section ?? '',
+						s.status,
+						s.scannedAt ?? '',
+						s.excuseReason ?? ''
+					])
+				),
+				filename
+			);
+		} finally {
+			exporting = false;
+		}
+	};
 
 	// Excuse-action modal state. Per-row excuse is mock-backed (see note
 	// above); bulk excuse-all-absent is live.
@@ -598,8 +652,14 @@
 		</section>
 
 		<div class="footer">
-			<button class="btn btn-secondary" type="button" disabled title="Server-side export is not available">
-				Export Current
+			<button
+				class="btn btn-secondary"
+				type="button"
+				disabled={exporting || session === null}
+				title="Download this session's attendance as CSV (server rows when reachable)"
+				onclick={() => void exportCurrent()}
+			>
+				{exporting ? 'Exporting…' : 'Export Current'}
 			</button>
 			<button class="btn btn-secondary" type="button" onclick={() => window.print()}>
 				Print
