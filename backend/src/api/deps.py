@@ -24,6 +24,7 @@ from features.program.service import ProgramService
 from features.reports.service import ReportsService
 from features.session.service import SessionService
 from features.student.service import StudentService
+from features.system.service import SystemService
 from shared.enums import UserRole
 
 settings: Settings = get_settings()
@@ -209,6 +210,12 @@ async def _get_reports_service(
     return ReportsService(session)
 
 
+async def _get_system_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> SystemService:
+    return SystemService(session)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
@@ -220,6 +227,7 @@ AttendanceServiceDep = Annotated[AttendanceService, Depends(_get_attendance_serv
 ExcuseServiceDep = Annotated[ExcuseService, Depends(_get_excuse_service)]
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(_get_analytics_service)]
 ReportsServiceDep = Annotated[ReportsService, Depends(_get_reports_service)]
+SystemServiceDep = Annotated[SystemService, Depends(_get_system_service)]
 
 
 FaceEnrollmentServiceDep = Annotated[

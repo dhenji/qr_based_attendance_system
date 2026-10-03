@@ -250,8 +250,11 @@ def _s3_presigned_url(settings: Settings, object_key: str, content_type: str) ->
         )
 
     try:
-        import boto3
-        from botocore.exceptions import BotoCoreError, ClientError
+        import boto3  # type: ignore[import-not-found]
+        from botocore.exceptions import (  # type: ignore[import-not-found]
+            BotoCoreError,
+            ClientError,
+        )
     except ImportError:
         raise StorageUnconfiguredException(
             "ATTACHMENTS_STORAGE_TYPE=s3 requires the boto3 package, which is "
@@ -281,6 +284,38 @@ def _s3_presigned_url(settings: Settings, object_key: str, content_type: str) ->
         raise StorageUnconfiguredException(
             "Could not generate a presigned upload URL for the configured storage"
         )
+
+
+def s3_client(settings: Settings | None = None) -> Any:
+    """Build the shared S3-compatible client for the backup bucket.
+
+    Both attachments and backups store into the same bucket, so client
+    construction lives here rather than per slice. `boto3` is imported
+    lazily, so a deployment that stays on `local` never pays for it;
+    selecting `s3` without a bucket or without the package is a 503.
+    """
+
+    current: Settings = settings or get_settings()
+
+    if not current.backup_s3_bucket:
+        raise StorageUnconfiguredException(
+            "S3 storage requires BACKUP_S3_BUCKET to be set"
+        )
+
+    try:
+        import boto3  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise StorageUnconfiguredException(
+            "S3 storage requires the boto3 package, which is "
+            "not installed in this environment"
+        ) from exc
+
+    client_kwargs: dict[str, Any] = {"service_name": "s3"}
+
+    if current.backup_s3_endpoint:
+        client_kwargs["endpoint_url"] = current.backup_s3_endpoint
+
+    return boto3.client(**client_kwargs)
 
 
 async def virus_scan_hook(object_key: str) -> None:
