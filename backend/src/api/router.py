@@ -20,6 +20,7 @@ from features.reports.router import router as reports_router
 from features.session.router import router as session_router
 from features.student.admin_router import router as student_admin_router
 from features.student.router import router as student_router
+from features.system.router import router as system_router
 from features.upload.router import router as upload_router
 
 api_router = APIRouter(prefix="/api")
@@ -47,3 +48,4 @@ api_router.include_router(excuse_admin_router, tags=["admin-excuses"])
 api_router.include_router(upload_router, tags=["upload"])
 api_router.include_router(analytics_router, tags=["admin-analytics"])
 api_router.include_router(reports_router, tags=["professor-reports"])
+api_router.include_router(system_router, tags=["system"])
