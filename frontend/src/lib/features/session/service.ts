@@ -204,7 +204,7 @@ export const closeSession = async (sessionId: number) => {
 // rejects, and the page renders its not-found state from that.
 export const getActiveSession = async (sessionId: number): Promise<LiveSession> => {
 	await ensureCourses();
-	const response = await get<SessionActiveResponse>('sessionActive', undefined, `/active/${sessionId}`);
+	const response = await get<SessionActiveResponse>('sessionActive', undefined, `/${sessionId}`);
 
 	const students: LiveStudent[] = (response.students ?? []).map((student) => ({
 		studentNumber: student.student_number,
