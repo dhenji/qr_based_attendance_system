@@ -4,12 +4,14 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from api.deps import ProfessorServiceDep, ReportsServiceDep, require_role
 from features.analytics.schema import TrendGranularity
 from features.auth.model import User
 from features.reports.schema import (
     AllCoursesResponse,
+    ProfessorExportRequest,
     ReportMetric,
     ReportsComparisonResponse,
     ReportsTrendResponse,
@@ -30,6 +32,8 @@ from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 router = APIRouter(prefix="/professor")
 
 ProfessorUser = Annotated[User, Depends(require_role(UserRole.PROFESSOR))]
+
+REPORTS_EXPORT_FILENAME = "professor-attendance-export.csv"
 
 
 @router.get(
@@ -120,4 +124,36 @@ async def reports_trends(
         date_to=date_to,
         page=page,
         size=size,
+    )
+
+
+@router.post(
+    "/reports/export",
+    summary="Download attendance rows for the professor's courses as CSV",
+)
+async def export_professor_reports(
+    payload: ProfessorExportRequest,
+    user: ProfessorUser,
+    service: ReportsServiceDep,
+    professor_service: ProfessorServiceDep,
+) -> StreamingResponse:
+    professor_id: int = await professor_service.resolve_professor_id(
+        user_id=user.id
+    )
+    content: str = await service.export_attendance(
+        professor_id=professor_id,
+        course_id=payload.course_id,
+        date_from=payload.date_from,
+        date_to=payload.date_to,
+        format=payload.format,
+        include=payload.include,
+        statuses=payload.statuses,
+    )
+
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={REPORTS_EXPORT_FILENAME}"
+        },
     )
