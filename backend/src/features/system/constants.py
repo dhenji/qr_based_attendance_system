@@ -26,3 +26,27 @@ S3_PREFIX_FALLBACK: str = "backups/"
 
 # Owner-only blobs on the local backend.
 LOCAL_FILE_MODE: int = 0o600
+
+# System settings keys persisted in the app_settings table. Seeded from
+# the matching `core.config.Settings` defaults when a row is missing.
+SETTING_GEOFENCE_RADIUS: str = "geofence_default_radius"
+SETTING_PRESENT_WINDOW: str = "present_window_default"
+SETTING_LATE_WINDOW: str = "late_window_default"
+SETTING_RETENTION_DAILY: str = "backup_retention_daily"
+SETTING_RETENTION_MONTHLY: str = "backup_retention_monthly"
+
+SETTING_KEY_MAX_LENGTH: int = 100
+
+# Per-setting bounds enforced on PATCH; values are stored as text and
+# parsed back to int on read.
+GEOFENCE_RADIUS_MIN: int = 10
+GEOFENCE_RADIUS_MAX: int = 1000
+WINDOW_MIN_MINUTES: int = 1
+WINDOW_MAX_MINUTES: int = 120
+RETENTION_DAILY_MIN: int = 1
+RETENTION_DAILY_MAX: int = 365
+RETENTION_MONTHLY_MIN: int = 1
+RETENTION_MONTHLY_MAX: int = 120
+
+# Timestamped object name for analytics CSVs persisted through backup storage.
+EXPORT_FILENAME_PREFIX: str = "analytics_"
