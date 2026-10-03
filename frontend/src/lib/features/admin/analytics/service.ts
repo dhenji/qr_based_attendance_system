@@ -24,8 +24,12 @@ import type {
 	AttendanceOverviewFilters,
 	AttendanceOverviewItemResponse,
 	Program,
+	PromoteStagingResponse,
 	RecentScanResponse,
 	RiskRefreshResponse,
+	RiskStagingFilters,
+	RiskStagingItemResponse,
+	RiskStagingResponse,
 	YearLevel,
 } from '$lib/shared/types';
 
@@ -108,6 +112,51 @@ export const getAtRisk = async (
 // 1 call per 60s per admin — the page surfaces the 429 message as-is.
 export const refreshRiskScores = async (): Promise<RiskRefreshResponse> =>
 	post<RiskRefreshResponse>('adminAnalyticsRefreshRisk');
+
+// Dry-run staging review (backend #137). listRiskStaging reads staged rows
+// without touching live scores; promoteRiskStaging copies the unpromoted
+// rows in scope into the live scores. Mock mode returns the empty fixtures,
+// so the page renders the "no dry-run yet" hint instead of demo rows.
+const stagingParams = (f: RiskStagingFilters): Record<string, string> => {
+	const params: Record<string, string> = {};
+	if (f.program_id !== undefined) params.program_id = String(f.program_id);
+	if (f.year_level_id !== undefined) params.year_level_id = String(f.year_level_id);
+	if (f.semester) params.semester = f.semester;
+	if (f.risk_level) params.risk_level = f.risk_level;
+	if (f.unpromoted_only !== undefined) params.unpromoted_only = String(f.unpromoted_only);
+	params.page = String(f.page ?? 1);
+	params.size = String(f.size ?? 20);
+	return params;
+};
+
+export const listRiskStaging = async (
+	filters: RiskStagingFilters = {}
+): Promise<RiskStagingResponse> =>
+	get<RiskStagingResponse>('adminRiskStaging', stagingParams(filters));
+
+export const promoteRiskStaging = async (
+	filters: RiskStagingFilters = {}
+): Promise<PromoteStagingResponse> =>
+	post<PromoteStagingResponse>('adminRiskStagingPromote', undefined, stagingParams(filters));
+
+export const stagingCsv = (rows: RiskStagingItemResponse[]): string =>
+	buildCsv(
+		['student_id', 'student_name', 'program', 'year_level', 'course_code', 'course_name', 'absence_rate', 'max_streak', 'trend_slope', 'risk_level', 'computed_at', 'promoted_at'],
+		rows.map((r) => [
+			r.student_id,
+			r.student_name,
+			r.program,
+			r.year_level,
+			r.course_code,
+			r.course_name,
+			percent(r.absence_rate),
+			r.max_streak,
+			r.trend_slope,
+			r.risk_level,
+			r.computed_at,
+			r.promoted_at ?? '',
+		])
+	);
 
 const overviewParams = (f: AttendanceOverviewFilters): Record<string, string> => {
 	const params: Record<string, string> = {};

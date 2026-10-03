@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import {
+		getSchedule,
 		getSessionHistory,
 		listStudentExcuses,
 		submitStudentExcuse,
@@ -9,6 +10,7 @@
 		type StudentHistoryRow,
 		type StudentHistoryStatus,
 	} from '$lib/features/student/service';
+	import type { ScheduledClass } from '$lib/shared/types';
 	import { buildCsv } from '$lib/features/report/service';
 	import { flushQueue, queue, type QueuedScan } from '$lib/features/sync/service';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
@@ -37,7 +39,24 @@
 		counts: Record<Status, number> | Record<string, number>;
 	} | null = $state(null);
 
-	const courseOptions = $derived([...new Set(rows.map((r) => r.course))]);
+	// Course filter options: the full enrollment list from GET
+	// /student/schedule (code + name), so every enrolled course is
+	// selectable even before its rows load. Falls back to the codes seen on
+	// the loaded rows when the schedule call fails (offline/mock).
+	let scheduleCourses = $state<ScheduledClass[]>([]);
+	const courseOptions = $derived.by(() => {
+		const seen = new Map<string, string>();
+		for (const c of scheduleCourses) {
+			if (!seen.has(c.courseCode)) seen.set(c.courseCode, c.courseName);
+		}
+		if (seen.size > 0) {
+			return [...seen].map(([code, name]) => ({ code, name }));
+		}
+		return [...new Set(rows.map((r) => r.course))].map((code) => ({
+			code,
+			name: rows.find((r) => r.course === code)?.courseName ?? '',
+		}));
+	});
 	const STATUSES: Status[] = ['present', 'late', 'absent', 'excused', 'pending', 'rejected'];
 
 	let sortKey: SortKey = $state('date');
@@ -147,6 +166,13 @@
 	onMount(() => {
 		void load();
 		void refreshQueue();
+		void getSchedule()
+			.then((courses) => {
+				scheduleCourses = courses;
+			})
+			.catch(() => {
+				scheduleCourses = [];
+			});
 		const handleVisible = () => {
 			if (document.visibilityState === 'visible') void refreshQueue();
 		};
@@ -214,7 +240,8 @@
 		status.charAt(0).toUpperCase() + status.slice(1);
 
 	// Server owns status/sort/page; course + search filter the fetched rows
-	// client-side (course_id mapping needs a schedule that has no backend yet).
+	// client-side by course code (the filter options above come from the live
+	// schedule, with row-derived codes as the offline fallback).
 	const matchesFilters = (r: Row): boolean => {
 		if (filterCourse !== 'All' && r.course !== filterCourse) return false;
 		if (
@@ -401,7 +428,7 @@
 		>
 			<option value="All">All Courses</option>
 			{#each courseOptions as course}
-				<option value={course}>{course}</option>
+				<option value={course.code}>{course.name ? `${course.code} — ${course.name}` : course.code}</option>
 			{/each}
 		</select>
 

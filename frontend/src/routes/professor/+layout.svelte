@@ -1,20 +1,28 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { authState, doLogout, restoreSession } from '$lib/features/auth/store.svelte';
+	import {
+		authState,
+		defaultRouteFor,
+		doLogout,
+		isProfessor,
+		restoreSession
+	} from '$lib/features/auth/store.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	let { children } = $props();
 
-	// TODO(auth): the professor portal is reachable without a session for now, so
-	// the dashboard can be reviewed before login is wired up. Once auth lands,
-	// restore the guard here: bounce anonymous visitors to Routes.LOGIN and send
-	// anyone who is not a professor back to Routes.DASHBOARD.
-	//
-	// restoreSession() still runs so the topbar shows the signed-in name when
-	// there is one; it just no longer gates rendering.
+	// Professor portal gate: anonymous visitors bounce to login, signed-in
+	// non-professors go to their own portal. restoreSession() runs first so
+	// the topbar shows the signed-in name when there is one.
 	onMount(async () => {
-		await restoreSession();
+		const user = await restoreSession();
+		if (!user) {
+			await goto(Routes.LOGIN);
+		} else if (!isProfessor()) {
+			await goto(defaultRouteFor(user));
+		}
 	});
 
 	// Professor portal nav: Dashboard, My Courses, Sessions, History,

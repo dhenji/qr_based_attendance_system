@@ -341,10 +341,9 @@ export interface AdminBulkEnrollResult {
 // --- Admin analytics & attendance overview (Phase 7, D33-D37) -----------------
 //
 // Wire shapes mirror docs/architecture/api-contracts.md exactly (snake_case).
-// The backend for these endpoints does not exist yet (features/analytics is
-// model-only), so the service layer reads these through endpoint defs whose
-// mocks return deterministic, mutually consistent data; real wiring is ready
-// for when the backend lands. Rate semantics (D36): compliance = present /
+// The analytics + attendance-overview routers landed in backend #136/#138,
+// so the service layer hits the real API by default; mocks only when
+// PUBLIC_MOCK_MODE=true. Rate semantics (D36): compliance = present /
 // total (default display), participation = (present + late + excused) / total.
 // At-risk thresholds (D35): absence_rate > 0.30 → high, > 0.15 → medium,
 // streak ≥ 3 → high, trend slope < −0.05/week → medium.
@@ -399,6 +398,48 @@ export interface RiskRefreshResponse {
 	medium: number;
 	low: number;
 	duration_ms: number;
+}
+
+// Dry-run staging review (backend #137): staged rows mirror AtRiskItem plus
+// the offering join and the promote stamp. promoted_at null = not yet copied
+// into the live scores.
+export interface RiskStagingItemResponse {
+	student_id: number;
+	student_name: string;
+	program: string;
+	year_level: string;
+	offering_id: number;
+	course_code: string;
+	course_name: string;
+	absence_rate: number;
+	max_streak: number;
+	trend_slope: number;
+	risk_level: AnalyticsRiskLevel;
+	computed_at: string;
+	promoted_at: string | null;
+}
+
+export interface RiskStagingResponse {
+	items: RiskStagingItemResponse[];
+	total: number;
+	page: number;
+	size: number;
+}
+
+export interface PromoteStagingResponse {
+	promoted: number;
+	skipped: number;
+	duration_ms: number;
+}
+
+export interface RiskStagingFilters {
+	program_id?: number;
+	year_level_id?: number;
+	semester?: string;
+	risk_level?: AnalyticsRiskLevel;
+	unpromoted_only?: boolean;
+	page?: number;
+	size?: number;
 }
 
 export interface AttendanceOverviewItemResponse {

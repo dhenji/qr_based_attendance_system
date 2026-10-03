@@ -32,8 +32,10 @@ import type {
 	AttendanceOverviewItemResponse,
 	AuditLogItemResponse,
 	ProfessorImportResult,
+	PromoteStagingResponse,
 	RecentScanResponse,
 	RiskRefreshResponse,
+	RiskStagingResponse,
 	StructureChangeResponse,
 	StudentImportResult,
 } from '$lib/shared/types';
@@ -2094,6 +2096,22 @@ export const AdminAnalyticsRefreshRiskEndpoint: EndpointDef<RiskRefreshResponse>
 	},
 };
 
+// Dry-run staging review (backend #137): GET lists staged rows without
+// touching live scores; POST copies unpromoted rows into the live scores.
+// Mocks are empty by design — fabricated staged scores would imply a batch
+// that never ran, so mock mode renders the "no dry-run yet" hint instead.
+export const AdminRiskStagingEndpoint: EndpointDef<RiskStagingResponse> = {
+	url: '/admin/analytics/risk-staging',
+	method: 'GET',
+	mock: () => ({ items: [], total: 0, page: 1, size: 20 }),
+};
+
+export const AdminRiskStagingPromoteEndpoint: EndpointDef<PromoteStagingResponse> = {
+	url: '/admin/analytics/risk-staging/promote',
+	method: 'POST',
+	mock: () => ({ promoted: 0, skipped: 0, duration_ms: 0 }),
+};
+
 export const AdminAttendanceOverviewEndpoint: EndpointDef<{ items: AttendanceOverviewItemResponse[] }> = {
 	url: '/admin/attendance/overview',
 	method: 'GET',
@@ -2687,12 +2705,14 @@ export const endpoints = {
 	adminOfferingProfessors: AdminOfferingProfessorsEndpoint,
 	adminOfferingRoster: AdminOfferingRosterEndpoint,
 	adminOfferingBulkEnroll: AdminOfferingBulkEnrollEndpoint,
-	// Admin analytics + attendance overview (Phase 7; backend not yet built)
+	// Admin analytics + attendance overview (Phase 7; backend #136/#137/#138)
 	adminAnalyticsOverview: AdminAnalyticsOverviewEndpoint,
 	adminAnalyticsComparison: AdminAnalyticsComparisonEndpoint,
 	adminAnalyticsTrends: AdminAnalyticsTrendsEndpoint,
 	adminAnalyticsAtRisk: AdminAnalyticsAtRiskEndpoint,
 	adminAnalyticsRefreshRisk: AdminAnalyticsRefreshRiskEndpoint,
+	adminRiskStaging: AdminRiskStagingEndpoint,
+	adminRiskStagingPromote: AdminRiskStagingPromoteEndpoint,
 	adminAttendanceOverview: AdminAttendanceOverviewEndpoint,
 	adminRecentScans: AdminRecentScansEndpoint,
 	// Admin audit logs (Phase 8 backend; designed shape)
