@@ -7,6 +7,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
 from shared.enums import BackupKind, BackupStatus, BackupStorage
+from shared.mixins import TimestampMixin
+
+
+class AppSetting(TimestampMixin, Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    value: Mapped[str] = mapped_column(Text)
 
 
 class BackupLog(Base):

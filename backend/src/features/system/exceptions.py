@@ -39,3 +39,13 @@ class BackupInProgressException(SystemDomainException):
 
     def __init__(self) -> None:
         super().__init__(message="A backup is already running")
+
+
+class BackupNotFoundException(SystemDomainException):
+    """404 - no backup row with this id, or its stored file is gone."""
+
+    status_code: int = 404
+    code: str = "backup_not_found"
+
+    def __init__(self, backup_id: int) -> None:
+        super().__init__(message=f"Backup {backup_id} not found")
