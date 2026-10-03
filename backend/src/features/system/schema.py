@@ -68,3 +68,23 @@ class BackupListResponse(BaseModel):
 class BackupTriggerResponse(BaseModel):
     backup_id: int
     status: Literal["started"] = "started"
+
+
+class AcademicStructureRead(BaseModel):
+    id: int
+    action: str
+    entity_type: str
+    entity_id: int | None = None
+    old_value: dict | None = None
+    new_value: dict | None = None
+    performed_by: int | None = None
+    performed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AcademicStructureListResponse(BaseModel):
+    items: list[AcademicStructureRead] = Field(default_factory=list)
+    total: int = 0
+    page: int = DEFAULT_PAGE
+    size: int = DEFAULT_PAGE_SIZE

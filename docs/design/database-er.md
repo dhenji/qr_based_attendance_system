@@ -6,6 +6,11 @@
 > `mfa_backup_codes` landed in Phase 2 (ADR-054), so the 16-table baseline is now 17.
 > **Planned tables** (land with backend-phases 8.5/8.7/12.0): `audit_logs`,
 > `app_settings` — the 17-table state becomes a 19-table target.
+>
+> **Update:** both have since landed — `audit_logs` (`f4a9c2b7d103`) in Phase 8.5 and
+> `app_settings` (`e7f8a9b0c1d2`) in Phase 12.0. `audit_logs` is written by
+> `shared/audit.record_audit` (structural rows today) and read by
+> `GET /admin/system/academic-structure`.
 
 > **Column note — `users.security_question_hash` (ADR-056):** despite the `_hash`
 > suffix, this column stores the security **question in readable plaintext**. Only

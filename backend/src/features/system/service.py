@@ -51,6 +51,7 @@ from features.system.constants import (
     S3_PREFIX_FALLBACK,
     SIDECAR_SUFFIX,
     STDERR_TAIL_CHARS,
+    STRUCTURAL_ENTITY_TYPES,
     WORK_DUMP_NAME,
     WORK_GZ_NAME,
 )
@@ -60,8 +61,10 @@ from features.system.exceptions import (
     BackupNotFoundException,
     BackupStorageUnconfiguredException,
 )
-from features.system.model import AppSetting, BackupLog
+from features.system.model import AppSetting, AuditLog, BackupLog
 from features.system.schema import (
+    AcademicStructureListResponse,
+    AcademicStructureRead,
     BackupListResponse,
     BackupRead,
     SystemSettingsRead,
@@ -374,6 +377,30 @@ class SystemService:
         ).all()
         return BackupListResponse(
             items=[BackupRead.model_validate(row) for row in rows],
+            total=int(total or 0),
+            page=page,
+            size=size,
+        )
+
+    async def list_academic_structure(
+        self, *, page: int = DEFAULT_PAGE, size: int = DEFAULT_PAGE_SIZE
+    ) -> AcademicStructureListResponse:
+        """Newest-first page of structural audit rows."""
+        page = max(page, 1)
+        size = min(max(size, 1), MAX_PAGE_SIZE)
+        scope = select(AuditLog).where(AuditLog.entity_type.in_(STRUCTURAL_ENTITY_TYPES))
+        total = await self._session.scalar(
+            select(func.count()).select_from(scope.subquery())
+        )
+        rows = (
+            await self._session.scalars(
+                scope.order_by(AuditLog.performed_at.desc(), AuditLog.id.desc())
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+        return AcademicStructureListResponse(
+            items=[AcademicStructureRead.model_validate(row) for row in rows],
             total=int(total or 0),
             page=page,
             size=size,

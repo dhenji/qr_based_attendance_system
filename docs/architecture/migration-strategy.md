@@ -6,9 +6,11 @@
 > and FKs. **No backfill functions or data migration scripts are needed.**
 >
 > **Forward-looking:** three tables land with later backend-phases —
-> `mfa_backup_codes` (Phase 2.11), `audit_logs` (Phases 8.5/8.7), `app_settings` (Phase
+> `mfa_backup_codes` (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase
 > 12.0) — bringing the baseline to a **19-table** target schema. Each addition gets its
-> own `alembic revision --autogenerate`.
+> own `alembic revision --autogenerate`. All three have now landed; `audit_logs`
+> (`f4a9c2b7d103`) carries structural rows today and takes the broader audit coverage
+> in Phase 8.7.
 >
 > **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in
 > `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py`
@@ -47,8 +49,9 @@ Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offe
 The baseline migration creates these 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
 
 > **Target grows to 19 tables** as the three planned tables are added: `mfa_backup_codes`
-> (Phase 2.11), `audit_logs` (Phases 8.5/8.7), `app_settings` (Phase 12.0). All three
-> need their models imported into `backend/alembic/env.py` before autogenerate.
+> (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase 12.0). All three
+> models are imported into `backend/alembic/env.py` (the first two via
+> `features.auth.model` / `features.system.model`) and have their own revisions.
 
 ---
 
