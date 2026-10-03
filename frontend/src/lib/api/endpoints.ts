@@ -66,7 +66,10 @@ export interface SessionVerificationResponse {
 	year_level_label: string;
 	expires_at: string;
 	scheduled_end_time: string;
-	geofence: { radius: number; lat: number; lng: number };
+	// Center is null when the session has no classroom coordinates — the
+	// backend skips its geofence check in that case (and so does the scan
+	// page pre-check).
+	geofence: { radius: number; lat: number | null; lng: number | null };
 	present_window_minutes: number;
 	late_window_minutes: number;
 }
@@ -1840,13 +1843,11 @@ export const AdminYearLevelDetailEndpoint: EndpointDef<YearLevelResponse> = {
 
 // --- Admin analytics & attendance overview (Phase 7, D33-D37) -----------------
 //
-// The backend for these endpoints does not exist yet (features/analytics is
-// model-only and unmounted), so the defs below mirror
-// docs/architecture/api-contracts.md and serve deterministic, mutually
-// consistent mocks until the backend lands. The mock sessions feed every tab
+// The analytics + attendance-overview routers landed in backend #136/#138, so
+// the defs below hit the real API by default; mocks only when
+// PUBLIC_MOCK_MODE=true (see api/client.ts). The mock sessions feed every tab
 // (overview, comparison, trends, attendance overview, recent scans) so the
-// numbers can never contradict each other. Real API by default; mocks only
-// when PUBLIC_MOCK_MODE=true (see api/client.ts).
+// numbers can never contradict each other.
 
 interface MockAnalyticsSession {
 	date: string;
@@ -2675,7 +2676,9 @@ export const endpoints = {
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
-	// Professor excuse queue (list + review; quick-excuse stays mock-only)
+	// Professor excuse queue (list + review live; quick/edit/revoke/bulk live
+	// by integer id — only the typed-number quick flow stays in-memory and
+	// evidence upload waits on the S3 presigned flow)
 	excuseList: ExcuseListEndpoint,
 	excuseReview: ExcuseReviewEndpoint,
 	// Professor per-record excuse actions + bulk (suffix carries the ids)

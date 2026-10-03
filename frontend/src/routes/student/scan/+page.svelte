@@ -413,12 +413,20 @@
 		let reachedSubmit = false;
 		try {
 			gps = await getCurrentPosition();
+			// The contract allows a null center (session/schema.py VerifyGeofence),
+			// and the server skips its check in that case — so does this pre-check.
+			// Without the guard, null coerces to 0 in the Haversine math and every
+			// scan reads as thousands of km "outside" a center that was never set.
+			const hasGeofenceCenter =
+				session.geofence.lat !== null &&
+				session.geofence.lng !== null;
 			if (
+				hasGeofenceCenter &&
 				!validateGPS(
 					gps.lat,
 					gps.lng,
-					session.geofence.lat,
-					session.geofence.lng,
+					session.geofence.lat as number,
+					session.geofence.lng as number,
 					session.geofence.radius
 				)
 			) {
