@@ -196,3 +196,36 @@ class PrecheckResponse(BaseModel):
     enrolled: bool
     already_scanned: bool
     student: dict[str, Any] = Field(default_factory=dict)
+
+
+class OverviewItem(BaseModel):
+    """One per-course row for the admin attendance overview."""
+
+    course_id: int
+    course_code: str
+    course_name: str
+    sessions_count: int
+    avg_rate: float
+    trend: Literal["up", "down", "flat"]
+
+
+class OverviewResponse(BaseModel):
+    """Per-course attendance overview over the requested filter set."""
+
+    items: list[OverviewItem] = Field(default_factory=list)
+
+
+class RecentScanItem(BaseModel):
+    """One row of the latest-scans feed for the admin dashboard."""
+
+    id: int
+    scanned_at: datetime
+    student_name: str
+    course_code: str
+    status: str
+
+
+class RecentScansResponse(BaseModel):
+    """Latest scans, newest first, capped by the requested limit."""
+
+    items: list[RecentScanItem] = Field(default_factory=list)

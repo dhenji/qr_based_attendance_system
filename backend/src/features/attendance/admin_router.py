@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from api.deps import AttendanceServiceDep, require_role
-from features.attendance.constants import REVIEW_STATUS_MAX_LENGTH
+from features.attendance.constants import (
+    RECENT_SCANS_DEFAULT_LIMIT,
+    RECENT_SCANS_MAX_LIMIT,
+    REVIEW_STATUS_MAX_LENGTH,
+)
 from features.attendance.schema import (
     LivenessReviewItem,
+    OverviewResponse,
+    RecentScansResponse,
     ResolveReviewRequest,
     ResolveReviewResponse,
 )
@@ -30,6 +38,72 @@ from shared.pagination import (
 router = APIRouter(prefix="/admin/attendance")
 
 AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
+
+OVERVIEW_EXPORT_FILENAME = "attendance-overview.csv"
+
+
+@router.get(
+    "/overview",
+    response_model=OverviewResponse,
+    summary="Per-course attendance overview",
+)
+async def get_attendance_overview(
+    _: AdminUser,
+    service: AttendanceServiceDep,
+    course_id: int | None = Query(default=None, gt=0),
+    professor_id: int | None = Query(default=None, gt=0),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+) -> OverviewResponse:
+    return await service.get_overview(
+        course_id=course_id,
+        professor_id=professor_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+@router.get(
+    "/overview/export",
+    summary="Download the attendance overview as CSV",
+)
+async def export_attendance_overview(
+    _: AdminUser,
+    service: AttendanceServiceDep,
+    course_id: int | None = Query(default=None, gt=0),
+    professor_id: int | None = Query(default=None, gt=0),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+) -> StreamingResponse:
+    content: str = await service.export_overview_csv(
+        course_id=course_id,
+        professor_id=professor_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={OVERVIEW_EXPORT_FILENAME}"
+        },
+    )
+
+
+@router.get(
+    "/recent-scans",
+    response_model=RecentScansResponse,
+    summary="Latest attendance scans",
+)
+async def get_recent_scans(
+    _: AdminUser,
+    service: AttendanceServiceDep,
+    limit: int = Query(
+        default=RECENT_SCANS_DEFAULT_LIMIT, ge=1, le=RECENT_SCANS_MAX_LIMIT
+    ),
+) -> RecentScansResponse:
+    return await service.get_recent_scans(limit=limit)
 
 
 @router.get(
