@@ -5,6 +5,7 @@
 	import {
 		buildCsv,
 		defaultReportRange,
+		fetchProfessorReportsCsv,
 		getAllCoursesReport,
 		getComparisonReport,
 		getReportFilterOptions,
@@ -293,9 +294,22 @@
 		`professor-${tab}-report-${from}-to-${to}.csv`.replace(/[^a-z0-9._-]+/gi, '-')
 	);
 
-	const downloadCsv = () => {
-		if (csvRows.length === 0) return;
-		const blob = new Blob([buildCsv(csvHeader, csvRows)], { type: 'text/csv;charset=utf-8' });
+	// Server export body: the backend takes one course_id, so a filtered
+	// course resolves only when every matching directory entry agrees on it —
+	// otherwise the union export (no course_id) covers the same rows.
+	const exportBody = $derived.by(() => {
+		const ids = new Set(
+			directory.filter((item) => item.courseCode === course).map((item) => item.courseId)
+		);
+		return {
+			...(course !== 'All' && ids.size === 1 ? { course_id: [...ids][0] } : {}),
+			date_from: `${from <= to ? from : to}T00:00:00`,
+			date_to: `${from <= to ? to : from}T23:59:59`
+		};
+	});
+
+	const saveCsv = (text: string) => {
+		const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement('a');
 		link.href = url;
@@ -304,6 +318,18 @@
 		link.click();
 		link.remove();
 		URL.revokeObjectURL(url);
+	};
+
+	// Server-first export (POST /professor/reports/export): the download
+	// matches the backend's per-scan rows. Mock mode and unreachable backends
+	// fall back to the client-side aggregate CSV so Export always works.
+	const downloadCsv = async () => {
+		if (csvRows.length === 0) return;
+		try {
+			saveCsv(await fetchProfessorReportsCsv(exportBody));
+		} catch {
+			saveCsv(buildCsv(csvHeader, csvRows));
+		}
 	};
 
 	const retry = () => {

@@ -7,6 +7,7 @@
 	import {
 		attendanceOverviewCsv,
 		downloadCsv,
+		fetchAttendanceOverviewCsv,
 	} from '$lib/features/admin/analytics/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listProfessors } from '$lib/features/admin/service';
@@ -16,9 +17,9 @@
 	import { adminCourse } from '$lib/shared/constants/routes';
 
 	// Admin Attendance Overview (wireframe 4.6): per-course sessions, average
-	// rate, and trend arrow over Course / Professor / Date filters. The
-	// backend endpoint does not exist yet, so rows come from the
-	// contract-shaped mock; the swap to the real backend stays mechanical.
+	// rate, and trend arrow over Course / Professor / Date filters. Rows come
+	// from GET /admin/attendance/overview (backend #138); mocks only when
+	// PUBLIC_MOCK_MODE=true.
 
 	type SortColumn = 'course' | 'sessions' | 'avg' | 'trend';
 
@@ -95,11 +96,25 @@
 	const trendLabel = (row: AttendanceOverviewItemResponse): string =>
 		row.trend === 'up' ? 'Rising' : row.trend === 'down' ? 'Falling' : 'Flat';
 
-	const onExport = () =>
-		downloadCsv(
-			`attendance-overview-${new Date().toISOString().slice(0, 10)}.csv`,
-			attendanceOverviewCsv(adminAttendanceState.items)
-		);
+	// Server-first export (GET /admin/attendance/overview/export) with the
+	// active filters, so the download matches the on-screen table. Mock mode
+	// and unreachable backends fall back to the client-side aggregate CSV.
+	const onExport = async () => {
+		const filename = `attendance-overview-${new Date().toISOString().slice(0, 10)}.csv`;
+		try {
+			downloadCsv(
+				filename,
+				await fetchAttendanceOverviewCsv({
+					course_id: courseFilter ? Number(courseFilter) : undefined,
+					professor_id: professorFilter ? Number(professorFilter) : undefined,
+					date_from: dateFrom.trim() || undefined,
+					date_to: dateTo.trim() || undefined,
+				})
+			);
+		} catch {
+			downloadCsv(filename, attendanceOverviewCsv(adminAttendanceState.items));
+		}
+	};
 </script>
 
 <div class="page">

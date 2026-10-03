@@ -12,7 +12,7 @@
 // docs/architecture/api-contracts.md so a future dedicated report endpoint
 // stays a mechanical swap; the page should not need to change.
 
-import { isMockMode } from '$lib/api/client';
+import { isMockMode, postText } from '$lib/api/client';
 import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 import { initProfessorCourses, professorState } from '$lib/features/professor/store.svelte';
 import { listSessionHistory, type SessionHistoryRow } from '$lib/features/session/service';
@@ -456,6 +456,21 @@ export const getTrendsReport = async (
 		meta
 	};
 };
+
+// Server CSV export (POST /professor/reports/export, backend #139). Body
+// mirrors ProfessorExportRequest: course/date bounds optional, format csv.
+// It throws in mock mode and when the backend is unreachable — the reports
+// page falls back to the client-side buildCsv export below, so Export always
+// produces a file.
+export type ProfessorReportsExportBody = {
+	course_id?: number;
+	date_from?: string;
+	date_to?: string;
+	statuses?: Array<'present' | 'late' | 'absent' | 'excused' | 'pending' | 'rejected'>;
+};
+
+export const fetchProfessorReportsCsv = (body: ProfessorReportsExportBody): Promise<string> =>
+	postText('/professor/reports/export', { format: 'csv', ...body });
 
 export const buildCsv = (header: string[], rows: Array<Array<string | number>>): string => {
 	const escape = (value: string | number): string => {
