@@ -1,19 +1,18 @@
 // features/admin/analytics/service.ts
 // Admin analytics + attendance-overview service.
 //
-// The backend for these endpoints does not exist yet (features/analytics is
-// model-only and unmounted), so the calls below go through endpoint defs
-// whose mocks return deterministic, mutually consistent data. The def URLs
-// and shapes mirror docs/architecture/api-contracts.md exactly, so the swap
-// to the real backend stays mechanical: no page or service change needed.
-// Real API by default; mocks only when PUBLIC_MOCK_MODE=true.
+// The analytics + attendance-overview routers landed in backend #136/#138,
+// so the calls below hit the real API by default; mocks only when
+// PUBLIC_MOCK_MODE=true (or when the backend is unreachable and the caller
+// falls back). The def URLs and shapes mirror
+// docs/architecture/api-contracts.md exactly.
 //
 // Rate semantics (D36): compliance = present / total (default display),
 // participation = (present + late + excused) / total (toggle). At-risk
 // thresholds (D35) live in schema.ts as named constants mirroring the future
 // backend heuristic; the backend remains the source of truth.
 
-import { get, post } from '$lib/api/client';
+import { get, getText, post } from '$lib/api/client';
 import { buildCsv } from '$lib/features/report/service';
 import type {
 	AdminAnalyticsFilters,
@@ -194,6 +193,14 @@ export const attendanceOverviewCsv = (rows: AttendanceOverviewItemResponse[]): s
 		['course_code', 'course_name', 'sessions_count', 'avg_rate', 'trend'],
 		rows.map((r) => [r.course_code, r.course_name, r.sessions_count, percent(r.avg_rate), r.trend])
 	);
+
+// Server CSV export (GET /admin/attendance/overview/export, backend #138).
+// Same filter set as getAttendanceOverview, so the download matches the
+// on-screen table. Throws in mock mode and when the backend is unreachable —
+// the attendance page falls back to attendanceOverviewCsv above.
+export const fetchAttendanceOverviewCsv = (
+	filters: AttendanceOverviewFilters = {}
+): Promise<string> => getText('/admin/attendance/overview/export', overviewParams(filters));
 
 export const downloadCsv = (filename: string, csv: string): void => {
 	const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });

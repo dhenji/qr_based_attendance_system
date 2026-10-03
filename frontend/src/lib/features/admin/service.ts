@@ -135,8 +135,18 @@ export const importStudents = async (file: File): Promise<StudentImportResult> =
 	return postForm<StudentImportResult>('adminStudentImport', form);
 };
 
-export const downloadStudentTemplate = async (): Promise<string> =>
-	getText('/admin/students/import/template');
+// Roster CSV template. Server text in live mode; the static header keeps
+// mock-mode/offline imports working when the template route is unreachable.
+const STUDENT_TEMPLATE_FALLBACK =
+	'student_id,first_name,middle_name,last_name,email,program_code,section,year_level\n';
+
+export const downloadStudentTemplate = async (): Promise<string> => {
+	try {
+		return await getText('/admin/students/import/template');
+	} catch {
+		return STUDENT_TEMPLATE_FALLBACK;
+	}
+};
 
 // --- Professors -------------------------------------------------------------
 

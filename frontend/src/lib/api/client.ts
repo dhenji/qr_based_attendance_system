@@ -292,32 +292,74 @@ export const postForm = async <T>(
 	return doFetch(false);
 };
 
-// Raw-text download for CSV templates (GET /admin/students/import/template).
-// The template route has no endpoint def (it returns text/csv, not JSON), so
-// the path is passed directly. Returns the CSV text for client-side download.
-export const getText = async (path: string): Promise<string> => {
+// Raw-text download for CSV templates (GET /admin/students/import/template)
+// and filtered CSV exports (GET /admin/attendance/overview/export). Text/csv
+// routes have no endpoint def (they return text, not JSON), so the path is
+// passed directly. Returns the CSV text for client-side download.
+export const getText = async (path: string, params?: Record<string, string>): Promise<string> => {
 	if (MOCK) {
-		return 'student_id,first_name,middle_name,last_name,email,program_code,section,year_level\n';
+		throw new APIError('mock_mode', 'Server CSV download is unavailable in mock mode');
 	}
 
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
-	const response = await fetchWithAuth(url.toString(), { method: 'GET' });
+	if (params) {
+		Object.entries(params).forEach(([key, value]) => {
+			url.searchParams.append(key, value);
+		});
+	}
 
-	if (response.status === 401 && unauthorizedHandler) {
-		const freshToken = await unauthorizedHandler();
-		if (freshToken) {
-			authToken = freshToken;
-			const retry = await fetchWithAuth(url.toString(), { method: 'GET' });
-			if (!retry.ok) {
-				throw await parseError(retry);
+	const doFetch = async (alreadyRetried: boolean): Promise<string> => {
+		const response = await fetchWithAuth(url.toString(), { method: 'GET' });
+
+		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
+			const freshToken = await unauthorizedHandler();
+			if (freshToken) {
+				authToken = freshToken;
+				return doFetch(true);
 			}
-			return retry.text();
 		}
+
+		if (!response.ok) {
+			throw await parseError(response);
+		}
+
+		return response.text();
+	};
+
+	return doFetch(false);
+};
+
+// Raw-text POST for CSV exports (POST /professor/reports/export). The export
+// route takes a JSON filter body and returns text/csv, so it fits neither
+// apiCall (JSON response) nor getText (GET). Auth header + 401-refresh reuse
+// fetchWithAuth; the path is passed directly, mirroring getText.
+export const postText = async (path: string, body: unknown): Promise<string> => {
+	if (MOCK) {
+		throw new APIError('mock_mode', 'Server CSV export is unavailable in mock mode');
 	}
 
-	if (!response.ok) {
-		throw await parseError(response);
-	}
+	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 
-	return response.text();
+	const doFetch = async (alreadyRetried: boolean): Promise<string> => {
+		const response = await fetchWithAuth(url.toString(), {
+			method: 'POST',
+			body: JSON.stringify(body)
+		});
+
+		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
+			const freshToken = await unauthorizedHandler();
+			if (freshToken) {
+				authToken = freshToken;
+				return doFetch(true);
+			}
+		}
+
+		if (!response.ok) {
+			throw await parseError(response);
+		}
+
+		return response.text();
+	};
+
+	return doFetch(false);
 };
