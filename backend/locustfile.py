@@ -15,7 +15,7 @@ Provisioning (once)::
 
 Run (5-minute Poisson window)::
 
-    cd backend && .venv/bin/locust -f locustfile.py \
+    cd backend && .venv/bin/locust -f locustfile.py --host http://127.0.0.1:8000 \
         --headless -u 30 -r 6 --run-time 5m --csv load_run
 
 Tuning: ``LOCUST_MEAN_WAIT_S`` (default 2.5, ~12 req/s across 30 users),
@@ -39,17 +39,24 @@ from __future__ import annotations
 
 import os
 import random
-import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
 
 from locust import HttpUser, events, task
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from bench_timings import discover_session_pool as _discover
+
 MEAN_WAIT_S = float(os.environ.get("LOCUST_MEAN_WAIT_S", "2.5"))
 POOL_SIZE = int(os.environ.get("LOCUST_POOL_SIZE", "30"))
 PASSWORD = os.environ.get("LOCUST_PASSWORD", "Loadtest1!")
 SESSION_CODE_PREFIX = os.environ.get("LOCUST_SESSION_CODE_PREFIX", "SEED-LOAD-")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys",
+)
 
 SESSION_IDS: list[int] = []
 
@@ -61,49 +68,13 @@ def _wait() -> float:
 
 
 def discover_session_pool() -> list[int]:
-    """Session ids for the load pool, oldest first.
+    """Pool ids from env: explicit list wins, else prefix lookup."""
 
-    Explicit ``LOCUST_SESSION_IDS=1,2,3`` wins; otherwise one indexed lookup
-    by session-code prefix in a subprocess, keeping asyncpg out of the
-    gevent-patched load process.
-    """
-
-    explicit = os.environ.get("LOCUST_SESSION_IDS", "")
-    if explicit.strip():
-        return [int(part) for part in explicit.split(",") if part.strip()]
-
-    url = os.environ.get(
-        "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys",
-    ).replace("+asyncpg", "")
-    script = (
-        "import asyncio, asyncpg, os, sys; "
-        "async def q(): "
-        "conn = await asyncpg.connect(os.environ['LOCUST_DSN']); "
-        "rows = await conn.fetch("
-        "\"SELECT id FROM sessions WHERE session_code LIKE $1 || '%' "
-        "ORDER BY id\", os.environ['LOCUST_PREFIX']); "
-        "await conn.close(); "
-        "print(' '.join(str(r['id']) for r in rows)); "
-        "asyncio.run(q())"
+    return _discover(
+        prefix=SESSION_CODE_PREFIX,
+        dsn=DATABASE_URL.replace("+asyncpg", ""),
+        explicit=os.environ.get("LOCUST_SESSION_IDS", ""),
     )
-    env = {
-        **os.environ,
-        "LOCUST_DSN": url,
-        "LOCUST_PREFIX": SESSION_CODE_PREFIX,
-    }
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=60,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"session pool discovery failed: {completed.stderr.strip()}"
-        )
-    return [int(part) for part in completed.stdout.split()]
 
 
 @events.test_start.add_listener
@@ -119,6 +90,7 @@ def _load_session_pool(environment, **kwargs) -> None:
 
 
 class ScanningStudent(HttpUser):
+    host = "http://127.0.0.1:8000"
     wait_time = _wait  # type: ignore[assignment]
 
     def on_start(self) -> None:
