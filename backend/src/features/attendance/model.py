@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Numeric,
     String,
     Text,
@@ -28,6 +29,16 @@ from shared.mixins import CreatedAtMixin
 class Attendance(CreatedAtMixin, Base):
     __tablename__ = "attendance_records"
 
+    # `timestamp` carries the date-range filters that analytics, reports and the
+    # three dashboards all run (`>= start AND < end`), and it had no index while
+    # every FK column did — so each of those was a sequential scan of the whole
+    # table. The composite covers the per-student variant the student dashboard
+    # uses (`student_id = ? AND timestamp BETWEEN ...`), which the single-column
+    # index can only serve by filtering on student_id afterwards.
+    __table_args__ = (
+        Index("ix_attendance_records_student_id_timestamp", "student_id", "timestamp"),
+    )
+
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     student_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("students.id", ondelete="RESTRICT"), index=True
@@ -36,7 +47,7 @@ class Attendance(CreatedAtMixin, Base):
         BigInteger, ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
     )
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
     gps_lat: Mapped[float | None] = mapped_column(Float)
     gps_lng: Mapped[float | None] = mapped_column(Float)
