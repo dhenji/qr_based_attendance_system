@@ -216,6 +216,13 @@ General API endpoint performance under normal load (not peak).
 | `pgBadger`                    | Postgres query log analysis        | Production monitoring  |
 | `prometheus-client` + Grafana | Runtime metrics dashboard          | Production             |
 
+Installed today: **`locust==2.46.6`** (pinned in `backend/requirements.txt`),
+driven by `backend/locustfile.py` — 30 virtual students over a pool of
+`SEED-LOAD-*` sessions from the seed's `--load-fixtures`, Poisson waits,
+`BENCHMARK_MODE=true` so the per-IP scan gate and the geofence/liveness checks
+are out of the measurement. `pytest-benchmark` and `Lighthouse CI` are listed
+as options, not yet installed.
+
 ### Environment Variables for Benchmarking
 
 ```bash

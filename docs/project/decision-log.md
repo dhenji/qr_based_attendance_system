@@ -1393,3 +1393,58 @@
   /admin/system/cleanup`), 86 OpenAPI paths, no migration. 11 new tests in
   `tests/features/system/test_maintenance_http.py` (594 total, all passing).
   The prune helper is the implementation the future cleanup-job work reuses.
+
+---
+
+### ADR-067: Test and Benchmark Infrastructure Lives Beside the Suite
+
+- **Decision (D67):** Phase 9's verification assets are three files at
+  `backend/` root plus one module inside the suite: the seed is
+  `src/tests/seed_data.py` with `backend/test_seed_data.py` as a thin entry
+  point; the concurrent-scan load harness is `backend/locustfile.py` with its
+  import-safe helpers (`poisson_wait`, `SlotAssigner`, `discover_session_pool`)
+  in `backend/bench_timings.py`, which also serves `--batch` / `--backup`
+  one-shot timings. Benchmark-only behavior stays gated behind existing config
+  (`BENCHMARK_MODE` skips the scan geofence + liveness checks and the per-IP
+  scan rate gate; `RISK_BATCH_WORKERS` shards scoring across threads
+  order-preservingly), both defaulting off.
+- **Date:** 2026-10-04
+- **Status:** Accepted
+- **Context:** Three findings from the first load runs forced these placements.
+  (1) locust calls `wait_time` bound, so a zero-arg wait crashes every virtual
+  user on its first tick. (2) A seed that owns its tables outright breaks the
+  moment a scheduled batch runs: the risk-score lookup keyed on
+  `(student, offering)` multi-matched, because the unique key is
+  `(student, offering, semester, computed_day)`. (3) Importing locust into the
+  pytest process installs gevent monkey-patching and hangs the entire suite —
+  which is also why the harness's unit-testable helpers cannot live in the
+  locustfile.
+- **Rationale:**
+  - **A re-runnable script, not a data migration.** The seed must be
+    importable by tests and the harness, re-runnable without duplicating rows,
+    and able to provision load fixtures on demand (`--load-fixtures N`). A
+    migration is none of those: it runs once, inside the schema history, and
+    cannot take a flag. Every write is looked up by its unique column first, so
+    re-runs are no-ops and `--reset` is the explicit destructive path.
+  - **Benchmarks must not change what they measure.** Gating behind config
+    keeps the geofence and rate limiter out of the request path by default and
+    leaves production behavior untouched; both paths are covered by tests, so
+    the skip is a tested branch rather than an unverified assumption.
+  - **Order-preserving parallelism.** `RISK_BATCH_WORKERS` shards the scoring
+    loop by chunk and concatenates in input order, so a sharded run scores
+    identically to the serial one — verified by a test asserting the two
+    summaries match — while the serial path stays the default.
+  - **Harness identity is assigned, not derived.** `SlotAssigner` deals slots
+    `1..pool_size` exactly once from a locked counter. Deriving a slot from
+    `id(user)` collapses CPython's 16-byte-aligned addresses onto a handful of
+    residues modulo the pool size, so users shared an identity and rescanned
+    each other's sessions as `duplicate_scan`.
+- **Consequences:** 2 new backend-root scripts and 1 suite module; the seed's
+  load fixtures are the only source of `SEED-LOAD-*` sessions and 30
+  `loadtestNN@load.uni.edu` accounts, and their emails must stay on a
+  deliverable domain because the login contract validates with `EmailStr`
+  (reserved TLDs 422 on every login). `bench_timings.py --backup` needs `pg_dump`
+  and an OpenSSL whose `enc` supports AEAD; the 2026-10-04 run recorded the
+  backup leg as environment-blocked for exactly that reason. The gevent trap is
+  documented in AGENTS.md so the helpers are not "tidied" back into
+  `locustfile.py`.
