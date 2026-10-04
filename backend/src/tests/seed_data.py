@@ -181,7 +181,12 @@ async def _get_or_create(session, model, defaults: dict, **lookup):
     return row, True
 
 
-async def seed(scale: str = "small", reset: bool = False) -> dict[str, int]:
+async def seed(
+    scale: str = "small",
+    reset: bool = False,
+    load_sessions: int = 0,
+    database_url: str | None = None,
+) -> dict[str, int]:
     from sqlalchemy import delete, select
 
     from core.database import Base
@@ -201,8 +206,11 @@ async def seed(scale: str = "small", reset: bool = False) -> dict[str, int]:
     from shared.enums import UserRole
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    counts = {k: 0 for k in ("courses", "students", "sessions", "records")}
-    engine = create_async_engine(_database_url())
+    counts = {
+        k: 0 for k in ("courses", "students", "sessions", "records",
+                       "load_sessions")
+    }
+    engine = create_async_engine(database_url or _database_url())
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with maker() as db:
@@ -766,6 +774,46 @@ async def seed(scale: str = "small", reset: bool = False) -> dict[str, int]:
                         )
                     )
                     await db.commit()
+
+            if load_sessions > 0:
+                now = datetime.now(UTC)
+                offering = offerings[("GE101", "BSCS", 1)]
+                owner = profs["prof.delacruz@uni.edu"]
+                for sid, _first, _last, _section in roster[:30]:
+                    await _get_or_create(
+                        db,
+                        Enrollment,
+                        {"semester": "1st_sem", "academic_year": "2026-2027"},
+                        student_id=students[sid].id,
+                        offering_id=offering.id,
+                        academic_year="2026-2027",
+                    )
+                for idx in range(load_sessions):
+                    code = f"SEED-LOAD-{idx:03d}"
+                    existing = (
+                        await db.scalars(
+                            select(Session).where(Session.session_code == code)
+                        )
+                    ).one_or_none()
+                    if existing is None:
+                        db.add(
+                            Session(
+                                offering_id=offering.id,
+                                professor_id=owner.id,
+                                session_code=code,
+                                duration_minutes=180,
+                                present_window_minutes=5,
+                                late_window_minutes=10,
+                                scheduled_start_time=now - timedelta(minutes=5),
+                                scheduled_end_time=now + timedelta(hours=3),
+                                expires_at=now + timedelta(hours=3),
+                                classroom_name="Room 301",
+                                classroom_lat=14.5995,
+                                classroom_lng=120.9842,
+                            )
+                        )
+                        counts["load_sessions"] += 1
+                await db.commit()
     finally:
         await engine.dispose()
     return counts
@@ -790,8 +838,16 @@ def main(argv: list[str] | None = None) -> dict[str, int]:
         "--reset", action="store_true",
         help="Delete previously seeded rows before seeding",
     )
+    parser.add_argument(
+        "--load-fixtures", type=int, default=0, metavar="N",
+        help="Create N active load sessions (SEED-LOAD-###) anchored at now "
+        "and enroll the load-test students in GE101-BSCS for the run",
+    )
     args = parser.parse_args(argv)
-    result = asyncio.run(seed(scale=args.scale, reset=args.reset))
+    result = asyncio.run(
+        seed(scale=args.scale, reset=args.reset,
+             load_sessions=args.load_fixtures)
+    )
     print(f"seeded scale={args.scale}: {result}")
     return result
 

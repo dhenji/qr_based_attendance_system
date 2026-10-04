@@ -1,13 +1,17 @@
-"""Concurrent-scan load test: 30 virtual students, one active session.
+"""Concurrent-scan load test: 30 virtual students over a pool of sessions.
+
+A single session admits one successful scan per student (repeats are
+`duplicate_scan` rejections), so the run cycles a pool of fresh sessions:
+each virtual user is pinned 1:1 to a `loadtestNN` account and walks the
+pool in slot order, keeping every (student, session) pair unique until the
+full 30 x N matrix is exhausted.
 
 Provisioning (once)::
 
-    cd backend && python test_seed_data.py --scale small
+    cd backend && python test_seed_data.py --scale small --load-fixtures 150
     # API with the load profile (lifts the single-IP rate gate and the
     # geofence/liveness checks so the run measures routing + persistence):
     BENCHMARK_MODE=true FACE_MATCH_THRESHOLD=0.0 uvicorn main:app --app-dir src
-    export LOCUST_SESSION_ID=$(psql $DATABASE_URL -tAc \
-        "SELECT id FROM sessions WHERE session_code='SEED-GE101-BSCS-00'")
 
 Run (5-minute Poisson window)::
 
@@ -16,7 +20,14 @@ Run (5-minute Poisson window)::
 
 Tuning: ``LOCUST_MEAN_WAIT_S`` (default 2.5, ~12 req/s across 30 users),
 ``LOCUST_POOL_SIZE`` (default 30, matches the ``loadtestNN`` seed accounts),
-``LOCUST_PASSWORD`` (default ``Loadtest1!``).
+``LOCUST_PASSWORD`` (default ``Loadtest1!``),
+``LOCUST_SESSION_CODE_PREFIX`` (default ``SEED-LOAD-``),
+``LOCUST_SESSION_IDS`` (comma list, skips pool discovery),
+``DATABASE_URL`` (pool discovery only).
+
+Pool discovery shells out to a clean interpreter (no gevent) running one
+``SELECT id ... ORDER BY id`` over asyncpg, so the load process itself never
+touches the database driver under monkey-patched sockets.
 
 Bandwidth shaping is out of scope for the harness: apply ``tc`` (or a proxy
 cap) on the load host to emulate 3G when that leg matters.
@@ -28,6 +39,8 @@ from __future__ import annotations
 
 import os
 import random
+import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 
@@ -36,7 +49,9 @@ from locust import HttpUser, events, task
 MEAN_WAIT_S = float(os.environ.get("LOCUST_MEAN_WAIT_S", "2.5"))
 POOL_SIZE = int(os.environ.get("LOCUST_POOL_SIZE", "30"))
 PASSWORD = os.environ.get("LOCUST_PASSWORD", "Loadtest1!")
-SESSION_ID = int(os.environ.get("LOCUST_SESSION_ID", "0"))
+SESSION_CODE_PREFIX = os.environ.get("LOCUST_SESSION_CODE_PREFIX", "SEED-LOAD-")
+
+SESSION_IDS: list[int] = []
 
 _failures: dict[str, int] = {"duplicate": 0, "rate_limited": 0, "error": 0}
 
@@ -45,17 +60,73 @@ def _wait() -> float:
     return random.expovariate(1.0 / MEAN_WAIT_S)
 
 
+def discover_session_pool() -> list[int]:
+    """Session ids for the load pool, oldest first.
+
+    Explicit ``LOCUST_SESSION_IDS=1,2,3`` wins; otherwise one indexed lookup
+    by session-code prefix in a subprocess, keeping asyncpg out of the
+    gevent-patched load process.
+    """
+
+    explicit = os.environ.get("LOCUST_SESSION_IDS", "")
+    if explicit.strip():
+        return [int(part) for part in explicit.split(",") if part.strip()]
+
+    url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys",
+    ).replace("+asyncpg", "")
+    script = (
+        "import asyncio, asyncpg, os, sys; "
+        "async def q(): "
+        "conn = await asyncpg.connect(os.environ['LOCUST_DSN']); "
+        "rows = await conn.fetch("
+        "\"SELECT id FROM sessions WHERE session_code LIKE $1 || '%' "
+        "ORDER BY id\", os.environ['LOCUST_PREFIX']); "
+        "await conn.close(); "
+        "print(' '.join(str(r['id']) for r in rows)); "
+        "asyncio.run(q())"
+    )
+    env = {
+        **os.environ,
+        "LOCUST_DSN": url,
+        "LOCUST_PREFIX": SESSION_CODE_PREFIX,
+    }
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"session pool discovery failed: {completed.stderr.strip()}"
+        )
+    return [int(part) for part in completed.stdout.split()]
+
+
+@events.test_start.add_listener
+def _load_session_pool(environment, **kwargs) -> None:
+    ids = discover_session_pool()
+    if not ids:
+        raise RuntimeError(
+            f"no sessions with prefix {SESSION_CODE_PREFIX!r}: "
+            "seed with --load-fixtures first"
+        )
+    SESSION_IDS.extend(ids)
+    print(f"load pool: {len(SESSION_IDS)} sessions from id {SESSION_IDS[0]}")
+
+
 class ScanningStudent(HttpUser):
     wait_time = _wait  # type: ignore[assignment]
 
     def on_start(self) -> None:
-        if not SESSION_ID:
-            raise RuntimeError(
-                "LOCUST_SESSION_ID is required: seed first, then export the id "
-                "of session SEED-GE101-BSCS-00"
-            )
-        slot = (id(self) % POOL_SIZE) + 1
-        self.username = f"loadtest{slot:02d}"
+        if not SESSION_IDS:
+            raise RuntimeError("session pool is empty")
+        self.slot = (id(self) % POOL_SIZE) + 1
+        self.username = f"loadtest{self.slot:02d}"
+        self.scans = 0
         with self.client.post(
             "/api/auth/login",
             json={"email": f"{self.username}@load.test", "password": PASSWORD},
@@ -77,8 +148,10 @@ class ScanningStudent(HttpUser):
 
     @task
     def scan(self) -> None:
+        session_id = SESSION_IDS[(self.slot + self.scans) % len(SESSION_IDS)]
+        self.scans += 1
         payload = {
-            "session_id": SESSION_ID,
+            "session_id": session_id,
             "student_number": self.student_number,
             "gps": {"lat": 14.5995, "lng": 121.0001, "accuracy": 5.0},
             "liveness_evidence": {
