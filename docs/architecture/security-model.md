@@ -10,10 +10,10 @@
 
 | #   | Threat                                                     | Severity | Mitigation                                                                                                                                                                                                                          | Decision                                 |
 | --- | ---------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential 5-step scan: session code → student-ID QR → GPS geofence → face liveness → face match. All steps must pass server-side. No shortcut allowed.                                                                             | D27, D31                                 |
-| T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe Face Mesh WASM. EAR (Eye Aspect Ratio) detects blink; PnP (Perspective-n-Point) detects head rotation. Fixed sequence, not random — prevents pre-recorded video. | D31                                      |
+| T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential 5-step scan: session code → student-ID QR → GPS geofence → face liveness → face match. Steps 1–3 are verified server-side; **steps 4–5 are client-asserted** and the server only range-checks them — see *Client-Asserted Biometrics*. No shortcut through steps 1–3.                                                                             | D27, D31                                 |
+| T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe Face Mesh WASM in the client. The server grades the *submitted* evidence, not a measurement — see *Client-Asserted Biometrics*. This stops an honest client from being tricked, not a determined one. | D31                                      |
 | T3  | **QR relay** — student sends session QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
-| T4  | **Sibling confusion** — twin/brother scans                 | Low      | Face embedding comparison (cosine similarity ≥ 0.7 threshold). Known limitation: acknowledged by instructor as accepted risk. No PAD CNN (class-level face anti-spoofing) in scope.                                                 | D31                                      |
+| T4  | **Sibling confusion** — twin/brother scans                 | Low      | **Not implemented.** No embedding comparison exists: there is no cosine-similarity code in the backend, and `face_enrollment` stores a zero-filled placeholder blob (`_stub_embedding_blob`), so there is nothing to compare against. The 0.70 threshold in `core/config.py` is applied to the score the *client* submits. Acknowledged by instructor as accepted risk; no PAD CNN in scope. | D31, ADR-068                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
 | T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP, revocable by the user. Argon2id for password hashing. Account lockout after failed attempts. A stolen 7-day refresh token outlives an MFA disable — see *Password & Account Security*. | D32                                      |
 | T7  | **Session code brute-force**                               | Medium   | HMAC-derived 6–8 char codes from random secret. 62^8 ≈ 2.18 × 10^14 possibilities. Rate-limited verification endpoint. Codes expire with session.                                                                                   | D18                                      |
@@ -125,6 +125,15 @@ exposure; it is not a way to kick an existing session out.
 
 ### Face Embedding Encryption (D28)
 
+> **Status: designed, not implemented.** What the server stores today is a
+> zero-filled placeholder from `_stub_embedding_blob` — a plain JSON blob with
+> `"mean"` and all three angle vectors set to `0.0` and `"stub": true`. There is
+> no ResNet inference, no AES-GCM step and no encryption code in the feature. The
+> pipeline below is the design D28 records. The blob's *shape* is already the
+> documented one so swapping the builder is the only change a real pipeline
+> needs. The audit-trail exclusion in `_face_snapshot` is implemented and holds
+> regardless.
+
 ```
 Server:
   3 photos → face-api.js ResNet → 128-d vectors per angle
@@ -139,6 +148,10 @@ Client:
   → Use for offline face comparison
 ```
 
+The last line — *use for offline face comparison* — has no server-side counterpart
+either: no comparison is performed on either side today. See *Client-Asserted
+Biometrics*.
+
 **Thresholds:**
 
 - ≥ 0.70: Pass (high confidence match)
@@ -149,14 +162,62 @@ Client:
 
 Fixed sequence: **blink → turn left → turn right**
 
-| Check      | Method                                       | Evidence            |
-| ---------- | -------------------------------------------- | ------------------- |
-| Blink      | EAR (Eye Aspect Ratio) < 0.25 for ≥ 3 frames | `ear_samples` array |
-| Turn left  | PnP head pose yaw < -15°                     | `pnp_evidence.yaw`  |
-| Turn right | PnP head pose yaw > +15°                     | `pnp_evidence.yaw`  |
+| Check      | Client-side method                     | Evidence submitted   | Server-side check |
+| ---------- | -------------------------------------- | -------------------- | ----------------- |
+| Blink      | EAR (Eye Aspect Ratio) per frame       | `ear_samples` array  | mean within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5), ≥ 1 sample |
+| Turn left  | PnP head pose yaw < -15°               | `pnp_evidence.yaw`   | `head_turn_left` true, `pnp_evidence` non-empty |
+| Turn right | PnP head pose yaw > +15°               | `pnp_evidence.yaw`   | `head_turn_right` true, `pnp_evidence` non-empty |
+
+The thresholds in the left column are what the *client* is expected to apply; the
+right column is all the server enforces. An earlier version of this table claimed
+"EAR < 0.25 for >= 3 frames" as a server-side rule, which the code has never
+enforced — see *Client-Asserted Biometrics* below.
 
 All processing client-side (MediaPipe Face Mesh WASM). Only scores/evidence
 sync to server for audit. Server re-validates evidence plausibility.
+
+### Client-Asserted Biometrics
+
+"Re-validates evidence plausibility" above is the whole of it, and it is worth
+being precise about what that means, because the threat table (T1, T4) reads as
+though the server verifies biometrics. It does not.
+
+| Input | Who computes it | What the server checks |
+| --- | --- | --- |
+| `liveness_evidence` | client (MediaPipe WASM) | three booleans true; `ear_samples` non-empty; their **mean** within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5); `pnp_evidence` non-empty |
+| `face_match_score` | client | within `face_review_band_low` (0.65) and `face_match_threshold` (0.70), both applied to the submitted number |
+
+Both are body fields on `POST /student/attendance/scan`. The server's checks are
+arithmetic and truthiness over values the client sent — no measurement, no
+image, no embedding comparison. Two specifics worth stating plainly:
+
+- `EAR_SAMPLES_MIN_COUNT` is **1**, so the three-step challenge is satisfiable
+  with a single asserted sample per position.
+- A client submitting `face_match_score=0.99` always passes and is never routed
+  to the liveness review queue. The review band only catches scores a client
+  volunteers.
+
+There is also no face *enrollment* pipeline yet: `face_enrollment` stores a
+zero-filled placeholder from `_stub_embedding_blob`, so there is no stored vector
+to compare against even in principle. That placeholder is why
+`api-contracts.md` lists `no_face_detected`, `multiple_faces`, `quality_too_low`
+and `invalid_image` as documented but never raised.
+
+**What this does and does not protect.** Steps 1-3 of the scan — session code,
+student-ID QR, GPS geofence — are genuinely server-enforced, which is why T3, T5
+and T8 remain accurate: those inputs are re-validated on sync. Steps 4-5 stop an
+honest client from being tricked with a photo or coerced into a lazy blink. They
+are an integrity signal recorded in the trail, **not an access control** against
+a modified client. Recorded as an accepted MVP gap in ADR-068 rather than left
+as an apparent oversight; treating `face_match_score` as a measurement is the
+mistake that section exists to prevent.
+
+One consequence worth stating for anyone reasoning about the scan pipeline: the
+geofence check (`outside_geofence`) is the only *biometric-adjacent* step that can
+be bypassed by not participating in it, because `BENCHMARK_MODE` skips it
+alongside the liveness check. That is deliberate for load runs and off by default,
+but it means a benchmark deployment has no geofence enforcement at all — not a
+weakened one, none.
 
 ---
 

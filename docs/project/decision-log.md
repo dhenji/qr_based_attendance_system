@@ -1448,3 +1448,53 @@
   backup leg as environment-blocked for exactly that reason. The gevent trap is
   documented in AGENTS.md so the helpers are not "tidied" back into
   `locustfile.py`.
+
+### ADR-068: Biometric Evidence Is Client-Asserted, and the Server Says So
+
+- **Decision (D68):** The liveness challenge and face-match score are computed
+  in the client and graded by the server only for internal consistency. The
+  server performs no biometric measurement and no embedding comparison. This is
+  accepted for the MVP **and written into `security-model.md`**, so the threat
+  table describes what the code does rather than what the design intended.
+- **Date:** 2026-10-04
+- **Status:** Accepted (known gap, explicitly not an oversight)
+- **Context:** `security-model.md` claimed for T4 that face verification is a
+  "cosine similarity >= 0.7 threshold" and for T1 that "all steps must pass
+  server-side". Neither is true of the current code. What actually happens on
+  `POST /student/attendance/scan`:
+  (1) `liveness_evidence` is a client-supplied body field. The grader
+  (`attendance/service.py::_validate_liveness_evidence`) requires three client
+  booleans to be true, `ear_samples` non-empty, the *mean* of those
+  client-supplied samples inside `[EAR_MEAN_MIN, EAR_MEAN_MAX]` (0.05..0.5), and
+  `pnp_evidence` to be a non-empty dict. It is arithmetic and truthiness over
+  submitted values, never a measurement.
+  (2) `EAR_SAMPLES_MIN_COUNT` is 1, so the whole three-step challenge is
+  satisfiable with a single asserted sample in each of the three positions.
+  (3) `face_match_score` is a client-supplied float. `face_match_threshold`
+  (0.70) and `face_review_band_low` (0.65) are applied to that submitted number,
+  so a client asserting 0.99 always passes and is never routed to review.
+  (4) There is no embedding comparison anywhere in the backend — no cosine,
+  similarity or dot-product code exists — and `face_enrollment` stores a
+  zero-filled placeholder via `_stub_embedding_blob`, so there is nothing to
+  compare against even in principle today.
+  The realistic threat is therefore a modified client, not a photo shown to an
+  honest one. T2's MediaPipe challenge is still worth keeping: it stops
+  collusion-by-accident and casual coercion, and it is what a future server-side
+  pipeline would replace.
+- **Alternatives considered:**
+  (1) *Server-side MediaPipe/embedding comparison.* Would make T1 and T4 true as
+  written, but requires the model pipeline on the server, real (non-stub)
+  embeddings, and a re-enrollment of the existing roster. Out of MVP scope.
+  (2) *Sign the client evidence.* Stops naive tampering but not a modified
+  client, and adds key management for a partial guarantee. Recorded as the
+  cheapest real improvement if this gap is ever taken seriously.
+  (3) *Delete the biometric steps.* Rejected: they raise the cost of the casual
+  attack, which is the attack that actually happens.
+- **Consequences:** Steps 1-3 of the scan (session code, student-ID QR, GPS
+  geofence) are genuinely server-enforced, and T3/T5/T8 remain accurate because
+  those inputs *are* re-validated on sync. Steps 4-5 are an integrity signal
+  recorded in the audit trail, not an access control. Anyone reading
+  `attendance_records.face_match_score` as a measurement should read
+  `security-model.md` *Client-Asserted Biometrics* first. The same placeholder
+  is why `api-contracts.md` records `no_face_detected`, `multiple_faces`,
+  `quality_too_low` and `invalid_image` as documented-but-never-raised.
