@@ -8,9 +8,13 @@
 
 import { APIError, get, isMockMode, post } from '$lib/api/client';
 import type {
+	BackupCodesResponse,
+	BackupCodesSummaryResponse,
 	ChangePasswordRequest,
 	LoginRequest,
 	MeResponse,
+	MfaDisableRequest,
+	MfaSetupResponse,
 	MfaVerifyRequest,
 	OtpRequest,
 	OtpVerifyRequest,
@@ -119,6 +123,46 @@ export const verifyMfa = async (code: string, preauthToken?: string | null): Pro
 	if (preauthToken) body.preauth_token = preauthToken;
 	return post<TokenResponse>('authMfaVerify', body);
 };
+
+// --- MFA enrolment and recovery ------------------------------------------------
+//
+// `mfa_enabled` has exactly two writers on the backend: `verify_mfa` sets it
+// True, `disable_mfa` sets it False. Nothing else may change it — in
+// particular `admin_reset_password` deliberately leaves MFA alone, so an admin
+// resetting a password cannot strip a second factor. Every function below maps
+// to one of those writers and nothing else.
+//
+// Throws APIError: 'mfa_already_enabled' (409, setup when already on),
+// 'mfa_not_enabled' (409, disable when already off), 'current_password_invalid'
+// (400), 'invalid_mfa_code' (400).
+//
+// None of these branch on isMockMode: `apiCall` already consults the endpoint
+// def's `mock` when PUBLIC_MOCK_MODE=true.
+
+// Step 1 of enabling. Mints and stores the secret but does NOT enable MFA —
+// this returns a `qr_url` (an otpauth:// URI, not an image) plus the same value
+// again as `manual_entry_key`. Calling it twice silently overwrites the first
+// secret, so the UI must not offer a casual retry.
+export const setupMfa = async (): Promise<MfaSetupResponse> =>
+	post<MfaSetupResponse>('authMfaSetup');
+
+// The only path back to `mfa_enabled = False`. Password-verified, and it stamps
+// `used_at` on every unconsumed backup code so none survives the disable.
+export const disableMfa = async (password: string): Promise<void> => {
+	const body: MfaDisableRequest = { password };
+	await post<void>('authMfaDisable', body);
+};
+
+// Regenerating invalidates the whole previous batch (each outstanding code is
+// stamped used, then 10 fresh ones are inserted), so this is the only way to
+// get a full set back after one is spent.
+export const generateBackupCodes = async (): Promise<BackupCodesResponse> =>
+	post<BackupCodesResponse>('authMfaBackupCodesGenerate');
+
+// Counts for the most recent batch only — never codes or hashes. Works even
+// when MFA is off, which is what makes pre-emptive generation possible.
+export const listBackupCodes = async (): Promise<BackupCodesSummaryResponse> =>
+	get<BackupCodesSummaryResponse>('authMfaBackupCodesSummary');
 
 export const changePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
 	if (isMockMode()) return mockNoop();

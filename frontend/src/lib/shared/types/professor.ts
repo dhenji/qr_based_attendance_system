@@ -75,3 +75,26 @@ export interface ProfessorCourseSummary {
 	isPrimary: boolean;
 	enrolledCount: number;
 }
+
+// GET /professor/dashboard
+//
+// One entry per session the professor runs today, carrying the scanned/enrolled
+// pair the live session tiles show. It deliberately carries no course identity
+// (no code, name, section, or clock time): the dashboard page still lists
+// today's sessions through GET /professor/sessions for those columns and joins
+// these counts on `session_id`. Same convention as the professor attendance
+// ledger, which also joins course identity client-side.
+export interface ProfessorTodaySessionResponse {
+	session_id: number;
+	offering_id: number;
+	scanned: number;
+	enrolled: number;
+}
+
+export interface ProfessorDashboardResponse {
+	sessions_today: number;
+	sessions_completed: number;
+	total_students: number;
+	avg_rate: number;
+	today_sessions: ProfessorTodaySessionResponse[];
+}

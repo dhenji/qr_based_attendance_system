@@ -2,39 +2,36 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import {
-		adminProfessorsState,
-		adminStudentsState,
-		initAdminProfessors,
-		initAdminStudents,
-	} from '$lib/features/admin/store.svelte';
+	import { getAdminDashboard } from '$lib/features/admin/service';
 	import {
 		adminAttendanceState,
-		adminScansState,
 		initAttendanceOverview,
-		initRecentScans,
 	} from '$lib/features/admin/analytics/store.svelte';
-	import { listPrograms } from '$lib/features/admin/programs/service';
 	import { formatPercentage } from '$lib/shared/utils/format';
 	import { Routes } from '$lib/shared/constants/routes';
+	import type { AdminDashboardResponse } from '$lib/shared/types';
 
-	// Admin dashboard (wireframe 4.1). There is no GET /admin/dashboard on the
-	// backend (Phase-12 gap), so the KPI row is derived from the first page of
-	// the students/professors/programs lists rather than hardcoded — the
-	// numbers can never contradict the roster pages. The scans feed and the
-	// attendance strip come from the contract-shaped analytics mocks until the
-	// analytics backend lands (Phase 7).
-	let programsTotal = $state<number | null>(null);
+	// GET /admin/dashboard supplies the KPI row and the recent-scans feed in a
+	// single call. Its roster counts are active-row counts that the backend
+	// composes from the same services the roster pages use, so the numbers here
+	// cannot drift from the tables they sit above — which is why this page
+	// reads them rather than re-deriving them from list endpoints.
+	//
+	// The per-course attendance strip is the one block the summary does not
+	// cover, so it keeps its own call.
+	let dashboard = $state<AdminDashboardResponse | null>(null);
+	let loading = $state(true);
+	let loadError = $state<string | null>(null);
 
 	onMount(async () => {
-		initAdminStudents({}, 1, 1);
-		initAdminProfessors({}, 1, 1);
-		initRecentScans(10);
 		initAttendanceOverview();
 		try {
-			programsTotal = (await listPrograms({ page: 1, size: 1 })).total;
-		} catch {
-			programsTotal = null;
+			dashboard = await getAdminDashboard();
+		} catch (e: unknown) {
+			loadError =
+				e instanceof Error && e.message ? e.message : 'Could not load the dashboard.';
+		} finally {
+			loading = false;
 		}
 	});
 
@@ -47,34 +44,42 @@
 		})
 	);
 
+	const count = (value: number | undefined) => (value === undefined ? '—' : String(value));
+
 	const kpis = $derived([
 		{
 			label: 'Students',
-			value: String(adminStudentsState.total),
-			sub: 'Roster total',
-			loading: adminStudentsState.loading,
+			value: count(dashboard?.student_count),
+			sub: 'Active roster',
 		},
 		{
 			label: 'Professors',
-			value: String(adminProfessorsState.total),
-			sub: 'Roster total',
-			loading: adminProfessorsState.loading,
+			value: count(dashboard?.professor_count),
+			sub: 'Active roster',
 		},
 		{
 			label: 'Programs',
-			value: programsTotal === null ? '—' : String(programsTotal),
-			sub: 'Live total',
-			loading: false,
+			value: count(dashboard?.program_count),
+			sub: 'Active roster',
 		},
 		{
-			label: 'Face enrolled',
-			value: `${adminStudentsState.items.filter((s) => s.faceEnrolled).length}`,
-			sub: 'On this page',
-			loading: adminStudentsState.loading,
+			label: 'Avg compliance',
+			// avg_rate arrives as a 0-1 fraction (backend `_rates`), so it needs
+			// scaling before formatting. Same figure the analytics overview shows.
+			value: dashboard ? formatPercentage(dashboard.avg_rate * 100) : '—',
+			sub: 'Across sessions',
+		},
+		{
+			label: 'Scans today',
+			value: count(dashboard?.scans_today),
+			sub: 'UTC so far',
+		},
+		{
+			label: 'Pending sync',
+			value: count(dashboard?.pending_sync),
+			sub: 'Queued uploads',
 		},
 	]);
-
-	const loadError = $derived(adminStudentsState.error ?? adminProfessorsState.error);
 </script>
 
 <div class="dashboard">
@@ -94,7 +99,7 @@
 	<section class="kpis">
 		{#each kpis as kpi (kpi.label)}
 			<div class="kpi">
-				<span class="kpi-value">{kpi.loading ? '…' : kpi.value}</span>
+				<span class="kpi-value">{loading ? '…' : kpi.value}</span>
 				<span class="kpi-label">{kpi.label}</span>
 				<span class="kpi-sub">{kpi.sub}</span>
 			</div>
@@ -159,15 +164,13 @@
 		<div class="section-head">
 			<h2 class="section-title">Recent scans</h2>
 		</div>
-		{#if adminScansState.loading}
+		{#if loading}
 			<p class="muted">Loading…</p>
-		{:else if adminScansState.error}
-			<p class="error">{adminScansState.error}</p>
-		{:else if adminScansState.items.length === 0}
+		{:else if !dashboard || dashboard.recent_scans.length === 0}
 			<p class="muted">No scans yet.</p>
 		{:else}
 			<ul class="scans">
-				{#each adminScansState.items as s (s.id)}
+				{#each dashboard.recent_scans as s (s.id)}
 					<li>
 						<span class="strong">{s.student_name}</span>
 						<span class="muted">{s.course_code} · {s.status} · {s.scanned_at.slice(0, 16).replace('T', ' ')}</span>
@@ -209,9 +212,11 @@
 		margin: 0;
 	}
 
+	/* Six tiles in two rows of three. `auto-fit` would reflow on width alone,
+	   which leaves a ragged 4+2 at desktop sizes. */
 	.kpis {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 1rem;
 	}
 

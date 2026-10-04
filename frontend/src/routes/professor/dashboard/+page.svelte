@@ -3,20 +3,25 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { formatPercentage } from '$lib/shared/utils/format';
 	import { Routes, professorActiveSession } from '$lib/shared/constants/routes';
+	import type { ProfessorDashboardResponse } from '$lib/shared/types';
 
 	import { onMount } from 'svelte';
-	import { listSessions, listSessionHistory } from '$lib/features/session/service';
-	import {
-		initProfessorCourses,
-		professorState
-	} from '$lib/features/professor/store.svelte';
+	import { listSessions } from '$lib/features/session/service';
+	import { getDashboard } from '$lib/features/professor/service';
 
-	// Live data. Today's sessions come from GET /professor/sessions (status is
-	// backend-computed: active vs closed), enrolled totals from
-	// GET /professor/courses, and the weekly compliance KPI from
-	// GET /professor/sessions/history. There is no "upcoming" state: the
-	// backend never schedules future sessions — a session is created open —
-	// so an empty day honestly shows no sessions plus a New Session action.
+	// Two calls, not four.
+	//
+	// GET /professor/dashboard supplies the KPI row and the per-session
+	// scanned/enrolled counts. GET /professor/sessions still supplies the
+	// session list itself, because the dashboard summary carries no course
+	// identity — no code, name, section, or clock time — so the table cannot be
+	// built from it alone. Counts are joined onto rows by `session_id`.
+	//
+	// Two figures genuinely improve by coming from the summary rather than being
+	// computed here: `total_students` is the distinct active roster across the
+	// professor's offerings (summing per-offering enrollments double-counts
+	// anyone in two of their courses), and `avg_rate` is term-wide compliance
+	// taken from the same report figure the Reports page shows.
 	type SessionStatus = 'active' | 'closed';
 
 	type DashboardSession = {
@@ -38,8 +43,12 @@
 		closed: '#94a3b8'
 	};
 
-	const toLocalKey = (date: Date): string =>
-		`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	// "Today" is UTC on both endpoints — the dashboard summary anchors on
+	// Session.created_at within the UTC day, and the session list is asked for
+	// the same window so the two sets line up and every row finds its counts.
+	// Deriving this key in local time would drift by a day either side of
+	// midnight and leave rows with no matching tile.
+	const toUtcDayKey = (date: Date): string => date.toISOString().slice(0, 10);
 
 	const formatClock = (iso: string | null): string => {
 		if (!iso) return '—';
@@ -49,8 +58,7 @@
 	};
 
 	let sessions = $state<DashboardSession[]>([]);
-	let enrolledTotal = $state(0);
-	let avgCompliance = $state<number | null>(null);
+	let summary = $state<ProfessorDashboardResponse | null>(null);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
@@ -67,23 +75,22 @@
 		loading = true;
 		loadError = null;
 		try {
-			if (professorState.courses.length === 0 && !professorState.coursesError) {
-				await initProfessorCourses();
-			}
-			const courses = professorState.courses;
-			enrolledTotal = courses.reduce((total, course) => total + course.enrolledCount, 0);
+			const [dashboard, list] = await Promise.all([
+				getDashboard(),
+				listSessions({ from: toUtcDayKey(new Date()), to: toUtcDayKey(new Date()), size: 100 })
+			]);
+			summary = dashboard;
 
-			const key = toLocalKey(new Date());
-			const { items } = await listSessions({ from: key, to: key, size: 100 });
-			sessions = items
+			// Tile counts are authoritative — the backend builds them in one
+			// batched query over the same window — so they win over anything
+			// derivable from the list row. The list fallback only covers a tile
+			// the summary did not return.
+			const tiles = new Map(dashboard.today_sessions.map((t) => [t.session_id, t]));
+			sessions = list.items
 				.map((item) => {
-					const course = courses.find((entry) => entry.offeringId === item.offeringId);
-					// Prefer the offering's current enrollment; fall back to the
-					// session's own scanned + absent counts when the course
-					// directory has no entry for this offering.
+					const tile = tiles.get(item.id);
 					const seats =
-						course?.enrolledCount ??
-						item.presentCount + item.lateCount + item.absentCount;
+						tile?.enrolled ?? item.presentCount + item.lateCount + item.absentCount;
 					return {
 						id: item.id,
 						offeringId: item.offeringId,
@@ -91,27 +98,17 @@
 						name: item.courseName,
 						section: item.section,
 						endsAt: item.status === 'active' ? formatClock(item.expiresAt) : formatClock(item.createdAt),
-						scanned: item.presentCount + item.lateCount,
+						scanned: tile?.scanned ?? item.presentCount + item.lateCount,
 						enrolled: seats,
 						status: item.status,
 						createdAt: item.createdAt
 					};
 				})
 				.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-			const weekAgo = new Date();
-			weekAgo.setDate(weekAgo.getDate() - 6);
-			const history = await listSessionHistory({
-				from: toLocalKey(weekAgo),
-				to: key,
-				page: 1,
-				size: 100
-			});
-			avgCompliance = history.items.length > 0 ? history.avg_compliance : null;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Unable to load dashboard.';
 			sessions = [];
-			avgCompliance = null;
+			summary = null;
 		} finally {
 			loading = false;
 		}
@@ -132,21 +129,27 @@
 	const scanPercent = (session: DashboardSession) =>
 		session.enrolled === 0 ? 0 : Math.round((session.scanned / session.enrolled) * 100);
 
+	// `sessions_completed / sessions_today` reads as "N of M done" for today.
+	// The backend decides what counts as completed (a session reads closed once
+	// expires_at has passed), so this is not the client-side status count the
+	// list rows use.
 	const kpis = $derived([
 		{
-			label: 'Active Sessions',
-			value: loading ? '—' : `${sessions.filter((s) => s.status === 'active').length}/${sessions.length}`,
-			sub: 'Today'
+			label: 'Sessions Today',
+			value: loading || !summary ? '—' : `${summary.sessions_completed}/${summary.sessions_today}`,
+			sub: 'Completed'
 		},
 		{
 			label: 'Students',
-			value: loading ? '—' : String(enrolledTotal),
-			sub: 'Enrolled total'
+			value: loading || !summary ? '—' : String(summary.total_students),
+			sub: 'Distinct enrolled'
 		},
 		{
 			label: 'Avg Compliance',
-			value: loading || avgCompliance === null ? '—' : formatPercentage(avgCompliance * 100),
-			sub: 'This week'
+			// avg_rate arrives as a 0-1 fraction (backend `_rates`), so it needs
+			// scaling before formatting — same as the Reports page.
+			value: loading || !summary ? '—' : formatPercentage(summary.avg_rate * 100),
+			sub: 'This term'
 		}
 	]);
 

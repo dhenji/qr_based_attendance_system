@@ -6,7 +6,7 @@
 // GET /student/attendance/history. Scan delegates to
 // features/liveness/service.ts in real mode.
 
-import { get, isMockMode, post } from '$lib/api/client';
+import { get, getText, isMockMode, post } from '$lib/api/client';
 import type {
 	Paginated,
 	StudentExcuseItemResponse,
@@ -120,17 +120,24 @@ const viaForDisplay = (scannedVia: string | null | undefined): StudentHistoryRow
 	return scannedVia;
 };
 
-// Session history — live on GET /student/attendance/history.
-// Contract: ?program_id&year_level_id&semester&course_id&status&date_from&
-// date_to&sort_by=date|course|section|status|time&sort_dir&page&size
-// -> { items, total, page, size, summary } (summary covers the FULL filter set).
-export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
+// Query builder shared by the history list and the CSV export.
+//
+// Shared deliberately: the export route takes the same filter set as the list,
+// so a mapping change that reached only one of them would quietly produce a
+// file that does not match the screen. `paginate` is the single difference —
+// the export carries every matching row and sends no page/size.
+const historyQuery = (
+	params: StudentHistoryFilters,
+	{ paginate }: { paginate: boolean }
+): Record<string, string> => {
 	const query: Record<string, string> = {
 		sort_by: params.sortBy ?? 'date',
 		sort_dir: params.sortDir ?? 'desc',
-		page: String(params.page ?? 1),
-		size: String(params.size ?? 20),
 	};
+	if (paginate) {
+		query.page = String(params.page ?? 1);
+		query.size = String(params.size ?? 20);
+	}
 	if (params.programId !== undefined) query.program_id = String(params.programId);
 	if (params.yearLevelId !== undefined) query.year_level_id = String(params.yearLevelId);
 	if (params.semester) query.semester = params.semester;
@@ -138,6 +145,15 @@ export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
 	if (params.status) query.status = params.status;
 	if (params.from) query.date_from = params.from;
 	if (params.to) query.date_to = params.to;
+	return query;
+};
+
+// Session history — live on GET /student/attendance/history.
+// Contract: ?program_id&year_level_id&semester&course_id&status&date_from&
+// date_to&sort_by=date|course|section|status|time&sort_dir&page&size
+// -> { items, total, page, size, summary } (summary covers the FULL filter set).
+export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
+	const query = historyQuery(params, { paginate: true });
 
 	const response = await get<StudentHistoryResponse>('studentHistory', query);
 
@@ -165,6 +181,23 @@ export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
 		},
 	};
 };
+
+// Full history as CSV text, from GET /student/attendance/history/export.
+//
+// Server-side, so the file holds every matching row — the previous client-side
+// export paged through the list endpoint and stopped at a 2000-row cap.
+//
+// No endpoint def: the route streams text/csv, which `apiCall` cannot parse,
+// so this goes through `getText` with a raw path the same way the roster
+// template download does. `getText` deliberately has no mock path (it throws
+// `mock_mode`), so callers are expected to fall back — here to the client-side
+// CSV builder.
+//
+// The server knows only the filters below; it has no free-text search, so an
+// active search term is the caller's problem to warn about.
+export const exportSessionHistoryCsv = async (
+	params: StudentHistoryFilters = {}
+): Promise<string> => getText('/student/attendance/history/export', historyQuery(params, { paginate: false }));
 
 export const getDashboard = async (): Promise<StudentDashboardResponse> => {
 	return get<StudentDashboardResponse>('studentDashboard');
