@@ -447,9 +447,9 @@ Seed 1 backup log entry for display in admin settings:
 
 ## 12. Seed Command
 
-> **Prerequisite:** Programs (BSCS, BSIT, BSECE) and their year levels must exist
-> before running the seed. Create them via the admin API first:
-> `POST /admin/programs` + `POST /admin/programs/{pid}/years`.
+> **Prerequisite:** a migrated database (`alembic upgrade head`). Programs
+> (BSCS, BSIT, BSECE) and their year levels are **created by the seed when
+> missing**, so a fresh database needs nothing else seeded first.
 
 ```bash
 # From project root — default seed (42 students, matching this spec):
@@ -461,18 +461,45 @@ cd backend && python test_seed_data.py --scale medium   # 500 students (pilot)
 cd backend && python test_seed_data.py --scale large    # 10,000 students
 cd backend && python test_seed_data.py --scale xl       # 50,000 students (multi-year)
 
-# Or via Alembic data migration (if preferred):
-alembic upgrade head  # schema first
-alembic run test_seed_data  # data migration
+# Re-runnable: every write is looked up by its unique column first, so a
+# second run inserts nothing. --reset deletes previously seeded rows first.
+cd backend && python test_seed_data.py --scale small --reset
+
+# Importable entry point (same module, what the load harness and tests use):
+cd backend && PYTHONPATH=src .venv/bin/python -m tests.seed_data --scale small
+```
+
+The seed is a script, not a migration: `src/tests/seed_data.py` holds the
+implementation and `backend/test_seed_data.py` is a thin entry point kept
+because the runbooks cite that path. There is no Alembic data-migration
+variant.
+
+**Load fixtures** (`--load-fixtures N`) provisions the concurrent-scan
+harness (`backend/locustfile.py`): `SEED-LOAD-###` sessions anchored at seed
+time (+3h expiry, Room 301 coordinates) plus 30 `loadtestNN@load.uni.edu`
+accounts cross-enrolled in `GE101-BSCS-Y1-1st`. Two behaviors matter when
+re-running it:
+
+- **Session codes are skipped if they already exist**, so a repeat run cannot
+  refresh the present/late windows or un-consume `(student, session)` pairs.
+  Clear the load data first: `DELETE FROM attendance_records WHERE session_id
+  IN (SELECT id FROM sessions WHERE session_code LIKE 'SEED-LOAD-%'); DELETE
+  FROM sessions WHERE session_code LIKE 'SEED-LOAD-%';`
+- **Load-account emails must use a deliverable domain.** The login contract
+  validates with `EmailStr`, which rejects reserved TLDs such as `.test`
+  (HTTP 422 on every login).
+
+```bash
+cd backend && python test_seed_data.py --scale small --load-fixtures 150
 ```
 
 **Verification after seed:**
 
 ```sql
--- Programs (admin-created, not seeded — should exist before running seed)
+-- Programs (seeded when missing — ≥3 on any database this seed has run)
 SELECT count(*) FROM programs;  -- Expected: ≥3
 
--- Year levels (admin-created, not seeded)
+-- Year levels (seeded when missing; 4+4+5 across the three programs)
 SELECT count(*) FROM year_levels;  -- Expected: ≥13
 
 -- Courses count (templates only, seeded)

@@ -43,6 +43,23 @@ class StudentNotFoundException(StudentDomainException):
         super().__init__(message=f"Student {student_id} not found")
 
 
+class StudentAccountUnlinkedException(StudentDomainException):
+    """409 - the roster row has no `users` account to reset.
+
+    A student is created as a roster record first and only gains a login when
+    the account is created or claimed, so `user_id` is legitimately null. There
+    is no password to hand out in that state.
+    """
+
+    status_code: int = 409
+    code: str = "student_account_unlinked"
+
+    def __init__(self, student_id: int) -> None:
+        super().__init__(
+            message=f"Student {student_id} has no linked account to reset"
+        )
+
+
 class StudentIdExistsException(StudentDomainException):
     """409 - another student already uses this student_id.
 

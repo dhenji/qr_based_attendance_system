@@ -9,8 +9,11 @@
 >
 > **Update:** both have since landed — `audit_logs` (`f4a9c2b7d103`) in Phase 8.5 and
 > `app_settings` (`e7f8a9b0c1d2`) in Phase 12.0. `audit_logs` is written by
-> `shared/audit.record_audit` (structural rows today) and read by
-> `GET /admin/system/academic-structure`.
+> `shared/audit.record_audit` from every sensitive mutation (ADR-064) and read by
+> `GET /admin/audit-logs`; `GET /admin/system/academic-structure` reads the same
+> table scoped to the four structural entity types. `action` and `entity_type` are
+> free-form `String(50)` constrained in code by `shared/enums.py::AuditAction` /
+> `AuditEntity`, and `action` carries no index.
 
 > **Column note — `users.security_question_hash` (ADR-056):** despite the `_hash`
 > suffix, this column stores the security **question in readable plaintext**. Only

@@ -38,14 +38,16 @@ from features.session.schema import (
     SessionCreate,
     SessionHistoryItem,
     SessionListItem,
+    SessionOfferingTile,
     SessionRead,
     VerifyCodeResponse,
     VerifyGeofence,
 )
 from features.student.model import Student
 from features.sync.model import SyncQueue
+from shared.audit import record_audit
 from shared.base import BaseCRUD
-from shared.enums import QueueStatus, ValidationStatus
+from shared.enums import AuditAction, AuditEntity, QueueStatus, ValidationStatus
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -146,7 +148,7 @@ class SessionService:
         self._offerings: BaseCRUD[CourseOffering] = BaseCRUD(CourseOffering, session)
 
     async def create_session(
-        self, *, professor_id: int, payload: SessionCreate
+        self, *, professor_id: int, payload: SessionCreate, actor_id: int | None = None
     ) -> SessionRead:
         """Open a new attendance session for an offering.
 
@@ -181,6 +183,17 @@ class SessionService:
             now=now,
         )
         await self._stamp_session(row, duration, now)
+
+        # After the stamp, not before: `session_code` is still the random
+        # placeholder until `_stamp_session` derives it from the assigned id.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.OPEN,
+            entity_type=AuditEntity.SESSION,
+            entity_id=row.id,
+            new_value=self._session_snapshot(row),
+        )
 
         # Canonical QR serialization: build_qr_payload owns the versioned
         # compact-key JSON contract ({v,code,offering,radius,pw,lw}); QRPayload
@@ -355,19 +368,49 @@ class SessionService:
         ]
 
     async def close_session(
-        self, *, session_id: int, professor_id: int
+        self, *, session_id: int, professor_id: int, actor_id: int | None = None
     ) -> SessionCloseResponse:
         """Manually close session scanning; already-closed closes are no-ops."""
         row: Session = await self._get_scoped_or_404(session_id, professor_id)
         now: datetime = _utcnow()
 
         if row.expires_at is None or row.expires_at > now:
+            old_value: dict[str, Any] = self._session_snapshot(row)
             row.expires_at = now
             await self._session.flush()
+
+            # Inside the guard on purpose: closing an already-closed session
+            # changes nothing, so it must not appear in the trail as though it
+            # did.
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.CLOSE,
+                entity_type=AuditEntity.SESSION,
+                entity_id=row.id,
+                old_value=old_value,
+                new_value=self._session_snapshot(row),
+            )
 
         counts, _ = _summarize(await self._attendance_rows(session_id))
 
         return SessionCloseResponse(id=row.id, final_counts=counts)
+
+    @staticmethod
+    def _session_snapshot(row: Session) -> dict[str, Any]:
+        """The audited columns of a session.
+
+        `session_code` is included: it is the value students type in, so it is
+        part of what an administrator reviewing a session needs to see.
+        """
+        return {
+            "offering_id": row.offering_id,
+            "professor_id": row.professor_id,
+            "session_code": row.session_code,
+            "scheduled_start_time": row.scheduled_start_time.isoformat(),
+            "scheduled_end_time": row.scheduled_end_time.isoformat(),
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        }
 
     async def verify_code(self, *, code: str) -> VerifyCodeResponse:
         """Resolve a student-typed/scanned session code to its session config.
@@ -468,6 +511,77 @@ class SessionService:
         return PaginatedResponse[SessionListItem](
             items=items, total=total, page=page, size=size
         )
+
+    async def today_offering_tiles(
+        self, *, professor_id: int, now: datetime | None = None
+    ) -> list[SessionOfferingTile]:
+        """Today's sessions for a professor as (offering, scanned, enrolled).
+
+        Batched on purpose. `list_professor_sessions` builds each tile with two
+        queries of its own, which is fine for a paginated list a human reads and
+        wrong for a dashboard that wants every one of today's sessions in a
+        single round trip — three queries here regardless of how many sessions
+        are on.
+
+        "Today" is UTC and anchored on `Session.created_at`, matching the date
+        filter every other session query uses. A session that opened yesterday
+        and is still live is therefore not counted, which is the same boundary
+        `GET /professor/sessions?date_from=...` draws.
+        """
+        moment: datetime = now or _utcnow()
+        start: datetime = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        end: datetime = start + timedelta(days=1)
+
+        rows: Sequence[Session] = (
+            await self._session.scalars(
+                self._sessions_stmt(
+                    professor_id,
+                    offering_id=None,
+                    date_from=start,
+                    date_to=end,
+                ).order_by(Session.created_at.asc(), Session.id.asc())
+            )
+        ).all()
+
+        if not rows:
+            return []
+
+        session_ids: list[int] = [row.id for row in rows]
+        scanned_by_session: dict[int, int] = {
+            int(session_id): int(total)
+            for session_id, total in (
+                await self._session.execute(
+                    select(Attendance.session_id, func.count(Attendance.id))
+                    .where(Attendance.session_id.in_(session_ids))
+                    .group_by(Attendance.session_id)
+                )
+            ).all()
+        }
+        enrolled_by_offering: dict[int, int] = {
+            int(offering_id): int(total)
+            for offering_id, total in (
+                await self._session.execute(
+                    select(Enrollment.offering_id, func.count(Enrollment.id))
+                    .join(Student, Student.id == Enrollment.student_id)
+                    .where(
+                        Enrollment.offering_id.in_({row.offering_id for row in rows}),
+                        Student.is_active.is_(True),
+                    )
+                    .group_by(Enrollment.offering_id)
+                )
+            ).all()
+        }
+
+        return [
+            SessionOfferingTile(
+                session_id=row.id,
+                offering_id=row.offering_id,
+                scanned=scanned_by_session.get(row.id, 0),
+                enrolled=enrolled_by_offering.get(row.offering_id, 0),
+                status=_session_status(row.expires_at, moment),
+            )
+            for row in rows
+        ]
 
     async def _session_list_item(
         self, row: Session, now: datetime

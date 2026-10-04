@@ -145,6 +145,17 @@ class MFAVerifyRequest(_CodeRequest):
     )
 
 
+class MFADisableRequest(BaseModel):
+    """Body for `POST /auth/mfa/disable`.
+
+    A bare `str`, not a `_NewPasswordRequest`: this authenticates the current
+    password rather than setting a new one, so the strength policy (and the
+    length bounds that come with it) do not apply.
+    """
+
+    password: str
+
+
 class BackupCodesResponse(BaseModel):
     codes: list[str]
     remaining: int
@@ -185,3 +196,14 @@ class MeResponse(BaseModel):
     face_embedding_version: int | None = None
 
     claim_status: str | None = None
+
+
+class AdminPasswordResetResponse(BaseModel):
+    """Body for the three admin-initiated `.../reset-password` routes.
+
+    Lives here rather than per-slice because all three reset the same thing — a
+    `users` row — and `AuthService.admin_reset_password` is the single
+    implementation behind them.
+    """
+
+    temp_password: str

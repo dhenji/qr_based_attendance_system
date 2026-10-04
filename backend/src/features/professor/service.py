@@ -18,6 +18,7 @@ from features.professor.exceptions import (
     ProfessorEmailExistsException,
     ProfessorHasRecordsException,
     ProfessorNotArchivedException,
+    ProfessorAccountUnlinkedException,
     ProfessorNotFoundException,
 )
 from features.professor.model import Professor
@@ -35,6 +36,7 @@ from features.professor.schema import (
 from features.program.model import Program, YearLevel
 from features.session.model import Session
 from features.student.model import Student
+from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.csv_import import (
     CsvColumn,
@@ -45,6 +47,7 @@ from shared.csv_import import (
     parse_import_csv,
     strip_lower,
 )
+from shared.enums import AuditAction, AuditEntity
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -305,7 +308,7 @@ class ProfessorService:
             setattr(professor, field, value)
 
         if is_active is False:
-            await self._archive_row(professor)
+            await self._archive_row(professor, assigned_by)
         elif is_active is True:
             professor.is_active = True
 
@@ -323,25 +326,42 @@ class ProfessorService:
 
         return await self._to_read(professor)
 
-    async def archive(self, *, professor_id: int) -> ProfessorRead:
+    async def archive(
+        self, *, professor_id: int, actor_id: int | None
+    ) -> ProfessorRead:
         professor: Professor = await self._get_or_404(professor_id)
-        await self._archive_row(professor)
+        await self._archive_row(professor, actor_id)
         # _archive_row flushes, which expires the server-side `updated_at`.
         await self._session.refresh(professor)
 
         return await self._to_read(professor)
 
-    async def reactivate(self, *, professor_id: int) -> ProfessorRead:
+    async def reactivate(
+        self, *, professor_id: int, actor_id: int | None
+    ) -> ProfessorRead:
         professor: Professor = await self._get_or_404(professor_id)
+        old_value: dict[str, Any] = self._professor_snapshot(professor)
         professor.is_active = True
         await self._session.flush()
         # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
         # it is expired and would raise MissingGreenlet if read synchronously.
         await self._session.refresh(professor)
 
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.PROFESSOR,
+            entity_id=professor.id,
+            old_value=old_value,
+            new_value=self._professor_snapshot(professor),
+        )
+
         return await self._to_read(professor)
 
-    async def import_roster(self, *, content: bytes) -> ProfessorImportResult:
+    async def import_roster(
+        self, *, content: bytes, actor_id: int | None
+    ) -> ProfessorImportResult:
         """Create NEW professor records from a CSV upload.
 
         Rows whose email already exists — in the database or earlier in the
@@ -376,13 +396,28 @@ class ProfessorService:
 
         await self._session.flush()
 
+        # One row for the upload rather than one per professor, so a large
+        # roster cannot bury every other action in the trail.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.IMPORT,
+            entity_type=AuditEntity.PROFESSOR,
+            entity_id=None,
+            new_value={
+                "imported": imported,
+                "duplicates": duplicates,
+                "errors": len(errors),
+            },
+        )
+
         errors.sort(key=lambda e: e.line)
 
         return ProfessorImportResult(
             imported=imported, duplicates=duplicates, errors=errors
         )
 
-    async def hard_delete(self, *, professor_id: int) -> None:
+    async def hard_delete(self, *, professor_id: int, actor_id: int | None) -> None:
         """Permanently delete an archived professor with no sessions or assignments."""
         professor: Professor = await self._get_or_404(professor_id)
 
@@ -412,6 +447,18 @@ class ProfessorService:
 
         if assignment_count:
             raise ProfessorHasRecordsException(professor.id)
+
+        # Snapshot before the delete: the instance is detached once flushed.
+        old_value: dict[str, Any] = self._professor_snapshot(professor)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.DELETE,
+            entity_type=AuditEntity.PROFESSOR,
+            entity_id=professor.id,
+            old_value=old_value,
+        )
 
         await self._session.delete(professor)
         await self._session.flush()
@@ -479,11 +526,48 @@ class ProfessorService:
             session_count=session_count,
         )
 
-    async def _archive_row(self, professor: Professor) -> None:
+    async def _archive_row(
+        self, professor: Professor, actor_id: int | None
+    ) -> None:
         # Soft archive touches only its own row (ADR-058): no cascade to
         # course_professors / sessions / users.
+        old_value: dict[str, Any] = self._professor_snapshot(professor)
         professor.is_active = False
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.ARCHIVE,
+            entity_type=AuditEntity.PROFESSOR,
+            entity_id=professor.id,
+            old_value=old_value,
+            new_value=self._professor_snapshot(professor),
+        )
+
+    @staticmethod
+    def _professor_snapshot(professor: Professor) -> dict[str, Any]:
+        return {
+            "email": professor.email,
+            "first_name": professor.first_name,
+            "last_name": professor.last_name,
+            "department": professor.department,
+            "is_active": professor.is_active,
+        }
+
+    @staticmethod
+    def _assignment_snapshot(record: CourseProfessor) -> dict[str, Any]:
+        return {
+            "offering_id": record.offering_id,
+            "professor_id": record.professor_id,
+            "is_primary": record.is_primary,
+            "effective_from": (
+                record.effective_from.isoformat() if record.effective_from else None
+            ),
+            "effective_to": (
+                record.effective_to.isoformat() if record.effective_to else None
+            ),
+        }
 
     async def _get_or_404(self, professor_id: int) -> Professor:
         professor: Professor | None = await self._professors.get(professor_id)
@@ -492,6 +576,20 @@ class ProfessorService:
             raise ProfessorNotFoundException(professor_id)
 
         return professor
+
+    async def account_user_id(self, professor_id: int) -> int:
+        """The `users.id` behind this roster row, for credential operations.
+
+        Public because `POST /admin/professors/{id}/reset-password` needs to
+        resolve the roster row to an account before handing off to
+        `AuthService.admin_reset_password`, which owns the credential write.
+        """
+        professor: Professor = await self._get_or_404(professor_id)
+
+        if professor.user_id is None:
+            raise ProfessorAccountUnlinkedException(professor_id)
+
+        return professor.user_id
 
     async def _get_professor_by_user_or_404(self, user_id: int) -> Professor:
         professor: Professor | None = await self._professors.get_by(user_id=user_id)
@@ -611,6 +709,15 @@ class ProfessorService:
         self._session.add(record)
         await self._session.flush()
 
+        await record_audit(
+            self._session,
+            actor_id=assigned_by,
+            action=AuditAction.ASSIGN,
+            entity_type=AuditEntity.COURSE_PROFESSOR,
+            entity_id=None,
+            new_value=self._assignment_snapshot(record),
+        )
+
         return record
 
     async def _replace_assignments(
@@ -629,7 +736,17 @@ class ProfessorService:
 
         for row in existing:
             if row.offering_id not in target:
+                old_value: dict[str, Any] = self._assignment_snapshot(row)
                 await self._session.delete(row)
+
+                await record_audit(
+                    self._session,
+                    actor_id=assigned_by,
+                    action=AuditAction.UNASSIGN,
+                    entity_type=AuditEntity.COURSE_PROFESSOR,
+                    entity_id=None,
+                    old_value=old_value,
+                )
 
         await self._session.flush()
 

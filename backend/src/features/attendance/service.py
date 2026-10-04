@@ -73,7 +73,14 @@ from features.session.model import Session
 from features.student.exceptions import NotEnrolledException, StudentNotFoundException
 from features.student.model import Student
 from features.sync.model import SyncQueue
-from shared.enums import QueueStatus, SyncStatus, ValidationStatus
+from shared.audit import record_audit
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    QueueStatus,
+    SyncStatus,
+    ValidationStatus,
+)
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -350,8 +357,11 @@ class AttendanceService:
             payload.session_id, scanned_at, now, user_id, payload.student_number
         )
 
-        self._validate_geofence(db_session, payload.gps)
-        self._validate_liveness(payload.liveness_evidence)
+        if not self._settings.benchmark_mode:
+            # Load profile: skip the geofence + liveness gates so a benchmark
+            # run measures routing + persistence, not sensor checks.
+            self._validate_geofence(db_session, payload.gps)
+            self._validate_liveness(payload.liveness_evidence)
 
         status, original, review = self._decide_scan_outcome(
             db_session, scanned_at, payload.face_match_score
@@ -859,6 +869,22 @@ class AttendanceService:
         page: int,
         size: int,
     ) -> Sequence[Attendance]:
+        stmt: Select[Any] = self._history_ordered(filtered, sort_key, desc)
+
+        return (
+            await self._session.scalars(stmt.offset((page - 1) * size).limit(size))
+        ).all()
+
+    @staticmethod
+    def _history_ordered(
+        filtered: Select[Any], sort_key: str, desc: bool
+    ) -> Select[Any]:
+        """Apply the history sort, with `Attendance.id` as the tie-breaker.
+
+        Split out of `_history_page` so the CSV export can order the full set
+        without inheriting the pagination it must not apply.
+        """
+
         columns: dict[str, tuple[Any, ...]] = {
             "date": (Attendance.timestamp,),
             "time": (Attendance.timestamp,),
@@ -870,11 +896,7 @@ class AttendanceService:
         ordered = [c.desc() if desc else c.asc() for c in cols]
         tie = Attendance.id.desc() if desc else Attendance.id.asc()
 
-        return (
-            await self._session.scalars(
-                filtered.order_by(*ordered, tie).offset((page - 1) * size).limit(size)
-            )
-        ).all()
+        return filtered.order_by(*ordered, tie)
 
     async def _history_items(self, records: Sequence[Attendance]) -> list[HistoryItem]:
         if not records:
@@ -1116,7 +1138,29 @@ class AttendanceService:
         else:
             status = ValidationStatus.REJECTED.value
 
+        previous: str = row.validation_status
         await self._apply_resolution(row, evidence, status, note)
+
+        # Approving restores a computed present/late status and rejecting marks
+        # the record `rejected`, so both rewrite a student's attendance outcome
+        # on an administrator's judgement. The note alone lives inside
+        # `liveness_evidence`; this is what ties the outcome to the person.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=(
+                AuditAction.APPROVE
+                if decision == "approve"
+                else AuditAction.REJECT
+            ),
+            entity_type=AuditEntity.ATTENDANCE_RECORD,
+            entity_id=row.id,
+            old_value={"validation_status": previous},
+            new_value={
+                "validation_status": row.validation_status,
+                "review_note": note,
+            },
+        )
 
         return ResolveReviewResponse(
             id=row.id,
@@ -1423,6 +1467,89 @@ class AttendanceService:
                     item.sessions_count,
                     item.avg_rate,
                     item.trend,
+                ]
+            )
+
+        return buffer.getvalue()
+
+    async def export_history_csv(
+        self,
+        *,
+        user_id: int,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        sort_by: str | None = None,
+        sort_dir: str | None = None,
+    ) -> str:
+        """Full history filter set rendered as CSV text for download.
+
+        Every matching row, never one page. The paginated endpoint stops at
+        MAX_PAGE_SIZE, so borrowing its query would hand back a file that
+        silently disagrees with the `total` the student was just shown;
+        `_history_ordered` gives the sort without the limit.
+
+        Generation and file persistence stay separate -- this returns text, the
+        router streams it.
+        """
+        student: Student = await self._history_student(user_id)
+        sort_key, desc = self._history_sort(sort_by, sort_dir)
+        filters = _HistoryFilters(
+            program_id=program_id,
+            year_level_id=year_level_id,
+            semester=semester,
+            course_id=course_id,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        filtered = self._apply_history_filters(self._history_base(student.id), filters)
+
+        records: Sequence[Attendance] = (
+            await self._session.scalars(
+                self._history_ordered(filtered, sort_key, desc)
+            )
+        ).all()
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "id",
+                "session_id",
+                "course_code",
+                "course_name",
+                "status",
+                "original_status",
+                "excuse_reason",
+                "scanned_at",
+                "scanned_via",
+            ]
+        )
+
+        for item in await self._history_items(records):
+            writer.writerow(
+                [
+                    item.id,
+                    item.session_id,
+                    item.course_code,
+                    item.course_name,
+                    # `.value` because `HistoryItem` types these as
+                    # `ValidationStatus`; the sibling exports write plain
+                    # scalars, so the cell has to be text either way.
+                    item.status.value,
+                    item.original_status.value if item.original_status else "",
+                    item.excuse_reason or "",
+                    # isoformat, not `str(datetime)`: the reports export does
+                    # the same, and `csv.writer` would otherwise emit a
+                    # space-separated value that no spreadsheet parses as a date.
+                    item.scanned_at.isoformat(),
+                    item.scanned_via or "",
                 ]
             )
 

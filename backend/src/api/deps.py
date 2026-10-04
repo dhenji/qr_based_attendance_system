@@ -14,6 +14,7 @@ from core.security import decode_access_token, extract_user_id
 from features.admin.service import AdminService
 from features.analytics.service import AnalyticsService
 from features.attendance.service import AttendanceService
+from features.dashboard.service import DashboardService
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.course.service import CourseService
@@ -216,6 +217,28 @@ async def _get_system_service(
     return SystemService(session)
 
 
+async def _get_dashboard_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> DashboardService:
+    """The dashboard aggregate, wired to the slices it composes.
+
+    Each dependency builds its service against the *same* session, so one
+    request is one transaction: a dashboard read that fails halfway rolls back
+    with everything else on the request.
+    """
+
+    return DashboardService(
+        session,
+        student_service=StudentService(session),
+        attendance_service=AttendanceService(session),
+        session_service=SessionService(session),
+        analytics_service=AnalyticsService(session),
+        reports_service=ReportsService(session),
+        system_service=SystemService(session),
+        program_service=ProgramService(session),
+    )
+
+
 AuthServiceDep = Annotated[AuthService, Depends(_get_auth_service)]
 AdminServiceDep = Annotated[AdminService, Depends(_get_admin_service)]
 ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
@@ -228,6 +251,7 @@ ExcuseServiceDep = Annotated[ExcuseService, Depends(_get_excuse_service)]
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(_get_analytics_service)]
 ReportsServiceDep = Annotated[ReportsService, Depends(_get_reports_service)]
 SystemServiceDep = Annotated[SystemService, Depends(_get_system_service)]
+DashboardServiceDep = Annotated[DashboardService, Depends(_get_dashboard_service)]
 
 
 FaceEnrollmentServiceDep = Annotated[

@@ -15,7 +15,7 @@
 | T3  | **QR relay** — student sends session QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
 | T4  | **Sibling confusion** — twin/brother scans                 | Low      | Face embedding comparison (cosine similarity ≥ 0.7 threshold). Known limitation: acknowledged by instructor as accepted risk. No PAD CNN (class-level face anti-spoofing) in scope.                                                 | D31                                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
-| T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP. Argon2id for password hashing. Account lockout after failed attempts.                                                                                        | D32                                      |
+| T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP, revocable by the user. Argon2id for password hashing. Account lockout after failed attempts. A stolen 7-day refresh token outlives an MFA disable — see *Password & Account Security*. | D32                                      |
 | T7  | **Session code brute-force**                               | Medium   | HMAC-derived 6–8 char codes from random secret. 62^8 ≈ 2.18 × 10^14 possibilities. Rate-limited verification endpoint. Codes expire with session.                                                                                   | D18                                      |
 | T8  | **Offline scan manipulation** — modify `scanned_at`        | Medium   | Server compares `scanned_at` against `session.expires_at`. Expired → `rejected` with reason `session_expired`. Client timestamp is untrusted input.                                                                                 | D16                                      |
 | T9  | **Embedding theft from device**                            | Medium   | Embeddings encrypted at rest in IndexedDB via WebCrypto AES-GCM with device-unique non-extractable key. Server never stores plaintext embeddings.                                                                                   | D28                                      |
@@ -102,10 +102,22 @@ Student scans QR or types code → server verifies
 | ---------------------- | ------------------------------------- |
 | Hashing                | Argon2id (memory=64MB, time=3, parallelism=4) |
 | Lockout                | 5 failed attempts → 15-minute lockout |
-| MFA                    | TOTP (RFC 6238) via authenticator app |
+| MFA                    | TOTP (RFC 6238) via authenticator app; user-revocable via `POST /auth/mfa/disable` (password-verified), which also clears the TOTP secret and invalidates every unconsumed backup code |
 | Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
 | `must_change_password` | Flag on first login / admin reset     |
 | Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056) |
+
+Disabling MFA requires the current password, not a fresh TOTP code: reaching the
+route at all required completing the MFA challenge at login, so the bearer token
+in hand is already proof of the second factor.
+
+**What disabling does not do:** it cannot revoke credentials that already exist.
+Tokens are stateless JWTs and there is no revocation list (D32/D51), so a refresh
+token minted while MFA was on stays usable until it expires on its own 7-day
+life. Someone who logged in before the disable can keep refreshing. Evicting
+them needs a per-user `tokens_valid_from` / session-version column checked at
+refresh — not built. Until then, disabling MFA reduces the *next* login's
+exposure; it is not a way to kick an existing session out.
 
 ---
 
@@ -163,18 +175,41 @@ Excuse evidence attachments (photos, documents) are:
 
 All sensitive operations are logged in the audit trail:
 
-| Action                                           | Logged |
-| ------------------------------------------------ | ------ |
-| Student enrollment/unenrollment                  | Yes    |
-| Professor assignment changes                     | Yes    |
-| Excuse create/approve/revoke                     | Yes    |
-| Session open/close                               | Yes    |
-| Face enrollment/re-enrollment                    | Yes    |
-| Backup create/restore                            | Yes    |
-| Academic structure changes (program/year/course) | Yes    |
-| System settings changes                          | Yes    |
-| Account lockout/unlock                           | Yes    |
-| Failed login attempts                            | Yes    |
+| Action                                           | Logged | Trail row                                        |
+| ------------------------------------------------ | ------ | ------------------------------------------------ |
+| Student enrollment/unenrollment                  | Yes    | `enroll` / `enrollment`                         |
+| Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
+| Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
+| Session open/close                               | Yes    | `open` / `close` on `session`                   |
+| Face enrollment/re-enrollment                    | Yes    | `update` / `revoke` on `face_enrollment`        |
+| Backup create/restore                            | Yes    | `create` on `backup`. **Restore is not implemented** — only download |
+| Academic structure changes (program/year/course) | Yes    | `create` / `update` / `archive` / `delete`      |
+| System settings changes                          | Yes    | `update` on `app_setting`, with the previous value |
+| Admin account creation                           | Yes    | `create` on `user`, with the role granted       |
+| Account lockout/unlock                           | Yes    | `lock` / `unlock` on `user`. **There is no standalone admin unlock** — an admin clears a lockout by resetting the password, which is audited as `password_reset` |
+| Failed login attempts                            | Yes    | `login_failed` on `user`, `performed_by` null    |
+| Password reset                                   | Yes    | `password_reset` on `user`, self-service (`performed_by` = the account) or admin-initiated (`performed_by` = the admin) |
+| MFA disable                                      | Yes    | `update` on `user` (`mfa_enabled` only)          |
+| Liveness review resolve                          | Yes    | `approve` / `reject` on `attendance_record`     |
+
+An admin-initiated reset (`POST /admin/{users,students,professors}/{id}/reset-password`)
+issues a temporary password, returns it once, forces `must_change_password`, and
+clears the lockout — the counter, `is_locked` and `locked_at` — because an admin
+rescuing a locked-out account would otherwise hand over a password that still
+could not be used. It deliberately does **not** clear MFA: that would remove a
+second factor as a side effect of a password reset, and `POST /auth/mfa/disable`
+is the path for that, password-verified. None of these snapshots carries the
+password, the hash or the TOTP secret — `_account_snapshot` omits all three by
+design, and the audit assertions pin that.
+
+Read the trail through `GET /admin/audit-logs` (admin-only, filterable by
+`entity_type` / `action` / `performed_by` / date range).
+`GET /admin/system/academic-structure` reads the same table scoped to the four
+structural entity types.
+
+Two rows above are marked unimplemented because the surface does not exist yet:
+there is no admin account unlock route and no admin password reset route. See
+ADR-064.
 
 ---
 

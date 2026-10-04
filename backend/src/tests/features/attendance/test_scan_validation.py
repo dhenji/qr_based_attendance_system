@@ -1265,3 +1265,56 @@ def _stale_response() -> ScanResponse:
         scanned_at=moment,
         expires_at=moment,
     )
+
+
+# --- benchmark profile -------------------------------------------------------
+
+
+async def test_benchmark_mode_skips_geofence_and_liveness(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    now: datetime,
+) -> None:
+    from tests.conftest import TEST_JWT_SECRET
+
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    bench = Settings(
+        debug=True, jwt_secret=TEST_JWT_SECRET, benchmark_mode=True
+    )
+    service = AttendanceService(test_db_session, bench)
+
+    result = await service.submit_scan(
+        user_id=student.user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=2),
+            gps=OUTSIDE_GPS,
+            liveness_evidence=valid_evidence(blink_detected=False),
+        ),
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
+
+
+async def test_normal_mode_still_enforces_geofence(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    with pytest.raises(OutsideGeofenceException):
+        await service.submit_scan(
+            user_id=student.user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=2),
+                gps=OUTSIDE_GPS,
+            ),
+        )

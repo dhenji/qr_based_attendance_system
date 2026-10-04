@@ -155,11 +155,11 @@ async def assign_professor(
 async def remove_professor(
     offering_id: int,
     professor_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> dict[str, date]:
     effective_to: date = await service.remove_professor(
-        offering_id=offering_id, professor_id=professor_id
+        offering_id=offering_id, professor_id=professor_id, actor_id=user.id
     )
 
     return {"effective_to": effective_to}
@@ -174,12 +174,14 @@ async def remove_professor(
 async def bulk_enroll(
     offering_id: int,
     file: Annotated[UploadFile, File(description="students.csv")],
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> BulkEnrollResult:
     content: bytes = await file.read()
 
-    return await service.bulk_enroll(offering_id=offering_id, content=content)
+    return await service.bulk_enroll(
+        offering_id=offering_id, content=content, actor_id=user.id
+    )
 
 
 @router.get(

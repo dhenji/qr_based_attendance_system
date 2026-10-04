@@ -295,9 +295,20 @@
 
 ---
 
-## Phase 9: Integration Testing & QA
+## Phase 9: Integration Testing & QA [Done]
 
 **Goal:** End-to-end testing across all portals, security validation, performance benchmarks.
+
+> **Status:** all deliverables landed and measured; suite is 707 collected cases
+> in 45 files, green on SQLite and on Postgres. Load: 11.0 req/s over 5 minutes
+> with 30 virtual students, scan p50 18ms / p95 26ms / p99 33ms, zero spurious
+> duplicate rejections. Risk batch: 10,058 rows in 4.2s, identical with
+> `RISK_BATCH_WORKERS=1` and `=4` (DB-bound at this volume). **Backup leg is
+> environment-blocked:** the pipeline needs `openssl enc` with AEAD support for
+> `-aes-256-gcm`, which the bench host's OpenSSL build does not provide; the
+> re-run command and the exact error are recorded in
+> [performance-benchmarks.md](../testing/performance-benchmarks.md) §7. See also
+> ADR-067 for where the seed and load harness live and why.
 
 ### Deliverables
 
@@ -359,16 +370,23 @@
 
 ---
 
-## Phase 12: Frontend-Readiness Roundup [gap]
+## Phase 12: Frontend-Readiness Roundup [Done]
 
 **Goal:** Backend endpoints that exist solely to power the frontend wireframe audit.
+
+All six deliverable groups shipped. The three dashboards live in their own
+`features/dashboard/` slice because each aggregates features it does not own —
+see the module docstring in `service.py`. Every figure they report is composed
+from an existing service method rather than recomputed, so a dashboard cannot
+disagree with the page above it.
 
 ### Deliverables
 
 - `app_settings` KV table + `GET/PATCH /admin/system/settings` (`geofence_default_radius`,
   `present_window_default`, `late_window_default`, `backup_retention_daily/monthly`,
   `pending_sync_count`)
-- Admin reset-password ×3 (admin / student / professor accounts)
+- Admin reset-password ×3 (admin / student / professor accounts) — one
+  implementation, `AuthService.admin_reset_password`
 - `POST /auth/mfa/disable` (password required; clears backup codes)
 - Dashboard summaries ×3 (`/student/dashboard`, `/professor/dashboard`, `/admin/dashboard`)
 - CSV export/template ×3 (student history, attendance overview, roster template)

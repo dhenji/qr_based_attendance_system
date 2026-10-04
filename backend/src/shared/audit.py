@@ -5,14 +5,15 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.system.model import AuditLog
+from shared.enums import AuditAction, AuditEntity
 
 
 async def record_audit(
     session: AsyncSession,
     *,
     actor_id: int | None,
-    action: str,
-    entity_type: str,
+    action: AuditAction,
+    entity_type: AuditEntity,
     entity_id: int | None,
     old_value: dict[str, Any] | None = None,
     new_value: dict[str, Any] | None = None,
@@ -21,6 +22,10 @@ async def record_audit(
 
     Flushes (never commits): the row rolls back with the mutation when the
     request fails, and commits with it when the request succeeds.
+
+    `actor_id` is `None` when nobody was authenticated — a lockout triggered by
+    an anonymous attempt, or a cron run. The subject is still identified by
+    `entity_type` + `entity_id`.
     """
     row = AuditLog(
         action=action,

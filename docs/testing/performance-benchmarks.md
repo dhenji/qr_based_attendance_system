@@ -216,6 +216,40 @@ General API endpoint performance under normal load (not peak).
 | `pgBadger`                    | Postgres query log analysis        | Production monitoring  |
 | `prometheus-client` + Grafana | Runtime metrics dashboard          | Production             |
 
+Installed today: **`locust==2.46.6`** (pinned in `backend/requirements.txt`),
+driven by `backend/locustfile.py` — 30 virtual students over a pool of
+`SEED-LOAD-*` sessions from the seed's `--load-fixtures`, Poisson waits,
+`BENCHMARK_MODE=true` so the per-IP scan gate and the geofence/liveness checks
+are out of the measurement. `pytest-benchmark` and `Lighthouse CI` are listed
+as options, not yet installed.
+
+### Enforced Targets
+
+The §2 targets are asserted at the end of every run, not just printed: on
+`test_stop` the harness re-reads its own stats, prints a PASS/FAIL row per
+target, and sets `environment.process_exit_code = 1` if any is missed, so the
+run is CI-gateable.
+
+| Target                | Default                     | Override             |
+| --------------------- | --------------------------- | -------------------- |
+| `>=10 req/s`          | `LOCUST_MIN_RPS=10`         | yes                  |
+| `p95 < 1s`            | `LOCUST_MAX_P95_MS=1000`    | yes                  |
+| `p99 < 2s`            | `LOCUST_MAX_P99_MS=2000`    | yes                  |
+| 0 duplicate rejections | not overridable             | no                   |
+
+Throughput is *successful scans* over the run's wall-clock window, not
+locust's blended `total_rps` (which also counts the login and profile calls).
+Percentiles prefer locust's trailing-10s window and fall back to the
+lifetime percentile when that window holds no samples; if neither can report,
+the target reads `unavailable` and counts as missed rather than as a pass. A
+run that issued no requests at all fails immediately.
+
+The gate only ever forces failure — it leaves `process_exit_code` as `None`
+on a clean run so locust still applies its own `exit_code_on-error` to
+recorded request failures (a run with 7 errored scans and no target miss
+still exits non-zero). Re-baseline with the three env knobs above rather than
+editing the defaults; a run measured on slower hardware then still gates.
+
 ### Environment Variables for Benchmarking
 
 ```bash
@@ -243,3 +277,40 @@ BACKUP_COMPRESSION_LEVEL=6        # gzip level (1=fast, 9=best)
 | Risk batch (10k students)   | <5min  | Xmin   | PASS/FAIL |
 | Backup (large, 500MB)       | <90s   | Xs     | PASS/FAIL |
 ```
+
+### Benchmark Run — 2026-10-04
+
+Harness: `backend/locustfile.py` (locust 2.46.6), 30 virtual students pinned
+1:1 to the `loadtestNN` seed accounts over a pool of 150 fresh
+`SEED-LOAD-*` sessions, Poisson waits (mean 2.5s), 5-minute window.
+Server profile: `BENCHMARK_MODE=true FACE_MATCH_THRESHOLD=0.0`.
+Seed: `--scale small --load-fixtures 150` on Postgres 16
+(+ `--scale large`, 10,000 students / ~120k attendance rows, for the batch leg).
+
+| Metric                            | Target | Actual                              | Status |
+| --------------------------------- | ------ | ----------------------------------- | ------ |
+| Scan throughput                   | ≥10 req/s | 11.0 req/s (3209 scans / 300s)   | PASS   |
+| Scan full happy path (p50)        | <6s    | 18ms                                | PASS   |
+| 30-student concurrent (p95)       | <1s    | 26ms                                | PASS   |
+| Scan p99                          | <2s    | 33ms                                | PASS   |
+| Spurious duplicate rejections     | 0      | 0 (`duplicate: 0`, exit code 0)     | PASS   |
+| Auth login (p95)                  | <1s    | 540ms                               | PASS   |
+| Risk batch (10,058 processed)     | <5min  | 4.2s (`workers=1` and `workers=4`)  | PASS   |
+| Backup (large, 500MB)             | <90s   | — (environment-blocked, see below)  | BLOCKED |
+
+Notes:
+
+- Scans landed `late` (fixtures seeded minutes before the run, past the
+  5-minute present window). The write path is identical either way, so the
+  throughput/latency numbers stand as happy-path measurements.
+- The batch leg is DB-bound at this volume: `RISK_BATCH_WORKERS=1` and `=4`
+  both report ~4.2s. Parallel scoring is order-preserving and covered by
+  `test_risk_batch_workers_match_serial_output`.
+- Backup leg is blocked on the host, not the code: the pipeline shells
+  `openssl enc -aes-256-gcm`, which needs OpenSSL 3.x
+  (`enc: AEAD ciphers not supported` on the bench host). Re-run
+  `bench_timings.py --backup` with `BACKUP_ENCRYPTION_KEY` set once the
+  host provides it; seeded data is tens of MB, so record actual size/time
+  against the 500MB/<90s target as PARTIAL if short on volume.
+- Backend suite at this commit: 642 passed on SQLite, 633 passed on
+  Postgres (`TEST_DATABASE_URL`), same cases.

@@ -4,11 +4,12 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
-from api.deps import StudentServiceDep, require_role
+from api.deps import AuthServiceDep, StudentServiceDep, require_role
 from shared.csv_import import csv_template_header
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 from features.auth.model import User
+from features.auth.schema import AdminPasswordResetResponse
 from features.student.constants import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -97,12 +98,12 @@ async def create_student(
 )
 async def import_students(
     file: Annotated[UploadFile, File(description="students.csv")],
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> StudentImportResult:
     content: bytes = await file.read()
 
-    return await service.import_roster(content=content)
+    return await service.import_roster(content=content, actor_id=user.id)
 
 
 @router.get(
@@ -140,10 +141,12 @@ async def get_student(
 async def update_student(
     student_id: int,
     payload: StudentUpdate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> StudentRead:
-    return await service.update(student_id=student_id, payload=payload)
+    return await service.update(
+        student_id=student_id, payload=payload, actor_id=user.id
+    )
 
 
 @router.delete(
@@ -153,7 +156,27 @@ async def update_student(
 )
 async def hard_delete_student(
     student_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> None:
-    await service.hard_delete(student_id=student_id)
+    await service.hard_delete(student_id=student_id, actor_id=user.id)
+
+
+@router.post(
+    "/{student_id}/reset-password",
+    response_model=AdminPasswordResetResponse,
+    summary="Reset a student's linked account password to a temp one",
+)
+async def reset_student_password(
+    student_id: int,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: StudentServiceDep,
+    auth_service: AuthServiceDep,
+) -> AdminPasswordResetResponse:
+    # The path names a roster row, so this resolves it to a `users.id` first;
+    # `AuthService` then does the credential write, which is the same code path
+    # `/admin/users/{id}/reset-password` uses.
+    temp_password: str = await auth_service.admin_reset_password(
+        user_id=await service.account_user_id(student_id), actor_id=user.id
+    )
+    return AdminPasswordResetResponse(temp_password=temp_password)

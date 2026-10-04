@@ -4,8 +4,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
-from api.deps import ProfessorServiceDep, require_role
+from api.deps import AuthServiceDep, ProfessorServiceDep, require_role
 from features.auth.model import User
+from features.auth.schema import AdminPasswordResetResponse
 from features.professor.constants import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -89,12 +90,12 @@ async def create_professor(
 )
 async def import_professors(
     file: Annotated[UploadFile, File(description="professors.csv")],
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProfessorServiceDep,
 ) -> ProfessorImportResult:
     content: bytes = await file.read()
 
-    return await service.import_roster(content=content)
+    return await service.import_roster(content=content, actor_id=user.id)
 
 
 @router.get(
@@ -133,7 +134,26 @@ async def update_professor(
 )
 async def hard_delete_professor(
     professor_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProfessorServiceDep,
 ) -> None:
-    await service.hard_delete(professor_id=professor_id)
+    await service.hard_delete(professor_id=professor_id, actor_id=user.id)
+
+
+@router.post(
+    "/{professor_id}/reset-password",
+    response_model=AdminPasswordResetResponse,
+    summary="Reset a professor's linked account password to a temp one",
+)
+async def reset_professor_password(
+    professor_id: int,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProfessorServiceDep,
+    auth_service: AuthServiceDep,
+) -> AdminPasswordResetResponse:
+    # Resolves the roster row to a `users.id`; `AuthService` does the
+    # credential write, the same path `/admin/users/{id}/reset-password` uses.
+    temp_password: str = await auth_service.admin_reset_password(
+        user_id=await service.account_user_id(professor_id), actor_id=user.id
+    )
+    return AdminPasswordResetResponse(temp_password=temp_password)

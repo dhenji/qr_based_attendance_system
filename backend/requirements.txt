@@ -4,6 +4,10 @@ pydantic-settings==2.14.2
 sqlalchemy[asyncio]==2.0.51
 asyncpg==0.31.0
 alembic==1.13.1
+# apscheduler 3.x drives the nightly risk batch and the nightly backup from the
+# app lifespan. 4.x is still alpha and drops the stable jobstore/locking
+# semantics the reload guard relies on, so the 3.x line is pinned deliberately.
+apscheduler==3.11.3
 PyJWT==2.13.0
 argon2-cffi==25.1.0
 pyotp==2.9.0
@@ -17,3 +21,5 @@ pytest-asyncio==1.3.0
 # aiosqlite backs the default in-memory test database (conftest.py).
 aiosqlite==0.22.1
 pytest-cov==7.1.0
+# Load profile only: the concurrent-scan harness (locustfile.py).
+locust==2.46.6

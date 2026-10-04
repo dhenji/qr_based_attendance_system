@@ -12,6 +12,8 @@ from features.admin.service import AdminService
 from shared.enums import UserRole
 
 STUDENT_EMAIL = "s@example.com"
+# The super_admin performing the creation; lands in audit_logs.performed_by.
+ACTOR_ID = 7
 
 
 class _FakeSession:
@@ -63,7 +65,9 @@ def _roster(user_id=None):
 
 
 def _run(session) -> None:
-    asyncio.run(AdminService(session).create_user(payload=_payload()))
+    asyncio.run(
+        AdminService(session).create_user(payload=_payload(), actor_id=ACTOR_ID)
+    )
 
 
 def test_links_to_an_unclaimed_active_roster_row() -> None:
@@ -109,7 +113,9 @@ def test_admin_role_needs_no_roster_row() -> None:
         last_name="Hopper",
     )
 
-    result = asyncio.run(AdminService(session).create_user(payload=payload))
+    result = asyncio.run(
+        AdminService(session).create_user(payload=payload, actor_id=ACTOR_ID)
+    )
 
     assert result.role is UserRole.ADMIN
     assert result.must_change_password is True
@@ -119,7 +125,9 @@ def test_admin_role_needs_no_roster_row() -> None:
 def test_created_user_is_forced_to_change_password() -> None:
     session = _FakeSession(roster=_roster())
 
-    result = asyncio.run(AdminService(session).create_user(payload=_payload()))
+    result = asyncio.run(
+        AdminService(session).create_user(payload=_payload(), actor_id=ACTOR_ID)
+    )
 
     assert result.must_change_password is True
     assert result.is_active is True

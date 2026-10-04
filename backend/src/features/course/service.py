@@ -53,6 +53,7 @@ from shared.csv_import import (
     CsvSchema,
     parse_import_csv,
 )
+from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
 
@@ -166,8 +167,8 @@ class CourseService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="create",
-            entity_type="course",
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.COURSE,
             entity_id=course.id,
             new_value=self._course_snapshot(course),
         )
@@ -234,8 +235,8 @@ class CourseService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="update",
-            entity_type="course",
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.COURSE,
             entity_id=course.id,
             old_value=old_value,
             new_value=self._course_snapshot(course),
@@ -252,8 +253,8 @@ class CourseService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="archive",
-            entity_type="course",
+            action=AuditAction.ARCHIVE,
+            entity_type=AuditEntity.COURSE,
             entity_id=course.id,
             old_value=old_value,
             new_value=self._course_snapshot(course),
@@ -297,8 +298,8 @@ class CourseService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="create",
-            entity_type="course_offering",
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.COURSE_OFFERING,
             entity_id=offering.id,
             new_value=self._offering_snapshot(offering),
         )
@@ -398,8 +399,8 @@ class CourseService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="update",
-            entity_type="course_offering",
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.COURSE_OFFERING,
             entity_id=offering.id,
             old_value=old_value,
             new_value=self._offering_snapshot(offering),
@@ -418,8 +419,8 @@ class CourseService:
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action="archive",
-            entity_type="course_offering",
+            action=AuditAction.ARCHIVE,
+            entity_type=AuditEntity.COURSE_OFFERING,
             entity_id=offering.id,
             old_value=old_value,
             new_value=self._offering_snapshot(offering),
@@ -483,9 +484,20 @@ class CourseService:
         self._session.add(record)
         await self._session.flush()
 
+        await record_audit(
+            self._session,
+            actor_id=assigned_by,
+            action=AuditAction.ASSIGN,
+            entity_type=AuditEntity.COURSE_PROFESSOR,
+            entity_id=None,
+            new_value=self._assignment_snapshot(record),
+        )
+
         return AssignmentRead.model_validate(record)
 
-    async def remove_professor(self, *, offering_id: int, professor_id: int) -> date:
+    async def remove_professor(
+        self, *, offering_id: int, professor_id: int, actor_id: int | None = None
+    ) -> date:
         await self._get_offering_or_404(offering_id)
 
         today: date = date.today()
@@ -507,15 +519,48 @@ class CourseService:
         if row is None:
             raise OfferingAssignmentNotFoundException(offering_id, professor_id)
 
+        old_value: dict[str, Any] = self._assignment_snapshot(row)
         row.effective_to = today
         await self._session.flush()
 
+        # Effective-dated rather than deleted: the row stays as the record that
+        # the professor taught the offering until this date.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UNASSIGN,
+            entity_type=AuditEntity.COURSE_PROFESSOR,
+            entity_id=None,
+            old_value=old_value,
+            new_value=self._assignment_snapshot(row),
+        )
+
         return today
+
+    @staticmethod
+    def _assignment_snapshot(record: CourseProfessor) -> dict[str, Any]:
+        """An assignment row, which has a composite primary key.
+
+        `course_professors` is keyed on (offering_id, professor_id,
+        effective_from), so there is no single-column id for `AuditLog.entity_id`
+        to hold; the identity lives here instead.
+        """
+        return {
+            "offering_id": record.offering_id,
+            "professor_id": record.professor_id,
+            "is_primary": record.is_primary,
+            "effective_from": (
+                record.effective_from.isoformat() if record.effective_from else None
+            ),
+            "effective_to": (
+                record.effective_to.isoformat() if record.effective_to else None
+            ),
+        }
 
     # -- bulk enroll + roster --------------------------------------------
 
     async def bulk_enroll(
-        self, *, offering_id: int, content: bytes
+        self, *, offering_id: int, content: bytes, actor_id: int | None = None
     ) -> BulkEnrollResult:
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
         program: Program | None = await self._session.get(Program, offering.program_id)
@@ -536,6 +581,24 @@ class CourseService:
                 skipped += 1
 
         await self._session.flush()
+
+        # One row for the upload rather than one per student, so a large roster
+        # cannot bury every other action in the trail. The per-student detail
+        # lives on the `enrollments` rows themselves.
+        if enrolled or skipped:
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.ENROLL,
+                entity_type=AuditEntity.ENROLLMENT,
+                entity_id=None,
+                new_value={
+                    "offering_id": offering_id,
+                    "enrolled": enrolled,
+                    "skipped": skipped,
+                    "errors": len(errors),
+                },
+            )
 
         errors.sort(key=lambda e: e.line)
 

@@ -132,7 +132,9 @@ async def create_session(
 ) -> SessionRead:
     professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
 
-    return await service.create_session(professor_id=professor_id, payload=payload)
+    return await service.create_session(
+        professor_id=professor_id, payload=payload, actor_id=user.id
+    )
 
 
 @router.get(
@@ -166,7 +168,9 @@ async def close_session(
 ) -> SessionCloseResponse:
     professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
 
-    return await service.close_session(session_id=session_id, professor_id=professor_id)
+    return await service.close_session(
+        session_id=session_id, professor_id=professor_id, actor_id=user.id
+    )
 
 
 @router.get(

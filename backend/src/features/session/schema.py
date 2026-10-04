@@ -89,6 +89,27 @@ class SessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SessionOfferingTile(BaseModel):
+    """One of today's sessions, reduced to what a dashboard tile shows.
+
+    The contract writes this row as `{ offering, scanned, enrolled }`. The
+    offering is split into `session_id` + `offering_id` because both are needed
+    to key the tile and no single column identifies the session on its own;
+    `scanned` is the attendance-row count, which is not the same as
+    present + late (excused and pending rows are scans too).
+
+    `status` rides along so a caller can count closed sessions without a second
+    query in a different scope. Sessions carry no status column — this is the
+    derived `_session_status` value.
+    """
+
+    session_id: int
+    offering_id: int
+    scanned: int
+    enrolled: int
+    status: Literal["active", "closed"]
+
+
 class SessionListItem(BaseModel):
     """Row for GET /professor/sessions; counts and status are computed DTOs."""
 

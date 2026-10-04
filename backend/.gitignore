@@ -34,3 +34,5 @@ backups/
 # attachments_local_dir="./attachments". Real student evidence, so it must
 # never be committed.
 attachments/
+
+load_run*.csv

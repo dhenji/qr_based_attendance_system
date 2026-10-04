@@ -11,6 +11,7 @@ from features.auth.schema import (
     ForgotPasswordStep2Request,
     LoginRequest,
     MeResponse,
+    MFADisableRequest,
     MFASetupResponse,
     MFAVerifyRequest,
     OTPRequest,
@@ -208,6 +209,23 @@ async def mfa_verify(
     return await service.verify_mfa(
         code=payload.code, preauth_token=payload.preauth_token, user=current_user
     )
+
+
+@router.post(
+    "/mfa/disable",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disable MFA (password required; clears the secret and backup codes)",
+)
+async def mfa_disable(
+    payload: MFADisableRequest,
+    current_user: CurrentUserDep,
+    service: AuthServiceDep,
+) -> None:
+    # Password, not a TOTP code: reaching this route at all required completing
+    # the MFA challenge at login, so the session in hand is already proof of
+    # the second factor. See security-model.md T6 for what this does *not* do
+    # (it cannot revoke refresh tokens that were already issued).
+    await service.disable_mfa(current_user, payload.password)
 
 
 @router.post(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -12,10 +13,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
+from core.database import database
+from core.scheduler import JOB_RISK_BATCH, track
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, SyncStatus, ValidationStatus
 from features.analytics.constants import (
     FEATURE_DECIMALS,
+    RISK_BATCH_RUNTIME_BUDGET_MS,
     SYNC_LAG_WINDOW,
     TREND_POSITIVE_NORM,
     TREND_WEEKS,
@@ -297,10 +301,18 @@ def _score_targets(
     moment: datetime,
     cfg: Settings,
     chunk_size: int,
+    workers: int = 1,
 ) -> list[_ScoredTarget]:
-    scored: list[_ScoredTarget] = []
-    for start in range(0, len(resolved), chunk_size):
-        for student_id, offering_id, semester in resolved[start : start + chunk_size]:
+    slices = [
+        resolved[start : start + chunk_size]
+        for start in range(0, len(resolved), chunk_size)
+    ]
+
+    def _score_slice(
+        targets: list[tuple[int, int, str]],
+    ) -> list[_ScoredTarget]:
+        scored: list[_ScoredTarget] = []
+        for student_id, offering_id, semester in targets:
             expected = expected_by_offering.get(offering_id, 0)
             records = grouped.get((student_id, offering_id), [])
             features = compute_features(records, expected, moment)
@@ -315,7 +327,17 @@ def _score_targets(
                     features=features,
                 )
             )
-    return scored
+        return scored
+
+    if workers <= 1 or len(slices) <= 1:
+        return [item for part in slices for item in _score_slice(part)]
+
+    # `executor.map` preserves input order, so sharded runs score identically
+    # to the serial path while spreading chunks across worker threads.
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return [
+            item for part in executor.map(_score_slice, slices) for item in part
+        ]
 
 
 async def _upsert_scores(
@@ -449,7 +471,10 @@ async def run_risk_batch(
     grouped = await _load_grouped_attendance(session, student_ids, offering_ids)
 
     chunk_size = max(int(cfg.risk_batch_chunk_size or 1000), 1)
-    scored = _score_targets(resolved, expected, grouped, moment, cfg, chunk_size)
+    workers = max(int(cfg.risk_batch_workers or 1), 1)
+    scored = _score_targets(
+        resolved, expected, grouped, moment, cfg, chunk_size, workers
+    )
     if cfg.risk_batch_dry_run:
         high, medium, low = await _stage_scores(
             session, scored, student_ids, offering_ids, moment.date(), moment
@@ -476,3 +501,58 @@ async def run_risk_batch(
         "low": low,
         "duration_ms": duration_ms,
     }
+
+
+async def run_scheduled_risk_batch(
+    settings: Settings | None = None,
+) -> dict[str, int]:
+    """Cron entry point: score every active enrollment and commit.
+
+    This is the wrapper `run_risk_batch` does not have. Two things make it
+    necessary rather than decorative:
+
+    * `run_risk_batch` only ever `flush()`es. The request dependency commits on
+      the way out, but a cron run has no request, so without an explicit commit
+      every score it computed would be rolled back when the connection closed.
+    * `database.get_session()` commits and rolls back nothing, so the rollback
+      in the failure path is this function's job too.
+
+    Failures are logged and swallowed: a scheduler job that raises is a lost
+    night, and the next run is tomorrow either way. The scheduler itself must
+    survive, so nothing propagates.
+
+    Returns the batch summary, or an empty summary when the run failed.
+    """
+    cfg = settings or get_settings()
+    empty: dict[str, int] = {
+        "processed": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "duration_ms": 0,
+    }
+
+    started = time.perf_counter()
+    logger.info("Risk batch started")
+    async with track(JOB_RISK_BATCH), database.get_session() as session:
+        try:
+            summary = await run_risk_batch(session, settings=cfg)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("Risk batch failed; scores left unchanged")
+            return empty
+
+    duration_s = time.perf_counter() - started
+    logger.info(
+        "Risk batch completed: %d students scored in %.1fs",
+        summary["processed"],
+        duration_s,
+    )
+    if summary["duration_ms"] > RISK_BATCH_RUNTIME_BUDGET_MS:
+        logger.warning(
+            "Risk batch exceeded its %d ms budget (%d ms); scores are still written",
+            RISK_BATCH_RUNTIME_BUDGET_MS,
+            summary["duration_ms"],
+        )
+    return summary

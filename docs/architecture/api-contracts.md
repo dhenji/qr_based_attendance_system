@@ -9,6 +9,7 @@
 
 | Aspect      | Standard                                                                                    |
 | ----------- | ------------------------------------------------------------------------------------------- |
+| Base path   | Every path below is relative to `/api`. The prefix is mounted once in `api/router.py`, not baked into the individual routers, so a row reading `/student/dashboard` is live at `/api/student/dashboard`. `GET /health` is the one exception: it is registered on the app itself, outside the namespace. |
 | Auth        | `Authorization: Bearer <JWT>` header on all `/admin/*`, `/professor/*`, `/student/*` routes |
 | Role guards | FastAPI `Depends(require_role(Role.admin))` etc. 403 on mismatch                            |
 | Pagination  | `?page=1&size=20` → `{ items: [...], total: int, page: int, size: int }`                    |
@@ -126,6 +127,28 @@ Scanned by students. Server generates HMAC-signed JSON.
 
 ---
 
+## Infrastructure
+
+### Health
+
+#### `GET /health`
+
+Liveness probe. Registered on the app itself in `main.py`, so it sits **outside**
+the `/api` namespace and takes no bearer token — it is what a load balancer or
+`docker compose` healthcheck hits.
+
+|                  |                                  |
+| ---------------- | -------------------------------- |
+| **Auth**         | None                             |
+| **Response 200** | `{ status: "ok" }`               |
+
+It reports process liveness only. It does **not** touch the database: the
+startup `SELECT 1` in the lifespan is what fails the boot when Postgres is
+unreachable, so a running process answering here is not evidence the database is
+reachable.
+
+---
+
 ## ADMIN Endpoints
 
 ### Programs
@@ -193,6 +216,13 @@ Archive program (sets `is_active=false` on the program row only). PATCH the same
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label }] } }` |
 | **Response 201** | Created year level                                                                  |
+
+#### `GET /admin/programs/{pid}/years/{yid}`
+
+|                  |                                                               |
+| ---------------- | ------------------------------------------------------------- |
+| **Response 200** | `{ id, program_id, year_number, label, term_structure, sort_order }` |
+| **Errors**       | 404 `program_not_found` / `year_level_not_found`                  |
 
 #### `PATCH /admin/programs/{pid}/years/{yid}`
 
@@ -471,6 +501,36 @@ List structural changes (audit log for program/year/course mutations).
 | **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }`                                                                                                              |
 | **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. |
 
+#### `GET /admin/audit-logs`
+
+The full audit trail — every sensitive mutation, not just the structural ones.
+
+|                  |                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?entity_type=&action=&performed_by=&date_from=&date_to=&page=1&size=20`                                                                 |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], total, page, size }`              |
+| **Notes**        | Admin-only. Filters AND-combine and are each optional; a blank value (`?action=`) means "no filter". `date_from` is inclusive from 00:00 UTC, `date_to` inclusive to the end of that day, so `date_from == date_to` selects one day. |
+
+**Vocabulary.** `entity_type` is one of `program`, `year_level`, `course`,
+`course_offering`, `student`, `professor`, `enrollment`, `course_professor`,
+`excuse`, `session`, `face_enrollment`, `attendance_record`, `backup`,
+`app_setting`, `user`, `maintenance` (aggregate subject of the sync-flush and
+cleanup runs, one audit row per run with counts in `new_value`). `action` is one of `create`, `update`, `archive`,
+`delete`, `import`, `enroll`, `assign`, `unassign`, `open`, `close`, `approve`,
+`reject`, `revoke`, `lock`, `unlock`, `login_failed`, `password_reset`. A value
+outside either list is **422 `invalid_audit_filter`** rather than an empty page,
+so a mistyped filter can never read as "nothing happened". An inverted range is
+**422 `invalid_audit_date_range`**.
+
+**`entity_id` is nullable.** It is null for `course_professor` (composite
+primary key, so there is no single-column id), for the `app_setting` rows a
+PATCH writes, and for the aggregate `import` / `enroll` rows that describe a
+batch. Those rows are identified by `old_value`/`new_value` instead.
+
+**`performed_by` is nullable.** It is null when nobody was authenticated: a
+lockout or failed login triggered by an anonymous attempt, or the nightly cron.
+The subject is still `entity_type` + `entity_id`.
+
 #### `GET /admin/backups`
 
 |                  |                                                                                                          |
@@ -495,8 +555,15 @@ Download backup file.
 
 #### `POST /admin/system/sync/flush`
 
-Force-process pending `sync_queue` rows now (re-runs each through the scan
-validation path). Refuses to run concurrently with a backup/risk batch.
+Reconcile pending `sync_queue` rows now. Each queued entry mirrors a scan
+that already landed in `attendance_records` — the payload carries ids only,
+no scan evidence, so the run confirms each entry against the row it names
+rather than resubmitting the scan: id match on both sides marks the entry
+`done`, anything else (orphan, mismatch, unparseable payload) marks it
+`failed` with another retry counted. One bad entry never aborts the run.
+Refuses to start while a maintenance run, backup, or scheduled batch is
+active (**409 `maintenance_in_progress`**). Audited as one aggregate row
+(`action: update`, `entity_type: maintenance`).
 
 |                  |                                    |
 | ---------------- | ---------------------------------- |
@@ -504,7 +571,13 @@ validation path). Refuses to run concurrently with a backup/risk batch.
 
 #### `POST /admin/system/cleanup`
 
-Prune expired data (7-day OTPs, 30-day completed/failed sync_queue).
+Prune expired data: OTP codes older than 7 days and finished (`done` /
+`failed`) `sync_queue` rows older than 30 days, both measured on
+`created_at`. Pending queue rows are never touched no matter their age.
+Refuses to start while a maintenance run, backup, or scheduled batch is
+active (**409 `maintenance_in_progress`**). Audited as one aggregate row
+(`action: delete`, `entity_type: maintenance`, per-table counts in
+`new_value`).
 
 |                  |                  |
 | ---------------- | ---------------- |
@@ -579,7 +652,7 @@ Approve or reject a flagged record.
 | ---------------- | --------------------------------------------------------------------------------- |
 | **Request**      | `{ decision: "approve" \| "reject", note?: string }`                              |
 | **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
-| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. `note` (≤1000 chars, stripped) is stored as `liveness_evidence.review_note` and returned by the list endpoint's `evidence`. Resolving an already-resolved record is 409 `review_not_pending`. **Audit logging is deferred to PROMPT 8.7** — no audit table exists until Phase 8, so the decision is currently recorded only on the attendance row. |
+| **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. `note` (≤1000 chars, stripped) is stored as `liveness_evidence.review_note` and returned by the list endpoint's `evidence`. Resolving an already-resolved record is 409 `review_not_pending`. The decision is also written to the audit trail as `approve` / `reject` on `attendance_record`, visible on `GET /admin/audit-logs`. |
 
 ### Students, Professors & Archive
 
@@ -729,6 +802,10 @@ admins; admins manage students/professors. Password resets set a temp password
 | POST   | `/admin/professors/{id}/reset-password` | Reset linked professor-account password (temp once)| admin        |
 
 **Reset response:** `{ temp_password: string }` — shown once. All resets audited.
+
+> **Not implemented.** None of the three `reset-password` routes above exists yet;
+> only the self-service `POST /auth/reset-password` is built, and that one writes
+> a `password_reset` audit row. See ADR-064 for the gap this leaves in the trail.
 
 ---
 

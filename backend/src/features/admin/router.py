@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from api.deps import AdminServiceDep, require_role
+from api.deps import AdminServiceDep, AuthServiceDep, require_role
 from features.admin.constants import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -17,6 +17,7 @@ from features.admin.schema import (
     AdminUserRead,
 )
 from features.auth.model import User
+from features.auth.schema import AdminPasswordResetResponse
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
@@ -54,10 +55,28 @@ async def list_users(
 )
 async def create_user(
     payload: AdminUserCreate,
-    _: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
     service: AdminServiceDep,
 ) -> AdminUserCreateResponse:
-    return await service.create_user(payload=payload)
+    return await service.create_user(payload=payload, actor_id=actor.id)
+
+
+@router.post(
+    "/{user_id}/reset-password",
+    response_model=AdminPasswordResetResponse,
+    summary="Reset a user account's password to a temp one (clears lockout)",
+)
+async def reset_user_password(
+    user_id: int,
+    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    auth_service: AuthServiceDep,
+) -> AdminPasswordResetResponse:
+    # `AuthService` owns the credential write — this route names a `users.id`
+    # directly, so there is no roster row to resolve first.
+    temp_password: str = await auth_service.admin_reset_password(
+        user_id=user_id, actor_id=actor.id
+    )
+    return AdminPasswordResetResponse(temp_password=temp_password)
 
 
 @router.patch(

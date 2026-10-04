@@ -1105,3 +1105,346 @@
   boundary in both directions and are the guards against replacing ownership
   with assignment instead of widening it.
 - **Extends:** ADR-061 (whose Known-asymmetry bullet this resolves) and D8.
+
+---
+
+## 8.1 Background Jobs
+
+### ADR-063: The API Process Owns the Nightly Cron Jobs
+
+- **Decision (D63):** The nightly risk batch and the nightly full backup are
+  scheduled inside the FastAPI process by APScheduler, started and stopped by
+  the application lifespan. Each job body is a thin adapter in the feature that
+  owns the work, and each adapter owns its own transaction.
+- **Date:** 2026-10-03
+- **Status:** Accepted
+- **Context:** `RISK_BATCH_CRON` has been in `core/config.py` since the
+  analytics slice landed, and the backup pipeline's own docstrings have
+  anticipated a scheduler job, but nothing actually fired either one — both ran
+  only when an admin triggered them by hand. `risk-model.md` §5 and
+  `monitoring.md` §3-4 both describe nightly automation and both document a
+  backup-freshness SLO that nothing could satisfy. The deployment plan is a
+  single API process, so an external worker (Celery, a cron-on-the-host) would be
+  a second moving part to operate for two jobs.
+- **Rationale:**
+  - **Two wrappers, not two bare calls.** `run_risk_batch` and
+    `SystemService.run_backup` only ever `flush()`; the request dependency
+    commits on the way out. A cron run has no request, so each adapter opens
+    `database.get_session()` (which commits nothing) and commits itself.
+    Calling the service functions directly from a job would silently discard
+    every row it wrote — the worst possible failure mode, since the job would
+    log a healthy-looking summary.
+  - **Adapters live in their features, the scheduler does not.**
+    `core/scheduler.py` imports nothing from `features` or `shared`, preserving
+    the stdlib → third-party → core → shared → features ordering. The job bodies
+    sit next to the code they run (`analytics/batch.py`,
+    `system/service.py`) and `main.py` — which already imports every feature via
+    `api.router` — wires them together.
+  - **A failed job must not take the scheduler down.** Both adapters catch,
+    log and return. A night is lost either way; the process dying would lose
+    tomorrow as well.
+  - **A malformed cron raises at boot.** The trigger is built during
+    `register()`, so a typo in `RISK_BATCH_CRON` fails where an operator is
+    watching the log, rather than becoming a cron that silently never fires.
+  - **The unconfigured backup is skipped, not failed.** With no
+    `BACKUP_ENCRYPTION_KEY` the pipeline cannot succeed. Letting it fail would
+    write a `failed` `backup_log` row every night until someone noticed, and the
+    real failures would drown in the noise. The adapter preflights and logs one
+    CRITICAL line instead, leaving `run_backup` itself untouched so a manual
+    trigger still fails loudly and visibly on its row.
+- **Known limitations, stated rather than inherited:**
+  - **Process-local, single instance.** Neither the in-flight set nor the backup
+    lock crosses processes, exactly like the scan idempotency store and the rate
+    limiter. Running more than one worker process would fire every job once per
+    process. `Dockerfile.dev` passes no `--workers`, so this holds today; a
+    shared job store or a Postgres advisory lock is the fix and is not in place.
+  - **The nightly backup needs system binaries.** The pipeline shells out to
+    `pg_dump`, `gzip` and `openssl`. The dev image installs none of them, and
+    the sample production `Dockerfile` in `deployment-workflow.md` installs no
+    system packages at all, so on that image the nightly backup fails with
+    `backup_failed`. The image belongs to the deployment work, not here; noted
+    in `production-checklist.md`.
+  - **`SCHEDULER_TIMEZONE` defaults to UTC**, which is what a container without
+    a configured `TZ` already was. `risk-model.md` says "02:00 server time", so
+    this is a clarification, not a change. An unresolvable zone warns and falls
+    back rather than failing the boot: a cron that never fires is a silent
+    data-loss bug, and a slim image may ship without the tz database.
+- **Divergence from the backup endpoint:** `POST /admin/backups` declares
+  `202 Accepted` but fully awaits the pipeline before responding
+  (`features/system/router.py`). Left alone — the scheduled path and the manual
+  path share `run_backup`, so making the endpoint fire-and-forget is a contract
+  change and a separate decision.
+- **Consequences:** One `AsyncIOScheduler` per process, with
+  `max_instances=1` (a slow run is skipped, not stacked) and `coalesce=True` (a
+  backlog of missed fires collapses into one). `start`/`shutdown` are idempotent
+  and `register` replaces by name — `uvicorn --reload` re-enters the lifespan on
+  every file save, and APScheduler's `replace_existing` flag does not dedupe
+  jobs added before `start()`. Shutdown stops the scheduler with `wait=False`,
+  then cancels in-flight job tasks under a bounded timeout, and only then
+  disposes the engine: returning first would leave a job holding a connection
+  that is about to be closed underneath it. `core/scheduler.py` exposes
+  `scheduled_job_running()` for the admin maintenance endpoints' concurrency
+  guard; it reports scheduled runs only, so it composes with
+  `is_backup_running()` (which also sees manual triggers) rather than replacing
+  it. No new route, no new model, no migration: OpenAPI is unchanged at 84 paths
+  / 110 operations. `RISK_BATCH_WORKERS` remains unread dead config.
+- **Testing:** `tests/features/system/test_scheduler.py` (20 cases) pins job
+  registration from both crons, idempotent `start`, teardown emptying
+  `get_jobs()`, `SCHEDULER_ENABLED=false` registering nothing, a malformed cron
+  raising at registration, timezone fallback, in-flight tracking clearing on
+  raise, shutdown cancelling a running job without hanging, the drain refusing
+  to cancel its own caller, and both adapters committing their rows — which is
+  the assertion that fails against the direct-call version. The retention test
+  seeds three rows because pruning deliberately never leaves fewer than two.
+
+## 8.2 Audit Trail
+
+### ADR-064: The Audit Vocabulary Is an Enum, Not a Database Constraint
+
+- **Decision (D64):** `audit_logs.action` and `audit_logs.entity_type` stay
+  free-form `String(50)` columns, constrained in code by two `StrEnum`s
+  (`shared/enums.py::AuditAction`, `AuditEntity`) that `record_audit` is typed
+  against and that the reader endpoint validates filters with. Writes cover
+  every sensitive mutation across all slices, and are read through one new
+  endpoint, `GET /admin/audit-logs`.
+- **Date:** 2026-10-03
+- **Status:** Accepted
+- **Context:** `audit_logs` and `shared/audit.py::record_audit` landed with the
+  academic-structure work, but only `program` and `course` ever called it — six
+  call sites each. Everything else the security model calls "logged" was in fact
+  recorded nowhere, or only as a comment on the row itself. Two comments and one
+  contract note still said "there is no audit table until Phase 8", and
+  `api-contracts.md` already promised a `GET /admin/audit-logs` route that no
+  router defined. The frontend has a fully-mocked audit page waiting on it.
+- **Rationale:**
+  - **The helper already existed; only call sites were missing.** `record_audit`
+    flushes into the caller's transaction and never commits, which is what makes
+    an audit row roll back with the mutation it describes. A rejected mutation
+    therefore leaves no trail — correct, and asserted at every call site.
+  - **An enum, not a `CheckConstraint`.** A constraint would be stronger, but it
+    is a migration and a breaking change against existing rows, and it would
+    make adding an action a deploy-order problem. The column stays permissive;
+    the enum is the contract. `audit_logs.action` still has **no index**, so an
+    `action`-only filter is a sequential scan — fine at MVP volume, and the first
+    thing to add if the table grows.
+  - **`entity_type` + `entity_id` is not always enough to name a row, so
+    `entity_id` is nullable.** `course_professors` has a composite primary key
+    and no surrogate id; the `app_setting` rows a settings PATCH writes have no
+    id either; and the `import` / `enroll` rows describe a batch rather than a
+    row. Those carry their identity in `old_value` / `new_value`.
+  - **Batch mutations are aggregated; per-item ones are not.** A roster import
+    writes one row with `imported` / `duplicates` / `errors` counts — a 400-line
+    upload would otherwise bury every other action in the trail. A bulk excuse
+    run writes one row per student, because each excuse is an independently
+    revocable entity with its own id.
+  - **Snapshots are hand-listed, never serialised generically.** Each slice has a
+    `_<entity>_snapshot` static method naming exactly the audited columns. A
+    generic model dump would eventually copy a password hash or an encrypted face
+    embedding into a table every admin can read; the face snapshots carry
+    `face_embedding_version` precisely so the blob never has to be there.
+  - **A rejected filter is an error, not an empty page.** Because the columns are
+    free-form, an unrecognised `entity_type` would match nothing and read as
+    "no such activity" — the one conclusion an audit query must never let a
+    reader draw by accident. Hence 422 `invalid_audit_filter` and
+    `invalid_audit_date_range`. A *blank* filter is still "no filter", so a
+    client that posts its form fields verbatim does not get a 422.
+  - **`GET /admin/audit-logs` returns the stored row unaltered** — the same eight
+    fields `GET /admin/system/academic-structure` already returns, and
+    `AcademicStructureRead` is now a subclass of the new `AuditLogRead` so the
+    two cannot drift. Nothing is derived: no `actor_name` join, no `category`
+    mapping. `academic-structure` stays pinned to the four structural entity
+    types; widening it would change an endpoint that already has consumers.
+- **A live defect this surfaced, and fixed:** `AuthService.login` incremented
+  `failed_login_attempts`, set `is_locked`, flushed, and then raised
+  `InvalidCredentialsException`. `_get_db` rolls back on any exception, so
+  **the counter was discarded on every failed login and the lockout threshold
+  was never reached** — account lockout did not work at all. No test covered it.
+  Lockout bookkeeping now runs through `_lockout_transaction`, which opens its
+  own session and commits, the same shape ADR-063 gave the cron adapters. This
+  is the one deliberate exception to "services only `flush()`", and it exists
+  because the alternative is a security control that silently does nothing.
+  `lock`, `login_failed` and `unlock` rows are written there, with
+  `performed_by = None` since no actor is authenticated at that point.
+- **Known limitations, stated rather than inherited:**
+  - **The counter is read-then-written, not atomic.** Two concurrent wrong
+    passwords for the same account can lose an increment. The row lock during
+    `UPDATE` serialises the writes but not the preceding `SELECT`. Pre-existing
+    in shape, but newly reachable now that the counter persists at all; the fix
+    is an atomic `SET failed_login_attempts = failed_login_attempts + 1`.
+  - **No admin-initiated lockout or password reset is auditable, because neither
+    exists.** `api-contracts.md` documents `POST /admin/users/{id}/reset-password`
+    and its student and professor equivalents; none is implemented. There is no
+    admin unlock route either, anywhere in the contract. `is_locked` is only ever
+    cleared by a successful login after the window elapses, or by a completed
+    self-service reset. Both gaps need the endpoints first; this decision records
+    them rather than inventing the surface.
+  - **`change_password` is not audited**, only `reset_password`. The security
+    model lists lockout and failed logins but not a self-service password change
+    with the current password. Reasonable to revisit alongside the admin routes.
+  - **The frontend still mocks the audit page.** Its designed response shape
+    (`occurred_at` / `actor_name` / `actor_role` / `category` / `entity` /
+    `detail`, in `shared/types/admin.ts`) does not match the stored columns.
+    Reconciling it is a frontend change and was deliberately left out of a
+    backend slice.
+- **Consequences:** OpenAPI 84 → 85 paths, 110 → 111 operations. No new model,
+  and no migration of its own — `audit_logs` already exists, from the
+  academic-structure work (`f4a9c2b7d103`). One unrelated conformance migration
+  (`b1c4e7f0a2d6`) ships alongside it; see ADR-065. 583 tests, up from 531.
+- **Testing:** `tests/features/auth/test_login_lockout.py` (12 cases) is the
+  regression test for the rollback defect: two of them drive
+  `POST /api/auth/login` over HTTP specifically because the service-level tests
+  never touch `_get_db`'s rollback and would pass against the broken version.
+  `tests/features/system/test_audit_logs_http.py` (26) covers the read contract,
+  including that the two audit endpoints stay scoped apart.
+  `tests/features/system/test_audit_call_sites_http.py` (14) drives the mutations
+  that only exist behind a route. The two pre-existing fake-session suites assert
+  their own writes now that those services add audit rows.
+
+## 8.3 Schema Conformance
+
+### ADR-065: The Model Is the Authoritative Schema; Migrations Converge Onto It
+
+- **Decision (D65):** `alembic check` reports no drift, repository-wide, and
+  `alembic check` is the only guard that keeps it that way. When a model and an
+  already-applied migration disagree, the model is right and a **new forward
+  migration** reconciles the database.
+- **Date:** 2026-10-03
+- **Status:** Accepted
+- **Context:** `alembic check` has failed on `app_settings` since Phase 12.0
+  landed. Migration `e7f8a9b0c1d2` created the table with a `UniqueConstraint`
+  on `key` **and** a separate non-unique index on the same column, while
+  `system/model.py` declares `key = mapped_column(String(100), unique=True,
+  index=True)` — which in SQLAlchemy means *one* unique index and no separate
+  constraint. Three operations were reported: drop the constraint, drop the
+  index, recreate the index as unique.
+- **Rationale:**
+  - **The constraint was the redundant half, not the model.** Postgres already
+    implements `UNIQUE` as an index, so the extra `ix_app_settings_key` was dead
+    weight *and* non-unique. `key` is load-bearing: `_stored_settings`
+    collapses rows with `{row.key: row.value for row in rows}` and seeds missing
+    keys, so duplicates would vanish silently into last-write-wins rather than
+    raise. Uniqueness is now declared once, by the unique index, and verified
+    enforced.
+  - **Fixed forward, never by editing an applied revision.** `e7f8a9b0c1d2` has
+    run in every environment that has migrated, so rewriting it forks the chain.
+    `b1c4e7f0a2d6` converges instead, and its `downgrade()` restores the old
+    shape exactly.
+  - **Safe on existing data.** The original constraint has enforced uniqueness
+    since the table was created, so no duplicate keys can exist and the new
+    unique index cannot fail. Postgres DDL is transactional and alembic runs
+    each revision in a transaction, so the drop-and-recreate has no window in
+    which a concurrent write could slip a duplicate in.
+- **Why it went unnoticed, and why no test will catch the next one:**
+  `tests/conftest.py` builds the test schema with `Base.metadata.create_all`,
+  straight from the models — the migration chain is never exercised by the
+  suite at all. A test asserting `app_settings.key` is unique would pass
+  identically against both schemas, because both are derived from the same
+  model. The suite can detect a *model* bug; it is structurally incapable of
+  detecting *migration* drift.
+  This is why the rule needs stating. Reading `alembic/versions/` shows a
+  constraint and an index; the model shows one unique index; the intuitive move
+  is to reconcile by deleting `unique=True` from the model — which the suite
+  would not object to, and which would leave two writers racing to insert the
+  same key with nothing to stop them. **Fix the migration, never the model.**
+- **Consequences:** head is `b1c4e7f0a2d6`, 9 migrations.
+  `b1c4e7f0a2d6_converge_app_settings_key_index.py` is the only added migration;
+  no model changed, so the 583 tests are unaffected and none of them cover it.
+  There is no CI and nothing runs `alembic check` automatically, so the guard is
+  manual — recorded in `AGENTS.md` rather than left to memory.
+
+### ADR-066: The Sync Flush Reconciles; It Does Not Resubmit
+
+- **Decision (D66):** `POST /admin/system/sync/flush` confirms each pending
+  `sync_queue` entry against the `attendance_records` row it names (id match
+  on both sides → `done`, otherwise `failed` with another retry counted)
+  instead of replaying the scan through the validation path. `POST
+  /admin/system/cleanup` deletes OTP codes older than 7 days and finished
+  (`done`/`failed`) queue rows older than 30 days, never touching `pending`
+  rows. Both refuse with **409 `maintenance_in_progress`** while the
+  maintenance lock, a backup, or a scheduled batch is active, and both write
+  one aggregate audit row (`entity_type: maintenance`, `entity_id: null`,
+  counts in `new_value`).
+- **Date:** 2026-10-04
+- **Status:** Accepted
+- **Context:** The queue writer (`AttendanceService._maybe_record_sync`)
+  persists the attendance row *before* enqueueing, and the payload carries
+  ids only — no GPS, liveness evidence, face score, or student number — so a
+  `ScanRequest` cannot be rebuilt and a true replay would only meet the
+  duplicate guard it was designed to trip. Resubmission was therefore never
+  available; reconciliation is the only honest semantics, and it is also the
+  idempotent one: a flush interrupted mid-run simply marks the remainder on
+  the next press.
+- **Rationale:**
+  - **Retro-failing valid history would be the inaccuracy.** A student who
+    unenrolled after scanning, or a session that has since expired, must not
+    fail a scan that was legitimate when taken. Only corruption (orphan,
+    mismatch, unparseable payload) fails — everything else is a fact the
+    server already accepted.
+  - **One audit row per run, per ADR-064's batch rule.** A roster import
+    writes one row with counts rather than burying the trail; a flush over a
+    large backlog follows the same rule. `maintenance` is the first new
+    `AuditEntity` member since the vocabulary was fixed, and it needed no
+    migration: the columns are free-form by design (D64).
+  - **The guard composes rather than replaces.** `scheduled_job_running()`
+    sees scheduled batches only, `is_backup_running()` also sees manual
+    triggers, and the new `_MAINTENANCE_LOCK` sees a second maintenance run —
+    the same OR-composition the scheduler decision (D63) established.
+- **Consequences:** Two new routes (`POST /admin/system/sync/flush`, `POST
+  /admin/system/cleanup`), 86 OpenAPI paths, no migration. 11 new tests in
+  `tests/features/system/test_maintenance_http.py` (594 total, all passing).
+  The prune helper is the implementation the future cleanup-job work reuses.
+
+---
+
+### ADR-067: Test and Benchmark Infrastructure Lives Beside the Suite
+
+- **Decision (D67):** Phase 9's verification assets are three files at
+  `backend/` root plus one module inside the suite: the seed is
+  `src/tests/seed_data.py` with `backend/test_seed_data.py` as a thin entry
+  point; the concurrent-scan load harness is `backend/locustfile.py` with its
+  import-safe helpers (`poisson_wait`, `SlotAssigner`, `discover_session_pool`)
+  in `backend/bench_timings.py`, which also serves `--batch` / `--backup`
+  one-shot timings. Benchmark-only behavior stays gated behind existing config
+  (`BENCHMARK_MODE` skips the scan geofence + liveness checks and the per-IP
+  scan rate gate; `RISK_BATCH_WORKERS` shards scoring across threads
+  order-preservingly), both defaulting off.
+- **Date:** 2026-10-04
+- **Status:** Accepted
+- **Context:** Three findings from the first load runs forced these placements.
+  (1) locust calls `wait_time` bound, so a zero-arg wait crashes every virtual
+  user on its first tick. (2) A seed that owns its tables outright breaks the
+  moment a scheduled batch runs: the risk-score lookup keyed on
+  `(student, offering)` multi-matched, because the unique key is
+  `(student, offering, semester, computed_day)`. (3) Importing locust into the
+  pytest process installs gevent monkey-patching and hangs the entire suite —
+  which is also why the harness's unit-testable helpers cannot live in the
+  locustfile.
+- **Rationale:**
+  - **A re-runnable script, not a data migration.** The seed must be
+    importable by tests and the harness, re-runnable without duplicating rows,
+    and able to provision load fixtures on demand (`--load-fixtures N`). A
+    migration is none of those: it runs once, inside the schema history, and
+    cannot take a flag. Every write is looked up by its unique column first, so
+    re-runs are no-ops and `--reset` is the explicit destructive path.
+  - **Benchmarks must not change what they measure.** Gating behind config
+    keeps the geofence and rate limiter out of the request path by default and
+    leaves production behavior untouched; both paths are covered by tests, so
+    the skip is a tested branch rather than an unverified assumption.
+  - **Order-preserving parallelism.** `RISK_BATCH_WORKERS` shards the scoring
+    loop by chunk and concatenates in input order, so a sharded run scores
+    identically to the serial one — verified by a test asserting the two
+    summaries match — while the serial path stays the default.
+  - **Harness identity is assigned, not derived.** `SlotAssigner` deals slots
+    `1..pool_size` exactly once from a locked counter. Deriving a slot from
+    `id(user)` collapses CPython's 16-byte-aligned addresses onto a handful of
+    residues modulo the pool size, so users shared an identity and rescanned
+    each other's sessions as `duplicate_scan`.
+- **Consequences:** 2 new backend-root scripts and 1 suite module; the seed's
+  load fixtures are the only source of `SEED-LOAD-*` sessions and 30
+  `loadtestNN@load.uni.edu` accounts, and their emails must stay on a
+  deliverable domain because the login contract validates with `EmailStr`
+  (reserved TLDs 422 on every login). `bench_timings.py --backup` needs `pg_dump`
+  and an OpenSSL whose `enc` supports AEAD; the 2026-10-04 run recorded the
+  backup leg as environment-blocked for exactly that reason. The gevent trap is
+  documented in AGENTS.md so the helpers are not "tidied" back into
+  `locustfile.py`.

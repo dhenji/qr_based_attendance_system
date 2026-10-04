@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Sequence
+from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,9 +46,12 @@ from features.excuse.schema import (
 from features.professor.model import Professor
 from features.session.model import Session
 from features.student.model import Student
+from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.email import OutboundEmail, dispatch_emails
 from shared.enums import (
+    AuditAction,
+    AuditEntity,
     ExcuseInitiatedBy,
     ExcuseInitiatedVia,
     ExcuseStatus,
@@ -126,6 +129,7 @@ class ExcuseService:
             status=ExcuseStatus.APPROVED.value,
             reviewed_by=user_id,
             reviewed_at=_utcnow(),
+            actor_id=user_id,
         )
         original: str | None = self._apply_excuse(
             record,
@@ -133,6 +137,16 @@ class ExcuseService:
             reason=payload.reason,
             actor_id=user_id,
             excuse_type=EXCUSE_TYPE_QUICK,
+        )
+
+        await record_audit(
+            self._session,
+            actor_id=user_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.ATTENDANCE_RECORD,
+            entity_id=record.id,
+            old_value={"validation_status": original},
+            new_value={"validation_status": record.validation_status},
         )
 
         return ExcuseActionResponse(
@@ -169,6 +183,7 @@ class ExcuseService:
             status=ExcuseStatus.APPROVED.value,
             reviewed_by=user_id,
             reviewed_at=_utcnow(),
+            actor_id=user_id,
         )
         original: str | None = self._apply_excuse(
             record,
@@ -176,6 +191,16 @@ class ExcuseService:
             reason=payload.reason,
             actor_id=user_id,
             excuse_type=EXCUSE_TYPE_WITH_EVIDENCE,
+        )
+
+        await record_audit(
+            self._session,
+            actor_id=user_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.ATTENDANCE_RECORD,
+            entity_id=record.id,
+            old_value={"validation_status": original},
+            new_value={"validation_status": record.validation_status},
         )
 
         return ExcuseActionResponse(
@@ -225,8 +250,9 @@ class ExcuseService:
                 status=ExcuseStatus.APPROVED.value,
                 reviewed_by=user_id,
                 reviewed_at=now,
+                actor_id=user_id,
             )
-            self._apply_excuse(
+            original: str | None = self._apply_excuse(
                 record,
                 excuse_id=excuse.id,
                 reason=payload.reason,
@@ -234,6 +260,17 @@ class ExcuseService:
                 excuse_type=EXCUSE_TYPE_QUICK,
                 now=now,
             )
+
+            await record_audit(
+                self._session,
+                actor_id=user_id,
+                action=AuditAction.UPDATE,
+                entity_type=AuditEntity.ATTENDANCE_RECORD,
+                entity_id=record.id,
+                old_value={"validation_status": original},
+                new_value={"validation_status": record.validation_status},
+            )
+
             excused_ids.append(record.student_id)
             count += 1
 
@@ -276,6 +313,7 @@ class ExcuseService:
             status=ExcuseStatus.PENDING.value,
             reviewed_by=None,
             reviewed_at=None,
+            actor_id=user_id,
         )
         await self._session.refresh(excuse)
 
@@ -305,24 +343,49 @@ class ExcuseService:
             raise ExcuseNotPendingException(request_id)
 
         now: datetime = _utcnow()
+        old_value: dict[str, Any] = self._excuse_snapshot(excuse)
         excuse.status = payload.status
         excuse.reviewed_by = user_id
         excuse.reviewed_at = now
         excuse.review_notes = payload.review_notes
         await self._session.flush()
 
+        await record_audit(
+            self._session,
+            actor_id=user_id,
+            action=(
+                AuditAction.APPROVE
+                if payload.status == ExcuseStatus.APPROVED.value
+                else AuditAction.REJECT
+            ),
+            entity_type=AuditEntity.EXCUSE,
+            entity_id=excuse.id,
+            old_value=old_value,
+            new_value=self._excuse_snapshot(excuse),
+        )
+
         if payload.status == ExcuseStatus.APPROVED.value:
             record: Attendance = await self._get_attendance_or_404(
                 excuse.student_id, excuse.session_id
             )
             self._require_excusable(record, excuse.student_id, excuse.session_id)
-            self._apply_excuse(
+            previous: str | None = self._apply_excuse(
                 record,
                 excuse_id=excuse.id,
                 reason=excuse.reason,
                 actor_id=user_id,
                 excuse_type=EXCUSE_TYPE_REQUEST_APPROVED,
                 now=now,
+            )
+
+            await record_audit(
+                self._session,
+                actor_id=user_id,
+                action=AuditAction.UPDATE,
+                entity_type=AuditEntity.ATTENDANCE_RECORD,
+                entity_id=record.id,
+                old_value={"validation_status": previous},
+                new_value={"validation_status": record.validation_status},
             )
 
         await self._session.refresh(excuse)
@@ -349,6 +412,8 @@ class ExcuseService:
             student_id, session_id, approved_only=False
         )
 
+        old_value: dict[str, Any] = self._excuse_snapshot(excuse)
+
         if reason is not None:
             excuse.reason = reason
             # The attendance row carries its own copy of the reason as the audit
@@ -366,6 +431,17 @@ class ExcuseService:
             excuse.review_notes = review_notes
 
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=user_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.EXCUSE,
+            entity_id=excuse.id,
+            old_value=old_value,
+            new_value=self._excuse_snapshot(excuse),
+        )
+
         await self._session.refresh(excuse)
 
         return ExcuseRequestRead.model_validate(excuse)
@@ -388,12 +464,15 @@ class ExcuseService:
             student_id, session_id, approved_only=True
         )
         record: Attendance = await self._get_attendance_or_404(student_id, session_id)
+        old_value: dict[str, Any] = self._excuse_snapshot(excuse)
 
         # Clearing the excuse columns is only correct for the excuse that is
         # actually stamped here. Doing it unconditionally would drop an audit
         # trail this revoke has no business touching.
         reverted: str | None = None
-        if record.excuse_request_id == excuse.id:
+        touched_attendance: bool = record.excuse_request_id == excuse.id
+
+        if touched_attendance:
             reverted = record.original_status
             record.validation_status = (
                 record.original_status or record.validation_status
@@ -409,6 +488,30 @@ class ExcuseService:
         excuse.reviewed_by = user_id
         excuse.reviewed_at = _utcnow()
         await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=user_id,
+            action=AuditAction.REVOKE,
+            entity_type=AuditEntity.EXCUSE,
+            entity_id=excuse.id,
+            old_value=old_value,
+            new_value=self._excuse_snapshot(excuse),
+        )
+
+        # Only when this revoke actually touched the row: the guard may have
+        # declined because a different excuse is stamped there, and then no
+        # attendance status moved.
+        if touched_attendance:
+            await record_audit(
+                self._session,
+                actor_id=user_id,
+                action=AuditAction.UPDATE,
+                entity_type=AuditEntity.ATTENDANCE_RECORD,
+                entity_id=record.id,
+                old_value={"validation_status": ValidationStatus.EXCUSED.value},
+                new_value={"validation_status": record.validation_status},
+            )
 
         return RevokeExcuseResponse(reverted_to=reverted)
 
@@ -686,8 +789,9 @@ class ExcuseService:
         status: str,
         reviewed_by: int | None,
         reviewed_at: datetime | None,
+        actor_id: int,
     ) -> ExcuseRequest:
-        return await self._excuses.create(
+        excuse: ExcuseRequest = await self._excuses.create(
             student_id=student_id,
             session_id=session_id,
             initiated_by=initiated_by,
@@ -698,6 +802,40 @@ class ExcuseService:
             reviewed_by=reviewed_by,
             reviewed_at=reviewed_at,
         )
+
+        # One row per excuse, including inside a bulk run: each is an
+        # independently revocable entity with its own id, unlike the students a
+        # roster import creates.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.EXCUSE,
+            entity_id=excuse.id,
+            new_value=self._excuse_snapshot(excuse),
+        )
+
+        return excuse
+
+    @staticmethod
+    def _excuse_snapshot(excuse: ExcuseRequest) -> dict[str, Any]:
+        """The audited columns of an excuse request.
+
+        `reason` is included because it is the substance of the decision, but
+        `attachment_urls` is reduced to a count: the URLs point at
+        content-addressed objects and the list itself is noise in a trail.
+        """
+        return {
+            "student_id": excuse.student_id,
+            "session_id": excuse.session_id,
+            "initiated_by": excuse.initiated_by,
+            "initiated_via": excuse.initiated_via,
+            "reason": excuse.reason,
+            "attachment_count": len(excuse.attachment_urls or []),
+            "status": excuse.status,
+            "reviewed_by": excuse.reviewed_by,
+            "review_notes": excuse.review_notes,
+        }
 
     def _apply_excuse(
         self,
