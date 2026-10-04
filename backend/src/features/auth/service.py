@@ -47,6 +47,7 @@ from features.auth.exceptions import (
     CurrentPasswordInvalid,
     InvalidCredentialsException,
     MfaAlreadyEnabledException,
+    MfaNotEnabledException,
     MfaVerifyException,
     OtpExpiredException,
     OtpInvalidException,
@@ -519,6 +520,62 @@ class AuthService:
         return MFASetupResponse(
             secret=secret, qr_url=otpauth_url, manual_entry_key=secret
         )
+
+    async def disable_mfa(self, user: User, password: str) -> None:
+        """Turn MFA off, invalidating every outstanding backup code.
+
+        The contract (api-contracts.md) is explicit about all four effects:
+        verify the password, clear `mfa_enabled`, clear the TOTP secret, and
+        invalidate the unconsumed backup codes. The last one is the security
+        point — leaving them live would hand a caller ten working codes for an
+        account that no longer challenges for a code.
+
+        Codes are consumed with `used_at` rather than deleted, matching
+        `generate_backup_codes`: the rows are the historical record, and
+        `list_backup_codes` derives `remaining` from `used_at IS NULL`, so this
+        is what makes a disabled account report zero remaining.
+        """
+
+        # Guard before the Argon2id verify: disabling MFA on an account that
+        # never had it is a no-op call, and password hashing is deliberately
+        # expensive. Checking the flag first also keeps the two failure modes
+        # distinguishable — a wrong password is 400, no MFA is 409.
+        if not user.mfa_enabled:
+            raise MfaNotEnabledException()
+
+        if not verify_password(password, user.password_hash):
+            raise CurrentPasswordInvalid()
+
+        now: datetime = datetime.now(timezone.utc)
+
+        outstanding: Sequence[MfaBackupCodes] = (
+            await self._session.scalars(
+                select(MfaBackupCodes).where(
+                    MfaBackupCodes.user_id == user.id, MfaBackupCodes.used_at.is_(None)
+                )
+            )
+        ).all()
+
+        for record in outstanding:
+            record.used_at = now
+
+        user.mfa_enabled = False
+        user.mfa_secret = None
+
+        # `_account_snapshot` deliberately omits every MFA field, so this audit
+        # row carries its own snapshot rather than widening the three other
+        # call sites' payloads. The secret is never included.
+        await record_audit(
+            self._session,
+            actor_id=user.id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value={"mfa_enabled": True},
+            new_value={"mfa_enabled": False},
+        )
+
+        await self._session.flush()
 
     async def generate_backup_codes(self, user: User) -> BackupCodesResponse:
         now: datetime = datetime.now(timezone.utc)
