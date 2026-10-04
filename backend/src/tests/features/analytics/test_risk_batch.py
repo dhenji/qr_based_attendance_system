@@ -308,3 +308,31 @@ async def test_promote_requires_semester_with_offering(
     service = AnalyticsService(test_db_session)
     with pytest.raises(Exception):
         await service.promote_staged(offering_id=1)
+
+
+async def test_risk_batch_workers_match_serial_output(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    now: datetime,
+    settings: Settings,
+) -> None:
+    await _high_absence_stack(factories, now)
+    serial = await run_risk_batch(
+        test_db_session,
+        now=now,
+        settings=settings.model_copy(
+            update={"risk_batch_workers": 1, "risk_batch_chunk_size": 1}
+        ),
+    )
+    parallel = await run_risk_batch(
+        test_db_session,
+        now=now,
+        settings=settings.model_copy(
+            update={"risk_batch_workers": 4, "risk_batch_chunk_size": 1}
+        ),
+    )
+
+    assert {k: v for k, v in serial.items() if k != "duration_ms"} == {
+        k: v for k, v in parallel.items() if k != "duration_ms"
+    }
+    assert serial["processed"] == 1

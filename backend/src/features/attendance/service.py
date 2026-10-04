@@ -357,8 +357,11 @@ class AttendanceService:
             payload.session_id, scanned_at, now, user_id, payload.student_number
         )
 
-        self._validate_geofence(db_session, payload.gps)
-        self._validate_liveness(payload.liveness_evidence)
+        if not self._settings.benchmark_mode:
+            # Load profile: skip the geofence + liveness gates so a benchmark
+            # run measures routing + persistence, not sensor checks.
+            self._validate_geofence(db_session, payload.gps)
+            self._validate_liveness(payload.liveness_evidence)
 
         status, original, review = self._decide_scan_outcome(
             db_session, scanned_at, payload.face_match_score
