@@ -25,6 +25,12 @@ Tuning: ``LOCUST_MEAN_WAIT_S`` (default 2.5, ~12 req/s across 30 users),
 ``LOCUST_SESSION_IDS`` (comma list, skips pool discovery),
 ``DATABASE_URL`` (pool discovery only).
 
+Re-baselining the targets: ``LOCUST_MIN_RPS`` (default 10),
+``LOCUST_MAX_P95_MS`` (1000), ``LOCUST_MAX_P99_MS`` (2000). The gate is a
+real assertion - a run that misses any target exits non-zero, so it can gate
+CI. It only ever forces failure: a clean run leaves the exit code to locust,
+which still fails on any recorded request failure.
+
 Pool discovery shells out to a clean interpreter (no gevent) running one
 ``SELECT id ... ORDER BY id`` over asyncpg, so the load process itself never
 touches the database driver under monkey-patched sockets.
@@ -33,6 +39,7 @@ Bandwidth shaping is out of scope for the harness: apply ``tc`` (or a proxy
 cap) on the load host to emulate 3G when that leg matters.
 
 Targets: >=10 req/s, p95 <1s, p99 <2s, zero spurious duplicate rejections.
+All four are asserted at the end of the run; missing any one exits non-zero.
 """
 
 from __future__ import annotations
@@ -62,6 +69,10 @@ DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys",
 )
 
+MIN_RPS = float(os.environ.get("LOCUST_MIN_RPS", "10"))
+MAX_P95_MS = float(os.environ.get("LOCUST_MAX_P95_MS", "1000"))
+MAX_P99_MS = float(os.environ.get("LOCUST_MAX_P99_MS", "2000"))
+
 SESSION_IDS: list[int] = []
 
 # Single-process runs (`--headless` without `--master`) share this counter,
@@ -70,6 +81,7 @@ SESSION_IDS: list[int] = []
 _assigner = SlotAssigner(POOL_SIZE)
 
 _failures: dict[str, int] = {"duplicate": 0, "rate_limited": 0, "error": 0}
+_counters: dict[str, int] = {"scans_ok": 0}
 
 
 def discover_session_pool() -> list[int]:
@@ -191,6 +203,7 @@ class ScanningStudent(HttpUser):
             catch_response=True,
         ) as response:
             if response.status_code == 200:
+                _counters["scans_ok"] += 1
                 response.success()
                 return
             try:
@@ -206,16 +219,100 @@ class ScanningStudent(HttpUser):
             response.failure(f"scan {_describe(response)} code={code}")
 
 
+def _window_seconds(stats) -> float:
+    """Wall-clock seconds over which the run actually issued requests.
+
+    ``stats.total_time`` is the sum of response times, so it is not a
+    denominator; ``total_rps`` uses these two timestamps instead.
+    """
+
+    if not stats.start_time or not stats.last_request_timestamp:
+        return 0.0
+    return max(stats.last_request_timestamp - stats.start_time, 0.0)
+
+
+def _percentile(stats, fraction: float) -> float | None:
+    """Percentile in ms, preferring the trailing window over the whole run.
+
+    ``get_current_response_time_percentile`` reads a 10-second rolling cache
+    and returns ``None`` when that window holds no samples — a short run, or
+    one that just idled. Falling back to the lifetime percentile keeps the
+    target meaningful; when even that has nothing to report the caller gets
+    ``None`` and must treat the target as unmet rather than as a pass.
+    """
+
+    current = stats.get_current_response_time_percentile(fraction)
+    if current is not None:
+        return float(current)
+    lifetime = stats.get_response_time_percentile(fraction)
+    return float(lifetime) if lifetime is not None else None
+
+
+def _describe_ms(value: float | None) -> str:
+    return "unavailable" if value is None else f"{value:.0f}ms"
+
+
 @events.test_stop.add_listener
 def _report(environment, **kwargs) -> None:
     stats = environment.stats.total
+    window_s = _window_seconds(stats)
+    if stats.num_requests == 0 or window_s <= 0:
+        print(
+            "\nload summary: "
+            f"requests={stats.num_requests} scans_ok={_counters['scans_ok']} "
+            f"window={window_s:.0f}s failures={_failures}"
+        )
+        print("FAIL: no requests recorded — the run measured nothing")
+        environment.process_exit_code = 1
+        return
+    scans_ok = _counters["scans_ok"]
+    scan_rps = scans_ok / window_s
+    p95 = _percentile(stats, 0.95)
+    p99 = _percentile(stats, 0.99)
     print(
         "\nload summary: "
         f"requests={stats.num_requests} "
-        f"rps={stats.total_rps:.1f} "
-        f"p95={stats.get_current_response_time_percentile(0.95) or 0:.0f}ms "
-        f"p99={stats.get_current_response_time_percentile(0.99) or 0:.0f}ms "
+        f"scans_ok={scans_ok} "
+        f"window={window_s:.0f}s "
+        f"scan_rps={scan_rps:.1f} "
+        f"blended_rps={stats.total_rps:.1f} "
+        f"p95={_describe_ms(p95)} "
+        f"p99={_describe_ms(p99)} "
         f"failures={_failures}"
     )
-    if _failures["duplicate"]:
-        print("FAIL: spurious duplicate rejections observed")
+    targets = (
+        (
+            "scan throughput",
+            f">={MIN_RPS:g} req/s",
+            f"{scan_rps:.1f} req/s",
+            scan_rps >= MIN_RPS,
+        ),
+        (
+            "response time p95",
+            f"<{MAX_P95_MS:g}ms",
+            _describe_ms(p95),
+            p95 is not None and p95 < MAX_P95_MS,
+        ),
+        (
+            "response time p99",
+            f"<{MAX_P99_MS:g}ms",
+            _describe_ms(p99),
+            p99 is not None and p99 < MAX_P99_MS,
+        ),
+        (
+            "duplicate rejections",
+            "0",
+            str(_failures["duplicate"]),
+            not _failures["duplicate"],
+        ),
+    )
+    missed = 0
+    for name, target, actual, met in targets:
+        verdict = "PASS" if met else "FAIL"
+        print(f"  {verdict}  {name:<20} target {target:<14} actual {actual}")
+        missed += not met
+    if missed:
+        print(f"FAIL: {missed} target(s) missed")
+        environment.process_exit_code = 1
+    else:
+        print("PASS: all targets met")

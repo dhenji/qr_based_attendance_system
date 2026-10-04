@@ -6,15 +6,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.attendance.model import Attendance
+from features.excuse.model import ExcuseRequest
 from features.excuse.service import ExcuseService
-from shared.enums import UserRole, ValidationStatus
+from features.system.model import AuditLog
+from shared.enums import AuditAction, AuditEntity, UserRole, ValidationStatus
 from tests.conftest import Factories
 
 QUICK_REASON = "Family emergency kept the student home today."
 EVIDENCE_REASON = "Clinic visit with a medical certificate attached."
 STUDENT_REASON = "Confined at the university clinic all morning with fever."
 REVISED_REASON = "Updated wording after the parent called the department."
+RACE_REASON = "Applied by the parallel quick excuse."
 ABSENT = ValidationStatus.ABSENT.value
+EXCUSED = ValidationStatus.EXCUSED.value
 
 
 async def _seed(factories: Factories) -> dict[str, Any]:
@@ -351,4 +355,120 @@ async def test_approve_preserves_original_status(
         )
     ).one()
     assert record.validation_status == "excused"
+    assert record.original_status == ABSENT
+
+
+async def _reload_attendance(
+    test_db_session: AsyncSession, student_id: int, session_id: int
+) -> Attendance:
+    """Re-read the attendance row.
+
+    Every read after a rolled-back request has to go back to the database: the
+    rollback leaves the session's identity map holding objects the transaction
+    never committed.
+    """
+
+    return (
+        await test_db_session.scalars(
+            select(Attendance).where(
+                Attendance.student_id == student_id,
+                Attendance.session_id == session_id,
+            )
+        )
+    ).one()
+
+
+async def test_approve_rolls_back_when_record_is_no_longer_excusable(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """A late rejection must undo the review's own writes, not just skip them.
+
+    `review_excuse` is the one method in this slice that writes before it has
+    finished validating: it flips the excuse to approved and flushes
+    (`service.py:347-351`) and records the audit (`:353`) before
+    `_require_excusable` can still refuse at `:371`. All of it lands in one
+    transaction, so `_get_db`'s rollback is the only thing standing between a
+    failed review and an approved excuse whose attendance row was never
+    stamped. Nothing else in the suite exercises that path.
+    """
+
+    graph = await _seed(factories)
+    student_id = graph["student"].id
+    session_id = graph["session"].id
+    professor_headers = await auth_headers(graph["professor_user"])
+
+    submitted = await api_client.post(
+        "/api/student/excuse-requests",
+        json={"session_id": session_id, "reason": STUDENT_REASON,
+              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        headers=await auth_headers(graph["student_user"]),
+    )
+    assert submitted.status_code == 201
+    rid = submitted.json()["id"]
+
+    # A parallel quick excuse won the race after the request was filed. The
+    # commit is load-bearing: `api_client` shares `test_db_session`, so the
+    # failed review below rolls that session back and would otherwise erase
+    # this setup too, leaving the assertions below to pass vacuously.
+    record = graph["record"]
+    record.validation_status = EXCUSED
+    record.excuse_reason = RACE_REASON
+    record.excused_by = graph["professor_user"].id
+    await test_db_session.commit()
+
+    denied = await api_client.post(
+        f"/api/professor/excuse-requests/{rid}/review",
+        json={"status": "approved"},
+        headers=professor_headers,
+    )
+    assert denied.status_code == 409
+    assert denied.json()["detail"]["code"] == "already_excused"
+
+    excuse = (
+        await test_db_session.scalars(
+            select(ExcuseRequest).where(ExcuseRequest.id == rid)
+        )
+    ).one()
+    assert excuse.status == "pending"
+    assert excuse.reviewed_at is None
+    assert excuse.reviewed_by is None
+
+    record = await _reload_attendance(test_db_session, student_id, session_id)
+    assert record.validation_status == EXCUSED
+    assert record.excuse_reason == RACE_REASON
+    assert record.excuse_request_id is None
+    assert record.original_status is None
+
+    # Scoped to APPROVE, not just to the excuse: filing the request already
+    # wrote a CREATE row for this id, and that one is supposed to survive.
+    audits = (
+        await test_db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_type == AuditEntity.EXCUSE.value,
+                AuditLog.entity_id == rid,
+                AuditLog.action == AuditAction.APPROVE.value,
+            )
+        )
+    ).all()
+    assert not audits, "the APPROVE audit row outlived the rolled-back review"
+
+    # The rollback has to leave the request usable, not merely unflipped: put
+    # the record back in an excusable state and the same review now succeeds.
+    record = await _reload_attendance(test_db_session, student_id, session_id)
+    record.validation_status = ABSENT
+    await test_db_session.commit()
+
+    approved = await api_client.post(
+        f"/api/professor/excuse-requests/{rid}/review",
+        json={"status": "approved"},
+        headers=professor_headers,
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+    record = await _reload_attendance(test_db_session, student_id, session_id)
+    assert record.validation_status == EXCUSED
     assert record.original_status == ABSENT
