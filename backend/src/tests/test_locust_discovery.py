@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from bench_timings import discover_session_pool, poisson_wait
+from bench_timings import SlotAssigner, discover_session_pool, poisson_wait
 
 
 def test_wait_accepts_user_and_returns_positive() -> None:
@@ -85,3 +85,9 @@ def test_locust_user_has_default_host() -> None:
     root = os.path.join(os.path.dirname(__file__), "..", "..")
     source = open(os.path.join(root, "locustfile.py")).read()
     assert re.search(r'host = "http://127\.0\.0\.1:8000"', source)
+
+
+def test_slot_assigner_deals_unique_slots_then_wraps() -> None:
+    assigner = SlotAssigner(30)
+    assert sorted(assigner.assign() for _ in range(30)) == list(range(1, 31))
+    assert assigner.assign() == 1

@@ -47,6 +47,7 @@ from locust import HttpUser, events, task
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from bench_timings import SlotAssigner
 from bench_timings import discover_session_pool as _discover, poisson_wait
 
 MEAN_WAIT_S = float(os.environ.get("LOCUST_MEAN_WAIT_S", "2.5"))
@@ -62,6 +63,11 @@ DATABASE_URL = os.environ.get(
 )
 
 SESSION_IDS: list[int] = []
+
+# Single-process runs (`--headless` without `--master`) share this counter,
+# so slots 1..POOL_SIZE are unique per user. Distributed workers would each
+# restart at 1 — shard POOL_SIZE/LOCUST_SESSION_IDS per worker instead.
+_assigner = SlotAssigner(POOL_SIZE)
 
 _failures: dict[str, int] = {"duplicate": 0, "rate_limited": 0, "error": 0}
 
@@ -111,7 +117,7 @@ class ScanningStudent(HttpUser):
     def on_start(self) -> None:
         if not SESSION_IDS:
             raise RuntimeError("session pool is empty")
-        self.slot = (id(self) % POOL_SIZE) + 1
+        self.slot = _assigner.assign()
         self.username = f"loadtest{self.slot:02d}"
         self.scans = 0
         token = self._login_with_retry()

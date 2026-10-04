@@ -50,6 +50,30 @@ def poisson_wait(mean_s: float) -> Callable[[object], float]:
     return _wait
 
 
+class SlotAssigner:
+    """Deterministic 1-based slots for load virtual users.
+
+    Lives here rather than in `locustfile.py` so the suite can cover it:
+    deriving a slot from `id(user) % pool_size` collapses CPython's
+    16-byte-aligned addresses onto a few residues, so several users share
+    one identity and rescan each other's sessions as `duplicate_scan`.
+    A locked counter assigns 1..pool_size exactly once, then wraps.
+    """
+
+    def __init__(self, pool_size: int) -> None:
+        import threading
+
+        self._pool_size = pool_size
+        self._lock = threading.Lock()
+        self._next = 0
+
+    def assign(self) -> int:
+        with self._lock:
+            slot = self._next % self._pool_size + 1
+            self._next += 1
+        return slot
+
+
 def discover_session_pool(
     *, prefix: str, dsn: str, explicit: str = ""
 ) -> list[int]:
