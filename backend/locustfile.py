@@ -38,7 +38,6 @@ Targets: >=10 req/s, p95 <1s, p99 <2s, zero spurious duplicate rejections.
 from __future__ import annotations
 
 import os
-import random
 import sys
 import time
 import uuid
@@ -48,7 +47,7 @@ from locust import HttpUser, events, task
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from bench_timings import discover_session_pool as _discover
+from bench_timings import discover_session_pool as _discover, poisson_wait
 
 MEAN_WAIT_S = float(os.environ.get("LOCUST_MEAN_WAIT_S", "2.5"))
 POOL_SIZE = int(os.environ.get("LOCUST_POOL_SIZE", "30"))
@@ -65,10 +64,6 @@ DATABASE_URL = os.environ.get(
 SESSION_IDS: list[int] = []
 
 _failures: dict[str, int] = {"duplicate": 0, "rate_limited": 0, "error": 0}
-
-
-def _wait() -> float:
-    return random.expovariate(1.0 / MEAN_WAIT_S)
 
 
 def discover_session_pool() -> list[int]:
@@ -93,7 +88,7 @@ def _load_session_pool(environment, **kwargs) -> None:
     print(f"load pool: {len(SESSION_IDS)} sessions from id {SESSION_IDS[0]}")
 
 
-LOGIN_ATTEMPTS = 5
+LOGIN_ATTEMPTS = 8
 
 
 def _describe(response: object) -> str:
@@ -111,7 +106,7 @@ def _describe(response: object) -> str:
 
 class ScanningStudent(HttpUser):
     host = "http://127.0.0.1:8000"
-    wait_time = _wait  # type: ignore[assignment]
+    wait_time = poisson_wait(MEAN_WAIT_S)
 
     def on_start(self) -> None:
         if not SESSION_IDS:
@@ -153,7 +148,7 @@ class ScanningStudent(HttpUser):
                 last = _describe(response)
                 if response.status_code == 429 and attempt < LOGIN_ATTEMPTS:
                     response.success()
-                    time.sleep(min(10 * attempt, 30))
+                    time.sleep(min(15 * attempt, 60))
                     continue
                 response.failure(f"login {last}")
         raise RuntimeError(f"login failed for {self.username}: {last}")
@@ -165,7 +160,9 @@ class ScanningStudent(HttpUser):
         payload = {
             "session_id": session_id,
             "student_number": self.student_number,
-            "gps": {"lat": 14.5995, "lng": 121.0001, "accuracy": 5.0},
+            # Seeded classroom of the SEED-LOAD-* sessions (Room 301):
+            # a scan elsewhere is a genuine outside_geofence rejection.
+            "gps": {"lat": 14.5995, "lng": 120.9842, "accuracy": 5.0},
             "liveness_evidence": {
                 "blink_detected": True,
                 "head_turn_left": True,

@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import random
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -31,6 +33,21 @@ def _settings(**overrides):
     from core.config import get_settings
 
     return get_settings().model_copy(update=overrides)
+
+
+def poisson_wait(mean_s: float) -> Callable[[object], float]:
+    """Poisson-distributed wait for the load harness.
+
+    Lives here rather than in `locustfile.py` so the suite can cover it:
+    locust calls the class's `wait_time` as `user.wait_time()`, i.e. bound,
+    so the callable MUST accept the user argument — a zero-arg function
+    crashes every virtual user on its first wait.
+    """
+
+    def _wait(_user: object) -> float:
+        return random.expovariate(1.0 / mean_s)
+
+    return _wait
 
 
 def discover_session_pool(

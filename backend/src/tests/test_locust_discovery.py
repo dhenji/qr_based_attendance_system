@@ -16,7 +16,15 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from bench_timings import discover_session_pool
+from bench_timings import discover_session_pool, poisson_wait
+
+
+def test_wait_accepts_user_and_returns_positive() -> None:
+    """Locust calls `user.wait_time()` bound: a zero-arg wait crashes every VU."""
+
+    wait = poisson_wait(2.5)
+    assert isinstance(wait(object()), float)
+    assert wait(object()) > 0
 
 
 def test_explicit_session_ids_skip_discovery() -> None:
