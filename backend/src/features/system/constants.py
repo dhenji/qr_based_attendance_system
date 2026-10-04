@@ -65,3 +65,9 @@ ACTION_MAX_LENGTH: int = 50
 
 # Timestamped object name for analytics CSVs persisted through backup storage.
 EXPORT_FILENAME_PREFIX: str = "analytics_"
+
+# Retention windows for the maintenance cleanup run. OTP rows are ephemeral
+# login artifacts; finished sync-queue rows are kept a month for debugging
+# late-arriving duplicates before they are pruned.
+OTP_RETENTION_DAYS: int = 7
+SYNC_FINISHED_RETENTION_DAYS: int = 30

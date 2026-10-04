@@ -13,6 +13,8 @@ from features.system.schema import (
     AuditLogListResponse,
     BackupListResponse,
     BackupTriggerResponse,
+    CleanupResponse,
+    SyncFlushResponse,
     SystemSettingsRead,
     SystemSettingsUpdate,
 )
@@ -136,3 +138,27 @@ async def download_backup(
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{row.filename}"'},
     )
+
+
+@router.post(
+    "/system/sync/flush",
+    response_model=SyncFlushResponse,
+    summary="Reconcile pending offline-sync rows now",
+)
+async def flush_sync_queue(
+    user: AdminUser,
+    service: SystemServiceDep,
+) -> SyncFlushResponse:
+    return await service.flush_sync_queue(actor_id=user.id)
+
+
+@router.post(
+    "/system/cleanup",
+    response_model=CleanupResponse,
+    summary="Prune expired OTP and finished sync-queue rows",
+)
+async def cleanup_expired(
+    user: AdminUser,
+    service: SystemServiceDep,
+) -> CleanupResponse:
+    return await service.cleanup_expired(actor_id=user.id)

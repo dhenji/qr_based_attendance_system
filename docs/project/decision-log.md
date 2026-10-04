@@ -1351,3 +1351,45 @@
   no model changed, so the 583 tests are unaffected and none of them cover it.
   There is no CI and nothing runs `alembic check` automatically, so the guard is
   manual — recorded in `AGENTS.md` rather than left to memory.
+
+### ADR-066: The Sync Flush Reconciles; It Does Not Resubmit
+
+- **Decision (D66):** `POST /admin/system/sync/flush` confirms each pending
+  `sync_queue` entry against the `attendance_records` row it names (id match
+  on both sides → `done`, otherwise `failed` with another retry counted)
+  instead of replaying the scan through the validation path. `POST
+  /admin/system/cleanup` deletes OTP codes older than 7 days and finished
+  (`done`/`failed`) queue rows older than 30 days, never touching `pending`
+  rows. Both refuse with **409 `maintenance_in_progress`** while the
+  maintenance lock, a backup, or a scheduled batch is active, and both write
+  one aggregate audit row (`entity_type: maintenance`, `entity_id: null`,
+  counts in `new_value`).
+- **Date:** 2026-10-04
+- **Status:** Accepted
+- **Context:** The queue writer (`AttendanceService._maybe_record_sync`)
+  persists the attendance row *before* enqueueing, and the payload carries
+  ids only — no GPS, liveness evidence, face score, or student number — so a
+  `ScanRequest` cannot be rebuilt and a true replay would only meet the
+  duplicate guard it was designed to trip. Resubmission was therefore never
+  available; reconciliation is the only honest semantics, and it is also the
+  idempotent one: a flush interrupted mid-run simply marks the remainder on
+  the next press.
+- **Rationale:**
+  - **Retro-failing valid history would be the inaccuracy.** A student who
+    unenrolled after scanning, or a session that has since expired, must not
+    fail a scan that was legitimate when taken. Only corruption (orphan,
+    mismatch, unparseable payload) fails — everything else is a fact the
+    server already accepted.
+  - **One audit row per run, per ADR-064's batch rule.** A roster import
+    writes one row with counts rather than burying the trail; a flush over a
+    large backlog follows the same rule. `maintenance` is the first new
+    `AuditEntity` member since the vocabulary was fixed, and it needed no
+    migration: the columns are free-form by design (D64).
+  - **The guard composes rather than replaces.** `scheduled_job_running()`
+    sees scheduled batches only, `is_backup_running()` also sees manual
+    triggers, and the new `_MAINTENANCE_LOCK` sees a second maintenance run —
+    the same OR-composition the scheduler decision (D63) established.
+- **Consequences:** Two new routes (`POST /admin/system/sync/flush`, `POST
+  /admin/system/cleanup`), 86 OpenAPI paths, no migration. 11 new tests in
+  `tests/features/system/test_maintenance_http.py` (594 total, all passing).
+  The prune helper is the implementation the future cleanup-job work reuses.

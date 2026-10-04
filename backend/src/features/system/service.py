@@ -38,13 +38,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.database import database
 from core.exceptions import DomainException
-from core.scheduler import JOB_BACKUP, track
+from core.scheduler import JOB_BACKUP, scheduled_job_running, track
+from features.attendance.model import Attendance
+from features.auth.model import OtpCodes
 from features.system.constants import (
     ERROR_MAX_CHARS,
     EXPORT_FILENAME_PREFIX,
     GZIP_LEVEL_MAX,
     GZIP_LEVEL_MIN,
     LOCAL_FILE_MODE,
+    OTP_RETENTION_DAYS,
     READ_CHUNK_BYTES,
     SETTING_GEOFENCE_RADIUS,
     SETTING_LATE_WINDOW,
@@ -55,6 +58,7 @@ from features.system.constants import (
     SIDECAR_SUFFIX,
     STDERR_TAIL_CHARS,
     STRUCTURAL_ENTITY_TYPES,
+    SYNC_FINISHED_RETENTION_DAYS,
     WORK_DUMP_NAME,
     WORK_GZ_NAME,
 )
@@ -65,6 +69,7 @@ from features.system.exceptions import (
     BackupInProgressException,
     BackupNotFoundException,
     BackupStorageUnconfiguredException,
+    MaintenanceBusyException,
 )
 from features.system.model import AppSetting, AuditLog, BackupLog
 from features.system.schema import (
@@ -74,6 +79,8 @@ from features.system.schema import (
     AuditLogRead,
     BackupListResponse,
     BackupRead,
+    CleanupResponse,
+    SyncFlushResponse,
     SystemSettingsRead,
     SystemSettingsUpdate,
 )
@@ -96,10 +103,40 @@ logger = logging.getLogger(__name__)
 
 _BACKUP_LOCK = asyncio.Lock()
 
+_MAINTENANCE_LOCK = asyncio.Lock()
+
 
 def is_backup_running() -> bool:
     """Whether a backup currently holds the in-process lock."""
     return _BACKUP_LOCK.locked()
+
+
+def is_maintenance_running() -> bool:
+    """Whether a maintenance run currently holds the in-process lock."""
+    return _MAINTENANCE_LOCK.locked()
+
+
+def maintenance_busy() -> bool:
+    """Whether a maintenance run must refuse to start.
+
+    Its own lock plus every exclusive job it must not overlap: a
+    scheduled batch (seen through the scheduler tracker) or a backup
+    (seen through its lock, which also covers manual triggers).
+    """
+    return (
+        _MAINTENANCE_LOCK.locked()
+        or scheduled_job_running()
+        or is_backup_running()
+    )
+
+
+def _queue_id(payload: dict[str, Any], key: str) -> int:
+    """One id out of a queue payload, or raise when it is missing or
+    unparseable. The caller maps both failures to a failed entry."""
+    raw = payload.get(key)
+    if raw is None:
+        raise TypeError(f"sync_queue payload has no {key!r}")
+    return int(raw)
 
 
 def build_backup_filename(*, now: datetime | None = None) -> str:
@@ -312,6 +349,149 @@ class SystemService:
         if doomed:
             await self._session.flush()
         return {"removed": len(doomed)}
+
+    async def flush_sync_queue(
+        self, actor_id: int | None = None
+    ) -> SyncFlushResponse:
+        """Reconcile every pending offline-sync row and report the outcome.
+
+        Each queued entry mirrors a scan that already landed in
+        `attendance_records`: the payload carries ids only, no scan
+        evidence, so a run cannot resubmit the scan — and must not, since
+        the duplicate guard would reject it. Instead the run confirms
+        each entry landed on the row it names: an id match on both sides
+        marks the entry done, anything else (orphan, mismatch, payload
+        that no longer parses) marks it failed with another retry
+        counted. One bad entry never aborts the run. Refuses to start
+        while another exclusive job runs.
+        """
+        if maintenance_busy():
+            raise MaintenanceBusyException()
+        async with _MAINTENANCE_LOCK:
+            queued = list(
+                (
+                    await self._session.scalars(
+                        select(SyncQueue)
+                        .where(SyncQueue.status == QueueStatus.PENDING.value)
+                        .order_by(SyncQueue.id)
+                    )
+                ).all()
+            )
+            succeeded = 0
+            for row in queued:
+                if await self._reconcile_sync_row(row):
+                    row.status = QueueStatus.DONE.value
+                    succeeded += 1
+                else:
+                    row.status = QueueStatus.FAILED.value
+                    row.retry_count = (row.retry_count or 0) + 1
+            failed = len(queued) - succeeded
+            if queued:
+                await self._session.flush()
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.UPDATE,
+                entity_type=AuditEntity.MAINTENANCE,
+                entity_id=None,
+                new_value={
+                    "processed": len(queued),
+                    "succeeded": succeeded,
+                    "failed": failed,
+                },
+            )
+            return SyncFlushResponse(
+                processed=len(queued), succeeded=succeeded, failed=failed
+            )
+
+    async def _reconcile_sync_row(self, row: SyncQueue) -> bool:
+        """True when the queued entry names the attendance row it landed on.
+
+        Ids only, never relationships: the queue row carries no foreign
+        keys, so there is nothing to join on, and the attendance row is
+        fetched by primary key. A row deleted out from under its queue
+        entry reconciles as failed rather than raising, so the run keeps
+        going.
+        """
+        payload = row.record_data
+        if not isinstance(payload, dict):
+            return False
+        try:
+            attendance_id = _queue_id(payload, "attendance_id")
+            session_id = _queue_id(payload, "session_id")
+            student_id = _queue_id(payload, "student_id")
+        except (TypeError, ValueError):
+            return False
+        record = await self._session.get(Attendance, attendance_id)
+        if record is None:
+            return False
+        return (
+            record.session_id == session_id
+            and record.student_id == student_id
+        )
+
+    async def cleanup_expired(
+        self, actor_id: int | None = None
+    ) -> CleanupResponse:
+        """Delete expired login artifacts and finished sync rows.
+
+        OTP codes older than `OTP_RETENTION_DAYS` and finished (`done`
+        or `failed`) sync-queue rows older than
+        `SYNC_FINISHED_RETENTION_DAYS`, both measured on `created_at`.
+        Pending rows are never touched no matter their age: only the
+        flush run may resolve those. One audit row carries the per-table
+        counts; the response reports the summed total. Refuses to start
+        while another exclusive job runs.
+        """
+        if maintenance_busy():
+            raise MaintenanceBusyException()
+        async with _MAINTENANCE_LOCK:
+            now = datetime.now(timezone.utc)
+            old_otps = list(
+                (
+                    await self._session.scalars(
+                        select(OtpCodes).where(
+                            OtpCodes.created_at
+                            < now - timedelta(days=OTP_RETENTION_DAYS)
+                        )
+                    )
+                ).all()
+            )
+            finished_queue = list(
+                (
+                    await self._session.scalars(
+                        select(SyncQueue).where(
+                            SyncQueue.status.in_(
+                                [
+                                    QueueStatus.DONE.value,
+                                    QueueStatus.FAILED.value,
+                                ]
+                            ),
+                            SyncQueue.created_at
+                            < now
+                            - timedelta(days=SYNC_FINISHED_RETENTION_DAYS),
+                        )
+                    )
+                ).all()
+            )
+            for row in (*old_otps, *finished_queue):
+                await self._session.delete(row)
+            if old_otps or finished_queue:
+                await self._session.flush()
+            removed = len(old_otps) + len(finished_queue)
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.DELETE,
+                entity_type=AuditEntity.MAINTENANCE,
+                entity_id=None,
+                new_value={
+                    "removed": removed,
+                    "otp_codes": len(old_otps),
+                    "sync_queue": len(finished_queue),
+                },
+            )
+            return CleanupResponse(removed=removed)
 
     def _setting_default(self, key: str) -> int:
         """Env default behind one settings key."""

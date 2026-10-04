@@ -484,7 +484,8 @@ The full audit trail — every sensitive mutation, not just the structural ones.
 **Vocabulary.** `entity_type` is one of `program`, `year_level`, `course`,
 `course_offering`, `student`, `professor`, `enrollment`, `course_professor`,
 `excuse`, `session`, `face_enrollment`, `attendance_record`, `backup`,
-`app_setting`, `user`. `action` is one of `create`, `update`, `archive`,
+`app_setting`, `user`, `maintenance` (aggregate subject of the sync-flush and
+cleanup runs, one audit row per run with counts in `new_value`). `action` is one of `create`, `update`, `archive`,
 `delete`, `import`, `enroll`, `assign`, `unassign`, `open`, `close`, `approve`,
 `reject`, `revoke`, `lock`, `unlock`, `login_failed`, `password_reset`. A value
 outside either list is **422 `invalid_audit_filter`** rather than an empty page,
@@ -524,8 +525,15 @@ Download backup file.
 
 #### `POST /admin/system/sync/flush`
 
-Force-process pending `sync_queue` rows now (re-runs each through the scan
-validation path). Refuses to run concurrently with a backup/risk batch.
+Reconcile pending `sync_queue` rows now. Each queued entry mirrors a scan
+that already landed in `attendance_records` — the payload carries ids only,
+no scan evidence, so the run confirms each entry against the row it names
+rather than resubmitting the scan: id match on both sides marks the entry
+`done`, anything else (orphan, mismatch, unparseable payload) marks it
+`failed` with another retry counted. One bad entry never aborts the run.
+Refuses to start while a maintenance run, backup, or scheduled batch is
+active (**409 `maintenance_in_progress`**). Audited as one aggregate row
+(`action: update`, `entity_type: maintenance`).
 
 |                  |                                    |
 | ---------------- | ---------------------------------- |
@@ -533,7 +541,13 @@ validation path). Refuses to run concurrently with a backup/risk batch.
 
 #### `POST /admin/system/cleanup`
 
-Prune expired data (7-day OTPs, 30-day completed/failed sync_queue).
+Prune expired data: OTP codes older than 7 days and finished (`done` /
+`failed`) `sync_queue` rows older than 30 days, both measured on
+`created_at`. Pending queue rows are never touched no matter their age.
+Refuses to start while a maintenance run, backup, or scheduled batch is
+active (**409 `maintenance_in_progress`**). Audited as one aggregate row
+(`action: delete`, `entity_type: maintenance`, per-table counts in
+`new_value`).
 
 |                  |                  |
 | ---------------- | ---------------- |
