@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -300,10 +301,18 @@ def _score_targets(
     moment: datetime,
     cfg: Settings,
     chunk_size: int,
+    workers: int = 1,
 ) -> list[_ScoredTarget]:
-    scored: list[_ScoredTarget] = []
-    for start in range(0, len(resolved), chunk_size):
-        for student_id, offering_id, semester in resolved[start : start + chunk_size]:
+    slices = [
+        resolved[start : start + chunk_size]
+        for start in range(0, len(resolved), chunk_size)
+    ]
+
+    def _score_slice(
+        targets: list[tuple[int, int, str]],
+    ) -> list[_ScoredTarget]:
+        scored: list[_ScoredTarget] = []
+        for student_id, offering_id, semester in targets:
             expected = expected_by_offering.get(offering_id, 0)
             records = grouped.get((student_id, offering_id), [])
             features = compute_features(records, expected, moment)
@@ -318,7 +327,17 @@ def _score_targets(
                     features=features,
                 )
             )
-    return scored
+        return scored
+
+    if workers <= 1 or len(slices) <= 1:
+        return [item for part in slices for item in _score_slice(part)]
+
+    # `executor.map` preserves input order, so sharded runs score identically
+    # to the serial path while spreading chunks across worker threads.
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return [
+            item for part in executor.map(_score_slice, slices) for item in part
+        ]
 
 
 async def _upsert_scores(
@@ -452,7 +471,10 @@ async def run_risk_batch(
     grouped = await _load_grouped_attendance(session, student_ids, offering_ids)
 
     chunk_size = max(int(cfg.risk_batch_chunk_size or 1000), 1)
-    scored = _score_targets(resolved, expected, grouped, moment, cfg, chunk_size)
+    workers = max(int(cfg.risk_batch_workers or 1), 1)
+    scored = _score_targets(
+        resolved, expected, grouped, moment, cfg, chunk_size, workers
+    )
     if cfg.risk_batch_dry_run:
         high, medium, low = await _stage_scores(
             session, scored, student_ids, offering_ids, moment.date(), moment

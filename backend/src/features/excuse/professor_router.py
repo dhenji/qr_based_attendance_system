@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 from api.deps import ExcuseServiceDep, require_role
 from features.auth.model import User
@@ -84,7 +85,10 @@ async def excuse_student(
         )
 
     if "attachment_urls" in body:
-        payload_with_evidence = ProfWithEvidenceRequest.model_validate(body)
+        try:
+            payload_with_evidence = ProfWithEvidenceRequest.model_validate(body)
+        except ValidationError as exc:
+            raise RequestValidationError(errors=exc.errors())
         return await service.excuse_with_evidence(
             user_id=user.id,
             student_id=student_id,
@@ -92,7 +96,10 @@ async def excuse_student(
             payload=payload_with_evidence,
         )
 
-    payload_quick = QuickExcuseRequest.model_validate(body)
+    try:
+        payload_quick = QuickExcuseRequest.model_validate(body)
+    except ValidationError as exc:
+        raise RequestValidationError(errors=exc.errors())
     return await service.quick_excuse(
         user_id=user.id,
         student_id=student_id,
