@@ -33,19 +33,7 @@ from shared.datetimes import ensure_aware
 from shared.enums import ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.query import apply_if
-
-
-def _rates(
-    present: int, late: int, excused: int, enrolled: int
-) -> tuple[float, float]:
-    """Compliance (present/total) and participation ((p+l+e)/total) rates."""
-    if enrolled <= 0:
-        return 0.0, 0.0
-
-    return (
-        round(present / enrolled, 4),
-        round((present + late + excused) / enrolled, 4),
-    )
+from shared.rates import attendance_rates
 
 
 def _bucket_key(moment: datetime, granularity: TrendGranularity) -> date:
@@ -112,11 +100,11 @@ class ReportsService:
             bucket: list[Session] = buckets.get(key, [])
             tally: Counter[str] = bucket_tallies.get(key, Counter())
             expected: int = _expected_for(bucket, enrolled_by_offering)
-            compliance, participation = _rates(
-                tally.get(ValidationStatus.PRESENT.value, 0),
-                tally.get(ValidationStatus.LATE.value, 0),
-                tally.get(ValidationStatus.EXCUSED.value, 0),
-                expected,
+            compliance, participation = attendance_rates(
+                present=tally.get(ValidationStatus.PRESENT.value, 0),
+                late=tally.get(ValidationStatus.LATE.value, 0),
+                excused=tally.get(ValidationStatus.EXCUSED.value, 0),
+                enrolled=expected,
             )
             items.append(
                 AllCoursesItem(
@@ -140,11 +128,11 @@ class ReportsService:
         tallies_all: Counter[str] = await self._tallies(
             [row.id for row in sessions]
         )
-        avg_compliance, avg_participation = _rates(
-            tallies_all.get(ValidationStatus.PRESENT.value, 0),
-            tallies_all.get(ValidationStatus.LATE.value, 0),
-            tallies_all.get(ValidationStatus.EXCUSED.value, 0),
-            expected_all,
+        avg_compliance, avg_participation = attendance_rates(
+            present=tallies_all.get(ValidationStatus.PRESENT.value, 0),
+            late=tallies_all.get(ValidationStatus.LATE.value, 0),
+            excused=tallies_all.get(ValidationStatus.EXCUSED.value, 0),
+            enrolled=expected_all,
         )
 
         return AllCoursesResponse(
@@ -194,11 +182,11 @@ class ReportsService:
             tallies: Counter[str] = await self._tallies(
                 [row.id for row in sessions]
             )
-            compliance, participation = _rates(
-                tallies.get(ValidationStatus.PRESENT.value, 0),
-                tallies.get(ValidationStatus.LATE.value, 0),
-                tallies.get(ValidationStatus.EXCUSED.value, 0),
-                _expected_for(sessions, enrolled_by_offering),
+            compliance, participation = attendance_rates(
+                present=tallies.get(ValidationStatus.PRESENT.value, 0),
+                late=tallies.get(ValidationStatus.LATE.value, 0),
+                excused=tallies.get(ValidationStatus.EXCUSED.value, 0),
+                enrolled=_expected_for(sessions, enrolled_by_offering),
             )
             first: CourseOffering = rows[0]
             course: Course | None = course_map.get(course_id)
@@ -267,11 +255,11 @@ class ReportsService:
             for key in sorted(set(buckets) | set(bucket_tallies)):
                 bucket: list[Session] = buckets.get(key, [])
                 tally: Counter[str] = bucket_tallies.get(key, Counter())
-                compliance, participation = _rates(
-                    tally.get(ValidationStatus.PRESENT.value, 0),
-                    tally.get(ValidationStatus.LATE.value, 0),
-                    tally.get(ValidationStatus.EXCUSED.value, 0),
-                    _expected_for(bucket, enrolled_by_offering),
+                compliance, participation = attendance_rates(
+                    present=tally.get(ValidationStatus.PRESENT.value, 0),
+                    late=tally.get(ValidationStatus.LATE.value, 0),
+                    excused=tally.get(ValidationStatus.EXCUSED.value, 0),
+                    enrolled=_expected_for(bucket, enrolled_by_offering),
                 )
                 items.append(
                     ReportsTrendItem(

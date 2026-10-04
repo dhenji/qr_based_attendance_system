@@ -15,6 +15,7 @@ from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.query import apply_if
+from shared.rates import attendance_rates
 from features.analytics.batch import run_risk_batch
 from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.analytics.schema import (
@@ -37,19 +38,6 @@ from features.enrollment.model import Enrollment
 from features.program.model import Program, YearLevel
 from features.session.model import Session
 from features.student.model import Student
-
-
-def _rates(
-    present: int, late: int, excused: int, enrolled: int
-) -> tuple[float, float]:
-    """Compliance (present/total) and participation ((p+l+e)/total) rates."""
-    if enrolled <= 0:
-        return 0.0, 0.0
-
-    return (
-        round(present / enrolled, 4),
-        round((present + late + excused) / enrolled, 4),
-    )
 
 
 def _full_name(
@@ -247,11 +235,11 @@ class AnalyticsService:
             self._session, [row.id for row in sessions]
         )
         enrolled: int = _expected_for(sessions, enrolled_by_offering)
-        compliance, participation = _rates(
-            tallies.get(ValidationStatus.PRESENT.value, 0),
-            tallies.get(ValidationStatus.LATE.value, 0),
-            tallies.get(ValidationStatus.EXCUSED.value, 0),
-            enrolled,
+        compliance, participation = attendance_rates(
+            present=tallies.get(ValidationStatus.PRESENT.value, 0),
+            late=tallies.get(ValidationStatus.LATE.value, 0),
+            excused=tallies.get(ValidationStatus.EXCUSED.value, 0),
+            enrolled=enrolled,
         )
 
         return OverviewResponse(
@@ -319,11 +307,11 @@ class AnalyticsService:
             tallies = await _tallies_for_sessions(
                 self._session, [row.id for row in sessions]
             )
-            compliance, participation = _rates(
-                tallies.get(ValidationStatus.PRESENT.value, 0),
-                tallies.get(ValidationStatus.LATE.value, 0),
-                tallies.get(ValidationStatus.EXCUSED.value, 0),
-                _expected_for(sessions, enrolled_by_offering),
+            compliance, participation = attendance_rates(
+                present=tallies.get(ValidationStatus.PRESENT.value, 0),
+                late=tallies.get(ValidationStatus.LATE.value, 0),
+                excused=tallies.get(ValidationStatus.EXCUSED.value, 0),
+                enrolled=_expected_for(sessions, enrolled_by_offering),
             )
             course: Course | None = course_map.get(course_id)
 
@@ -415,11 +403,11 @@ class AnalyticsService:
             bucket: list[Session] = bucket_sessions.get(key, [])
             tallies: Counter[str] = bucket_tallies.get(key, Counter())
             enrolled: int = _expected_for(bucket, enrolled_by_offering)
-            compliance, participation = _rates(
-                tallies.get(ValidationStatus.PRESENT.value, 0),
-                tallies.get(ValidationStatus.LATE.value, 0),
-                tallies.get(ValidationStatus.EXCUSED.value, 0),
-                enrolled,
+            compliance, participation = attendance_rates(
+                present=tallies.get(ValidationStatus.PRESENT.value, 0),
+                late=tallies.get(ValidationStatus.LATE.value, 0),
+                excused=tallies.get(ValidationStatus.EXCUSED.value, 0),
+                enrolled=enrolled,
             )
             session_count: int = len(
                 {row.id for row in bucket}
