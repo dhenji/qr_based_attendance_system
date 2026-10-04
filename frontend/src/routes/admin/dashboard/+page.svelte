@@ -149,7 +149,7 @@
 				{#each adminAttendanceState.items.slice(0, 4) as r (r.course_id)}
 					<li>
 						<span class="strong">{r.course_code}</span>
-						<span class="muted">{r.sessions_count} sessions · {formatPercentage(r.avg_rate)}</span>
+						<span class="muted">{r.sessions_count} sessions · {formatPercentage(r.avg_rate * 100)}</span>
 					</li>
 				{/each}
 			</ul>

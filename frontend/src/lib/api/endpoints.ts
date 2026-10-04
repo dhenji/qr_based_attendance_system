@@ -2263,12 +2263,13 @@ export const AdminRecentScansEndpoint: EndpointDef<{ items: RecentScanResponse[]
 	},
 };
 
-// --- Admin system settings (no backend; contract-shaped mocks) ----------------
+// --- Admin system settings (live backend) -------------------------------------
 // api-contracts.md §System Settings & Backups: GET/PATCH /admin/system/settings
 // (app_settings KV seeded from env defaults), GET/POST /admin/backups,
-// POST /admin/system/sync/flush, POST /admin/system/cleanup. Real API by
-// default; mocks only when PUBLIC_MOCK_MODE=true. PATCH/flush/cleanup mutate
-// module state so saves visibly stick for the session.
+// GET /admin/backups/{id}/download, POST /admin/system/sync/flush,
+// POST /admin/system/cleanup — all served by the mounted features/system
+// router. Real API by default; the mocks below are only consulted when
+// PUBLIC_MOCK_MODE=true, where they mutate module state so saves visibly stick.
 
 export interface SystemSettingsResponse {
 	geofence_default_radius: number;

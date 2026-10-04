@@ -68,7 +68,11 @@ export const studentState = $state({
 // present / total_expected_sessions. An empty dashboard has no data yet, so
 // `hasData` distinguishes "0%" from "nothing to report".
 export const hasDashboardData = () => studentState.dashboard.total_scans > 0;
-export const complianceRate = () => Math.round(studentState.dashboard.compliance_rate);
+// The dashboard's compliance_rate is a 0-1 fraction (backend `_history_rates`
+// does round(present/enrolled, 4)), so it has to be scaled before display. This
+// previously omitted the *100, and Math.round(0.85) === 1 meant the student's
+// headline Attendance Rate always read "0%" or "1%".
+export const complianceRate = () => Math.round(studentState.dashboard.compliance_rate * 100);
 export const scansToday = () => studentState.dashboard.scans_today;
 export const totalScans = () => studentState.dashboard.total_scans;
 export const isLoading = () => studentState.loading || studentState.scanLoading;

@@ -1,10 +1,11 @@
 // features/admin/audit/store.svelte.ts
 // Admin audit-log state using Svelte 5 runes ($state object store).
 //
-// Two regions: the merged action feed (live record-creation rows + mock
-// operational rows, newest first) and the academic-structure changes list
-// (D38). The feed endpoint takes no sort params, so Time/User/Action header
-// toggles sort client-side over the loaded page (same convention as courses).
+// Two regions: the merged action feed (audit-trail rows from
+// GET /admin/audit-logs + record-creation rows derived from roster created_at,
+// newest first) and the academic-structure changes list (D38). The feed
+// endpoint takes no sort params, so Time/User/Action header toggles sort
+// client-side over the loaded page (same convention as courses).
 
 import type {
 	AuditLogFilters,

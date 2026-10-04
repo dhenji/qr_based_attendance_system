@@ -2,16 +2,17 @@
 // Admin system settings (wireframe 4.9, api-contracts.md §System Settings &
 // Backups).
 //
-// No backend exists yet (features/system is model-only and unmounted), so the
-// calls below go through endpoint defs whose mocks return deterministic,
-// contract-shaped data. Real API by default; mocks only when
-// PUBLIC_MOCK_MODE=true. PATCH/flush/cleanup mutate the mock module state,
-// so saves visibly stick for the session — the page labels the whole surface
-// as demo data until the backend lands.
+// All of this is live: `features/system` is mounted at api/router.py and serves
+// GET/PATCH /admin/system/settings, GET/POST /admin/backups,
+// GET /admin/backups/{id}/download, POST /admin/system/sync/flush and
+// POST /admin/system/cleanup. Settings live in the `app_settings` table, so a
+// successful PATCH persists — the page used to claim the values were
+// session-only demo data, which was false. Real API by default; the endpoint
+// defs' mocks are only consulted when PUBLIC_MOCK_MODE=true.
 //
 // Analytics export reuses the live-or-mock analytics getters and CSV
-// builders from the sibling analytics service; backup download is a JSON
-// descriptor (a mock cannot produce a pg_dump binary).
+// builders from the sibling analytics service. Backup download is the one
+// genuine gap: see downloadBackupDescriptor below.
 
 import { get, patch, post } from '$lib/api/client';
 import type {
@@ -67,16 +68,25 @@ export const cleanupSystem = async (): Promise<{ removed: number }> =>
 	post<{ removed: number }>('systemCleanup');
 
 // downloadBackupDescriptor
-// Stand-in for GET /admin/backups/{id}/download: a mock cannot emit a
-// pg_dump binary, so the descriptor names the row a real download would
-// serve. Labelled as demo on the page.
+// Stand-in for GET /admin/backups/{id}/download, which IS implemented: the
+// backend returns the encrypted archive as application/octet-stream with a
+// Content-Disposition filename (system/router.py). The frontend simply never
+// calls it, because `getText` throws in mock mode and the response is binary
+// rather than text, so it needs a blob fetch instead.
+//
+// TODO: swap this for a real download — fetch the route as a blob and save it
+// under `row.filename`. Until then admins cannot retrieve a backup archive,
+// only this JSON description of the row.
+//
+// The `demo: true` flag stays inside the payload so anything downstream that
+// consumes the file can still tell it is not an archive.
 export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 	const blob = new Blob(
 		[
 			JSON.stringify(
 				{
 					demo: true,
-					note: 'Descriptor only — the backup backend is not built yet.',
+					note: 'Descriptor only — the backup archive itself is not fetched yet.',
 					backup: row
 				},
 				null,
