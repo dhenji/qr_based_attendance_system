@@ -145,6 +145,47 @@ def _to_roster_row(raw: CsvRow) -> _RosterRow:
     )
 
 
+# `schedule_days` is an uppercase string of day initials, "MWF" or "TF" in the
+# seed. Nothing in the schema constrains the letters, so this is the only place
+# that interprets them.
+#
+# T is ambiguous in the wild: seed data writes "TF" for Tue/Fri, while
+# wireframes.md:1387 writes "TTH", where the trailing H stands in for Thursday
+# precisely because T was already taken by Tuesday. `H` is therefore read as
+# Thursday, and the conventional initials otherwise. An unrecognised letter
+# matches nothing rather than raising: a typo in one offering's schedule should
+# hide that one class from today's list, not break a student's whole dashboard.
+_DAY_INITIALS: dict[str, int] = {
+    "M": 0,
+    "T": 1,
+    "W": 2,
+    "H": 3,
+    "F": 4,
+    "S": 5,
+    "U": 6,  # Sunday: 'S' is taken by Saturday
+}
+
+
+def _meets_on(schedule_days: str | None, day: date) -> bool:
+    """Whether an offering with these `schedule_days` meets on `day`.
+
+    Membership rather than a first-letter comparison: "MWF" must match a
+    Wednesday, which it does not if only `M` is looked at. Monday is 0 in both
+    `date.weekday()` and this map, so the comparison is direct.
+    """
+    if not schedule_days:
+        return False
+
+    initials: str = schedule_days.strip().upper()
+    weekday: int = day.weekday()
+
+    return any(
+        _DAY_INITIALS.get(letter) == weekday
+        for letter in initials
+        if letter in _DAY_INITIALS
+    )
+
+
 def _schedule_stmt(student_id: int) -> Select[tuple[Any, ...]]:
     """Active offerings for `student_id`, projected in `_to_schedule_item` order."""
     return (
