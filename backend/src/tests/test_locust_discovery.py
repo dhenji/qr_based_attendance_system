@@ -87,6 +87,37 @@ def test_locust_user_has_default_host() -> None:
     assert re.search(r'host = "http://127\.0\.0\.1:8000"', source)
 
 
+def test_locustfile_asserts_the_documented_targets() -> None:
+    """The four targets must stay enforced, not merely printed.
+
+    Source-level because importing `locustfile` monkey-patches gevent and
+    hangs the suite, so the report function cannot be called from here.
+    """
+
+    root = os.path.join(os.path.dirname(__file__), "..", "..")
+    source = open(os.path.join(root, "locustfile.py")).read()
+
+    for knob, default in (
+        ("LOCUST_MIN_RPS", "10"),
+        ("LOCUST_MAX_P95_MS", "1000"),
+        ("LOCUST_MAX_P99_MS", "2000"),
+    ):
+        assert f'{knob}", "{default}"' in source, knob
+
+    for target in (
+        "scan throughput",
+        "response time p95",
+        "response time p99",
+        "duplicate rejections",
+    ):
+        assert target in source, target
+
+    # A missed target has to reach the shell, so it must set the exit code
+    # rather than only printing. `None` must stay possible: leaving it unset
+    # is what lets locust still fail the run on a recorded request failure.
+    assert "environment.process_exit_code = 1" in source
+
+
 def test_slot_assigner_deals_unique_slots_then_wraps() -> None:
     assigner = SlotAssigner(30)
     assert sorted(assigner.assign() for _ in range(30)) == list(range(1, 31))

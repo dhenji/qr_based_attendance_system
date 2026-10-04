@@ -223,6 +223,33 @@ driven by `backend/locustfile.py` — 30 virtual students over a pool of
 are out of the measurement. `pytest-benchmark` and `Lighthouse CI` are listed
 as options, not yet installed.
 
+### Enforced Targets
+
+The §2 targets are asserted at the end of every run, not just printed: on
+`test_stop` the harness re-reads its own stats, prints a PASS/FAIL row per
+target, and sets `environment.process_exit_code = 1` if any is missed, so the
+run is CI-gateable.
+
+| Target                | Default                     | Override             |
+| --------------------- | --------------------------- | -------------------- |
+| `>=10 req/s`          | `LOCUST_MIN_RPS=10`         | yes                  |
+| `p95 < 1s`            | `LOCUST_MAX_P95_MS=1000`    | yes                  |
+| `p99 < 2s`            | `LOCUST_MAX_P99_MS=2000`    | yes                  |
+| 0 duplicate rejections | not overridable             | no                   |
+
+Throughput is *successful scans* over the run's wall-clock window, not
+locust's blended `total_rps` (which also counts the login and profile calls).
+Percentiles prefer locust's trailing-10s window and fall back to the
+lifetime percentile when that window holds no samples; if neither can report,
+the target reads `unavailable` and counts as missed rather than as a pass. A
+run that issued no requests at all fails immediately.
+
+The gate only ever forces failure — it leaves `process_exit_code` as `None`
+on a clean run so locust still applies its own `exit_code_on-error` to
+recorded request failures (a run with 7 errored scans and no target miss
+still exits non-zero). Re-baseline with the three env knobs above rather than
+editing the defaults; a run measured on slower hardware then still gates.
+
 ### Environment Variables for Benchmarking
 
 ```bash
