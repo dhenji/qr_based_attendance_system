@@ -51,6 +51,17 @@ class BackupNotFoundException(SystemDomainException):
         super().__init__(message=f"Backup {backup_id} not found")
 
 
+class MaintenanceBusyException(SystemDomainException):
+    """409 - a maintenance run was requested while another exclusive job holds
+    the floor (a second maintenance run, a backup, or a scheduled batch)."""
+
+    status_code: int = 409
+    code: str = "maintenance_in_progress"
+
+    def __init__(self) -> None:
+        super().__init__(message="A maintenance task is already running")
+
+
 class AuditFilterInvalidException(SystemDomainException):
     """422 - an audit filter names a value outside the recorded vocabulary.
 

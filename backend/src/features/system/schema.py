@@ -70,6 +70,16 @@ class BackupTriggerResponse(BaseModel):
     status: Literal["started"] = "started"
 
 
+class SyncFlushResponse(BaseModel):
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+
+
+class CleanupResponse(BaseModel):
+    removed: int = 0
+
+
 class AuditLogRead(BaseModel):
     """One audit trail row.
 

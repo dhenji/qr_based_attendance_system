@@ -33,6 +33,10 @@ class AuditEntity(StrEnum):
     BACKUP = "backup"
     APP_SETTING = "app_setting"
     USER = "user"
+    # Aggregate subject for the maintenance runs (sync flush, expired-data
+    # cleanup): one audit row per run, with the per-table counts in
+    # `new_value`, so a large backlog cannot bury the rest of the trail.
+    MAINTENANCE = "maintenance"
 
 
 class AuditAction(StrEnum):
