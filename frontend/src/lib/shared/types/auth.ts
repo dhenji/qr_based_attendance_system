@@ -49,6 +49,44 @@ export interface MfaVerifyRequest {
 	preauth_token?: string | null;
 }
 
+// POST /auth/mfa/setup — mints a TOTP secret for an already-authenticated
+// account. Takes no request body.
+//
+// `secret` and `manual_entry_key` are the same base32 value; the backend
+// returns both so a client can render either. `qr_url` is the raw
+// `otpauth://totp/...` provisioning URI — NOT an image and NOT a data URI —
+// so the browser has to render the QR itself.
+//
+// Does NOT enable MFA: it only writes `mfa_secret` and returns. `verify_mfa` is
+// the only writer of `mfa_enabled = True`, so an abandoned setup leaves a stored
+// secret with the flag still False.
+export interface MfaSetupResponse {
+	secret: string;
+	qr_url: string;
+	manual_entry_key: string;
+}
+
+// POST /auth/mfa/disable — password-verified, 204 on success.
+export interface MfaDisableRequest {
+	password: string;
+}
+
+// POST /auth/mfa/backup-codes — 10 codes, plaintext, returned exactly once.
+// Stored server-side as an Argon2id hash plus an HMAC fingerprint; consuming one
+// stamps `used_at` rather than deleting it.
+export interface BackupCodesResponse {
+	codes: string[];
+	remaining: number;
+}
+
+// GET /auth/mfa/backup-codes — counts only, never hashes or codes. Reports the
+// most recent batch alone, so regenerating resets both numbers to 10/10.
+export interface BackupCodesSummaryResponse {
+	total: number;
+	remaining: number;
+	last_generated_at: string | null;
+}
+
 // POST /auth/change-password
 export interface ChangePasswordRequest {
 	new_password: string;

@@ -1,5 +1,5 @@
 // features/professor/service.ts
-// Professor-facing service: self profile.
+// Professor-facing service: self profile, course directory, dashboard summary.
 //
 // GET /professor/profile is fully implemented on the backend
 // (professor/router.py -> ProfessorService.get_self_profile), so this talks
@@ -18,6 +18,7 @@ import type {
 	Professor,
 	ProfessorAssignedOffering,
 	ProfessorCourseSummary,
+	ProfessorDashboardResponse,
 	ProfessorProfileResponse,
 } from '$lib/shared/types';
 
@@ -67,3 +68,13 @@ export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {
 	});
 	return (response.items ?? []).map(toCourseSummary);
 };
+
+// GET /professor/dashboard — today's session counts, the enrolled roster, and
+// the term-wide compliance headline, in one call.
+//
+// The session tiles carry no course identity, so the dashboard page still lists
+// today's sessions through GET /professor/sessions for the code/name/section
+// columns and joins these counts on `session_id`. Same convention as the
+// professor attendance ledger.
+export const getDashboard = async (): Promise<ProfessorDashboardResponse> =>
+	get<ProfessorDashboardResponse>('professorDashboard');

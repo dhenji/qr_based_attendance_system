@@ -6,16 +6,23 @@
 // Collection routes use "" on the backend (no trailing slash), so list/create
 // hit the bare url and detail routes pass the id via `suffix` (e.g. `/123`,
 // `/123/archive`). Real API by default; mocks only when PUBLIC_MOCK_MODE=true
-// (see api/client.ts). There is deliberately no reset-password here: the
-// backend mounts no such route (api-contracts lists it, routers do not), so
-// the UI omits the button rather than calling a 404.
+// (see api/client.ts).
+//
+// Reset-password is here too: all three routes landed together and share one
+// backend implementation (`AuthService.admin_reset_password`), so there is a
+// single credential write to reason about rather than three. The users route
+// names a `users.id`; the student and professor routes name a roster row that
+// the backend resolves to an account first, so those two can fail 409
+// `student_account_unlinked` / `professor_account_unlinked`.
 
 import { del, get, getText, patch, post, postForm } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
+	AdminDashboardResponse,
 	AdminOffering,
 	AdminOfferingFilters,
 	AdminOfferingResponse,
+	AdminPasswordResetResponse,
 	AdminProfessor,
 	AdminProfessorCreatePayload,
 	AdminProfessorFilters,
@@ -36,6 +43,17 @@ import type {
 	ProfessorImportResult,
 	StudentImportResult,
 } from '$lib/shared/types';
+
+// --- Dashboard summary -------------------------------------------------------
+
+// The whole admin landing page in one call. Preferred over composing it from
+// the roster + analytics lists, because the backend composes its figures from
+// the same services those pages use — so the dashboard cannot drift from them.
+// In particular `student_count` counts active roster rows, which is NOT the
+// analytics overview's `total_students` (students enrolled in a session in
+// scope); use whichever the question actually is.
+export const getAdminDashboard = async (): Promise<AdminDashboardResponse> =>
+	get<AdminDashboardResponse>('adminDashboard');
 
 // --- Students ---------------------------------------------------------------
 
@@ -283,6 +301,54 @@ export const createUser = async (
 
 export const deactivateUser = async (id: number): Promise<void> => {
 	await patch<void>('adminUserDeactivate', undefined, undefined, `/${id}/deactivate`);
+};
+
+// --- Password reset -----------------------------------------------------------
+//
+// Three routes, one backend implementation. Each sets a fresh temp password,
+// flags `must_change_password` so the account is forced to change it at next
+// login, and clears any lockout — which is the case the endpoint exists for.
+// It deliberately does NOT touch MFA: an admin able to clear a second factor
+// as a password-reset side effect could remove a protection the account owner
+// chose, and `POST /auth/mfa/disable` is separately password-verified for
+// exactly that reason. The modal that shows the result says so.
+//
+// The temp password comes back in the response and nowhere else — there is no
+// endpoint to read it again — so callers must surface it immediately rather
+// than storing it.
+
+// Names a `users.id` directly. Super-admin only.
+export const resetUserPassword = async (userId: number): Promise<string> => {
+	const response = await post<AdminPasswordResetResponse>(
+		'adminUserResetPassword',
+		undefined,
+		undefined,
+		`/${userId}/reset-password`
+	);
+	return response.temp_password;
+};
+
+// Names a roster row; the backend resolves it to an account and answers 409
+// `student_account_unlinked` when the row has no linked user.
+export const resetStudentPassword = async (studentId: number): Promise<string> => {
+	const response = await post<AdminPasswordResetResponse>(
+		'adminStudentResetPassword',
+		undefined,
+		undefined,
+		`/${studentId}/reset-password`
+	);
+	return response.temp_password;
+};
+
+// Same contract as the student route, with `professor_account_unlinked`.
+export const resetProfessorPassword = async (professorId: number): Promise<string> => {
+	const response = await post<AdminPasswordResetResponse>(
+		'adminProfessorResetPassword',
+		undefined,
+		undefined,
+		`/${professorId}/reset-password`
+	);
+	return response.temp_password;
 };
 
 // --- Offerings (professor assignment picker) ---------------------------------

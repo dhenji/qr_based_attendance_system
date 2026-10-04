@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import {
 		adminProfessorsState,
 		deleteArchivedProfessor,
@@ -12,6 +13,7 @@
 		createProfessor,
 		listOfferings,
 		offeringLabel,
+		resetProfessorPassword,
 		updateProfessor,
 	} from '$lib/features/admin/service';
 	import {
@@ -38,6 +40,8 @@
 	let formBusy = $state(false);
 	let deleteTarget = $state<AdminProfessor | null>(null);
 	let deleteBusy = $state(false);
+	// Credential reset; see the students page for why the modal is shared.
+	let resetTarget = $state<AdminProfessor | null>(null);
 
 	let f_first_name = $state('');
 	let f_middle_name = $state('');
@@ -314,10 +318,11 @@
 								>
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
-								{#if !p.isActive}
-									<button class="link danger" onclick={() => (deleteTarget = p)}>Delete</button>
-								{/if}
-							</td>
+{#if !p.isActive}
+								<button class="link danger" onclick={() => (deleteTarget = p)}>Delete</button>
+							{/if}
+							<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
+						</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -417,6 +422,15 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if resetTarget}
+	<TempPasswordModal
+		subject={fullName(resetTarget) || resetTarget.email}
+		subjectKind="professor"
+		onconfirm={() => resetProfessorPassword(resetTarget!.id)}
+		onclose={() => (resetTarget = null)}
+	/>
 {/if}
 
 <style>

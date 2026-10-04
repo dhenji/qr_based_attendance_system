@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import {
 		authState,
 		isSuperAdmin,
@@ -13,16 +14,17 @@
 		initAdminUsers,
 		refreshAdminUsers,
 	} from '$lib/features/admin/store.svelte';
-	import { createUser } from '$lib/features/admin/service';
+	import { createUser, resetUserPassword } from '$lib/features/admin/service';
 	import { adminUserCreateSchema } from '$lib/features/admin/schema';
 	import type { AdminUser, AdminUserRole } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// User Management (super_admin only, wireframe 4.13): wraps
-	// GET/POST /admin/users + PATCH /{id}/deactivate. Plain admins never see
-	// this page — the layout hides the nav item and this guard bounces them
-	// to the dashboard. No edit/reactivate/delete/reset: the backend mounts
-	// no such routes, so the UI omits the buttons rather than calling 404s.
+	// GET/POST /admin/users, PATCH /{id}/deactivate, and
+	// POST /{id}/reset-password. Plain admins never see this page — the layout
+	// hides the nav item and this guard bounces them to the dashboard. Still no
+	// edit/reactivate/delete: the backend mounts no such routes, so the UI
+	// omits the buttons rather than calling 404s.
 
 	let search = $state('');
 	let roleFilter = $state<'all' | AdminUserRole>('all');
@@ -35,6 +37,9 @@
 	let deactivateBusy = $state(false);
 	let createdTemp = $state<{ email: string; tempPassword: string } | null>(null);
 	let copied = $state(false);
+	// Credential reset; shares TempPasswordModal with the students and
+	// professors rosters because the backend has one path behind all three.
+	let resetTarget = $state<AdminUser | null>(null);
 
 	let f_email = $state('');
 	let f_role = $state<'admin' | 'professor' | 'student'>('admin');
@@ -239,6 +244,7 @@
 								{:else}
 									<span class="hint">Deactivated</span>
 								{/if}
+								<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
 							</td>
 						</tr>
 					{/each}
@@ -341,6 +347,15 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if resetTarget}
+	<TempPasswordModal
+		subject={displayName(resetTarget)}
+		subjectKind="account"
+		onconfirm={() => resetUserPassword(resetTarget!.id)}
+		onclose={() => (resetTarget = null)}
+	/>
 {/if}
 
 <style>

@@ -10,15 +10,26 @@ import type {
 	TokenResponse,
 } from '$lib/shared/types';
 import type {
+	BackupCodesResponse,
+	BackupCodesSummaryResponse,
+	MfaDisableRequest,
+	MfaSetupResponse,
+} from '$lib/shared/types';
+import type {
 	StudentDashboardResponse,
 	StudentProfileResponse,
 	ScheduleResponse,
 } from '$lib/shared/types';
 import type {
+	ProfessorDashboardResponse,
+} from '$lib/shared/types';
+import type {
+	AdminDashboardResponse,
 	AdminAssignmentResponse,
 	AdminBulkEnrollResult,
 	AdminCourseResponse,
 	AdminOfferingResponse,
+	AdminPasswordResetResponse,
 	AdminProfessorResponse,
 	AdminRosterItemResponse,
 	AdminStudentDetailResponse,
@@ -345,6 +356,53 @@ export const AuthMfaVerifyEndpoint: EndpointDef<TokenResponse> = {
 	mock: () => MOCK_TOKENS,
 };
 
+// --- MFA enrolment and recovery ------------------------------------------------
+//
+// Five routes, one account field. `mfa_enabled` is a TWO-WRITER field and the
+// UI has to respect that split:
+//   * `verify_mfa` is the ONLY writer of true.
+//   * `disable_mfa` (POST /auth/mfa/disable) is the ONLY path back to false.
+// `setup` deliberately does not enable anything — it only stores the secret —
+// so the confirm step must go through `authMfaVerify`, which is why enabling
+// takes two calls and looks like it "does nothing" on the first.
+//
+// None of these are rate limited server-side (unlike login / otp /
+// forgot-password), so do not assume the login page's throttle covers the
+// confirm step.
+export const AuthMfaSetupEndpoint: EndpointDef<MfaSetupResponse> = {
+	url: '/auth/mfa/setup',
+	method: 'POST',
+	mock: () => ({
+		// Valid base32 so an authenticator-app-shaped secret is still usable in
+		// mock mode. Matches the backend's 16-char pyotp.random_base32().
+		secret: 'JBSWY3DPEB2XS2LP',
+		qr_url:
+			'otpauth://totp/Attendly:student@example.com?secret=JBSWY3DPEB2XS2LP&issuer=Attendly',
+		manual_entry_key: 'JBSWY3DPEB2XS2LP',
+	}),
+};
+
+export const AuthMfaDisableEndpoint: EndpointDef<void> = {
+	url: '/auth/mfa/disable',
+	method: 'POST',
+	mock: () => undefined,
+};
+
+export const AuthMfaBackupCodesGenerateEndpoint: EndpointDef<BackupCodesResponse> = {
+	url: '/auth/mfa/backup-codes',
+	method: 'POST',
+	mock: () => ({
+		codes: Array.from({ length: 10 }, (_, i) => `MOCKC-${String(i).padStart(4, '0')}-CODE`),
+		remaining: 10,
+	}),
+};
+
+export const AuthMfaBackupCodesSummaryEndpoint: EndpointDef<BackupCodesSummaryResponse> = {
+	url: '/auth/mfa/backup-codes',
+	method: 'GET',
+	mock: () => ({ total: 0, remaining: 0, last_generated_at: null }),
+};
+
 export const AuthChangePasswordEndpoint: EndpointDef<void> = {
 	url: '/auth/change-password',
 	method: 'POST',
@@ -436,6 +494,42 @@ export const StudentDashboardEndpoint: EndpointDef<StudentDashboardResponse> = {
 		total_scans: 0,
 		today_schedule: [],
 		recent_activity: [],
+	}),
+};
+
+// The other two dashboard summaries. All three live in the backend
+// `features/dashboard` slice but mount under three different role prefixes, so
+// they are three defs rather than one with a path parameter.
+//
+// Each aggregates features it does not own, and composes its figures from
+// existing service methods rather than recomputing them — which is why the
+// dashboard can never disagree with the page above it. On the client that
+// means: take the numbers from here and do not re-derive them from the roster
+// or analytics endpoints.
+
+export const AdminDashboardEndpoint: EndpointDef<AdminDashboardResponse> = {
+	url: '/admin/dashboard',
+	method: 'GET',
+	mock: () => ({
+		student_count: 0,
+		professor_count: 0,
+		program_count: 0,
+		avg_rate: 0,
+		scans_today: 0,
+		pending_sync: 0,
+		recent_scans: [],
+	}),
+};
+
+export const ProfessorDashboardEndpoint: EndpointDef<ProfessorDashboardResponse> = {
+	url: '/professor/dashboard',
+	method: 'GET',
+	mock: () => ({
+		sessions_today: 0,
+		sessions_completed: 0,
+		total_students: 0,
+		avg_rate: 0,
+		today_sessions: [],
 	}),
 };
 
@@ -2538,6 +2632,62 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 	},
 };
 
+// --- Admin password reset (three rosters, one backend implementation) ----------
+//
+// POST /admin/users/{id}/reset-password names a `users.id` directly;
+// POST /admin/students/{id}/reset-password and
+// POST /admin/professors/{id}/reset-password name a roster row, which the
+// backend resolves to a `users.id` before calling the same
+// `AuthService.admin_reset_password`. So all three return one shape and there
+// is no reason for the client to treat them differently.
+//
+// Three defs rather than one keyed by roster because the url is baked into
+// EndpointDef and only the collection prefix is shared. Role gate differs
+// too: the users route is super_admin, the roster two are admin (which
+// super_admin also passes).
+//
+// The response's `temp_password` is returned exactly once — there is no
+// endpoint to read it back — so the mock returns a plausible one and the UI
+// must present it inline rather than storing it.
+const mockTempPassword = (): AdminPasswordResetResponse => ({
+	temp_password: `Temp-${Math.random().toString(36).slice(2, 10)}!`,
+});
+
+export const AdminUserResetPasswordEndpoint: EndpointDef<AdminPasswordResetResponse> = {
+	url: '/admin/users',
+	method: 'POST',
+	mock: (_params, suffix, _body, method) => {
+		if (method !== 'POST') throw new Error('Password reset is a POST.');
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('User not found.');
+		row.must_change_password = true;
+		return mockTempPassword();
+	},
+};
+
+export const AdminStudentResetPasswordEndpoint: EndpointDef<AdminPasswordResetResponse> = {
+	url: '/admin/students',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_STUDENT_ROWS.some((r) => r.id === id)) throw new Error('Student not found.');
+		return mockTempPassword();
+	},
+};
+
+export const AdminProfessorResetPasswordEndpoint: EndpointDef<AdminPasswordResetResponse> = {
+	url: '/admin/professors',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_PROFESSOR_ROWS.some((r) => r.id === id)) {
+			throw new Error('Professor not found.');
+		}
+		return mockTempPassword();
+	},
+};
+
 // --- Professor excuse queue --------------------------------------------------
 //
 // Live routes on features/excuse/professor_router.py under the shared
@@ -2659,6 +2809,10 @@ export const endpoints = {
 	authRefresh: AuthRefreshEndpoint,
 	authMe: AuthMeEndpoint,
 	authMfaVerify: AuthMfaVerifyEndpoint,
+	authMfaSetup: AuthMfaSetupEndpoint,
+	authMfaDisable: AuthMfaDisableEndpoint,
+	authMfaBackupCodesGenerate: AuthMfaBackupCodesGenerateEndpoint,
+	authMfaBackupCodesSummary: AuthMfaBackupCodesSummaryEndpoint,
 	authChangePassword: AuthChangePasswordEndpoint,
 	authForgotPassword: ForgotPasswordEndpoint,
 	authForgotPasswordVerify: ForgotPasswordVerifyEndpoint,
@@ -2725,6 +2879,10 @@ export const endpoints = {
 	adminUsers: AdminUsersEndpoint,
 	adminUserCreate: AdminUserCreateEndpoint,
 	adminUserDeactivate: AdminUserDeactivateEndpoint,
+	// Admin password reset (three rosters, one backend implementation)
+	adminUserResetPassword: AdminUserResetPasswordEndpoint,
+	adminStudentResetPassword: AdminStudentResetPasswordEndpoint,
+	adminProfessorResetPassword: AdminProfessorResetPasswordEndpoint,
 	// Admin courses (templates, D44)
 	adminCourses: AdminCoursesEndpoint,
 	adminCourseCreate: AdminCourseCreateEndpoint,
@@ -2735,4 +2893,7 @@ export const endpoints = {
 	adminProgramDetail: AdminProgramDetailEndpoint,
 	adminYearLevels: AdminYearLevelsEndpoint,
 	adminYearLevelDetail: AdminYearLevelDetailEndpoint,
+	// Dashboard summaries (three roles, three mount points)
+	adminDashboard: AdminDashboardEndpoint,
+	professorDashboard: ProfessorDashboardEndpoint,
 };

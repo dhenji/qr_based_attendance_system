@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { studentState, initStudent } from '$lib/features/student/store.svelte';
 	import { authState } from '$lib/features/auth/store.svelte';
+	import MfaSettings from '$lib/components/MfaSettings.svelte';
 	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
 	import { setSecurityQuestion } from '$lib/features/auth/service';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -137,6 +138,10 @@
 
 		<h3 class="sub-title">Change Password</h3>
 		<a class="btn" href={Routes.FORGOT_PASSWORD}>Change Password</a>
+
+		<hr class="divider" />
+
+		<MfaSettings />
 
 		<hr class="divider" />
 

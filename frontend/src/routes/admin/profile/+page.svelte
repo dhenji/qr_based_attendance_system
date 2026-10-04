@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { me } from '$lib/features/auth/service';
+	import MfaSettings from '$lib/components/MfaSettings.svelte';
 	import {
 		authState,
 		doChangePassword,
@@ -105,13 +106,14 @@
 			<dl class="detail">
 				<div><dt>Email</dt><dd class="mono">{identity.email}</dd></div>
 				<div><dt>Role</dt><dd>{identity.role}</dd></div>
-				<div><dt>MFA</dt><dd>{identity.mfa_enabled ? 'Enabled' : 'Not configured'}</dd></div>
 				<div>
 					<dt>Last login</dt>
 					<dd>{identity.last_login ? identity.last_login.slice(0, 16).replace('T', ' ') : '—'}</dd>
 				</div>
 			</dl>
 		</section>
+
+		<MfaSettings />
 
 		<section class="card">
 			<h2 class="section-title">Change password</h2>

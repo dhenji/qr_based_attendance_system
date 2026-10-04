@@ -462,6 +462,23 @@ export interface RecentScanResponse {
 	status: string;
 }
 
+// GET /admin/dashboard — the admin landing page in one call.
+//
+// `student_count` / `professor_count` / `program_count` count active roster
+// rows. That is deliberately NOT the analytics overview's `total_students`,
+// which counts students enrolled in a session in scope: the dashboard must
+// agree with the roster list above it, and the two figures answer different
+// questions.
+export interface AdminDashboardResponse {
+	student_count: number;
+	professor_count: number;
+	program_count: number;
+	avg_rate: number;
+	scans_today: number;
+	pending_sync: number;
+	recent_scans: RecentScanResponse[];
+}
+
 export interface AdminAnalyticsFilters {
 	program_id?: number;
 	year_level_id?: number;
@@ -612,4 +629,13 @@ export interface AdminUserFilters {
 	is_active?: boolean;
 	page?: number;
 	size?: number;
+}
+
+// Admin-initiated password reset — one response shape behind all three routes
+// (`POST /admin/users/{id}/reset-password`, and its student/professor
+// equivalents). `temp_password` is returned exactly once and is not
+// retrievable afterwards, so the UI has to show it in the same interaction
+// that triggered the call.
+export interface AdminPasswordResetResponse {
+	temp_password: string;
 }

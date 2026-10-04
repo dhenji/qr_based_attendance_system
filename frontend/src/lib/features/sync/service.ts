@@ -280,12 +280,17 @@ export const queue = {
 	}
 };
 
+// `faceMatchScore` is passed straight through, undefined included:
+// `submitAttendanceScan` substitutes FACE_MATCH_SCORE_PLACEHOLDER when it is
+// missing, so the field is always sent. Building the body conditionally here
+// (as this used to) is what let a required backend field go missing on replay
+// and marked queued scans terminally `rejected`.
 const toScanBody = (payload: QueuedScanPayload) => ({
 	sessionId: payload.sessionId,
 	studentNumber: payload.studentNumber,
 	gps: payload.gps,
 	livenessEvidence: payload.livenessEvidence,
-	...(payload.faceMatchScore === undefined ? {} : { faceMatchScore: payload.faceMatchScore }),
+	faceMatchScore: payload.faceMatchScore,
 	scannedAt: payload.scannedAt
 });
 

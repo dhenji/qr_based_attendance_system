@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import {
 		adminStudentsState,
 		deleteArchivedStudent,
@@ -11,6 +12,7 @@
 	} from '$lib/features/admin/store.svelte';
 	import {
 		createStudent,
+		resetStudentPassword,
 		updateStudent,
 	} from '$lib/features/admin/service';
 	import {
@@ -109,6 +111,9 @@
 	let formBusy = $state(false);
 	let deleteTarget = $state<AdminStudent | null>(null);
 	let deleteBusy = $state(false);
+	// Credential reset: the row drives the modal, the call and its copy live in
+	// TempPasswordModal because all three rosters share one backend path.
+	let resetTarget = $state<AdminStudent | null>(null);
 
 	// Form fields (strings for inputs; ids coerced by zod on submit).
 	let f_student_id = $state('');
@@ -424,10 +429,11 @@
 								>
 									{s.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
-								{#if !s.isActive}
-									<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>
-								{/if}
-							</td>
+{#if !s.isActive}
+								<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>
+							{/if}
+							<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
+						</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -522,6 +528,15 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if resetTarget}
+	<TempPasswordModal
+		subject="{fullName(resetTarget)} ({resetTarget.studentId})"
+		subjectKind="student"
+		onconfirm={() => resetStudentPassword(resetTarget!.id)}
+		onclose={() => (resetTarget = null)}
+	/>
 {/if}
 
 <style>

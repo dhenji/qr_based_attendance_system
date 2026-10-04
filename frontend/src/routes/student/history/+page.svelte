@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import {
+		exportSessionHistoryCsv,
 		getSchedule,
 		getSessionHistory,
 		listStudentExcuses,
@@ -11,7 +12,6 @@
 		type StudentHistoryStatus,
 	} from '$lib/features/student/service';
 	import type { ScheduledClass } from '$lib/shared/types';
-	import { buildCsv } from '$lib/features/report/service';
 	import { flushQueue, queue, type QueuedScan } from '$lib/features/sync/service';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 
@@ -262,44 +262,61 @@
 
 	let exporting = $state(false);
 	let exportError: string | null = $state(null);
+	let exportNote: string | null = $state(null);
 
-	// Full filtered-set export: the table shows one server page at a time, so
-	// the export pages through every server page itself (cap 2000 rows) and
-	// re-applies the client-side course + search filter to the complete set.
-	const EXPORT_PAGE_SIZE = 100;
-	const EXPORT_MAX_ROWS = 2000;
+	// Export is server-side (GET /student/attendance/history/export), so the
+	// file holds every matching row — the old client path paged through the list
+	// endpoint and stopped at 2000.
+	//
+	// The tradeoff: the export route only knows the filters the server knows.
+	// Status and course id go over the wire; the course dropdown and the search
+	// box are client-side on this page (see matchesFilters), so they do not
+	// unless they can be expressed server-side. Rather than silently returning
+	// more rows than the screen shows, `droppedFilters` names whatever is being
+	// left behind and the page surfaces it next to the button.
+	//
+	// The course dropdown holds codes, the route takes an id, so the code is
+	// resolved through the schedule enrollments. A student can hold the same
+	// course code in more than one offering, in which case there is no single
+	// correct id and the filter is reported as dropped rather than guessed.
+	const courseIdForExport = $derived.by(() => {
+		if (filterCourse === 'All') return undefined;
+		const ids = [
+			...new Set(scheduleCourses.filter((c) => c.courseCode === filterCourse).map((c) => c.courseId)),
+		];
+		return ids.length === 1 ? ids[0] : undefined;
+	});
+
+	const droppedFilters = $derived.by(() => {
+		const dropped: string[] = [];
+		if (search.trim()) dropped.push('the search box');
+		if (filterCourse !== 'All' && courseIdForExport === undefined) dropped.push('the course filter');
+		return dropped;
+	});
 
 	const exportCsv = async () => {
 		if (exporting) return;
 		exporting = true;
 		exportError = null;
+		exportNote = null;
 		try {
 			const status = filterStatus !== 'All' ? (filterStatus.toLowerCase() as Status) : undefined;
-			const all: Row[] = [];
-			let exportPage = 1;
-			let exportTotal = Number.POSITIVE_INFINITY;
-			while (all.length < exportTotal && all.length < EXPORT_MAX_ROWS) {
-				const res = await getSessionHistory({
-					status,
-					sortBy: sortKey,
-					sortDir: sortAsc ? 'asc' : 'desc',
-					page: exportPage,
-					size: EXPORT_PAGE_SIZE
-				});
-				exportTotal = res.total;
-				const items = res.items ?? [];
-				if (items.length === 0) break;
-				all.push(...items.map(toRow));
-				exportPage += 1;
-			}
-			const records = all.filter(matchesFilters);
-			if (records.length === 0) {
+			const csv = await exportSessionHistoryCsv({
+				status,
+				courseId: courseIdForExport,
+				sortBy: sortKey,
+				sortDir: sortAsc ? 'asc' : 'desc',
+			});
+
+			// Header-only means the filter matched nothing, which is worth saying
+			// rather than handing over an empty file.
+			const lines = csv.split('\n').filter((line) => line.trim().length > 0);
+			if (lines.length <= 1) {
 				exportError = 'No records to export.';
 				return;
 			}
-			const header = ['Date', 'Course code', 'Course name', 'Status', 'Time', 'Scanned at'];
-			const body = records.map((r) => [r.date, r.course, r.courseName, r.status, r.time, r.scannedAt]);
-			const blob = new Blob([buildCsv(header, body)], { type: 'text/csv;charset=utf-8' });
+
+			const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
@@ -310,6 +327,12 @@
 			a.click();
 			a.remove();
 			URL.revokeObjectURL(url);
+
+			if (droppedFilters.length > 0) {
+				exportNote = `Exported every matching row. ${droppedFilters.join(' and ')} ${
+					droppedFilters.length === 1 ? 'is' : 'are'
+				} applied on screen only, so ${droppedFilters.length === 1 ? 'it is' : 'they are'} not in the file.`;
+			}
 		} catch (e) {
 			exportError = e instanceof Error ? e.message : 'Export failed. Please try again.';
 		} finally {
@@ -454,6 +477,8 @@
 		</div>
 		{#if exportError}
 			<p class="export-error" role="status">{exportError}</p>
+		{:else if exportNote}
+			<p class="export-note" role="status">{exportNote}</p>
 		{/if}
 	</div>
 
@@ -868,6 +893,15 @@
 		flex-basis: 100%;
 		margin: 0;
 		color: #b91c1c;
+		font-size: 0.875rem;
+	}
+
+	/* Not a failure — the download succeeded, this just says what the server
+	   could not filter on. Muted so it does not read as an error. */
+	.export-note {
+		flex-basis: 100%;
+		margin: 0;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 	}
 

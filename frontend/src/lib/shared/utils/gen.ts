@@ -68,7 +68,9 @@ export const generateAttendanceRecord = (overrides?: Partial<AttendanceRecord>):
 		status: statuses[Math.floor(Math.random() * statuses.length)],
 		scannedAt: new Date(Date.now() - Math.random() * 2 * 60 * 60 * 1000).toISOString(),
 		scannedVia: via[Math.floor(Math.random() * via.length)],
-		faceMatchScore: Math.random() * 100,
+		// 0.0..1.0 — the backend's `face_match_score` bounds. This was
+		// `Math.random() * 100`, which generated values the server would reject.
+		faceMatchScore: Math.random(),
 		gps: {
 			lat: 13.7563 + (Math.random() - 0.5) * 0.01,
 			lng: 100.5018 + (Math.random() - 0.5) * 0.01,

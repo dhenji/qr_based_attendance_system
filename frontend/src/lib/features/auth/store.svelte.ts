@@ -11,7 +11,14 @@ import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import { Routes } from '$lib/shared/constants/routes';
 import { withMinDuration } from '$lib/shared/utils/timing';
-import { changePassword, login, me, register, verifyMfa } from '$lib/features/auth/service';
+import {
+	changePassword,
+	disableMfa,
+	login,
+	me,
+	register,
+	verifyMfa,
+} from '$lib/features/auth/service';
 import {
 	clearTokens,
 	hasTokens,
@@ -274,4 +281,48 @@ export const doLogout = async (): Promise<void> => {
 	clearTokens();
 	reset();
 	await goto(Routes.HOME);
+};
+
+// --- MFA ---------------------------------------------------------------------
+//
+// `authState.user.mfaEnabled` is a local mirror of a two-writer backend field:
+// `verify_mfa` is the only writer of True and `disable_mfa` the only path back
+// to False. So neither action below patches the flag on its own — each calls
+// the matching endpoint and only then updates the mirror, the same way
+// doChangePassword handles mustChangePassword. Reading the mirror to decide
+// which button to show is fine; writing it directly is not.
+
+// Step 2 of enabling: confirm a TOTP (or a backup code, if the user generated
+// some before enabling) to flip `mfa_enabled` True. Returns fresh tokens, which
+// we store so the session survives the swap — verify_mfa mints a new pair even
+// when it was called on an already-authenticated session.
+export const doMfaConfirmSetup = async (code: string): Promise<void> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			const tokens = await verifyMfa(code);
+			if (tokens.access_token || tokens.refresh_token) {
+				setTokens({ access: tokens.access_token, refresh: tokens.refresh_token });
+			}
+			if (authState.user) authState.user.mfaEnabled = true;
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'That code was not accepted. Try the next one.');
+			throw error;
+		}
+	});
+};
+
+// Disable MFA. Password-verified server-side, and it consumes any unspent
+// backup codes in the same request, so there is nothing to clean up here.
+export const doMfaDisable = async (password: string): Promise<void> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			await disableMfa(password);
+			if (authState.user) authState.user.mfaEnabled = false;
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Could not disable MFA.');
+			throw error;
+		}
+	});
 };

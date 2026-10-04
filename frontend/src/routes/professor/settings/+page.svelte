@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { authState, doChangePassword } from '$lib/features/auth/store.svelte';
+	import MfaSettings from '$lib/components/MfaSettings.svelte';
 	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
 	import { setSecurityQuestion } from '$lib/features/auth/service';
 	import {
@@ -99,9 +100,6 @@
 			questionBusy = false;
 		}
 	}
-
-	// MFA status comes from the restored session (GET /auth/me).
-	const mfaConfigured = $derived(authState.user?.mfaEnabled === true);
 </script>
 
 <div class="wrap">
@@ -183,8 +181,7 @@
 
 		<hr class="divider" />
 
-		<h3 class="sub-title">Two-Factor Auth</h3>
-		<p class="muted">Status: {mfaConfigured ? 'Configured' : 'Not configured'}</p>
+		<MfaSettings />
 
 		<hr class="divider" />
 

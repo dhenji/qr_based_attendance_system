@@ -78,6 +78,36 @@ export const validateGPS = (
 	return isWithinGeofence(studentLat, studentLng, centerLat, centerLng, radiusMetres);
 };
 
+// PLACEHOLDER face-match score. Read this before trusting the face step.
+//
+// `POST /student/attendance/scan` requires `face_match_score` (backend
+// `ScanRequest.face_match_score`, a required float in 0.0..1.0 with no
+// default). The server band-checks whatever number arrives:
+//   < 0.65                -> 403 face_mismatch, nothing recorded
+//   0.65 .. 0.70          -> recorded `pending`, queued for human review
+//   >= 0.70 (FACE_MATCH_THRESHOLD) -> present / late
+//
+// It never compares that number to anything. The student's stored
+// `face_embedding` is written by `_stub_embedding_blob` (all-zero 128-dim
+// vectors tagged "stub": true) and is not read during a scan at all, and
+// enrollment is not even required. So the score is a client assertion and the
+// face step is currently decorative — what genuinely IS enforced server-side
+// is the liveness evidence (blink + head turns + EAR mean + pnp), graded in
+// `_validate_liveness_evidence`.
+//
+// Sending a fixed high value is a stopgap to keep the scan journey working, not
+// a security control. Computing a real score needs a real reference embedding
+// and a documented decrypt scheme for the cached blob, and the comparison has
+// to happen server-side. Both are backend work.
+//
+// Every scan path funnels through `submitAttendanceScan`, so the default lives
+// here rather than at the call sites — the offline replay in features/sync
+// forwards queued payloads that also carry no score, and both used to produce a
+// 422 (and a queue row marked terminally `rejected`, discarding the student's
+// evidence). An explicitly-passed value still wins, so this can be replaced with
+// a real computation without touching callers.
+export const FACE_MATCH_SCORE_PLACEHOLDER = 1;
+
 export const submitAttendanceScan = async (input: {
 	sessionId: number;
 	studentNumber: string;
@@ -89,6 +119,8 @@ export const submitAttendanceScan = async (input: {
 	// can never double-record (docs/architecture/offline-first.md).
 	idempotencyKey?: string;
 }): Promise<AttendanceScanResult> => {
+	const faceMatchScore = input.faceMatchScore ?? FACE_MATCH_SCORE_PLACEHOLDER;
+
 	const response = await post<AttendanceScanResponse>(
 		'attendanceScan',
 		{
@@ -102,7 +134,7 @@ export const submitAttendanceScan = async (input: {
 				ear_samples: input.livenessEvidence.earSamples,
 				pnp_evidence: input.livenessEvidence.pnpEvidence,
 			},
-			...(input.faceMatchScore === undefined ? {} : { face_match_score: input.faceMatchScore }),
+			face_match_score: faceMatchScore,
 			scanned_at: input.scannedAt,
 		},
 		undefined,
