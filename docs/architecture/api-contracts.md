@@ -9,6 +9,7 @@
 
 | Aspect      | Standard                                                                                    |
 | ----------- | ------------------------------------------------------------------------------------------- |
+| Base path   | Every path below is relative to `/api`. The prefix is mounted once in `api/router.py`, not baked into the individual routers, so a row reading `/student/dashboard` is live at `/api/student/dashboard`. `GET /health` is the one exception: it is registered on the app itself, outside the namespace. |
 | Auth        | `Authorization: Bearer <JWT>` header on all `/admin/*`, `/professor/*`, `/student/*` routes |
 | Role guards | FastAPI `Depends(require_role(Role.admin))` etc. 403 on mismatch                            |
 | Pagination  | `?page=1&size=20` → `{ items: [...], total: int, page: int, size: int }`                    |
@@ -126,6 +127,28 @@ Scanned by students. Server generates HMAC-signed JSON.
 
 ---
 
+## Infrastructure
+
+### Health
+
+#### `GET /health`
+
+Liveness probe. Registered on the app itself in `main.py`, so it sits **outside**
+the `/api` namespace and takes no bearer token — it is what a load balancer or
+`docker compose` healthcheck hits.
+
+|                  |                                  |
+| ---------------- | -------------------------------- |
+| **Auth**         | None                             |
+| **Response 200** | `{ status: "ok" }`               |
+
+It reports process liveness only. It does **not** touch the database: the
+startup `SELECT 1` in the lifespan is what fails the boot when Postgres is
+unreachable, so a running process answering here is not evidence the database is
+reachable.
+
+---
+
 ## ADMIN Endpoints
 
 ### Programs
@@ -193,6 +216,13 @@ Archive program (sets `is_active=false` on the program row only). PATCH the same
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label }] } }` |
 | **Response 201** | Created year level                                                                  |
+
+#### `GET /admin/programs/{pid}/years/{yid}`
+
+|                  |                                                               |
+| ---------------- | ------------------------------------------------------------- |
+| **Response 200** | `{ id, program_id, year_number, label, term_structure, sort_order }` |
+| **Errors**       | 404 `program_not_found` / `year_level_not_found`                  |
 
 #### `PATCH /admin/programs/{pid}/years/{yid}`
 
