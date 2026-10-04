@@ -538,8 +538,14 @@ class SystemService:
             await self._session.flush()
         return resolved
 
-    async def _pending_sync_total(self) -> int:
-        """Unprocessed offline-sync rows backing the maintenance line."""
+    async def pending_sync_total(self) -> int:
+        """Unprocessed offline-sync rows backing the maintenance line.
+
+        Public because the admin dashboard needs the count on its own. Note that
+        `get_system_settings` must NOT be reused for that: it calls
+        `_stored_settings`, which INSERTs missing `AppSetting` rows and flushes,
+        turning a dashboard GET into a write.
+        """
         total = await self._session.scalar(
             select(func.count(SyncQueue.id)).where(
                 SyncQueue.status == QueueStatus.PENDING.value
@@ -556,7 +562,7 @@ class SystemService:
             late_window_default=values[SETTING_LATE_WINDOW],
             backup_retention_daily=values[SETTING_RETENTION_DAILY],
             backup_retention_monthly=values[SETTING_RETENTION_MONTHLY],
-            pending_sync_count=await self._pending_sync_total(),
+            pending_sync_count=await self.pending_sync_total(),
         )
 
     async def update_system_settings(

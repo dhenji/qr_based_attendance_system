@@ -38,6 +38,7 @@ from features.session.schema import (
     SessionCreate,
     SessionHistoryItem,
     SessionListItem,
+    SessionOfferingTile,
     SessionRead,
     VerifyCodeResponse,
     VerifyGeofence,
@@ -510,6 +511,77 @@ class SessionService:
         return PaginatedResponse[SessionListItem](
             items=items, total=total, page=page, size=size
         )
+
+    async def today_offering_tiles(
+        self, *, professor_id: int, now: datetime | None = None
+    ) -> list[SessionOfferingTile]:
+        """Today's sessions for a professor as (offering, scanned, enrolled).
+
+        Batched on purpose. `list_professor_sessions` builds each tile with two
+        queries of its own, which is fine for a paginated list a human reads and
+        wrong for a dashboard that wants every one of today's sessions in a
+        single round trip — three queries here regardless of how many sessions
+        are on.
+
+        "Today" is UTC and anchored on `Session.created_at`, matching the date
+        filter every other session query uses. A session that opened yesterday
+        and is still live is therefore not counted, which is the same boundary
+        `GET /professor/sessions?date_from=...` draws.
+        """
+        moment: datetime = now or _utcnow()
+        start: datetime = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        end: datetime = start + timedelta(days=1)
+
+        rows: Sequence[Session] = (
+            await self._session.scalars(
+                self._sessions_stmt(
+                    professor_id,
+                    offering_id=None,
+                    date_from=start,
+                    date_to=end,
+                ).order_by(Session.created_at.asc(), Session.id.asc())
+            )
+        ).all()
+
+        if not rows:
+            return []
+
+        session_ids: list[int] = [row.id for row in rows]
+        scanned_by_session: dict[int, int] = {
+            int(session_id): int(total)
+            for session_id, total in (
+                await self._session.execute(
+                    select(Attendance.session_id, func.count(Attendance.id))
+                    .where(Attendance.session_id.in_(session_ids))
+                    .group_by(Attendance.session_id)
+                )
+            ).all()
+        }
+        enrolled_by_offering: dict[int, int] = {
+            int(offering_id): int(total)
+            for offering_id, total in (
+                await self._session.execute(
+                    select(Enrollment.offering_id, func.count(Enrollment.id))
+                    .join(Student, Student.id == Enrollment.student_id)
+                    .where(
+                        Enrollment.offering_id.in_({row.offering_id for row in rows}),
+                        Student.is_active.is_(True),
+                    )
+                    .group_by(Enrollment.offering_id)
+                )
+            ).all()
+        }
+
+        return [
+            SessionOfferingTile(
+                session_id=row.id,
+                offering_id=row.offering_id,
+                scanned=scanned_by_session.get(row.id, 0),
+                enrolled=enrolled_by_offering.get(row.offering_id, 0),
+                status=_session_status(row.expires_at, moment),
+            )
+            for row in rows
+        ]
 
     async def _session_list_item(
         self, row: Session, now: datetime
