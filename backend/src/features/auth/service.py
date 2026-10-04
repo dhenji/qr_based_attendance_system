@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import secrets
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -40,6 +41,7 @@ from features.auth.constants import (
     BACKUP_CODE_LENGTH,
     SECURITY_QUESTION_POOL,
     SECURITY_RECOVERY_MAX_ATTEMPTS,
+    TEMP_PASSWORD_LENGTH,
 )
 from features.auth.exceptions import (
     AccountLockedException,
@@ -56,6 +58,7 @@ from features.auth.exceptions import (
     SecurityAnswerInvalidException,
     UnrecognizedEmailException,
     UserAlreadyClaimedException,
+    UserNotFoundException,
 )
 from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.auth.schema import (
@@ -504,6 +507,55 @@ class AuthService:
         user.must_change_password = False
 
         await self._session.flush()
+
+    async def admin_reset_password(self, *, user_id: int, actor_id: int) -> str:
+        """Set a temporary password on someone else's account. Returns it once.
+
+        The one implementation behind all three admin routes
+        (`/admin/users/{id}`, `/admin/students/{id}`, `/admin/professors/{id}`);
+        the student and professor slices resolve their roster row to a
+        `users.id` and call this, so the credential write has a single home.
+
+        Clears the lockout alongside the password, same as the self-service
+        `reset_password` above. Without that an admin could not actually help a
+        locked-out account, which is the case the endpoint exists for — the
+        counter and `is_locked` would survive the new password.
+
+        Deliberately does *not* touch MFA. An admin able to clear MFA as a side
+        effect of a password reset could remove a second factor the account
+        owner chose and never see it in the trail; `POST /auth/mfa/disable` is
+        the path for that, and it is password-verified for exactly this reason.
+
+        `actor_id` is the admin, so `performed_by` says who did it while
+        `entity_id` stays the account whose password changed.
+        """
+        user: User | None = await self._users.get(user_id)
+
+        if user is None:
+            raise UserNotFoundException()
+
+        old_value: dict[str, Any] = _account_snapshot(user)
+
+        temp_password: str = secrets.token_urlsafe(TEMP_PASSWORD_LENGTH)
+
+        user.password_hash = hash_password(temp_password)
+        user.must_change_password = True
+        user.failed_login_attempts = 0
+        user.is_locked = False
+        user.locked_at = None
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.PASSWORD_RESET,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value=_account_snapshot(user),
+        )
+        await self._session.flush()
+
+        return temp_password
 
     async def setup_mfa(self, user: User) -> MFASetupResponse:
         if user.mfa_enabled:

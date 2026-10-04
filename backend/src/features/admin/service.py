@@ -25,8 +25,9 @@ from features.admin.schema import (
 from features.auth.model import User
 from features.professor.model import Professor
 from features.student.model import Student
+from shared.audit import record_audit
 from shared.base import BaseCRUD
-from shared.enums import UserRole
+from shared.enums import AuditAction, AuditEntity, UserRole
 from shared.pagination import PaginatedResponse
 
 
@@ -115,7 +116,9 @@ class AdminService:
         self._students: BaseCRUD[Student] = BaseCRUD(Student, session)
         self._professors: BaseCRUD[Professor] = BaseCRUD(Professor, session)
 
-    async def create_user(self, *, payload: AdminUserCreate) -> AdminUserCreateResponse:
+    async def create_user(
+        self, *, payload: AdminUserCreate, actor_id: int
+    ) -> AdminUserCreateResponse:
         normalized: str = payload.email.lower()
 
         if await self._users.get_by(email=normalized) is not None:
@@ -144,6 +147,23 @@ class AdminService:
             await self._link_roster(
                 roster.handle, email=normalized, user_id=user.id, role=roster.label
             )
+
+        # Account creation is a privilege grant, so it belongs in the trail.
+        # `performed_by` is the super_admin; `entity_id` is the new account.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            new_value={
+                "email": normalized,
+                "username": user.username,
+                "role": user.role,
+                "is_active": user.is_active,
+                "must_change_password": True,
+            },
+        )
 
         return AdminUserCreateResponse(
             id=user.id,

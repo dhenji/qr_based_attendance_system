@@ -37,6 +37,22 @@ class ProfessorNotFoundException(ProfessorDomainException):
         super().__init__(message=f"Professor {professor_id} not found")
 
 
+class ProfessorAccountUnlinkedException(ProfessorDomainException):
+    """409 - the roster row has no `users` account to reset.
+
+    A professor is created as a roster record first and only gains a login when
+    the account is created or claimed, so `user_id` is legitimately null.
+    """
+
+    status_code: int = 409
+    code: str = "professor_account_unlinked"
+
+    def __init__(self, professor_id: int) -> None:
+        super().__init__(
+            message=f"Professor {professor_id} has no linked account to reset"
+        )
+
+
 class ProfessorEmailExistsException(ProfessorDomainException):
     """409 - another professor already uses this email.
 

@@ -176,7 +176,7 @@ Excuse evidence attachments (photos, documents) are:
 All sensitive operations are logged in the audit trail:
 
 | Action                                           | Logged | Trail row                                        |
-| ------------------------------------------------ | ------ | ----------------------------------------------- |
+| ------------------------------------------------ | ------ | ------------------------------------------------ |
 | Student enrollment/unenrollment                  | Yes    | `enroll` / `enrollment`                         |
 | Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
 | Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
@@ -185,10 +185,22 @@ All sensitive operations are logged in the audit trail:
 | Backup create/restore                            | Yes    | `create` on `backup`. **Restore is not implemented** — only download |
 | Academic structure changes (program/year/course) | Yes    | `create` / `update` / `archive` / `delete`      |
 | System settings changes                          | Yes    | `update` on `app_setting`, with the previous value |
-| Account lockout/unlock                           | Yes    | `lock` / `unlock` on `user`. **Admin-initiated unlock is not implemented** |
-| Failed login attempts                            | Yes    | `login_failed` on `user`, `performed_by` null |
-| Password reset                                   | Yes    | `password_reset` on `user`. **Only the self-service route exists** |
+| Admin account creation                           | Yes    | `create` on `user`, with the role granted       |
+| Account lockout/unlock                           | Yes    | `lock` / `unlock` on `user`. **There is no standalone admin unlock** — an admin clears a lockout by resetting the password, which is audited as `password_reset` |
+| Failed login attempts                            | Yes    | `login_failed` on `user`, `performed_by` null    |
+| Password reset                                   | Yes    | `password_reset` on `user`, self-service (`performed_by` = the account) or admin-initiated (`performed_by` = the admin) |
+| MFA disable                                      | Yes    | `update` on `user` (`mfa_enabled` only)          |
 | Liveness review resolve                          | Yes    | `approve` / `reject` on `attendance_record`     |
+
+An admin-initiated reset (`POST /admin/{users,students,professors}/{id}/reset-password`)
+issues a temporary password, returns it once, forces `must_change_password`, and
+clears the lockout — the counter, `is_locked` and `locked_at` — because an admin
+rescuing a locked-out account would otherwise hand over a password that still
+could not be used. It deliberately does **not** clear MFA: that would remove a
+second factor as a side effect of a password reset, and `POST /auth/mfa/disable`
+is the path for that, password-verified. None of these snapshots carries the
+password, the hash or the TOTP secret — `_account_snapshot` omits all three by
+design, and the audit assertions pin that.
 
 Read the trail through `GET /admin/audit-logs` (admin-only, filterable by
 `entity_type` / `action` / `performed_by` / date range).

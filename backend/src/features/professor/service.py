@@ -18,6 +18,7 @@ from features.professor.exceptions import (
     ProfessorEmailExistsException,
     ProfessorHasRecordsException,
     ProfessorNotArchivedException,
+    ProfessorAccountUnlinkedException,
     ProfessorNotFoundException,
 )
 from features.professor.model import Professor
@@ -575,6 +576,20 @@ class ProfessorService:
             raise ProfessorNotFoundException(professor_id)
 
         return professor
+
+    async def account_user_id(self, professor_id: int) -> int:
+        """The `users.id` behind this roster row, for credential operations.
+
+        Public because `POST /admin/professors/{id}/reset-password` needs to
+        resolve the roster row to an account before handing off to
+        `AuthService.admin_reset_password`, which owns the credential write.
+        """
+        professor: Professor = await self._get_or_404(professor_id)
+
+        if professor.user_id is None:
+            raise ProfessorAccountUnlinkedException(professor_id)
+
+        return professor.user_id
 
     async def _get_professor_by_user_or_404(self, user_id: int) -> Professor:
         professor: Professor | None = await self._professors.get_by(user_id=user_id)

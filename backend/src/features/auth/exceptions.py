@@ -11,6 +11,21 @@ class AuthDomainException(AuthException, DomainException):
     pass
 
 
+class UserNotFoundException(AuthDomainException):
+    """404 - no user account with that id.
+
+    Distinct from `UnrecognizedEmailException`, which is the self-service
+    forgot-password flow's deliberately vague answer: an admin naming a specific
+    id is entitled to know it does not exist.
+    """
+
+    status_code: int = 404
+    code: str = "user_not_found"
+
+    def __init__(self) -> None:
+        super().__init__(message="User account not found")
+
+
 class RoleMismatchException(AuthDomainException):
     """403 - user lacks the required role."""
 
