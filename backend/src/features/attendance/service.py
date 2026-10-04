@@ -88,6 +88,7 @@ from shared.pagination import (
     PaginatedResponse,
 )
 from shared.query import apply_if
+from shared.rates import attendance_rates
 
 EARTH_RADIUS_METERS: float = 6371000.0
 
@@ -673,8 +674,11 @@ class AttendanceService:
             }
         )
         absent = max(0, enrolled - scanned)
-        compliance, participation = self._history_rates(
-            counts.present, counts.late, counts.excused, enrolled
+        compliance, participation = attendance_rates(
+            present=counts.present,
+            late=counts.late,
+            excused=counts.excused,
+            enrolled=enrolled,
         )
         return HistorySummary(
             compliance_rate=compliance,
@@ -848,18 +852,6 @@ class AttendanceService:
         )
 
         return stmt
-
-    @staticmethod
-    def _history_rates(
-        present: int, late: int, excused: int, enrolled: int
-    ) -> tuple[float, float]:
-        if enrolled <= 0:
-            return 0.0, 0.0
-
-        return (
-            round(present / enrolled, 4),
-            round((present + late + excused) / enrolled, 4),
-        )
 
     async def _history_page(
         self,

@@ -55,6 +55,7 @@ from shared.pagination import (
     PaginatedResponse,
 )
 from shared.query import apply_if
+from shared.rates import attendance_rates
 
 
 def _utcnow() -> datetime:
@@ -102,19 +103,6 @@ class _SessionWindows:
 def _or_fallback[T](chosen: T | None, fallback: T | None) -> T | None:
     """First non-None of two values; `None` overrides are explicit `0` on purpose."""
     return fallback if chosen is None else chosen
-
-
-def _rates(enrolled: int, counts: SessionCounts) -> tuple[float, float]:
-    """Compliance (present/total) and participation ((p+l+e)/total) rates."""
-    if enrolled <= 0:
-        return 0.0, 0.0
-
-    compliance: float = round(counts.present / enrolled, 4)
-    participation: float = round(
-        (counts.present + counts.late + counts.excused) / enrolled, 4
-    )
-
-    return compliance, participation
 
 
 def _session_status(
@@ -657,7 +645,12 @@ class SessionService:
         """One history row: counts plus the compliance/participation rates."""
         counts, scanned = _summarize(await self._attendance_rows(row.id))
         enrolled: int = await self._enrollment_count(row.offering_id)
-        compliance, participation = _rates(enrolled, counts)
+        compliance, participation = attendance_rates(
+            present=counts.present,
+            late=counts.late,
+            excused=counts.excused,
+            enrolled=enrolled,
+        )
 
         return SessionHistoryItem(
             id=row.id,
