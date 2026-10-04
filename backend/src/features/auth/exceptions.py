@@ -141,6 +141,22 @@ class MfaAlreadyEnabledException(AuthDomainException):
         super().__init__(message="MFA is already enabled")
 
 
+class MfaNotEnabledException(AuthDomainException):
+    """409 - MFA is not on, so there is nothing to disable.
+
+    Reported distinctly from a wrong password so the two failures cannot be
+    confused. Note that the flag, not the secret, decides: `setup_mfa` writes
+    the TOTP secret without enabling anything, so a user who never confirmed
+    setup holds a secret and is still not enabled.
+    """
+
+    status_code: int = 409
+    code: str = "mfa_not_enabled"
+
+    def __init__(self) -> None:
+        super().__init__(message="MFA is not enabled for this account")
+
+
 class SecurityAnswerInvalidException(AuthDomainException):
     """400 - security-question answer does not match."""
 

@@ -145,6 +145,17 @@ class MFAVerifyRequest(_CodeRequest):
     )
 
 
+class MFADisableRequest(BaseModel):
+    """Body for `POST /auth/mfa/disable`.
+
+    A bare `str`, not a `_NewPasswordRequest`: this authenticates the current
+    password rather than setting a new one, so the strength policy (and the
+    length bounds that come with it) do not apply.
+    """
+
+    password: str
+
+
 class BackupCodesResponse(BaseModel):
     codes: list[str]
     remaining: int
