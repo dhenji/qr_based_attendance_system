@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     text,
@@ -27,6 +28,12 @@ class Session(CreatedAtMixin, Base):
             "present_window_minutes + late_window_minutes <= duration_minutes",
             name="ck_session_window_sum_lte_duration",
         ),
+        # Every session-scoped date filter keys on `created_at` rather than
+        # `scheduled_start_time` (see `SessionService._sessions_stmt`), including
+        # the UTC day bounds the dashboards and reports build. It was unindexed.
+        # Declared here rather than as `index=True` because the column is
+        # inherited from `CreatedAtMixin`.
+        Index("ix_sessions_created_at", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
