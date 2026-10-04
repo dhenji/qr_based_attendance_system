@@ -53,6 +53,9 @@ from bench_timings import discover_session_pool as _discover
 MEAN_WAIT_S = float(os.environ.get("LOCUST_MEAN_WAIT_S", "2.5"))
 POOL_SIZE = int(os.environ.get("LOCUST_POOL_SIZE", "30"))
 PASSWORD = os.environ.get("LOCUST_PASSWORD", "Loadtest1!")
+# Must be a deliverable domain: the login contract validates with EmailStr,
+# which rejects reserved TLDs such as `.test`.
+EMAIL_DOMAIN = os.environ.get("LOCUST_EMAIL_DOMAIN", "load.uni.edu")
 SESSION_CODE_PREFIX = os.environ.get("LOCUST_SESSION_CODE_PREFIX", "SEED-LOAD-")
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -135,7 +138,7 @@ class ScanningStudent(HttpUser):
         for attempt in range(1, LOGIN_ATTEMPTS + 1):
             with self.client.post(
                 "/api/auth/login",
-                json={"email": f"{self.username}@load.test",
+                json={"email": f"{self.username}@{EMAIL_DOMAIN}",
                       "password": PASSWORD},
                 catch_response=True,
             ) as response:

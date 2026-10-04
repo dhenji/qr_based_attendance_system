@@ -11,11 +11,23 @@ import features.sync.model  # noqa: F401
 import features.system.model  # noqa: F401
 import tests.conftest  # noqa: F401
 from core.database import Base
+from features.auth.model import User
+from features.auth.schema import LoginRequest
 from features.course.model import Course, CourseOffering
 from features.enrollment.model import Enrollment
 from features.program.model import Program
 from features.session.model import Session
 from tests.seed_data import seed
+
+
+def test_load_emails_pass_login_contract() -> None:
+    """The load accounts must survive EmailStr: reserved TLDs 422 every login."""
+
+    for idx in range(1, 31):
+        request = LoginRequest(
+            email=f"loadtest{idx:02d}@load.uni.edu", password="Loadtest1!"
+        )
+        assert request.email == f"loadtest{idx:02d}@load.uni.edu"
 
 
 async def _fresh_db(url: str) -> None:
@@ -83,3 +95,45 @@ async def test_load_fixtures_created_and_idempotent(tmp_path: object) -> None:
     assert second["load_sessions"] == 0
     assert second["students"] == 0
     assert second["records"] == 0
+
+
+async def test_load_email_migrated_from_reserved_domain(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    url = f"sqlite+aiosqlite:///{Path(str(tmp_path)) / 'legacy.db'}"
+    await _fresh_db(url)
+
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine)() as db:
+            db.add(
+                User(
+                    username="loadtest01",
+                    email="loadtest01@load.test",
+                    password_hash="legacy",
+                    role="student",
+                )
+            )
+            await db.commit()
+
+        await seed("small", database_url=url)
+
+        async with async_sessionmaker(engine)() as db:
+            row = (
+                await db.scalars(
+                    select(User).where(User.username == "loadtest01")
+                )
+            ).one()
+            assert row.email == "loadtest01@load.uni.edu"
+
+            domains = (
+                await db.scalars(
+                    select(User.email).where(User.username.like("loadtest%"))
+                )
+            ).all()
+            assert len(domains) == 30
+            assert all(address.endswith("@load.uni.edu") for address in domains)
+    finally:
+        await engine.dispose()

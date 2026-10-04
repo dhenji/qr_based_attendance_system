@@ -456,18 +456,31 @@ async def seed(
             from core.security import hash_password as _hash_password
 
             for idx, (sid, _first, _last, _section) in enumerate(roster[:30], 1):
-                user, _ = await _get_or_create(
-                    db,
-                    User,
-                    {
-                        "username": f"loadtest{idx:02d}",
-                        "password_hash": _hash_password("Loadtest1!"),
-                        "role": UserRole.STUDENT.value,
-                    },
-                    email=f"loadtest{idx:02d}@load.test",
-                )
+                username = f"loadtest{idx:02d}"
+                # Deliverable domain: the login contract validates mailboxes
+                # with EmailStr, which rejects reserved TLDs such as `.test`.
+                email = f"{username}@load.uni.edu"
+                row = (
+                    await db.scalars(
+                        select(User).where(User.username == username)
+                    )
+                ).one_or_none()
+                if row is None:
+                    row = User(
+                        username=username,
+                        email=email,
+                        password_hash=_hash_password("Loadtest1!"),
+                        role=UserRole.STUDENT.value,
+                    )
+                    db.add(row)
+                    await db.flush()
+                elif row.email != email:
+                    # Forward migration for databases seeded before the
+                    # reserved-TLD domain was replaced.
+                    row.email = email
+                    await db.flush()
                 if students[sid].user_id is None:
-                    students[sid].user_id = user.id
+                    students[sid].user_id = row.id
             await db.commit()
 
             if scale == "small":
