@@ -749,6 +749,9 @@ async def seed(
                             select(StudentRiskScore).where(
                                 StudentRiskScore.student_id == student.id,
                                 StudentRiskScore.offering_id == offering.id,
+                                StudentRiskScore.semester == "1st_sem",
+                                StudentRiskScore.computed_day
+                                == date(2026, 7, 9),
                             )
                         )
                     ).one_or_none()

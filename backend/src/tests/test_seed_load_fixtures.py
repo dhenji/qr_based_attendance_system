@@ -137,3 +137,73 @@ async def test_load_email_migrated_from_reserved_domain(tmp_path: object) -> Non
             assert all(address.endswith("@load.uni.edu") for address in domains)
     finally:
         await engine.dispose()
+
+
+async def test_reseed_survives_batch_written_risk_rows(tmp_path: object) -> None:
+    """Nightly batch rows share (student, offering) with the seed's rows.
+
+    The batch upserts per (student, offering, semester, computed_day), so
+    after any batch run the seed's pair-only lookup multi-matches and the
+    re-seed crashed with MultipleResultsFound.
+    """
+
+    from datetime import date
+    from decimal import Decimal
+    from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from features.analytics.model import StudentRiskScore
+
+    url = f"sqlite+aiosqlite:///{Path(str(tmp_path)) / 'batched.db'}"
+    await _fresh_db(url)
+    await seed("small", database_url=url)
+
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine)() as db:
+            seeded = (
+                await db.scalars(
+                    select(StudentRiskScore).where(
+                        StudentRiskScore.computed_day == date(2026, 7, 9)
+                    )
+                )
+            ).all()
+            assert len(seeded) == 9
+
+            first = seeded[0]
+            pair = (
+                first.student_id,
+                first.offering_id,
+                first.semester,
+            )
+            db.add(
+                StudentRiskScore(
+                    student_id=pair[0],
+                    offering_id=pair[1],
+                    semester=pair[2],
+                    risk_probability=Decimal("0.10"),
+                    risk_level="low",
+                    features={},
+                    computed_at=datetime.now(timezone.utc),
+                    computed_day=date.today(),
+                )
+            )
+            await db.commit()
+
+        result = await seed("small", database_url=url)
+
+        async with async_sessionmaker(engine)() as db:
+            rows = (
+                await db.scalars(
+                    select(StudentRiskScore).where(
+                        StudentRiskScore.student_id == pair[0],
+                        StudentRiskScore.offering_id == pair[1],
+                    )
+                )
+            ).all()
+            assert len(rows) == 2
+    finally:
+        await engine.dispose()
+
+    assert result["students"] == 0
