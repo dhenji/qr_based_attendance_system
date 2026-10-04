@@ -295,9 +295,21 @@
 
 ---
 
-## Phase 9: Integration Testing & QA
+## Phase 9: Integration Testing & QA [Done]
 
 **Goal:** End-to-end testing across all portals, security validation, performance benchmarks.
+
+> **Status:** all deliverables landed and measured; suite is 642 collected cases
+> in 43 files (210 sync + 392 async + 40 parametrized expansions), green on
+> SQLite and on Postgres. Load: 11.0 req/s over 5 minutes with 30 virtual
+> students, scan p50 18ms / p95 26ms / p99 33ms, zero spurious duplicate
+> rejections. Risk batch: 10,058 rows in 4.2s, identical with
+> `RISK_BATCH_WORKERS=1` and `=4` (DB-bound at this volume). **Backup leg is
+> environment-blocked:** the pipeline needs `openssl enc` with AEAD support for
+> `-aes-256-gcm`, which the bench host's OpenSSL build does not provide; the
+> re-run command and the exact error are recorded in
+> [performance-benchmarks.md](../testing/performance-benchmarks.md) §7. See also
+> ADR-067 for where the seed and load harness live and why.
 
 ### Deliverables
 

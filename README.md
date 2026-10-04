@@ -94,8 +94,11 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (13 routers mounted under /api, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 15 slices: admin, analytics, attendance, auth, course, course_professor, enrollment, excuse, face_enrollment, professor, program, session, student, sync, system
 │   │   │   └── */        # model.py in 13 slices (17 classes; admin + face_enrollment are model-less); all 13 mounted routers carry routes — /api/professor is shared by the session router (courses/sessions/attendance) and the professor router (profile*), /api/student is shared by the student router and the attendance router, course/ owns two routers (/admin/courses + /admin/offerings); enrollment intentionally unmounted; service.py ×10, schema.py ×9, exceptions.py ×11, constants.py ×8
-│   │   └── tests/        # pytest suite — 386 cases in 25 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests; program slice has no test file. Config: backend/pytest.ini
-│   ├── alembic/          # env.py imports all 13 feature models; 4 migrations — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at) → 17 tables
+│   │   └── tests/        # pytest suite — 642 cases in 43 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini
+│   ├── alembic/          # env.py imports all 13 feature models; 9 migrations — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), … → head b1c4e7f0a2d6
+│   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
+│   ├── locustfile.py     # Concurrent-scan load harness (locust; 30 VUs over a pool of SEED-LOAD-* sessions)
+│   ├── bench_timings.py  # One-shot risk-batch / backup timings + the import-safe helpers locustfile reuses
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
 ├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend (+ api-test under profile: test)
 └── docs/                 # Proposals, architecture, deployment, design, developer, guides, operations, presentations, project, testing

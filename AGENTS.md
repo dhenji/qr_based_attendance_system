@@ -34,6 +34,18 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendan
 ```
 Markers in `backend/pytest.ini`: `-m "not slow"`, `-m "not integration"`. No `--cov` in `addopts`; add `--cov=src/features --cov=src/shared --cov=src/core` explicitly when needed.
 
+Seed, load and batch timings — none of these are pytest-collected. The seed needs a migrated live Postgres (`alembic upgrade head`); the load harness needs the API in the load profile so a single load host does not trip the per-IP gates:
+```bash
+cd backend
+python test_seed_data.py --scale small      # small|medium|large|xl; also --reset, --load-fixtures N
+PYTHONPATH=src .venv/bin/python -m tests.seed_data --scale small   # same module, importable entry
+BENCHMARK_MODE=true FACE_MATCH_THRESHOLD=0.0 .venv/bin/uvicorn main:app --app-dir src   # terminal 1
+.venv/bin/locust -f locustfile.py --host http://127.0.0.1:8000 --headless -u 30 -r 6 --run-time 5m --csv load_run   # terminal 2
+.venv/bin/python bench_timings.py --batch --workers 4   # nightly risk-batch timing, prints duration_ms
+BACKUP_ENCRYPTION_KEY=… .venv/bin/python bench_timings.py --backup   # needs pg_dump + OpenSSL 3 with AEAD
+```
+`locustfile.py` and `bench_timings.py` are the harness; `src/tests/seed_data.py` is the seed implementation and `test_seed_data.py` a thin root entry point (kept because the docs and runbooks cite that path). Measured results live in `docs/testing/performance-benchmarks.md` §7.
+
 Frontend (`engine-strict=true` in `.npmrc` — install fails on wrong Node):
 ```bash
 cd frontend
@@ -62,10 +74,12 @@ npm run check          # typecheck (runs svelte-kit sync first)
 - Email: `shared/email.py` is the one delivery path — real `smtplib`, stdlib only, and it **never raises** (`debug` logs, empty `SMTP_HOST` logs+skips, otherwise implicit TLS 465 / STARTTLS 587). `SMTP_*` in `core/config.py` is deliberately unvalidated (unlike `JWT_SECRET`) so a deployment without a relay still boots. `send_otp_email` keeps its old signature because `auth/service.py` calls it inline; new code that must not block uses `dispatch_emails` (one executor job per batch, futures parked in `shared.email._PENDING`). Excuse notifications: copy in `features/excuse/notifications.py` (pure builders), recipient resolution + dispatch in `ExcuseService`, always last in the method so a raise sends nothing. Recipients read `users.email` first, then the profile's roster `email`. Only §8's four events notify — `quick_excuse`/`excuse_with_evidence`/`edit_excuse`/`revoke_excuse` are silent, and the in-app half is unimplemented (no table, by design).
 - Audit: `shared/audit.py::record_audit` is the ONE writer — flush-only, so a row rolls back with the mutation it describes. `action`/`entity_type` are typed by `shared/enums.py::AuditAction`/`AuditEntity` (free-form columns, no DB constraint, **no index on `action`**). Read via `GET /admin/audit-logs` (all rows, 4 filters); `GET /admin/system/academic-structure` reads the same table scoped to the 4 structural entity types. Both live in `system/router.py` (prefix `/admin`); `AuditFilterInvalidException`/`AuditDateRangeInvalidException` are 422. One exception to "services only flush": lockout bookkeeping in `auth/service.py` commits on its own session (`_lockout_transaction`) because the request that raises 400 would otherwise roll the counter back — see ADR-064.
 - Scan flow (D27, rejection reasons D15): `POST /student/attendance/{scan,precheck}` resolve the student from the **authenticated user**, only *comparing* `payload.student_number` case-insensitively → `403 student_number_mismatch`. Same rule applies to any new student-facing endpoint taking an ID (e.g. excuse submit). Idempotency key is `user_id:session_id:X-Idempotency-Key`, 15-min TTL, process-local (like `rate_limit` — needs a shared store for multi-instance).
+- Benchmark profile (Phase 9, see ADR-067): `BENCHMARK_MODE=true` skips the scan geofence + liveness checks (`attendance/service.py`) and the per-IP scan rate gate (`attendance/router.py`); `RISK_BATCH_WORKERS` shards risk scoring across threads order-preservingly (`analytics/batch.py`). Both default off, so production behavior is unchanged; `test_scan_validation.py` and `test_risk_batch.py` cover each.
+- Load-harness traps (Phase 9): never import `locustfile` from the suite — importing locust pulls in gevent monkey-patching and hangs pytest, which is why the harness's helpers live in `bench_timings.py`; locust calls `wait_time` bound, so the callable must accept the user argument; a virtual user's identity must come from `SlotAssigner`, never `id(user) % pool` (CPython's aligned addresses collapse onto a few residues and the users then rescan each other's sessions).
 
 ## Backend tests
 
-- 583 collected cases / 38 files (204 sync + 342 async test functions, plus 37 parametrized expansions): sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` slice has no test file, and `features/excuse/` has only `test_notifications.py` (the full excuse-service cover is still unwritten).
+- 642 collected cases / 43 files (210 sync + 392 async test functions, plus 40 parametrized expansions): sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` is covered by `features/program/test_program_service.py`; `features/excuse/` has all three layers (`test_service.py`, `test_routes_http.py`, `test_notifications.py`).
 - `conftest.py` SQLite shims (SQLite-only, inert on Postgres): `JSONB`→`JSON`, `BigInteger`→`INTEGER` (else every `id` insert fails `NOT NULL`), aware-UTC `DateTime` (else `SessionService.create_session` raises `TypeError`), plus `PRAGMA foreign_keys=ON` (else RESTRICT guards pass vacuously).
 - DB tests must use `api_client` (httpx + ASGITransport, `_get_db` overridden). `test_client` is sync-only and never used as a context manager (entering it runs lifespan `SELECT 1` → needs live Postgres).
 - `api_client` commits only on success, so a **failing request rolls back the seed** — commit after seeding if a test issues two failing requests. Read `server_default` values before committing (else `MissingGreenlet`).
