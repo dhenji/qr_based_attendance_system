@@ -406,8 +406,13 @@ import { formatPercentage } from '$lib/shared/utils/format';
 		<section class="kpis">
 			<div class="kpi"><span class="kpi-value">{overview.total_students}</span><span class="kpi-label">Students</span></div>
 			<div class="kpi"><span class="kpi-value">{overview.total_sessions}</span><span class="kpi-label">Sessions</span></div>
-			<div class="kpi"><span class="kpi-value">{formatPercentage(overview.avg_compliance_rate)}</span><span class="kpi-label">Avg compliance</span></div>
-			<div class="kpi"><span class="kpi-value">{formatPercentage(overview.avg_participation_rate)}</span><span class="kpi-label">Avg participation</span></div>
+			<!-- Both rates arrive as 0-1 fractions (backend `_rates` does
+			     round(present/enrolled, 4)), so they need scaling before
+			     formatting. The CSV export in features/admin/analytics/service.ts
+			     already does this, which is why the omission here went unnoticed:
+			     85% was rendering as "1%". -->
+			<div class="kpi"><span class="kpi-value">{formatPercentage(overview.avg_compliance_rate * 100)}</span><span class="kpi-label">Avg compliance</span></div>
+			<div class="kpi"><span class="kpi-value">{formatPercentage(overview.avg_participation_rate * 100)}</span><span class="kpi-label">Avg participation</span></div>
 		</section>
 	{:else if tab === 'comparison'}
 		<section class="card">
@@ -432,8 +437,8 @@ import { formatPercentage } from '$lib/shared/utils/format';
 									<td class="strong">{r.course_code}{r.courseName ? ` — ${r.courseName}` : ''}</td>
 									<td>{[r.programCode ?? `Program ${r.program_id}`, r.yearLevelLabel ?? `Year ${r.year_level_id}`].join(' · ')}</td>
 									<td>{r.total_sessions}</td>
-									<td>{formatPercentage(r.compliance_rate)}</td>
-									<td>{formatPercentage(r.participation_rate)}</td>
+									<td>{formatPercentage(r.compliance_rate * 100)}</td>
+									<td>{formatPercentage(r.participation_rate * 100)}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -462,8 +467,8 @@ import { formatPercentage } from '$lib/shared/utils/format';
 								<tr>
 									<td class="strong">{t.date}</td>
 									<td>{t.total_sessions}</td>
-									<td>{formatPercentage(t.compliance_rate)}</td>
-									<td>{formatPercentage(t.participation_rate)}</td>
+									<td>{formatPercentage(t.compliance_rate * 100)}</td>
+									<td>{formatPercentage(t.participation_rate * 100)}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -520,7 +525,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 								<tr>
 									<td class="strong">{r.student_name}<div class="muted small">{r.student_id} · {r.program} {r.year_level}</div></td>
 									<td>{r.course_code}</td>
-									<td>{formatPercentage(r.absence_rate)}</td>
+									<td>{formatPercentage(r.absence_rate * 100)}</td>
 									<td>{r.max_streak}</td>
 									<td>{trendArrow(r.trend_slope)}</td>
 									<td><span class={riskBadge(r.risk_level)}>{r.risk_level}</span></td>
@@ -601,7 +606,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 								<tr>
 									<td class="strong">{r.student_name}<div class="muted small">#{r.student_id} · {r.program} {r.year_level}</div></td>
 									<td>{r.course_code}<div class="muted small">{r.course_name}</div></td>
-									<td>{formatPercentage(r.absence_rate)}</td>
+									<td>{formatPercentage(r.absence_rate * 100)}</td>
 									<td>{r.max_streak}</td>
 									<td>{trendArrow(r.trend_slope)}</td>
 									<td><span class={riskBadge(r.risk_level)}>{r.risk_level}</span></td>

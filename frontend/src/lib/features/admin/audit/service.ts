@@ -1,21 +1,27 @@
 // features/admin/audit/service.ts
 // Admin audit-log service.
 //
-// No audit backend exists yet (audit_logs lands in Phase 8.5/8.7), so rows
-// come from two sources merged here:
-// - Live record-creation rows derived from roster lists (students, professors,
-//   programs, courses) via their created_at — marked origin "system". Rosters
-//   expose no updater/updated-at, so creations are the only live-derivable
-//   rows; everything else waits on the backend trail.
-// - Deterministic mock operational rows (session opens, scans, excuses,
-//   backups, lockouts, …) from the adminAuditLogs endpoint def — marked
-//   origin "seed".
+// The audit backend is live (Phase 8, `GET /admin/audit-logs` on
+// features/system/router.py, fed by shared/audit.py::record_audit), so rows come
+// from two live sources merged here:
 //
-// The merged feed sorts by timestamp desc with one client-side pager (the
-// mock def is asked for a full page of 100 and sliced locally, so the two
-// sources share a single total). Category values are the ten logged families
-// from security-model §Audit-Log-Coverage. Real API by default; mocks only
-// when PUBLIC_MOCK_MODE=true.
+// - Trail rows straight from `adminAuditLogs`: every recorded action, with its
+//   real actor, action, entity and detail.
+// - Record-creation rows derived client-side from roster `created_at`
+//   (students, professors, programs, courses) because the rosters expose no
+//   updater or updated-at, so creations are the only rows derivable from them.
+//
+// `origin` labels the two sources and is rendered in the feed and the CSV
+// export. The label `'seed'` on the trail rows is a legacy name from when they
+// really were deterministic fixtures — they are not seeded now, and the
+// endpoint def's `mock` is only consulted under PUBLIC_MOCK_MODE=true. Renaming
+// it would touch the store, the page and the CSV header, so it is left as-is
+// rather than half-migrated.
+//
+// The merged feed sorts by timestamp desc with one client-side pager (both
+// sources are requested at full page size and sliced locally, so they share a
+// single total). Category values are the ten logged families from
+// security-model §Audit-Log-Coverage.
 
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';

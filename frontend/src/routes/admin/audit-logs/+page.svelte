@@ -121,7 +121,7 @@
 	<header class="header">
 		<div>
 			<h1>Audit Logs</h1>
-			<p class="muted">Record creations are live system rows · operational actions are seeded until the Phase 8 audit backend lands</p>
+			<p class="muted">Audit-trail rows come from the server log · record-creation rows are derived from roster created_at</p>
 		</div>
 		<div class="header-actions">
 			<button class="btn btn-secondary" onclick={() => window.print()}>Print</button>

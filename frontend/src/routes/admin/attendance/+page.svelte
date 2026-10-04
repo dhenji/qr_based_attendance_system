@@ -171,7 +171,7 @@
 						<tr>
 							<td><button class="link strong" onclick={() => goto(adminCourse(r.course_id))}>{r.course_code}</button><div class="muted small">{r.course_name}</div></td>
 							<td>{r.sessions_count}</td>
-							<td>{formatPercentage(r.avg_rate)}</td>
+							<td>{formatPercentage(r.avg_rate * 100)}</td>
 							<td title={trendLabel(r)}><span class="trend" aria-label={trendLabel(r)}>{trendGlyph(r)}</span></td>
 						</tr>
 					{/each}

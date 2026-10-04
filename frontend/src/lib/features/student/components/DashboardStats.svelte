@@ -2,7 +2,8 @@
 	import { formatPercentage } from '$lib/shared/utils/format';
 
 	interface Props {
-		// 0–100 from GET /student/dashboard.
+		// Already scaled to 0–100 by `complianceRate()` in the student store —
+		// the wire value is a 0-1 fraction.
 		complianceRate: number;
 		// False while the student has no scans, so we can say "No data" instead of
 		// implying a genuine 0% attendance record.

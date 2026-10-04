@@ -96,7 +96,11 @@
 				present_window_default: present,
 				late_window_default: late
 			});
-			saveNote = 'Defaults saved for this session (demo data — the settings backend is not built yet).';
+			// These persist: `app_settings` is a real table and this route commits
+			// through the request dependency, so a success message must not imply
+			// the values were session-only. It used to say exactly that, which
+			// told admins a save had not stuck when it had.
+			saveNote = 'Defaults saved. They take effect immediately and persist on the server.';
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Could not save defaults.';
 		} finally {
@@ -112,7 +116,7 @@
 		try {
 			const started = await triggerBackup();
 			backups = await listBackups();
-			backupNote = `Backup #${started.backup_id} started (demo — no file is produced).`;
+			backupNote = `Backup #${started.backup_id} started. It appears below once it completes.`;
 		} catch (e) {
 			backupError = e instanceof Error ? e.message : 'Could not start a backup.';
 		} finally {
@@ -180,10 +184,6 @@
 			<p class="muted">Attendance defaults, backups, exports, and maintenance.</p>
 		</div>
 	</header>
-
-	<p class="demo" role="status">
-		Demo data — the system settings backend is not built yet. Changes apply to this session only.
-	</p>
 
 	{#if loading}
 		<section class="card"><p class="muted">Loading system settings…</p></section>
@@ -261,7 +261,7 @@
 					class="btn btn-secondary"
 					type="button"
 					disabled={!latestCompleted}
-					title={latestCompleted ? 'Download a JSON descriptor of this backup (demo)' : 'No completed backup yet'}
+					title={latestCompleted ? 'Download a JSON descriptor of this backup — the file itself is not fetched yet' : 'No completed backup yet'}
 					onclick={() => latestCompleted && downloadBackupDescriptor(latestCompleted)}
 				>
 					📥 Download
@@ -338,16 +338,6 @@
 
 	.muted {
 		color: #64748b;
-		font-size: 0.875rem;
-		margin: 0;
-	}
-
-	.demo {
-		background: #fffbeb;
-		border: 1px solid #fde68a;
-		border-radius: 8px;
-		padding: 0.75rem 1rem;
-		color: #92400e;
 		font-size: 0.875rem;
 		margin: 0;
 	}
