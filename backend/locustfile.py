@@ -40,6 +40,7 @@ from __future__ import annotations
 import os
 import random
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -89,6 +90,22 @@ def _load_session_pool(environment, **kwargs) -> None:
     print(f"load pool: {len(SESSION_IDS)} sessions from id {SESSION_IDS[0]}")
 
 
+LOGIN_ATTEMPTS = 5
+
+
+def _describe(response: object) -> str:
+    """One-line status + body for a failed response, whatever failed."""
+
+    status = getattr(response, "status_code", "?")
+    if status == 0:
+        return "0 (no response — is the API up?)"
+    try:
+        text = response.text  # type: ignore[union-attr]
+    except Exception:
+        return str(status)
+    return f"{status} {text[:160]}"
+
+
 class ScanningStudent(HttpUser):
     host = "http://127.0.0.1:8000"
     wait_time = _wait  # type: ignore[assignment]
@@ -99,24 +116,44 @@ class ScanningStudent(HttpUser):
         self.slot = (id(self) % POOL_SIZE) + 1
         self.username = f"loadtest{self.slot:02d}"
         self.scans = 0
-        with self.client.post(
-            "/api/auth/login",
-            json={"email": f"{self.username}@load.test", "password": PASSWORD},
-            catch_response=True,
-        ) as response:
-            if response.status_code != 200:
-                response.failure(f"login {response.status_code}")
-                raise RuntimeError(f"login failed for {self.username}")
-            token = response.json()["access_token"]
+        token = self._login_with_retry()
         self.headers = {"Authorization": f"Bearer {token}"}
         with self.client.get(
             "/api/student/profile", headers=self.headers, catch_response=True
         ) as response:
             if response.status_code != 200:
-                response.failure(f"profile {response.status_code}")
+                response.failure(f"profile {_describe(response)}")
                 raise RuntimeError(f"profile failed for {self.username}")
             body = response.json()
             self.student_number = body["student_number"] or body["student_id"]
+
+    def _login_with_retry(self) -> str:
+        # The login limiters stay enforced in the load profile (20/min per
+        # IP), so the 30-user spawn wave absorbs 429s with backoff instead of
+        # failing: throttled attempts are not the run's measured traffic.
+        last = "never attempted"
+        for attempt in range(1, LOGIN_ATTEMPTS + 1):
+            with self.client.post(
+                "/api/auth/login",
+                json={"email": f"{self.username}@load.test",
+                      "password": PASSWORD},
+                catch_response=True,
+            ) as response:
+                if response.status_code == 200:
+                    response.success()
+                    token = response.json()["access_token"]
+                    if not token:
+                        raise RuntimeError(
+                            f"login returned no token for {self.username}"
+                        )
+                    return token
+                last = _describe(response)
+                if response.status_code == 429 and attempt < LOGIN_ATTEMPTS:
+                    response.success()
+                    time.sleep(min(10 * attempt, 30))
+                    continue
+                response.failure(f"login {last}")
+        raise RuntimeError(f"login failed for {self.username}: {last}")
 
     @task
     def scan(self) -> None:
@@ -160,7 +197,7 @@ class ScanningStudent(HttpUser):
                 _failures["rate_limited"] += 1
             else:
                 _failures["error"] += 1
-            response.failure(f"scan {response.status_code} {code}")
+            response.failure(f"scan {_describe(response)} code={code}")
 
 
 @events.test_stop.add_listener
