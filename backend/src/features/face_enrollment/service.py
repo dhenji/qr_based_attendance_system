@@ -182,8 +182,12 @@ class FaceEnrollmentService:
     def _face_snapshot(student: Student) -> dict[str, Any]:
         """Face state without the embedding.
 
-        The blob is encrypted at rest and is deliberately never copied into an
-        audit row; `face_embedding_version` is the signal that it changed.
+        The blob is deliberately never copied into an audit row; the
+        `face_embedding_version` bump is the signal that it changed. Once the
+        real pipeline lands (D28) the blob will also be encrypted at rest — today
+        it is the zero-filled `_stub_embedding_blob` placeholder, so the exclusion
+        is carrying the weight on its own. See security-model.md
+        *Client-Asserted Biometrics*.
         """
         return {
             "enrolled": student.face_embedding is not None,
