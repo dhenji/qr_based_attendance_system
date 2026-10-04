@@ -30,6 +30,7 @@ from features.student.exceptions import (
     StudentHasRecordsException,
     StudentIdExistsException,
     StudentNotArchivedException,
+    StudentAccountUnlinkedException,
     StudentNotFoundException,
     YearLevelMismatchException,
 )
@@ -777,6 +778,20 @@ class StudentService:
             raise StudentNotFoundException(student_id)
 
         return student
+
+    async def account_user_id(self, student_id: int) -> int:
+        """The `users.id` behind this roster row, for credential operations.
+
+        Public because `POST /admin/students/{id}/reset-password` needs to
+        resolve the roster row to an account before handing off to
+        `AuthService.admin_reset_password`, which owns the credential write.
+        """
+        student: Student = await self._get_or_404(student_id)
+
+        if student.user_id is None:
+            raise StudentAccountUnlinkedException(student_id)
+
+        return student.user_id
 
     async def _year_level(self, year_level_id: int) -> YearLevel:
         year_level: YearLevel | None = await self._session.get(YearLevel, year_level_id)

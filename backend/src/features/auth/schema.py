@@ -196,3 +196,14 @@ class MeResponse(BaseModel):
     face_embedding_version: int | None = None
 
     claim_status: str | None = None
+
+
+class AdminPasswordResetResponse(BaseModel):
+    """Body for the three admin-initiated `.../reset-password` routes.
+
+    Lives here rather than per-slice because all three reset the same thing — a
+    `users` row — and `AuthService.admin_reset_password` is the single
+    implementation behind them.
+    """
+
+    temp_password: str
