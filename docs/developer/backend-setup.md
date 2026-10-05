@@ -1,6 +1,6 @@
 # Backend Setup Guide
 
-> Copy-pasteable commands only. Prerequisites: Docker, Python 3.12+, Node 20+.
+> Copy-pasteable commands only. Prerequisites: Docker, Python 3.12+, Node 22+.
 
 ---
 
@@ -57,9 +57,11 @@ alembic upgrade head
 ```
 
 > **Note:** `alembic upgrade head` applies the 16-table baseline migration
-> (`679a319c12d6`). Further model changes (e.g. locking, audit, settings tables)
-> are added via new revisions on top. See [migration-strategy.md](../architecture/migration-strategy.md)
-> for the target schema reference.
+> (`679a319c12d6`) **and** the nine revisions on top of it, ending at head
+> `1e1582c4e9f8`. That chain carries the schema to the current **20 tables** — including
+> `mfa_backup_codes`, `audit_logs`, `app_settings` and `student_risk_scores_staging`.
+> See [migration-strategy.md](../architecture/migration-strategy.md) for the target schema
+> reference and the full revision list.
 
 ### 5. Run the server
 
@@ -85,9 +87,71 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-The suite holds 239 cases across 19 files. `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
+The suite holds **719 cases across 49 files**. `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
 
 Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead.
+
+### Deselecting slow and integration tests
+
+`pytest.ini` declares two markers, so either group can be skipped:
+
+```bash
+cd backend
+DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src \
+  .venv/bin/python -m pytest src/tests -q -m "not slow"
+DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src \
+  .venv/bin/python -m pytest src/tests -q -m "not integration"
+```
+
+CI runs the whole suite on SQLite; see
+[test-plan.md §9](../testing/test-plan.md) for what CI gates versus what stays manual.
+
+---
+
+## Seeding & Load Harness
+
+None of the following are pytest-collected — they are standalone entry points.
+
+### Seed data
+
+Needs a **migrated live Postgres** (`alembic upgrade head` first). `small` is the default
+scale: 42 students.
+
+```bash
+cd backend
+python test_seed_data.py --scale small          # small|medium|large|xl; also --reset, --load-fixtures N
+PYTHONPATH=src .venv/bin/python -m tests.seed_data --scale small   # same module, importable entry
+```
+
+Per-scale row counts are documented in
+[test-data.md](../testing/test-data.md).
+
+### Load harness
+
+Run the API in benchmark mode first so a single host does not trip the per-IP rate gates,
+then drive it with locust:
+
+```bash
+# terminal 1
+cd backend
+BENCHMARK_MODE=true FACE_MATCH_THRESHOLD=0.0 .venv/bin/uvicorn main:app --app-dir src
+# terminal 2
+cd backend
+.venv/bin/locust -f locustfile.py --host http://127.0.0.1:8000 --headless -u 30 -r 6 --run-time 5m --csv load_run
+```
+
+The load run asserts its own throughput and latency targets and sets a non-zero exit code on
+a miss, so it is CI-gateable. **Never import `locustfile` from the test suite** — importing
+locust monkey-patches with gevent and hangs pytest. Measured results live in
+[performance-benchmarks.md §7](../testing/performance-benchmarks.md).
+
+### Batch timings
+
+```bash
+cd backend
+.venv/bin/python bench_timings.py --batch --workers 4   # nightly risk-batch timing
+BACKUP_ENCRYPTION_KEY=… .venv/bin/python bench_timings.py --backup   # needs pg_dump + OpenSSL 3
+```
 
 ---
 
@@ -120,6 +184,22 @@ alembic downgrade -1
 cd backend
 alembic current
 ```
+
+### Check for model/migration drift
+
+```bash
+cd backend
+alembic check
+```
+
+> **Important — this is the only guard against migration drift.** `conftest.py` builds the test
+> schema with `Base.metadata.create_all`, straight from the models, so the suite never
+> exercises the revision chain and cannot detect drift in **either** direction (ADR-065). CI
+> runs `alembic upgrade head && alembic check` against a `postgres:16-alpine` service on every
+> push and pull request. **Red means drift, not a flaky check.**
+>
+> When an applied migration disagrees with a model, **fix the migration, never the model**:
+> never edit an already-applied revision, add a forward migration.
 
 ### View migration history
 

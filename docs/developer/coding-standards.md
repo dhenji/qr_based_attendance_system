@@ -34,7 +34,7 @@ to follow by convention until tooling is added:
 
 - **Line length:** 88 characters (ruff default).
 - **Quotes:** double quotes for strings.
-- **Imports:** sorted by ruff rules — stdlib first, then third-party, then local. Use `from __future__ import annotations` where helpful.
+- **Imports:** sorted by ruff rules — stdlib first, then third-party, then local. Put `from __future__ import annotations` at the top of every module.
 - **Trailing commas:** yes on multi-line collections and function signatures.
 - **Type hints:** required on all function signatures (args + return). Use `X | None` over `Optional[X]`.
 
@@ -93,11 +93,12 @@ to follow by convention until tooling is added:
 
 ```python
 # 1. Standard library
+from __future__ import annotations
+
 from datetime import datetime, timezone
-from typing import Optional
 
 # 2. Third-party
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -146,7 +147,7 @@ from features.student.model import Student
 
 #### Exception Hierarchy Design (all feature `exceptions.py`)
 
-Standard 3-tier pattern used by all 11 feature exception modules:
+Standard 3-tier pattern used by all 13 feature exception modules:
 
 ```python
 class FeatureException(AppException):              # umbrella
@@ -180,20 +181,27 @@ class ConcreteConflict(FeatureDomainException):     # 409
   (`<Feature>ServiceDep`), which receives `_get_db`, so the transaction boundary is unchanged.
   This is a standing rule, not a per-slice re-argument — see ADR-055 and ADR-058 in
   [decision-log.md](../project/decision-log.md).
-- **Everything else is module-level async functions**: `async def create_foo(session: AsyncSession, ...)`.
-  That covers pure helpers such as `shared/csv_import.py` — where a
-  class would have nothing to compose. A session alone does **not** justify a class; a
-  composed set of per-request handles does. `FaceEnrollmentService` is the one
-  sanctioned non-CRUD exception: it holds the session plus `Settings` (upload caps,
-  embedding version) that every method reads, and is reached via
-  `FaceEnrollmentServiceDep` (ADR-059). `CourseProfessorService` (Phase 1.3) is the one
-  borderline holdover: it is a class that would be a near-exact drop-in as a function and is
-  retained as-is because ADR-055 declined a cosmetic change to contract-tested code. Do not
-  treat either as precedent for a new slice.
+- **A slice service is a `class <Feature>Service`.** All 15 `features/*/service.py` modules are
+  classes; there is no module-level-function service module in the tree. Whether a class
+  *earns* its place is the separate question below — the form is uniform, the justification
+  varies per slice.
+- **The class name carries the noun, so methods do not repeat it.** `create`, `get`, `list`,
+  `archive`, `refresh_risk` — not `create_program`. Sub-resources extend the class:
+  `list_years`, `create_year`.
+- **Arguments after `self` are keyword-only**, and payloads arrive as the Create schema rather
+  than as loose scalars.
+- **Every list returns `PaginatedResponse[T]`** with an explicit `total` count and `page`/`size`
+  bounds from `shared/pagination.py`. `BaseCRUD.list()` has its own `limit=50` default and is
+  for internal lookups — do not return it from a list endpoint.
+- **Optional filters go through `shared/query.apply_if(stmt, value, build)`**, which skips
+  building a criterion for a `None` value; a bare `>=` comparison rejects `None` at
+  construction time.
+- **Return read schemas.** `model_validate` cannot see derived aggregates, so a response
+  carrying counts or collections is built as `ProgramRead(**self._read_fields(row))`.
+- **Sensitive mutations call `shared/audit.record_audit(...)`** in the caller's transaction, so
+  the audit row rolls back with the change it describes.
 - A service class must hold no state across requests; its `__init__` may only build
   per-request handles. Services call `BaseCRUD` for database operations.
-- **Services return read schemas.** Building `ProgramRead(...)` in the service is the norm
-  when the response carries derived aggregates — `model_validate(program)` cannot see them.
 - **Relationship access in async must be explicit.** `Program.year_levels` declares no
   `lazy=`, so reading `program.year_levels` after a query raises `MissingGreenlet`. Either
   pass `selectinload(Program.year_levels)` (or `joinedload`) in the query, or issue a second
@@ -201,21 +209,44 @@ class ConcreteConflict(FeatureDomainException):     # 409
   query when the same children are also needed per row in `list`, so both paths share one
   helper.
 - Business logic lives in services, not routers.
-- Raise `HTTPException` or domain exceptions, never raw `ValueError`.
+- **Services raise domain exceptions** from their `exceptions.py` — never `HTTPException`,
+  never a raw `ValueError`. Only `AppException` subclasses reach the client's
+  `{detail: {code, message}}` envelope (`DomainException` → 422, `DatabaseException` → 409).
+  `HTTPException` is reserved for the auth layer in `api/deps.py`, which builds it through the
+  `shared/dependencies.py` envelope helper.
 - Transactions: flush within service methods; commit managed by the router/dependency.
 
 #### Service Form Decision Tree (ADR-055/058/059)
 
-| Slice Type                                                                         | Form                                 | Rationale                                                                                           |
-| ---------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Admin CRUD (`/admin/*`: program, course, student-admin, professor-admin)           | **Class** (`FeatureService`)         | Composes multiple `BaseCRUD` handles in `__init__`; per-request injection via `<Feature>ServiceDep` |
-| `face_enrollment`                                                                  | **Class** (`FaceEnrollmentService`)  | Holds `Session` + `Settings` (upload caps, embedding version) read by every method (ADR-059)        |
-| `session`                                                                          | **Class** (`SessionService`)         | Holds `Session` + `Settings`; owns professor sessions + attendance reads                            |
-| `auth`                                                                             | **Class** (`AuthService`)            | Accepted cost: multiple CRUDs + settings + rate limiter — ADR-055                                   |
-| `course_professor`                                                                 | **Class** (`CourseProfessorService`) | Borderline holdover — retained, **not precedent** (ADR-055)                                         |
-| **All other slices** (`sync`, `excuse`, `analytics`, `system`, `csv_import`, etc.) | **Module-level `async def`**         | No composed handles; a session alone doesn't justify a class (ADR-055 default)                      |
+| Slice                                                                            | Form                        | Why `__init__` earns the class                                                                                              |
+| -------------------------------------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Admin CRUD (`/admin/*`: program, course, student-admin, professor-admin)           | **Class** (`FeatureService`) | Composes multiple `BaseCRUD` handles; per-request injection via `<Feature>ServiceDep` (ADR-058)                             |
+| `admin`                                                                         | **Class** (`AdminService`)    | Composes 3 `BaseCRUD` handles (`User`, `Student`, `Professor`); accepted cost — ADR-055                  |
+| `dashboard`                                                                       | **Class** (`DashboardService`) | Injects 5 sibling services (`student`, `attendance`, `session`, `analytics`, `reports`) — it aggregates features it does not own |
+| `excuse`                                                                          | **Class** (`ExcuseService`)   | Composes 2 `BaseCRUD` handles (`ExcuseRequest`, `Attendance`)                                                               |
+| `session`, `face_enrollment`, `auth`                                              | **Class**                    | Holds `Session` + `Settings` read by every method (ADR-059); `AuthService` also composes CRUDs + a rate limiter             |
+| `system`, `attendance`                                                            | **Class**                    | Holds `Session` + `Settings` — the same shape as ADR-059's case                                                            |
+| `analytics`, `reports`, `course_professor`                                        | **Class**                    | **Compose only the session — none meets the rule below.** See the note underneath                                       |
 
-**Rule of thumb**: a class earns its place when `__init__` builds **multiple per-request handles** (CRUD, settings, limiters) that every method uses. Otherwise, write `async def foo(session: AsyncSession, ...)`.
+**Rule of thumb** (unchanged, `coding-standards.md` §1.7): a class earns its place when
+`__init__` builds **multiple per-request handles** (CRUD, settings, limiters) that every
+method uses. Otherwise, write `async def foo(session: AsyncSession, ...)`.
+
+> **Unresolved: `analytics`, `reports`, `course_professor`.** These three are classes that
+> build only `self._session`, so they do not satisfy the rule above — a session alone does not
+> justify a class. They are left as-is rather than flattened, because every alternative is a
+> judgement call: widen the rule to admit a namespace-only class as a DI/test seam, or convert
+> ~25 methods and ~15 private helpers to module-level functions and delete two of the fourteen
+> `*ServiceDep` annotations. `course_professor` is already a known holdover — ADR-055 declined a
+> cosmetic change to contract-tested code, and it is the one service with **no** `*ServiceDep`
+> at all: `course/service.py:456` and `professor/service.py:684` each construct one ad hoc for a
+> single overlap check. `analytics` and `reports` are unacknowledged. All three are open
+> questions in [#179](https://github.com/dhenji/qr_based_attendance_system/issues/179).
+> **None of the three is precedent for a new slice.**
+
+Everything not in the table is a **shared helper**, not a slice service —
+`shared/csv_import.py` is module-level functions on purpose, and is imported by four service
+modules rather than injected like a service.
 
 ### 1.8 Router Conventions
 
@@ -374,7 +405,8 @@ slice's own session.
   ```
 - **Settings injection**:
   - Admin CRUD services: **not injected** (don't need settings)
-  - `AuthService`, `FaceEnrollmentService`, `SessionService`: `Settings` via `__init__(session, settings: Settings | None = None)` with `settings or get_settings()`
+  - `AuthService`, `FaceEnrollmentService`, `SessionService`, `SystemService`, `AttendanceService`:
+    `Settings` via `__init__(session, settings: Settings | None = None)` with `settings or get_settings()`
 - **Transaction boundary**: single `commit()` in `_get_db`; services only `flush()`
 
 ---
@@ -419,7 +451,21 @@ Svelte 5 runes are **forced on** via `vite.config.ts`. Write all reactive code u
 - **Strict mode** enabled (`tsconfig.json`).
 - Use `interface` for object shapes, `type` for unions/intersections.
 - Prefix component props interfaces with the component name: `SessionCardProps`.
-- Use `enum` for role/status constants shared across features.
+- **Shared constants are `as const` objects plus a derived union, never `enum`.** There is no
+  `export enum` in `frontend/src`; `lib/shared/constants/roles.ts:3-10` is the reference shape:
+  ```ts
+  export const Roles = {
+    SUPER_ADMIN: 'super_admin' as const,
+    ADMIN: 'admin' as const,
+    PROFESSOR: 'professor' as const,
+    STUDENT: 'student' as const,
+  };
+
+  export type UserRole = keyof typeof Roles;
+  ```
+  A string-literal union keeps the values assignable to the backend's `StrEnum` members and
+  avoids the nominal typing an `enum` introduces. Python side, use `StrEnum` in
+  `shared/enums.py`.
 - Zod schemas for API request/response validation (live in the feature's `schema.ts`).
 
 ### 2.4 Svelte Component Conventions
@@ -433,19 +479,33 @@ Svelte 5 runes are **forced on** via `vite.config.ts`. Write all reactive code u
 
 ### 2.5 File Organization (Feature Slices)
 
-Each feature under `src/lib/features/<name>/`:
+Each feature under `src/lib/features/<name>/`. **The file set is per-slice, not a
+template** — scaffold only what the slice needs, since an unused `schema.ts` is dead weight:
 
 ```
 features/
   student/
-    store.svelte.ts      # Reactive state (Svelte 5 runes)
+    store.svelte.ts      # Reactive state ($state object store)
+    face.svelte.ts       # Face-enrollment state, kept separate per concern
     service.ts           # API communication
-    schema.ts            # Zod validators
-    mock.ts              # Mock data for dev
     components/          # UI components
       StudentCard.svelte
       StudentList.svelte
+  auth/
+    service.ts           # + tokens.ts, errors.ts, security.ts
+    store.svelte.ts
+    mock.ts
+  notifications/
+    poll.ts              # nothing else — polling is all it does
 ```
+
+Measured across the 13 slices: **`service.ts` is universal** (13/13); `store.svelte.ts` 5/13;
+`mock.ts` 5/13; `components/` 4/13; `schema.ts` **1/13**. `attendance` and `sync` are
+`service.ts` alone. So "which files does a feature slice have" is answered per feature, not
+from a checklist.
+
+Filenames are **unprefixed** — the directory already namespaces the slice, so it is
+`store.svelte.ts`, `service.ts`, `schema.ts`, never `studentService.ts`.
 
 ### 2.6 Import Paths
 
@@ -463,10 +523,10 @@ features/
 | --------------- | ------------------------------------------------- | --------------------------------------- |
 | Tables          | lowercase, snake_case, plural                     | `students`, `attendance_records`        |
 | Columns         | snake_case                                        | `student_id`, `created_at`              |
-| Models          | PascalCase                                        | `Student`, `AttendanceRecord`           |
+| Models          | PascalCase                                        | `Student`, `Attendance`                    |
 | Schemas         | PascalCase + suffix                               | `StudentCreate`, `SessionResponse`      |
 | Services        | PascalCase + suffix (admin CRUD)                  | `ProgramService`                        |
-| Service fns     | snake_case, `session` first arg                   | `check_overlap()`                       |
+| Service methods | snake_case, keyword-only after `self`, noun not repeated | `create()`, `get()`, `list()`         |
 | Routers         | snake_case, prefix baked in                       | `student_router`, `session_router`      |
 | Router modules  | snake_case, one per mount point                   | `admin_router.py`, `offering_router.py` |
 | Service deps    | `<Feature>ServiceDep` in `api/deps.py`            | `ProgramServiceDep`                     |
@@ -483,9 +543,9 @@ features/
 | ---------------- | --------------------- | --------------------------------- |
 | Components       | PascalCase            | `SessionCard.svelte`              |
 | Component files  | PascalCase.svelte     | `Step1SessionEntry.svelte`        |
-| Stores           | camelCase             | `authStore.svelte.ts`             |
-| Services         | camelCase             | `studentService.ts`               |
-| Schemas          | camelCase             | `studentSchema.ts`                |
+| Stores           | one per slice, unprefixed          | `store.svelte.ts`                  |
+| Services         | unprefixed                         | `service.ts`                       |
+| Schemas          | unprefixed                         | `schema.ts`                        |
 | Types/Interfaces | PascalCase            | `StudentProfile`, `SessionConfig` |
 | Functions        | camelCase             | `formatDate()`                    |
 | CSS classes      | kebab-case            | `scan-progress`, `status-badge`   |
@@ -561,7 +621,8 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 - **Fixtures:** use `conftest.py` for shared fixtures (test DB session, test client, factories).
 - **Async tests:** `asyncio_mode = auto`, so no `@pytest.mark.asyncio` decorator is needed. The pre-existing sync tests that call `asyncio.run()` keep working untouched.
 - **Test database:** in-memory SQLite by default; set `TEST_DATABASE_URL` to run the same suite against Postgres.
-- **Coverage target:** 80%+ for services, 100% for critical paths (attendance validation, session expiry).
+- **No coverage threshold is enforced.** `--cov` is deliberately absent from `pytest.ini`'s
+  `addopts`, so nothing fails a drop in coverage. Treat coverage as a review signal, not a gate.
 
 ### 5.2 Frontend Tests
 
@@ -574,11 +635,14 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 
 See [test-data.md](../testing/test-data.md) for seed specifications:
 
-- ~40 students across cohorts sharing a GE course
+- 42 students at the `small` scale (`SCALE_COUNTS` in `src/tests/seed_data.py`), across cohorts sharing a GE course
 - Professors including one effective-dated handover
 - 6 weeks of historical attendance
 
-> **Note:** Programs and year levels are admin-created, not seeded.
+> **Note:** the seed **does** create the programs and year levels it needs, get-or-create style
+> (`seed_data.py:201,236-246`), so it is self-contained. It also seeds sessions, attendance,
+> excuse requests, staged and promoted risk scores, and pending sync rows — see
+> [test-data.md](../testing/test-data.md) for the per-scale row counts.
 
 ---
 
@@ -600,7 +664,8 @@ Rules:
 Only `PUBLIC_*` variables reach the browser. All others are server-side only.
 
 ```bash
-PUBLIC_API_URL=http://localhost:8000   # required
+PUBLIC_API_URL=http://localhost:8000   # optional — client.ts falls back to this exact value
+PUBLIC_MOCK_MODE=true                  # optional — the one mock gate; default is the real API
 ```
 
 ---
