@@ -214,7 +214,7 @@
 			{/if}
 		</section>
 
-		{#if adminAuditState.loading}
+		{#if adminAuditState.loading && adminAuditState.items.length === 0}
 			<section class="card"><p class="muted">Loading…</p></section>
 		{:else if adminAuditState.error}
 			<section class="card"><p class="error">Could not load audit logs: {adminAuditState.error}</p></section>
@@ -223,7 +223,7 @@
 				<p class="empty">No log entries match these filters.</p>
 			</section>
 		{:else}
-			<section class="card table-wrap">
+			<section class="card table-wrap" aria-busy={adminAuditState.loading}>
 				<table>
 					<thead>
 						<tr>
@@ -294,14 +294,14 @@
 				</div>
 				<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>Edit Programs →</button>
 			</div>
-			{#if adminStructureState.loading}
+			{#if adminStructureState.loading && adminStructureState.items.length === 0}
 				<p class="muted">Loading…</p>
 			{:else if adminStructureState.error}
 				<p class="error">{adminStructureState.error}</p>
 			{:else if adminStructureState.items.length === 0}
 				<p class="empty">No structural changes recorded.</p>
 			{:else}
-				<div class="table-wrap">
+				<div class="table-wrap" aria-busy={adminStructureState.loading}>
 					<table>
 						<thead>
 							<tr><th>When</th><th>Action</th><th>Entity</th><th>Change</th><th>By</th></tr>

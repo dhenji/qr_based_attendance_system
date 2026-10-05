@@ -591,6 +591,10 @@
 								{/if}
 							</td>
 						</tr>
+					{:else}
+						<tr>
+							<td colspan="4" class="muted">No students are enrolled in this session yet.</td>
+						</tr>
 					{/each}
 				</tbody>
 				</table>

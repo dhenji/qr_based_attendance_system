@@ -2309,8 +2309,9 @@ export const AdminAnalyticsAtRiskEndpoint: EndpointDef<{ items: AnalyticsAtRiskI
 			const program = MOCK_PROGRAMS.items.find((p) => String(p.id) === params.program_id);
 			rows = program ? rows.filter((r) => r.program === program.code) : [];
 		}
-		// Mock rows carry no semester (risk is keyed by offering per D35) —
-		// the param is accepted and ignored until the backend lands.
+		// Mock rows carry no semester (risk is keyed by offering per D35), so in
+		// mock mode the filter is accepted and has no effect. Live mode passes
+		// semester through to the backend.
 		return { items: rows };
 	},
 };
