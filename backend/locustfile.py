@@ -25,11 +25,25 @@ Tuning: ``LOCUST_MEAN_WAIT_S`` (default 2.5, ~12 req/s across 30 users),
 ``LOCUST_SESSION_IDS`` (comma list, skips pool discovery),
 ``DATABASE_URL`` (pool discovery only).
 
+Device mix (§2): slots 1-15 scan live; slots 16-25 queue 1-3 scans before
+replaying; slots 26-30 queue 5-8. A queued scan is a real scan POST carrying
+an older ``scanned_at`` (``LOCUST_QUEUE_STALE_S``, default 90 — past the 60s
+staleness floor, so it writes a sync row the way a reconnecting device would).
+Each user tracks the sessions it has scanned live and the ones sitting in its
+backlog, and the two sets never overlap: the second scan for a
+(student, session) is a 409 ``duplicate_scan``, which the gate counts as
+failure. Leftover backlog replays in ``on_stop`` so "all pending processed"
+holds even when the run clock cuts a cycle short.
+
 Re-baselining the targets: ``LOCUST_MIN_RPS`` (default 10),
-``LOCUST_MAX_P95_MS`` (1000), ``LOCUST_MAX_P99_MS`` (2000). The gate is a
-real assertion - a run that misses any target exits non-zero, so it can gate
-CI. It only ever forces failure: a clean run leaves the exit code to locust,
-which still fails on any recorded request failure.
+``LOCUST_MAX_P95_MS`` (1000), ``LOCUST_MAX_P99_MS`` (2000),
+``LOCUST_MAX_DRAIN_S`` (default 60, slowest replay batch end to end).
+``LOCUST_QUEUE_STALE_S`` re-baselines how old a queued timestamp is; keep it
+above 60 or replays stop exercising the sync path. ``LOCUST_QUEUE_P``
+(default 0.3) is how often a queued-profile tick queues instead of scanning
+live. The gate is a real assertion - a run that misses any target exits
+non-zero, so it can gate CI. It only ever forces failure: a clean run leaves
+the exit code to locust, which still fails on any recorded request failure.
 
 Pool discovery shells out to a clean interpreter (no gevent) running one
 ``SELECT id ... ORDER BY id`` over asyncpg, so the load process itself never
@@ -38,17 +52,19 @@ touches the database driver under monkey-patched sockets.
 Bandwidth shaping is out of scope for the harness: apply ``tc`` (or a proxy
 cap) on the load host to emulate 3G when that leg matters.
 
-Targets: >=10 req/s, p95 <1s, p99 <2s, zero spurious duplicate rejections.
-All four are asserted at the end of the run; missing any one exits non-zero.
+Targets: >=10 req/s, p95 <1s, p99 <2s, zero spurious duplicate rejections,
+slowest replay batch <60s. All five are asserted at the end of the run;
+missing any one exits non-zero.
 """
 
 from __future__ import annotations
 
 import os
+import random
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from locust import HttpUser, events, task
 
@@ -72,6 +88,9 @@ DATABASE_URL = os.environ.get(
 MIN_RPS = float(os.environ.get("LOCUST_MIN_RPS", "10"))
 MAX_P95_MS = float(os.environ.get("LOCUST_MAX_P95_MS", "1000"))
 MAX_P99_MS = float(os.environ.get("LOCUST_MAX_P99_MS", "2000"))
+MAX_DRAIN_S = float(os.environ.get("LOCUST_MAX_DRAIN_S", "60"))
+QUEUE_STALE_S = float(os.environ.get("LOCUST_QUEUE_STALE_S", "90"))
+QUEUE_P = float(os.environ.get("LOCUST_QUEUE_P", "0.3"))
 
 SESSION_IDS: list[int] = []
 
@@ -81,7 +100,50 @@ SESSION_IDS: list[int] = []
 _assigner = SlotAssigner(POOL_SIZE)
 
 _failures: dict[str, int] = {"duplicate": 0, "rate_limited": 0, "error": 0}
-_counters: dict[str, int] = {"scans_ok": 0}
+_counters: dict[str, int] = {"scans_ok": 0, "replays_ok": 0}
+_drain: dict[str, float] = {"worst_s": 0.0, "batches": 0.0}
+
+
+def _profile_for_slot(slot: int) -> str:
+    """§2 device mix by 1-based slot: 15 online, 10 lightly queued, 5 heavy."""
+
+    if slot <= 15:
+        return "online"
+    if slot <= 25:
+        return "light"
+    return "heavy"
+
+
+def _draw_cap(profile: str) -> int:
+    """Backlog size that triggers a replay: 1-3 light (§2), 5-8 heavy."""
+
+    if profile == "light":
+        return random.randint(1, 3)
+    if profile == "heavy":
+        return random.randint(5, 8)
+    return 0
+
+
+def _pick_session(
+    pool: list[int], cursor: int, exclude: set[int]
+) -> tuple[int | None, int]:
+    """First pool entry at/after cursor not in exclude; None when exhausted.
+
+    Advancing the cursor keeps the slot-order rotation the harness relies on,
+    so two users still walk the pool in lockstep rather than clustering.
+    """
+
+    for step in range(len(pool)):
+        candidate = pool[(cursor + step) % len(pool)]
+        if candidate not in exclude:
+            return candidate, cursor + step + 1
+    return None, cursor
+
+
+def _record_replay(duration_s: float) -> None:
+    _drain["batches"] += 1
+    if duration_s > _drain["worst_s"]:
+        _drain["worst_s"] = duration_s
 
 
 def discover_session_pool() -> list[int]:
@@ -131,7 +193,12 @@ class ScanningStudent(HttpUser):
             raise RuntimeError("session pool is empty")
         self.slot = _assigner.assign()
         self.username = f"loadtest{self.slot:02d}"
-        self.scans = 0
+        self.profile = _profile_for_slot(self.slot)
+        self.cap = _draw_cap(self.profile)
+        self.backlog: list[tuple[dict, str, int]] = []
+        self.backlogged: set[int] = set()
+        self.live_scanned: set[int] = set()
+        self.seq = 0
         token = self._login_with_retry()
         self.headers = {"Authorization": f"Bearer {token}"}
         with self.client.get(
@@ -171,11 +238,8 @@ class ScanningStudent(HttpUser):
                 response.failure(f"login {last}")
         raise RuntimeError(f"login failed for {self.username}: {last}")
 
-    @task
-    def scan(self) -> None:
-        session_id = SESSION_IDS[(self.slot + self.scans) % len(SESSION_IDS)]
-        self.scans += 1
-        payload = {
+    def _payload(self, session_id: int, scanned_at: datetime) -> dict:
+        return {
             "session_id": session_id,
             "student_number": self.student_number,
             # Seeded classroom of the SEED-LOAD-* sessions (Room 301):
@@ -189,12 +253,14 @@ class ScanningStudent(HttpUser):
                 "pnp_evidence": {"depth_mean": 0.4},
             },
             "face_match_score": 0.92,
-            "scanned_at": datetime.now(timezone.utc).isoformat(),
+            "scanned_at": scanned_at.isoformat(),
             "scanned_via": "qr_camera",
         }
+
+    def _post_scan(self, payload: dict, key: str) -> bool:
         headers = {
             **self.headers,
-            "X-Idempotency-Key": uuid.uuid4().hex,
+            "X-Idempotency-Key": key,
         }
         with self.client.post(
             "/api/student/attendance/scan",
@@ -205,7 +271,7 @@ class ScanningStudent(HttpUser):
             if response.status_code == 200:
                 _counters["scans_ok"] += 1
                 response.success()
-                return
+                return True
             try:
                 code = response.json().get("detail", {}).get("code", "")
             except ValueError:
@@ -217,6 +283,56 @@ class ScanningStudent(HttpUser):
             else:
                 _failures["error"] += 1
             response.failure(f"scan {_describe(response)} code={code}")
+            return False
+
+    def _scan_live(self) -> None:
+        session_id, self.seq = _pick_session(
+            SESSION_IDS, self.slot + self.seq, self.live_scanned | self.backlogged
+        )
+        if session_id is None:
+            return
+        self.live_scanned.add(session_id)
+        self._post_scan(
+            self._payload(session_id, datetime.now(timezone.utc)), uuid.uuid4().hex
+        )
+
+    def _queue(self) -> None:
+        session_id, self.seq = _pick_session(
+            SESSION_IDS, self.slot + self.seq, self.live_scanned | self.backlogged
+        )
+        if session_id is None:
+            return
+        key = uuid.uuid4().hex
+        payload = self._payload(
+            session_id,
+            datetime.now(timezone.utc) - timedelta(seconds=QUEUE_STALE_S),
+        )
+        self.backlog.append((payload, key, session_id))
+        self.backlogged.add(session_id)
+
+    def _replay(self) -> None:
+        backlog, self.backlog = self.backlog, []
+        start = time.perf_counter()
+        for payload, key, session_id in backlog:
+            if self._post_scan(payload, key):
+                _counters["replays_ok"] += 1
+            self.live_scanned.add(session_id)
+            self.backlogged.discard(session_id)
+        _record_replay(time.perf_counter() - start)
+        self.cap = _draw_cap(self.profile)
+
+    @task
+    def scan(self) -> None:
+        if self.profile != "online" and len(self.backlog) >= self.cap:
+            self._replay()
+        elif self.profile != "online" and random.random() < QUEUE_P:
+            self._queue()
+        else:
+            self._scan_live()
+
+    def on_stop(self) -> None:
+        if self.backlog:
+            self._replay()
 
 
 def _window_seconds(stats) -> float:
@@ -273,11 +389,14 @@ def _report(environment, **kwargs) -> None:
         "\nload summary: "
         f"requests={stats.num_requests} "
         f"scans_ok={scans_ok} "
+        f"replays_ok={_counters['replays_ok']} "
         f"window={window_s:.0f}s "
         f"scan_rps={scan_rps:.1f} "
         f"blended_rps={stats.total_rps:.1f} "
         f"p95={_describe_ms(p95)} "
         f"p99={_describe_ms(p99)} "
+        f"drain_batches={_drain['batches']:.0f} "
+        f"worst_drain={_drain['worst_s']:.1f}s "
         f"failures={_failures}"
     )
     targets = (
@@ -304,6 +423,14 @@ def _report(environment, **kwargs) -> None:
             "0",
             str(_failures["duplicate"]),
             not _failures["duplicate"],
+        ),
+        (
+            "queue drain",
+            f"<{MAX_DRAIN_S:g}s",
+            f"{_drain['worst_s']:.1f}s"
+            if _drain["batches"]
+            else "no replays recorded",
+            _drain["batches"] > 0 and _drain["worst_s"] < MAX_DRAIN_S,
         ),
     )
     missed = 0
