@@ -117,6 +117,16 @@
 	const sortArrow = (column: typeof sortBy) =>
 		sortBy === column ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
+	// Sort state for assistive tech, mirroring the professor ledger pattern
+	// (professor/attendance/+page.svelte).
+	const sortLabel = (column: typeof sortBy, label: string): string => {
+		if (sortBy !== column) return `Sort by ${label.toLowerCase()} ascending`;
+		return `Sort by ${label.toLowerCase()} ${sortDir === 'asc' ? 'descending' : 'ascending'}`;
+	};
+
+	const ariaSort = (column: typeof sortBy): 'ascending' | 'descending' | 'none' =>
+		sortBy === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+
 	const fullName = (p: AdminProfessor) =>
 		[p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ');
 
@@ -280,8 +290,16 @@
 			<table>
 				<thead>
 					<tr>
-						<th><button class="th-btn" onclick={() => toggleSort('last_name')}>Name{sortArrow('last_name')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('email')}>Email{sortArrow('email')}</button></th>
+						<th scope="col" aria-sort={ariaSort('last_name')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('last_name')} aria-label={sortLabel('last_name', 'Name')}>
+								Name<span aria-hidden="true">{sortArrow('last_name')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('email')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('email')} aria-label={sortLabel('email', 'Email')}>
+								Email<span aria-hidden="true">{sortArrow('email')}</span>
+							</button>
+						</th>
 						<th>Department</th>
 						<th>Courses</th>
 						<th>Claim</th>
@@ -551,6 +569,12 @@
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.mono {

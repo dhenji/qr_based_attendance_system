@@ -91,3 +91,66 @@ body {
 	outline: 2px solid var(--accent);
 	outline-offset: 2px;
 }
+
+/* Print.
+ * Eight pages call window.print() and only two shipped a per-page
+ * `@media print` block, so the rest printed the topbar, sidebar, action
+ * buttons, and dark-theme surfaces. This lives here (not per page) because all
+ * the chrome class names are shared, and the root layout already imports this
+ * file.
+ *
+ * `!important` is deliberate and confined to this block: Svelte scopes
+ * component CSS with a generated class, so a plain `.btn` here would lose to a
+ * page's own `.btn { display: inline-flex }` and the button would still print.
+ * Print overrides are the canonical case for it.
+ *
+ * The colour reset matters most: browsers do not print backgrounds by default,
+ * so the dark theme's near-white `--text` would land as white text on paper.
+ */
+@media print {
+	html,
+	body {
+		background: #fff !important;
+		color: #000 !important;
+	}
+
+	/* App chrome and interactive-only affordances. */
+	.topbar,
+	.sidebar,
+	.icon-btn,
+	.btn,
+	.pager,
+	.filters,
+	.modal-overlay,
+	.toast,
+	.install-banner,
+	.no-print {
+		display: none !important;
+	}
+
+	/* Reclaim the space the chrome occupied. */
+	.content {
+		max-width: none !important;
+		padding: 0 !important;
+		margin: 0 !important;
+	}
+
+	.card,
+	table {
+		box-shadow: none !important;
+		border-color: #ccc !important;
+		background: #fff !important;
+		color: #000 !important;
+	}
+
+	/* Keep a card or table row from splitting across pages, and repeat table
+	   headers on every printed page. */
+	.card,
+	tr {
+		break-inside: avoid;
+	}
+
+	thead {
+		display: table-header-group;
+	}
+}

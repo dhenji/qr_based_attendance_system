@@ -137,6 +137,21 @@
 				: ' ▼'
 			: '';
 
+	// Sort state for assistive tech, mirroring the professor ledger pattern
+	// (professor/attendance/+page.svelte). Sort lives on the shared store here,
+	// so these read `adminAuditState` rather than local bindings.
+	const sortLabel = (column: AuditSortColumn, label: string): string => {
+		if (adminAuditState.sortBy !== column) return `Sort by ${label.toLowerCase()} ascending`;
+		return `Sort by ${label.toLowerCase()} ${adminAuditState.sortDir === 'asc' ? 'descending' : 'ascending'}`;
+	};
+
+	const ariaSort = (column: AuditSortColumn): 'ascending' | 'descending' | 'none' =>
+		adminAuditState.sortBy === column
+			? adminAuditState.sortDir === 'asc'
+				? 'ascending'
+				: 'descending'
+			: 'none';
+
 	const categoryLabel = (id: string): string =>
 		AUDIT_ENTITY_TYPES.find((c) => c.id === id)?.label ?? id;
 
@@ -212,9 +227,21 @@
 				<table>
 					<thead>
 						<tr>
-							<th><button class="th-btn" onclick={() => toggleSort('time')}>Time{sortArrow('time')}</button></th>
-							<th><button class="th-btn" onclick={() => toggleSort('user')}>User{sortArrow('user')}</button></th>
-							<th><button class="th-btn" onclick={() => toggleSort('action')}>Action{sortArrow('action')}</button></th>
+<th scope="col" aria-sort={ariaSort('time')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('time')} aria-label={sortLabel('time', 'Time')}>
+								Time<span aria-hidden="true">{sortArrow('time')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('user')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('user')} aria-label={sortLabel('user', 'User')}>
+								User<span aria-hidden="true">{sortArrow('user')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('action')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('action')} aria-label={sortLabel('action', 'Action')}>
+								Action<span aria-hidden="true">{sortArrow('action')}</span>
+							</button>
+						</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -465,6 +492,12 @@
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.badge {
