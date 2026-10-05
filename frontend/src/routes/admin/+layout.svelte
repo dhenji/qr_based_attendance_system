@@ -26,11 +26,11 @@
 		}
 	});
 
-	// MVP nav: Dashboard, Students, Professors, Programs, Courses,
-	// Offerings, Analytics, Audit Logs and Settings are live (settings reads
-	// contract-shaped mocks until the system backend lands). Users is
-	// super_admin-only (backend require_role(SUPER_ADMIN)) and stays hidden
-	// for plain admins.
+// MVP nav: Dashboard, Students, Professors, Programs, Courses,
+// Offerings, Analytics, Audit Logs and Settings are live. Settings reads the
+// real system backend (app_settings persists, backups download as encrypted
+// archives). Users is super_admin-only (backend require_role(SUPER_ADMIN)) and
+// stays hidden for plain admins.
 	const baseNavItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
@@ -120,7 +120,7 @@
 			<span class="who" title={authState.user?.email ?? displayName}>{displayName}</span>
 		{/if}
 
-		<button class="icon-btn logout" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
+		<button class="icon-btn logout" type="button" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 				<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
 				<path d="m16 17 5-5-5-5" />

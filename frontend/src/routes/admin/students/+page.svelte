@@ -489,7 +489,7 @@
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
-	{#if adminStudentsState.loading}
+	{#if adminStudentsState.loading && adminStudentsState.items.length === 0}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminStudentsState.error}
 		<section class="card">
@@ -501,7 +501,7 @@
 			<p class="empty">No students match these filters. Import a roster or add one manually.</p>
 		</section>
 	{:else}
-		<section class="card table-wrap">
+		<section class="card table-wrap" aria-busy={adminStudentsState.loading}>
 			{#if adminStudentsState.actionError}
 				<p class="error" role="alert">{adminStudentsState.actionError}</p>
 			{/if}

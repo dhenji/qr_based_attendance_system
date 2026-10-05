@@ -309,7 +309,7 @@
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
-	{#if adminAttendanceState.loading}
+	{#if adminAttendanceState.loading && adminAttendanceState.items.length === 0}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminAttendanceState.error}
 		<section class="card"><p class="error">Could not load overview: {adminAttendanceState.error}</p></section>
@@ -318,7 +318,7 @@
 			<p class="empty">No courses match these filters.</p>
 		</section>
 	{:else}
-		<section class="card table-wrap">
+		<section class="card table-wrap" aria-busy={adminAttendanceState.loading}>
 			<table>
 				<thead>
 					<tr>
