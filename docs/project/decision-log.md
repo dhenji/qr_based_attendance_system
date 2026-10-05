@@ -771,6 +771,22 @@
   touches, and is reached through an annotated `<Feature>ServiceDep` in
   `api/deps.py`. It is a rule about the slice family, not a judgement call to
   re-argue per slice. Non-CRUD slices keep module-level functions.
+
+  > **Superseded in part, 2026-10.** The closing sentence above never held:
+  > all 15 `features/*/service.py` modules are service classes, and the tree
+  > contains no module-level-function service. What actually governs is the
+  > rule of thumb in `coding-standards.md` §1.7 — a class earns its place
+  > when `__init__` composes multiple per-request handles (CRUD, settings,
+  > limiters) — so (a)'s reasoning extends by the same test to slices it did
+  > not name: `AdminService` (3 `BaseCRUD`), `DashboardService` (5 injected
+  > services), `ExcuseService` (2 `BaseCRUD`), and `SystemService` /
+  > `AttendanceService` (session + `Settings`, ADR-059's shape). Three
+  > classes compose only the session and do **not** satisfy it —
+  > `AnalyticsService`, `ReportsService`, and `CourseProfessorService` —
+  > which ADR-055 already flagged the last of as a borderline holdover. Those
+  > three are open questions in #179; nothing here sanctions them. Clause (b) is
+  > unaffected and still accurate: the pagination bounds do live in
+  > `shared/pagination.py`, re-exported per slice.
   **(b) Each slice carries a `constants.py`.** Slice-specific field bounds live
   there; the list-query bounds (`DEFAULT_PAGE`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE`,
   `SEARCH_MAX_LENGTH`) live in `shared/pagination.py` and are imported rather than
