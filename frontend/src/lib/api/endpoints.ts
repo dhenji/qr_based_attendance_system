@@ -594,24 +594,21 @@ export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
 // Student excuse requests — live on features/excuse/student_router.py.
 // Submit creates a pending request (201); the professor reviews it in the
 // queue. Reason floor is 20 chars here (REASON_MIN_LENGTH_STUDENT), not the
-// professor 10. Attachments expect presigned-upload URLs (D24) — the UI
-// collects no files until that flow lands, so submits are reason-only.
+// professor 10. Attachments ride presigned-upload URLs (D24): the client
+// mints a URL per file, PUTs the bytes itself, then submits the returned
+// object_urls (1..5). Reason-only submits stay valid (pending without files).
 // List/detail read the student's own rows (a 404 doubles as not-yours).
+export interface StudentExcuseSubmitBody {
+	session_id: number;
+	reason: string;
+	attachment_urls?: string[];
+}
+
 export interface StudentExcuseSubmitResponse {
 	id: number;
 	status: string;
 	requested_at: string;
 }
-
-export const StudentExcuseSubmitEndpoint: EndpointDef<StudentExcuseSubmitResponse> = {
-	url: '/student/excuse-requests',
-	method: 'POST',
-	mock: () => ({
-		id: Math.floor(Math.random() * 10000) + 1,
-		status: 'pending',
-		requested_at: new Date().toISOString(),
-	}),
-};
 
 export interface StudentExcuseItemResponse {
 	id: number;
@@ -628,10 +625,51 @@ export interface StudentExcuseItemResponse {
 	review_notes: string | null;
 }
 
+// In-memory student excuse rows so mock-mode submits visibly stick.
+const MOCK_STUDENT_EXCUSE_ROWS: StudentExcuseItemResponse[] = [];
+
+export const StudentExcuseSubmitEndpoint: EndpointDef<StudentExcuseSubmitResponse> = {
+	url: '/student/excuse-requests',
+	method: 'POST',
+	mock: (_params, _suffix, body) => {
+		const input = (body ?? {}) as StudentExcuseSubmitBody;
+		const urls = [...(input.attachment_urls ?? [])];
+		const id = Math.floor(Math.random() * 10000) + 1;
+		MOCK_STUDENT_EXCUSE_ROWS.unshift({
+			id,
+			student_id: 1,
+			session_id: input.session_id ?? 0,
+			initiated_by: 'student',
+			initiated_via: 'request',
+			reason: input.reason ?? '',
+			attachment_urls: urls,
+			status: 'pending',
+			requested_at: new Date().toISOString(),
+			reviewed_by: null,
+			reviewed_at: null,
+			review_notes: null,
+		});
+		return {
+			id,
+			status: 'pending',
+			requested_at: new Date().toISOString(),
+		};
+	},
+};
+
 export const StudentExcuseListEndpoint: EndpointDef<Paginated<StudentExcuseItemResponse>> = {
 	url: '/student/excuse-requests',
 	method: 'GET',
-	mock: () => ({ items: [], total: 0, page: 1, size: 20 }),
+	mock: (params) => {
+		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+		const page = Math.min(Math.max(parseInt(params?.page ?? '1', 10) || 1, 1), 1);
+		return {
+			items: MOCK_STUDENT_EXCUSE_ROWS.slice((page - 1) * size, page * size),
+			total: MOCK_STUDENT_EXCUSE_ROWS.length,
+			page,
+			size,
+		};
+	},
 };
 
 export const StudentExcuseDetailEndpoint: EndpointDef<StudentExcuseItemResponse> = {
@@ -651,6 +689,46 @@ export const StudentExcuseDetailEndpoint: EndpointDef<StudentExcuseItemResponse>
 		reviewed_at: null,
 		review_notes: null,
 	}),
+};
+
+// --- Attachment uploads (D24) --------------------------------------------------
+//
+// Excuse evidence is uploaded straight to storage, so the file bytes never
+// pass through the API. The client mints a URL here, PUTs the bytes itself,
+// then submits the excuse carrying the returned object_url — the database
+// stores URL references only, never file bytes.
+//
+// POST /upload/presigned-url { filename, size_bytes, content_type? } →
+// { upload_url, object_url, object_key, expires_in }. Max 5 MiB
+// (ATTACHMENTS_MAX_BYTES), PDF/JPG/PNG/HEIC by extension (case-insensitive),
+// max 5 attachments per request (enforced by the excuse schemas).
+// Real API by default; mocks only when PUBLIC_MOCK_MODE=true.
+export interface PresignedUrlRequest {
+	filename: string;
+	size_bytes: number;
+	content_type?: string;
+}
+
+export interface PresignedUrlResponse {
+	upload_url: string;
+	object_url: string;
+	object_key: string;
+	expires_in: number;
+}
+
+export const UploadPresignedEndpoint: EndpointDef<PresignedUrlResponse> = {
+	url: '/upload/presigned-url',
+	method: 'POST',
+	mock: (_params, _suffix, body) => {
+		const input = (body ?? {}) as PresignedUrlRequest;
+		const safe = String(input.filename ?? 'evidence').replace(/[^a-zA-Z0-9._-]+/g, '-');
+		return {
+			upload_url: `mock://upload/${safe}`,
+			object_url: `mock://attachments/${safe}`,
+			object_key: `attachments/${safe}`,
+			expires_in: 3600,
+		};
+	},
 };
 // Student face-embedding pull (D29) — live on features/student/router.py
 // (GET /student/me/face-embedding?current_version=N). 200 carries the
@@ -1168,6 +1246,65 @@ export const AdminStudentImportEndpoint: EndpointDef<StudentImportResult> = {
 	method: 'POST',
 	mock: () => ({ imported: 25, duplicates: 0, errors: [] }),
 };
+
+// --- Admin face enrollment (3-photo upload, D43) --------------------------------
+//
+// POST /admin/face-enrollment/{student_id} takes multipart front/left/right
+// images and returns the enrollment stamp; GET reads the status. The student
+// id rides the suffix like adminStudentDetail. Real API by default; mocks
+// only when PUBLIC_MOCK_MODE=true (the mock flips the roster row's
+// face_enrolled flag so the list visibly sticks).
+export interface AdminFaceEnrollmentUploadResponse {
+	student_id: number;
+	face_enrolled_at: string;
+	face_embedding_version: number;
+}
+
+export interface AdminFaceEnrollmentStatusResponse {
+	enrolled: boolean;
+	face_enrolled_at?: string;
+	face_embedding_version?: number;
+}
+
+export const AdminFaceEnrollmentUploadEndpoint: EndpointDef<AdminFaceEnrollmentUploadResponse> = {
+	url: '/admin/face-enrollment',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_STUDENT_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('Student not found.');
+		row.face_enrolled = true;
+		const prior = MOCK_FACE_VERSIONS.get(id) ?? 1;
+		const version = prior + 1;
+		const at = new Date().toISOString();
+		MOCK_FACE_VERSIONS.set(id, version);
+		MOCK_FACE_ENROLLED_AT.set(id, at);
+		return { student_id: id, face_enrolled_at: at, face_embedding_version: version };
+	},
+};
+
+export const AdminFaceEnrollmentStatusEndpoint: EndpointDef<AdminFaceEnrollmentStatusResponse> = {
+	url: '/admin/face-enrollment',
+	method: 'GET',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_STUDENT_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('Student not found.');
+		if (!row.face_enrolled) return { enrolled: false };
+		const at = MOCK_FACE_ENROLLED_AT.get(id);
+		if (!at) return { enrolled: false };
+		return {
+			enrolled: true,
+			face_enrolled_at: at,
+			face_embedding_version: MOCK_FACE_VERSIONS.get(id) ?? 1,
+		};
+	},
+};
+
+// Mock face-enrollment state per roster id (the detail mock carries no
+// per-row enrollment stamp, so the upload/status mocks keep their own).
+const MOCK_FACE_VERSIONS = new Map<number, number>();
+const MOCK_FACE_ENROLLED_AT = new Map<number, string>();
 
 // In-memory professor roster so mock-mode list/create/edit/deactivate/delete
 // behave like the backend. Mirrors the student mock above: list filters/sorts/
@@ -2736,8 +2873,13 @@ export const ExcuseReviewEndpoint: EndpointDef<ExcuseRequestReadResponse> = {
 // Professor-initiated excuse (Path A quick / Path B with evidence) —
 // POST /professor/sessions/{sid}/attendance/{stid}/excuse. Path is chosen
 // server-side by presence of the `attachment_urls` key (absent → quick,
-// present → evidence); Path B stays unwired client-side until the S3
-// presigned upload flow (D24) lands, so the UI sends reason-only bodies.
+// present → evidence); the quick modal collects files via the D24 presigned
+// flow and sends reason-only bodies when there are none.
+export interface ExcuseActionBody {
+	reason: string;
+	attachment_urls?: string[];
+}
+
 export interface ExcuseActionResponse {
 	excuse_request_id: number;
 	status: string;
@@ -2995,12 +3137,14 @@ export const endpoints = {
 	studentExcuseSubmit: StudentExcuseSubmitEndpoint,
 	studentExcuseList: StudentExcuseListEndpoint,
 	studentExcuseDetail: StudentExcuseDetailEndpoint,
+	// Attachment uploads (D24 presigned flow; bytes never pass the API)
+	uploadPresigned: UploadPresignedEndpoint,
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
 	// Professor excuse queue (list + review live; quick/edit/revoke/bulk live
-	// by integer id — only the typed-number quick flow stays in-memory and
-	// evidence upload waits on the S3 presigned flow)
+	// by integer id — only the typed-number quick flow stays in-memory; the
+	// quick modal collects evidence via the D24 presigned flow)
 	excuseList: ExcuseListEndpoint,
 	excuseReview: ExcuseReviewEndpoint,
 	// Professor per-record excuse actions + bulk (suffix carries the ids)
@@ -3029,6 +3173,8 @@ export const endpoints = {
 	adminStudentCreate: AdminStudentCreateEndpoint,
 	adminStudentDetail: AdminStudentDetailEndpoint,
 	adminStudentImport: AdminStudentImportEndpoint,
+	adminFaceEnrollmentUpload: AdminFaceEnrollmentUploadEndpoint,
+	adminFaceEnrollmentStatus: AdminFaceEnrollmentStatusEndpoint,
 	adminProfessors: AdminProfessorsEndpoint,
 	adminProfessorCreate: AdminProfessorCreateEndpoint,
 	adminProfessorDetail: AdminProfessorDetailEndpoint,

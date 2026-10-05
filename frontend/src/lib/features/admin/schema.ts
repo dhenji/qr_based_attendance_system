@@ -64,6 +64,18 @@ export const csvFileSchema = z
 	.refine((f) => f.size > 0, 'File is empty')
 	.refine((f) => f.size <= 5 * 1024 * 1024, 'File must be under 5 MB');
 
+// Face-enrollment photo (D43 3-photo upload: front/left/right). Mirrors the
+// backend quality gates loosely client-side (type + non-empty + size); the
+// server owns brightness/face-size/single-face/sharpness/eyes-open checks.
+export const facePhotoSchema = z
+	.instanceof(File, { message: 'Choose a photo' })
+	.refine(
+		(f) => ['jpg', 'jpeg', 'png', 'webp'].some((ext) => f.name.toLowerCase().endsWith(`.${ext}`)),
+		'Photo must be JPG, PNG, or WebP'
+	)
+	.refine((f) => f.size > 0, 'Photo is empty')
+	.refine((f) => f.size <= 5 * 1024 * 1024, 'Photo must be under 5 MB');
+
 // Admin user create (super_admin only). Mirrors backend
 // features/admin/schema.py AdminUserCreate: creatable roles are
 // admin/professor/student — super_admin is seeded, never created via API.

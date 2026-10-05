@@ -7,8 +7,9 @@
 // integer id. The typed-number quick flow stays in-memory: no professor
 // endpoint returns integer student ids (only numbers/names), so a typed
 // student number cannot be resolved to the id the per-record routes need
-// without backend help. Path B (evidence upload) waits on the S3 presigned
-// flow (D24).
+// without backend help. Path B (evidence upload) rides the D24 presigned
+// flow: the quick modal collects files and sends attachment_urls (presence
+// selects prof_with_evidence server-side); reason-only stays Path A.
 //
 // The list row is deliberately bare (ids only): session/course labels join
 // client-side from the session + courses directory, the same convention as
@@ -27,6 +28,7 @@
 import { EXCUSE_REQUESTS } from '$lib/features/excuse/mock';
 import { del, get, isMockMode, patch, post } from '$lib/api/client';
 import type {
+	ExcuseActionBody,
 	ExcuseActionResponse,
 	ExcuseBulkResponse,
 	ExcuseEditBody,
@@ -323,12 +325,11 @@ export type QuickExcuseInput = {
 // flow stays in-memory (mock store below in MOCK mode; same in-memory row in
 // real mode with a clear note), while quickExcuseByIds below serves callers
 // that already hold integer ids (queue rows carry student_id).
-// Reason min 10 chars per excuse-workflow.md Path A modal spec. Path B
-// (prof_with_evidence file upload) stays a TODO until S3 presigned flow (D24)
-// exists — the service accepts attachment names but the page does not collect
-// files yet.
+// Reason min 10 chars per excuse-workflow.md Path A modal spec. The quick
+// modal collects evidence files via the D24 presigned flow; their object
+// urls ride along as attachment names so the created row mirrors them.
 // Contract: POST /professor/sessions/{id}/attendance/{sid}/excuse
-export const quickExcuse = async (input: QuickExcuseInput): Promise<ExcuseRequest> => {
+export const quickExcuse = async (input: QuickExcuseInput & { attachmentUrls?: string[] }): Promise<ExcuseRequest> => {
 	const reason = input.reason.trim();
 	if (reason.length < 10) throw new Error('Reason must be at least 10 characters.');
 	if (input.studentNumber.trim().length === 0) throw new Error('Student number is required.');
@@ -354,7 +355,7 @@ export const quickExcuse = async (input: QuickExcuseInput): Promise<ExcuseReques
 		originalStatus: input.originalStatus,
 		requestedAt: now,
 		reviewedAt: now,
-		attachmentNames: []
+		attachmentNames: [...(input.attachmentUrls ?? [])]
 	};
 	nextId += 1;
 	store = [row, ...store];
@@ -367,7 +368,8 @@ export const quickExcuse = async (input: QuickExcuseInput): Promise<ExcuseReques
 // /professor/sessions/{sid}/attendance/{stid}/excuse plus POST
 // /professor/sessions/{sid}/excuse-all-absent. Real API by default;
 // in-memory mock store when PUBLIC_MOCK_MODE=true (same convention as
-// list/review above). Path B (evidence upload) stays unwired until D24.
+// list/review above). attachment_urls presence selects Path B
+// (prof_with_evidence) server-side; reason-only stays Path A.
 
 const excusePathSuffix = (sessionId: number, studentId: number): string =>
 	`/${sessionId}/attendance/${studentId}/excuse`;
@@ -384,14 +386,17 @@ const requireReason = (reason: string): string => {
 	return clean;
 };
 
-// quickExcuseByIds — Path A quick-excuse for callers holding integer ids.
+// quickExcuseByIds — Path A quick-excuse (Path B with evidence when
+// attachmentUrls are passed) for callers holding integer ids.
 // Returns the backend action summary (the created row id + status flip).
 export const quickExcuseByIds = async (
 	sessionId: number,
 	studentId: number,
-	reason: string
+	reason: string,
+	attachmentUrls: string[] = []
 ): Promise<{ excuseRequestId: number; originalStatus: string | null; newStatus: string }> => {
 	const clean = requireReason(reason);
+	const urls = [...attachmentUrls];
 	if (isMockMode()) {
 		const now = new Date().toISOString();
 		store = [
@@ -406,13 +411,13 @@ export const quickExcuseByIds = async (
 				sessionId,
 				sessionCode: `S-${sessionId}`,
 				sessionDate: now,
-				initiatedVia: 'quick' as ExcuseInitiatedVia,
+				initiatedVia: (urls.length > 0 ? 'prof_with_evidence' : 'quick') as ExcuseInitiatedVia,
 				reason: clean,
 				status: 'approved',
 				originalStatus: 'unknown',
 				requestedAt: now,
 				reviewedAt: now,
-				attachmentNames: []
+				attachmentNames: urls
 			},
 			...store
 		];
@@ -420,9 +425,11 @@ export const quickExcuseByIds = async (
 		return { excuseRequestId: nextId - 1, originalStatus: null, newStatus: 'excused' };
 	}
 
+	const body: ExcuseActionBody = { reason: clean };
+	if (urls.length > 0) body.attachment_urls = urls;
 	const response = await post<ExcuseActionResponse>(
 		'excuseQuick',
-		{ reason: clean },
+		body,
 		undefined,
 		excusePathSuffix(sessionId, studentId)
 	);

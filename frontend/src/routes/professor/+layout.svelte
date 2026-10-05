@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -9,6 +9,11 @@
 		isProfessor,
 		restoreSession
 	} from '$lib/features/auth/store.svelte';
+	import {
+		getProfessorPendingCount,
+		maybeNotify,
+		POLL_INTERVAL_MS,
+	} from '$lib/features/notifications/poll';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	let { children } = $props();
@@ -16,13 +21,45 @@
 	// Professor portal gate: anonymous visitors bounce to login, signed-in
 	// non-professors go to their own portal. restoreSession() runs first so
 	// the topbar shows the signed-in name when there is one.
+	//
+	// Pending-excuse bell: polls the live pending-queue total (fail-soft —
+	// mock/offline/401 hides the badge). Clicking jumps to the queue.
+	let pendingCount = $state(0);
+	let notifToast = $state<string | null>(null);
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+	const refreshNotif = async () => {
+		const next = await getProfessorPendingCount();
+		if (next > pendingCount) {
+			const fresh = next - pendingCount;
+			notifToast = `${fresh} new excuse request${fresh === 1 ? '' : 's'} awaiting review — tap the bell to open the queue.`;
+			maybeNotify('Excuse requests', 'New student excuse requests are awaiting review.');
+		}
+		pendingCount = next;
+	};
+
+	const onNotifFocus = () => {
+		void refreshNotif();
+	};
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
 			await goto(Routes.LOGIN);
 		} else if (!isProfessor()) {
 			await goto(defaultRouteFor(user));
+		} else {
+			void refreshNotif();
+			pollTimer = setInterval(() => void refreshNotif(), POLL_INTERVAL_MS);
+			window.addEventListener('focus', onNotifFocus);
+			document.addEventListener('visibilitychange', onNotifFocus);
 		}
+	});
+
+	onDestroy(() => {
+		if (pollTimer) clearInterval(pollTimer);
+		window.removeEventListener('focus', onNotifFocus);
+		document.removeEventListener('visibilitychange', onNotifFocus);
 	});
 
 	// Professor portal nav: Dashboard, My Courses, Sessions, History,
@@ -102,6 +139,20 @@
 			<span class="who" title={authState.user?.email ?? displayName}>{displayName}</span>
 		{/if}
 
+		<button
+			class="icon-btn notif"
+			onclick={() => void goto(Routes.PROFESSOR_EXCUSE_REQUESTS)}
+			aria-label={pendingCount > 0 ? `${pendingCount} pending excuse requests` : 'No new notifications'}
+		>
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<path d="M6 9a6 6 0 0 1 12 0c0 4 2 5 2 6H4c0-1 2-2 2-6Z" />
+				<path d="M10 19a2 2 0 0 0 4 0" />
+			</svg>
+			{#if pendingCount > 0}
+				<span class="badge" aria-hidden="true">{pendingCount > 9 ? '9+' : pendingCount}</span>
+			{/if}
+		</button>
+
 		<button class="icon-btn logout" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 				<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -110,6 +161,15 @@
 			</svg>
 		</button>
 	</header>
+
+	{#if notifToast}
+		<p class="toast" role="status">
+			<span>{notifToast}</span>
+			<button type="button" onclick={() => (notifToast = null)} aria-label="Dismiss notification">
+				Dismiss
+			</button>
+		</p>
+	{/if}
 
 	<div class="body">
 		<aside class="sidebar" class:collapsed>
@@ -190,6 +250,51 @@
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
 		color: var(--on-brand);
+	}
+
+	.icon-btn.notif {
+		position: relative;
+	}
+
+	.icon-btn .badge {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		min-width: 18px;
+		height: 18px;
+		padding: 0 5px;
+		border-radius: 999px;
+		background: var(--danger);
+		color: #fff;
+		font-size: 0.6875rem;
+		font-weight: 700;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.toast {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0.75rem 1.5rem 0;
+		padding: 0.625rem 0.875rem;
+		border-radius: 8px;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		box-shadow: var(--shadow-sm);
+		font-size: 0.875rem;
+		color: var(--text-strong);
+	}
+
+	.toast button {
+		border: 0;
+		background: none;
+		padding: 0;
+		color: var(--accent);
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
 	}
 
 	.brand {
