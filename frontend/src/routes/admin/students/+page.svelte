@@ -298,6 +298,17 @@
 	const sortArrow = (column: typeof sortBy) =>
 		sortBy === column ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ↕';
 
+	// Sort state for assistive tech, mirroring the professor ledger pattern
+	// (professor/attendance/+page.svelte). The arrow glyph is decorative, so it
+	// is hidden from screen readers and the button carries the spoken state.
+	const sortLabel = (column: typeof sortBy, label: string): string => {
+		if (sortBy !== column) return `Sort by ${label.toLowerCase()} ascending`;
+		return `Sort by ${label.toLowerCase()} ${sortDir === 'asc' ? 'descending' : 'ascending'}`;
+	};
+
+	const ariaSort = (column: typeof sortBy): 'ascending' | 'descending' | 'none' =>
+		sortBy === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+
 	const fullName = (s: AdminStudent) =>
 		[s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ');
 
@@ -497,15 +508,39 @@
 			<table>
 				<thead>
 					<tr>
-						<th><button class="th-btn" onclick={() => toggleSort('student_id')}>ID{sortArrow('student_id')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('last_name')}>Name{sortArrow('last_name')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('program_code')}>Program{sortArrow('program_code')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('section')}>Sec{sortArrow('section')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('year_level_label')}>Year{sortArrow('year_level_label')}</button></th>
-						<th>Status</th>
-						<th>Face</th>
-						<th><button class="th-btn" onclick={() => toggleSort('created_at')}>Added{sortArrow('created_at')}</button></th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col" aria-sort={ariaSort('student_id')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('student_id')} aria-label={sortLabel('student_id', 'ID')}>
+								ID<span aria-hidden="true">{sortArrow('student_id')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('last_name')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('last_name')} aria-label={sortLabel('last_name', 'Name')}>
+								Name<span aria-hidden="true">{sortArrow('last_name')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('program_code')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('program_code')} aria-label={sortLabel('program_code', 'Program')}>
+								Program<span aria-hidden="true">{sortArrow('program_code')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('section')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('section')} aria-label={sortLabel('section', 'Section')}>
+								Sec<span aria-hidden="true">{sortArrow('section')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('year_level_label')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('year_level_label')} aria-label={sortLabel('year_level_label', 'Year level')}>
+								Year<span aria-hidden="true">{sortArrow('year_level_label')}</span>
+							</button>
+						</th>
+						<th scope="col">Status</th>
+						<th scope="col">Face</th>
+						<th scope="col" aria-sort={ariaSort('created_at')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('created_at')} aria-label={sortLabel('created_at', 'Added')}>
+								Added<span aria-hidden="true">{sortArrow('created_at')}</span>
+							</button>
+						</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -809,6 +844,12 @@
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.mono {

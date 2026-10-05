@@ -388,17 +388,22 @@
 			<table>
 				<thead>
 					<tr>
-						<th>
-							<button class="th-btn" onclick={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}>
-								Course{sortDir === 'asc' ? ' ▲' : ' ▼'}
+						<th scope="col" aria-sort={sortDir === 'asc' ? 'ascending' : 'descending'}>
+							<button
+								class="th-btn"
+								type="button"
+								onclick={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}
+								aria-label={`Sort by course ${sortDir === 'asc' ? 'descending' : 'ascending'}`}
+							>
+								Course<span aria-hidden="true">{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>
 							</button>
 						</th>
-						<th>Cohort</th>
-						<th>Term</th>
-						<th>Schedule</th>
-						<th>Enrolled</th>
-						<th>Status</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Cohort</th>
+						<th scope="col">Term</th>
+						<th scope="col">Schedule</th>
+						<th scope="col">Enrolled</th>
+						<th scope="col">Status</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -661,6 +666,12 @@
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.row-actions {

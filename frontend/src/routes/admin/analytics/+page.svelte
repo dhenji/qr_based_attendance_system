@@ -513,12 +513,21 @@ import { formatPercentage } from '$lib/shared/utils/format';
 					<table>
 						<thead>
 							<tr>
-								<th><button class="th-btn" onclick={() => (nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc')}>Name{nameSortDir === 'asc' ? ' ▲' : ' ▼'}</button></th>
-								<th>Course</th>
-								<th>Absence</th>
-								<th>Streak</th>
-								<th>Trend</th>
-								<th>Risk</th>
+								<th scope="col" aria-sort={nameSortDir === 'asc' ? 'ascending' : 'descending'}>
+									<button
+										class="th-btn"
+										type="button"
+										onclick={() => (nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc')}
+										aria-label={`Sort by name ${nameSortDir === 'asc' ? 'descending' : 'ascending'}`}
+									>
+										Name<span aria-hidden="true">{nameSortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+									</button>
+								</th>
+								<th scope="col">Course</th>
+								<th scope="col">Absence</th>
+								<th scope="col">Streak</th>
+								<th scope="col">Trend</th>
+								<th scope="col">Risk</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -599,13 +608,22 @@ import { formatPercentage } from '$lib/shared/utils/format';
 					<table>
 						<thead>
 							<tr>
-								<th><button class="th-btn" onclick={() => (nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc')}>Name{nameSortDir === 'asc' ? ' ▲' : ' ▼'}</button></th>
-								<th>Course</th>
-								<th>Absence</th>
-								<th>Streak</th>
-								<th>Trend</th>
-								<th>Risk</th>
-								<th>Computed</th>
+								<th scope="col" aria-sort={nameSortDir === 'asc' ? 'ascending' : 'descending'}>
+									<button
+										class="th-btn"
+										type="button"
+										onclick={() => (nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc')}
+										aria-label={`Sort by name ${nameSortDir === 'asc' ? 'descending' : 'ascending'}`}
+									>
+										Name<span aria-hidden="true">{nameSortDir === 'asc' ? ' ▲' : ' ▼'}</span>
+									</button>
+								</th>
+								<th scope="col">Course</th>
+								<th scope="col">Absence</th>
+								<th scope="col">Streak</th>
+								<th scope="col">Trend</th>
+								<th scope="col">Risk</th>
+								<th scope="col">Computed</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -870,6 +888,12 @@ import { formatPercentage } from '$lib/shared/utils/format';
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.badge {

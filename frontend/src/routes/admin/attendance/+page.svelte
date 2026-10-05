@@ -139,6 +139,16 @@
 	const sortArrow = (column: SortColumn) =>
 		sortBy === column ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
+	// Sort state for assistive tech, mirroring the professor ledger pattern
+	// (professor/attendance/+page.svelte).
+	const sortLabel = (column: SortColumn, label: string): string => {
+		if (sortBy !== column) return `Sort by ${label.toLowerCase()} ascending`;
+		return `Sort by ${label.toLowerCase()} ${sortDir === 'asc' ? 'descending' : 'ascending'}`;
+	};
+
+	const ariaSort = (column: SortColumn): 'ascending' | 'descending' | 'none' =>
+		sortBy === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+
 	const trendGlyph = (row: AttendanceOverviewItemResponse): string =>
 		row.trend === 'up' ? '↑' : row.trend === 'down' ? '↓' : '→';
 
@@ -312,10 +322,26 @@
 			<table>
 				<thead>
 					<tr>
-						<th><button class="th-btn" onclick={() => toggleSort('course')}>Course{sortArrow('course')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('sessions')}>Sessions{sortArrow('sessions')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('avg')}>Avg{sortArrow('avg')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('trend')}>Trend{sortArrow('trend')}</button></th>
+						<th scope="col" aria-sort={ariaSort('course')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('course')} aria-label={sortLabel('course', 'Course')}>
+								Course<span aria-hidden="true">{sortArrow('course')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('sessions')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('sessions')} aria-label={sortLabel('sessions', 'Sessions')}>
+								Sessions<span aria-hidden="true">{sortArrow('sessions')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('avg')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('avg')} aria-label={sortLabel('avg', 'Average rate')}>
+								Avg<span aria-hidden="true">{sortArrow('avg')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('trend')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('trend')} aria-label={sortLabel('trend', 'Trend')}>
+								Trend<span aria-hidden="true">{sortArrow('trend')}</span>
+							</button>
+						</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -468,6 +494,12 @@
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.link {

@@ -98,6 +98,20 @@
 				: ' ▼'
 			: '';
 
+	// Sort state for assistive tech, mirroring the professor ledger pattern
+	// (professor/attendance/+page.svelte). Sort lives on the shared store here.
+	const sortLabel = (column: ProgramSortColumn, label: string): string => {
+		if (adminProgramsState.sortBy !== column) return `Sort by ${label.toLowerCase()} ascending`;
+		return `Sort by ${label.toLowerCase()} ${adminProgramsState.sortDir === 'asc' ? 'descending' : 'ascending'}`;
+	};
+
+	const ariaSort = (column: ProgramSortColumn): 'ascending' | 'descending' | 'none' =>
+		adminProgramsState.sortBy === column
+			? adminProgramsState.sortDir === 'asc'
+				? 'ascending'
+				: 'descending'
+			: 'none';
+
 	const openCreate = () => {
 		formError = null;
 		f_code = '';
@@ -186,8 +200,16 @@
 			<table>
 				<thead>
 					<tr>
-						<th><button class="th-btn" onclick={() => toggleSort('code')}>Code{sortArrow('code')}</button></th>
-						<th><button class="th-btn" onclick={() => toggleSort('name')}>Name{sortArrow('name')}</button></th>
+						<th scope="col" aria-sort={ariaSort('code')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('code')} aria-label={sortLabel('code', 'Code')}>
+								Code<span aria-hidden="true">{sortArrow('code')}</span>
+							</button>
+						</th>
+						<th scope="col" aria-sort={ariaSort('name')}>
+							<button class="th-btn" type="button" onclick={() => toggleSort('name')} aria-label={sortLabel('name', 'Name')}>
+								Name<span aria-hidden="true">{sortArrow('name')}</span>
+							</button>
+						</th>
 						<th>Years</th>
 						<th>Terms</th>
 						<th>Courses</th>
@@ -394,6 +416,12 @@
 
 	.th-btn:hover {
 		color: var(--text-strong);
+	}
+
+	.th-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 
 	.row-actions {
