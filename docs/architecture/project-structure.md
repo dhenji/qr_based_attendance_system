@@ -130,6 +130,7 @@ attendance-system/
 │   └── presentations/                # Slides + deck (.pptx, .pdf)
 │
 ├── docker-compose.dev.yml             # Local development: PostgreSQL + migrations + backend + frontend (frontend HMR via CHOKIDAR_USEPOLLING)
+├── .github/workflows/ci.yml           # CI: backend suite, alembic drift check, frontend typecheck (ADR-069)
 ├── AGENTS.md                         # Repo conventions & reference
 ├── .gitignore
 └── README.md                         # Project overview & setup instructions

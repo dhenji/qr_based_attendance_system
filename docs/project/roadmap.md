@@ -310,6 +310,14 @@
 > re-run command and the exact error are recorded in
 > [performance-benchmarks.md](../testing/performance-benchmarks.md) §7. See also
 > ADR-067 for where the seed and load harness live and why.
+>
+> **Automated since 2026-10-05:** `.github/workflows/ci.yml` gates every push to
+> `main` and every PR on three jobs — the suite on SQLite, `alembic check`
+> against a `postgres:16-alpine` service, and the frontend typecheck (ADR-069).
+> The drift leg is the load-bearing one: `conftest.py` builds the test schema from
+> the models, so the suite cannot detect migration drift in either direction. The
+> Postgres leg, load harness, and backup pipeline stay manual — see
+> [test-plan.md](../testing/test-plan.md) §9 for the full gated/not-gated split.
 
 ### Deliverables
 
