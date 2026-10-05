@@ -9,6 +9,11 @@
 	} from '$lib/features/excuse/service';
 	import { listSessions } from '$lib/features/session/service';
 	import { isMockMode } from '$lib/api/client';
+	import {
+		ATTACHMENTS_MAX_FILES,
+		uploadAttachments,
+		validateAttachmentFiles,
+	} from '$lib/features/excuse/attachments';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 	import {
 		initProfessorCourses,
@@ -83,6 +88,9 @@
 	let quickReason = $state('');
 	let quickBusy = $state(false);
 	let quickError = $state<string | null>(null);
+	let quickFiles = $state<File[]>([]);
+	let quickFileErrors = $state<string[]>([]);
+	let quickUploading = $state(false);
 	// Real sessions for the quick-excuse picker (warmed when the modal
 	// opens; falls back to the course directory when the list is empty).
 	let quickSessions = $state<Array<{ id: number; code: string }>>([]);
@@ -225,6 +233,8 @@
 	const openQuick = () => {
 		quickOpen = true;
 		quickError = null;
+		quickFiles = [];
+		quickFileErrors = [];
 		// Warm real sessions so the excuse attaches to an actual session id
 		// instead of a fabricated one (the submit itself stays in-memory:
 		// typed numbers cannot resolve to integer ids without backend help).
@@ -245,6 +255,13 @@
 		quickError = null;
 	};
 
+	const onQuickFiles = (list: FileList | null) => {
+		if (!list) return;
+		const { valid, errors } = validateAttachmentFiles([...quickFiles, ...Array.from(list)]);
+		quickFiles = valid;
+		quickFileErrors = errors;
+	};
+
 	const doQuickExcuse = async () => {
 		if (quickBusy) return;
 		quickBusy = true;
@@ -252,6 +269,18 @@
 		try {
 			const offering = directory.find((c) => c.courseCode === quickCourse);
 			const picked = quickSessions.find((s) => s.id === quickSessionId) ?? null;
+			// Files upload first via the D24 presigned flow; their object urls
+			// ride along so the created row mirrors them (Path B). Reason-only
+			// stays Path A.
+			let attachmentUrls: string[] = [];
+			if (quickFiles.length > 0) {
+				quickUploading = true;
+				try {
+					attachmentUrls = await uploadAttachments(quickFiles);
+				} finally {
+					quickUploading = false;
+				}
+			}
 			const created = await quickExcuse({
 				studentNumber: quickStudentNumber,
 				studentName: quickStudentName || quickStudentNumber,
@@ -261,12 +290,15 @@
 				sessionId: picked?.id ?? offering?.offeringId ?? 1,
 				sessionCode: picked?.code ?? 'QUICK',
 				originalStatus: quickOriginal,
-				reason: quickReason
+				reason: quickReason,
+				attachmentUrls
 			});
 			quickOpen = false;
 			quickStudentNumber = '';
 			quickStudentName = '';
 			quickReason = '';
+			quickFiles = [];
+			quickFileErrors = [];
 			notice = `Quick-excused ${created.studentName} (${created.studentNumber}) — approved immediately.`;
 			status = 'approved';
 			currentPage = 1;
@@ -549,7 +581,13 @@
 						{:else}
 							<ul class="files">
 								{#each selected.attachmentNames as name (name)}
-										<li>{name} (S3 presigned flow lands with D24)</li>
+									<li>
+										{#if /^(https?:|mock:|file:|\/)/i.test(name)}
+											<a href={name} target="_blank" rel="noopener">{name.split('/').pop() ?? name}</a>
+										{:else}
+											{name}
+										{/if}
+									</li>
 								{/each}
 							</ul>
 						{/if}
@@ -780,6 +818,39 @@
 				placeholder="e.g. Student informed me after class…"
 				bind:value={quickReason}
 			></textarea>
+			<label class="form-label" for="quick-files">Evidence (optional — with files this files as with-evidence)</label>
+			<input
+				id="quick-files"
+				class="form-input"
+				type="file"
+				multiple
+				accept=".pdf,.jpg,.jpeg,.png,.heic"
+				disabled={quickBusy}
+				onchange={(e) => onQuickFiles(e.currentTarget.files)}
+			/>
+			{#if quickFiles.length > 0}
+				<ul class="files">
+					{#each quickFiles as file, i (file.name + file.size)}
+						<li>
+							<span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>
+							<button
+								class="link-btn"
+								type="button"
+								disabled={quickBusy}
+								onclick={() => (quickFiles = quickFiles.filter((_, j) => j !== i))}
+							>
+								Remove
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#each quickFileErrors as message (message)}
+				<p class="error">{message}</p>
+			{/each}
+			{#if quickUploading}
+				<p class="modal-sub" role="status">Uploading evidence…</p>
+			{/if}
 			{#if quickError}
 				<p class="error">{quickError}</p>
 			{/if}
@@ -1200,6 +1271,27 @@
 	.files {
 		margin: 0;
 		padding-left: 1.25rem;
+	}
+
+	.files li {
+		margin-bottom: 0.25rem;
+	}
+
+	.link-btn {
+		border: 0;
+		background: none;
+		padding: 0;
+		margin-left: 0.5rem;
+		color: var(--accent);
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
+		text-decoration: underline;
+	}
+
+	.link-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.modal-actions {

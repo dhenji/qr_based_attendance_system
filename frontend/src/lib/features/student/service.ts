@@ -10,6 +10,7 @@ import { get, getText, isMockMode, post } from '$lib/api/client';
 import type {
 	Paginated,
 	StudentExcuseItemResponse,
+	StudentExcuseSubmitBody,
 	StudentExcuseSubmitResponse,
 	StudentHistoryResponse,
 	StudentHistoryStatus,
@@ -206,8 +207,9 @@ export const getDashboard = async (): Promise<StudentDashboardResponse> => {
 // Student excuse requests — live on features/excuse/student_router.py.
 // Submit creates a pending professor-reviewed request (201); list reads the
 // student's own rows newest-first. Reason floor is 20 chars
-// (REASON_MIN_LENGTH_STUDENT). Reason-only submits: attachments expect
-// presigned-upload URLs (D24), which the UI does not collect yet.
+// (REASON_MIN_LENGTH_STUDENT). Attachments ride presigned-upload URLs (D24):
+// pass object_urls from the attachments helper (1..5); reason-only submits
+// stay valid (pending without files).
 // Real API by default; deterministic mocks only when PUBLIC_MOCK_MODE=true.
 export interface StudentExcuseRequest {
 	id: number;
@@ -217,6 +219,7 @@ export interface StudentExcuseRequest {
 	requestedAt: string;
 	reviewedAt?: string;
 	reviewNotes?: string;
+	attachmentUrls: string[];
 }
 
 const toStudentExcuse = (item: StudentExcuseItemResponse): StudentExcuseRequest => ({
@@ -227,18 +230,21 @@ const toStudentExcuse = (item: StudentExcuseItemResponse): StudentExcuseRequest 
 	requestedAt: item.requested_at,
 	reviewedAt: item.reviewed_at ?? undefined,
 	reviewNotes: item.review_notes ?? undefined,
+	attachmentUrls: [...(item.attachment_urls ?? [])],
 });
 
 export const submitStudentExcuse = async (input: {
 	sessionId: number;
 	reason: string;
+	attachmentUrls?: string[];
 }): Promise<StudentExcuseRequest> => {
 	const reason = input.reason.trim();
 	if (reason.length < 20) throw new Error('Reason must be at least 20 characters.');
-	const response = await post<StudentExcuseSubmitResponse>('studentExcuseSubmit', {
-		session_id: input.sessionId,
-		reason,
-	});
+	const urls = [...(input.attachmentUrls ?? [])];
+	if (urls.length > 5) throw new Error('At most 5 files can be attached.');
+	const body: StudentExcuseSubmitBody = { session_id: input.sessionId, reason };
+	if (urls.length > 0) body.attachment_urls = urls;
+	const response = await post<StudentExcuseSubmitResponse>('studentExcuseSubmit', body);
 	const now = new Date().toISOString();
 	return {
 		id: response.id,
@@ -246,6 +252,7 @@ export const submitStudentExcuse = async (input: {
 		reason,
 		status: 'pending',
 		requestedAt: response.requested_at ?? now,
+		attachmentUrls: urls,
 	};
 };
 

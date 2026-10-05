@@ -12,13 +12,18 @@
 	} from '$lib/features/admin/store.svelte';
 	import {
 		createStudent,
+		getFaceEnrollmentStatus,
 		resetStudentPassword,
 		updateStudent,
+		uploadFaceEnrollment,
+		type FaceEnrollmentStatus,
 	} from '$lib/features/admin/service';
 	import {
 		adminStudentCreateSchema,
 		adminStudentUpdateSchema,
+		facePhotoSchema,
 	} from '$lib/features/admin/schema';
+	import { APIError } from '$lib/api/client';
 	import type { AdminStudent, Program, YearLevel } from '$lib/shared/types';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -114,6 +119,98 @@
 	// Credential reset: the row drives the modal, the call and its copy live in
 	// TempPasswordModal because all three rosters share one backend path.
 	let resetTarget = $state<AdminStudent | null>(null);
+
+	// Face enrollment (D43 3-photo upload): the row drives the modal; status
+	// reads GET /admin/face-enrollment/{id}, upload POSTs multipart
+	// front/left/right. The roster Face column flips on success via refresh.
+	let faceTarget = $state<AdminStudent | null>(null);
+	let faceStatus = $state<FaceEnrollmentStatus | null>(null);
+	let faceLoading = $state(false);
+	let faceFront = $state<File | null>(null);
+	let faceLeft = $state<File | null>(null);
+	let faceRight = $state<File | null>(null);
+	let faceError = $state<string | null>(null);
+	let faceBusy = $state(false);
+	let faceNote = $state<string | null>(null);
+
+	const FACE_ERROR_MESSAGES: Record<string, string> = {
+		invalid_image: 'One of the photos could not be read. Use clear JPG, PNG, or WebP images.',
+		no_face_detected: 'No face was detected in one of the photos. Retake with the face centered.',
+		multiple_faces: 'More than one face was detected. Photos must show a single face.',
+		quality_too_low: 'One of the photos failed the quality check (lighting, size, sharpness, eyes open).',
+		student_not_found: 'Student record not found. Refresh the list and try again.',
+	};
+
+	const openFace = (row: AdminStudent) => {
+		faceTarget = row;
+		faceStatus = null;
+		faceFront = null;
+		faceLeft = null;
+		faceRight = null;
+		faceError = null;
+		faceNote = null;
+		faceLoading = true;
+		void getFaceEnrollmentStatus(row.id)
+			.then((status) => {
+				if (faceTarget?.id === row.id) faceStatus = status;
+			})
+			.catch((e: unknown) => {
+				if (faceTarget?.id !== row.id) return;
+				faceError =
+					e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
+						? FACE_ERROR_MESSAGES[e.code]
+						: (e instanceof Error && e.message ? e.message : 'Could not load enrollment status.');
+			})
+			.finally(() => {
+				if (faceTarget?.id === row.id) faceLoading = false;
+			});
+	};
+
+	const pickFacePhoto = (slot: 'front' | 'left' | 'right', list: FileList | null) => {
+		const file = list?.[0] ?? null;
+		if (!file) return;
+		const parsed = facePhotoSchema.safeParse(file);
+		if (!parsed.success) {
+			faceError = parsed.error.issues[0]?.message ?? 'Photo rejected.';
+			return;
+		}
+		faceError = null;
+		if (slot === 'front') faceFront = file;
+		else if (slot === 'left') faceLeft = file;
+		else faceRight = file;
+	};
+
+	const uploadFace = async () => {
+		if (!faceTarget || faceBusy) return;
+		if (!faceFront || !faceLeft || !faceRight) {
+			faceError = 'Choose front, left, and right photos to enroll.';
+			return;
+		}
+		faceBusy = true;
+		faceError = null;
+		faceNote = null;
+		try {
+			const result = await uploadFaceEnrollment(faceTarget.id, {
+				front: faceFront,
+				left: faceLeft,
+				right: faceRight,
+			});
+			faceStatus = {
+				enrolled: true,
+				faceEnrolledAt: result.faceEnrolledAt,
+				faceEmbeddingVersion: result.faceEmbeddingVersion,
+			};
+			faceNote = `Enrolled (v${result.faceEmbeddingVersion}). The roster Face column updates on refresh.`;
+			await refreshAdminStudents();
+		} catch (e: unknown) {
+			faceError =
+				e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
+					? FACE_ERROR_MESSAGES[e.code]
+					: (e instanceof Error && e.message ? e.message : 'Upload failed. Try again.');
+		} finally {
+			faceBusy = false;
+		}
+	};
 
 	// Form fields (strings for inputs; ids coerced by zod on submit).
 	let f_student_id = $state('');
@@ -433,6 +530,9 @@
 								<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>
 							{/if}
 							<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
+							<button class="link" onclick={() => openFace(s)}>
+								{s.faceEnrolled ? 'Re-enroll face' : 'Enroll face'}
+							</button>
 						</td>
 						</tr>
 					{/each}
@@ -537,6 +637,46 @@
 		onconfirm={() => resetStudentPassword(resetTarget!.id)}
 		onclose={() => (resetTarget = null)}
 	/>
+{/if}
+
+{#if faceTarget}
+	<div class="modal-overlay" role="presentation">
+		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="face-title">
+			<h2 id="face-title" class="modal-title">
+				{faceTarget.faceEnrolled ? 'Re-enroll face' : 'Enroll face'} — {fullName(faceTarget)} ({faceTarget.studentId})
+			</h2>
+			{#if faceLoading}
+				<p class="muted">Loading enrollment status…</p>
+			{:else if faceStatus?.enrolled}
+				<p class="muted" role="status">
+					Enrolled{#if faceStatus.faceEmbeddingVersion} (v{faceStatus.faceEmbeddingVersion}){/if}{#if faceStatus.faceEnrolledAt} · {new Date(faceStatus.faceEnrolledAt).toLocaleDateString()}{/if}.
+					Uploading replaces the enrollment.
+				</p>
+			{:else}
+				<p class="muted" role="status">Not enrolled. Upload front, left, and right photos.</p>
+			{/if}
+			{#if faceError}
+				<p class="error" role="alert">{faceError}</p>
+			{/if}
+			{#if faceNote}
+				<p class="note" role="status">{faceNote}</p>
+			{/if}
+			<div class="form">
+				<label>Front photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
+				{#if faceFront}<p class="muted">{faceFront.name} · {(faceFront.size / 1024).toFixed(0)} KB</p>{/if}
+				<label>Left photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
+				{#if faceLeft}<p class="muted">{faceLeft.name} · {(faceLeft.size / 1024).toFixed(0)} KB</p>{/if}
+				<label>Right photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
+				{#if faceRight}<p class="muted">{faceRight.name} · {(faceRight.size / 1024).toFixed(0)} KB</p>{/if}
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (faceTarget = null)}>Close</button>
+				<button class="btn btn-primary" disabled={faceBusy} onclick={() => void uploadFace()}>
+					{faceBusy ? 'Uploading…' : 'Upload enrollment'}
+				</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 <style>
@@ -723,6 +863,12 @@
 
 	.error {
 		color: var(--danger);
+		font-size: 0.875rem;
+		margin: 0 0 1rem;
+	}
+
+	.note {
+		color: var(--success);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
 	}

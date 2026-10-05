@@ -153,6 +153,57 @@ export const importStudents = async (file: File): Promise<StudentImportResult> =
 	return postForm<StudentImportResult>('adminStudentImport', form);
 };
 
+// --- Face enrollment (3-photo upload, D43) --------------------------------------
+//
+// POST /admin/face-enrollment/{id} takes multipart front/left/right images;
+// GET reads the enrollment status. Same suffix-carries-id convention as the
+// student detail routes. Real API by default; mocks only when
+// PUBLIC_MOCK_MODE=true.
+export interface FaceEnrollmentStatus {
+	enrolled: boolean;
+	faceEnrolledAt?: string;
+	faceEmbeddingVersion?: number;
+}
+
+export interface FaceEnrollmentResult {
+	studentId: number;
+	faceEnrolledAt: string;
+	faceEmbeddingVersion: number;
+}
+
+export const getFaceEnrollmentStatus = async (studentId: number): Promise<FaceEnrollmentStatus> => {
+	const response = await get<{
+		enrolled: boolean;
+		face_enrolled_at?: string;
+		face_embedding_version?: number;
+	}>('adminFaceEnrollmentStatus', undefined, `/${studentId}`);
+	return {
+		enrolled: response.enrolled,
+		faceEnrolledAt: response.face_enrolled_at ?? undefined,
+		faceEmbeddingVersion: response.face_embedding_version ?? undefined,
+	};
+};
+
+export const uploadFaceEnrollment = async (
+	studentId: number,
+	photos: { front: File; left: File; right: File }
+): Promise<FaceEnrollmentResult> => {
+	const form = new FormData();
+	form.append('front', photos.front);
+	form.append('left', photos.left);
+	form.append('right', photos.right);
+	const response = await postForm<{
+		student_id: number;
+		face_enrolled_at: string;
+		face_embedding_version: number;
+	}>('adminFaceEnrollmentUpload', form, undefined, `/${studentId}`);
+	return {
+		studentId: response.student_id,
+		faceEnrolledAt: response.face_enrolled_at,
+		faceEmbeddingVersion: response.face_embedding_version,
+	};
+};
+
 // Roster CSV template. Server text in live mode; the static header keeps
 // mock-mode/offline imports working when the template route is unreachable.
 const STUDENT_TEMPLATE_FALLBACK =

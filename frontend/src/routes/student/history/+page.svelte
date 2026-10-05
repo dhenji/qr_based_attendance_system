@@ -13,6 +13,11 @@
 	} from '$lib/features/student/service';
 	import type { ScheduledClass } from '$lib/shared/types';
 	import { flushQueue, queue, type QueuedScan } from '$lib/features/sync/service';
+	import {
+		ATTACHMENTS_MAX_FILES,
+		uploadAttachments,
+		validateAttachmentFiles,
+	} from '$lib/features/excuse/attachments';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 
 	type Status = StudentHistoryStatus;
@@ -347,8 +352,8 @@
 	// Student excuse requests (Path C submit side). Only absent/late/rejected
 	// rows are excusable server-side (422 excuse_not_eligible otherwise); a
 	// second submit while one is pending fails with 409 duplicate_excuse.
-	// Reason floor is 20 chars (REASON_MIN_LENGTH_STUDENT). No file input:
-	// attachments expect presigned-upload URLs (D24), unbuilt.
+	// Reason floor is 20 chars (REASON_MIN_LENGTH_STUDENT). Evidence files
+	// (up to 5) upload via the D24 presigned flow before submit.
 	const canRequestExcuse = (status: Status): boolean =>
 		status === 'absent' || status === 'late' || status === 'rejected';
 
@@ -360,6 +365,9 @@
 		attendance_not_found: 'No attendance record found for this session.',
 		session_not_found: 'Session not found.',
 		student_not_found: 'No student record found for your account. Contact an administrator.',
+		invalid_attachment: 'One of the files was rejected. Only PDF, JPG, PNG, or HEIC up to 5 MiB each.',
+		file_too_large: 'One of the files exceeds the 5 MiB limit.',
+		storage_unconfigured: 'File uploads are unavailable right now — submit without files or try again later.',
 	};
 
 	const toExcuseMessage = (error: unknown, fallback: string): string => {
@@ -374,6 +382,9 @@
 	let excuseBusy = $state(false);
 	let excuseError: string | null = $state(null);
 	let excuseNotice: string | null = $state(null);
+	let excuseFiles = $state<File[]>([]);
+	let excuseFileErrors = $state<string[]>([]);
+	let excuseUploading = $state(false);
 
 	let myRequests = $state<StudentExcuseRequest[]>([]);
 	let myRequestsError: string | null = $state(null);
@@ -392,6 +403,19 @@
 		excuseTarget = row;
 		excuseReason = '';
 		excuseError = null;
+		excuseFiles = [];
+		excuseFileErrors = [];
+	};
+
+	const onExcuseFiles = (list: FileList | null) => {
+		if (!list) return;
+		const { valid, errors } = validateAttachmentFiles([...excuseFiles, ...Array.from(list)]);
+		excuseFiles = valid;
+		excuseFileErrors = errors;
+	};
+
+	const removeExcuseFile = (index: number) => {
+		excuseFiles = excuseFiles.filter((_, i) => i !== index);
 	};
 
 	const submitExcuse = async () => {
@@ -404,8 +428,19 @@
 		excuseBusy = true;
 		excuseError = null;
 		try {
-			await submitStudentExcuse({ sessionId: excuseTarget.sessionId, reason });
+			let attachmentUrls: string[] = [];
+			if (excuseFiles.length > 0) {
+				excuseUploading = true;
+				try {
+					attachmentUrls = await uploadAttachments(excuseFiles);
+				} finally {
+					excuseUploading = false;
+				}
+			}
+			await submitStudentExcuse({ sessionId: excuseTarget.sessionId, reason, attachmentUrls });
 			excuseTarget = null;
+			excuseFiles = [];
+			excuseFileErrors = [];
 			excuseNotice = 'Excuse request submitted — your professor will review it.';
 			await loadMyRequests();
 		} catch (error) {
@@ -636,6 +671,9 @@
 						</span>
 						<span class="request-text">
 							Session #{request.sessionId} · {request.reason}
+							{#if request.attachmentUrls.length > 0}
+								<span class="muted"> · {request.attachmentUrls.length} file{request.attachmentUrls.length === 1 ? '' : 's'}</span>
+							{/if}
 							{#if request.reviewNotes}
 								<span class="muted"> — Professor note: {request.reviewNotes}</span>
 							{/if}
@@ -661,7 +699,35 @@
 					placeholder="Explain why you missed or were late to this session…"
 					bind:value={excuseReason}
 				></textarea>
-				<p class="hint">{excuseReason.trim().length}/2000 · evidence upload is not available yet</p>
+				<p class="hint">{excuseReason.trim().length}/2000 · up to {ATTACHMENTS_MAX_FILES} files (PDF/JPG/PNG/HEIC, 5 MiB each)</p>
+				<label class="form-label" for="excuse-files">Evidence (optional)</label>
+				<input
+					id="excuse-files"
+					class="form-input"
+					type="file"
+					multiple
+					accept=".pdf,.jpg,.jpeg,.png,.heic"
+					disabled={excuseBusy}
+					onchange={(e) => onExcuseFiles(e.currentTarget.files)}
+				/>
+				{#if excuseFiles.length > 0}
+					<ul class="files">
+						{#each excuseFiles as file, i (file.name + file.size)}
+							<li>
+								<span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>
+								<button class="link-btn" type="button" disabled={excuseBusy} onclick={() => removeExcuseFile(i)}>
+									Remove
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+				{#each excuseFileErrors as message (message)}
+					<p class="error">{message}</p>
+				{/each}
+				{#if excuseUploading}
+					<p class="hint" role="status">Uploading evidence…</p>
+				{/if}
 				{#if excuseError}
 					<p class="error">{excuseError}</p>
 				{/if}
@@ -1044,6 +1110,39 @@
 		font-size: 0.75rem;
 		color: var(--text-muted);
 		margin: 0.375rem 0 0;
+	}
+
+	.files {
+		list-style: none;
+		margin: 0.5rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+	}
+
+	.files li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.link-btn {
+		border: 0;
+		background: none;
+		padding: 0;
+		color: var(--accent);
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
+		text-decoration: underline;
+	}
+
+	.link-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.modal-actions {

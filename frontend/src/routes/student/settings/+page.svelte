@@ -13,6 +13,7 @@
 		type SettingsPrefs,
 	} from '$lib/features/settings/service';
 	import { applyTheme, setTheme as persistTheme } from '$lib/features/settings/theme';
+	import { requestNotificationPermission } from '$lib/features/notifications/poll';
 
 	const prefs = $state<SettingsPrefs>({ ...DEFAULT_PREFS });
 
@@ -31,7 +32,23 @@
 	function flip<K extends 'pushNotifications' | 'emailNotifications' | 'shareGps' | 'cameraScanning'>(key: K) {
 		prefs[key] = !prefs[key];
 		savePrefs({ ...prefs });
+		if (key === 'pushNotifications' && prefs[key]) {
+			// Opting in unlocks OS toasts on new excuse decisions (in-app pill
+			// works regardless). A denied permission reverts the toggle so the
+			// switch never promises what the OS blocks.
+			void requestNotificationPermission().then((permission) => {
+				if (permission === 'denied') {
+					prefs.pushNotifications = false;
+					savePrefs({ ...prefs });
+					pushNote = 'Browser notifications are blocked — enable them in the browser site settings first.';
+				} else {
+					pushNote = null;
+				}
+			});
+		}
 	}
+
+	let pushNote = $state<string | null>(null);
 
 	// Security Question — live on POST /auth/security-question. The server
 	// is the source of truth (GET /auth/me security_question_set); nothing
@@ -113,6 +130,10 @@
 				<span class="slider"></span>
 			</span>
 		</label>
+		{#if pushNote}
+			<p class="muted note" role="status">{pushNote}</p>
+		{/if}
+		<p class="muted note">OS toasts only appear while the app is open — no background push.</p>
 	</section>
 
 	<section class="card">
