@@ -20,23 +20,45 @@
 
 ### Error Code Coverage
 
-The per-endpoint `**Errors**` rows below are a summary, not an exhaustive index. The
-following codes are implemented in `backend/src/features/*/exceptions.py` and
-`core/exceptions.py` but are **not yet listed** against a specific endpoint in this
-document. They are stable (covered by the test suite) and clients may already depend on
-them; folding each into its endpoint's `**Errors**` row is outstanding documentation
-work, not a code change.
+Every code below appears in the `**Errors**` row (or summary-table column) of each
+endpoint that can return it, so this section no longer tracks an outstanding list —
+it records the exceptions to that rule instead. `src/tests/test_contract_error_codes.py`
+asserts the two sets agree, so the coverage cannot silently regress.
 
-| Slice                     | Codes                                                                                                                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| auth / core               | `invalid_credentials` · `account_locked` · `role_mismatch` · `user_exists` · `ambiguous_account` · `unrecognized_email` · `security_answer_invalid` · `otp_invalid` · `otp_expired` · `recovery_locked` · `invalid_mfa_code` · `mfa_already_enabled` · `internal_error` · `database_error` |
-| admin                     | `admin_user_not_found` · `admin_user_email_exists` · `admin_user_username_exists` · `roster_link_impossible` · `self_deactivation_forbidden`                                                                                                                                                                                  |
-| student / professor       | `student_not_found` · `student_id_exists` · `student_email_exists` · `year_level_not_found` · `year_level_program_mismatch` · `year_number_exists` · `invalid_semester` · `professor_email_exists`                                                                                                                                      |
-| course / offering         | `offering_not_found` · `invalid_schedule_window`                                                                                                                                                                                                                                                               |
-| face enrollment           | `face_not_enrolled` · `face_embedding_not_found`                                                                                                                                                                                                                                                              |
-| attachments (storage)     | `invalid_attachment` · `file_too_large` · `storage_unconfigured`                                                                                                                                                                                                                                                |
-| attendance review queue   | `review_not_found` · `review_not_pending`
-| attendance scan           | `outside_geofence` · `liveness_failed` · `face_mismatch` · `duplicate_scan` · `student_number_mismatch`                                                                                                                                                                                                   |
+**Attribution was traced, not guessed.** Each code was mapped by following its
+`raise` site to the enclosing service method and then to the router functions that
+call it. Three consequences worth knowing:
+
+- **Some codes are deliberately absent from an endpoint they can reach.** A 404 on
+  a path parameter whose foreign key is `RESTRICT` cannot be triggered by a client —
+  the row that would dangle cannot exist. Those are omitted rather than listed and
+  then never seen.
+- **A few codes are conditional on the request body.** `roster_link_impossible`
+  fires on `POST /admin/users` only for `student`/`professor` roles;
+  `offering_not_found` reaches `PATCH /admin/professors/{professor_id}` only when
+  the payload carries `courses`.
+- **Three codes are shared by two exception classes on purpose.**
+  `storage_unconfigured` is 503 from both `shared/storage.py` (upload, and the
+  backup download which re-raises) and `features/system` (backup create, academic
+  structure export). `student_not_found` is raised by both the student and excuse
+  slices with an identical envelope. `duplicate_scan` sets no `status_code` of its
+  own and inherits 409 through `SessionDatabaseException → DatabaseException`, as
+  does `year_level_program_mismatch` inheriting 422 via `DomainException`.
+
+**Six codes are defined but unreachable**, so no endpoint row can list them:
+
+| Code | Why it cannot occur |
+| ---- | ------------------- |
+| `internal_error` | The default `code` on `AppException` and the fallback in `main.py`'s single handler, but no code constructs a code-less `AppException`. An unhandled non-`AppException` (a SQLAlchemy `IntegrityError`, say) escapes to FastAPI's plain-text 500 instead. |
+| `database_error` | `DatabaseException` has a 409 handler but no `raise` site anywhere. |
+| `face_not_enrolled` | `FaceNotEnrolledException` is never raised. |
+| `invalid_semester` | `InvalidSemesterException` is never raised; `semester` is a free-text column with no vocabulary. |
+| `role_mismatch` | `RoleMismatchException` is never raised; `require_role` returns an `HTTPException` with `insufficient_permissions` (403). |
+| `password_policy_violation` | `PasswordPolicyException` is never raised. New passwords *are* strength-checked, but through a Pydantic `password_strength` validator that fails as the generic 422 `validation_error` — so the custom code can never be emitted and was removed from the change-password row rather than left implying otherwise. |
+
+They are kept rather than deleted because each is a plausible future guard, and an
+unused exception class is not a defect. If one is ever raised, the guard test fails
+and the row gets added.
 
 Conversely, `no_face_detected`, `multiple_faces`, `quality_too_low` and `invalid_image`
 are documented below but not yet raised: face detection is stubbed by
@@ -177,20 +199,20 @@ Create a new program.
 | **Response 201** | `{ id, code, name, description, total_years, is_active: true, created_at, updated_at }` |
 | **Errors**       | 409 `program_code_exists` · 422 validation                                              |
 
-#### `GET /admin/programs/{id}`
+#### `GET /admin/programs/{program_id}`
 
 |                  |                                                |
 | ---------------- | ---------------------------------------------- |
 | **Response 200** | Program object with nested `year_levels` array |
 
-#### `PATCH /admin/programs/{id}`
+#### `PATCH /admin/programs/{program_id}`
 
 |                  |                                       |
 | ---------------- | ------------------------------------- |
 | **Request**      | `{ name?, description?, is_active? }` |
 | **Response 200** | Updated program                       |
 
-#### `DELETE /admin/programs/{id}`
+#### `DELETE /admin/programs/{program_id}`
 
 Archive program (sets `is_active=false` on the program row only). PATCH the same row with
 `is_active: true` to reactivate.
@@ -204,41 +226,43 @@ Archive program (sets `is_active=false` on the program row only). PATCH the same
 
 ### Year Levels
 
-#### `GET /admin/programs/{pid}/years`
+#### `GET /admin/programs/{program_id}/years`
 
 |                  |                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------- |
 | **Response 200** | `{ items: [{ id, program_id, year_number, label, term_structure, sort_order }], ... }` |
 
-#### `POST /admin/programs/{pid}/years`
+#### `POST /admin/programs/{program_id}/years`
 
 |                  |                                                                                     |
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label }] } }` |
 | **Response 201** | Created year level                                                                  |
 
-#### `GET /admin/programs/{pid}/years/{yid}`
+| **Errors**       | 409 `year_number_exists` |
+#### `GET /admin/programs/{program_id}/years/{year_id}`
 
 |                  |                                                               |
 | ---------------- | ------------------------------------------------------------- |
 | **Response 200** | `{ id, program_id, year_number, label, term_structure, sort_order }` |
 | **Errors**       | 404 `program_not_found` / `year_level_not_found`                  |
 
-#### `PATCH /admin/programs/{pid}/years/{yid}`
+#### `PATCH /admin/programs/{program_id}/years/{year_id}`
 
 |                  |                                            |
 | ---------------- | ------------------------------------------ |
 | **Request**      | `{ label?, term_structure?, sort_order? }` |
 | **Response 200** | Updated year level                         |
 
-#### `DELETE /admin/programs/{pid}/years/{yid}`
+| **Errors**       | 404 `year_level_not_found` |
+#### `DELETE /admin/programs/{program_id}/years/{year_id}`
 
 Archive year level. Restrict if courses exist.
 
 |                  |                        |
 | ---------------- | ---------------------- |
 | **Response 204** | No content             |
-| **Errors**       | 409 `year_has_courses` |
+| **Errors**       | 409 `year_has_courses` · 404 `year_level_not_found` |
 
 ---
 
@@ -261,20 +285,20 @@ A course is a standalone reusable **template** (D44) — it carries no program, 
 | **Response 201** | Created course template                                                                                      |
 | **Errors**       | 409 `course_code_exists` · 422 validation                                                                    |
 
-#### `GET /admin/courses/{cid}`
+#### `GET /admin/courses/{course_id}`
 
 |                  |                                              |
 | ---------------- | -------------------------------------------- |
 | **Response 200** | Full course template                         |
 
-#### `PATCH /admin/courses/{cid}`
+#### `PATCH /admin/courses/{course_id}`
 
 |                  |                             |
 | ---------------- | --------------------------- |
 | **Request**      | Any mutable template field from POST |
 | **Response 200** | Updated course template              |
 
-#### `DELETE /admin/courses/{cid}`
+#### `DELETE /admin/courses/{course_id}`
 
 Archive course template (soft-delete: `is_active=false`).
 
@@ -302,15 +326,16 @@ A course offering is a specific instance of a course template for a program, yea
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int }` |
 | **Response 201** | Created course offering                                                                                                                                                                                                                                             |
-| **Errors**       | 409 `offering_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration`                                                                                                                                                            |
+| **Errors**       | 409 `offering_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 404 `year_level_not_found` |
 
-#### `GET /admin/offerings/{oid}`
+#### `GET /admin/offerings/{offering_id}`
 
 |                  |                  |
 | ---------------- | ---------------- |
 | **Response 200** | Course offering  |
 
-#### `PATCH /admin/offerings/{oid}`
+| **Errors**       | 404 `offering_not_found` |
+#### `PATCH /admin/offerings/{offering_id}`
 
 |                  |                                                |
 | ---------------- | ---------------------------------------------- |
@@ -319,7 +344,7 @@ A course offering is a specific instance of a course template for a program, yea
 | **Errors**       | 404 `offering_not_found` · 422 `invalid_schedule_window` |
 | **Notes**        | `invalid_schedule_window` is 422 when the *merged* result would end at or before it starts. A PATCH that moves only `schedule_start_time` past the stored end is caught here, because the request body's own validator only sees the fields it was sent. |
 
-#### `DELETE /admin/offerings/{oid}`
+#### `DELETE /admin/offerings/{offering_id}`
 
 Archive course offering.
 
@@ -327,13 +352,15 @@ Archive course offering.
 | ---------------- | ---------- |
 | **Response 204** | No content |
 
-#### `GET /admin/offerings/{oid}/professors`
+| **Errors**       | 404 `offering_not_found` |
+#### `GET /admin/offerings/{offering_id}/professors`
 
 |                  |                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | **Response 200** | `{ items: [{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }], ... }` |
 
-#### `POST /admin/offerings/{oid}/professors`
+| **Errors**       | 404 `offering_not_found` |
+#### `POST /admin/offerings/{offering_id}/professors`
 
 Assign professor to course offering.
 
@@ -341,18 +368,18 @@ Assign professor to course offering.
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
 | **Request**      | `{ professor_id: int, is_primary: bool, effective_from: date, effective_to?: date, semester: string }` |
 | **Response 201** | Created assignment                                                                                     |
-| **Errors**       | 409 `overlapping_assignment` · 404 `professor_not_found`                                               |
+| **Errors**       | 409 `overlapping_assignment` · 404 `professor_not_found` · 404 `offering_not_found` |
 
-#### `DELETE /admin/offerings/{oid}/professors/{pid}`
+#### `DELETE /admin/offerings/{offering_id}/professors/{professor_id}`
 
 End assignment (set `effective_to` = today).
 
 |                  |                                  |
 | ---------------- | -------------------------------- |
 | **Response 200** | `{ effective_to: "YYYY-MM-DD" }` |
-| **Errors**       | 404 `assignment_not_found`       |
+| **Errors**       | 404 `assignment_not_found` · 404 `offering_not_found` |
 
-#### `POST /admin/offerings/{oid}/enrollments/bulk`
+#### `POST /admin/offerings/{offering_id}/enrollments/bulk`
 
 Bulk-enroll EXISTING students via CSV upload (wireframes.md 4.3 template; creating
 new roster students is `POST /admin/students/import`).
@@ -362,9 +389,9 @@ new roster students is `POST /admin/students/import`).
 | **Request**      | `multipart/form-data: file=students.csv`                      |
 | **CSV columns**  | `student_id, first_name, middle_name, last_name, email, program_code, year_level, section` |
 | **Response 201** | `{ enrolled: int, skipped: int, errors: [{ line, reason }] }` |
-| **Errors**       | 422 `validation_error`                                        |
+| **Errors**       | 422 `validation_error` · 404 `offering_not_found` |
 
-#### `GET /admin/offerings/{oid}/students`
+#### `GET /admin/offerings/{offering_id}/students`
 
 Offering roster read (wireframes.md 4.5d Enrolled tab; drives the D2 `section`
 filters on professor screens and the active-session "Enrolled" count).
@@ -376,6 +403,7 @@ filters on professor screens and the active-session "Enrolled" count).
 
 ---
 
+| **Errors**       | 404 `offering_not_found` |
 ### Face Enrollment
 
 #### `POST /admin/face-enrollment/{student_id}`
@@ -386,7 +414,7 @@ Upload 3 photos (front, left, right) for face embedding generation.
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | **Request**      | `multipart/form-data: front=Image, left=Image, right=Image`                                 |
 | **Response 201** | `{ student_id, face_enrolled_at, face_embedding_version: int }`                             |
-| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 400 `multiple_faces` · 422 `quality_too_low` |
+| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 400 `multiple_faces` · 422 `quality_too_low` · 404 `student_not_found` |
 
 #### `GET /admin/face-enrollment/{student_id}`
 
@@ -398,6 +426,7 @@ Check enrollment status.
 
 ---
 
+| **Errors**       | 404 `student_not_found` |
 ### Analytics
 
 #### `GET /admin/analytics/overview`
@@ -501,6 +530,7 @@ List structural changes (audit log for program/year/course mutations).
 | **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }`                                                                                                              |
 | **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. |
 
+| **Errors**       | 503 `storage_unconfigured` |
 #### `GET /admin/audit-logs`
 
 The full audit trail — every sensitive mutation, not just the structural ones.
@@ -545,7 +575,8 @@ Trigger a full backup.
 | ---------------- | --------------------------------- |
 | **Response 202** | `{ backup_id, status: "started" }` |
 
-#### `GET /admin/backups/{id}/download`
+| **Errors**       | 503 `storage_unconfigured` · 409 `backup_in_progress` · 500 `backup_failed` |
+#### `GET /admin/backups/{backup_id}/download`
 
 Download backup file.
 
@@ -553,6 +584,7 @@ Download backup file.
 | ---------------- | -------------------- |
 | **Response 200** | Binary file download |
 
+| **Errors**       | 503 `storage_unconfigured` · 404 `backup_not_found` |
 #### `POST /admin/system/sync/flush`
 
 Reconcile pending `sync_queue` rows now. Each queued entry mirrors a scan
@@ -644,7 +676,7 @@ List flagged records for manual review.
 | **Response 200** | `{ items: [{ id, student_number, student_name, session_code, course_code, face_match_score, evidence, scanned_at }], total, page, size }` |
 | **Notes**        | `evidence` is the stored `liveness_evidence` JSONB (review flag, EAR/PnP samples). Only `status=pending` records are actionable. |
 
-#### `PATCH /admin/attendance/liveness-review/{id}/resolve`
+#### `PATCH /admin/attendance/liveness-review/{record_id}/resolve`
 
 Approve or reject a flagged record.
 
@@ -654,6 +686,7 @@ Approve or reject a flagged record.
 | **Response 200** | `{ id, status, reviewed_by, reviewed_at }`                                        |
 | **Notes**        | `approve` restores the computed present/late status; `reject` sets `rejected`. Both clear `liveness_evidence.review`. `note` (≤1000 chars, stripped) is stored as `liveness_evidence.review_note` and returned by the list endpoint's `evidence`. Resolving an already-resolved record is 409 `review_not_pending`. The decision is also written to the audit trail as `approve` / `reject` on `attendance_record`, visible on `GET /admin/audit-logs`. |
 
+| **Errors**       | 404 `review_not_found` · 409 `review_not_pending` |
 ### Students, Professors & Archive
 
 #### `POST /admin/students/import`
@@ -685,7 +718,7 @@ Columns: `student_id, first_name, middle_name, last_name, email, program_code, s
 | ---------------- | --------------------- |
 | **Response 200** | CSV file download     |
 
-#### `DELETE /admin/students/{id}/archive`
+#### `DELETE /admin/students/{student_id}/archive`
 
 Permanent delete — allowed only on archived (`is_active=false`) students
 (wireframes.md 4.10).
@@ -693,7 +726,7 @@ Permanent delete — allowed only on archived (`is_active=false`) students
 |                  |                          |
 | ---------------- | ------------------------ |
 | **Response 204** | No content               |
-| **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `student_has_records` (enrollments / attendance_records / excuse_requests still reference this student — ADR-057) |
+| **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `student_has_records` (enrollments / attendance_records / excuse_requests still reference this student — ADR-057) · 404 `student_not_found` |
 
 > The `is_active` check alone is not sufficient. `enrollments`,
 > `attendance_records` and `excuse_requests` all reference `students.id` with
@@ -702,7 +735,7 @@ Permanent delete — allowed only on archived (`is_active=false`) students
 > has-records guard returns 409 instead. The FKs stay `RESTRICT` on purpose:
 > cascading them would silently destroy the attendance audit trail (ADR-057).
 
-#### `DELETE /admin/professors/{id}/archive`
+#### `DELETE /admin/professors/{professor_id}/archive`
 
 Same semantics as the student archive delete, for professors, including
 `409 professor_has_records` when `sessions` still reference the professor
@@ -728,7 +761,8 @@ Create a student (wireframes.md 4.2 -> Create Student).
 | **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
 | **Notes**        | Optional `username` captures the claim slot used at self-registration; omitted = auto-generated at claim. Email is unique across users.       |
 
-#### `GET /admin/students/{id}`
+| **Errors**       | 404 `year_level_not_found` · 409 `student_email_exists` · 409 `student_id_exists` · 422 `year_level_program_mismatch` |
+#### `GET /admin/students/{student_id}`
 
 Single student detail.
 
@@ -737,7 +771,8 @@ Single student detail.
 | **Response 200** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, created_at, scan_count, face_enrolled: bool, face_enrolled_at?, face_embedding_version? }` |
 | **Notes**        | Detail response also carries `student_number` (same `students.student_id` column) — see `GET /student/profile`. |
 
-#### `PATCH /admin/students/{id}`
+| **Errors**       | 404 `student_not_found` · 404 `year_level_not_found` |
+#### `PATCH /admin/students/{student_id}`
 
 Update student fields (program/year-level/sections; clears face enrollment on identity change).
 
@@ -747,6 +782,7 @@ Update student fields (program/year-level/sections; clears face enrollment on id
 | **Response 200** | Updated student                                      |
 | **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). |
 
+| **Errors**       | 404 `student_not_found` · 404 `year_level_not_found` · 409 `student_email_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/professors`
 
 List professors with claim status (wireframes.md 4.4).
@@ -766,7 +802,8 @@ Create a professor (wireframes.md 4.4).
 | **Response 201** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status }`                                   |
 | **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. |
 
-#### `GET /admin/professors/{id}`
+| **Errors**       | 404 `offering_not_found` · 409 `professor_email_exists` |
+#### `GET /admin/professors/{professor_id}`
 
 Single professor detail.
 
@@ -774,7 +811,7 @@ Single professor detail.
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | **Response 200** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status, assigned_courses, created_at }`        |
 
-#### `PATCH /admin/professors/{id}`
+#### `PATCH /admin/professors/{professor_id}`
 
 Update professor fields + course assignments.
 
@@ -786,6 +823,7 @@ Update professor fields + course assignments.
 
 ---
 
+| **Errors**       | 404 `offering_not_found` · 409 `professor_email_exists` |
 ### Admin Users & Reset
 
 Admin accounts are never self-registered (wireframes.md 4.13). Super Admins manage
@@ -793,19 +831,26 @@ admins; admins manage students/professors. Password resets set a temp password
 (returned once) and force `must_change_password=true`.
 
 | Method | Path                                    | Purpose                                            | Role        |
+| Errors |
+| --- |
 | ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
-| GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin |
-| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin |
-| PATCH  | `/admin/users/{id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin |
-| POST   | `/admin/users/{id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin |
-| POST   | `/admin/students/{id}/reset-password`   | Reset linked student-account password (temp once)  | admin        |
-| POST   | `/admin/professors/{id}/reset-password` | Reset linked professor-account password (temp once)| admin        |
+| GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
+| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `admin_user_username_exists` · 409 `roster_link_impossible` |
+| PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
+| POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
+| POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
+| POST   | `/admin/professors/{professor_id}/reset-password` | Reset linked professor-account password (temp once)| admin | 404 `professor_not_found` · 404 `user_not_found` · 409 `professor_account_unlinked` |
 
 **Reset response:** `{ temp_password: string }` — shown once. All resets audited.
 
-> **Not implemented.** None of the three `reset-password` routes above exists yet;
-> only the self-service `POST /auth/reset-password` is built, and that one writes
-> a `password_reset` audit row. See ADR-064 for the gap this leaves in the trail.
+> **One implementation.** All three routes delegate to
+> `AuthService.admin_reset_password`; the student and professor variants resolve the
+> roster row to a `users.id` first, and a roster row with no linked account is 409
+> `student_account_unlinked` / `professor_account_unlinked`. An admin reset also
+> clears `failed_login_attempts`/`is_locked`/`locked_at` so it can actually rescue a
+> locked-out account, and deliberately does **not** clear MFA —
+> `POST /auth/mfa/disable` is that path, password-verified. Every reset writes a
+> `password_reset` audit row with `performed_by` set to the admin.
 
 ---
 
@@ -857,10 +902,10 @@ Open a new attendance session.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
 | **Response 201** | `{ id, session_code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 403 `not_assigned`                                                                                                                          |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 403 `not_assigned` · 404 `offering_not_found` |
 | **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49).                                |
 
-#### `GET /professor/sessions/active/{id}`
+#### `GET /professor/sessions/active/{session_id}`
 
 Live session detail with dual timers.
 
@@ -869,7 +914,7 @@ Live session detail with dual timers.
 | **Response 200** | `{ id, offering, session_code, scan_window_remaining, scheduled_end_time, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
 | **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). |
 
-#### `POST /professor/sessions/{id}/close`
+#### `POST /professor/sessions/{session_id}/close`
 
 Manually close session scanning.
 
@@ -882,7 +927,7 @@ Manually close session scanning.
 
 ### Excuses
 
-#### `POST /professor/sessions/{id}/attendance/{sid}/excuse`
+#### `POST /professor/sessions/{session_id}/attendance/{student_id}/excuse`
 
 Quick-excuse a student for this session.
 
@@ -890,10 +935,10 @@ Quick-excuse a student for this session.
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Request**      | `{ reason: string }`                                                                |
 | **Response 201** | `{ excuse_request_id, status: "approved", original_status, new_status: "excused" }` |
-| **Errors**       | `404 attendance_not_found` · `409 already_excused` · `422 excuse_not_eligible` (`present`/`pending` records) · `403 not_assigned` · `404 professor_not_found` |
+| **Errors**       | `404 attendance_not_found` · `409 already_excused` · `422 excuse_not_eligible` (`present`/`pending` records) · `403 not_assigned` · `404 professor_not_found` · 404 `attendance_not_found` · 409 `already_excused` · 409 `duplicate_excuse` · 422 `excuse_not_eligible` |
 | **Notes**        | `new_status`/`original_status` are DTO fields mapping `attendance_records.validation_status`. |
 
-#### `PATCH /professor/sessions/{id}/attendance/{sid}/excuse`
+#### `PATCH /professor/sessions/{session_id}/attendance/{student_id}/excuse`
 
 Update/edit existing excuse.
 
@@ -902,7 +947,7 @@ Update/edit existing excuse.
 | **Request**      | `{ reason?: string }` |
 | **Response 200** | Updated excuse        |
 
-#### `DELETE /professor/sessions/{id}/attendance/{sid}/excuse`
+#### `DELETE /professor/sessions/{session_id}/attendance/{student_id}/excuse`
 
 Revoke excuse (revert to original status).
 
@@ -910,7 +955,8 @@ Revoke excuse (revert to original status).
 | ---------------- | ---------------------------------- |
 | **Response 200** | `{ reverted_to: original_status }` |
 
-#### `POST /professor/sessions/{id}/excuse-all-absent`
+| **Errors**       | 404 `attendance_not_found` · 404 `excuse_not_found` |
+#### `POST /professor/sessions/{session_id}/excuse-all-absent`
 
 Bulk excuse all absent students.
 
@@ -920,6 +966,7 @@ Bulk excuse all absent students.
 | **Response 200** | `{ excused_count: int, reason }`                 |
 | **Idempotent**   | Re-running with same session returns same result |
 
+| **Errors**       | 404 `attendance_not_found` · 409 `already_excused` · 422 `excuse_not_eligible` |
 #### `GET /professor/excuse-requests`
 
 List pending excuse requests for professor's courses.
@@ -940,6 +987,7 @@ Approve or reject an excuse request.
 
 ---
 
+| **Errors**       | 404 `attendance_not_found` · 404 `excuse_not_found` · 409 `already_excused` · 409 `excuse_not_pending` · 422 `excuse_not_eligible` |
 ### Attendance
 
 #### `GET /professor/attendance`
@@ -1025,7 +1073,7 @@ Change password.
 | ---------------- | ---------------------------------------------------------------- |
 | **Request**      | `{ current_password: string, new_password: string }`             |
 | **Response 200** | `{ message: "Password updated" }`                                |
-| **Errors**       | 400 `current_password_invalid` · 422 `password_policy_violation` |
+| **Errors**       | 400 `current_password_invalid` |
 
 ---
 
@@ -1043,7 +1091,7 @@ Verify a typed session code or scan session QR.
 | **Request**      | `{ code: string }`                                                                                                                                                 |
 | **Response 200** | `{ session_id, offering_id, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
 | **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. |
-| **Errors**       | 404 `session_not_found` · 410 `session_expired`                                                                                                                    |
+| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` |
 
 ---
 
@@ -1057,7 +1105,7 @@ Submit attendance scan (online or queued for offline sync).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
-| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired`                                                                                                                                                     |
+| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
 | **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): `"qr_camera"` when submitted from a QR scan of the session/student-ID QR, `"manual_code"` when the session code was typed via verify-code. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
@@ -1072,7 +1120,7 @@ duplicate BEFORE GPS/face are captured. **Never writes attendance.**
 | **Role**         | student                                                                               |
 | **Request**      | `{ session_id: int, student_number: string }`                                         |
 | **Response 200** | `{ enrolled: true, already_scanned: false, student: { student_id, name, section } }` |
-| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 403 `student_number_mismatch` |
+| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 403 `student_number_mismatch` · 404 `student_not_found` |
 | **Notes**        | Read-only gate — the full submission still goes through `POST /student/attendance/scan`; duplicate-scan is re-checked atomically at submit time. `student_number` is checked against the authenticated account, not used to select the row (see the scan endpoint). `not_enrolled` and `duplicate_scan` are reported as `enrolled: false` / `already_scanned: true` in the 200 body rather than raised, so the client gets both flags in one round trip. |
 
 ---
@@ -1087,6 +1135,7 @@ duplicate BEFORE GPS/face are captured. **Never writes attendance.**
 | **Response 200** | `{ items: [{ id, session_id, course_code, course_name, status, original_status?, excuse_reason?, scanned_at, scanned_via }], total, page, size, summary: { compliance_rate, participation_rate, counts: { present, late, absent, excused, rejected } } }` |
 | **Notes**        | `course_id`/`date_from`/`date_to` match the 2.7 filters; `sort_by` accepts `date`/`course`/`section`/`status`/`time`. |
 
+| **Errors**       | 404 `student_not_found` |
 #### `GET /student/attendance/history/export`
 
 CSV export of the filtered history — **all rows** (not just the page). Same filters
@@ -1098,6 +1147,7 @@ as the list endpoint.
 
 ---
 
+| **Errors**       | 404 `student_not_found` |
 ### Schedule
 
 #### `GET /student/schedule`
@@ -1108,6 +1158,7 @@ as the list endpoint.
 
 ---
 
+| **Errors**       | 404 `student_not_found` |
 ### Excuses
 
 #### `POST /student/excuse-requests`
@@ -1118,7 +1169,7 @@ Submit an excuse request with evidence.
 | ---------------- | --------------------------------------------------------------------------------- |
 | **Request**      | JSON `{ session_id: int, reason: string, attachment_urls: string[1..5] }` (presigned-upload flow; the `multipart/form-data` form is superseded) |
 | **Response 201** | `{ id, status: "pending", requested_at }`                                         |
-| **Errors**       | `404 attendance_not_found` · `403 not_enrolled` · `409 already_excused` (record already excused) · `422 excuse_not_eligible` (record is `present`/`pending`, nothing to excuse) · `409 duplicate_excuse` |
+| **Errors**       | `404 attendance_not_found` · `403 not_enrolled` · `409 already_excused` (record already excused) · `422 excuse_not_eligible` (record is `present`/`pending`, nothing to excuse) · `409 duplicate_excuse` · 404 `student_not_found` · 404 `attendance_not_found` · 409 `already_excused` · 409 `duplicate_excuse` · 422 `excuse_not_eligible` |
 
 #### `GET /student/excuse-requests`
 
@@ -1127,6 +1178,7 @@ Submit an excuse request with evidence.
 | **Query**        | `?page=1&size=20`                                                                                              |
 | **Response 200** | `{ items: [{ id, session_id, course_code, status, reason, requested_at, reviewed_at?, review_notes? }], ... }` |
 
+| **Errors**       | 404 `student_not_found` |
 #### `GET /student/excuse-requests/{rid}`
 
 |                  |                            |
@@ -1135,6 +1187,7 @@ Submit an excuse request with evidence.
 
 ---
 
+| **Errors**       | 404 `student_not_found` · 404 `excuse_not_found` |
 ### Face Embedding
 
 #### `GET /student/me/face-embedding`
@@ -1149,6 +1202,7 @@ Pull face embedding (version-gated, D29).
 
 ---
 
+| **Errors**       | 404 `face_embedding_not_found` · 404 `student_not_found` |
 ### Profile & Settings
 
 #### `GET /student/profile`
@@ -1158,15 +1212,17 @@ Read-only identity fields.
 |                  |                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **Response 200** | `{ student_number, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count, face_enrolled_at?, face_embedding_version }` |
-| **Notes**        | Also carries `student_id` alongside `student_number` — the same `students.student_id` column under the name the admin roster rows use (:615/:634). Both spellings are emitted on this response and on `GET /admin/students/{id}` so either client reads the name it expects. |
+| **Notes**        | Also carries `student_id` alongside `student_number` — the same `students.student_id` column under the name the admin roster rows use (:615/:634). Both spellings are emitted on this response and on `GET /admin/students/{student_id}` so either client reads the name it expects. |
 | **Notes**        | `created_at` (Account date) + `scan_count` + face-enrollment meta feed wireframes.md 2.10 ("Account: Jun 2026 · Scans: 42", "Enrolled (vN)"). |
 
+| **Errors**       | 404 `student_not_found` |
 #### `PATCH /student/profile/password`
 
 Same contract as professor password change.
 
 ---
 
+| **Errors**       | 404 `student_not_found` |
 ## Dashboard Summaries
 
 One-call stat summaries for the three dashboards (wireframes.md 2.1/3.1/4.1). Each is
@@ -1180,6 +1236,7 @@ and primary lists without composing several calls.
 | **Role**         | student                                                                                             |
 | **Response 200** | `{ compliance_rate, scans_today, total_scans, today_schedule: [...], recent_activity: [...] }`      |
 
+| **Errors**       | 404 `student_not_found` |
 #### `GET /professor/dashboard`
 
 |                  |                                                                                     |
@@ -1210,7 +1267,7 @@ database stores URL references only, never file bytes.
 | **Role**         | any authenticated account (student, professor, admin)                           |
 | **Request**      | `{ filename: string, size_bytes: int, content_type?: string }`                  |
 | **Response 200** | `{ upload_url, object_url, object_key, expires_in }`                             |
-| **Errors**       | `invalid_attachment` (400) · `file_too_large` (413) · `storage_unconfigured` (503) |
+| **Errors**       | 400 `invalid_attachment` · 413 `file_too_large` · 503 `storage_unconfigured` |
 
 | Constraint                  | Value                              | Enforced by                          |
 | --------------------------- | ---------------------------------- | ------------------------------------ |
@@ -1239,23 +1296,25 @@ login applies the MFA preauth gate; refresh returns tokens in the body; accounts
 lock after 5 failed attempts.
 
 | Method | Path                               | Purpose                                              |
+| Errors |
+| --- |
 | ------ | ---------------------------------- | ---------------------------------------------------- |
-| POST   | `/auth/otp/request`                | Request 6-digit OTP (email)                          |
-| POST   | `/auth/otp/verify`                 | Verify OTP code                                      |
-| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question) |
-| POST   | `/auth/login`                      | Email/password login (+ MFA gate)                    |
-| POST   | `/auth/refresh`                    | Refresh-token rotation                               |
-| POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question |
-| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP                     |
-| POST   | `/auth/change-password`            | Change password (authenticated)                      |
-| POST   | `/auth/security-question`          | Set/update security question (authenticated)         |
-| POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once)           |
-| GET    | `/auth/mfa/backup-codes`           | Backup-code summary (total/remaining)                |
-| GET    | `/auth/me`                         | Current user info (role + security/MFA state)      |
-| POST   | `/auth/mfa/setup`                  | Generate TOTP secret                                 |
-| POST   | `/auth/mfa/verify`                 | Verify TOTP or backup code (login exchange or setup) |
-| POST   | `/auth/mfa/disable`                | Disable MFA (password required; clears backup codes) |
+| POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
+| POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
+| POST   | `/auth/login`                      | Email/password login (+ MFA gate) | 400 `invalid_credentials` · 423 `account_locked` |
+| POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
+| POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
+| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` |
+| POST   | `/auth/change-password`            | Change password (authenticated) | — |
+| POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
+| POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
+| GET    | `/auth/mfa/backup-codes`           | Backup-code summary (total/remaining) | — |
+| GET    | `/auth/me`                         | Current user info (role + security/MFA state) | — |
+| POST   | `/auth/mfa/setup`                  | Generate TOTP secret | 409 `mfa_already_enabled` |
+| POST   | `/auth/mfa/verify`                 | Verify TOTP or backup code (login exchange or setup) | 400 `invalid_credentials` · 400 `invalid_mfa_code` |
+| POST   | `/auth/mfa/disable`                | Disable MFA (password required; clears backup codes) | 400 `current_password_invalid` · 409 `mfa_not_enabled` |
 
 **Forgot-password flow (wireframes.md:152-260, ADR-052, hardened by ADR-056):**
 Step 1 (`/auth/forgot-password`, email) → Step 2 (`/auth/forgot-password/verify`,
