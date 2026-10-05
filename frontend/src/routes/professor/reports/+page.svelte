@@ -343,9 +343,9 @@
 			<h1>Attendance Reports</h1>
 			<p class="muted">
 				{#if reportMeta.dataSource === 'live'}
-					Live attendance data from your session history.
+					Live attendance data from your reports.
 				{:else}
-					Demo report data — live session history is unavailable.
+					Demo report data — live reports are unavailable.
 				{/if}
 			</p>
 			{#if reportMeta.truncated}
@@ -627,7 +627,13 @@
 				>
 					Download CSV
 				</button>
-				<button class="btn btn-secondary" type="button" disabled title="PDF export needs backend file generation">
+				<button
+					class="btn btn-secondary"
+					type="button"
+					disabled={csvRows.length === 0}
+					title={csvRows.length === 0 ? 'No report rows to export' : 'Print the current report as PDF'}
+					onclick={() => window.print()}
+				>
 					Download PDF
 				</button>
 			</div>

@@ -497,50 +497,76 @@ export interface AttendanceOverviewFilters {
 	date_to?: string;
 }
 
-// --- Admin audit logs (Phase 8 backend; designed shape, D38/D20-D22) ---------
+// --- Admin audit logs (live backend, api-contracts §System Settings & Backups) --
 //
-// No audit contract or table exists yet (audit_logs lands in Phase 8.5/8.7),
-// so the shape below is designed from wireframe 4.8 (Time/User/Action) plus
-// the action taxonomy in security-model §Audit-Log-Coverage. Category values
-// are the ten logged action families. Rows come from two sources (see the
-// audit service): live record-creation rows derived from roster lists
-// (marked origin "system") and deterministic mock operational rows (origin
-// "seed") until the backend trail lands.
+// GET /admin/audit-logs?entity_type&action&performed_by&date_from&date_to&page&size
+// returns { items: [{ id, action, entity_type, entity_id, old_value, new_value,
+// performed_by, performed_at }] }. Filters AND-combine; a blank value means
+// "no filter". date_from is inclusive from 00:00 UTC, date_to inclusive to end
+// of day. Values outside the entity/action vocabularies are 422
+// invalid_audit_filter (never an empty page); an inverted range is 422
+// invalid_audit_date_range.
 //
 // The academic-structure shape mirrors api-contracts
 // GET /admin/system/academic-structure exactly (D38: program/year/course
 // mutations with old/new values).
 
-export type AuditCategory =
+export type AuditEntityType =
+	| 'program'
+	| 'year_level'
+	| 'course'
+	| 'course_offering'
+	| 'student'
+	| 'professor'
 	| 'enrollment'
-	| 'assignment'
+	| 'course_professor'
 	| 'excuse'
 	| 'session'
 	| 'face_enrollment'
+	| 'attendance_record'
 	| 'backup'
-	| 'structure'
-	| 'settings'
-	| 'lockout'
-	| 'login';
+	| 'app_setting'
+	| 'user'
+	| 'maintenance';
+
+export type AuditAction =
+	| 'create'
+	| 'update'
+	| 'archive'
+	| 'delete'
+	| 'import'
+	| 'enroll'
+	| 'assign'
+	| 'unassign'
+	| 'open'
+	| 'close'
+	| 'approve'
+	| 'reject'
+	| 'revoke'
+	| 'lock'
+	| 'unlock'
+	| 'login_failed'
+	| 'password_reset';
 
 export type AuditActorRole = 'admin' | 'professor' | 'student' | 'system';
 
 export interface AuditLogItemResponse {
 	id: number;
-	occurred_at: string;
-	actor_name: string;
-	actor_role: AuditActorRole;
 	action: string;
-	category: AuditCategory;
-	entity: string;
-	detail?: string;
+	entity_type: string;
+	entity_id: number | null;
+	old_value: unknown;
+	new_value: unknown;
+	performed_by: string | number | null;
+	performed_at: string;
 }
 
 export interface AuditLogFilters {
+	entity_type?: AuditEntityType;
+	action?: AuditAction;
+	performed_by?: string;
 	date_from?: string;
 	date_to?: string;
-	category?: AuditCategory;
-	search?: string;
 	page?: number;
 	size?: number;
 }

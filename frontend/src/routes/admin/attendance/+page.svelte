@@ -11,6 +11,12 @@
 	} from '$lib/features/admin/analytics/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listProfessors } from '$lib/features/admin/service';
+	import {
+		listLivenessReview,
+		resolveLivenessReview,
+		type LivenessStatus,
+	} from '$lib/features/admin/liveness/service';
+	import type { LivenessReviewItemResponse } from '$lib/api/endpoints';
 	import type { AdminCourse, AdminProfessor, AttendanceOverviewItemResponse } from '$lib/shared/types';
 	import { formatPercentage } from '$lib/shared/utils/format';
 	import { goto } from '$app/navigation';
@@ -32,6 +38,19 @@
 
 	let courseOptions = $state<AdminCourse[]>([]);
 	let professorOptions = $state<AdminProfessor[]>([]);
+
+	// Liveness review (flagged-scan queue): records whose face_match_score fell
+	// in the review band stay actionable only while pending; resolving via the
+	// buttons below approves (restores present/late) or rejects them.
+	type Section = 'overview' | 'liveness';
+	let section = $state<Section>('overview');
+	let liveStatus = $state<LivenessStatus>('pending');
+	let liveItems = $state<LivenessReviewItemResponse[]>([]);
+	let liveTotal = $state(0);
+	let liveLoading = $state(false);
+	let liveError = $state<string | null>(null);
+	let resolvingId = $state<number | null>(null);
+	let reviewNote = $state('');
 
 	const visibleItems = $derived.by(() => {
 		const items = [...adminAttendanceState.items];
@@ -72,7 +91,37 @@
 			professorOptions = [];
 		}
 		await load();
+		await loadLiveness();
 	});
+
+	const loadLiveness = async () => {
+		liveLoading = true;
+		liveError = null;
+		try {
+			const response = await listLivenessReview({ status: liveStatus, page: 1, size: 20 });
+			liveItems = response.items ?? [];
+			liveTotal = response.total ?? liveItems.length;
+		} catch (e) {
+			liveError = e instanceof Error ? e.message : 'Could not load the review queue.';
+		} finally {
+			liveLoading = false;
+		}
+	};
+
+	const resolveRow = async (id: number, decision: 'approve' | 'reject') => {
+		if (resolvingId !== null) return;
+		resolvingId = id;
+		liveError = null;
+		try {
+			await resolveLivenessReview(id, decision, reviewNote);
+			reviewNote = '';
+			await loadLiveness();
+		} catch (e) {
+			liveError = e instanceof Error ? e.message : 'Could not resolve this record.';
+		} finally {
+			resolvingId = null;
+		}
+	};
 
 	const applyFilters = () => {
 		load();
@@ -129,6 +178,109 @@
 		</div>
 	</header>
 
+	<div class="tabs" role="tablist" aria-label="Attendance sections">
+		<button
+			class="tab"
+			class:selected={section === 'overview'}
+			role="tab"
+			aria-selected={section === 'overview'}
+			type="button"
+			onclick={() => (section = 'overview')}
+		>
+			Overview
+		</button>
+		<button
+			class="tab"
+			class:selected={section === 'liveness'}
+			role="tab"
+			aria-selected={section === 'liveness'}
+			type="button"
+			onclick={() => (section = 'liveness')}
+		>
+			Liveness review{liveTotal > 0 ? ` (${liveTotal})` : ''}
+		</button>
+	</div>
+
+	{#if section === 'liveness'}
+		<section class="card filters" aria-label="Review filters">
+			<select
+				class="input"
+				aria-label="Review status"
+				bind:value={liveStatus}
+				onchange={() => void loadLiveness()}
+			>
+				<option value="pending">Pending</option>
+				<option value="approved">Approved</option>
+				<option value="rejected">Rejected</option>
+			</select>
+			<input
+				class="input"
+				type="text"
+				placeholder="Review note (optional, stored with the decision)"
+				aria-label="Review note"
+				bind:value={reviewNote}
+				maxlength={1000}
+			/>
+			<button class="btn btn-secondary" onclick={() => void loadLiveness()}>Refresh</button>
+		</section>
+
+		{#if liveLoading}
+			<section class="card"><p class="muted">Loading review queue…</p></section>
+		{:else if liveError}
+			<section class="card"><p class="error">{liveError}</p></section>
+		{:else if liveItems.length === 0}
+			<section class="card"><p class="empty">No {liveStatus} records in the review queue.</p></section>
+		{:else}
+			<section class="card table-wrap">
+				<table>
+					<thead>
+						<tr>
+							<th>Student</th>
+							<th>Session</th>
+							<th>Score</th>
+							<th>Scanned</th>
+							{#if liveStatus === 'pending'}<th>Decision</th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each liveItems as row (row.id)}
+							<tr>
+								<td>
+									<span class="strong">{row.student_name}</span>
+									<div class="muted small">{row.student_number} · {row.course_code}</div>
+								</td>
+								<td>{row.session_code}</td>
+								<td>{row.face_match_score.toFixed(2)}</td>
+								<td>{row.scanned_at.slice(0, 16).replace('T', ' ')}</td>
+								{#if liveStatus === 'pending'}
+									<td>
+										<div class="row-actions">
+											<button
+												class="btn btn-secondary"
+												type="button"
+												disabled={resolvingId !== null}
+												onclick={() => void resolveRow(row.id, 'approve')}
+											>
+												Approve
+											</button>
+											<button
+												class="btn btn-secondary"
+												type="button"
+												disabled={resolvingId !== null}
+												onclick={() => void resolveRow(row.id, 'reject')}
+											>
+												Reject
+											</button>
+										</div>
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</section>
+		{/if}
+	{:else}
 	<section class="card filters" aria-label="Overview filters">
 		<select class="input" aria-label="Course filter" bind:value={courseFilter} onchange={applyFilters}>
 			<option value="">All courses</option>
@@ -179,6 +331,7 @@
 			</table>
 		</section>
 	{/if}
+	{/if}
 </div>
 
 <style>
@@ -218,6 +371,37 @@
 	.header-actions {
 		display: flex;
 		gap: 0.75rem;
+	}
+
+	.tabs {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.tab {
+		padding: 0.625rem 1rem;
+		border: 1px solid var(--border-strong);
+		border-radius: 999px;
+		background: var(--bg-card);
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+		cursor: pointer;
+	}
+
+	.tab.selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
+	}
+
+	.row-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.strong {
+		font-weight: 700;
 	}
 
 	.card {

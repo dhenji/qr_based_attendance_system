@@ -571,9 +571,20 @@
 							<td><span class="status status-{student.status}">{student.status}</span></td>
 							<td class="row-action">
 								{#if isExcusable(student.status)}
-									<button class="link" type="button" onclick={() => openExcuse(student)}>
-										Excuse
-									</button>
+									{#if isMockMode()}
+										<button class="link" type="button" onclick={() => openExcuse(student)}>
+											Excuse
+										</button>
+									{:else}
+										<button
+											class="link"
+											type="button"
+											disabled
+											title="Per-student excuse needs backend support to resolve this row — use Excuse all absent or the review queue instead"
+										>
+											Excuse
+										</button>
+									{/if}
 								{:else if student.status === 'excused'}
 									<span class="muted">Excused</span>
 								{/if}

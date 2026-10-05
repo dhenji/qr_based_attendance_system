@@ -23,6 +23,37 @@
 
 	const student = $derived(studentState.student);
 
+	// My QR is generated on-device from the student number (no backend QR
+	// route exists). Dynamic import keeps it client-side; failures fall back
+	// to the number below rather than a broken image.
+	let qrDataUrl = $state<string | null>(null);
+	let qrFailed = $state(false);
+
+	$effect(() => {
+		const code = student?.studentNumber?.trim() ?? '';
+		if (!code) {
+			qrDataUrl = null;
+			qrFailed = false;
+			return;
+		}
+		let cancelled = false;
+		qrFailed = false;
+		void import('qrcode')
+			.then(({ default: QRCode }) => QRCode.toDataURL(code, { margin: 1, width: 256 }))
+			.then((url) => {
+				if (!cancelled) qrDataUrl = url;
+			})
+			.catch(() => {
+				if (!cancelled) {
+					qrDataUrl = null;
+					qrFailed = true;
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
+
 	const fullName = $derived(
 		student
 			? [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ')
@@ -97,10 +128,18 @@
 		<section class="card">
 			<h2 class="section-title">My QR</h2>
 			<div class="qr-tile">
-				<div class="qr-placeholder">QR</div>
+				{#if qrDataUrl}
+					<img class="qr-code" src={qrDataUrl} alt="QR code for {student.studentNumber}" width="128" height="128" />
+				{:else}
+					<div class="qr-placeholder">QR</div>
+				{/if}
 				<div class="qr-label">{student.studentNumber}</div>
 			</div>
-			<p class="muted qr-note">Your QR code will appear here once the backend provides it.</p>
+			{#if qrFailed}
+				<p class="muted qr-note">Could not render the QR code — show your student number above instead.</p>
+			{:else}
+				<p class="muted qr-note">Generated on this device from your student number.</p>
+			{/if}
 		</section>
 
 		<div class="admin-note">Changes to your profile are handled by your administrator.</div>
@@ -234,6 +273,13 @@
 		color: #94a3b8;
 		font-size: 0.875rem;
 		font-weight: 700;
+	}
+
+	.qr-code {
+		width: 128px;
+		height: 128px;
+		border-radius: 8px;
+		image-rendering: pixelated;
 	}
 
 	.qr-label {

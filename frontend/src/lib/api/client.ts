@@ -99,10 +99,23 @@ const fetchWithAuth = async (
 //   1. AppException  -> {"detail": {"code", "message", "field"}}  (main.py handler)
 //   2. FastAPI 422   -> {"detail": [{loc, msg, type}, ...]}
 //   3. HTTPException -> {"detail": "some string"}
+// Plain-text 500s (unhandled non-AppException escapes to FastAPI's default
+// text body) fall through to the generic branch with the text preserved.
 const parseError = async (response: Response): Promise<APIError> => {
-	const body: unknown = await response.json().catch(() => ({}));
-	const detail = isRecord(body) ? body.detail : undefined;
 	const { status } = response;
+	// Read as text first: the body can only be consumed once, and a
+	// plain-text 500 has no JSON to parse.
+	const text = await response.text().catch(() => '');
+	let body: unknown = {};
+	if (text) {
+		try {
+			body = JSON.parse(text) as unknown;
+		} catch {
+			// Not JSON — keep the raw text for the fallback below.
+			body = {};
+		}
+	}
+	const detail = isRecord(body) ? body.detail : undefined;
 
 	if (isRecord(detail)) {
 		const code = typeof detail.code === 'string' ? detail.code : 'request_failed';
@@ -111,7 +124,10 @@ const parseError = async (response: Response): Promise<APIError> => {
 		return new APIError(code, message, field, status);
 	}
 
-	if (Array.isArray(detail) && detail.length > 0) {
+	if (Array.isArray(detail)) {
+		if (detail.length === 0) {
+			return new APIError('validation_error', 'Validation failed', undefined, status);
+		}
 		const first = isRecord(detail[0]) ? detail[0] : undefined;
 		const loc = first && Array.isArray(first.loc) ? first.loc : [];
 		// loc is ["body", "password"] — the trailing entry is the offending field
@@ -124,7 +140,11 @@ const parseError = async (response: Response): Promise<APIError> => {
 		return new APIError('request_failed', detail, undefined, status);
 	}
 
-	return new APIError('request_failed', `Request failed (${status})`, undefined, status);
+	// Plain-text or empty body (e.g. FastAPI's default 500 page): preserve a
+	// truncated slice so the message is actionable instead of opaque.
+	const snippet = text.trim().slice(0, 200);
+	const message = snippet ? snippet : `Request failed (${status})`;
+	return new APIError('request_failed', message, undefined, status);
 };
 
 // One request/response round trip, with one transparent retry after a 401 when
@@ -202,12 +222,17 @@ const apiCall = async <T>(
 
 	// Mock mode — return mock data (call inputs forwarded so stateful mocks
 	// can filter/sort/paginate lists and apply CRUD payloads like the backend).
+	// Defs without a mock throw explicitly instead of resolving to an empty
+	// stub: silent `{}` masks missing fixtures as downstream undefined-property
+	// failures.
 	if (MOCK) {
 		if (endpointDef.mock) {
 			return endpointDef.mock(forMock(params), suffix, body, method) as unknown as T;
 		}
-		// Return stub structure
-		return {} as unknown as T;
+		throw new APIError(
+			'mock_mode',
+			`No mock fixture for ${endpointDef.url} — wire one or bypass apiCall in mock mode`
+		);
 	}
 
 	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix}`, BASE_URL);
@@ -271,7 +296,10 @@ export const postForm = async <T>(
 		if (endpointDef.mock) {
 			return endpointDef.mock(forMock(params), suffix, undefined, 'POST') as unknown as T;
 		}
-		return {} as unknown as T;
+		throw new APIError(
+			'mock_mode',
+			`No mock fixture for ${endpointDef.url} — wire one or bypass postForm in mock mode`
+		);
 	}
 
 	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix ?? ''}`, BASE_URL);
@@ -376,6 +404,46 @@ export const postText = async (path: string, body: unknown): Promise<string> => 
 		}
 
 		return response.text();
+	};
+
+	return doFetch(false);
+};
+
+// Binary download for encrypted backup archives
+// (GET /admin/backups/{id}/download → application/octet-stream with a
+// Content-Disposition filename). getText cannot handle binary, so this fetches
+// a Blob and parses the filename header instead.
+export const getBlob = async (
+	path: string,
+	params?: QueryParams
+): Promise<{ blob: Blob; filename: string }> => {
+	if (MOCK) {
+		throw new APIError('mock_mode', 'Server file download is unavailable in mock mode');
+	}
+
+	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
+	appendParams(url, params);
+
+	const doFetch = async (alreadyRetried: boolean): Promise<{ blob: Blob; filename: string }> => {
+		const response = await fetchWithAuth(url.toString(), { method: 'GET' });
+
+		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
+			const freshToken = await unauthorizedHandler();
+			if (freshToken) {
+				authToken = freshToken;
+				return doFetch(true);
+			}
+		}
+
+		if (!response.ok) {
+			throw await parseError(response);
+		}
+
+		const blob = await response.blob();
+		const disposition = response.headers.get('content-disposition') ?? '';
+		const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+		const filename = match?.[1] ? decodeURIComponent(match[1].trim()) : path.split('/').pop() ?? 'download';
+		return { blob, filename };
 	};
 
 	return doFetch(false);

@@ -2400,14 +2400,14 @@ export const SystemCleanupEndpoint: EndpointDef<{ removed: number }> = {
 	mock: () => ({ removed: 14 })
 };
 
-// --- Admin audit logs (Phase 8 backend; designed shape) ----------------------
+// --- Admin audit logs (live backend, api-contracts §System Settings & Backups) --
 //
-// No audit contract or table exists yet, so the shape is designed from
-// wireframe 4.8 (Time/User/Action) and the ten logged families in
-// security-model §Audit-Log-Coverage. Mock rows are deterministic seed data
-// spanning the last two weeks; the service layer merges them with live
-// record-creation rows derived from roster lists (marked origin "system").
-// Real API by default; mocks only when PUBLIC_MOCK_MODE=true.
+// GET /admin/audit-logs?entity_type&action&performed_by&date_from&date_to&page&size
+// returns { items: [{ id, action, entity_type, entity_id, old_value, new_value,
+// performed_by, performed_at }] }. The mock rows below mirror that contract
+// shape (mapped to the legacy feed view-model in features/admin/audit/service.ts
+// until the page migrates to the native columns); mocks only when
+// PUBLIC_MOCK_MODE=true.
 
 const mockAuditAt = (daysAgo: number, time: string): string => {
 	const date = new Date();
@@ -2417,30 +2417,28 @@ const mockAuditAt = (daysAgo: number, time: string): string => {
 };
 
 const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
-	{ id: 1, occurred_at: mockAuditAt(0, '09:01:00'), actor_name: 'Alice Santos', actor_role: 'student', action: 'Scan CS101', category: 'login', entity: 'attendance_records:1', detail: 'present via session QR' },
-	{ id: 2, occurred_at: mockAuditAt(0, '08:55:00'), actor_name: 'John Smith', actor_role: 'professor', action: 'Opened session CS101', category: 'session', entity: 'sessions:41', detail: 'offering 1 · 60 min' },
-	{ id: 3, occurred_at: mockAuditAt(0, '08:30:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Imported CSV (25)', category: 'enrollment', entity: 'students:import', detail: '25 imported · 0 duplicates' },
-	{ id: 4, occurred_at: mockAuditAt(0, '08:00:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Added term to Y2 BSCS', category: 'structure', entity: 'year_levels:2', detail: 'Midyear added to term_structure' },
-	{ id: 5, occurred_at: mockAuditAt(1, '15:20:00'), actor_name: 'Maria Garcia', actor_role: 'professor', action: 'Excused B. Cruz MATH101', category: 'excuse', entity: 'excuse_requests:7', detail: 'quick excuse · medical' },
-	{ id: 6, occurred_at: mockAuditAt(1, '14:05:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Assigned J. Smith to offering 1', category: 'assignment', entity: 'course_professors:1:1', detail: 'primary · 2026-01-01 → ongoing' },
-	{ id: 7, occurred_at: mockAuditAt(1, '11:47:00'), actor_name: 'System', actor_role: 'system', action: 'Risk batch finished', category: 'settings', entity: 'student_risk_scores', detail: 'processed 90 · high 4 · medium 11' },
-	{ id: 8, occurred_at: mockAuditAt(2, '16:33:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Enrolled 3 students to offering 1', category: 'enrollment', entity: 'enrollments:bulk', detail: '3 enrolled · 1 skipped' },
-	{ id: 9, occurred_at: mockAuditAt(2, '10:12:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Face enrollment A. Santos', category: 'face_enrollment', entity: 'students:1', detail: '3 photos · embedding v2' },
-	{ id: 10, occurred_at: mockAuditAt(3, '03:00:00'), actor_name: 'System', actor_role: 'system', action: 'Backup completed', category: 'backup', entity: 'backup_log:31', detail: 'pg_dump · AES-256-GCM · 41 MB' },
-	{ id: 11, occurred_at: mockAuditAt(3, '09:44:00'), actor_name: 'John Smith', actor_role: 'professor', action: 'Closed session CS101', category: 'session', entity: 'sessions:38', detail: 'present 24 · late 3 · absent 3' },
-	{ id: 12, occurred_at: mockAuditAt(4, '13:29:00'), actor_name: 'System', actor_role: 'system', action: 'Account locked: ivy.lim@isu.edu.ph', category: 'lockout', entity: 'users:19', detail: '5 failed attempts' },
-	{ id: 13, occurred_at: mockAuditAt(4, '13:24:00'), actor_name: 'System', actor_role: 'system', action: 'Failed login ivy.lim@isu.edu.ph', category: 'login', entity: 'users:19', detail: 'attempt 5 · wrong password' },
-	{ id: 14, occurred_at: mockAuditAt(5, '10:02:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Updated offering 2 windows', category: 'settings', entity: 'course_offerings:2', detail: 'present 5 → 10 min' },
-	{ id: 15, occurred_at: mockAuditAt(5, '09:15:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Deactivated GE001', category: 'structure', entity: 'courses:4', detail: 'is_active true → false' },
-	{ id: 16, occurred_at: mockAuditAt(6, '14:51:00'), actor_name: 'Bob Cruz', actor_role: 'student', action: 'Submitted excuse MATH101', category: 'excuse', entity: 'excuse_requests:6', detail: 'pending professor review' },
-	{ id: 17, occurred_at: mockAuditAt(7, '08:05:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Created course CS102', category: 'structure', entity: 'courses:2', detail: 'Data Structures · 3 units' },
-	{ id: 18, occurred_at: mockAuditAt(7, '08:02:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Created offering CS101 BSIT Y1', category: 'structure', entity: 'course_offerings:3', detail: '1st Sem 2025-2026 · MWF' },
-	{ id: 19, occurred_at: mockAuditAt(8, '17:40:00'), actor_name: 'Maria Garcia', actor_role: 'professor', action: 'Opened session MATH101', category: 'session', entity: 'sessions:35', detail: 'offering 2 · 90 min' },
-	{ id: 20, occurred_at: mockAuditAt(9, '12:18:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Ended assignment J. Smith offering 3', category: 'assignment', entity: 'course_professors:3:1', detail: 'effective_to today (handover)' },
-	{ id: 21, occurred_at: mockAuditAt(10, '09:31:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Re-enrolled face embedding D. Aquino', category: 'face_enrollment', entity: 'students:4', detail: '3 photos · embedding v3' },
-	{ id: 22, occurred_at: mockAuditAt(11, '03:00:00'), actor_name: 'System', actor_role: 'system', action: 'Backup completed', category: 'backup', entity: 'backup_log:30', detail: 'pg_dump · AES-256-GCM · 40 MB' },
-	{ id: 23, occurred_at: mockAuditAt(12, '07:58:00'), actor_name: 'Admin', actor_role: 'admin', action: 'Unlocked account ivy.lim@isu.edu.ph', category: 'lockout', entity: 'users:19', detail: 'manual unlock after verification' },
-	{ id: 24, occurred_at: mockAuditAt(13, '16:07:00'), actor_name: 'Carla Reyes', actor_role: 'student', action: 'Scan CS101', category: 'login', entity: 'attendance_records:96', detail: 'late via session QR' },
+	{ id: 1, action: 'open', entity_type: 'session', entity_id: 41, old_value: null, new_value: 'offering 1 · 60 min', performed_by: 'J. Smith', performed_at: mockAuditAt(0, '08:55:00') },
+	{ id: 2, action: 'import', entity_type: 'student', entity_id: null, old_value: null, new_value: '25 imported · 0 duplicates', performed_by: 'Admin', performed_at: mockAuditAt(0, '08:30:00') },
+	{ id: 3, action: 'update', entity_type: 'year_level', entity_id: 2, old_value: '1st Semester, 2nd Semester', new_value: '1st Semester, 2nd Semester, Midyear', performed_by: 'Admin', performed_at: mockAuditAt(0, '08:00:00') },
+	{ id: 4, action: 'approve', entity_type: 'excuse', entity_id: 7, old_value: 'pending', new_value: 'approved · quick excuse · medical', performed_by: 'M. Garcia', performed_at: mockAuditAt(1, '15:20:00') },
+	{ id: 5, action: 'assign', entity_type: 'course_professor', entity_id: null, old_value: null, new_value: 'J. Smith → offering 1 · primary', performed_by: 'Admin', performed_at: mockAuditAt(1, '14:05:00') },
+	{ id: 6, action: 'update', entity_type: 'maintenance', entity_id: null, old_value: null, new_value: 'risk batch · processed 90 · high 4 · medium 11', performed_by: 'system', performed_at: mockAuditAt(1, '11:47:00') },
+	{ id: 7, action: 'enroll', entity_type: 'enrollment', entity_id: null, old_value: null, new_value: '3 enrolled · 1 skipped · offering 1', performed_by: 'Admin', performed_at: mockAuditAt(2, '16:33:00') },
+	{ id: 8, action: 'create', entity_type: 'face_enrollment', entity_id: 1, old_value: null, new_value: '3 photos · embedding v2', performed_by: 'Admin', performed_at: mockAuditAt(2, '10:12:00') },
+	{ id: 9, action: 'create', entity_type: 'backup', entity_id: 31, old_value: null, new_value: 'pg_dump · AES-256-GCM · 41 MB', performed_by: 'system', performed_at: mockAuditAt(3, '03:00:00') },
+	{ id: 10, action: 'close', entity_type: 'session', entity_id: 38, old_value: null, new_value: 'present 24 · late 3 · absent 3', performed_by: 'J. Smith', performed_at: mockAuditAt(3, '09:44:00') },
+	{ id: 11, action: 'lock', entity_type: 'user', entity_id: 19, old_value: null, new_value: '5 failed attempts', performed_by: 'system', performed_at: mockAuditAt(4, '13:29:00') },
+	{ id: 12, action: 'login_failed', entity_type: 'user', entity_id: 19, old_value: null, new_value: 'attempt 5 · wrong password', performed_by: null, performed_at: mockAuditAt(4, '13:24:00') },
+	{ id: 13, action: 'update', entity_type: 'course_offering', entity_id: 2, old_value: 'present 5 min', new_value: 'present 10 min', performed_by: 'Admin', performed_at: mockAuditAt(5, '10:02:00') },
+	{ id: 14, action: 'archive', entity_type: 'course', entity_id: 4, old_value: 'is_active=true', new_value: 'is_active=false', performed_by: 'Admin', performed_at: mockAuditAt(5, '09:15:00') },
+	{ id: 15, action: 'create', entity_type: 'excuse', entity_id: 6, old_value: null, new_value: 'pending professor review', performed_by: 'B. Cruz', performed_at: mockAuditAt(6, '14:51:00') },
+	{ id: 16, action: 'create', entity_type: 'course', entity_id: 2, old_value: null, new_value: 'CS102 Data Structures · 3 units', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:05:00') },
+	{ id: 17, action: 'create', entity_type: 'course_offering', entity_id: 3, old_value: null, new_value: 'CS101 BSIT 1st Year 1st Sem 2025-2026', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:02:00') },
+	{ id: 18, action: 'open', entity_type: 'session', entity_id: 35, old_value: null, new_value: 'offering 2 · 90 min', performed_by: 'M. Garcia', performed_at: mockAuditAt(8, '17:40:00') },
+	{ id: 19, action: 'unassign', entity_type: 'course_professor', entity_id: null, old_value: 'J. Smith → offering 3', new_value: 'effective_to today (handover)', performed_by: 'Admin', performed_at: mockAuditAt(9, '12:18:00') },
+	{ id: 20, action: 'update', entity_type: 'app_setting', entity_id: null, old_value: 'present_window 5 min', new_value: 'present_window 10 min', performed_by: 'Admin', performed_at: mockAuditAt(10, '09:31:00') },
+	{ id: 21, action: 'unlock', entity_type: 'user', entity_id: 19, old_value: 'locked', new_value: 'unlocked after verification', performed_by: 'Admin', performed_at: mockAuditAt(12, '07:58:00') },
+	{ id: 22, action: 'password_reset', entity_type: 'user', entity_id: 19, old_value: null, new_value: 'temp password issued · must_change_password', performed_by: 'Admin', performed_at: mockAuditAt(12, '08:10:00') },
 ];
 
 export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>> = {
@@ -2448,22 +2446,26 @@ export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>
 	method: 'GET',
 	mock: (params) => {
 		let rows = [...MOCK_AUDIT_ROWS];
+		// Contract filters AND-combine; a blank value means "no filter".
+		if (params?.entity_type) {
+			rows = rows.filter((r) => r.entity_type === params.entity_type);
+		}
+		if (params?.action) {
+			rows = rows.filter((r) => r.action === params.action);
+		}
+		if (params?.performed_by) {
+			const needle = params.performed_by.trim().toLowerCase();
+			if (needle) {
+				rows = rows.filter((r) => String(r.performed_by ?? '').toLowerCase().includes(needle));
+			}
+		}
 		if (params?.date_from) {
-			rows = rows.filter((r) => r.occurred_at.slice(0, 10) >= params.date_from!);
+			rows = rows.filter((r) => r.performed_at.slice(0, 10) >= params.date_from!);
 		}
 		if (params?.date_to) {
-			rows = rows.filter((r) => r.occurred_at.slice(0, 10) <= params.date_to!);
+			rows = rows.filter((r) => r.performed_at.slice(0, 10) <= params.date_to!);
 		}
-		if (params?.category) {
-			rows = rows.filter((r) => r.category === params.category);
-		}
-		const search = params?.search?.trim().toLowerCase();
-		if (search) {
-			rows = rows.filter((r) =>
-				`${r.actor_name} ${r.action} ${r.entity} ${r.detail ?? ''}`.toLowerCase().includes(search)
-			);
-		}
-		rows.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
+		rows.sort((a, b) => (a.performed_at < b.performed_at ? 1 : -1));
 		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
 		const total = rows.length;
 		const totalPages = Math.max(1, Math.ceil(total / size));
@@ -2478,7 +2480,7 @@ const MOCK_STRUCTURE_ROWS: StructureChangeResponse[] = [
 	{ id: 1, action: 'term_added', entity_type: 'year_level', entity_id: 2, old_value: '1st Semester, 2nd Semester', new_value: '1st Semester, 2nd Semester, Midyear', performed_by: 'Admin', performed_at: mockAuditAt(0, '08:00:00') },
 	{ id: 2, action: 'course_archived', entity_type: 'course', entity_id: 4, old_value: 'is_active=true', new_value: 'is_active=false', performed_by: 'Admin', performed_at: mockAuditAt(5, '09:15:00') },
 	{ id: 3, action: 'course_created', entity_type: 'course', entity_id: 2, old_value: null, new_value: 'CS102 Data Structures · 3 units', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:05:00') },
-	{ id: 4, action: 'offering_created', entity_type: 'offering', entity_id: 3, old_value: null, new_value: 'CS101 BSIT 1st Year 1st Sem 2025-2026', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:02:00') },
+	{ id: 4, action: 'offering_created', entity_type: 'course_offering', entity_id: 3, old_value: null, new_value: 'CS101 BSIT 1st Year 1st Sem 2025-2026', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:02:00') },
 	{ id: 5, action: 'year_level_created', entity_type: 'year_level', entity_id: 6, old_value: null, new_value: '6th Year · BSCS', performed_by: 'Admin', performed_at: mockAuditAt(9, '10:00:00') },
 	{ id: 6, action: 'program_renamed', entity_type: 'program', entity_id: 2, old_value: 'BS Information Technology', new_value: 'BS Information Technology (morning)', performed_by: 'Admin', performed_at: mockAuditAt(12, '11:30:00') },
 ];
@@ -2785,6 +2787,171 @@ export const ExcuseBulkEndpoint: EndpointDef<ExcuseBulkResponse> = {
 	method: 'POST',
 };
 
+// --- Professor reports (live aggregates, D37) ---------------------------------
+//
+// GET /professor/reports/all-courses, /comparison, /trends. The reports page
+// used to recompute all three client-side from GET /professor/sessions/history;
+// these defs call the dedicated aggregates instead, keeping the history
+// derivation as the offline/mock fallback in features/report/service.ts.
+// Real API by default; mocks only when PUBLIC_MOCK_MODE=true.
+export interface ProfessorReportsAllCoursesItemResponse {
+	date: string;
+	total_sessions: number;
+	total_students: number;
+	compliance_rate: number;
+	participation_rate: number;
+}
+
+export interface ProfessorReportsAllCoursesResponse {
+	items: ProfessorReportsAllCoursesItemResponse[];
+	avg_compliance: number;
+	avg_participation: number;
+}
+
+export const ProfessorReportsAllCoursesEndpoint: EndpointDef<ProfessorReportsAllCoursesResponse> = {
+	url: '/professor/reports/all-courses',
+	method: 'GET',
+	mock: (params) => {
+		const granularity = params?.granularity ?? 'daily';
+		const suffix = granularity === 'monthly' ? '-01' : '';
+		const base = (params?.date_from ?? new Date().toISOString().slice(0, 10)).slice(0, granularity === 'monthly' ? 7 : 10);
+		const items: ProfessorReportsAllCoursesItemResponse[] = [0, 1, 2].map((i) => ({
+			date: `${base}${suffix}`,
+			total_sessions: 3 - i,
+			total_students: 90 - i * 5,
+			compliance_rate: 0.82 - i * 0.03,
+			participation_rate: 0.9 - i * 0.02,
+		}));
+		return { items, avg_compliance: 0.79, avg_participation: 0.88 };
+	},
+};
+
+export interface ProfessorReportsComparisonItemResponse {
+	course_id: number;
+	course_code: string;
+	program_id: number;
+	year_level_id: number;
+	compliance_rate: number;
+	participation_rate: number;
+	total_sessions: number;
+}
+
+export const ProfessorReportsComparisonEndpoint: EndpointDef<{
+	items: ProfessorReportsComparisonItemResponse[];
+}> = {
+	url: '/professor/reports/comparison',
+	method: 'GET',
+	mock: () => ({
+		items: [
+			{ course_id: 1, course_code: 'CS101', program_id: 1, year_level_id: 1, compliance_rate: 0.84, participation_rate: 0.92, total_sessions: 12 },
+			{ course_id: 2, course_code: 'MATH101', program_id: 1, year_level_id: 1, compliance_rate: 0.71, participation_rate: 0.83, total_sessions: 9 },
+		],
+	}),
+};
+
+export interface ProfessorReportsTrendItemResponse {
+	date: string;
+	course_id: number;
+	course_code: string;
+	rate: number;
+}
+
+export const ProfessorReportsTrendsEndpoint: EndpointDef<{
+	items: ProfessorReportsTrendItemResponse[];
+}> = {
+	url: '/professor/reports/trends',
+	method: 'GET',
+	mock: (params) => {
+		const base = (params?.date_from ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+		return {
+			items: [0, 1, 2].map((i) => ({
+				date: base,
+				course_id: 1,
+				course_code: 'CS101',
+				rate: 0.8 - i * 0.02,
+			})),
+		};
+	},
+};
+
+// --- Admin excuses (read-only queue) ------------------------------------------
+//
+// GET /admin/excuses?status&page&size — same ExcuseRequest row as the professor
+// queue. Admins review via the professor flow; this def is list-only so the
+// admin side can surface workload without duplicating review actions.
+// Real API by default; mocks only when PUBLIC_MOCK_MODE=true.
+export const AdminExcusesEndpoint: EndpointDef<Paginated<ExcuseRequestReadResponse>> = {
+	url: '/admin/excuses',
+	method: 'GET',
+	mock: (params) => {
+		const now = new Date().toISOString();
+		const rows: ExcuseRequestReadResponse[] = [
+			{ id: 901, student_id: 1, session_id: 41, initiated_by: 'student', initiated_via: 'request', reason: 'Medical appointment with supporting documents attached for review.', attachment_urls: [], status: 'pending', requested_at: now, reviewed_by: null, reviewed_at: null, review_notes: null },
+			{ id: 902, student_id: 2, session_id: 38, initiated_by: 'student', initiated_via: 'request', reason: 'Family emergency, barangay certificate available on request.', attachment_urls: [], status: 'pending', requested_at: now, reviewed_by: null, reviewed_at: null, review_notes: null },
+		];
+		const status = params?.status;
+		const filtered = status ? rows.filter((r) => r.status === status) : rows;
+		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+		const page = Math.min(Math.max(parseInt(params?.page ?? '1', 10) || 1, 1), 1);
+		return { items: filtered.slice((page - 1) * size, page * size), total: filtered.length, page, size };
+	},
+};
+
+// --- Admin liveness review (flagged-scan queue) --------------------------------
+//
+// GET /admin/attendance/liveness-review?status&page&size lists records whose
+// face_match_score fell in [0.65, 0.70) with validation_status pending;
+// PATCH /admin/attendance/liveness-review/{id}/resolve approves (restores
+// present/late) or rejects them. Real API by default; mocks only when
+// PUBLIC_MOCK_MODE=true.
+export interface LivenessReviewItemResponse {
+	id: number;
+	student_number: string;
+	student_name: string;
+	session_code: string;
+	course_code: string;
+	face_match_score: number;
+	evidence: Record<string, unknown>;
+	scanned_at: string;
+}
+
+export interface LivenessReviewResolveBody {
+	decision: 'approve' | 'reject';
+	note?: string;
+}
+
+export interface LivenessReviewResolveResponse {
+	id: number;
+	status: string;
+	reviewed_by: number;
+	reviewed_at: string;
+}
+
+const MOCK_LIVENESS_ROWS: LivenessReviewItemResponse[] = [
+	{ id: 501, student_number: '24-2132', student_name: 'Alice Santos', session_code: 'A7X-9K2M', course_code: 'CS101', face_match_score: 0.67, evidence: { review: true, blink_detected: true, head_turn_left: true, head_turn_right: true }, scanned_at: new Date().toISOString() },
+	{ id: 502, student_number: '24-1045', student_name: 'Bob Cruz', session_code: 'B3M-7Q8N', course_code: 'MATH101', face_match_score: 0.68, evidence: { review: true, blink_detected: true, head_turn_left: true, head_turn_right: false }, scanned_at: new Date().toISOString() },
+];
+
+export const LivenessReviewListEndpoint: EndpointDef<Paginated<LivenessReviewItemResponse>> = {
+	url: '/admin/attendance/liveness-review',
+	method: 'GET',
+	mock: (params) => {
+		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+		const page = Math.min(Math.max(parseInt(params?.page ?? '1', 10) || 1, 1), 1);
+		return { items: [...MOCK_LIVENESS_ROWS], total: MOCK_LIVENESS_ROWS.length, page, size };
+	},
+};
+
+export const LivenessReviewResolveEndpoint: EndpointDef<LivenessReviewResolveResponse> = {
+	url: '/admin/attendance/liveness-review',
+	method: 'PATCH',
+	mock: (_params, suffix, body) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '0', 10) || MOCK_LIVENESS_ROWS[0].id;
+		const decision = (body as LivenessReviewResolveBody | undefined)?.decision ?? 'approve';
+		return { id, status: decision === 'approve' ? 'present' : 'rejected', reviewed_by: 1, reviewed_at: new Date().toISOString() };
+	},
+};
+
 // Endpoint registry
 // Named, strongly-typed endpoint definitions keyed for the apiCall() layer.
 export const endpoints = {
@@ -2841,7 +3008,16 @@ export const endpoints = {
 	excuseEdit: ExcuseEditEndpoint,
 	excuseRevoke: ExcuseRevokeEndpoint,
 	excuseBulk: ExcuseBulkEndpoint,
-	// Admin system settings (mock-only until the backend lands)
+	// Professor reports (live aggregates; history derivation stays the fallback)
+	professorReportsAllCourses: ProfessorReportsAllCoursesEndpoint,
+	professorReportsComparison: ProfessorReportsComparisonEndpoint,
+	professorReportsTrends: ProfessorReportsTrendsEndpoint,
+	// Admin excuses (read-only queue)
+	adminExcuses: AdminExcusesEndpoint,
+	// Admin liveness review (flagged-scan queue + resolve)
+	livenessReviewList: LivenessReviewListEndpoint,
+	livenessReviewResolve: LivenessReviewResolveEndpoint,
+	// Admin system settings (live backend)
 	systemSettings: SystemSettingsGetEndpoint,
 	systemSettingsPatch: SystemSettingsPatchEndpoint,
 	systemBackups: SystemBackupsEndpoint,

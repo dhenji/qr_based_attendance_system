@@ -1,18 +1,23 @@
 // features/report/service.ts
 // Professor-facing report queries.
 //
-// Live first: per-session aggregates come from GET /professor/sessions/history
-// (server-computed present/late/absent counts plus compliance/participation
-// rates, so no client-side denominator guessing), with course identity joined
-// from the professor courses store. When the backend is unreachable or the
-// app runs with PUBLIC_MOCK_MODE=true, the deterministic mock history below
-// backs the same shapes instead.
+// Live first: the dedicated aggregates GET /professor/reports/all-courses,
+// /comparison and /trends are tried first; when the backend is unreachable or
+// the app runs with PUBLIC_MOCK_MODE=true, the per-session derivation from
+// GET /professor/sessions/history (server-computed counts + rates) backs the
+// same shapes, and the deterministic mock history below backs mock mode.
+// Course identity joins from the professor courses store in every path.
 //
 // Field names intentionally mirror the professor report contracts in
-// docs/architecture/api-contracts.md so a future dedicated report endpoint
-// stays a mechanical swap; the page should not need to change.
+// docs/architecture/api-contracts.md so the live swap stays mechanical; the
+// page does not change.
 
-import { isMockMode, postText } from '$lib/api/client';
+import { get, isMockMode, postText } from '$lib/api/client';
+import type {
+	ProfessorReportsAllCoursesResponse,
+	ProfessorReportsComparisonItemResponse,
+	ProfessorReportsTrendItemResponse,
+} from '$lib/api/endpoints';
 import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 import { initProfessorCourses, professorState } from '$lib/features/professor/store.svelte';
 import { listSessionHistory, type SessionHistoryRow } from '$lib/features/session/service';
@@ -310,6 +315,119 @@ const summarize = (sessions: ReportSessionRecord[]) => {
 	};
 };
 
+// --- Dedicated live aggregates (D37) -------------------------------------------
+// Tried first outside mock mode; any failure falls back to the
+// sessions/history derivation below so a missing scope or a 404 still renders.
+const fetchLiveAllCourses = async (
+	filters: ReportFilters
+): Promise<{ items: AggregateBucket[]; total_sessions: number; total_students: number; avg_compliance: number; avg_participation: number }> => {
+	const { start, end } = rangeOf(filters);
+	const response = await get<ProfessorReportsAllCoursesResponse>('professorReportsAllCourses', {
+		granularity: filters.granularity,
+		date_from: start,
+		date_to: end,
+	});
+	const items: AggregateBucket[] = (response.items ?? []).map((row) => {
+		const bucket = bucketFor(row.date.slice(0, 10), filters.granularity);
+		return {
+			key: row.date,
+			label: bucket.label,
+			date: row.date,
+			total_sessions: row.total_sessions,
+			total_students: row.total_students,
+			compliance_rate: row.compliance_rate,
+			participation_rate: row.participation_rate,
+		};
+	});
+	items.sort((a, b) => (a.date === b.date ? a.key.localeCompare(b.key) : a.date < b.date ? -1 : 1));
+	return {
+		items,
+		total_sessions: items.reduce((sum, item) => sum + item.total_sessions, 0),
+		total_students: items.reduce((sum, item) => sum + item.total_students, 0),
+		avg_compliance: response.avg_compliance ?? 0,
+		avg_participation: response.avg_participation ?? 0,
+	};
+};
+
+const toComparisonRow = (
+	row: ProfessorReportsComparisonItemResponse,
+	directory: ReportCourseDir[]
+): ComparisonRow => {
+	const identity = directory.find((item) => item.courseId === row.course_id) ?? null;
+	const programCode = identity?.programCode ?? String(row.program_id);
+	const yearLabel = identity?.yearLevelLabel ?? String(row.year_level_id);
+	return {
+		course_id: row.course_id,
+		offering_id: identity?.offeringId ?? row.course_id,
+		course_code: row.course_code,
+		course_name: identity?.courseName ?? row.course_code,
+		program_id: programCode,
+		program_code: programCode,
+		year_level_id: yearLabel,
+		year_level_label: yearLabel,
+		section: identity?.section ?? '—',
+		total_sessions: row.total_sessions,
+		compliance_rate: row.compliance_rate,
+		participation_rate: row.participation_rate,
+	};
+};
+
+const fetchLiveComparison = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[]
+): Promise<ComparisonRow[]> => {
+	const { start, end } = rangeOf(filters);
+	const response = await get<{ items: ProfessorReportsComparisonItemResponse[] }>(
+		'professorReportsComparison',
+		{ granularity: filters.granularity, date_from: start, date_to: end }
+	);
+	return (response.items ?? []).map((row) => toComparisonRow(row, directory));
+};
+
+const fetchLiveTrends = async (
+	filters: ReportFilters,
+	directory: ReportCourseDir[]
+): Promise<TrendPoint[]> => {
+	const { start, end } = rangeOf(filters);
+	const courseIds = [
+		...new Set(
+			directory
+				.filter(
+					(item) =>
+						(filters.program === 'All' || item.programCode === filters.program) &&
+						(filters.year === 'All' || item.yearLevelLabel === filters.year) &&
+						(filters.course === 'All' || item.courseCode === filters.course)
+				)
+				.map((item) => String(item.courseId))
+		),
+	];
+	const response = await get<{ items: ProfessorReportsTrendItemResponse[] }>(
+		'professorReportsTrends',
+		{
+			metric: filters.metric,
+			granularity: filters.granularity,
+			date_from: start,
+			date_to: end,
+			...(courseIds.length > 0 && filters.course !== 'All' ? { course_ids: courseIds } : {}),
+		}
+	);
+	return (response.items ?? []).map((row) => {
+		const identity = directory.find((item) => item.courseId === row.course_id) ?? null;
+		const bucket = bucketFor(row.date.slice(0, 10), filters.granularity);
+		return {
+			date: row.date,
+			label: bucket.label,
+			offering_id: identity?.offeringId ?? row.course_id,
+			course_id: row.course_id,
+			course_code: row.course_code,
+			cohort: identity
+				? `${identity.programCode}·${identity.yearLevelLabel} ${identity.courseCode} · Section ${identity.section}`
+				: row.course_code,
+			rate: row.rate,
+		};
+	});
+};
+
 export const defaultReportRange = (days = 30): { from: string; to: string } => {
 	const to = new Date();
 	to.setHours(0, 0, 0, 0);
@@ -337,6 +455,15 @@ export const getAllCoursesReport = async (
 	filters: ReportFilters,
 	directory: ReportCourseDir[] = PROFESSOR_COURSES
 ) => {
+	// Dedicated aggregate first; history derivation stays the fallback.
+	if (!isMockMode()) {
+		try {
+			const live = await fetchLiveAllCourses(filters);
+			return { ...live, meta: { dataSource: 'live', truncated: false } as ReportMeta };
+		} catch {
+			// Fall through to the history derivation below.
+		}
+	}
 	const { sessions, meta } = await fetchSessions(filters, directory);
 	const buckets = new Map<string, AggregateBucket & { present: number; eligible: number }>();
 
@@ -377,6 +504,33 @@ export const getComparisonReport = async (
 	filters: ReportFilters,
 	directory: ReportCourseDir[] = PROFESSOR_COURSES
 ) => {
+	if (!isMockMode()) {
+		try {
+			const liveItems = await fetchLiveComparison(filters, directory);
+			// Program/year/course/section slicing still applies client-side: the
+			// comparison aggregate has no section dimension.
+			const scoped = directory.length === 0 ? liveItems : liveItems.filter((item) => {
+				const dir = directory.find((d) => d.courseId === item.course_id) ?? null;
+				if (!dir) return true;
+				if (filters.program !== 'All' && dir.programCode !== filters.program) return false;
+				if (filters.year !== 'All' && dir.yearLevelLabel !== filters.year) return false;
+				if (filters.course !== 'All' && dir.courseCode !== filters.course) return false;
+				return true;
+			});
+			return {
+				items: scoped.sort((a, b) =>
+					a.course_code === b.course_code
+						? `${a.program_code}${a.year_level_label}${a.section}`.localeCompare(
+								`${b.program_code}${b.year_level_label}${b.section}`
+							)
+						: a.course_code.localeCompare(b.course_code)
+				),
+				meta: { dataSource: 'live', truncated: false } as ReportMeta
+			};
+		} catch {
+			// Fall through to the history derivation below.
+		}
+	}
 	const { sessions, meta } = await fetchSessions(filters, directory);
 	const groups = new Map<number, ReportSessionRecord[]>();
 	for (const session of sessions) {
@@ -420,6 +574,20 @@ export const getTrendsReport = async (
 	filters: ReportFilters,
 	directory: ReportCourseDir[] = PROFESSOR_COURSES
 ) => {
+	if (!isMockMode()) {
+		try {
+			const liveItems = await fetchLiveTrends(filters, directory);
+			return {
+				metric: filters.metric,
+				items: liveItems.sort((a, b) =>
+					a.date === b.date ? a.offering_id - b.offering_id : a.date < b.date ? -1 : 1
+				),
+				meta: { dataSource: 'live', truncated: false } as ReportMeta
+			};
+		} catch {
+			// Fall through to the history derivation below.
+		}
+	}
 	const { sessions, meta } = await fetchSessions(filters, directory);
 	const points = new Map<string, { bucket: AggregateBucket; offering: ReportSessionRecord; present: number; eligible: number; seats: number }>();
 
