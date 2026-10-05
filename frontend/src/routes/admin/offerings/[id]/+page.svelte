@@ -33,6 +33,7 @@
 		YearLevel,
 	} from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Offering Detail (wireframe 4.5d, admin-manual §2.4): schedule, classroom
 	// GPS, weeks, and default windows live here — the course template page
@@ -563,7 +564,14 @@
 
 {#if assignOpen && offering}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="assign-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="assign-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (assignOpen = false) }}
+		>
 			<h2 id="assign-title" class="modal-title">Assign professor</h2>
 			{#if assignError}
 				<p class="error" role="alert">{assignError}</p>

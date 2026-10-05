@@ -23,6 +23,7 @@
 	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
 	import { goto } from '$app/navigation';
 	import { adminProfessor, Routes } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
 	// the roster seeds the records professors claim at registration. Columns:
@@ -350,7 +351,14 @@
 
 {#if formOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="professor-form-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="professor-form-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (formOpen = false) }}
+		>
 			<h2 id="professor-form-title" class="modal-title">{editing ? 'Edit professor' : 'Add professor'}</h2>
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
@@ -405,7 +413,14 @@
 
 {#if deleteTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteTarget = null) }}
+		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
 				{fullName(deleteTarget)} is inactive. This cannot be undone, and it fails

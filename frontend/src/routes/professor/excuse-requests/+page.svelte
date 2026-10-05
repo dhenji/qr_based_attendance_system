@@ -21,6 +21,7 @@
 	} from '$lib/features/professor/store.svelte';
 	import type { ExcuseOriginalStatus, ExcuseRequest, ExcuseStatus } from '$lib/shared/types/excuse';
 	import { formatDate } from '$lib/shared/utils/format';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	type QueueRow = ExcuseRequest;
 
@@ -554,7 +555,14 @@
 
 {#if selected}
 	<div class="overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="excuse-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="excuse-title"
+			tabindex="-1"
+			use:trapFocus
+		>
 			<h2 id="excuse-title">Excuse #{selected.id} — {selected.studentName}</h2>
 			<p class="modal-sub">
 				{selected.studentNumber} · {selected.courseCode} · Session {selected.sessionCode} ·
@@ -751,7 +759,14 @@
 
 {#if quickOpen}
 	<div class="overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="quick-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="quick-title"
+			tabindex="-1"
+			use:trapFocus
+		>
 			<h2 id="quick-title">New quick-excuse (Path A)</h2>
 			<p class="modal-sub">Approves immediately — for direct-knowledge cases. Min 10-char reason.</p>
 			{#if !isMockMode()}

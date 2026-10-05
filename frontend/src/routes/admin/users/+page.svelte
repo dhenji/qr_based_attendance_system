@@ -18,6 +18,7 @@
 	import { adminUserCreateSchema } from '$lib/features/admin/schema';
 	import type { AdminUser, AdminUserRole } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// User Management (super_admin only, wireframe 4.13): wraps
 	// GET/POST /admin/users, PATCH /{id}/deactivate, and
@@ -273,7 +274,14 @@
 
 {#if formOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="user-form-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (formBusy ? undefined : (formOpen = false)) }}
+		>
 			<h2 id="user-form-title" class="modal-title">Add user</h2>
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
@@ -309,7 +317,14 @@
 
 {#if deactivateTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="deactivate-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="deactivate-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deactivateBusy ? undefined : (deactivateTarget = null)) }}
+		>
 			<h2 id="deactivate-title" class="modal-title">Deactivate account?</h2>
 			<p class="modal-text">
 				{displayName(deactivateTarget)} ({deactivateTarget.email}) will lose access
@@ -331,7 +346,16 @@
 
 {#if createdTemp}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="temp-title">
+		<!-- Shown-once temp password: Escape is deliberately inert so a stray
+		     keypress cannot discard the only copy. Copy or Done to leave. -->
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="temp-title"
+			tabindex="-1"
+			use:trapFocus
+		>
 			<h2 id="temp-title" class="modal-title">Temporary password</h2>
 			<p class="modal-text">
 				Account <strong class="mono">{createdTemp.email}</strong> created. Share this

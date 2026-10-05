@@ -79,3 +79,15 @@ body {
 	background-color: var(--bg-page);
 	color: var(--text);
 }
+
+/* Global keyboard-focus fallback.
+ * `:where()` keeps specificity at 0, so the per-component focus rules that
+ * already exist (~25 files use `.btn:focus-visible`, `.sort:focus-visible`,
+ * `.page:focus-visible`) still win and nothing restyles. This only covers the
+ * controls nobody styled: the admin `.th-btn` sort headers, `.icon-btn` in the
+ * three layouts, and InstallPrompt's dismiss button — all of which were
+ * invisible to keyboard users. Uses --accent so it follows the theme. */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}

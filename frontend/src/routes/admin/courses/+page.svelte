@@ -19,6 +19,7 @@
 	} from '$lib/features/admin/courses/schema';
 	import type { AdminCourse } from '$lib/shared/types';
 	import { adminCourse } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Course template list: standalone reusable templates (D44) — no program,
 	// scheduling, or classroom columns (those live on offerings). The list
@@ -266,7 +267,14 @@
 
 {#if formOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="course-form-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="course-form-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (formOpen = false) }}
+		>
 			<h2 id="course-form-title" class="modal-title">{editing ? 'Edit course' : 'Add course'}</h2>
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>

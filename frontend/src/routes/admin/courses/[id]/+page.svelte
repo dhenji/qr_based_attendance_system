@@ -21,6 +21,7 @@
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import type { AdminOffering, Program, YearLevel } from '$lib/shared/types';
 	import { Routes, adminOffering } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Course Detail: template overview (units, duration) plus the offerings
 	// that instance it across programs/years (D6: one template spans many
@@ -229,7 +230,14 @@
 
 {#if editOpen && course}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="course-edit-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="course-edit-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (editOpen = false) }}
+		>
 			<h2 id="course-edit-title" class="modal-title">Edit course</h2>
 			{#if editError}
 				<p class="error" role="alert">{editError}</p>
