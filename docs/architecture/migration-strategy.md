@@ -5,12 +5,12 @@
 > on a fresh database produces the current target schema with correct columns, constraints,
 > and FKs. **No backfill functions or data migration scripts are needed.**
 >
-> **Forward-looking:** three tables land with later backend-phases —
+> **Forward-looking:** four tables landed with later backend-phases —
 > `mfa_backup_codes` (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase
-> 12.0) — bringing the baseline to a **19-table** target schema. Each addition gets its
-> own `alembic revision --autogenerate`. All three have now landed; `audit_logs`
-> (`f4a9c2b7d103`) carries structural rows today and takes the broader audit coverage
-> in Phase 8.7.
+> 12.0) and `student_risk_scores_staging` (`d4e5f6a7b8c9`) — bringing the baseline
+> to a **20-table** target schema. Each addition gets its own
+> `alembic revision --autogenerate`. `audit_logs` (`f4a9c2b7d103`) carries structural
+> rows today and takes the broader audit coverage in Phase 8.7.
 >
 > **Alembic import rule:** Every new model (`features/program/model.py`, plus new tables in
 > `analytics`, `excuse`, `system` features) MUST be imported in `backend/alembic/env.py`
@@ -48,8 +48,9 @@ Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offe
 
 The baseline migration creates these 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
 
-> **Target grows to 19 tables** as the three planned tables are added: `mfa_backup_codes`
-> (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase 12.0). All three
+> **Target grows to 20 tables** as the four later tables are added: `mfa_backup_codes`
+> (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase 12.0),
+> `student_risk_scores_staging` (`d4e5f6a7b8c9`). All four
 > models are imported into `backend/alembic/env.py` (the first two via
 > `features.auth.model` / `features.system.model`) and have their own revisions.
 
@@ -188,8 +189,8 @@ class CourseOffering(Base):
 ```python
 class CourseProfessor(Base):
     __tablename__ = "course_professors"
-    offering_id = BigInteger FK → course_offerings.id CASCADE
-    professor_id = BigInteger FK → professors.id CASCADE
+    offering_id = BigInteger FK → course_offerings.id RESTRICT
+    professor_id = BigInteger FK → professors.id RESTRICT
     is_primary = Boolean default False
     effective_from = Date NOT NULL
     effective_to = Date NULL  -- NULL = ongoing
@@ -200,6 +201,13 @@ class CourseProfessor(Base):
 ```
 
 **Service-layer rule (enforced in Python, not DB):** Reject overlapping `[effective_from, effective_to)` ranges for same `(offering_id, professor_id)`.
+
+> **Delete rule history:** the baseline `679a319c12d6` created all three FKs as
+> `ON DELETE CASCADE`; `a562c3f8a6f7_restrict_fks_course_professors_risk_.py` dropped
+> those constraints and recreated them as `RESTRICT` (it did the same for
+> `student_risk_scores`). RESTRICT is the current contract — it forces the has-records
+> guard on offering and professor delete instead of silently deleting assignments.
+> `assigned_by` was `RESTRICT` in the baseline and is unchanged.
 
 > **Reference Only** — In greenfield deployments, `course_professors` rows are created via
 > admin API. The steps below apply only when migrating from legacy session data.
