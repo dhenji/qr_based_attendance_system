@@ -10,6 +10,7 @@
 		restoreSession,
 	} from '$lib/features/auth/store.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	let { children } = $props();
 
@@ -156,7 +157,14 @@
 
 {#if logoutOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title" tabindex={-1}>
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="logout-dialog-title"
+			tabindex={-1}
+			use:trapFocus={{ onEscape: () => (logoutOpen = false) }}
+		>
 			<h2 id="logout-dialog-title" class="modal-title">Log out?</h2>
 			<p class="modal-text">Are you sure you want to logout?</p>
 			<div class="modal-actions">

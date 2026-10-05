@@ -19,6 +19,7 @@
 		validateAttachmentFiles,
 	} from '$lib/features/excuse/attachments';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	type Status = StudentHistoryStatus;
 	type Row = {
@@ -686,7 +687,14 @@
 
 	{#if excuseTarget}
 		<div class="overlay" role="presentation">
-			<div class="modal" role="dialog" aria-modal="true" aria-labelledby="excuse-title">
+			<div
+				class="modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="excuse-title"
+				tabindex="-1"
+				use:trapFocus={{ onEscape: () => (excuseTarget = null) }}
+			>
 				<h2 id="excuse-title">Request excuse</h2>
 				<p class="modal-sub">
 					{excuseTarget.course} · {excuseTarget.date} {excuseTarget.time} · currently {excuseTarget.status}

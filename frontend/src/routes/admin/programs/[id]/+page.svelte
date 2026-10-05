@@ -23,6 +23,7 @@
 	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 	import type { YearLevel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Program Detail (wireframe 4.5b): header with totals + edit, year-level
 	// cards with editable term chips, add-year and manage-terms modals, year
@@ -276,7 +277,14 @@
 
 {#if editOpen && program}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="edit-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (editOpen = false) }}
+		>
 			<h2 id="edit-title" class="modal-title">Edit program</h2>
 			{#if editError}
 				<p class="error" role="alert">{editError}</p>
@@ -298,7 +306,14 @@
 
 {#if yearOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="year-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="year-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (yearOpen = false) }}
+		>
 			<h2 id="year-title" class="modal-title">Add year level</h2>
 			{#if yearError}
 				<p class="error" role="alert">{yearError}</p>
@@ -356,7 +371,14 @@
 
 {#if termsOpen && termsTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="terms-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="terms-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (termsOpen = false) }}
+		>
 			<h2 id="terms-title" class="modal-title">Manage terms — {termsTarget.label}</h2>
 			{#if termsError}
 				<p class="error" role="alert">{termsError}</p>
@@ -405,7 +427,14 @@
 
 {#if deleteTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-year-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-year-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteTarget = null) }}
+		>
 			<h2 id="delete-year-title" class="modal-title">Delete {deleteTarget.label}?</h2>
 			<p class="modal-text">
 				This permanently removes the year level. It fails with 409 if course

@@ -7,6 +7,7 @@
 		toggleProfessorActive,
 	} from '$lib/features/admin/store.svelte';
 	import type { AdminProfessor } from '$lib/shared/types';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Professors archive (wireframe 4.10): inactive roster rows only.
 	// Restore flips is_active back on; Delete permanently removes the row
@@ -134,7 +135,14 @@
 
 {#if deleteTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteTarget = null) }}
+		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
 				{fullName(deleteTarget)} will be removed for good. This fails with 409 if

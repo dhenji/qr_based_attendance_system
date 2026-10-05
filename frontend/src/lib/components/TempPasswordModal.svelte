@@ -11,8 +11,11 @@
 	// The generated password arrives in the response and nowhere else: there is
 	// no endpoint that reads it back. So it is rendered inline, monospaced, and
 	// selectable, and the UI is explicit that closing this modal loses it. It is
-	// never stored anywhere.
+	// never stored anywhere. For that reason Escape is wired to `onclose` ONLY
+	// on the confirm step — once the password is on screen the dialog becomes
+	// Escape-inert, so a stray keypress cannot silently discard it.
 	import { APIError } from '$lib/api/client';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	interface Props {
 		/** Display name of the account being reset, e.g. "Jose P. Rizal (24-0001)". */
@@ -85,7 +88,14 @@
 </script>
 
 <div class="modal-overlay" role="presentation">
-	<div class="modal" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+	<div
+		class="modal"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="reset-password-title"
+		tabindex="-1"
+		use:trapFocus={{ onEscape: issued === null ? onclose : undefined }}
+	>
 		<h2 id="reset-password-title" class="modal-title">
 			{issued === null ? 'Reset password?' : 'New temporary password'}
 		</h2>

@@ -12,6 +12,7 @@
 	import { programCreateSchema } from '$lib/features/admin/programs/schema';
 	import type { Program } from '$lib/shared/types';
 	import { Routes, adminProgram } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Program Management list (wireframe 4.5a): search + status filter over
 	// GET /admin/programs. Aggregates (Years/Terms/Courses) are derived
@@ -243,7 +244,14 @@
 
 {#if formOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="program-form-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="program-form-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (formBusy ? undefined : (formOpen = false)) }}
+		>
 			<h2 id="program-form-title" class="modal-title">Add program</h2>
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>

@@ -65,7 +65,7 @@
 </script>
 
 {#if visible}
-	<div class="install-banner" role="dialog" aria-label="Install Attendly">
+	<div class="install-banner" role="region" aria-label="Install Attendly">
 		<img src="/qr-attend-logo.svg" alt="" class="install-icon" aria-hidden="true" />
 		<div class="install-text">
 			<strong>Install Attendly</strong>

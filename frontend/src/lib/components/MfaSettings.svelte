@@ -27,6 +27,7 @@
 		setupMfa,
 	} from '$lib/features/auth/service';
 	import type { BackupCodesSummaryResponse } from '$lib/shared/types';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	const mfaEnabled = $derived(authState.user?.mfaEnabled === true);
 
@@ -152,6 +153,14 @@
 		codesCopied = false;
 	};
 
+	// Shared by the Cancel button and the Escape key on the disable dialog, so
+	// the password field and error never survive a dismissal.
+	const closeDisable = () => {
+		disableOpen = false;
+		disablePassword = '';
+		disableError = null;
+	};
+
 	const confirmDisable = async () => {
 		if (!disablePassword || disableBusy) return;
 		disableBusy = true;
@@ -235,7 +244,14 @@
 
 {#if setupOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mfa-setup-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="mfa-setup-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeSetup }}
+		>
 			<h2 id="mfa-setup-title" class="modal-title">Set up MFA</h2>
 
 			{#if setupBusy && !setup}
@@ -315,7 +331,17 @@
 
 {#if codesOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mfa-codes-title">
+		<!-- Escape closes only the pre-issue step. Once the codes are on screen
+		     they are shown exactly once, so the dialog becomes Escape-inert
+		     rather than letting a stray keypress discard them. -->
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="mfa-codes-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: issuedCodes ? undefined : closeCodes }}
+		>
 			<h2 id="mfa-codes-title" class="modal-title">
 				{issuedCodes ? 'Save your backup codes' : 'Generate backup codes'}
 			</h2>
@@ -360,7 +386,14 @@
 
 {#if disableOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mfa-disable-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="mfa-disable-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDisable }}
+		>
 			<h2 id="mfa-disable-title" class="modal-title">Disable MFA?</h2>
 			<p class="modal-text">
 				Your account will be protected by password alone again, and any unused backup codes are
@@ -381,11 +414,7 @@
 			<div class="modal-actions">
 				<button
 					class="btn btn-ghost"
-					onclick={() => {
-						disableOpen = false;
-						disablePassword = '';
-						disableError = null;
-					}}
+					onclick={closeDisable}
 				>
 					Cancel
 				</button>

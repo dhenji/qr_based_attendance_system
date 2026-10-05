@@ -1,11 +1,29 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	// ErrorBoundary — renders a recoverable error state for an error the caller
+	// has ALREADY caught and passed in.
+	//
+	// It is NOT a render-error boundary: there is no try/catch here, so an
+	// exception thrown while rendering a child cannot be caught by this
+	// component. That job belongs to SvelteKit's `+error.svelte` (routes/
+	// +error.svelte), which wraps the whole route tree. This component is the
+	// presentational half: message, optional stack, and the recovery actions.
+	//
+	// `onretry` is a callback prop (runes idiom) rather than a dispatched
+	// event. Dismissal is local state, never a mutation of the `error` prop —
+	// writing to a `$props()` binding throws ownership_invalid_mutation in
+	// Svelte 5, which is why the parent owns clearing/keeping the error.
+	// Accepts a real Error, the loosely-shaped `App.Error` that SvelteKit's
+	// `page.error` carries (message only, no name/stack), or a plain string.
+	type ErrorLike = Error | { message?: string; stack?: string } | string | null;
 
 	interface Props {
-		error?: Error | string | null;
+		error?: ErrorLike;
 		showDetails?: boolean;
 		fallback?: string;
 		retryButton?: boolean;
+		// Called after the panel hides. The parent decides what "retry" means
+		// (clear the error, refetch, or reload).
+		onretry?: () => void;
 		children?: import('svelte').Snippet;
 	}
 
@@ -14,29 +32,40 @@
 		showDetails = false,
 		fallback = 'Something went wrong. Please try again.',
 		retryButton = true,
+		onretry,
 		children
 	}: Props = $props();
 
-	const dispatch = createEventDispatcher();
+	let dismissed = $state(false);
+	let lastError = $state<ErrorLike>(null);
+
+	// A *different* error re-shows the panel, so a failed refetch that returns
+	// a fresh error is not swallowed by an earlier dismissal.
+	$effect(() => {
+		if (error && error !== lastError) {
+			lastError = error;
+			dismissed = false;
+		}
+	});
 
 	function handleRetry() {
-		dispatch('retry');
-		error = null;
+		dismissed = true;
+		onretry?.();
 	}
 
-	function getErrorMessage(err: Error | string | null): string {
+	function getErrorMessage(err: ErrorLike): string {
 		if (!err) return fallback;
 		if (typeof err === 'string') return err;
 		return err.message || fallback;
 	}
 
-	function getErrorDetails(err: Error | string | null): string {
+	function getErrorDetails(err: ErrorLike): string {
 		if (!err || typeof err === 'string') return '';
-		return err.stack || '';
+		return err.stack ?? '';
 	}
 </script>
 
-{#if error}
+{#if error && !dismissed}
 	<div class="error-boundary">
 		<div class="error-icon">
 			!

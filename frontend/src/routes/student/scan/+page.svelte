@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { initFaceModel } from '$lib/features/liveness/model';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import {
@@ -367,6 +368,24 @@
 		startLiveness();
 	};
 
+	// Escape closes whichever scan overlay is open, mirroring the visible button
+	// on each so keyboard and pointer users get the same outcome. The success
+	// overlay follows its own auto-dismiss path (clear the timer, return to the
+	// dashboard) rather than dropping the student back at the entry step.
+	// This window-level handler is the single Escape owner for all four overlays;
+	// the dialogs use `use:trapFocus` for Tab containment and focus restore only,
+	// so Escape is never handled twice.
+	const onOverlayKeydown = (event: KeyboardEvent) => {
+		if (event.key !== 'Escape') return;
+		if (showPermission || showQueued || showFailure) {
+			backToEntry();
+		} else if (showSuccess) {
+			clearCountdown();
+			showSuccess = false;
+			void goto(Routes.DASHBOARD);
+		}
+	};
+
 	const getCurrentPosition = () =>
 		new Promise<{ lat: number; lng: number; accuracy: number }>((resolve, reject) => {
 			if (!navigator.geolocation) {
@@ -693,8 +712,15 @@
 	<!-- Permission Modal -->
 	{#if showPermission}
 		<div class="overlay">
-			<div class="modal">
-				<h3 class="modal-title">Allow Access</h3>
+			<div
+				class="modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="scan-permission-title"
+				tabindex="-1"
+				use:trapFocus
+			>
+				<h3 id="scan-permission-title" class="modal-title">Allow Access</h3>
 				<p class="modal-desc">
 					Camera is needed for QR scanning and the face liveness check.
 				</p>
@@ -714,8 +740,15 @@
 	<!-- Success Overlay -->
 	{#if showSuccess}
 		<div class="overlay">
-			<div class="result">
-				<h3 class="result-title">Attendance {resultStatus === 'late' ? 'Recorded Late' : 'Recorded!'}</h3>
+			<div
+				class="result"
+				role="alertdialog"
+				aria-modal="true"
+				aria-labelledby="scan-success-title"
+				tabindex="-1"
+				use:trapFocus
+			>
+				<h3 id="scan-success-title" class="result-title">Attendance {resultStatus === 'late' ? 'Recorded Late' : 'Recorded!'}</h3>
 				<p class="result-line">{studentName}</p>
 				<p class="result-line">
 					{session?.courseCode ?? 'Session'} — {session?.courseName ?? ''}
@@ -732,8 +765,15 @@
 	<!-- Queued Overlay -->
 	{#if showQueued}
 		<div class="overlay">
-			<div class="result">
-				<h3 class="result-title">Evidence saved</h3>
+			<div
+				class="result"
+				role="alertdialog"
+				aria-modal="true"
+				aria-labelledby="scan-queued-title"
+				tabindex="-1"
+				use:trapFocus
+			>
+				<h3 id="scan-queued-title" class="result-title">Evidence saved</h3>
 				<p class="result-line">{studentName}</p>
 				<p class="result-line">
 					{session?.courseCode ?? queuedCode} — {session?.courseName ?? ''}
@@ -749,8 +789,15 @@
 	<!-- Failure Overlay -->
 	{#if showFailure}
 		<div class="overlay">
-			<div class="result">
-				<h3 class="result-title">Attendance Rejected</h3>
+			<div
+				class="result"
+				role="alertdialog"
+				aria-modal="true"
+				aria-labelledby="scan-failure-title"
+				tabindex="-1"
+				use:trapFocus
+			>
+				<h3 id="scan-failure-title" class="result-title">Attendance Rejected</h3>
 				<div class="reject-reason">{rejectionReason || 'The scan could not be accepted'}</div>
 				<p class="reject-desc">
 					The attendance service rejected this scan. You can try again.
@@ -781,6 +828,8 @@
 		</div>
 	{/if}
 </div>
+
+<svelte:window onkeydown={onOverlayKeydown} />
 
 <style>
 	.scan {

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 import {
 	adminAnalyticsState,
 	adminStagingState,
@@ -557,7 +558,13 @@ import { formatPercentage } from '$lib/shared/utils/format';
 				</p>
 			{/if}
 			{#if promoteOpen}
-				<div class="confirm" role="alertdialog" aria-label="Confirm promote">
+				<div
+					class="confirm"
+					role="alertdialog"
+					aria-label="Confirm promote"
+					tabindex="-1"
+					use:trapFocus={{ onEscape: () => (stagingBusy ? undefined : (promoteOpen = false)) }}
+				>
 					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'}?</p>
 					<p class="muted small">
 						Promote acts on the whole semester scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,

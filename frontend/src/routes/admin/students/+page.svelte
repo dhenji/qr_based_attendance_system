@@ -27,6 +27,7 @@
 	import type { AdminStudent, Program, YearLevel } from '$lib/shared/types';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Student Management (wireframe 4.2): search + status filter + sortable
 	// table + pagination over GET /admin/students. Deactivate flips
@@ -564,7 +565,14 @@
 
 {#if formOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="student-form-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="student-form-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (formOpen = false) }}
+		>
 			<h2 id="student-form-title" class="modal-title">{editing ? 'Edit student' : 'Add student'}</h2>
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
@@ -611,7 +619,14 @@
 
 {#if deleteTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteTarget = null) }}
+		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
 				{fullName(deleteTarget)} ({deleteTarget.studentId}) is inactive. This cannot be undone,
@@ -641,7 +656,14 @@
 
 {#if faceTarget}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="face-title">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="face-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (faceBusy ? undefined : (faceTarget = null)) }}
+		>
 			<h2 id="face-title" class="modal-title">
 				{faceTarget.faceEnrolled ? 'Re-enroll face' : 'Enroll face'} — {fullName(faceTarget)} ({faceTarget.studentId})
 			</h2>

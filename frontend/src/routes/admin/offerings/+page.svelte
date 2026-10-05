@@ -21,6 +21,7 @@
 	} from '$lib/features/admin/offerings/schema';
 	import type { AdminCourse, AdminOffering, Program, YearLevel } from '$lib/shared/types';
 	import { adminOffering } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Offering list: program/year/semester instances of course templates (D44).
 	// Filters are the backend list query itself — Program → Year → Semester →
@@ -449,7 +450,14 @@
 
 {#if formOpen}
 	<div class="modal-overlay" role="presentation">
-		<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="offering-form-title">
+		<div
+			class="modal wide"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="offering-form-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (formOpen = false) }}
+		>
 			<h2 id="offering-form-title" class="modal-title">Add offering</h2>
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>

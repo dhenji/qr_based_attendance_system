@@ -17,6 +17,7 @@
 	import { professorState } from '$lib/features/professor/store.svelte';
 	import { isMockMode } from '$lib/api/client';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
+	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	type LiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 
@@ -691,7 +692,14 @@
 
 		{#if excuseTarget}
 			<div class="overlay" role="presentation">
-				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="excuse-title">
+				<div
+					class="modal"
+					role="dialog"
+					aria-modal="true"
+					aria-labelledby="excuse-title"
+					tabindex="-1"
+					use:trapFocus={{ onEscape: () => (excuseBusy ? undefined : (excuseTarget = null)) }}
+				>
 					<h3 class="modal-title" id="excuse-title">Excuse {excuseTarget.name}</h3>
 					<p class="modal-desc">
 						{excuseTarget.studentNumber} · Section {excuseTarget.section ?? '—'} ·
@@ -718,7 +726,14 @@
 
 		{#if bulkOpen}
 			<div class="overlay" role="presentation">
-				<div class="modal" role="dialog" aria-modal="true" aria-labelledby="bulk-title">
+				<div
+					class="modal"
+					role="dialog"
+					aria-modal="true"
+					aria-labelledby="bulk-title"
+					tabindex="-1"
+					use:trapFocus={{ onEscape: () => (bulkBusy ? undefined : (bulkOpen = false)) }}
+				>
 					<h3 class="modal-title" id="bulk-title">Excuse all absent</h3>
 					<p class="modal-desc">
 						Every record currently marked absent in this session will be excused.
