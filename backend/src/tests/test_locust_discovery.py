@@ -88,7 +88,7 @@ def test_locust_user_has_default_host() -> None:
 
 
 def test_locustfile_asserts_the_documented_targets() -> None:
-    """The four targets must stay enforced, not merely printed.
+    """The five targets must stay enforced, not merely printed.
 
     Source-level because importing `locustfile` monkey-patches gevent and
     hangs the suite, so the report function cannot be called from here.
@@ -101,6 +101,8 @@ def test_locustfile_asserts_the_documented_targets() -> None:
         ("LOCUST_MIN_RPS", "10"),
         ("LOCUST_MAX_P95_MS", "1000"),
         ("LOCUST_MAX_P99_MS", "2000"),
+        ("LOCUST_MAX_DRAIN_S", "60"),
+        ("LOCUST_QUEUE_STALE_S", "90"),
     ):
         assert f'{knob}", "{default}"' in source, knob
 
@@ -109,6 +111,7 @@ def test_locustfile_asserts_the_documented_targets() -> None:
         "response time p95",
         "response time p99",
         "duplicate rejections",
+        "queue drain",
     ):
         assert target in source, target
 
@@ -116,6 +119,10 @@ def test_locustfile_asserts_the_documented_targets() -> None:
     # rather than only printing. `None` must stay possible: leaving it unset
     # is what lets locust still fail the run on a recorded request failure.
     assert "environment.process_exit_code = 1" in source
+
+    # Replays carry their own idempotency keys: a reused key returns the prior
+    # result instead of queueing, which would make the drain leg vacuous.
+    assert "uuid.uuid4().hex" in source
 
 
 def test_slot_assigner_deals_unique_slots_then_wraps() -> None:
