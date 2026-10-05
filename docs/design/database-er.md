@@ -3,17 +3,16 @@
 > Crow's-foot notation for the QR-based attendance system — **Target Schema** (canonical ERD).
 > Source: `docs/project/migration-strategy.md` steps 1–9.
 > New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`.
-> `mfa_backup_codes` landed in Phase 2 (ADR-054), so the 16-table baseline is now 17.
-> **Planned tables** (land with backend-phases 8.5/8.7/12.0): `audit_logs`,
-> `app_settings` — the 17-table state becomes a 19-table target.
+> `mfa_backup_codes` landed in Phase 2 (ADR-054), so the 16-table baseline became 17.
+> Three more have since landed — `audit_logs` (`f4a9c2b7d103`, Phase 8.5),
+> `app_settings` (`e7f8a9b0c1d2`, Phase 12.0) and `student_risk_scores_staging`
+> (`d4e5f6a7b8c9`) — so the target documented below is **20 tables / 205 columns**.
 >
-> **Update:** both have since landed — `audit_logs` (`f4a9c2b7d103`) in Phase 8.5 and
-> `app_settings` (`e7f8a9b0c1d2`) in Phase 12.0. `audit_logs` is written by
-> `shared/audit.record_audit` from every sensitive mutation (ADR-064) and read by
-> `GET /admin/audit-logs`; `GET /admin/system/academic-structure` reads the same
-> table scoped to the four structural entity types. `action` and `entity_type` are
-> free-form `String(50)` constrained in code by `shared/enums.py::AuditAction` /
-> `AuditEntity`, and `action` carries no index.
+> `audit_logs` is written by `shared/audit.record_audit` from every sensitive mutation
+> (ADR-064) and read by `GET /admin/audit-logs`; `GET /admin/system/academic-structure`
+> reads the same table scoped to the four structural entity types. `action` and
+> `entity_type` are free-form `String(50)` constrained in code by
+> `shared/enums.py::AuditAction` / `AuditEntity`, and `action` carries no index.
 
 > **Column note — `users.security_question_hash` (ADR-056):** despite the `_hash`
 > suffix, this column stores the security **question in readable plaintext**. Only
@@ -35,15 +34,18 @@
 | `year_levels`         | id (PK), program_id (FK → programs CASCADE), year_number, label, term_structure (JSONB), sort_order, UNIQUE(program_id, year_number)                                                                                                                                                                                                                                                                                                                                                               |
 | `courses`             | id (PK), course_code (UK), course_name, units, session_duration_hours (NUMERIC(3,1)), is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                                              |
 | `course_offerings`    | id (PK), course_id (FK → courses RESTRICT), program_id (FK → programs RESTRICT), year_level_id (FK → year_levels RESTRICT), semester (String 20: '1st_sem'/'2nd_sem'/'midyear'), academic_year (String 20), sessions_per_week, semester_weeks, schedule_days (String 10: 'MWF'), schedule_start_time (TIME), schedule_end_time (TIME), classroom_name (String 100), classroom_lat, classroom_lng, default_present_window_minutes (DEF 5), default_late_window_minutes (DEF 10), is_active, created_at, updated_at, UNIQUE(course_id, program_id, semester, academic_year) |
-| `course_professors`   | offering_id (FK → course_offerings CASCADE), professor_id (FK → professors CASCADE), is_primary (BOOL), effective_from (DATE), effective_to (DATE NULL), semester, assigned_by (FK → users), assigned_at, PK(offering_id, professor_id, effective_from)                                                                                                                                                                                                                                                         |
+| `course_professors`   | offering_id (FK → course_offerings RESTRICT), professor_id (FK → professors RESTRICT), is_primary (BOOL), effective_from (DATE), effective_to (DATE NULL), semester, assigned_by (FK → users RESTRICT), assigned_at, created_at, PK(offering_id, professor_id, effective_from)                                                                                                                                                                                                                                                         |
 | `students`            | id (PK), user_id (FK → users, UK, nullable), year_level_id (FK → year_levels, RESTRICT), student_id (UK), email (UK), first_name, middle_name, last_name, section (retained per D2), is_active, face_embedding (BYTEA NULL), face_enrolled_at (TIMESTAMPTZ NULL), face_embedding_version (INT DEF 0), created_at, updated_at — **legacy `course` string dropped**                                                                                                                                                  |
 | `professors`          | id (PK), user_id (FK → users, UK, nullable), email (UK), first_name, middle_name, last_name, department, is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                         |
-| `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings) NOT NULL, academic_year NOT NULL, semester NOT NULL (validated against year_level.term_structure), UNIQUE(student_id, offering_id, academic_year)                                                                                                                                                                                                                                                                                                             |
+| `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings) NOT NULL, academic_year NOT NULL, semester NOT NULL (validated against year_level.term_structure), created_at, UNIQUE(student_id, offering_id, academic_year)                                                                                                                                                                                                                                                                                                             |
 | `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → professors), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), expires_at (TIMESTAMPTZ, set by application: LEAST(created_at + duration_minutes * interval '1 min', scheduled_end_time)), classroom_radius_meters (DEF 50), classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), created_at |
 | `attendance_records`  | id (PK), student_id (FK → students), session_id (FK → sessions), timestamp, gps_lat, gps_lng, validation_status (present/late/absent/excused/pending/rejected), sync_status, liveness_evidence (JSONB), face_match_score (NUMERIC(5,4)), scanned_via (qr_camera/manual_code), original_status (NULL), excuse_reason (NULL), excused_by (FK → users NULL), excused_at (NULL), excuse_type (quick/prof_with_evidence/request_approved NULL), excuse_request_id (FK NULL), created_at                 |
 | `excuse_requests`     | id (PK), student_id (FK), session_id (FK), initiated_by (professor/student), initiated_via (quick/prof_with_evidence/request), reason, attachment_urls (JSONB), status (pending/approved/rejected DEF pending), requested_at, reviewed_by (FK → users NULL), reviewed_at (NULL), review_notes (NULL)                                                                                                                                                                                               |
 | `student_risk_scores` | id (PK), student_id (FK → students), offering_id (FK → course_offerings), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high), features (JSONB), computed_at, computed_day (DATE), UNIQUE(student_id, offering_id, semester, computed_day)                                                                                                                                                                                                                                                                   |
+| `student_risk_scores_staging` | id (PK), student_id (FK → students RESTRICT), offering_id (FK → course_offerings RESTRICT), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high, CHECK `ck_student_risk_scores_staging_risk_level`), features (JSONB), computed_at, computed_day (DATE), promoted_at (TIMESTAMPTZ NULL — set when a dry-run batch is promoted), UNIQUE(student_id, offering_id, semester, computed_day)                                                                                                                                                     |
 | `backup_log`          | id (PK), filename, kind (full/analytics), size_bytes (BIGINT), sha256, storage_backend (local/s3), encryption_key_version, started_at, finished_at, status (started/completed/failed), error (NULL)                                                                                                                                                                                                                                                                                                                           |
+| `audit_logs`          | id (PK), action (String 50, **no index** — ADR-064), entity_type (String 50, indexed), entity_id (BigInteger NULL, indexed), old_value (JSONB NULL), new_value (JSONB NULL), performed_by (FK → users RESTRICT, NULL, indexed), performed_at (indexed)                                                                                                                                                                                                                                                                          |
+| `app_settings`        | id (PK), key (String 100, UK — unique index `ix_app_settings_key`), value (TEXT), created_at, updated_at                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `sync_queue`          | id (PK), record_data (JSON), status, retry_count, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ---
@@ -58,9 +60,9 @@ erDiagram
     users ||--o| professors : "claims"
     professors ||--o{ sessions : "opens"
     users ||--o{ course_professors : "assigns"
-    users ||--o{ excuse_requests : "reviews (excused_by/reviewed_by)"
-    users ||--o{ attendance_records : "excuses"
-    users ||--o{ backup_log : "initiates"
+    users ||--o{ excuse_requests : "reviews (reviewed_by)"
+    users ||--o{ attendance_records : "excuses (excused_by)"
+    users ||--o{ audit_logs : "performs"
     programs ||--o{ year_levels : "owns"
     programs ||--o{ course_offerings : "offers"
     year_levels ||--o{ course_offerings : "contains"
@@ -74,6 +76,8 @@ erDiagram
     students ||--o{ attendance_records : "records"
     students ||--o{ excuse_requests : "subject of"
     students ||--o{ student_risk_scores : "scored"
+    students ||--o{ student_risk_scores_staging : "scored (dry run)"
+    course_offerings ||--o{ student_risk_scores_staging : "evaluates"
     sessions ||--o{ attendance_records : "collects"
     sessions ||--o{ excuse_requests : "for session"
     excuse_requests ||--o{ attendance_records : "originates"
@@ -173,6 +177,7 @@ erDiagram
         varchar semester
         bigint assigned_by FK
         timestamp assigned_at
+        timestamp created_at
     }
     students {
         bigint id PK
@@ -209,6 +214,7 @@ erDiagram
         bigint offering_id FK
         varchar academic_year
         varchar semester
+        timestamp created_at
     }
     sessions {
         bigint id PK
@@ -270,6 +276,19 @@ erDiagram
         varchar risk_level
         jsonb features
         timestamp computed_at
+        date computed_day
+    }
+    student_risk_scores_staging {
+        bigint id PK
+        bigint student_id FK
+        bigint offering_id FK
+        varchar semester
+        numeric risk_probability
+        varchar risk_level
+        jsonb features
+        timestamp computed_at
+        date computed_day
+        timestamp promoted_at
     }
     backup_log {
         bigint id PK
@@ -283,6 +302,23 @@ erDiagram
         timestamp finished_at
         varchar status
         text error
+    }
+    audit_logs {
+        bigint id PK
+        varchar action
+        varchar entity_type
+        bigint entity_id
+        jsonb old_value
+        jsonb new_value
+        bigint performed_by FK
+        timestamp performed_at
+    }
+    app_settings {
+        bigint id PK
+        varchar key UK
+        text value
+        timestamp created_at
+        timestamp updated_at
     }
     sync_queue {
         bigint id PK
@@ -333,7 +369,7 @@ erDiagram
     │  │ student_id FK → students          │      │  │          scheduled_end_time)           │
     │  │ offering_id → course_offering (NN)│      │  │ classroom_radius_meters                │
     │  │ academic_year NOT NULL            │      │  │ classroom_name/lat/lng (NULL override) │
-    │  │ semester NOT NULL                 │      │  │ created_at                             │
+    │  │ semester NOT NULL, created_at     │      │  │ created_at                             │
     │  │ UNIQUE(student_id, offering_id,   │      │  └─────────────────┬─────────────────────┘
     │  │   academic_year)                  │      │                    │ 1 (collects)
     │  └───────────────┬───────────────────┘      │                    o<{
@@ -393,16 +429,17 @@ erDiagram
    │  └────────────────────────────────────┘      │
    │                                              │
    │  ┌───────────────────────────────────────────┐
-   │  │   course_professors (offering-scoped)     │
-   │  │───────────────────────────────────────────│
-   │  │ offering_id FK → course_offerings (CASCADE)│
-   │  │ professor_id FK → professors (CASCADE)     │
-   │  │ is_primary, effective_from DATE            │
-   │  │ effective_to DATE (NULL = ongoing)         │
-   │  │ semester, assigned_by FK → users           │
-   │  │ assigned_at                                │
-   │  │ PK(offering_id, professor_id, effective_from)│
-   │  └───────────────────────────────────────────┘
+   │  │   course_professors (offering-scoped)        │
+   │  │──────────────────────────────────────────────│
+   │  │offering_id FK → course_offerings             │
+   │  │professor_id FK → professors                  │
+   │  │assigned_by   FK → users                      │
+   │  │  (all three RESTRICT)                        │
+   │  │is_primary, effective_from DATE               │
+   │  │effective_to DATE (NULL = ongoing)            │
+   │  │semester, assigned_at, created_at             │
+   │  │PK(offering_id, professor_id, effective_from) │
+   │  └──────────────────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
    │  │                 professors                │
@@ -422,10 +459,26 @@ erDiagram
    │  │ semester                                  │
    │  │ risk_probability NUMERIC(5,4)             │
    │  │ risk_level (low/medium/high)              │
-   │  │ features JSONB, computed_at               │
+   │  │ features JSONB, computed_at, computed_day │
    │  │ UNIQUE(student_id, offering_id,           │
    │  │   semester, computed_day)              │
    │  └───────────────────────────────────────────┘
+
+   │  ┌─────────────────────────────────────────────┐
+   │  │         student_risk_scores_staging         │
+   │  │─────────────────────────────────────────────│
+   │  │id PK                                        │
+   │  │student_id FK → students (RESTRICT)          │
+   │  │offering_id FK → course_offerings (RESTRICT) │
+   │  │semester                                     │
+   │  │risk_probability NUMERIC(5,4)                │
+   │  │risk_level (low/medium/high, CHECK)          │
+   │  │features JSONB                               │
+   │  │computed_at, computed_day                    │
+   │  │promoted_at (NULL = not yet promoted)        │
+   │  │UNIQUE(student_id, offering_id,              │
+   │  │  semester, computed_day)                    │
+   │  └─────────────────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
    │  │                 backup_log                │
@@ -437,12 +490,35 @@ erDiagram
    │  │ started_at, finished_at                   │
    │  │ status (started/completed/failed), error  │
    │  └───────────────────────────────────────────┘
+
+   │  ┌─────────────────────────────────────────┐
+   │  │                audit_logs               │
+   │  │─────────────────────────────────────────│
+   │  │id PK                                    │
+   │  │action (String 50, NO INDEX — ADR-064)   │
+   │  │entity_type (String 50, indexed)         │
+   │  │entity_id (BigInteger, indexed, NULL)    │
+   │  │old_value, new_value JSONB (NULL)        │
+   │  │performed_by FK → users (RESTRICT, NULL) │
+   │  │performed_at (indexed)                   │
+   │  └─────────────────────────────────────────┘
+
+   │  ┌───────────────────────────────────┐
+   │  │            app_settings           │
+   │  │───────────────────────────────────│
+   │  │id PK                              │
+   │  │key (String 100, UK, unique index) │
+   │  │value TEXT                         │
+   │  │created_at, updated_at             │
+   │  │(no FK relationships — standalone  │
+   │  │  system key/value config)         │
+   │  └───────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
    │  │        sync_queue (offline queue)         │
    │  │───────────────────────────────────────────│
    │  │ id PK, record_data JSON, status           │
-   │  │ retry_count, created_at                   │
+   │  │ retry_count, created_at, updated_at       │
    │  └───────────────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
@@ -455,6 +531,17 @@ erDiagram
    │  │ user_id FK → users (nullable)             │
    │  │ created_at                                │
    │  └───────────────────────────────────────────┘
+
+   │  ┌────────────────────────────────────────┐
+   │  │            mfa_backup_codes            │
+   │  │────────────────────────────────────────│
+   │  │id PK                                   │
+   │  │user_id FK → users (CASCADE)            │
+   │  │code_hash (Argon2id, never plaintext)   │
+   │  │code_fingerprint (HMAC-SHA256, indexed) │
+   │  │used_at (NULL = unconsumed)             │
+   │  │created_at                              │
+   │  └────────────────────────────────────────┘
 ```
 
 ---
@@ -469,8 +556,8 @@ erDiagram
 | `professors`        | `‖──○{`     | `sessions`            | one professor opens many                                                                                         |
 | `users`             | `‖──○       | `                     | `students`                                                                                                      | one user claims zero-or-one student _(set at registration)_   |
 | `users`             | `‖──○       | `                     | `professors`                                                                                                    | one user claims zero-or-one professor _(set at registration)_ |
-| `users`             | `‖──○{`     | `excuse_requests`     | one user reviews many (as `excused_by`/`reviewed_by`)                                                           |
-| `users`             | `‖──○{`     | `backup_log`          | one user initiates many backups                                                                                 |
+| `users`             | `‖──○{`     | `excuse_requests`     | one user reviews many (as `reviewed_by`)                                                                       |
+| `users`             | `‖──○{`     | `audit_logs`          | one user performs many recorded mutations (`performed_by` is NULL for system writes)                              |
 | `programs`          | `‖──○{`     | `year_levels`         | one program owns many year levels (CASCADE)                                                                     |
 | `programs`          | `‖──○{`     | `course_offerings`    | one program offers many course offerings (RESTRICT)                                                             |
 | `year_levels`       | `‖──○{`     | `course_offerings`    | one year level contains many course offerings (RESTRICT)                                                        |
@@ -481,6 +568,8 @@ erDiagram
 | `course_offerings`  | `‖──○{`     | `sessions`            | one offering hosts many sessions                                                                                |
 | `course_offerings`  | `‖──○{`     | `enrollments`         | one offering has many enrollments                                                                               |
 | `course_offerings`  | `‖──○{`     | `student_risk_scores` | one offering has many risk scores                                                                               |
+| `students`          | `‖──○{`     | `student_risk_scores_staging` | one student has many staged risk scores (dry-run batches)                                                  |
+| `course_offerings`  | `‖──○{`     | `student_risk_scores_staging` | one offering has many staged risk scores (dry-run batches)                                                  |
 | `students`          | `‖──○{`     | `enrollments`         | one student has many enrollments                                                                                |
 | `students`          | `‖──○{`     | `attendance_records`  | one student has many records                                                                                    |
 | `students`          | `‖──○{`     | `excuse_requests`     | one student has many excuse requests                                                                            |
@@ -492,6 +581,7 @@ erDiagram
 > **Notes:**
 >
 > - `attendance_records → sync_queue` is an **offline queue**, not a relational child. `sync_queue.record_data` stores a serialized attendance record as JSON; written by client's offline worker; no enforced FK.
+> - `app_settings` and `backup_log` have **no foreign keys at all** — neither is a child of any table, and they appear in no cardinality row above. `app_settings` is a standalone key/value config table; `backup_log` records backup runs and is written only by the scheduler (`system/service.py::run_scheduled_backup`). An earlier revision of this diagram drew a `users → backup_log` edge; there is no such column.
 > - `course_professors` uses **effectiveness dating** (D7/D8): a session's professor of record is the `course_professors` row where `session.created_at::date BETWEEN effective_from AND COALESCE(effective_to, 'infinity')` AND `semester` matches.
 > - `students.face_embedding` stores encrypted JSON blob: `{"mean":[128f],"angles":{"front":[...],"left":[...],"right":[...]}}` (D28/D43).
 > - `year_levels.term_structure` JSONB: `{"terms":[{"code":"1st_sem","label":"1st Semester"},...]}` (D3).
