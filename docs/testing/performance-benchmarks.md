@@ -325,5 +325,6 @@ Notes:
   `bench_timings.py --backup` with `BACKUP_ENCRYPTION_KEY` set once the
   host provides it; seeded data is tens of MB, so record actual size/time
   against the 500MB/<90s target as PARTIAL if short on volume.
-- Backend suite at this commit: 642 passed on SQLite, 633 passed on
-  Postgres (`TEST_DATABASE_URL`), same cases.
+- Backend suite at the time of this run: 642 passed on SQLite, 633 passed on
+  Postgres (`TEST_DATABASE_URL`), same cases. The suite has since grown —
+  re-check the current count with `pytest src/tests -q --collect-only`.
