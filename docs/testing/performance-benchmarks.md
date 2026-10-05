@@ -236,13 +236,26 @@ run is CI-gateable.
 | `p95 < 1s`            | `LOCUST_MAX_P95_MS=1000`    | yes                  |
 | `p99 < 2s`            | `LOCUST_MAX_P99_MS=2000`    | yes                  |
 | 0 duplicate rejections | not overridable             | no                   |
+| slowest replay batch `<60s` | `LOCUST_MAX_DRAIN_S=60` | yes                  |
 
 Throughput is *successful scans* over the run's wall-clock window, not
 locust's blended `total_rps` (which also counts the login and profile calls).
+Replayed scans count toward it — they are real requests to the same endpoint.
 Percentiles prefer locust's trailing-10s window and fall back to the
 lifetime percentile when that window holds no samples; if neither can report,
 the target reads `unavailable` and counts as missed rather than as a pass. A
 run that issued no requests at all fails immediately.
+
+The device mix is part of the run, not a separate leg: slots 1-15 scan live,
+slots 16-25 queue 1-3 scans, slots 26-30 queue 5-8, drawing a fresh cap after
+every replay. A queued scan is a real POST carrying `scanned_at` 90s old
+(`LOCUST_QUEUE_STALE_S`), which is past the 60s staleness floor and inside any
+still-open session's window, so it lands as an attendance row *and* a pending
+sync row — the same two writes a reconnecting device produces. The drain metric
+is the slowest end-to-end replay batch; a run that produced no batches fails the
+target rather than passing it vacuously. Duplicate-safety is structural: each
+user's live-scanned and backlogged session sets are disjoint, because a second
+scan for a (student, session) is a 409 that fails the duplicate gate.
 
 The gate only ever forces failure — it leaves `process_exit_code` as `None`
 on a clean run so locust still applies its own `exit_code_on-error` to
