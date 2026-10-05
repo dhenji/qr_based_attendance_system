@@ -716,6 +716,12 @@
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="quick-title">
 			<h2 id="quick-title">New quick-excuse (Path A)</h2>
 			<p class="modal-sub">Approves immediately — for direct-knowledge cases. Min 10-char reason.</p>
+			{#if !isMockMode()}
+				<p class="modal-sub" role="note">
+					Live mode: typed numbers cannot resolve to roster records, so this submit is
+					kept locally as a demo — use Excuse all absent or the review queue for real records.
+				</p>
+			{/if}
 			<div class="quick-grid">
 				<div class="field">
 					<label class="form-label" for="quick-number">Student number</label>

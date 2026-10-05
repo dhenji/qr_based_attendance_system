@@ -14,7 +14,7 @@
 // builders from the sibling analytics service. Backup download is the one
 // genuine gap: see downloadBackupDescriptor below.
 
-import { get, patch, post } from '$lib/api/client';
+import { get, getBlob, isMockMode, patch, post } from '$lib/api/client';
 import type {
 	BackupLogItemResponse,
 	SystemSettingsResponse
@@ -68,18 +68,9 @@ export const cleanupSystem = async (): Promise<{ removed: number }> =>
 	post<{ removed: number }>('systemCleanup');
 
 // downloadBackupDescriptor
-// Stand-in for GET /admin/backups/{id}/download, which IS implemented: the
-// backend returns the encrypted archive as application/octet-stream with a
-// Content-Disposition filename (system/router.py). The frontend simply never
-// calls it, because `getText` throws in mock mode and the response is binary
-// rather than text, so it needs a blob fetch instead.
-//
-// TODO: swap this for a real download — fetch the route as a blob and save it
-// under `row.filename`. Until then admins cannot retrieve a backup archive,
-// only this JSON description of the row.
-//
-// The `demo: true` flag stays inside the payload so anything downstream that
-// consumes the file can still tell it is not an archive.
+// Mock-mode stand-in: describes the row as JSON because getBlob throws in
+// mock mode (no backend to fetch from). Live mode never calls this directly —
+// downloadBackupArchive below fetches the encrypted archive first.
 export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 	const blob = new Blob(
 		[
@@ -103,6 +94,32 @@ export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 	link.click();
 	link.remove();
 	URL.revokeObjectURL(url);
+};
+
+// downloadBackupArchive
+// GET /admin/backups/{id}/download (application/octet-stream + filename).
+// Saves the real encrypted archive under the server filename. In mock mode
+// (no backend) it falls back to the JSON descriptor so the button still does
+// something; live failures throw so the page surfaces them instead of
+// writing a misleading descriptor.
+export const downloadBackupArchive = async (row: BackupLogItem): Promise<void> => {
+	try {
+		const { blob, filename } = await getBlob(`/admin/backups/${row.id}/download`);
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename || row.filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(url);
+	} catch (e) {
+		if (isMockMode()) {
+			downloadBackupDescriptor(row);
+			return;
+		}
+		throw e;
+	}
 };
 
 // --- Analytics export (settings Export block) ---------------------------------

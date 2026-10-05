@@ -9,22 +9,25 @@
 		type AuditSortColumn,
 	} from '$lib/features/admin/audit/store.svelte';
 	import {
-		AUDIT_CATEGORIES,
+		AUDIT_ACTIONS,
+		AUDIT_ENTITY_TYPES,
 		auditCsv,
 		downloadCsv,
 		type AuditLogRow,
 	} from '$lib/features/admin/audit/service';
 	import { auditFilterSchema } from '$lib/features/admin/audit/schema';
+	import type { AuditAction, AuditEntityType } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 
-	// Audit Logs (wireframe 4.8, `/admin/audit-logs`): system-wide action
-	// feed with date-range + category + search filters, sortable Time / User /
-	// Action columns, pagination, Print + CSV export. Rows are hybrid: live
-	// record-creation rows derived from roster lists (badged "system record")
-	// plus deterministic seed rows for operational actions until the Phase 8
-	// audit backend lands. The Structure tab lists program/year/course
-	// mutations with old/new values (D38, contracted academic-structure shape)
-	// and deep-links into Program Management.
+	// Audit Logs (wireframe 4.8, `/admin/audit-logs`): contract-shaped trail
+	// (Time/Actor/Action/Entity with old/new values) with entity/action/actor
+	// + date-range filters, sortable Time / User / Action columns, pagination,
+	// Print + CSV export. Rows are hybrid: live trail rows from
+	// GET /admin/audit-logs (badged "seed" for legacy reasons) plus
+	// record-creation rows derived from roster lists (badged "system record").
+	// The Structure tab lists program/year/course mutations with old/new
+	// values (D38, contracted academic-structure shape) and deep-links into
+	// Program Management.
 
 	type Tab = 'log' | 'structure';
 	const TABS = [
@@ -35,9 +38,36 @@
 	let tab = $state<Tab>('log');
 	let dateFrom = $state('');
 	let dateTo = $state('');
-	let category = $state('');
-	let search = $state('');
+	let entityType = $state('');
+	let action = $state('');
+	let performedBy = $state('');
 	let formError = $state<string | null>(null);
+
+	const actorLabel = (row: AuditLogRow): string =>
+		row.performed_by === null || row.performed_by === undefined || row.performed_by === ''
+			? '— (anonymous)'
+			: String(row.performed_by);
+
+	const entityLabel = (row: AuditLogRow): string =>
+		row.entity_id === null || row.entity_id === undefined
+			? row.entity_type
+			: `${row.entity_type} #${row.entity_id}`;
+
+	const changeLabel = (row: AuditLogRow): string => {
+		const text = (value: unknown): string => {
+			if (value === null || value === undefined) return '';
+			if (typeof value === 'string') return value;
+			try {
+				return JSON.stringify(value);
+			} catch {
+				return String(value);
+			}
+		};
+		const oldText = text(row.old_value);
+		const newText = text(row.new_value);
+		if (oldText && newText) return `${oldText} → ${newText}`;
+		return newText || oldText || '—';
+	};
 
 	const totalPages = $derived(
 		Math.max(1, Math.ceil(adminAuditState.total / adminAuditState.size))
@@ -49,9 +79,9 @@
 		const dir = adminAuditState.sortDir === 'asc' ? 1 : -1;
 		const key =
 			adminAuditState.sortBy === 'time'
-				? (r: AuditLogRow) => r.occurred_at
+				? (r: AuditLogRow) => r.performed_at
 				: adminAuditState.sortBy === 'user'
-					? (r: AuditLogRow) => r.actor_name
+					? (r: AuditLogRow) => String(r.performed_by ?? '')
 					: (r: AuditLogRow) => r.action;
 		items.sort((a, b) => key(a).localeCompare(key(b)) * dir);
 		return items;
@@ -62,8 +92,9 @@
 			{
 				date_from: dateFrom.trim() || undefined,
 				date_to: dateTo.trim() || undefined,
-				category: (category || undefined) as AuditLogRow['category'] | undefined,
-				search: search.trim() || undefined,
+				entity_type: (entityType || undefined) as AuditEntityType | undefined,
+				action: (action || undefined) as AuditAction | undefined,
+				performed_by: performedBy.trim() || undefined,
 			},
 			page,
 			adminAuditState.size
@@ -79,8 +110,9 @@
 		const parsed = auditFilterSchema.safeParse({
 			date_from: dateFrom,
 			date_to: dateTo,
-			category,
-			search,
+			entity_type: entityType,
+			action,
+			performed_by: performedBy,
 		});
 		if (!parsed.success) {
 			formError = parsed.error.issues[0]?.message ?? 'Check the filters and try again.';
@@ -106,7 +138,7 @@
 			: '';
 
 	const categoryLabel = (id: string): string =>
-		AUDIT_CATEGORIES.find((c) => c.id === id)?.label ?? id;
+		AUDIT_ENTITY_TYPES.find((c) => c.id === id)?.label ?? id;
 
 	const onExport = () =>
 		downloadCsv(
@@ -139,18 +171,24 @@
 		<section class="card filters" aria-label="Audit filters">
 			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
 			<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
-			<select class="input" aria-label="Action category filter" bind:value={category}>
-				<option value="">All actions</option>
-				{#each AUDIT_CATEGORIES as c (c.id)}
+			<select class="input" aria-label="Entity type filter" bind:value={entityType}>
+				<option value="">All entities</option>
+				{#each AUDIT_ENTITY_TYPES as c (c.id)}
 					<option value={c.id}>{c.label}</option>
+				{/each}
+			</select>
+			<select class="input" aria-label="Action filter" bind:value={action}>
+				<option value="">All actions</option>
+				{#each AUDIT_ACTIONS as a (a.id)}
+					<option value={a.id}>{a.label}</option>
 				{/each}
 			</select>
 			<input
 				class="input search"
 				type="search"
-				placeholder="Search actor, action, entity…"
-				aria-label="Search audit logs"
-				bind:value={search}
+				placeholder="Actor (e.g. Admin, system)…"
+				aria-label="Filter by actor"
+				bind:value={performedBy}
 				onkeydown={(e) => {
 					if (e.key === 'Enter') applyFilters();
 				}}
@@ -182,20 +220,20 @@
 					<tbody>
 						{#each visibleItems as r (r.id)}
 							<tr>
-								<td class="nowrap">{formatTime(r.occurred_at)}</td>
+								<td class="nowrap">{formatTime(r.performed_at)}</td>
 								<td>
-									<div class="strong">{r.actor_name}</div>
-									<div class="muted small">{r.actor_role}</div>
+									<div class="strong">{actorLabel(r)}</div>
+									<div class="muted small">{entityLabel(r)}</div>
 								</td>
 								<td>
 									<div>
-										<span class="badge">{categoryLabel(r.category)}</span>
+										<span class="badge">{categoryLabel(r.entity_type)}</span>
 										{#if r.origin === 'system'}
 											<span class="badge live">system record</span>
 										{/if}
 									</div>
-									<div class="strong">{r.action}</div>
-									<div class="muted small">{r.entity}{r.detail ? ` · ${r.detail}` : ''}</div>
+									<div class="strong">{r.action.replace(/_/g, ' ')}</div>
+									<div class="muted small">{changeLabel(r)}</div>
 								</td>
 							</tr>
 						{/each}

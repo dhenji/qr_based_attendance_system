@@ -5,7 +5,7 @@
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 	import {
 		cleanupSystem,
-		downloadBackupDescriptor,
+		downloadBackupArchive,
 		exportAnalyticsAtRisk,
 		exportAnalyticsComparison,
 		exportAnalyticsOverview,
@@ -20,9 +20,8 @@
 		type SystemSettings
 	} from '$lib/features/admin/settings/service';
 
-	// Admin system settings (wireframe 4.9). No settings backend exists yet,
-	// so every block reads contract-shaped mocks and the banner says so —
-	// saves stick for the session only, via the mock module state.
+	// Admin system settings (wireframe 4.9). Live backend: settings persist to
+	// app_settings, backups download as encrypted archives.
 
 	let settings = $state<SystemSettings | null>(null);
 	let backups = $state<BackupLogItem[]>([]);
@@ -39,6 +38,7 @@
 	let backupBusy = $state(false);
 	let backupError = $state<string | null>(null);
 	let backupNote = $state<string | null>(null);
+	let downloadBusy = $state(false);
 
 	let flushBusy = $state(false);
 	let cleanupBusy = $state(false);
@@ -121,6 +121,19 @@
 			backupError = e instanceof Error ? e.message : 'Could not start a backup.';
 		} finally {
 			backupBusy = false;
+		}
+	};
+
+	const downloadBackup = async (row: BackupLogItem) => {
+		if (downloadBusy) return;
+		downloadBusy = true;
+		backupError = null;
+		try {
+			await downloadBackupArchive(row);
+		} catch (e) {
+			backupError = e instanceof Error ? e.message : 'Could not download this backup.';
+		} finally {
+			downloadBusy = false;
 		}
 	};
 
@@ -260,16 +273,14 @@
 				<button
 					class="btn btn-secondary"
 					type="button"
-					disabled={!latestCompleted}
-					title={latestCompleted ? 'Download a JSON descriptor of this backup — the file itself is not fetched yet' : 'No completed backup yet'}
-					onclick={() => latestCompleted && downloadBackupDescriptor(latestCompleted)}
+					disabled={!latestCompleted || downloadBusy}
+					title={latestCompleted ? 'Download the encrypted backup archive' : 'No completed backup yet'}
+					onclick={() => latestCompleted && void downloadBackup(latestCompleted)}
 				>
-					📥 Download
-				</button>
-				<button class="btn btn-secondary" type="button" disabled title="Key management needs the backup backend">
-					🔒 Key Mgmt
+					{downloadBusy ? '⏳ Preparing…' : '📥 Download'}
 				</button>
 			</div>
+			<p class="muted">Backup archives are encrypted with the server key — there is no key-management UI; key rotation happens deployment-side.</p>
 		</section>
 
 		<section class="card" aria-label="Analytics export">
@@ -291,7 +302,12 @@
 				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('at-risk', exportAnalyticsAtRisk)}>
 					{exporting === 'at-risk' ? 'Exporting…' : 'At-risk CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled title="PDF export needs backend file generation">
+				<button
+					class="btn btn-secondary"
+					type="button"
+					title="Print the current page as PDF"
+					onclick={() => window.print()}
+				>
 					Export PDF
 				</button>
 			</div>

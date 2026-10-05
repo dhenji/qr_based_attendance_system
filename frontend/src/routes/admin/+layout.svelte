@@ -39,6 +39,7 @@
 		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
 		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
 		{ label: 'Attendance', path: Routes.ADMIN_ATTENDANCE, enabled: true, icon: 'reports' },
+		{ label: 'Excuses', path: Routes.ADMIN_EXCUSES, enabled: true, icon: 'reports' },
 		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN_SYSTEM_SETTINGS, enabled: true, icon: 'settings' },
 		{ label: 'Profile', path: Routes.ADMIN_PROFILE, enabled: true, icon: 'profile' },

@@ -681,6 +681,7 @@
 					Phase 2: blink once for face liveness — then the head-tilt check
 					starts automatically (left, center, right, center).
 					Your result is submitted to the attendance service for verification.
+					The face-match score is provisional while server-side matching lands.
 				</p>
 				{#if submitting}
 					<p class="footnote">Submitting attendance…</p>

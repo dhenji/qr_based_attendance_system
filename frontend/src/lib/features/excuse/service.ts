@@ -48,7 +48,8 @@ import type {
 } from '$lib/shared/types/excuse';
 
 // Mock only when the whole app runs without a backend. Defaults to real API.
-const MOCK = isMockMode();
+// Evaluated per call (not frozen at import) so tests and HMR toggling
+// PUBLIC_MOCK_MODE cannot leave the service pinned to the wrong backend.
 
 export type ExcuseFilters = {
 	status?: ExcuseStatus;
@@ -214,7 +215,7 @@ const matches = (row: ExcuseRequest, filters: ExcuseFilters): boolean => {
 // page client-side (same `matches` predicate as mock mode); `total` stays the
 // backend status-filtered total.
 export const listExcuseRequests = async (filters: ExcuseFilters = {}): Promise<ExcuseListResult> => {
-	if (MOCK) {
+	if (isMockMode()) {
 		const counts: Record<ExcuseStatus, number> = { pending: 0, approved: 0, rejected: 0 };
 		for (const row of store) counts[row.status] += 1;
 
@@ -274,7 +275,7 @@ export const reviewExcuseRequest = async (
 	if (input.status === 'rejected' && notes.length === 0)
 		throw new Error('A rejection reason is required.');
 
-	if (MOCK) {
+	if (isMockMode()) {
 		const index = store.findIndex((row) => row.id === id);
 		if (index === -1) throw new Error('Excuse request not found.');
 		const current = store[index];
@@ -391,7 +392,7 @@ export const quickExcuseByIds = async (
 	reason: string
 ): Promise<{ excuseRequestId: number; originalStatus: string | null; newStatus: string }> => {
 	const clean = requireReason(reason);
-	if (MOCK) {
+	if (isMockMode()) {
 		const now = new Date().toISOString();
 		store = [
 			{
@@ -446,7 +447,7 @@ export const editExcuse = async (
 	if (reason.length === 0 && notes.length === 0)
 		throw new Error('Provide a reason, review notes, or both.');
 
-	if (MOCK) {
+	if (isMockMode()) {
 		const index = store.findIndex((item) => item.id === row.id);
 		if (index === -1) throw new Error('Excuse request not found.');
 		const updated: ExcuseRequest = {
@@ -477,7 +478,7 @@ export const editExcuse = async (
 // excuse rejected and restores attendance to original_status; returns what it
 // reverted to.
 export const revokeExcuse = async (row: ExcuseRequest): Promise<{ revertedTo: string | null }> => {
-	if (MOCK) {
+	if (isMockMode()) {
 		const index = store.findIndex((item) => item.id === row.id);
 		if (index === -1) throw new Error('Excuse request not found.');
 		store[index] = { ...store[index], status: 'rejected' };
@@ -501,7 +502,7 @@ export const excuseAllAbsent = async (
 	reason: string
 ): Promise<{ excusedCount: number }> => {
 	const clean = requireReason(reason);
-	if (MOCK) {
+	if (isMockMode()) {
 		let count = 0;
 		store = store.map((item) => {
 			if (item.sessionId === sessionId && item.status === 'pending' && item.originalStatus === 'absent') {
