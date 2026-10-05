@@ -311,9 +311,32 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured, and no CI workflows (no
-`.github/workflows`) — verification is manual. The backend suite is 719 cases
+There are no linters or formatters configured. The backend suite is 719 cases
 across 49 files.
+
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
+`main` and every pull request, as three parallel jobs — rationale in
+[ADR-069](docs/project/decision-log.md):
+
+| Job | Gate | Needs |
+| --- | --- | --- |
+| `backend` | `python -m pytest src/tests -q` — 719 cases on in-memory SQLite | nothing |
+| `migrations` | `alembic upgrade head && alembic check` | a `postgres:16-alpine` service |
+| `frontend` | `npm ci && npm run check` (svelte-check) | nothing |
+
+No job reads a secret. The `migrations` job is the one that matters: the test
+schema is built with `Base.metadata.create_all`, straight from the models, so
+the suite exercises the migration chain in neither direction and **cannot** catch
+drift (ADR-065). `alembic check` is the only thing that does — the local
+equivalent is the schema drift check above.
+
+CI **reports**; it only *blocks* a merge once `backend`, `migrations`, and
+`frontend` are added as required status checks in the repository's branch
+protection settings. **`main` is not protected today** — on a private repository
+GitHub gates branch protection and rulesets behind a paid plan, so merges are
+currently enforced by convention, not by the platform.
 
 > **Note**: several test modules pin a fixed `NOW =
 > 2026-09-27 12:00 UTC` fixture and are wall-clock sensitive —
@@ -383,7 +406,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12; 0, 9 and 12 marked `[Done]`)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D62, ADR-055–ADR-068)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D69, ADR-055–ADR-069)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
