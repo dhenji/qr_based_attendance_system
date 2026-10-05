@@ -19,6 +19,7 @@
 6. [Security / Threat-Model Tests](#6-security--threat-model-tests)
 7. [Offline & Sync Tests](#7-offline--sync-tests)
 8. [Decision Coverage Matrix](#8-decision-coverage-matrix)
+9. [Continuous Integration Gates](#9-continuous-integration-gates)
 
 ---
 
@@ -376,6 +377,48 @@ Every decision D1–D48 is covered by at least one test case above.
 | D46      | P-SC-1, P-SC-2, P-SC-4, P-AS-1, P-SS-3 (sessions.professor_id references professors.id)                                                                                                           |
 | D47      | A-BS-1, A-BS-2, A-BS-3, SEC-9 (backup statuses started/completed/failed; finished_at nullable)                                                                                                       |
 | D48      | A-FE-1, S-SC-8, S-SC-9 (FACE_MATCH_THRESHOLD=0.70, review band 0.65–0.70; session status active/closed computed DTO-only)                                                                             |
+
+---
+
+## 9. Continuous Integration Gates
+
+Sections 1–7 are the *specification* — what a case must prove. This section is
+what actually **executes** on every push to `main` and every pull request.
+Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md).
+
+| Job | Command | Runs against | Fails on |
+| --- | --- | --- | --- |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 719 cases |
+| `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
+| `frontend` | `npm ci && npm run check` | — | a svelte-check *error* (warnings pass) |
+
+Python 3.12 and Node 22, matching `backend/Dockerfile.dev` and
+`frontend/Dockerfile.dev`. No job reads a secret; `permissions: contents: read`.
+
+**Why `migrations` is not redundant with `backend`.** `conftest.py` builds the
+test schema with `Base.metadata.create_all`, straight from the models, so the
+revision chain is never exercised by the suite in either direction. A test
+asserting a unique column passes identically against both schemas. Only
+`alembic check` compares them. Per ADR-065, a failure there means **fix the
+migration, never the model**.
+
+### What CI does not cover
+
+| Not gated | Why | Where it is verified instead |
+| --- | --- | --- |
+| Coverage threshold | `--cov` is deliberately out of `addopts`; no number is enforced | run on demand; see [performance-benchmarks.md](performance-benchmarks.md) |
+| Postgres leg of the 719 cases | `TEST_DATABASE_URL` unset in CI; SQLite shims (`JSONB`→`JSON`, `BigInteger`→`INTEGER`, aware `DateTime`) cover the suite | Phase 9 status in `roadmap.md`: green on both |
+| Load / throughput | needs a live API in `BENCHMARK_MODE` plus locust | `performance-benchmarks.md` §7 |
+| Backup pipeline | host needs `openssl enc` with AEAD (`-aes-256-gcm`) | `performance-benchmarks.md` §7 — currently environment-blocked |
+| Frontend runtime tests | no test runner exists at all (no `test` script, no vitest/playwright, zero spec files) | manual |
+| Linting / formatting | none configured in the repo | manual |
+
+CI **reports**; it only blocks a merge once all three jobs are added as required
+status checks in branch protection, which is repository settings rather than a
+tracked file. `main` is not protected as of 2026-10-05: GitHub gates branch
+protection and rulesets behind a paid plan on private repositories
+(`GET /branches/main/protection` returns 403 on this repo), so the three checks
+are advisory until that changes.
 
 ---
 
