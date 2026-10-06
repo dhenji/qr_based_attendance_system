@@ -28,6 +28,7 @@ export const Routes = {
   ADMIN_STUDENTS_IMPORT: "/admin/students/import",
   ADMIN_STUDENTS_ARCHIVE: "/admin/students/archive",
   ADMIN_PROFESSORS: "/admin/professors",
+  ADMIN_PROFESSORS_IMPORT: "/admin/professors/import",
   ADMIN_PROFESSORS_ARCHIVE: "/admin/professors/archive",
   ADMIN_PROGRAMS: "/admin/programs",
   ADMIN_COURSES: "/admin/courses",
