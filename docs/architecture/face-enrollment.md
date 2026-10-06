@@ -45,9 +45,12 @@ Admin picks student → Face Enrollment Modal opens
         │
         ▼
 Server generates 128-d embedding per photo (face-api.js ResNet, D28)
-        │
+        │  ⚠ NOT IMPLEMENTED — no inference runs. The server writes a zero-filled
+        │  placeholder from `_stub_embedding_blob` ("mean" and all three angle
+        │  vectors 0.0, "stub": true), matching the shape below so that swapping
+        │  in the real pipeline only changes that one builder.
         ▼
-Stores ONE encrypted JSON blob in students.face_embedding BYTEA
+Stores ONE JSON blob in students.face_embedding BYTEA (plaintext today)
         │
         ├─ Bumps face_embedding_version
         ├─ Sets face_enrolled_at = NOW()
@@ -58,6 +61,16 @@ Student can now use face verification in scan sessions
 ```
 
 ### 2.1 Quality Gates
+
+⚠ **Enforcement point: client-only, today.** These six gates run in the browser (MediaPipe)
+before the frame is uploaded. **The server does not re-check any of them.** It validates
+`content_type`, size, and that the bytes are non-empty
+(`face_enrollment/service.py:41-60`) — nothing more.
+
+Consequently `no_face_detected`, `multiple_faces` and `quality_too_low` appear in
+`api-contracts.md` but have **no exception class in the tree**
+(`face_enrollment/exceptions.py` defines only `InvalidImageException`). Since the
+thresholds below live only in client code, a modified client can bypass every one.
 
 Each captured photo must pass **all** of the following before the next angle is
 accepted:
@@ -73,7 +86,8 @@ accepted:
 
 ### 2.2 Storage Format
 
-A single encrypted JSON blob stored in `students.face_embedding` (BYTEA column):
+A single JSON blob stored in `students.face_embedding` (BYTEA column) — **plaintext today**,
+with AES-256-GCM as the D28 design (§2.2):
 
 ```json
 {
@@ -88,13 +102,20 @@ A single encrypted JSON blob stored in `students.face_embedding` (BYTEA column):
 
 - **`mean`** (128 floats): element-wise average of the three angle vectors. Used as
   the **primary comparison target** during verification (D28).
-- **`angles`** (3 × 128 floats): per-angle vectors retained for **tie-breaking**
-  when the mean score falls in the review band (0.65–0.70). The system re-checks
-  cosine similarity against each individual angle; if any angle passes ≥
-  `FACE_MATCH_THRESHOLD` (0.70), the scan is auto-approved.
-- **Encryption**: the JSON is encrypted with AES-256-GCM using a server-side key
-  before writing to BYTEA. Decryption happens only on the server during enrollment
-  or when serving the embedding to a verified student device (D29).
+- **`angles`** (3 × 128 floats): per-angle vectors, part of the D28 design for
+  **tie-breaking** when the mean score falls in the review band (0.65–0.70).
+  ⚠ **Not implemented.** The stub writes three zero vectors for shape parity, and
+  nothing reads them back — there is no per-angle comparison anywhere in the
+  codebase, so the tie-break re-check that §4's review band describes does not
+  happen. The single `face_match_score` the client submits **is** still compared
+  against the threshold to flag the review band (`attendance/service.py:519`);
+  only the angle-level second opinion is missing.
+- **Encryption**: ⚠ **Not implemented.** The design is AES-256-GCM with a server-side
+  key, decrypted only on the server during enrollment or when serving the embedding
+  to a verified student device (D29). What the server writes today is plain
+  `json.dumps(...).encode("utf-8")` (`face_enrollment/service.py:38`) — no cipher,
+  no key. The BYTEA column is real and holds the blob; only the encryption is missing,
+  which is what T9 tracks.
 
 ### 2.3 Supporting Columns
 
@@ -132,15 +153,21 @@ Stored in IndexedDB (encrypted at rest via WebCrypto device key):
 
 ```json
 {
-  "embedding": "<base64-encoded encrypted blob>",
+  "embedding": "<base64-encoded blob — plaintext today, encrypted under D28>",
   "version": 42,
   "cached_at": "2026-08-25T10:30:00Z"
 }
 ```
 
-The device key is derived from a device-unique salt + user passphrase (or
-device-bound keychain entry). Decryption is client-side only; the raw embedding
-never touches localStorage unencrypted.
+⚠ **Correcting §2.1's counterpart — the device key is not derived from a salt or
+passphrase.** The client calls `crypto.subtle.generateKey()`, producing a non-extractable
+AES-GCM `CryptoKey` that it stores directly as a `CryptoKey` in IndexedDB. There is no salt,
+no user passphrase, and no keychain step. (IndexedDB can hold a non-extractable key, which is
+what makes this safe without a passphrase — and the encrypt-before-cache step is real
+(`encryptBlob`, a random IV per write). The gap T9 tracks is server-side, where the BYTEA column
+holds plaintext.)
+
+Decryption is client-side only; the raw embedding never touches localStorage unencrypted.
 
 ### 3.2 Re-enrollment Policy
 
@@ -154,16 +181,22 @@ never touches localStorage unencrypted.
 
 ### 3.3 Revocation Policy
 
-| Trigger                                | Action                                                                       |
-| -------------------------------------- | ---------------------------------------------------------------------------- |
-| Student archived (`is_active = false`) | `face_embedding` set to NULL, version NOT reset (prevents stale cache reuse) |
-| Admin manually revokes face data       | Same as above: NULL + version bump                                           |
-| Student graduates / transfers out      | Handled by archive flow above                                                |
+| Trigger                                | Action                                                    |
+| -------------------------------------- | --------------------------------------------------------- |
+| Student archived (`is_active = false`) | `face_embedding` set to NULL **and `face_embedding_version` incremented** (`student/service.py:571-574`) |
+| Admin manually revokes face data       | ⚠ **Not reachable.** `revoke_face_enrollment` exists as a service method, but no route exposes it, so no admin can trigger this today |
+| Student graduates / transfers out      | Handled by archive flow above                             |
 
-When `face_embedding IS NULL`, the scan flow (D27) skips step 4 (face check)
-and records the attendance record with `liveness_evidence` noting
-`"face_not_enrolled"`. The student is NOT blocked from attendance but is
-flagged in the liveness review queue for admin follow-up.
+Both triggers increment the version rather than leaving it alone: that is what invalidates a
+cached copy on the device. The original row claiming the version is "NOT reset" was wrong —
+archive bumps it, same as the revoke path it was contrasted with.
+
+When `face_embedding IS NULL`, the scan flow (D27) skips step 4 (face check).
+⚠ **The `liveness_evidence: "face_not_enrolled"` branch below does not exist** — that string is
+in no source file. The student is not blocked, but the "flagged in the liveness review queue"
+outcome is likewise unverified: the review queue is read by the admin liveness dashboard from
+records whose status is pending, and an unenrolled student produces no such record. Treat this
+row as specified-but-unimplemented.
 
 ---
 
@@ -293,6 +326,15 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 | GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
 
+`GET /student/me/face-embedding` returns **404 `face_embedding_not_found`** when the student has
+no embedding. That code is defined in `features/student/exceptions.py` (not `face_enrollment`’s, which
+raises only `invalid_image`) and is documented in `api-contracts.md:1205`, but was missing from
+this table.
+
+The enrollment feature raises exactly one code — `invalid_image` (§2.1); the 404 above comes
+from the student slice. `no_face_detected`, `multiple_faces` and `quality_too_low` are contract
+codes with no implementation anywhere.
+
 ---
 
 ## 7. Known Limitations
@@ -301,7 +343,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 | ------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sibling confusion  | **Accepted** (D31)    | Siblings may have similar embeddings; treated as a known limitation per instructor guidance. Future work: PAD CNN for anti-spoofing (out of scope).                                                                        |
 | Photo/video replay | Mitigated by liveness | Fixed-sequence blink + turn challenges make static-photo replay infeasible. Video replay of a live person remains a theoretical vector (acknowledged).                                                                     |
-| Model staleness    | Version migration     | If the face-api.js model is updated (changing embedding dimensions), `FACE_EMBEDDING_VERSION` is bumped and all students must be re-enrolled. The pull-on-login handshake detects version mismatch and forces re-download. |
+| Model staleness    | Version migration     | If the face-api.js model is updated (changing embedding dimensions), `FACE_EMBEDDING_VERSION` is bumped and all students must be re-enrolled. The pull-on-login handshake detects version mismatch and forces re-download. ⚠ The mismatch is detected against the **per-student** `students.face_embedding_version` column (`student/service.py:333`), not the `FACE_EMBEDDING_VERSION` env var — the env var is the format the server writes at enrollment time, and the two are compared via that column. |
 
 ---
 
