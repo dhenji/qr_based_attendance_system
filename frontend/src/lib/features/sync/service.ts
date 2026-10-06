@@ -25,6 +25,7 @@ export type QueuedScanPayload = {
 	livenessEvidence: LivenessEvidence;
 	faceMatchScore?: number;
 	scannedAt: string;
+	idempotencyKey?: string;
 };
 
 export type QueuedScanStatus = 'pending' | 'syncing' | 'synced' | 'rejected';
@@ -310,7 +311,10 @@ export const flushQueue = async (): Promise<{ synced: number; rejected: number; 
 	for (const item of pending) {
 		await queue.updateStatus(item.id, 'syncing');
 		try {
-			await submitAttendanceScan({ ...toScanBody(item.payload), idempotencyKey: item.id });
+			await submitAttendanceScan({
+				...toScanBody(item.payload),
+				idempotencyKey: item.payload.idempotencyKey || item.id
+			});
 			await queue.updateStatus(item.id, 'synced');
 			synced += 1;
 		} catch (error) {

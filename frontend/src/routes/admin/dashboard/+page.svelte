@@ -7,7 +7,7 @@
 		adminAttendanceState,
 		initAttendanceOverview,
 	} from '$lib/features/admin/analytics/store.svelte';
-	import { formatPercentage } from '$lib/shared/utils/format';
+	import { formatPercentage, formatLocalDateTime } from '$lib/shared/utils/format';
 	import { Routes } from '$lib/shared/constants/routes';
 	import type { AdminDashboardResponse } from '$lib/shared/types';
 
@@ -173,7 +173,7 @@
 				{#each dashboard.recent_scans as s (s.id)}
 					<li>
 						<span class="strong">{s.student_name}</span>
-						<span class="muted">{s.course_code} · {s.status} · {s.scanned_at.slice(0, 16).replace('T', ' ')}</span>
+						<span class="muted">{s.course_code} · {s.status} · {formatLocalDateTime(s.scanned_at)}</span>
 					</li>
 				{/each}
 			</ul>

@@ -18,6 +18,7 @@
 	} from '$lib/features/admin/liveness/service';
 	import type { LivenessReviewItemResponse } from '$lib/api/endpoints';
 	import type { AdminCourse, AdminProfessor, AttendanceOverviewItemResponse } from '$lib/shared/types';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import { formatPercentage } from '$lib/shared/utils/format';
 	import { goto } from '$app/navigation';
 	import { adminCourse } from '$lib/shared/constants/routes';
@@ -261,7 +262,7 @@
 								</td>
 								<td>{row.session_code}</td>
 								<td>{row.face_match_score.toFixed(2)}</td>
-								<td>{row.scanned_at.slice(0, 16).replace('T', ' ')}</td>
+								<td>{formatLocalDateTime(row.scanned_at)}</td>
 								{#if liveStatus === 'pending'}
 									<td>
 										<div class="row-actions">

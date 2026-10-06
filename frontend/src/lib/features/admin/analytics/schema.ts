@@ -49,6 +49,8 @@ export const defaultAnalyticsRange = (days = 30): { from: string; to: string } =
 	to.setHours(0, 0, 0, 0);
 	const from = new Date(to);
 	from.setDate(to.getDate() - (days - 1));
-	const key = (d: Date): string => d.toISOString().slice(0, 10);
-	return { from: key(from), to: key(to) };
+	// Use local date formatting instead of UTC to prevent "yesterday on first load" bug
+	const toDateKey = (date: Date): string =>
+		`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	return { from: toDateKey(from), to: toDateKey(to) };
 };

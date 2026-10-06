@@ -197,6 +197,14 @@
 		const normalizedCode = code.trim();
 		if (!normalizedCode || verifying) return;
 
+		// Check if we're trying to scan a different session code than already verified
+		if (session && sessionCode && sessionCode !== normalizedCode) {
+			scanError = `Session changed from ${sessionCode} to ${normalizedCode}. Please restart your ID check.`;
+			// Reset to entry step to force restart
+			backToEntry();
+			return;
+		}
+
 		verifying = true;
 		scanError = null;
 		try {
@@ -235,6 +243,8 @@
 					};
 					showFailure = false;
 					rejectionReason = '';
+					precheckFailed = false;
+					alreadyScannedStop = false;
 					if (openScanner) goToQr();
 					else startLiveness();
 					return;
@@ -337,12 +347,24 @@
 	};
 
 	const backToQr = () => {
+		if (submitting) return;
 		livenessActive = false;
+		showFailure = false;
+		rejectionReason = '';
+		scanError = null;
+		precheckFailed = false;
+		alreadyScannedStop = false;
+		showPermission = false;
 		step = 'qr';
 		qrActive = true;
 	};
 
 	const backToEntry = () => {
+		if (submitting) return;
+		submitting = false;
+		checkingId = false;
+		verifying = false;
+		clearCountdown();
 		qrActive = false;
 		livenessActive = false;
 		showPermission = false;
@@ -421,6 +443,11 @@
 			return;
 		}
 
+		// Generate idempotency key once per attempt (shared between live POST and offline replay)
+		const idempotencyKey = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+			? crypto.randomUUID()
+			: Math.random().toString(36).substring(2, 15);
+
 		livenessActive = false;
 		submitting = true;
 		showSuccess = false;
@@ -459,6 +486,7 @@
 				gps,
 				livenessEvidence,
 				scannedAt: new Date().toISOString(),
+				idempotencyKey,
 			});
 
 			if (result.status === 'rejected') {
@@ -495,7 +523,8 @@
 							studentNumber: submitNumber,
 							gps,
 							livenessEvidence,
-							scannedAt: new Date().toISOString()
+							scannedAt: new Date().toISOString(),
+							idempotencyKey
 						}
 					});
 					await refreshQueueState();
@@ -594,7 +623,7 @@
 	{:else if step === 'id'}
 		<div class="page">
 			<div class="page-header">
-				<button class="back-btn" onclick={backToEntry}>
+				<button class="back-btn" onclick={backToEntry} disabled={submitting}>
 					← <span>Back</span>
 				</button>
 				<h1>Confirm Student ID</h1>
@@ -635,7 +664,7 @@
 	{:else if step === 'qr'}
 		<div class="page">
 			<div class="page-header">
-				<button class="back-btn" onclick={backToEntry}>
+				<button class="back-btn" onclick={backToEntry} disabled={submitting}>
 					← <span>Back</span>
 				</button>
 				<h1>QR Scanner</h1>
@@ -685,7 +714,7 @@
 	{:else}
 		<div class="page">
 			<div class="page-header">
-				<button class="back-btn" onclick={backToQr}>
+				<button class="back-btn" onclick={backToQr} disabled={submitting}>
 					← <span>Back</span>
 				</button>
 				<h1>Face Liveness</h1>

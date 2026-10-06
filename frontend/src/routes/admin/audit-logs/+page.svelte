@@ -18,6 +18,7 @@
 	import { auditFilterSchema } from '$lib/features/admin/audit/schema';
 	import type { AuditAction, AuditEntityType } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	// Audit Logs (wireframe 4.8, `/admin/audit-logs`): contract-shaped trail
 	// (Time/Actor/Action/Entity with old/new values) with entity/action/actor
@@ -161,7 +162,7 @@
 			auditCsv(adminAuditState.items)
 		);
 
-	const formatTime = (iso: string): string => iso.slice(0, 16).replace('T', ' ');
+	// Remove the problematic formatTime function - using formatLocalDateTime from imports instead
 </script>
 
 <div class="page">
@@ -247,7 +248,7 @@
 					<tbody>
 						{#each visibleItems as r (r.id)}
 							<tr>
-								<td class="nowrap">{formatTime(r.performed_at)}</td>
+								<td class="nowrap">{formatLocalDateTime(r.performed_at)}</td>
 								<td>
 									<div class="strong">{actorLabel(r)}</div>
 									<div class="muted small">{entityLabel(r)}</div>
@@ -309,7 +310,7 @@
 						<tbody>
 							{#each adminStructureState.items as c (c.id)}
 								<tr>
-									<td class="nowrap">{formatTime(c.performed_at)}</td>
+									<td class="nowrap">{formatLocalDateTime(c.performed_at)}</td>
 									<td class="strong">{c.action.replace(/_/g, ' ')}</td>
 									<td>{c.entity_type} #{c.entity_id}</td>
 									<td>

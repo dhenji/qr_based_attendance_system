@@ -19,6 +19,7 @@
 	import type { AdminUser, AdminUserRole } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { formatLocalDate } from '$lib/shared/utils/format';
 
 	// User Management (super_admin only, wireframe 4.13): wraps
 	// GET/POST /admin/users, PATCH /{id}/deactivate, and
@@ -232,7 +233,7 @@
 									{u.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="mono">{u.createdAt.slice(0, 10)}</td>
+							<td class="mono">{formatLocalDate(u.createdAt)}</td>
 							<td class="row-actions">
 								{#if u.isActive}
 									{#if isSelf(u)}
