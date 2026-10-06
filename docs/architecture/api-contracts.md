@@ -9,7 +9,7 @@
 
 | Aspect      | Standard                                                                                    |
 | ----------- | ------------------------------------------------------------------------------------------- |
-| Base path   | Every path below is relative to `/api`. The prefix is mounted once in `api/router.py`, not baked into the individual routers, so a row reading `/student/dashboard` is live at `/api/student/dashboard`. `GET /health` is the one exception: it is registered on the app itself, outside the namespace. |
+| Base path   | Every path below is relative to `/api`. Each `APIRouter` bakes its own `/…` prefix; `api/router.py` mounts them under `/api` with no additional prefix, so a row reading `/student/dashboard` is live at `/api/student/dashboard`. `GET /health` is the one exception: it is registered on the app itself, outside the namespace. |
 | Auth        | `Authorization: Bearer <JWT>` header on all `/admin/*`, `/professor/*`, `/student/*` routes |
 | Role guards | FastAPI `Depends(require_role(Role.admin))` etc. 403 on mismatch                            |
 | Pagination  | `?page=1&size=20` → `{ items: [...], total: int, page: int, size: int }`                    |
@@ -357,7 +357,7 @@ Archive course offering.
 
 |                  |                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ items: [{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }], ... }` |
+| **Response 200** | `[{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }]` — a bare array, **not** `{ items: […] }`. The only non-paginated list in the app, so the row is outside the `?page/?size` convention. |
 
 | **Errors**       | 404 `offering_not_found` |
 #### `POST /admin/offerings/{offering_id}/professors`
@@ -464,8 +464,9 @@ Export analytics as CSV/PDF.
 
 |                  |                            |
 | ---------------- | -------------------------- |
-| **Request**      | `{ format: "csv"           | "pdf", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to? }` |
-| **Response 200** | File download (CSV or PDF) |
+| **Request**      | `{ format: "csv", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to? }` |
+| **Response 200** | File download (CSV) |
+| **Errors**       | 422 `unsupported_export_format` for any format other than `csv` |
 
 #### `POST /admin/analytics/refresh-risk`
 
@@ -1029,8 +1030,10 @@ Per-course comparison with program/year slicing.
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&granularity?&date_from?&date_to?`                                                       |
+| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                                       |
 | **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+
+(Compare rows at `:451` and `:1023` do accept `granularity=daily|weekly|monthly`; this scoped row does not.)
 
 #### `GET /professor/reports/trends`
 
@@ -1047,7 +1050,7 @@ Export attendance for the professor's own assigned courses (wireframes.md 3.7/3.
 
 |                  |                                                                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv" \| "pdf", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus] }` |
+| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus] }` |
 | **Response 200** | Generated file (download)                                                                                             |
 
 **Scope note:** Excel/Print are frontend concerns — backend emits CSV or PDF only.
@@ -1176,7 +1179,7 @@ Submit an excuse request with evidence.
 |                  |                                                                                                                |
 | ---------------- | -------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?page=1&size=20`                                                                                              |
-| **Response 200** | `{ items: [{ id, session_id, course_code, status, reason, requested_at, reviewed_at?, review_notes? }], ... }` |
+| **Response 200** | `{ items: [{ id, session_id, status, reason, requested_at, reviewed_by?, reviewed_at?, review_notes? }], ... }` |
 
 | **Errors**       | 404 `student_not_found` |
 #### `GET /student/excuse-requests/{rid}`
@@ -1242,7 +1245,10 @@ and primary lists without composing several calls.
 |                  |                                                                                     |
 | ---------------- | ----------------------------------------------------------------------------------- |
 | **Role**         | professor                                                                           |
-| **Response 200** | `{ sessions_today, sessions_completed, total_students, avg_rate, today_sessions: [{ offering, scanned, enrolled }] }` |
+| **Response 200** | `{ sessions_today, sessions_completed, total_students, avg_rate, today_sessions: [{ session_id, offering_id, scanned, enrolled }] }` |
+
+(`today_sessions` items are keyed by `session_id`; the schema splits the contract's bare
+`offering` into both `session_id` and `offering_id` so the client can link onward.)
 
 #### `GET /admin/dashboard`
 
