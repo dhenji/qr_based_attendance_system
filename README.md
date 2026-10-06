@@ -406,7 +406,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12; 0, 9 and 12 marked `[Done]`)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D69, ADR-055–ADR-069)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D70, ADR-055–ADR-070)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing

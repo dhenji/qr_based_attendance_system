@@ -772,20 +772,20 @@
   `api/deps.py`. It is a rule about the slice family, not a judgement call to
   re-argue per slice. Non-CRUD slices keep module-level functions.
 
-  > **Superseded in part, 2026-10.** The closing sentence above never held:
-  > all 15 `features/*/service.py` modules are service classes, and the tree
-  > contains no module-level-function service. What actually governs is the
-  > rule of thumb in `coding-standards.md` §1.7 — a class earns its place
+  > **Superseded by ADR-070, 2026-10.** The closing sentence above never
+  > held: all 15 `features/*/service.py` modules are service classes, and the
+  > tree contains no module-level-function service. What actually governs is
+  > the rule of thumb in `coding-standards.md` §1.7 — a class earns its place
   > when `__init__` composes multiple per-request handles (CRUD, settings,
   > limiters) — so (a)'s reasoning extends by the same test to slices it did
   > not name: `AdminService` (3 `BaseCRUD`), `DashboardService` (5 injected
   > services), `ExcuseService` (2 `BaseCRUD`), and `SystemService` /
-  > `AttendanceService` (session + `Settings`, ADR-059's shape). Three
-  > classes compose only the session and do **not** satisfy it —
-  > `AnalyticsService`, `ReportsService`, and `CourseProfessorService` —
-  > which ADR-055 already flagged the last of as a borderline holdover. Those
-  > three are open questions in #179; nothing here sanctions them. Clause (b) is
-  > unaffected and still accurate: the pagination bounds do live in
+  > `AttendanceService` (session + `Settings`, ADR-059's shape). ADR-070 widens
+  > that test — composing handles is sufficient, not necessary — which settles
+  > the last three (`AnalyticsService`, `ReportsService` and
+  > `CourseProfessorService`, of which ADR-055 had already flagged the last as a
+  > borderline holdover) without needing an exemption for any of them. Clause (b)
+  > is unaffected and still accurate: the pagination bounds do live in
   > `shared/pagination.py`, re-exported per slice.
   **(b) Each slice carries a `constants.py`.** Slice-specific field bounds live
   there; the list-query bounds (`DEFAULT_PAGE`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE`,
@@ -1587,3 +1587,79 @@
   `script_location = alembic`). CI **reports**; only required status checks in
   repo settings make it block a merge, and that half is configured GitHub-side,
   not in the repo.
+
+### ADR-070: Composing Handles Earns a Service Class but Is Not Required
+
+- **Decision (D70):** every `features/<slice>/service.py` is a
+  `class <Feature>Service`. The rule of thumb in `coding-standards.md` §1.7
+  is widened: composing multiple per-request handles (CRUD, settings,
+  limiters) in `__init__` is a **sufficient** reason for a class, not a
+  necessary one. A
+  cohesive operation set with a private helper cluster also earns one, because
+  the alternative scatters a cohesive API across module-level functions and
+  drops the `*ServiceDep` seam that every router already uses. What does
+  **not** justify a class is a thin wrapper with nothing to compose and no
+  meaningful seam; nothing in the tree is one.
+  **Supersedes ADR-058(a)'s** blanket "Non-CRUD slices keep module-level
+  functions."
+- **Date:** 2026-10-05
+- **Status:** Accepted
+- **Context:** The tree settled on class-per-service without ever recording
+  the decision, and the written rules ended up describing a codebase that does
+  not exist. Measured at the time: **15 of 15** `features/*/service.py` define
+  a `class <Feature>Service`, so there is no module-level-function service
+  module anywhere; **22 of the 23** mounted routers import a `*ServiceDep`
+  (the one exception is `upload/router.py`, a single presigned-URL handler
+  with no service); and `api/deps.py:242-257` defines **14** annotated
+  service deps.
+  Meanwhile ADR-058(a) still ended "Non-CRUD slices keep module-level
+  functions" and `coding-standards.md` §1.7 told readers to write
+  `async def create_foo(session: AsyncSession, ...)` for everything else —
+  naming four slices (`sync`, `excuse`, `analytics`, `system`) of which **all
+  four** are classes, and `sync` has no `service.py` at all.
+- **Why the old rule was too narrow, not merely untrue:** keying on what each
+  `__init__` actually builds, twelve of the fifteen satisfied the original
+  test with no exemption needed — `AdminService` (3 `BaseCRUD`),
+  `DashboardService` (5 injected services), `ExcuseService` (2 `BaseCRUD`),
+  `SystemService` and `AttendanceService` (session + `Settings`), plus the
+  five ADR-055/058/059 already named. Only three failed it, all by composing
+  nothing but the session: `AnalyticsService` (812 lines, 7 public methods),
+  `ReportsService` (595 lines, 3) and `CourseProfessorService` (66 lines, 1).
+  Those three are the whole justification for this ADR — few in number, large
+  in consequence, because `analytics` and `reports` back a professor's report
+  view and the admin risk view, and `DashboardService` composes both.
+- **Alternatives considered:**
+  (1) *Flatten the three to module-level functions.* Rejected, and it is why
+  this ADR exists. It would have deleted two of the fourteen `*ServiceDep`
+  annotations and rewritten twelve route handler signatures (8 in
+  `analytics/router.py`, 4 in `reports/router.py`), converting 11 public
+  methods and 13 private helpers across files totalling 1,473 lines — the two
+  large ones behind two live dashboards. Worse, those three would have become
+  the **only** service consumers in the repo not using the shared DI seam,
+  inverting them from examples into exceptions.
+  (2) *Leave ADR-058(a) as written and fix only `coding-standards.md`.*
+  Rejected. It leaves the authoritative file asserting the opposite of the
+  standards doc, which is how the drift stayed invisible.
+  (3) *Annotate ADR-058(a) and stop there.* This is what #177 did as an
+  interim measure, and it is insufficient alone: it records that the old
+  sentence was wrong but leaves in place the rule that produced three
+  unsanctioned services, so the next slice author re-derives the question.
+  (4) *Widen the rule and record it.* Taken. It is the smallest change that
+  makes the written convention match the tree without ratifying anything the
+  code does not already do unanimously.
+- **Consequences:** No service, route, schema, or test file changes — the
+  three services keep the class form they already had, so this ADR ratifies
+  the status quo rather than converting anything. `CourseProfessorService`
+  remains the one service with **no** `*ServiceDep`:
+  `course/service.py:456` and `professor/service.py:684` each construct one
+  ad hoc for a single overlap check, and `system/service.py:823` does the
+  same with `AnalyticsService`. Those bypass the DI graph but reuse the
+  *same* request session, so they are intra-request collaborator access rather
+  than a defect; promoting them into the graph is a separate, optional
+  tidy-up. `shared/csv_import.py` is explicitly unaffected and remains the
+  counter-example that keeps the widened rule honest: nine module-level
+  functions, nothing to compose, no seam needed, imported by three service
+  modules and one admin router rather than injected as a service. ADR-055's
+  "prefer a function" default and its `CourseProfessorService` holdover note
+  stand as written history — this ADR is what settles the question they left
+  open.
