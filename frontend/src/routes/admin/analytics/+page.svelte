@@ -32,7 +32,7 @@ import {
 import { listCourses } from '$lib/features/admin/courses/service';
 import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
-import { formatPercentage } from '$lib/shared/utils/format';
+import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	// Analytics & Reports (wireframe 4.7, D33): one page, six tabs —
 	// Overview, Comparison, Trends, At-Risk, Staging, Export — over a shared
@@ -635,7 +635,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 									<td>{r.max_streak}</td>
 									<td>{trendArrow(r.trend_slope)}</td>
 									<td><span class={riskBadge(r.risk_level)}>{r.risk_level}</span></td>
-									<td class="muted small">{r.computed_at.slice(0, 10)}</td>
+									<td class="muted small">{formatLocalDate(r.computed_at)}</td>
 								</tr>
 							{/each}
 						</tbody>

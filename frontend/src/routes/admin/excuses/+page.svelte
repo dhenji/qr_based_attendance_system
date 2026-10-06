@@ -4,6 +4,7 @@
 		listAdminExcuses,
 		type AdminExcuseStatus
 	} from '$lib/features/admin/excuses/service';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	// Admin excuse workload (api-contracts §Excuses Admin View): read-only
 	// queue across courses. Review actions live on the professor excuse queue;
@@ -84,7 +85,7 @@
 							</td>
 							<td>Session {row.session_id}</td>
 							<td class="reason">{row.reason}</td>
-							<td>{row.requested_at.slice(0, 16).replace('T', ' ')}</td>
+							<td>{formatLocalDateTime(row.requested_at)}</td>
 						</tr>
 					{/each}
 				</tbody>

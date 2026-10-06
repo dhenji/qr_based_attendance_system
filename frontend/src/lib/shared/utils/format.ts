@@ -31,6 +31,33 @@ export const formatTimestamp = (isoString: string): string => {
   return date.toISOString().replace("T", " ").slice(0, 19);
 };
 
+// Local datetime in "YYYY-MM-DD HH:MM:SS" format (user's timezone)
+export const formatLocalDateTime = (isoString: string): string => {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+};
+
+// Local date in "YYYY-MM-DD" format (user's timezone)
+export const formatLocalDate = (isoString: string): string => {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// UTC timestamp with explicit UTC label for admin/debugging use
+export const formatUTCTimestamp = (isoString: string): string => {
+  const date = new Date(isoString);
+  return `${date.toISOString().replace("T", " ").slice(0, 19)} UTC`;
+};
+
 const ORDINAL_SUFFIXES = ["th", "st", "nd", "rd"] as const;
 
 // Ordinal suffix for a whole number: 1 -> "1st", 2 -> "2nd", 11 -> "11th".
