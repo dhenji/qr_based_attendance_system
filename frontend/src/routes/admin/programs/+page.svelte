@@ -184,7 +184,7 @@
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
-	{#if adminProgramsState.loading}
+	{#if adminProgramsState.loading && adminProgramsState.items.length === 0}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminProgramsState.error}
 		<section class="card"><p class="error">Could not load programs: {adminProgramsState.error}</p></section>
@@ -193,7 +193,7 @@
 			<p class="empty">No programs yet. Add the first one — year levels and terms come next on its detail page.</p>
 		</section>
 	{:else}
-		<section class="card table-wrap">
+		<section class="card table-wrap" aria-busy={adminProgramsState.loading}>
 			{#if adminProgramsState.actionError}
 				<p class="error" role="alert">{adminProgramsState.actionError}</p>
 			{/if}

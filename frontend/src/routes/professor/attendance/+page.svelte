@@ -127,8 +127,12 @@
 				// The service clamps out-of-range pages (e.g. filters shrank the
 				// result under us); follow it so the pager never points nowhere.
 				if (result.page !== currentPage) currentPage = result.page;
-			} catch {
-				if (!cancelled) loadError = 'Attendance records could not be loaded.';
+			} catch (e) {
+				if (!cancelled)
+					loadError =
+						e instanceof Error && e.message
+							? `Attendance records could not be loaded: ${e.message}`
+							: 'Attendance records could not be loaded.';
 			} finally {
 				if (!cancelled) isLoading = false;
 			}
