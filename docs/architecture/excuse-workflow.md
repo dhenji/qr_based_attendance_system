@@ -33,30 +33,38 @@ Key properties:
   └───────────┘    │  └───────────┘    └──────────────────┘   │
        ▲           │       │                    ▲              │
        │           │       │                    │              │
-       │           │       ▼                    │              │
-       │           │  ┌───────────┐             │              │
-       │           │  │ rejected   │             │              │
-       │           │  └───────────┘             │              │
-       │           └──────────────────────────┘              │
-       │                                                        │
-       │    Path (a): quick-excuse ────────────────────────────┘
-       │    (prof marks student excused; row created + approved atomically)
-       │
-       │    Path (b): prof_with_evidence ──────────────────────┘
-       │    (prof uploads evidence; row created + approved atomically)
-       │
-       └──── Path (c): request (student-initiated) ──▶ pending ──▶ approved/rejected
+  │           │       ▼                    │              │
+  │           │  ┌───────────┐             │              │
+  │           │  │ rejected   │◀────────────┘              │
+  │           │  └───────────┘  revoke: an approved       │
+  │           └──────────────────────────┘  prof-excuse   │
+  │                 marked rejected (no                    │
+  │                 distinct `revoked` status)             │
+  │                                                        │
+  │    Path (a): quick-excuse ────────────────────────────┘
+  │    (prof marks student excused; row created + approved atomically)
+  │
+  │    Path (b): prof_with_evidence ──────────────────────┘
+  │    (prof uploads evidence; row created + approved atomically)
+  │
+  └──── Path (c): request (student-initiated) ──▶ pending ──▶ approved/rejected
 ```
 
 ### 2.1 Transition Rules
 
 | Transition             | Who                            | Preconditions                                                                          | Side Effects                                                                                                                        |
 | ---------------------- | ------------------------------ | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| (create) → `approved`  | Professor (quick)              | Student has absent/late record for session; professor has active assignment for course | `excuse_requests` row created with `status=approved`; `attendance_records.validation_status` mutated to `excused`; `original_status` preserved |
+| (create) → `approved`  | Professor (quick)              | Student has an absent/late/rejected record for session; professor has active assignment for course | `excuse_requests` row created with `status=approved`; `attendance_records.validation_status` mutated to `excused`; `original_status` preserved |
 | (create) → `approved`  | Professor (prof_with_evidence) | Same as above + at least 1 attachment uploaded                                         | Same as quick + `attachment_urls` populated                                                                                         |
 | (create) → `pending`   | Student (request)              | Student has absent/late/rejected record for session; reason text provided              | `excuse_requests` row created with `status=pending`; no mutation to `attendance_records` yet                                        |
 | `pending` → `approved` | Professor (review)             | Professor has active assignment for the course; `reviewed_by` set                      | `attendance_records.validation_status` mutated to `excused`; `original_status` preserved                                                       |
 | `pending` → `rejected` | Professor (review)             | Same as above + optional `review_notes`                                                | No mutation to `attendance_records`; student notified                                                                               |
+| `approved` → `rejected` | Professor (revoke)             | Professor-initiated excuse with a professor assignment on the course                 | Request marked `rejected` (no distinct `revoked` status by design — see `revoke_excuse`, `excuse/service.py:449`); `attendance_records` restored to `original_status` |
+
+All three `(create) → …` paths share the same record-state guard (`_require_excusable`,
+`excuse/service.py:969`): the attendance row must currently read `absent`, `late` or `rejected`,
+and a row already marked `excused` is rejected with `AlreadyExcusedException`. The professor
+paths additionally require an active professor assignment on the offering.
 
 ---
 
@@ -78,7 +86,7 @@ Clicks [📝 Excuse] on absent/late student row
     ▼
 Quick-excuse modal opens
     ├─ Required: reason (text, min 10 chars)
-    ├─ Optional: notes (internal)
+    │   (no notes field — QuickExcuseRequest carries only `reason`)
     │
     ▼
 Professor submits
@@ -122,7 +130,7 @@ Excuse form opens
     ├─ Required: reason (text)
     ├─ Required: attachment(s) — upload to S3-compatible storage
     │   ├─ Allowed types: PDF, JPG, PNG, HEIC
-    │   ├─ Max size: ATTACHMENTS_MAX_BYTES (default 5 MiB)
+    │   ├─ Max size: ATTACHMENTS_MAX_BYTES → attachments_max_bytes (default 5 MiB)
     │   └─ Returns presigned URLs
     │
     ▼
@@ -349,9 +357,10 @@ the factual record of what happened at scan time.
 
 ### Storage
 
-- Attachments are stored in **S3-compatible storage** (Supabase Storage / R2 / S3;
-  local filesystem in dev).
-- Same storage backend as backups, controlled by `ATTACHMENTS_STORAGE_TYPE` env var.
+- Attachments are stored in **local storage by default**; S3-compatible storage (Supabase /
+  R2 / S3) is opt-in via `ATTACHMENTS_STORAGE_TYPE=s3`.
+- Storage is controlled by `ATTACHMENTS_STORAGE_TYPE` (default `local`, `.env.example:53`);
+  S3 mode reuses the same `BACKUP_S3_*` bucket and credentials as the backup pipeline.
 - The database stores **URL references only** — never raw file bytes.
 
 ### Upload Flow
@@ -361,19 +370,23 @@ the factual record of what happened at scan time.
    for the actual bytes).
 3. Server records the final object URL(s) in `excuse_requests.attachment_urls`
    (JSONB array).
-4. **Virus-scan hook point:** After upload completes, the server triggers an
-   asynchronous virus scan (e.g., ClamAV sidecar, cloud function, or storage-provider
-   native scanning). If the scan flags a file, the attachment URL is retained for
-   audit but the excuse request is placed on hold with a `scan_failed` note in
-   `review_notes`. The professor is notified to re-upload from a clean source.
-   This hook is **pluggable** — deployments without a scanner simply skip it
-   (no-op) and rely on manual review.
+4. **Virus-scan hook point:** ⚠ **Not wired — the hook exists but is never called.**
+   `virus_scan_hook` (`shared/storage.py:321-330`) is a no-op (logs and returns) and is
+   invoked by **no route and no service** — only its own test
+   (`tests/shared/test_storage.py:458`). Consequently no attachment is ever scanned, no
+   `scan_failed` note is written, and no hold path exists. The paragraph below describes the
+   intended design — replace the no-op body and call it after upload to turn it on.
+
+   *Intended design:* After upload completes, the server triggers an asynchronous virus scan
+   (e.g., ClamAV sidecar, cloud function). If flagged, the URL is retained for audit but the
+   excuse is placed on hold with a `scan_failed` note in `review_notes`, and the professor is
+   notified to re-upload from a clean source.
 
 ### Constraints
 
 | Constraint                  | Value                                                                                         | Env Var                 |
 | --------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
-| Max file size               | 5 MiB                                                                                         | `ATTACHMENTS_MAX_BYTES` |
+| Max file size               | 5 MiB                                                                                         | `ATTACHMENTS_MAX_BYTES` (env: `attachments_max_bytes`, default 5242880) |
 | Allowed types               | PDF, JPG, PNG, HEIC                                                                           | Hardcoded (extendable)  |
 | Max attachments per request | 5                                                                                             | Hardcoded               |
 | Immutability                | Once uploaded, attachments are **never deleted** even if the excuse is rejected (audit trail) | —                       |
@@ -420,20 +433,23 @@ did it, and §8 lists no notice for them.
 ### Compliance Rate
 
 ```
-Compliance Rate = present / total
+Compliance Rate = present / enrolled
 ```
 
 Excused records are **NOT counted as present** in the compliance rate. They are
-excluded from the numerator. Only `validation_status = 'present'` counts.
+excluded from the numerator. Only `validation_status = 'present'` counts, and the
+denominator is the number of enrolled students/sessions (`enrolled`), not total
+records on file.
 
 ### Participation Rate
 
 ```
-Participation Rate = (present + late + excused) / total
+Participation Rate = (present + late + excused) / enrolled
 ```
 
 Excused records **ARE counted** in the participation rate. An excused student
 is considered to have participated (they had a legitimate reason for absence).
+As with compliance, the denominator is the enrolled count, not total records.
 
 ### Per-Course/Student Breakdown
 
@@ -452,6 +468,7 @@ is considered to have participated (they had a legitimate reason for absence).
 
 | Method | Path                                               | Role      | Description                                                   |
 | ------ | -------------------------------------------------- | --------- | ------------------------------------------------------------- |
+| POST   | `/upload/presigned-url`                            | Student/Professor | Mint a presigned upload URL for one attachment (step 1 of §7) |
 | POST   | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Quick-excuse (Path A) or prof-with-evidence (Path B)          |
 | PATCH  | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Update existing excuse (reason, notes)                        |
 | DELETE | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Revoke a prof-initiated excuse (sets status back to original) |

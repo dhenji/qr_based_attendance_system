@@ -35,10 +35,19 @@ Example: a 3-unit course meeting 2×/week over 16 weeks = 32 expected sessions.
 absence_rate = count(absent records for student+offering+semester) / expected_sessions
 ```
 
-Only records with `validation_status IN ('absent', 'late', 'excused')` that are
-NOT `rejected` are considered. `validation_status = 'pending'` records are
-excluded from the numerator but included in the denominator (they represent
-expected attendance that hasn't been validated yet).
+Only **`absent`** records are counted in the numerator — `absent_count =
+count(validation_status == 'absent')`, computed over records whose
+`validation_status != 'rejected'` (`batch.py:91-95,159`). Rejected rows are
+dropped entirely (`_usable_records`). `absent`, `late` and `excused` are **not**
+included in the numerator: `late` and `excused` are resolved attendance
+(handled by the student), and `pending` rows are mid-validation.
+
+The denominator is **not** record count. It is
+`expected_sessions = course_offerings.semester_weeks × course_offerings.sessions_per_week`
+(`batch.py:271-273`) — the number of sessions the course scheduled. Records with
+any `validation_status` simply mean the student had (or did not have) a row for
+one of those sessions; "pending" rows sit nowhere in that framing because
+`expected_sessions` derives from course metadata, not from rows on file.
 
 ### 2.3 Maximum Consecutive Streak
 
@@ -118,19 +127,25 @@ Clamped to [0.0, 1.0]. Higher = more at-risk.
 
 ```sql
 CREATE TABLE student_risk_scores (
-    id              SERIAL PRIMARY KEY,
-    student_id      INT NOT NULL REFERENCES students(id),
-    offering_id     INT NOT NULL REFERENCES course_offerings(id),
-    semester        VARCHAR NOT NULL,
+    id              BIGSERIAL PRIMARY KEY,
+    student_id      BIGINT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+    offering_id     BIGINT NOT NULL REFERENCES course_offerings(id) ON DELETE RESTRICT,
+    semester        VARCHAR(20) NOT NULL,
     risk_probability NUMERIC(5,4) NOT NULL,   -- 0.0000–1.0000
-    risk_level      VARCHAR NOT NULL          -- 'low' | 'medium' | 'high'
-                    CHECK (risk_level IN ('low', 'medium', 'high')),
+    risk_level      VARCHAR(10) NOT NULL      -- 'low' | 'medium' | 'high'
+                    CHECK (risk_level IN ('low','medium','high')),
     features        JSONB NOT NULL,           -- full feature snapshot
-    computed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    computed_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     computed_day    DATE NOT NULL,            -- set by service: computed_at.date() (D50)
-    UNIQUE(student_id, offering_id, semester, computed_day)
 );
+CREATE UNIQUE INDEX uq_student_risk_scores_student_offering_semester_day
+    ON student_risk_scores (student_id, offering_id, semester, computed_day);
 ```
+
+Matches `analytics/model.py` (`BigInteger` FKs with `ondelete='RESTRICT'`, a CHECK constraint,
+and a surrogate **unique index** rather than an inline `UNIQUE` constraint). The staging twin,
+`student_risk_scores_staging`, has the same columns **plus** `promoted_at TIMESTAMPZ NULL`, so
+it is identical schema *except* for that column (see §5.4).
 
 ### 4.1 Features JSONB Structure
 
@@ -157,7 +172,8 @@ CREATE TABLE student_risk_scores (
 ### 5.1 Schedule
 
 ```
-RISK_BATCH_CRON="0 2 * * *"    # daily at 02:00 server time
+RISK_BATCH_CRON="0 2 * * *"    # daily at 02:00 **scheduler** time (UTC by
+                                # default via SCHEDULER_TIMEZONE)
 ```
 
 ### 5.2 Execution Flow
@@ -197,15 +213,24 @@ BEGIN BATCH
 - If exceeded, log a warning but do not abort — partial results are still written.
 - Optimization: batch SQL queries (fetch all attendance records for the cohort in
   one query, compute in Python) rather than per-student queries.
+- Scoring is order-preservingly sharded across a `ThreadPoolExecutor` of
+  `RISK_BATCH_WORKERS` threads in chunks of `RISK_BATCH_CHUNK_SIZE`
+  (`config.py:67`, `batch.py:474`, `:303-308`) — these shards run concurrently
+  but the merge into the output list is order-preserving, so the result matches a
+  single-threaded run (ADR-067, covered by
+  `test_risk_batch_workers_match_serial_output`).
 
 ### 5.4 Dry-Run Mode
 
 Set `RISK_BATCH_DRY_RUN=true` to:
 
 1. Compute all features and risk levels as normal.
-2. Write to a temporary `student_risk_scores_staging` table (identical schema).
+2. Write to a staging table, `student_risk_scores_staging` — same columns as the
+   live table **plus `promoted_at TIMESTAMPTZ NULL`** (set when a dry-run batch is
+   promoted; mirrored DDL documented next to `student_risk_scores`, §4).
 3. Log the summary without affecting production data.
-4. Admin can review staging results via a debug endpoint before promoting.
+4. Admin can review staging results via `GET /admin/analytics/risk-staging` and
+   promote them via `POST /admin/analytics/risk-staging/promote`.
 
 ---
 
@@ -223,7 +248,8 @@ POST /admin/analytics/refresh-risk
   - `offering_id` — refresh all students in a course offering
   - `semester` — filter by semester (required if `offering_id` provided)
 - Returns: `{ processed: N, high: X, medium: Y, low: Z, duration_ms: T }`
-- Rate-limited: max 1 call per 60 seconds per admin (prevents abuse).
+- Rate-limited: max 1 call per 60 seconds **per IP** (`rate_limit(1, 60)` defaults to the
+  IP key, `analytics/router.py:155`), not per admin.
 
 ---
 
