@@ -15,10 +15,10 @@ sequenceDiagram
 
     Note over S,DB: Step 1 — Session Entry (D27.1)
 
-    S->>API: POST /student/sessions/verify-code {code: "A7X-9K2M"}
-    API->>DB: SELECT sessions.id, sessions.session_code, sessions.expires_at,<br>course_offerings.id, course_offerings.classroom_lat, course_offerings.classroom_lng<br>WHERE session_code = 'A7X-9K2M' AND expires_at > now()
+    S->>API: POST /student/sessions/verify-code {code: "A7X9K2M4"}
+    API->>DB: SELECT sessions.id, sessions.session_code, sessions.expires_at,<br>course_offerings.id, course_offerings.classroom_lat, course_offerings.classroom_lng<br>WHERE session_code = 'A7X9K2M4' AND expires_at > now()
     DB-->>API: Session row + offering context
-    API-->>S: 200 {session_id, offering_id, course_code, course_name, expires_at,<br>scheduled_end_time, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
+    API-->>S: 200 {session_id, offering_id, course_code, course_name, program_code, year_level_label,<br>expires_at, scheduled_end_time, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
 
     Note over S,DB: Step 2 — Student-ID QR Scan (D27.2)
 
@@ -39,7 +39,7 @@ sequenceDiagram
     S->>S: Challenge: Blink → Turn Left → Turn Right
     S->>S: EAR check (blink), PnP check (head turns)
     S->>S: Embedding comparison vs cached face_embedding
-    S->>S: cosine_similarity(student, enrolled) ≥ 0.7?
+    S->>S: face_match_score = selfie-vs-embedding similarity (submitted to server)
     alt Face check failed
         S-->>S: Show error with specific reason
     end
@@ -48,18 +48,18 @@ sequenceDiagram
 
     S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>face_match_score: 0.82,<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
 
-    API->>API: 1. Validate session active + not expired
-    API->>API: 2. Check idempotency key
-    API->>API: 3. Validate scanned_at vs session window
-    API->>API: 4. Validate geofence (server-side Haversine)
-    API->>API: 5. Validate liveness evidence
-    API->>API: 6. Validate face_match_score ≥ FACE_MATCH_THRESHOLD
-    API->>API: 7. Check enrollment (students.id → enrollments)
-    API->>API: 8. Check duplicate scan
+    API->>API: 1. Check idempotency key → return prior result<br>(key = "user_id:session_id:X-Idempotency-Key", 15-min TTL)
+    API->>API: 2. Verify session exists & is active + not expired
+    API->>API: 3. Resolve student & match student_number
+    API->>API: 4. Check enrollment (students.id → enrollments)
+    API->>API: 5. Check duplicate scan
+    API->>API: 6. Validate geofence (server-side Haversine)
+    API->>API: 7. Validate liveness evidence
+    API->>API: 8. Validate face_match_score ≥ FACE_MATCH_THRESHOLD
 
-    API->>API: 9. Compute status:<br>scanned_at ≤ present_window → present<br>scanned_at ≤ present_window + late_window → late<br>else → rejected
+    API->>API: 9. Compute status (elapsed since session.created_at):<br>elapsed ≤ present_window → present<br>elapsed ≤ present_window + late_window → late<br>else → rejected
 
-    API->>DB: INSERT INTO attendance_records<br>(session_id, student_id, validation_status, timestamp,<br>scanned_via, liveness_evidence, face_match_score,<br>gps_lat, gps_lng)
+    API->>DB: INSERT INTO attendance_records<br>(session_id, student_id, validation_status, timestamp,<br>scanned_via, liveness_evidence, face_match_score,<br>gps_lat, gps_lng, original_status, sync_status)
     DB-->>API: attendance_records.id
 
     API-->>S: 200 {id: 789, status: "present",<br>scanned_at, expires_at}
@@ -80,7 +80,7 @@ sequenceDiagram
 
     S->>S: Steps 1–4 same as online scan
     S->>S: Local validation passes
-    S->>IDB: INSERT INTO attendance_queue<br>{id: UUID, session_id, gps_lat, gps_lng,<br>liveness_evidence, face_match_score, scanned_at,<br>status: "pending" (client queue state)}
+    S->>IDB: INSERT INTO attendance_queue<br>{id: UUID, session_id, payload: {gps, liveness_evidence,<br>face_match_score, scanned_at},<br>status: "pending" (client queue state), attempts: 0}
     IDB-->>S: Stored locally
     S-->>S: Show "Evidence saved — will verify after sync"
 
@@ -91,9 +91,9 @@ sequenceDiagram
 
     loop For each pending item
         S->>IDB: UPDATE status = 'syncing' (client queue state)
-        S->>API: POST /student/attendance/scan<br>+ X-Idempotency-Key: item.id
-        API->>DB: Check idempotency key
-        API->>API: Validate scanned_at vs session.expires_at (D16)
+        S->>API: POST /student/attendance/scan<br>+ X-Idempotency-Key: user_id:session_id:item.id
+        API->>DB: Check idempotency key (user_id:session_id:key, 15-min TTL)
+        API->>API: Validate elapsed vs session window (D16)
 
         alt scanned_at > expires_at (D16)
             API-->>S: 410 {detail: {code: "session_expired", message: "Scan submitted after window closed"}}
@@ -147,10 +147,10 @@ sequenceDiagram
     participant S3 as S3 Storage
     participant DB as Database
 
-    P->>API: POST /professor/sessions/{sid}/attendance/{stid}/excuse<br>{reason: "...", attachment: file.jpg}
-    API->>S3: Upload attachment (content-addressable SHA-256 key)
-    S3-->>API: attachment_url
-
+    P->>API: POST /professor/sessions/{sid}/attendance/{stid}/excuse<br>{reason: "...", attachment_urls: [url]}
+    Note over API,S3: bytes went up earlier via
+    POST /upload/presigned-url → client PUT to storage;
+    the server never brokers the file itself
     API->>DB: BEGIN
     API->>DB: INSERT INTO excuse_requests<br>(student_id, session_id, initiated_by='professor',<br>initiated_via='prof_with_evidence',<br>reason, attachment_urls: [url],<br>status='approved',<br>reviewed_by=professor_user_id, reviewed_at=now())
     DB-->>API: excuse_request.id
@@ -170,10 +170,9 @@ sequenceDiagram
     participant DB as Database
     participant P as Professor Client
 
-    ST->>API: POST /student/excuse-requests<br>multipart: {session_id, reason, attachment?}
-    API->>S3: Upload attachment (if provided)
-    S3-->>API: attachment_url
-
+    ST->>API: POST /student/excuse-requests<br>{session_id, reason, attachment_urls?}
+    Note over API,S3: presigned upload (POST /upload/presigned-url)
+    completed client-side before this; server stores URL references
     API->>DB: INSERT INTO excuse_requests<br>(student_id, session_id,<br>initiated_by='student',<br>initiated_via='request',<br>reason, attachment_urls, status='pending')
     DB-->>API: excuse_request.id
     API-->>ST: 201 {id, status: "pending"}
@@ -207,17 +206,15 @@ sequenceDiagram
     DB-->>API: Active enrollment pairs
 
     loop For each (student_id, offering_id, semester)
-        API->>DB: SELECT COUNT(*) FROM sessions<br>WHERE offering_id = ? AND created_at<br>BETWEEN semester_start AND now()
-        DB-->>API: total_sessions
+        Note over API,DB: One batched cohort fetch (not per-student COUNT):
+        API->>DB: SELECT attendance rows for the cohort<br>(student_id, offering_id, status, timestamp, sync_status)
+        DB-->>API: rows
 
-        API->>DB: SELECT COUNT(*) FROM attendance_records ar<br>JOIN sessions s ON ar.session_id = s.id<br>WHERE s.offering_id = ? AND ar.student_id = ?<br>AND ar.validation_status = 'absent'
-        DB-->>API: absent_count
-
-        API->>API: Compute features:<br>absence_rate = absent_count / total_sessions<br>max_streak = longest consecutive absent run<br>sync_lag = COUNT(attendance_records WHERE<br>sync_status = 'pending' AND<br>timestamp < now() - interval '24 hours')<br>trend_slope = 4-week linear regression of weekly rates
+        API->>API: Compute features:<br>expected_sessions = offering.semester_weeks × offering.sessions_per_week<br>absence_rate = count(ABSENT) / expected_sessions<br>max_streak = longest consecutive ABSENT run<br>sync_lag = count(sync_status='pending' AND older than 24h)<br>weekly_absences = compute_weekly_absences(...)  # counts per ISO week<br>trend_slope = 4-week linear regression of weekly_absences
 
         API->>API: Apply heuristic thresholds (D35):<br>absence_rate > 0.30 → high<br>absence_rate > 0.15 → medium<br>streak ≥ 3 → high<br>sync_lag ≥ 5 → medium<br>trend_slope < -0.05 → medium
 
-        API->>DB: INSERT INTO student_risk_scores<br>(student_id, offering_id, semester,<br>risk_probability, risk_level,<br>features: {absence_rate, max_streak,<br>sync_lag, trend_slope},<br>computed_at = now())
+        API->>DB: INSERT INTO student_risk_scores<br>(student_id, offering_id, semester,<br>risk_probability, risk_level,<br>features: {absence_rate, expected_sessions, max_streak,<br>sync_lag, weekly_absences, trend_slope},<br>computed_at = now(), computed_day = computed_at.date())
         Note over DB: UNIQUE(student_id, offering_id,<br>semester, computed_day)
     end
 
@@ -252,7 +249,7 @@ sequenceDiagram
 
     API->>DB: UPDATE backup_log SET<br>filename = '...',<br>size_bytes = ...,<br>sha256 = '...',<br>storage_backend = 'local',<br>encryption_key_version = N,<br>finished_at = now(),<br>status = 'completed'
 
-    API-->>ADM: 202 {backup_id, status: "completed"}
+    API-->>ADM: 202 {backup_id}
 
     Note over API,LOG: Retention prune (daily)
 
@@ -277,14 +274,15 @@ sequenceDiagram
 
 ---
 
-## Appendix: Table/Column Reference (§6)
+## Appendix: Table/Column Reference
 
-All diagrams above reference the target schema in §6:
+All diagrams above reference the target schema in
+[`../design/database-er.md`](../design/database-er.md):
 
 | Diagram      | Tables Referenced                                                                    |
 | ------------ | ------------------------------------------------------------------------------------ |
 | Online Scan  | `sessions`, `course_offerings`, `enrollments`, `attendance_records`, `students`    |
-| Offline Sync | `attendance_records`, `sync_queue` (client-side `attendance_queue`)                  |
+| Offline Sync | `attendance_records` (client persists to IndexedDB `attendance_queue`)        |
 | Excuse       | `excuse_requests` (reviewed_by), `attendance_records` (excused_by)                    |
-| Risk Batch   | `enrollments`, `sessions`, `attendance_records`, `student_risk_scores`, `sync_queue` |
+| Risk Batch   | `enrollments`, `sessions`, `attendance_records`, `student_risk_scores` (reads `attendance_records.sync_status`) |
 | Backup       | `backup_log`, all tables via `pg_dump`                                               |
