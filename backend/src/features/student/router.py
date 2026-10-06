@@ -7,6 +7,10 @@ from fastapi import APIRouter, Depends, Query, Response
 from api.deps import SessionServiceDep, StudentServiceDep, require_role
 from features.auth.model import User
 from features.session.schema import VerifyCodeRequest, VerifyCodeResponse
+from features.student.constants import (
+    VERIFY_CODE_RATE_LIMIT_MAX_CALLS,
+    VERIFY_CODE_RATE_LIMIT_WINDOW_SECONDS,
+)
 from features.student.schema import (
     ChangePasswordRequest,
     FaceEmbeddingResponse,
@@ -14,6 +18,7 @@ from features.student.schema import (
     StudentDetail,
 )
 from shared.enums import UserRole
+from shared.rate_limit import rate_limit
 
 # ALREADY MOUNTED at /api/student (see api/router.py). Student-facing routes
 # only: profile, schedule, attendance scan/history, excuse requests, face status.
@@ -33,6 +38,10 @@ router = APIRouter(prefix="/student")
 
 StudentUser = Annotated[User, Depends(require_role(UserRole.STUDENT))]
 
+_verify_code_limiter = rate_limit(
+    VERIFY_CODE_RATE_LIMIT_MAX_CALLS, VERIFY_CODE_RATE_LIMIT_WINDOW_SECONDS
+)
+
 
 @router.post(
     "/sessions/verify-code",
@@ -43,8 +52,9 @@ async def verify_session_code(
     payload: VerifyCodeRequest,
     user: StudentUser,
     service: SessionServiceDep,
+    _: None = Depends(_verify_code_limiter),
 ) -> VerifyCodeResponse:
-    _ = user  # role gate only; no student scoping needed for verify
+    # `user` is consumed only as a role gate; no student scoping is needed for verify.
     return await service.verify_code(code=payload.code)
 
 

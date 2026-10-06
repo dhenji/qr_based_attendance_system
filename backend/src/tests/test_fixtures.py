@@ -386,6 +386,34 @@ async def test_student_can_verify_a_session_code(
     assert body["course_code"] == stack["course"].course_code
 
 
+async def test_verify_code_is_rate_limited(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    """T7: the per-IP verify-code limiter throttles probing for a valid code.
+
+    ten attempts fit in the window; the eleventh is a 429 with `rate_limited`.
+    """
+
+    stack = await factories.full_stack()
+    headers = await auth_headers(role=UserRole.STUDENT.value)
+
+    for _ in range(10):
+        ok = await api_client.post(
+            "/api/student/sessions/verify-code",
+            json={"code": stack["session"].session_code},
+            headers=headers,
+        )
+        assert ok.status_code == 200
+
+    blocked = await api_client.post(
+        "/api/student/sessions/verify-code",
+        json={"code": stack["session"].session_code},
+        headers=headers,
+    )
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"]["code"] == "rate_limited"
+
+
 @pytest.mark.slow
 async def test_rate_limiter_does_not_bleed_between_tests(
     api_client: Any, auth_headers: Any

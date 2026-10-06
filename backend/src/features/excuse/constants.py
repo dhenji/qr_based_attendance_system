@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-ATTACHMENT_MAX_BYTES: int = 5 * 1024 * 1024
 ATTACHMENT_MAX_COUNT: int = 5
 
 ALLOWED_ATTACHMENT_EXTENSIONS: frozenset[str] = frozenset(
