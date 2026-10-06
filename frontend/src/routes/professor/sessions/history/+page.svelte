@@ -361,14 +361,13 @@
 								</td>
 								<td class="numeric">{plaText(row)}</td>
 								<td>
-									<button
+									<span
 										class="rate"
-										type="button"
 										title={rateTitle(row)}
 										aria-label={`Compliance ${formatPercentage(row.compliance_rate * 100)}, participation ${formatPercentage(row.participation_rate * 100)}`}
 									>
 										{formatPercentage(row.compliance_rate * 100)}
-									</button>
+									</span>
 								</td>
 								<td>
 									<button
@@ -591,8 +590,7 @@
 
 	.sort:focus-visible,
 	.mini:focus-visible,
-	.btn:focus-visible,
-	.rate:focus-visible {
+	.btn:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 1px;
 	}

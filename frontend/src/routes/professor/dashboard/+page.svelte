@@ -263,11 +263,11 @@
 		</button>
 		<button
 			class="btn btn-secondary"
-			data-testid="export-report"
+			data-testid="view-reports"
 			onclick={() => goto(Routes.PROFESSOR_REPORTS)}
 		>
 			<AppIcon name="file" size={18} />
-			Export Report
+			View Reports
 		</button>
 	</section>
 
