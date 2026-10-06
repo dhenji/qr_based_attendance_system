@@ -216,9 +216,9 @@ class ConcreteConflict(FeatureDomainException):     # 409
   `shared/dependencies.py` envelope helper.
 - Transactions: flush within service methods; commit managed by the router/dependency.
 
-#### Service Form Decision Tree (ADR-055/058/059)
+#### Service Form Decision Tree (ADR-055/058/059/070)
 
-| Slice                                                                            | Form                        | Why `__init__` earns the class                                                                                              |
+| Slice                                                                            | Form                        | Why the class earns its place                                                                                               |
 | -------------------------------------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Admin CRUD (`/admin/*`: program, course, student-admin, professor-admin)           | **Class** (`FeatureService`) | Composes multiple `BaseCRUD` handles; per-request injection via `<Feature>ServiceDep` (ADR-058)                             |
 | `admin`                                                                         | **Class** (`AdminService`)    | Composes 3 `BaseCRUD` handles (`User`, `Student`, `Professor`); accepted cost — ADR-055                  |
@@ -226,27 +226,18 @@ class ConcreteConflict(FeatureDomainException):     # 409
 | `excuse`                                                                          | **Class** (`ExcuseService`)   | Composes 2 `BaseCRUD` handles (`ExcuseRequest`, `Attendance`)                                                               |
 | `session`, `face_enrollment`, `auth`                                              | **Class**                    | Holds `Session` + `Settings` read by every method (ADR-059); `AuthService` also composes CRUDs + a rate limiter             |
 | `system`, `attendance`                                                            | **Class**                    | Holds `Session` + `Settings` — the same shape as ADR-059's case                                                            |
-| `analytics`, `reports`, `course_professor`                                        | **Class**                    | **Compose only the session — none meets the rule below.** See the note underneath                                       |
+| `analytics`, `reports`, `course_professor`                                        | **Class**                    | A cohesive operation set with private helper clusters; injected through the same seam (ADR-070)                             |
 
-**Rule of thumb** (unchanged, `coding-standards.md` §1.7): a class earns its place when
-`__init__` builds **multiple per-request handles** (CRUD, settings, limiters) that every
-method uses. Otherwise, write `async def foo(session: AsyncSession, ...)`.
-
-> **Unresolved: `analytics`, `reports`, `course_professor`.** These three are classes that
-> build only `self._session`, so they do not satisfy the rule above — a session alone does not
-> justify a class. They are left as-is rather than flattened, because every alternative is a
-> judgement call: widen the rule to admit a namespace-only class as a DI/test seam, or convert
-> ~25 methods and ~15 private helpers to module-level functions and delete two of the fourteen
-> `*ServiceDep` annotations. `course_professor` is already a known holdover — ADR-055 declined a
-> cosmetic change to contract-tested code, and it is the one service with **no** `*ServiceDep`
-> at all: `course/service.py:456` and `professor/service.py:684` each construct one ad hoc for a
-> single overlap check. `analytics` and `reports` are unacknowledged. All three are open
-> questions in [#179](https://github.com/dhenji/qr_based_attendance_system/issues/179).
-> **None of the three is precedent for a new slice.**
+**Rule of thumb** (ADR-070): a class earns its place when `__init__` composes multiple
+per-request handles (CRUD, settings, limiters) that every method uses — **or** when the service
+exposes a cohesive operation set that would otherwise scatter across module-level functions and
+lose the `*ServiceDep` seam. Composing handles is sufficient, not necessary. What does *not*
+justify a class is a thin wrapper with nothing to compose and no meaningful seam; nothing in the
+tree is one.
 
 Everything not in the table is a **shared helper**, not a slice service —
-`shared/csv_import.py` is module-level functions on purpose, and is imported by four service
-modules rather than injected like a service.
+`shared/csv_import.py` is module-level functions on purpose, has nothing to compose and needs no
+seam, and is imported by three service modules and one admin router rather than injected.
 
 ### 1.8 Router Conventions
 
