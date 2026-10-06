@@ -16,11 +16,11 @@
 | T4  | **Sibling confusion** — twin/brother scans                 | Low      | **Not implemented.** No embedding comparison exists: there is no cosine-similarity code in the backend, and `face_enrollment` stores a zero-filled placeholder blob (`_stub_embedding_blob`), so there is nothing to compare against. The 0.70 threshold in `core/config.py` is applied to the score the *client* submits. Acknowledged by instructor as accepted risk; no PAD CNN in scope. | D31, ADR-068                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
 | T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP, revocable by the user. Argon2id for password hashing. Account lockout after failed attempts. A stolen 7-day refresh token outlives an MFA disable — see *Password & Account Security*. | D32                                      |
-| T7  | **Session code brute-force**                               | Medium   | HMAC-derived 6–8 char codes from random secret. 62^8 ≈ 2.18 × 10^14 possibilities. Rate-limited verification endpoint. Codes expire with session.                                                                                   | D18                                      |
+| T7  | **Session code brute-force**                               | Medium   | HMAC-derived 8-char codes from a server-only secret. 62^8 ≈ 2.18 × 10^14 possibilities. **The verification endpoint is _not_ rate-limited today** (see *Rate Limits*). Codes expire with the session.                                                                                   | D18                                      |
 | T8  | **Offline scan manipulation** — modify `scanned_at`        | Medium   | Server compares `scanned_at` against `session.expires_at`. Expired → `rejected` with reason `session_expired`. Client timestamp is untrusted input.                                                                                 | D16                                      |
-| T9  | **Embedding theft from device**                            | Medium   | Embeddings encrypted at rest in IndexedDB via WebCrypto AES-GCM with device-unique non-extractable key. Server never stores plaintext embeddings.                                                                                   | D28                                      |
+| T9  | **Embedding theft from device**                            | Medium   | Client cache encrypted at rest in IndexedDB via WebCrypto AES-GCM with a device-generated non-extractable key. Server stores plaintext JSON today — AES-256-GCM is the D28 design, not implemented.                                                                                                                                       | D28                                      |
 | T10 | **Excuse abuse** — student fabricates excuse               | Low      | Excuse requests require professor approval. Prof-initiated excuses have audit trail (`excused_by`, `excused_at`). Evidence attachments stored immutably in S3-compatible storage.                                                   | D20, D21, D24                            |
-| T11 | **Man-in-the-middle**                                      | Medium   | HTTPS everywhere (production). CORS restricts frontend origin. Session QR payloads are HMAC-signed (tamper-evident).                                                                                                                | D18                                      |
+| T11 | **Man-in-the-middle**                                      | Medium   | HTTPS everywhere (production). CORS restricts frontend origin. Session QR payloads are **unsigned JSON** — the HMAC derives the *code*, not the payload, so a payload is tamperable by anyone who can read it (D18).                                                                                                                | D18                                      |
 | T12 | **DB dump exfiltration**                                   | High     | Backups encrypted AES-256-GCM with key from env (`BACKUP_ENCRYPTION_KEY`). Key rotation tracked via `encryption_key_version`.                                                                                                       | D39                                      |
 
 ---
@@ -31,17 +31,17 @@
 secret (from env, server-only)
    │
    ▼
-HMAC-SHA256(secret, session_id + timestamp)
+HMAC-SHA256(secret, session_id)
    │
    ▼
-Base62-truncate to 6–8 chars → session code
+Base62-truncate to the first 8 chars → session code
    │
    ▼
 Stored in sessions.session_code (unique, indexed)
    │
    ▼
-QR payload includes code + HMAC signature
-   │
+QR payload = unsigned JSON {v, code, offering, radius, pw, lw}
+   │          (the HMAC above produced `code`; the payload is not signed)
    ▼
 Student scans QR or types code → server verifies
 ```
@@ -60,7 +60,7 @@ Student scans QR or types code → server verifies
 ### Claim-Based Registration (OTP)
 
 1. Admin imports student/professor record with email
-2. User visits `/auth/register` → enters email → receives 6-digit OTP via email
+2. User visits `/auth/register` → enters email → receives 6-digit OTP via email, then supplies the answer to the security question it returns. Registration is **two** calls (`POST /auth/otp/request`, then `POST /auth/register`) and `security_question` + `security_answer` are mandatory.
 3. OTP verified → user sets password → account activated
 4. One-time use; OTP expires after 5 minutes
 
@@ -90,7 +90,7 @@ Student scans QR or types code → server verifies
 | Role          | Access                                                      |
 | ------------- | ----------------------------------------------------------- |
 | `super_admin` | All admin access + platform/system-level management         |
-| `admin`       | All endpoints + system settings + backup + analytics        |
+| `admin`       | System settings, backup, analytics, users, and the `/admin/*` CRUD trees. Not a wildcard — `require_role` matches the exact role, and `super_admin` is the only superset (`api/deps.py`) |
 | `professor`   | `/professor/*` — assigned courses, sessions, attendance, reports |
 | `student`     | `/student/*` — own scan, history, schedule, excuse requests |
 
@@ -104,7 +104,7 @@ Student scans QR or types code → server verifies
 | Lockout                | 5 failed attempts → 15-minute lockout |
 | MFA                    | TOTP (RFC 6238) via authenticator app; user-revocable via `POST /auth/mfa/disable` (password-verified), which also clears the TOTP secret and invalidates every unconsumed backup code |
 | Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
-| `must_change_password` | Flag on first login / admin reset     |
+| `must_change_password` | Set by admin **account creation and admin reset only**. There is no first-login trigger |
 | Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056) |
 
 Disabling MFA requires the current password, not a fresh TOTP code: reaching the
@@ -200,8 +200,10 @@ image, no embedding comparison. Two specifics worth stating plainly:
 There is also no face *enrollment* pipeline yet: `face_enrollment` stores a
 zero-filled placeholder from `_stub_embedding_blob`, so there is no stored vector
 to compare against even in principle. That placeholder is why
-`api-contracts.md` lists `no_face_detected`, `multiple_faces`, `quality_too_low`
-and `invalid_image` as documented but never raised.
+`api-contracts.md` lists `no_face_detected`, `multiple_faces` and
+`quality_too_low` as documented but never raised. (`invalid_image` **is**
+raised — it is the one of the four that exists, as
+`InvalidImageException`.)
 
 **What this does and does not protect.** Steps 1-3 of the scan — session code,
 student-ID QR, GPS geofence — are genuinely server-enforced, which is why T3, T5
@@ -218,6 +220,48 @@ be bypassed by not participating in it, because `BENCHMARK_MODE` skips it
 alongside the liveness check. That is deliberate for load runs and off by default,
 but it means a benchmark deployment has no geofence enforcement at all — not a
 weakened one, none.
+
+---
+
+## Rate Limits
+
+`shared/rate_limit.py` is a fixed-window limiter keyed on `request.url.path` plus either the
+client IP or the normalized email in the JSON body. Exhausting a window raises 429
+`rate_limited`. `X-Forwarded-For` is deliberately **not** trusted, so a deployment behind a proxy
+rates by the proxy's address unless the limiter is given `key="email"`.
+
+| Route | Key | Limit | Window | Note |
+| --- | --- | --- | --- | --- |
+| `POST /auth/otp/request` | email | 5 | 60s | OTP send |
+| `POST /auth/otp/verify` | email | 5 | 300s | Deliberately the longest window: verification is the brute-forceable step |
+| `POST /auth/forgot-password` | email | 5 | 60s | |
+| `POST /auth/forgot-password/verify` | email | 5 | 300s | Answer brute-force |
+| `POST /auth/login` | **ip + email** | 20 + 5 | 60s | Two limiters on one route: 20/IP alongside the email-keyed 5 |
+| `POST /admin/analytics/refresh-risk` | ip | 1 | 60s | Manual trigger, per-IP |
+| `POST /student/attendance/scan` | ip | 30 | 60s | `SCAN_RATE_LIMIT_MAX_CALLS` / `_WINDOW_SECONDS`; skipped under `BENCHMARK_MODE` |
+
+Two endpoints are conspicuously **absent**, and neither is an oversight worth assuming:
+
+- **`POST /auth/refresh`** — token rotation has no limiter. Rotation is authenticated by the
+  refresh token itself, which is high-entropy and already rate-limits its own usefulness (a stolen
+  token is usable until it expires, per T6/D32); a limiter would primarily blunt the legitimate
+  case of a client retrying with an expired token.
+
+- **`POST /student/sessions/verify-code`** — the T7 gap. Session codes are 8 base62 chars
+  (~2.2 × 10¹⁴ possibilities), which is why T7 rates the threat Medium rather than High, but the
+  endpoint that accepts a code has no limiter at all. Nothing else in the auth surface is in this
+  state. Adding one is a code decision, not a documentation change.
+
+> **Captcha.** `POST /auth/login` and `POST /auth/forgot-password` call
+> `verify_turnstile_token(...)` when a token is supplied, so Turnstile is enforced on those two.
+
+> **HMAC secret.** `_resolve_hmac_secret` prefers `HMAC_SECRET_KEY` and falls back to
+> `JWT_SECRET`, raising if neither is set — so code generation works on a deployment configured
+> only for JWTs.
+
+> **Recovery lockout.** Too many wrong security answers returns 423 `recovery_locked`
+> (`RecoveryLockedException`), distinct from the 423 `account_locked`
+> (`AccountLockedException`) that failed logins raise.
 
 ---
 
@@ -242,7 +286,7 @@ All sensitive operations are logged in the audit trail:
 | Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
 | Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
 | Session open/close                               | Yes    | `open` / `close` on `session`                   |
-| Face enrollment/re-enrollment                    | Yes    | `update` / `revoke` on `face_enrollment`        |
+| Face enrollment/re-enrollment                    | Yes    | `update` on `face_enrollment`. `revoke` exists as a service method but **no route exposes it**, so the row it would write is unreachable |
 | Backup create/restore                            | Yes    | `create` on `backup`. **Restore is not implemented** — only download |
 | Academic structure changes (program/year/course) | Yes    | `create` / `update` / `archive` / `delete`      |
 | System settings changes                          | Yes    | `update` on `app_setting`, with the previous value |
@@ -268,9 +312,15 @@ Read the trail through `GET /admin/audit-logs` (admin-only, filterable by
 `GET /admin/system/academic-structure` reads the same table scoped to the four
 structural entity types.
 
-Two rows above are marked unimplemented because the surface does not exist yet:
-there is no admin account unlock route and no admin password reset route. See
-ADR-064.
+One row above is marked unimplemented because the surface does not exist yet:
+there is no admin account unlock route. See ADR-064.
+
+Admin password reset **is** implemented, at `POST /admin/{users,students,professors}/{id}/reset-password`.
+All three routes resolve to the same `AuthService.admin_reset_password`; the student and
+professor routers look their roster row up to a `users.id` first (409 `*_account_unlinked`
+when there is none), then call it. It clears `failed_login_attempts`/`is_locked`/`locked_at`
+as well as the password, and records `performed_by` — but it does not touch MFA, which is
+`disable_mfa`'s job and is password-verified.
 
 ---
 
@@ -294,7 +344,7 @@ These are **explicitly out of scope** for this system:
 | D12      | Session duration expiry — scan window boundaries    |
 | D16      | Offline `scanned_at` validation — anti-backdate     |
 | D17      | Classroom override — geofence source selection      |
-| D18      | Session QR payload — HMAC signing, versioned schema |
+| D18      | Session code derivation — HMAC-SHA256 over `session_id`, 8 base62 chars; QR payload is versioned (`v: 1`) but unsigned |
 | D25      | Never security-disabled sessions                    |
 | D26      | Liveness mandatory even for remote classes          |
 | D27      | 5-step sequential scan flow                         |

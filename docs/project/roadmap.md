@@ -22,7 +22,8 @@
 - `api/deps.py` — `_get_db`, `_get_current_user`, `require_role(*roles)`, plus `AuthServiceDep`/`AdminServiceDep` (the session dependency is `_get_db`; there is no public `get_db`)
 - Alembic baseline migration `679a319c12d6` (16 tables), + `2a437ca93c53` and `33eabbfbfa6a` in Phase 2 (`mfa_backup_codes` + fingerprint index) → 17 tables
 
-> **Forward-looking:** `audit_logs`, `app_settings` land in Phases 8/12 → 19-table
+> **Forward-looking:** `audit_logs` and `app_settings` land in Phases 8/12, plus
+> `student_risk_scores_staging` (`d4e5f6a7b8c9`) → 20-table
 > target. `mfa_backup_codes` landed in Phase 2 (ADR-054). See
 > [migration-strategy.md](../architecture/migration-strategy.md).
 

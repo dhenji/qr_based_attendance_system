@@ -313,10 +313,17 @@ async def test_professor_dashboard_counts_todays_sessions(
     professor.user_id = user.id
 
     now = datetime.now(timezone.utc)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = now - midnight
     for index in range(2):
         # Started *and* expired in the past, so both read as closed. Sessions
         # have no status column: closed means `expires_at` is past.
-        started = now - timedelta(minutes=30 * (index + 1))
+        # Anchored to fractions of the elapsed day, not fixed offsets: a fixed
+        # `now - 60min` falls on yesterday for any suite run inside the first
+        # hour after midnight UTC, and the dashboard counts `created_at` by UTC
+        # calendar day. The `expires_at` cap keeps "closed" true even there,
+        # when `started + 20min` would otherwise land in the future.
+        started = midnight + elapsed * (index + 1) // 3
         db_session = await factories.session(
             graph["offering"],
             professor,
@@ -326,7 +333,7 @@ async def test_professor_dashboard_counts_todays_sessions(
             created_at=started,
             scheduled_start_time=started,
             scheduled_end_time=started + timedelta(minutes=30),
-            expires_at=started + timedelta(minutes=20),
+            expires_at=min(started + timedelta(minutes=20), now - timedelta(minutes=1)),
         )
         await factories.attendance(
             graph["student"], db_session, timestamp=started

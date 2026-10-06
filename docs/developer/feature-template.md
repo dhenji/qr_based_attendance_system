@@ -18,7 +18,7 @@ backend/src/features/{feature}/
 └── router.py       # FastAPI endpoints
 ```
 
-Plus an Alembic migration, frontend feature slice, and (aspirational) backend tests.
+Plus an Alembic migration, a frontend feature slice, and backend tests.
 
 ---
 
@@ -31,7 +31,16 @@ Define SQLAlchemy ORM models inheriting from `core.database.Base`.
 **Worked example — `program/model.py`:**
 
 ```python
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    true,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,7 +56,7 @@ class Program(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     total_years: Mapped[int] = mapped_column(Integer)
-    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     year_levels: Mapped[list["YearLevel"]] = relationship(
         back_populates="program", cascade="all, delete-orphan"
@@ -57,17 +66,17 @@ class Program(TimestampMixin, Base):
 class YearLevel(Base):
     __tablename__ = "year_levels"
     __table_args__ = (
-        UniqueConstraint("program_id", "year_number", name="uq_program_year"),
+        UniqueConstraint("program_id", "year_number", name="uq_program_year_number"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     program_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("programs.id", ondelete="CASCADE")
+        BigInteger, ForeignKey("programs.id", ondelete="CASCADE"), index=True
     )
     year_number: Mapped[int] = mapped_column(Integer)
     label: Mapped[str] = mapped_column(String(50))
     term_structure: Mapped[dict] = mapped_column(JSONB)
-    sort_order: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    sort_order: Mapped[int] = mapped_column(Integer)
 
     program: Mapped["Program"] = relationship(back_populates="year_levels")
 ```
@@ -129,38 +138,61 @@ alembic upgrade head
 Pydantic v2 models for request/response validation.
 
 ```python
-from pydantic import BaseModel, Field
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
+from features.program.constants import (
+    CODE_MAX_LENGTH,
+    CODE_MIN_LENGTH,
+    DESCRIPTION_MAX_LENGTH,
+    TOTAL_YEARS_MAX,
+    TOTAL_YEARS_MIN,
+)
 
 
 class ProgramCreate(BaseModel):
-    code: str = Field(..., max_length=20)
-    name: str = Field(..., max_length=100)
-    description: str | None = None
-    total_years: int = Field(..., ge=1, le=6)
+    code: str = Field(min_length=CODE_MIN_LENGTH, max_length=CODE_MAX_LENGTH)
+    name: str = Field(min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH)
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LENGTH)
+    total_years: int = Field(ge=TOTAL_YEARS_MIN, le=TOTAL_YEARS_MAX)
 
 
 class ProgramRead(BaseModel):
     id: int
     code: str
     name: str
-    description: str | None
+    description: str | None = None
     total_years: int
     is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProgramUpdate(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    total_years: int | None = Field(None, ge=1, le=6)
+    # `code` and `total_years` are absent, not Optional: neither is mutable.
+    name: str | None = Field(
+        default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
+    )
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LENGTH)
+    is_active: bool | None = None
 ```
 
 **Conventions:**
 
 - Separate `Create`, `Read`, `Update` schemas per entity
-- `Read` uses `from_attributes = True` for ORM compatibility
-- Use `Field(...)` for constraints (`ge`, `le`, `max_length`)
+- `Read` uses `ConfigDict(from_attributes=True)` for ORM compatibility
+- Use `Field(...)` for constraints (`ge`, `le`, `min_length`, `max_length`)
+- **Every field bound is a named constant from the slice's `constants.py`** — never an inline
+  literal. Bounds shared with another slice are re-exported from that slice's constants
+  (`NAME_MAX_LENGTH` lives in `features/admin/constants.py`, not in the slice that uses it),
+  which is ADR-058(b).
+- **`Update` omits immutable fields entirely** rather than making them `| None`. A `| None`
+  field is indistinguishable from "not supplied", so `code` or `total_years` on `Update`
+  would silently accept a change the service must then reject.
 - Never return passwords or secrets in `Read` schemas
 
 **Done:**
@@ -173,41 +205,131 @@ class ProgramUpdate(BaseModel):
 
 ### 4. Service (`backend/src/features/{feature}/service.py`)
 
-Business logic layer. No HTTP concerns — receives/returns domain objects.
+Business logic layer. No HTTP concerns — receives an `AsyncSession` and returns **read
+schemas**. This is a service **class**: `__init__` composes one `BaseCRUD` handle per model it
+touches, so the router never constructs it (see `coding-standards.md` §1.7).
 
 ```python
-from sqlalchemy import select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.program.model import Program
+from features.program.exceptions import ProgramCodeExistsException
+from features.program.model import Program, YearLevel
+from features.program.schema import ProgramCreate, ProgramRead
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.enums import AuditAction, AuditEntity
+from shared.pagination import PaginatedResponse
+from shared.query import apply_if
 
 
-async def create_program(session: AsyncSession, *, code: str, name: str,
-                         total_years: int) -> Program:
-    program = Program(code=code, name=name, total_years=total_years)
-    session.add(program)
-    await session.flush()
+class ProgramService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._programs: BaseCRUD[Program] = BaseCRUD(Program, session)
+        self._years: BaseCRUD[YearLevel] = BaseCRUD(YearLevel, session)
 
-    return program
+    async def create(
+        self, *, payload: ProgramCreate, actor_id: int | None = None
+    ) -> ProgramRead:
+        if await self._programs.get_by(code=payload.code) is not None:
+            raise ProgramCodeExistsException(payload.code)
+
+        program: Program = await self._programs.create(
+            code=payload.code,
+            name=payload.name,
+            description=payload.description,
+            total_years=payload.total_years,
+        )
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.PROGRAM,
+            entity_id=program.id,
+            new_value=self._snapshot(program),
+        )
+
+        return ProgramRead(**self._read_fields(program))
+
+    async def list(
+        self, *, search: str | None, is_active: bool | None, page: int, size: int
+    ) -> PaginatedResponse[ProgramRead]:
+        stmt: Select[tuple[Program]] = self._list_stmt(
+            search=search, is_active=is_active
+        )
+
+        total: int = (
+            await self._session.scalar(select(func.count()).select_from(stmt.subquery()))
+            or 0
+        )
+        rows = (
+            await self._session.scalars(
+                stmt.order_by(Program.id).offset((page - 1) * size).limit(size)
+            )
+        ).all()
+
+        return PaginatedResponse[ProgramRead](
+            items=[ProgramRead(**self._read_fields(p)) for p in rows],
+            total=total,
+            page=page,
+            size=size,
+        )
+
+    async def _get_or_404(self, program_id: int) -> Program:
+        program = await self._programs.get(program_id)
+        if program is None:
+            raise ProgramNotFoundException(program_id)
+        return program
+
+    @staticmethod
+    def _list_stmt(*, search: str | None, is_active: bool | None) -> Select[tuple[Program]]:
+        stmt: Select[tuple[Program]] = select(Program)
+        stmt = apply_if(stmt, is_active, lambda v: Program.is_active == v)
+
+        if search:
+            term: str = f"%{search.strip()}%"
+            stmt = stmt.where(or_(Program.code.ilike(term), Program.name.ilike(term)))
+
+        return stmt
+```
+
+The router reaches it through an annotated dependency, so the transaction boundary is
+unchanged (`api/deps.py`):
+
+```python
+async def _get_program_service(
+    session: Annotated[AsyncSession, Depends(_get_db)],
+) -> ProgramService:
+    return ProgramService(session)
 
 
-async def get_program(session: AsyncSession, program_id: int) -> Program | None:
-    result = await session.execute(select(Program).where(Program.id == program_id))
-    return result.scalar_one_or_none()
-
-
-async def list_programs(session: AsyncSession) -> list[Program]:
-    result = await session.execute(select(Program).where(Program.is_active == True))
-    return list(result.scalars().all())
+ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
 ```
 
 **Conventions:**
 
-- Functions are `async`, receive `AsyncSession` as first param
-- Use `select()` + `where()` (SQLAlchemy 2.0 query style)
+- A slice service is a `class <Feature>Service`; `__init__` builds one `BaseCRUD` handle per
+  model it touches and holds no state across requests. All 15 services in the tree are classes.
+- **The class name carries the noun, so methods do not repeat it** — `create`, `get`, `list`,
+  `archive`, not `create_program`. Sub-resources extend it: `list_years`, `create_year`.
+- **Keyword-only arguments after `self`,** and payloads arrive as the Create schema rather than
+  as loose scalars.
+- **Every list returns `PaginatedResponse[T]`** with an explicit `total` count, and takes
+  `page`/`size` bounds from `shared/pagination.py`. `BaseCRUD.list()` has its own `limit=50`
+  default and is for internal lookups — do not return it from a list endpoint.
+- Use `apply_if(stmt, value, build)` for optional filters; it skips building a criterion for a
+  `None` value, which a bare comparison would reject at construction time.
+- **Return read schemas.** `model_validate` cannot see derived aggregates, so a response that
+  carries counts or collections is built as `ProgramRead(**self._read_fields(row))`.
+- **Sensitive mutations call `record_audit(...)`** in the caller's transaction, so the audit
+  row rolls back with the change it describes.
 - **`await session.flush()` after writes — never `commit()` and never `refresh()`**
-- Raise domain exceptions (not HTTP exceptions) for business rule violations
-- Keep functions focused — one operation per function
+- Raise **domain exceptions** from `exceptions.py` — never `HTTPException`, never a raw
+  `ValueError`. Only `AppException` subclasses reach the client's `{detail: {code, message}}`
+  envelope; `HTTPException` belongs to the auth layer in `api/deps.py`.
+- Keep methods focused — one operation per method
 
 > **Do not call `session.commit()` in a service.** The single `commit()` lives in
 > the `_get_db` dependency (`backend/src/api/deps.py`), which commits on success
@@ -230,101 +352,159 @@ FastAPI router with endpoint definitions.
 ```python
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, Query, status
 
-from api.deps import _get_db, require_role
+from api.deps import ProgramServiceDep, require_role
+from features.auth.model import User
+from features.program.constants import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    SEARCH_MAX_LENGTH,
+)
 from features.program.schema import ProgramCreate, ProgramRead
-from features.program import service
 from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
 
-# The full contract path lives here, not in api/router.py.
-router = APIRouter(prefix="/admin/programs", tags=["programs"])
+# The full contract path lives here, not in api/router.py: it passes no prefix=
+# argument. Collection routes below use "" not "/" so /admin/programs registers
+# exactly, with no trailing-slash redirect.
+router = APIRouter(prefix="/admin/programs")
 
 
-@router.post("/", response_model=ProgramRead)
+@router.get(
+    "",
+    response_model=PaginatedResponse[ProgramRead],
+    summary="List programs (search, status filter, paginated)",
+)
+async def list_programs(
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProgramServiceDep,
+    search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
+    is_active: bool | None = Query(default=None),
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> PaginatedResponse[ProgramRead]:
+    return await service.list(search=search, is_active=is_active, page=page, size=size)
+
+
+@router.post(
+    "",
+    response_model=ProgramRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a program",
+)
 async def create_program(
     payload: ProgramCreate,
-    _admin: Annotated[object, Depends(require_role(UserRole.ADMIN))],
-    session: Annotated[AsyncSession, Depends(_get_db)],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProgramServiceDep,
 ) -> ProgramRead:
-    program = await service.create_program(
-        session,
-        code=payload.code,
-        name=payload.name,
-        total_years=payload.total_years,
-    )
-    return ProgramRead.model_validate(program)
+    return await service.create(payload=payload, actor_id=user.id)
 
 
-@router.get("/", response_model=list[ProgramRead])
-async def list_programs(
-    session: Annotated[AsyncSession, Depends(_get_db)],
-) -> list[ProgramRead]:
-    programs = await service.list_programs(session)
-    return [ProgramRead.model_validate(p) for p in programs]
-
-
-@router.get("/{program_id}", response_model=ProgramRead)
+@router.get("/{program_id}", response_model=ProgramRead, summary="Get one program")
 async def get_program(
     program_id: int,
-    session: Annotated[AsyncSession, Depends(_get_db)],
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProgramServiceDep,
 ) -> ProgramRead:
-    program = await service.get_program(session, program_id)
-    if not program:
-        raise HTTPException(status_code=404, detail="Program not found")
-    return ProgramRead.model_validate(program)
+    return await service.get(program_id=program_id)
 ```
+
+The 404 is the service's job — `service.get()` raises `ProgramNotFoundException`, which the
+`AppException` handler renders as `{"detail": {"code": "program_not_found", "message": ...}}`.
+**A router never constructs a 404 by hand**, because a bare
+`HTTPException(status_code=404, detail="...")` puts a plain string where the frontend's error
+parser expects `{code, message}`. Note the role-guard parameter is named `user` (not `_`) when
+the handler forwards `actor_id=user.id` to the service for the audit row.
 
 **Conventions:**
 
 - Prefix matches [API contract](../architecture/api-contracts.md) and is **baked
   into the router**; `api/router.py` must not pass a `prefix=` argument
+- **Collection routes are declared `""`, never `"/"`** — `"/"` registers a trailing-slash
+  redirect the contract does not have
+- The service arrives through its `*ServiceDep`; the router never constructs it
 - The session dependency is **`_get_db`** — there is no public `get_db`
-- `Depends(_get_db)` for session injection
-- Response model is the Read schema
-- Errors: `HTTPException` with appropriate status codes
+- The admin CRUD route set is `GET ""`, `POST ""`, `GET /{id}`, `PATCH /{id}`,
+  `DELETE /{id}` — in that order in the module, each with a one-line `summary=`
+- **Every admin route carries its own role guard**:
+  `_: Annotated[User, Depends(require_role(UserRole.ADMIN))]`. `super_admin` passes
+  automatically, so routes never name both roles
+- Pagination and search bounds are declared per route via `Query(...)` so they appear in the
+  OpenAPI schema. **Import those constants from the slice's `constants.py`**, which
+  re-exports `shared/pagination.py` and `SEARCH_MAX_LENGTH` (ADR-058b) — the router should
+  not reach into `shared/` for feature-specific bounds
+- Response model is the Read schema (`PaginatedResponse[...]` for lists)
+- **Errors come from the service's domain exceptions.** Only `AppException` has a handler;
+  `DomainException` maps to 422 and `DatabaseException` to 409 automatically
 - Tags group endpoints in Swagger UI
 
 **Done:**
 
-- [ ] Endpoints match §7 API inventory
+- [ ] Endpoints match the [API contract](../architecture/api-contracts.md)
 - [ ] Request/response schemas used correctly
 - [ ] Error responses consistent (`{detail: {code, message}}`)
+- [ ] No collection route declared with `"/"`
 
 #### One `APIRouter` per (feature, mount point)
 
 A router's prefix is its full contract path, so **one `APIRouter` serves exactly
 one mount point**. Most features need only one router. When a single feature's
 endpoints span two prefixes, declare a **second `APIRouter` in its own module**
-rather than mounting the same router twice:
+rather than mounting the same router twice. All 23 mounted routers:
 
-| Feature module | Router prefix | Mounted at |
-| --- | --- | --- |
-| `features/auth/router.py` | `/auth` | `/api/auth` |
-| `features/admin/router.py` | `/admin/users` | `/api/admin/users` |
-| `features/course/router.py` | `/admin/courses` | `/api/admin/courses` |
-| `features/course/offering_router.py` | `/admin/offerings` | `/api/admin/offerings` |
-| `features/student/router.py` | `/student` | `/api/student` |
-| `features/student/admin_router.py` | `/admin/students` | `/api/admin/students` |
-| `features/attendance/router.py` | `/student` | `/api/student` |
-| `features/attendance/admin_router.py` | `/admin/attendance` | `/api/admin/attendance` |
-| `features/professor/router.py` | `/professor` | `/api/professor` |
-| `features/session/router.py` | `/professor` | `/api/professor` |
-| `features/professor/admin_router.py` | `/admin/professors` | `/api/admin/professors` |
+| Router module                            | Prefix                 |
+| ---------------------------------------- | ---------------------- |
+| `features/auth/router.py`                | `/auth`                |
+| `features/student/router.py`             | `/student`             |
+| `features/session/router.py`             | `/professor`           |
+| `features/attendance/router.py`          | `/student`             |
+| `features/attendance/admin_router.py`    | `/admin/attendance`    |
+| `features/professor/router.py`           | `/professor`           |
+| `features/program/router.py`             | `/admin/programs`      |
+| `features/admin/router.py`               | `/admin/users`         |
+| `features/student/admin_router.py`       | `/admin/students`      |
+| `features/professor/admin_router.py`     | `/admin/professors`    |
+| `features/course/router.py`              | `/admin/courses`       |
+| `features/course/offering_router.py`     | `/admin/offerings`     |
+| `features/face_enrollment/router.py`     | `/admin/face-enrollment` |
+| `features/excuse/professor_router.py`    | `/professor`           |
+| `features/excuse/student_router.py`      | `/student`             |
+| `features/excuse/admin_router.py`        | `/admin/excuses`       |
+| `features/upload/router.py`              | `/upload`              |
+| `features/analytics/router.py`           | `/admin/analytics`     |
+| `features/reports/router.py`             | `/professor`           |
+| `features/system/router.py`              | `/admin`               |
+| `features/dashboard/student_router.py`   | `/student`             |
+| `features/dashboard/professor_router.py` | `/professor`           |
+| `features/dashboard/admin_router.py`     | `/admin`               |
 
-Two things follow from the table:
+These 23 routers collapse onto **16 distinct mount paths**, because a mount point is a
+namespace rather than an owner:
 
-- **Several routers may share one mount point.** `professor` and `session` both
-  prefix `/professor`, and `student` and `attendance` both prefix `/student` — a
-  mount point is a namespace, not an owner. Their route paths inside the shared
-  prefix must not collide (`/professor/sessions` from `session`, not
-  `/professor/professor/sessions`).
+| Mount path      | Routers sharing it                                                     |
+| --------------- | ---------------------------------------------------------------------- |
+| `/api/student`  | `student`, `attendance`, `excuse/student`, `dashboard/student` (4)      |
+| `/api/professor`| `professor`, `session`, `excuse/professor`, `reports`, `dashboard/professor` (5) |
+| `/api/admin`    | `system`, `dashboard/admin` (2)                                        |
+
+Their inner paths must not collide: `/professor/sessions` comes from `session`, never
+`/professor/professor/sessions`.
+
+Two things follow:
+
 - **Never mount the same `APIRouter` at two prefixes.** Paths inside it are
   relative to its own prefix, so mounting `student/router.py` at `/api/admin`
   would also expose `/api/admin/profile` and `/api/admin/schedule`. This is why
   student and professor each need a separate `admin_router.py` — their
   student-facing and admin-facing routes are distinct contracts.
+- **A prefix may be shared; a router may not.** `dashboard` spans three mount points
+  and therefore declares **three** routers in three modules
+  (`student_router.py`, `professor_router.py`, `admin_router.py`) — never one router
+  included three times.
+- `features/enrollment/router.py` exists but is deliberately **not mounted**; do not
+  wire it up.
 
 ---
 
@@ -380,7 +560,8 @@ async def test_program_service_requires_a_unique_code(
     """
 
     await factories.program(code="BSCS")
-    service = ProgramService(test_db_session, settings)
+    service = ProgramService(test_db_session)   # one arg: admin CRUD services
+                                      # take no Settings
     # ...assert the domain exception is raised
 ```
 
@@ -406,55 +587,86 @@ async def test_program_service_requires_a_unique_code(
 
 ### 8. Frontend Feature Slice
 
-Create the feature directory under `src/lib/features/`:
+Create the feature directory under `src/lib/features/`. The files a slice actually needs
+depend on what it does — treat the list below as the ceiling, not a checklist:
 
 ```
 frontend/src/lib/features/{feature}/
-├── store.svelte.ts    # Reactive state ($state runes)
-├── service.ts         # API calls (with mock fallback)
-├── schema.ts          # Zod validation schemas
-├── mock.ts            # Mock data for dev
-└── components/        # Svelte components
+├── store.svelte.ts    # Reactive state ($state runes)   — when the slice holds state
+├── service.ts         # API calls                        — always
+├── schema.ts          # Zod validators                   — when the slice validates input
+├── mock.ts            # Fixture data for the mock leg    — when isMockMode() needs data
+└── components/        # Svelte components                — when it renders any
 ```
+
+Reality across the 13 existing slices: **every one has `service.ts`; only 1 has
+`schema.ts` and 5 have `mock.ts`; `attendance` and `sync` are `service.ts` alone.**
+Do not scaffold empty files to match a template — an unused `schema.ts` is dead weight,
+and `notifications` has just `poll.ts` because polling is all it does.
 
 **store.svelte.ts:**
 
 ```ts
-// Use $state runes in a .svelte.ts file (runes mode is forced globally):
-import type { Program } from "./schema";
+// Runes mode is forced globally in vite.config.ts, so $state/$derived work in a
+// plain .svelte.ts module. State lives in one exported $state object — a bare
+// `let` is module-local and will not survive HMR or be shareable across importers.
+import type { Program } from '$lib/shared/types';
+import { listPrograms } from './service';
 
-let programs = $state<Program[]>([]);
-let loading = $state(false);
+export const programState = $state<{ programs: Program[]; loading: boolean }>({
+	programs: [],
+	loading: false,
+});
 
-export function getPrograms() {
-  return {
-    get programs() {
-      return programs;
-    },
-    loading,
-  };
+export async function loadPrograms(page = 1, size = 20): Promise<void> {
+	programState.loading = true;
+	try {
+		const res = await listPrograms({ page, size });
+		programState.programs = res.items;
+	} finally {
+		programState.loading = false;
+	}
 }
 ```
 
 **service.ts:**
 
 ```ts
-import { PUBLIC_API_URL } from "$env/static/public";
-import { mockPrograms } from "./mock";
+import { get, isMockMode, post } from '$lib/api/client';
+import type { Paginated, Program } from '$lib/shared/types';
+import { mockPrograms } from './mock';
 
-const USE_MOCK = import.meta.env.DEV && !PUBLIC_API_URL;
+// `isMockMode()` is the ONLY mock gate — it reads PUBLIC_MOCK_MODE, which
+// api/client.ts:18 owns. Never branch on import.meta.env.DEV, on the presence of
+// PUBLIC_API_URL, or on a service-local USE_MOCK flag: the API is real by default
+// and mock mode is an explicit opt-in for UI work without a backend.
+export async function listPrograms(params: {
+	page: number;
+	size: number;
+}): Promise<Paginated<Program>> {
+	if (isMockMode()) return mockPrograms(params);
 
-export async function fetchPrograms() {
-  if (USE_MOCK) return mockPrograms;
-  const res = await fetch(`${PUBLIC_API_URL}/admin/programs`);
-  return res.json();
+	// Endpoint keys are EndpointDefs registered in api/endpoints.ts, not raw paths —
+	// client.ts adds the /api prefix and handles auth, refresh and error envelopes.
+	return await get<Paginated<Program>>('adminProgramList', params);
+}
+
+export async function createProgram(payload: Program): Promise<Program> {
+	if (isMockMode()) return payload;
+	return await post<Program>('adminProgramCreate', payload);
 }
 ```
 
+A local fixture fallback is fine and expected on the mock leg; what is not fine is
+re-deciding *whether* to mock. `PUBLIC_API_URL` is optional and falls back to
+`http://localhost:8000`, so keying off it would silently mock whenever the var is unset.
+
 **Done:**
 
-- [ ] Store, service, schema, mock files created
+- [ ] Files created only where the slice needs them (not scaffolded empty)
 - [ ] Components use runes syntax ($state, $derived, $effect, $props)
+- [ ] Mock branching goes through `isMockMode()` and nothing else
+- [ ] URLs referenced as `EndpointDef` keys from `api/endpoints.ts`
 - [ ] Type check passes: `npm run check`
 
 ---
@@ -486,7 +698,7 @@ export async function fetchPrograms() {
 6. service.py            → write business logic (flush, never commit)
 7. router.py             → write endpoints, prefix baked in
 8. api/router.py         → mount router (no prefix= argument)
-9. tests                 → write tests (aspirational — no test runner yet)
+9. tests                 → write tests (pytest; pytest.ini sets testpaths + asyncio_mode=auto)
 10. frontend/            → feature slice
 11. docs/                → update wireframes, contracts, structure
 ```
@@ -505,9 +717,9 @@ export async function fetchPrograms() {
 | Second prefix    | feature spans two mounts → second `APIRouter` in its own module (`admin_router.py`, `offering_router.py`)                    | `features/student/admin_router.py`              |
 | Session dep      | `_get_db` (there is no public `get_db`)                                                                                     | `Depends(_get_db)`                              |
 | Transactions     | `flush()` in services; the single `commit()` lives in `_get_db`                                                              | —                                               |
-| Frontend store   | `$state` in `.svelte.ts`                                                                                                    | `programs.svelte.ts`                            |
-| Frontend service | camelCase functions                                                                                                         | `fetchPrograms()`, `createProgram()`            |
-| Frontend schema  | Zod                                                                                                                         | `programSchema`, `programCreateSchema`          |
+| Frontend store   | one `store.svelte.ts` per slice; `$state` runes inside                                                                   | `store.svelte.ts`                              |
+| Frontend service | camelCase verbs, `const` arrow exports, no `fetch` outside the client                                                     | `listPrograms()`, `openSession()`              |
+| Frontend schema  | Zod; `<scope><Entity><Action>Schema` + a PascalCase `…Input` inferred type                                              | `adminStudentCreateSchema`, `AdminStudentCreateInput` |
 
 ---
 
