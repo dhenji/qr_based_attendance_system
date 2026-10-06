@@ -350,16 +350,6 @@
 		box-shadow: var(--shadow-sm);
 	}
 
-	.error-banner {
-		background: var(--danger-bg);
-		border: 1px solid var(--danger-bg);
-		border-radius: 8px;
-		padding: 0.625rem 0.875rem;
-		margin-bottom: 1.25rem;
-		color: var(--danger);
-		font-size: 0.8125rem;
-	}
-
 	.field {
 		margin-bottom: 1.25rem;
 	}

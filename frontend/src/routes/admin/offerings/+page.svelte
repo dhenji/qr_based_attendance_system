@@ -372,7 +372,7 @@
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
-	{#if adminOfferingsState.loading}
+	{#if adminOfferingsState.loading && adminOfferingsState.items.length === 0}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminOfferingsState.error}
 		<section class="card"><p class="error">Could not load offerings: {adminOfferingsState.error}</p></section>
@@ -381,7 +381,7 @@
 			<p class="empty">No offerings match these filters. Add the first one — it instances a course template for a program and year.</p>
 		</section>
 	{:else}
-		<section class="card table-wrap">
+		<section class="card table-wrap" aria-busy={adminOfferingsState.loading}>
 			{#if adminOfferingsState.actionError}
 				<p class="error" role="alert">{adminOfferingsState.actionError}</p>
 			{/if}

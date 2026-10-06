@@ -399,12 +399,12 @@ import { formatPercentage } from '$lib/shared/utils/format';
 		{/each}
 	</nav>
 
-	{#if adminAnalyticsState.loading}
+	{#if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminAnalyticsState.error}
 		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>
 	{:else if tab === 'overview' && overview}
-		<section class="kpis">
+		<section class="kpis" aria-busy={adminAnalyticsState.loading}>
 			<div class="kpi"><span class="kpi-value">{overview.total_students}</span><span class="kpi-label">Students</span></div>
 			<div class="kpi"><span class="kpi-value">{overview.total_sessions}</span><span class="kpi-label">Sessions</span></div>
 			<!-- Both rates arrive as 0-1 fractions (backend `_rates` does
@@ -416,7 +416,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 			<div class="kpi"><span class="kpi-value">{formatPercentage(overview.avg_participation_rate * 100)}</span><span class="kpi-label">Avg participation</span></div>
 		</section>
 	{:else if tab === 'comparison'}
-		<section class="card">
+		<section class="card" aria-busy={adminAnalyticsState.loading}>
 			<h2 class="card-title">Course Comparison</h2>
 			<p class="muted">Same course shown once per cohort · {metric} rate</p>
 			<ReportBarChart
@@ -448,7 +448,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 			{/if}
 		</section>
 	{:else if tab === 'trends'}
-		<section class="card">
+		<section class="card" aria-busy={adminAnalyticsState.loading}>
 			<h2 class="card-title">Trends ({granularity})</h2>
 			<p class="muted">{metric} rate over the selected range</p>
 			<ReportTrendChart
@@ -478,7 +478,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 			{/if}
 		</section>
 	{:else if tab === 'atrisk'}
-		<section class="card">
+		<section class="card" aria-busy={adminAnalyticsState.loading}>
 			<div class="row-head">
 				<div>
 					<h2 class="card-title">At-Risk Students</h2>
@@ -593,7 +593,7 @@ import { formatPercentage } from '$lib/shared/utils/format';
 					<option value="low">Low</option>
 				</select>
 			</div>
-			{#if adminStagingState.loading}
+			{#if adminStagingState.loading && adminStagingState.items.length === 0}
 				<p class="muted">Loading staged scores…</p>
 			{:else if adminStagingState.error}
 				<p class="error" role="alert">{adminStagingState.error}</p>

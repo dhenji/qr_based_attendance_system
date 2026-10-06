@@ -234,14 +234,14 @@
 			<button class="btn btn-secondary" onclick={() => void loadLiveness()}>Refresh</button>
 		</section>
 
-		{#if liveLoading}
+		{#if liveLoading && liveItems.length === 0}
 			<section class="card"><p class="muted">Loading review queue…</p></section>
 		{:else if liveError}
 			<section class="card"><p class="error">{liveError}</p></section>
 		{:else if liveItems.length === 0}
 			<section class="card"><p class="empty">No {liveStatus} records in the review queue.</p></section>
 		{:else}
-			<section class="card table-wrap">
+			<section class="card table-wrap" aria-busy={liveLoading}>
 				<table>
 					<thead>
 						<tr>

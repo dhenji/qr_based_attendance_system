@@ -274,7 +274,7 @@
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
-	{#if adminProfessorsState.loading}
+	{#if adminProfessorsState.loading && adminProfessorsState.items.length === 0}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminProfessorsState.error}
 		<section class="card"><p class="error">Could not load professors: {adminProfessorsState.error}</p></section>
@@ -283,7 +283,7 @@
 			<p class="empty">No professors match these filters. Add the first record to seed the roster.</p>
 		</section>
 	{:else}
-		<section class="card table-wrap">
+		<section class="card table-wrap" aria-busy={adminProfessorsState.loading}>
 			{#if adminProfessorsState.actionError}
 				<p class="error" role="alert">{adminProfessorsState.actionError}</p>
 			{/if}

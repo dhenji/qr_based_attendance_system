@@ -208,7 +208,7 @@
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
-	{#if adminCoursesState.loading}
+	{#if adminCoursesState.loading && adminCoursesState.items.length === 0}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminCoursesState.error}
 		<section class="card"><p class="error">Could not load courses: {adminCoursesState.error}</p></section>
@@ -217,7 +217,7 @@
 			<p class="empty">No courses yet. Add the first template — offerings attach it to a program and year.</p>
 		</section>
 	{:else}
-		<section class="card table-wrap">
+		<section class="card table-wrap" aria-busy={adminCoursesState.loading}>
 			{#if adminCoursesState.actionError}
 				<p class="error" role="alert">{adminCoursesState.actionError}</p>
 			{/if}

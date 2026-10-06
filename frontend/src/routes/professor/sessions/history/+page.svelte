@@ -98,8 +98,12 @@
 				// The service clamps out-of-range pages (e.g. filters shrank the
 				// result under us); follow it so the pager never points nowhere.
 				if (result.page !== currentPage) currentPage = result.page;
-			} catch {
-				if (!cancelled) loadError = 'Session history could not be loaded.';
+			} catch (e) {
+				if (!cancelled)
+					loadError =
+						e instanceof Error && e.message
+							? `Session history could not be loaded: ${e.message}`
+							: 'Session history could not be loaded.';
 			} finally {
 				if (!cancelled) isLoading = false;
 			}
