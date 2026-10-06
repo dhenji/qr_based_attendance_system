@@ -300,6 +300,23 @@ export const importProfessors = async (file: File): Promise<ProfessorImportResul
 	return postForm<ProfessorImportResult>('adminProfessorImport', form);
 };
 
+// Roster CSV template — no professor template route exists server-side
+// (only /admin/students/import/template), so this is a static header in
+// backend column order (ROSTER_CSV_COLUMNS in professor/service.py):
+// first_name, middle_name, last_name, email, department. First/last/email
+// are required; middle/department are optional. Tries the server route
+// first so a future backend template is picked up without a UI change.
+const PROFESSOR_TEMPLATE_FALLBACK =
+	'first_name,middle_name,last_name,email,department\n';
+
+export const downloadProfessorTemplate = async (): Promise<string> => {
+	try {
+		return await getText('/admin/professors/import/template');
+	} catch {
+		return PROFESSOR_TEMPLATE_FALLBACK;
+	}
+};
+
 // --- Users (super_admin only) --------------------------------------------------
 //
 // Wraps backend features/admin/router.py (/api/admin/users): list (search /

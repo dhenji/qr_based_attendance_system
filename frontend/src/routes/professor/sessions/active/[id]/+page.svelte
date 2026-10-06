@@ -27,9 +27,15 @@
 	const PAGE_SIZE = 10;
 
 	// Excuse actions: bulk excuse-all-absent hits the live backend (it needs
-	// only the session id). Per-row quick-excuse resolves through the mock
-	// store: live feed rows carry student numbers, and no professor endpoint
-	// returns the integer student ids the per-record routes need.
+	// only the session id). Per-row quick-excuse is mock-mode only: the
+	// per-record routes need integer student ids
+	// (POST /professor/sessions/{sid}/attendance/{stid}/excuse), but the live
+	// feed's ActiveStudentItem rows carry student numbers only, and no other
+	// professor-accessible endpoint returns integer ids (the attendance
+	// ledger's `id` is the attendance record id, not the student id; the admin
+	// roster is role-gated). quickExcuseByIds in features/excuse/service.ts is
+	// already wired to the live route and takes over as soon as a row carries
+	// an id — until then no per-row button is rendered in real mode.
 	type SortKey = 'time' | 'name' | 'status';
 	type SortDirection = 'asc' | 'desc';
 	type FeedRow = LiveSession['students'][number];
@@ -114,7 +120,7 @@
 		}
 	};
 
-	// Excuse-action modal state. Per-row excuse is mock-backed (see note
+	// Excuse-action modal state. The modal opens in mock mode only (see note
 	// above); bulk excuse-all-absent is live.
 	let excuseTarget = $state<FeedRow | null>(null);
 	let excuseReason = $state('');
@@ -576,15 +582,6 @@
 										<button class="link" type="button" onclick={() => openExcuse(student)}>
 											Excuse
 										</button>
-									{:else}
-										<button
-											class="link"
-											type="button"
-											disabled
-											title="Per-student excuse needs backend support to resolve this row — use Excuse all absent or the review queue instead"
-										>
-											Excuse
-										</button>
 									{/if}
 								{:else if student.status === 'excused'}
 									<span class="muted">Excused</span>
@@ -657,8 +654,12 @@
 				{:else}
 					<p class="muted">
 						Excuse every absent record in this session at once (idempotent —
-						re-running excuses nothing new). Per-row excuses use the mock
-						preview; the review queue handles real per-student cases.
+						re-running excuses nothing new).
+						{#if isMockMode()}
+							Per-row excuses use the mock preview; the review queue handles real per-student cases.
+						{:else}
+							Per-student excuses are handled in the excuse review queue.
+						{/if}
 					</p>
 				{/if}
 			</div>
