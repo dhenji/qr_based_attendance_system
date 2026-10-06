@@ -16,7 +16,7 @@
 | T4  | **Sibling confusion** — twin/brother scans                 | Low      | **Not implemented.** No embedding comparison exists: there is no cosine-similarity code in the backend, and `face_enrollment` stores a zero-filled placeholder blob (`_stub_embedding_blob`), so there is nothing to compare against. The 0.70 threshold in `core/config.py` is applied to the score the *client* submits. Acknowledged by instructor as accepted risk; no PAD CNN in scope. | D31, ADR-068                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
 | T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP, revocable by the user. Argon2id for password hashing. Account lockout after failed attempts. A stolen 7-day refresh token outlives an MFA disable — see *Password & Account Security*. | D32                                      |
-| T7  | **Session code brute-force**                               | Medium   | HMAC-derived 8-char codes from a server-only secret. 62^8 ≈ 2.18 × 10^14 possibilities. **The verification endpoint is _not_ rate-limited today** (see *Rate Limits*). Codes expire with the session.                                                                                   | D18                                      |
+| T7  | **Session code brute-force**                               | Medium   | HMAC-derived 8-char codes from a server-only secret. 62^8 ≈ 2.18 × 10^14 possibilities. The verify endpoint is rate-limited at 10 attempts/min per IP (`VERIFY_CODE_RATE_LIMIT_*`, `student/router.py`). Codes expire with the session. | D18 |
 | T8  | **Offline scan manipulation** — modify `scanned_at`        | Medium   | Server compares `scanned_at` against `session.expires_at`. Expired → `rejected` with reason `session_expired`. Client timestamp is untrusted input.                                                                                 | D16                                      |
 | T9  | **Embedding theft from device**                            | Medium   | Client cache encrypted at rest in IndexedDB via WebCrypto AES-GCM with a device-generated non-extractable key. Server stores plaintext JSON today — AES-256-GCM is the D28 design, not implemented.                                                                                                                                       | D28                                      |
 | T10 | **Excuse abuse** — student fabricates excuse               | Low      | Excuse requests require professor approval. Prof-initiated excuses have audit trail (`excused_by`, `excused_at`). Evidence attachments stored immutably in S3-compatible storage.                                                   | D20, D21, D24                            |
@@ -238,19 +238,23 @@ rates by the proxy's address unless the limiter is given `key="email"`.
 | `POST /auth/forgot-password/verify` | email | 5 | 300s | Answer brute-force |
 | `POST /auth/login` | **ip + email** | 20 + 5 | 60s | Two limiters on one route: 20/IP alongside the email-keyed 5 |
 | `POST /admin/analytics/refresh-risk` | ip | 1 | 60s | Manual trigger, per-IP |
+| `POST /student/sessions/verify-code` | ip | 10 | 60s | T7 — brute-force guard on the only unauthenticated-code probe (closes #191) |
 | `POST /student/attendance/scan` | ip | 30 | 60s | `SCAN_RATE_LIMIT_MAX_CALLS` / `_WINDOW_SECONDS`; skipped under `BENCHMARK_MODE` |
 
-Two endpoints are conspicuously **absent**, and neither is an oversight worth assuming:
+One endpoint is conspicuously absent, and it is not an oversight worth assuming:
 
 - **`POST /auth/refresh`** — token rotation has no limiter. Rotation is authenticated by the
   refresh token itself, which is high-entropy and already rate-limits its own usefulness (a stolen
   token is usable until it expires, per T6/D32); a limiter would primarily blunt the legitimate
   case of a client retrying with an expired token.
 
-- **`POST /student/sessions/verify-code`** — the T7 gap. Session codes are 8 base62 chars
-  (~2.2 × 10¹⁴ possibilities), which is why T7 rates the threat Medium rather than High, but the
-  endpoint that accepts a code has no limiter at all. Nothing else in the auth surface is in this
-  state. Adding one is a code decision, not a documentation change.
+The other one that used to be missing is now throttled:
+
+- **`POST /student/sessions/verify-code`** — limited per IP at 10 attempts/min
+  (`VERIFY_CODE_RATE_LIMIT_MAX_CALLS=10`, `..._WINDOW_SECONDS=60`,
+  `student/constants.py`). This closes the T7 gap: a code is still 8 base62 chars
+  (~2.2 × 10¹⁴ possibilities, which is why T7 stayed Medium rather than High), and now an
+  automated probe is additionally throttled.
 
 > **Captcha.** `POST /auth/login` and `POST /auth/forgot-password` call
 > `verify_turnstile_token(...)` when a token is supplied, so Turnstile is enforced on those two.
