@@ -16,8 +16,8 @@ and rejects expired-window submissions.
 
 ## IndexedDB Stores
 
-All client storage uses IndexedDB via a thin wrapper (e.g., `idb` library).
-Three object stores:
+All client storage uses IndexedDB via a thin wrapper around the raw browser
+API (`sync/service.ts:56-61`) — there is no `idb` dependency. Four object stores:
 
 ### 1. `attendance_queue`
 
@@ -28,28 +28,34 @@ Stores pending scan submissions.
 | `id`                | UUID     | Auto-generated client ID                                     |
 | `session_id`        | int      | FK to server session                                         |
 | `session_code`      | string   | For display/debug                                            |
-| `student_number`  | string   | Student number from ID QR                                    |
-| `gps_lat`           | float    | Captured at scan time                                        |
-| `gps_lng`           | float    | Captured at scan time                                        |
-| `gps_accuracy`      | float    | metres                                                       |
-| `liveness_evidence` | JSON     | blink, head turns, EAR, PnP                                  |
-| `face_match_score`  | float    | Cosine similarity                                            |
-| `scanned_at`        | ISO-8601 | **Device timestamp at scan** (validated server-side per D16) |
+| `student_number`    | string   | Student number from ID QR                                    |
+| `payload.gps`       | object   | `{lat, lng, accuracy}` nested, not flat columns              |
+| `payload.liveness_evidence` | JSON | blink, head turns, EAR, PnP                            |
+| `payload.face_match_score` | float | Selfie-vs-embedding similarity               |
+| `payload.scanned_at` | ISO-8601 | **Device timestamp at scan** (validated server-side per D16) |
 | `status`            | enum     | `pending` → `syncing` → `synced` / `rejected` — **client-local queue states** (NOT DB enums; server uses `SyncStatus` = `synced`/`pending`/`failed` and `QueueStatus` = `pending`/`processing`/`done`/`failed`) |
-| `retry_count`       | int      | Exponential backoff counter                                  |
-| `last_error`        | string   | Server rejection reason, if any                              |
+| `attempts`          | int      | Retry counter, incremented per failure, never reset           |
+| `max_attempts`      | int      | Terminal after N tries (`DEFAULT_MAX_ATTEMPTS = 25`)         |
+| `last_error`        | string   | `error.code` from the failed POST, not the message            |
 | `created_at`        | ISO-8601 | Local enqueue time                                           |
+
+The queue row nests the scan payload under `payload` rather than flattening `gps_lat` /
+`gps_lng` / `gps_accuracy` into top-level columns (`sync/service.ts:24,39`). Retries count
+`attempts` toward `max_attempts` and are **never reset** on a later enqueue — the row's
+history is kept, not cleared.
 
 ### 2. `face_embeddings`
 
-Cached face embeddings, encrypted at rest via WebCrypto (AES-GCM) with a device-unique key.
+Cached face embeddings, encrypted at rest via WebCrypto (AES-GCM) with a device-generated
+non-extractable key. The key itself lives in the fourth store, `face_keys` — it is never
+serialised, so a steal of `face_embeddings` ciphertext alone is not sufficient to decrypt it.
 
-| Column       | Type        | Notes                     |
-| ------------ | ----------- | ------------------------- |
-| `student_id` | int         | Own embedding             |
-| `version`    | int         | Server embedding version  |
-| `embedding`  | ArrayBuffer | Encrypted 128-d vector(s) |
-| `fetched_at` | ISO-8601    | Cache freshness           |
+| Column       | Type        | Notes                                              |
+| ------------ | ----------- | -------------------------------------------------- |
+| `student_id` | int         | Own embedding                                      |
+| `version`    | int         | Server embedding version                           |
+| `embedding`  | string      | Base64 **ciphertext** (iv + ciphertext), not raw bytes |
+| `fetched_at` | ISO-8601    | Cache freshness                                    |
 
 ### 3. `session_cache`
 
@@ -63,6 +69,13 @@ Read-only snapshots of active session config (for offline display and GPS checks
 | `expires_at`             | ISO-8601 | For local expiry check |
 | `present_window_minutes` | int      |                        |
 | `late_window_minutes`    | int      |                        |
+
+### 4. `face_keys`
+
+Stores the single device-generated AES-GCM `CryptoKey` used to encrypt the cached
+`face_embeddings` rows. Non-extractable, persisted via structured clone — no salt, no
+passphrase, and **no decrypt-on-sync path exists**: the client encrypts the server blob for
+at-rest protection and only ever compares against it locally.
 
 ---
 
@@ -90,12 +103,12 @@ Read-only snapshots of active session config (for offline display and GPS checks
 │     for each item (oldest first):                    │
 │       set status = syncing (client-only state)       │
 │       POST /student/attendance/scan with X-Idempotency-Key   │
-│       = item.id                                      │
+│       = "user_id:session_id:caller-supplied key" (15-min TTL) │
 │       → 200: set status = synced (client-only state) │
 │       → 4xx reject: set status = rejected,           │
-│         last_error = server message                  │
+│         last_error = error.code (not the message)    │
 │       → network error: revert status = pending,      │
-│         increment retry_count, schedule next          │
+│         increment attempts, schedule next              │
 │                                                      │
 └─────────────────────────────────────────────────────┘
 
@@ -103,28 +116,38 @@ Read-only snapshots of active session config (for offline display and GPS checks
 │                   Server Side                        │
 │                                                      │
 │  POST /student/attendance/scan:                              │
-│    1. Verify session exists & is active              │
-│    2. Validate scanned_at against session window:    │
-│       - If scanned_at > session.expires_at:          │
-│         REJECT → { code: "session_expired",          │
-│           message: "Scan submitted after window      │
-│           closed" } (D16)                            │
-│    3. Check idempotency key → return prior result    │
-│    4. Validate geofence (Haversine)                  │
-│    5. Validate liveness evidence                     │
-│    6. Validate face_match_score ≥ threshold          │
-│    7. Check enrollment                               │
-│    8. Check duplicate scan                           │
-│    9. Compute status:                                │
-│       scanned_at ≤ present_window → present          │
-│       scanned_at ≤ present_window + late_window      │
-│                                        → late        │
-│       else → rejected (late after window)            │
-│    10. Write attendance_records                       │
-│    11. Return result                                 │
+│    1. Check idempotency key → return prior result             │
+│       (keyed "user_id:session_id:X-Idempotency-Key", 15-min TTL)│
+│    2. Verify session exists & is active + not expired         │
+│       (scanned_at > session.expires_at → "session_expired", D16)│
+│    3. Resolve student & match student_number                  │
+│    4. Check enrollment                                        │
+│    5. Check duplicate scan                                    │
+│    6. Validate geofence (Haversine) — skipped under           │
+│       BENCHMARK_MODE                                          │
+│    7. Validate liveness evidence — skipped under              │
+│       BENCHMARK_MODE                                          │
+│    8. Validate face_match_score ≥ threshold                   │
+│    9. Compute status:                                         │
+│       elapsed ≤ present_window → present                      │
+│       elapsed ≤ present + late window → late                  │
+│       else → rejected                                         │
+│   10. Write attendance_records (preserving original_status)   │
+│   11. Return result                                           │
 │                                                      │
 └─────────────────────────────────────────────────────┘
 ```
+
+**Idempotency & staleness contract (server-enforced):**
+
+- The idempotency key is `user_id:session_id:<caller-supplied key>`, TTL 900s
+  (15 min), process-local, max 10,000 entries (`attendance/constants.py:33-36`,
+  `service.py:205`). A reused key inside the window returns the prior result
+  instead of re-writing the record.
+- A queued scan is only written as `synced` when its `scanned_at` is within
+  `SYNC_STALE_SECONDS = 60` of server time (`attendance/constants.py:41`,
+  `service.py:595`). Older replays are dropped as stale, so a backed-off replay
+  must keep a due scan younger than 60s.
 
 ### Rejection Reasons
 
@@ -135,7 +158,7 @@ Read-only snapshots of active session config (for offline display and GPS checks
 | `liveness_failed`  | Liveness checks fail                | D31        |
 | `face_mismatch`    | Cosine similarity < threshold       | D27 step 4 |
 | `not_enrolled`     | Student not in course roster        | D27 step 2 |
-| `duplicate`        | Student already scanned for session | D27 step 2 |
+| `duplicate_scan`   | Student already scanned for session | D27 step 2 |
 
 ### Exponential Backoff
 
@@ -147,7 +170,9 @@ retry_delay = min(30s * 2^retry_count, 30 minutes)
 - Second: 60s
 - Third: 120s
 - Max: 30 minutes
-- Reset `retry_count` to 0 on successful sync
+- `attempts` is **not** reset on a later retry — only on enqueue (a fresh queue
+  row starts at 0). The counter is what trips `max_attempts` into terminal
+  rejection, so resetting it on each sync would defeat the cap.
 
 ### Conflict Resolution
 
@@ -182,19 +207,22 @@ item stays in `rejected` state with `last_error` for user visibility.
       │                    │
       │  OR                │
       │                    │
-      │  4b. 200 {version, │  (newer version)
-      │     encrypted_blob}│
-      │◄───────────────────│
-      │                    │
-      │  5. Decrypt with   │
-      │     device key,    │
-      │     store in       │
-      │     IndexedDB      │
-      │                    │
+│  4b. 200 {version, │  (newer version)
+│     embedding}    │  embedding is the server's
+│                    │  plaintext JSON blob
+│◄───────────────────│
+│                    │
+│  5. Encrypt with   │
+│     device key,    │
+│     store          │
+│     ciphertext in  │
+│     IndexedDB      │
+│                    │
 ```
 
 **Device encryption key**: generated once per device via `crypto.subtle.generateKey`,
-stored in `crypto.subtle` (non-extractable) or in a secure enclave. The server
+stored as a non-extractable `CryptoKey` in the `face_keys` IndexedDB store (not
+`crypto.subtle` itself, not a secure enclave, no salt/passphrase). The server
 never sees this key.
 
 **Re-enrollment**: When admin re-enrolls a student (3 new photos), `face_embedding_version`
@@ -209,8 +237,11 @@ requests; client clears local cache.
 
 When scanning offline:
 
-1. **Face comparison** runs against cached embedding in IndexedDB (decrypted in memory).
-   Score is computed client-side using face-api.js WASM.
+1. **Face comparison** — ⚠ **Not implemented yet.** The cached embedding is stored as
+   encryption ciphertext, and no decrypt-and-compare path exists today. The client-side
+   embedding compare is a separate future slice (`student/face.svelte.ts:15-16` states this
+   explicitly: "Client-side embedding *compare* is a separate future slice … no documented
+   decrypt scheme"). Treat the steps below as the design, not the build.
 2. **GPS check** runs against cached session geofence config.
 3. **Liveness** runs client-side (MediaPipe Face Mesh WASM, EAR + PnP heuristics).
 4. **Status is tentative**: marked `pending` in queue. Server recomputes on sync.
@@ -308,13 +339,14 @@ sequenceDiagram
     API->>DB: SELECT face_embedding, face_embedding_version
     DB-->>API: version = 5, embedding = "enc blob"
 
-    API-->>S: 200 {version: 5, embedding: "enc blob"}
+    API-->>S: 200 {version: 5, embedding: "plaintext blob"}
 
-    S->>S: Decrypt with device key
-    S->>IDB: Upsert {student_id, version: 5, embedding: decrypted}
+    S->>S: Encrypt with device key (encryptBlob)
+    S->>IDB: Upsert {student_id, version: 5, embedding: <ciphertext>}
     IDB-->>S: Stored
 
-    Note over S: Subsequent scans use cached v5 embedding
+    Note over S: Subsequent scans use cached v5 ciphertext —
+    N.B. client-side compare is not yet implemented (see "Offline Verification")
 ```
 
 ---
