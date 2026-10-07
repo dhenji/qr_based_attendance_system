@@ -209,3 +209,15 @@ class RecoveryGrantRequiredException(AuthDomainException):
 
     def __init__(self) -> None:
         super().__init__(message="Invalid email or password")
+
+
+class PasswordReusedException(AuthDomainException):
+    """400 = new password is identical to the current one."""
+
+    status_code: int = 400
+    code: str = "password_reused"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="New password must be different from the current password"
+        )

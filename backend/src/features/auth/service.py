@@ -51,8 +51,9 @@ from features.auth.exceptions import (
     MfaAlreadyEnabledException,
     MfaNotEnabledException,
     MfaVerifyException,
-    OtpExpiredException,
     OtpInvalidException,
+    OtpExpiredException,
+    PasswordReusedException,
     RecoveryGrantRequiredException,
     RecoveryLockedException,
     SecurityAnswerInvalidException,
@@ -478,6 +479,9 @@ class AuthService:
         if user is None or not user.is_active:
             raise UnrecognizedEmailException()
 
+        if verify_password(new_password, user.password_hash):
+            raise PasswordReusedException()
+
         old_value: dict[str, Any] = _account_snapshot(user)
 
         user.password_hash = hash_password(new_password)
@@ -502,6 +506,9 @@ class AuthService:
     ) -> None:
         if not verify_password(current_password, user.password_hash):
             raise CurrentPasswordInvalid()
+
+        if verify_password(new_password, user.password_hash):
+            raise PasswordReusedException()
 
         user.password_hash = hash_password(new_password)
         user.must_change_password = False

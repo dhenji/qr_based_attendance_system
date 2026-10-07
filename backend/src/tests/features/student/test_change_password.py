@@ -176,3 +176,17 @@ def test_missing_linked_user_raises_404() -> None:
 
     with pytest.raises(StudentNotFoundException):
         _run(service.change_password(42, CURRENT_PASSWORD, NEW_PASSWORD))
+
+
+def test_reused_new_password_is_rejected() -> None:
+    from features.student.exceptions import PasswordReusedException
+
+    user = _FakeUser(42, CURRENT_PASSWORD, must_change=True)
+    original_hash = user.password_hash
+    service = StudentService(_FakeSession(student=_student(), user=user))
+
+    with pytest.raises(PasswordReusedException):
+        _run(service.change_password(42, CURRENT_PASSWORD, CURRENT_PASSWORD))
+
+    assert user.password_hash == original_hash
+    assert user.must_change_password is True

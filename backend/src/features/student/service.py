@@ -25,6 +25,7 @@ from features.program.exceptions import (
 from features.program.model import Program, YearLevel
 from features.student.exceptions import (
     CurrentPasswordInvalidException,
+    PasswordReusedException,
     FaceEmbeddingNotFoundException,
     StudentEmailExistsException,
     StudentHasRecordsException,
@@ -637,6 +638,9 @@ class StudentService:
 
         if not verify_password(current_password, user.password_hash):
             raise CurrentPasswordInvalidException()
+
+        if verify_password(new_password, user.password_hash):
+            raise PasswordReusedException()
 
         user.password_hash = hash_password(new_password)
         user.must_change_password = False

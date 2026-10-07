@@ -78,6 +78,8 @@
 			return 'No account matches that email. Contact an administrator.';
 		if (e instanceof APIError && e.code === 'password_policy_violation')
 			return 'Password does not meet the required policy.';
+		if (e instanceof APIError && e.code === 'password_reused')
+			return 'New password must be different from your current one.';
 		return e instanceof Error && e.message ? e.message : fallback;
 	};
 
