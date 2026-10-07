@@ -89,7 +89,16 @@ python -m pytest src/tests/ -v
 
 The suite holds **719 cases across 49 files**. `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
 
-Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead.
+Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead. Create a dedicated test database first — the Compose Postgres only creates `attendance_sys`, and the suite runs `create_all`/`drop_all` per test, so never point `TEST_DATABASE_URL` at `attendance_sys` itself:
+
+```bash
+docker compose -f docker-compose.dev.yml exec db \
+  psql -U postgres -c "CREATE DATABASE attendance_test;"
+
+cd backend
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test \
+  PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
+```
 
 ### Deselecting slow and integration tests
 

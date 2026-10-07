@@ -30,7 +30,7 @@ Backend tests — SQLite in-memory by default (no Docker needed); `DEBUG` + `JWT
 ```bash
 cd backend
 DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/python -m pytest src/tests -q
-TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test PYTHONPATH=src .venv/bin/python -m pytest src/tests -q  # same suite on Postgres
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_test PYTHONPATH=src .venv/bin/python -m pytest src/tests -q  # same suite on Postgres; first create the DB (CREATE DATABASE attendance_test) — never point this at attendance_sys, the suite drops/creates tables per test
 ```
 Markers in `backend/pytest.ini`: `-m "not slow"`, `-m "not integration"`. No `--cov` in `addopts`; add `--cov=src/features --cov=src/shared --cov=src/core` explicitly when needed.
 
