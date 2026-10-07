@@ -18,6 +18,13 @@ STUDENT_ID_MAX_LENGTH: int = 50
 
 EMAIL_MAX_LENGTH: int = 255
 
+# Per-IP throttle on POST /sessions/verify-code. Unlike the scan endpoint, a
+# successful verify is a legitimate single retry (fat-fingered code), so the
+# cap is deliberately tight to slow probing for a working session code while
+# barely affecting a real student.
+VERIFY_CODE_RATE_LIMIT_MAX_CALLS: int = 10
+VERIFY_CODE_RATE_LIMIT_WINDOW_SECONDS: int = 60
+
 SECTION_MAX_LENGTH: int = 20
 
 SORT_BY_OPTIONS: tuple[str, ...] = ("last_name", "student_id", "created_at")
@@ -39,4 +46,6 @@ __all__: list[str] = [
     "STUDENT_ID_MIN_LENGTH",
     "USERNAME_MAX_LENGTH",
     "USERNAME_MIN_LENGTH",
+    "VERIFY_CODE_RATE_LIMIT_MAX_CALLS",
+    "VERIFY_CODE_RATE_LIMIT_WINDOW_SECONDS",
 ]
