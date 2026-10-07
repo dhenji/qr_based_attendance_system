@@ -1076,7 +1076,7 @@ Change password.
 | ---------------- | ---------------------------------------------------------------- |
 | **Request**      | `{ current_password: string, new_password: string }`             |
 | **Response 200** | `{ message: "Password updated" }`                                |
-| **Errors**       | 400 `current_password_invalid` |
+| **Errors**       | 400 `current_password_invalid` · 400 `password_reused` |
 
 ---
 
@@ -1312,8 +1312,8 @@ lock after 5 failed attempts.
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` |
-| POST   | `/auth/change-password`            | Change password (authenticated) | — |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
+| POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
 | GET    | `/auth/mfa/backup-codes`           | Backup-code summary (total/remaining) | — |

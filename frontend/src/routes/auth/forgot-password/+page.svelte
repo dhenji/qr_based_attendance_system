@@ -7,17 +7,21 @@
 		forgotPasswordVerify,
 		requestOtp,
 		resetPassword,
-		verifyOtp,
 	} from '$lib/features/auth/service';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { defaultRouteFor, doLogin } from '$lib/features/auth/store.svelte';
 
 	// Forgot-password recovery (ADR-056), live against the backend:
 	//  1. POST /auth/forgot-password {email} -> {question} (decoy for unknown
 	//     emails — always render it, never hint at account existence).
 	//  2. POST /auth/forgot-password/verify {email, answer} -> recovery_token
 	//     (5-min grant held in memory; 423 recovery_locked on lockout).
-	//  3. OTP request (grant-gated) + verify; Resend re-requests for real.
+	//  3. OTP request (grant-gated); the code is collected here and verified
+	//     + consumed exactly once, by the reset call at step 4 (ADR-056).
 	//  4. POST /auth/reset-password {email, otp_code, new_password}.
+	//  5. On success, auto-login with the new password and land on the role
+	//     dashboard (mfa_pending or a login failure falls back to the login
+	//     page).
 	// No Turnstile widget exists yet — turnstile_token is sent null and the
 	// backend no-ops when its secret is empty.
 
@@ -74,6 +78,8 @@
 			return 'No account matches that email. Contact an administrator.';
 		if (e instanceof APIError && e.code === 'password_policy_violation')
 			return 'Password does not meet the required policy.';
+		if (e instanceof APIError && e.code === 'password_reused')
+			return 'New password must be different from your current one.';
 		return e instanceof Error && e.message ? e.message : fallback;
 	};
 
@@ -132,16 +138,8 @@
 			error = 'Enter all 6 digits';
 			return;
 		}
-		busy = true;
 		error = '';
-		try {
-			await verifyOtp(email, otp.join(''), 'forget_password');
-			step = 4;
-		} catch (e: unknown) {
-			error = toMessage(e, 'Code verification failed. Please try again.');
-		} finally {
-			busy = false;
-		}
+		step = 4;
 	}
 
 	async function handleStep4() {
@@ -162,9 +160,20 @@
 		try {
 			await resetPassword(email, otp.join(''), newPwd);
 			success = true;
-			setTimeout(() => goto(Routes.LOGIN), 1500);
+			setTimeout(async () => {
+				try {
+					const user = await doLogin(email, newPwd);
+					if (user) goto(defaultRouteFor(user));
+					else goto(Routes.LOGIN);
+				} catch {
+					goto(Routes.LOGIN);
+				}
+			}, 1500);
 		} catch (e: unknown) {
 			error = toMessage(e, 'Password reset failed. Please try again.');
+			if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired')) {
+				step = 3;
+			}
 		} finally {
 			busy = false;
 		}

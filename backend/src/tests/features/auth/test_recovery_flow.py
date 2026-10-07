@@ -325,3 +325,38 @@ def test_expired_grant_is_rejected_by_decoder() -> None:
 
 def test_recovery_token_type_is_distinct() -> None:
     assert RECOVERY_TOKEN_TYPE not in (PREAUTH_TOKEN_TYPE, "refresh")
+
+
+def test_reset_password_rejects_reused_password() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from core.security import hash_otp
+    from features.auth.exceptions import PasswordReusedException
+
+    now = datetime.now(timezone.utc)
+
+    record = SimpleNamespace(
+        id=3,
+        email="u@example.com",
+        is_active=True,
+        consumed_at=None,
+        expires_at=now + timedelta(minutes=5),
+        otp_hash=hash_otp("123456"),
+        password_hash=hash_password("OldPass1!"),
+    )
+
+    service = _service(record)
+
+    with pytest.raises(PasswordReusedException):
+        asyncio.run(service.reset_password("u@example.com", "123456", "OldPass1!"))
+
+
+def test_change_password_rejects_reused_password() -> None:
+    from features.auth.exceptions import PasswordReusedException
+
+    user = _user(password_hash=hash_password("OldPass1!"))
+
+    with pytest.raises(PasswordReusedException):
+        asyncio.run(
+            _service(user).change_password(user, "OldPass1!", "OldPass1!")
+        )
