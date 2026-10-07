@@ -276,7 +276,15 @@ DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/pyth
 which build `Settings()` themselves; `conftest.py` sets both for everything
 it owns. `PYTHONPATH=src` is what makes `core.*`/`features.*` importable.
 
-To run the same suite against a real Postgres instead of SQLite:
+To run the same suite against a real Postgres instead of SQLite, create a
+dedicated test database first — the Compose Postgres only creates
+`attendance_sys`, and the suite runs `create_all`/`drop_all` per test, so
+never point `TEST_DATABASE_URL` at `attendance_sys` itself:
+
+```bash
+docker compose -f docker-compose.dev.yml exec db \
+  psql -U postgres -c "CREATE DATABASE attendance_test;"
+```
 
 ```bash
 cd backend

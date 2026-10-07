@@ -27,6 +27,7 @@ const MESSAGES: Record<string, string> = {
 	mfa_already_enabled: 'Two-factor authentication is already enabled.',
 
 	password_policy_violation: 'Password does not meet the required policy.',
+	password_reused: 'New password must be different from your current one.',
 	current_password_invalid: 'Your current password is incorrect.',
 
 	invalid_captcha: 'Captcha verification failed. Please try again.',

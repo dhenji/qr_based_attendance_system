@@ -161,3 +161,15 @@ class CurrentPasswordInvalidException(StudentDomainException):
 
     def __init__(self) -> None:
         super().__init__(message="Current password is incorrect")
+
+
+class PasswordReusedException(StudentDomainException):
+    """400 - the new password matches the current one."""
+
+    status_code: int = 400
+    code: str = "password_reused"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="New password must be different from the current password"
+        )
