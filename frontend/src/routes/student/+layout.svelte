@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import {
 		authState,
 		defaultRouteFor,
@@ -60,6 +61,10 @@
 	});
 
 	onDestroy(() => {
+		// onDestroy also runs during SSR teardown, where window/document do
+		// not exist — and onMount (the only place listeners attach) never
+		// runs on the server, so there is nothing to clean up there.
+		if (!browser) return;
 		if (pollTimer) clearInterval(pollTimer);
 		window.removeEventListener('focus', onNotifFocus);
 		document.removeEventListener('visibilitychange', onNotifFocus);
