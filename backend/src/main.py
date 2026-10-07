@@ -20,6 +20,16 @@ from features.system.service import run_scheduled_backup
 
 logger = logging.getLogger(__name__)
 
+if get_settings().debug:
+    _email_logger = logging.getLogger("shared.email")
+    _email_logger.setLevel(logging.INFO)
+    if not _email_logger.handlers:
+        _email_handler = logging.StreamHandler()
+        _email_handler.setFormatter(
+            logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        )
+        _email_logger.addHandler(_email_handler)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
