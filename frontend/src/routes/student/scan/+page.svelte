@@ -602,9 +602,10 @@
 				<div class="code-row">
 					<input
 						class="form-input code-input"
-						placeholder="Enter code from projector (e.g. A7X-9K2M)"
+						placeholder="Enter code from projector (e.g. wan9YQXY)"
+						style="text-transform: none;"
 						value={sessionCode}
-						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value.toUpperCase(); }}
+						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value; }}
 					/>
 					<button
 						class="btn-secondary"
