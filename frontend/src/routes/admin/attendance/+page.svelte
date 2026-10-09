@@ -39,6 +39,8 @@
 
 	let courseOptions = $state<AdminCourse[]>([]);
 	let professorOptions = $state<AdminProfessor[]>([]);
+	let filterNotice = $state<string | null>(null);
+	let exportNote = $state<string | null>(null);
 
 	// Liveness review (flagged-scan queue): records whose face_match_score fell
 	// in the review band stay actionable only while pending; resolving via the
@@ -85,11 +87,13 @@
 			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
 		} catch {
 			courseOptions = [];
+			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		try {
 			professorOptions = (await listProfessors({ page: 1, size: 100 })).items;
 		} catch {
 			professorOptions = [];
+			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await load();
 		await loadLiveness();
@@ -161,6 +165,7 @@
 	// and unreachable backends fall back to the client-side aggregate CSV.
 	const onExport = async () => {
 		const filename = `attendance-overview-${new Date().toISOString().slice(0, 10)}.csv`;
+		exportNote = null;
 		try {
 			downloadCsv(
 				filename,
@@ -172,6 +177,7 @@
 				})
 			);
 		} catch {
+			exportNote = 'Server export unavailable — downloaded the on-screen rows instead.';
 			downloadCsv(filename, attendanceOverviewCsv(adminAttendanceState.items));
 		}
 	};
@@ -188,6 +194,10 @@
 			<button class="btn btn-primary" data-testid="export-overview" onclick={onExport}>Export Overview</button>
 		</div>
 	</header>
+
+	{#if exportNote}
+		<p class="muted" role="status">{exportNote}</p>
+	{/if}
 
 	<div class="tabs" role="tablist" aria-label="Attendance sections">
 		<button
@@ -308,6 +318,9 @@
 		<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
 		<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
+		{#if filterNotice}
+			<p class="muted" role="status">{filterNotice}</p>
+		{/if}
 	</section>
 
 	{#if adminAttendanceState.loading && adminAttendanceState.items.length === 0}

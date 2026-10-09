@@ -67,6 +67,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let riskLevel = $state<'' | 'low' | 'medium' | 'high'>('');
 	let nameSortDir = $state<'asc' | 'desc'>('asc');
 	let formError = $state<string | null>(null);
+	let filterNotice = $state<string | null>(null);
 	let refreshBusy = $state(false);
 
 	let programOptions = $state<Program[]>([]);
@@ -184,11 +185,13 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
 		} catch {
 			programOptions = [];
+			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		try {
 			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
 		} catch {
 			courseOptions = [];
+			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await apply();
 	});
@@ -202,6 +205,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				yearOptions = await listYearLevels(Number(programFilter));
 			} catch {
 				yearOptions = [];
+				filterNotice = 'Some filters failed to load — lists may be incomplete.';
 			}
 		}
 		await apply();
@@ -240,8 +244,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	// Server-first comparison export (POST /admin/analytics/export): per-course
 	// rows straight from the backend for the rail's filter set. Mock mode and
 	// unreachable backends fall back to the client-side aggregate CSV.
+	let exportNote = $state<string | null>(null);
 	const exportComparison = async () => {
 		const filename = `analytics-comparison-${stamp()}.csv`;
+		exportNote = null;
 		try {
 			downloadCsv(
 				filename,
@@ -255,6 +261,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				})
 			);
 		} catch {
+			exportNote = 'Server export unavailable — downloaded the on-screen rows instead.';
 			downloadCsv(filename, comparisonCsv(comparison));
 		}
 	};
@@ -373,6 +380,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
 		{#if formError}
 			<p class="error" role="alert">{formError}</p>
+		{/if}
+		{#if filterNotice}
+			<p class="muted" role="status">{filterNotice}</p>
 		{/if}
 		<fieldset class="courses">
 			<legend>Courses (multi)</legend>
@@ -654,6 +664,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				<div><div><div class="strong">At-risk students</div><div class="muted small">{adminAnalyticsState.atRisk.length} rows</div></div><button class="btn btn-secondary" onclick={exportAtRisk}>Download CSV</button></div>
 				<div><div><div class="strong">Staging review</div><div class="muted small">{adminStagingState.items.length} rows</div></div><button class="btn btn-secondary" onclick={exportStaging}>Download CSV</button></div>
 			</div>
+			{#if exportNote}
+				<p class="muted" role="status">{exportNote}</p>
+			{/if}
 		</section>
 	{/if}
 </div>

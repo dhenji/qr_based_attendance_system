@@ -56,6 +56,7 @@
 	let loadError = $state<string | null>(null);
 	let reloadToken = $state(0);
 	let exporting = $state(false);
+	let exportError = $state<string | null>(null);
 
 	// Course options deduped by code, sections joined from the live courses
 	// store. The ledger only queries once both are picked.
@@ -227,6 +228,7 @@
 	const exportCsv = async () => {
 		if (exporting || !canQuery) return;
 		exporting = true;
+		exportError = null;
 		try {
 			const baseQuery = {
 				course: course || undefined,
@@ -284,6 +286,8 @@
 			anchor.click();
 			anchor.remove();
 			URL.revokeObjectURL(url);
+		} catch (e: unknown) {
+			exportError = e instanceof Error && e.message ? e.message : 'Export failed. Please try again.';
 		} finally {
 			exporting = false;
 		}
@@ -586,6 +590,9 @@
 						{exporting ? 'Exporting…' : 'Export CSV'}
 					</button>
 				</div>
+				{#if exportError}
+					<p class="error" role="alert">{exportError}</p>
+				{/if}
 			</div>
 		</section>
 	{/if}

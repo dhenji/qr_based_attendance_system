@@ -23,16 +23,23 @@
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
-	onMount(async () => {
-		initAttendanceOverview();
+	const load = async () => {
+		loading = true;
+		loadError = null;
 		try {
 			dashboard = await getAdminDashboard();
 		} catch (e: unknown) {
+			dashboard = null;
 			loadError =
 				e instanceof Error && e.message ? e.message : 'Could not load the dashboard.';
 		} finally {
 			loading = false;
 		}
+	};
+
+	onMount(async () => {
+		initAttendanceOverview();
+		await load();
 	});
 
 	const today = $derived(
@@ -93,6 +100,9 @@
 	{#if loadError}
 		<section class="card">
 			<p class="error">Could not load roster counts: {loadError}</p>
+			<button class="btn btn-secondary" disabled={loading} onclick={() => void load()}>
+				{loading ? 'Retrying…' : 'Try again'}
+			</button>
 		</section>
 	{/if}
 
@@ -166,6 +176,8 @@
 		</div>
 		{#if loading}
 			<p class="muted">Loading…</p>
+		{:else if loadError && !dashboard}
+			<p class="muted">The recent-scans feed is unavailable — try again above.</p>
 		{:else if !dashboard || dashboard.recent_scans.length === 0}
 			<p class="muted">No scans yet.</p>
 		{:else}
