@@ -82,11 +82,9 @@ const toMessage = (e: unknown, fallback: string) =>
 
 // init
 // One-shot bootstrap: loads the profile, dashboard summary, schedule, and
-// history into state. GET /student/profile and GET /student/dashboard have no
-// backend route yet and 404 in real mode, so each leg is independent — a
-// single 404 never blanks the page. Profile falls back to GET /auth/me;
-// dashboard falls back to EMPTY_DASHBOARD. studentState.error is set only
-// when every leg fails.
+// history into state. Each leg is independent — a single failure never blanks
+// the page. Profile falls back to GET /auth/me; dashboard falls back to
+// EMPTY_DASHBOARD. studentState.error is set only when every leg fails.
 export const initStudent = async (): Promise<void> => {
 	studentState.loading = true;
 	studentState.error = null;
@@ -146,6 +144,7 @@ export const initStudent = async (): Promise<void> => {
 		try {
 			studentState.courses = await getSchedule();
 		} catch {
+			failures += 1;
 			studentState.courses = [];
 		}
 
@@ -157,7 +156,7 @@ export const initStudent = async (): Promise<void> => {
 			studentState.history = [];
 		}
 
-		if (failures >= 3 && !studentState.student) {
+		if (failures >= 4 && !studentState.student) {
 			studentState.error = 'Failed to load student data';
 		}
 	} catch (e: unknown) {
@@ -168,14 +167,17 @@ export const initStudent = async (): Promise<void> => {
 };
 
 // Actions
-// doUpdateProfile: apply partial profile edits and reflect them in state.
+// doUpdateProfile: profile is read-only (D32) — never wipes local state.
+// updateProfile throws, so a failed edit preserves the current student.
 export const doUpdateProfile = async (updates: Partial<Student>): Promise<void> => {
 	studentState.loading = true;
 	studentState.error = null;
 	try {
-		studentState.student = await updateProfile(updates);
+		const next = await updateProfile(updates);
+		if (next) studentState.student = next;
+		else studentState.error = 'Student profile is read-only.';
 	} catch (e: unknown) {
-		studentState.error = toMessage(e, 'Failed to update profile');
+		studentState.error = toMessage(e, 'Student profile is read-only.');
 	} finally {
 		studentState.loading = false;
 	}

@@ -130,8 +130,11 @@ const viaForDisplay = (scannedVia: string | null): string | undefined => {
 // sort_by=date|student|section|status|time&sort_dir&page&size
 //
 // The backend filters by course_id, not course code: the page's course filter
-// resolves code -> course_id here. Counts and the distinct-session total are
-// derived from the returned page (the envelope carries no aggregates).
+// resolves code -> course_id here. A code can exist in two programs — when it
+// is ambiguous no course_id is sent and the page filters the joined rows
+// client-side instead of guessing the wrong course.
+// Counts and the distinct-session total cover the returned page only (the
+// envelope carries no aggregates); `total` stays the server global.
 export const listRecords = async (params?: AttendanceLedgerFilters) => {
 	await ensureDirectory();
 
@@ -143,10 +146,14 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 	};
 	if (params?.offeringId !== undefined) query.offering_id = String(params.offeringId);
 	if (params?.course !== undefined) {
-		const courseId = professorState.courses.find(
+		const matches = professorState.courses.filter(
 			(course) => course.courseCode === params.course
-		)?.courseId;
-		if (courseId !== undefined) query.course_id = String(courseId);
+		);
+		// Exactly one owner: safe to push down. Ambiguous or unknown: leave
+		// the server unfiltered so the joined code filter below decides.
+		if (matches.length === 1 && matches[0].courseId !== undefined) {
+			query.course_id = String(matches[0].courseId);
+		}
 	}
 	if (params?.section !== undefined) query.section = params.section;
 	if (params?.sessionId !== undefined) query.session_id = String(params.sessionId);
@@ -164,6 +171,10 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 		const identity = session
 			? courseIdentityFor(session.offeringId)
 			: { code: '—', name: '', section: item.section ?? '—' };
+		// created_at/expires_at fall back to scanned_at only for display/sort;
+		// a row whose session is outside the recent directory has no true
+		// session clock, so callers must treat these as scanned times.
+		// excuse_reason has no contract field — always undefined by design.
 		return {
 			id: item.id,
 			session_id: item.session_id,
@@ -192,6 +203,8 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 		};
 	});
 
+	// Page counts only — the envelope carries total/page/size but no
+	// aggregates, so summaryText must label these as page counts.
 	const counts = { present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 };
 	const sessionIds = new Set<number>();
 	for (const item of items) {

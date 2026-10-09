@@ -291,12 +291,10 @@ const fetchSessions = async (
 	if (isMockMode()) {
 		return { sessions: filterMockSessions(filters), meta: { dataSource: 'demo', truncated: false } };
 	}
-	try {
-		const { sessions, truncated } = await fetchLiveSessions(filters, directory);
-		return { sessions, meta: { dataSource: 'live', truncated } };
-	} catch {
-		return { sessions: filterMockSessions(filters), meta: { dataSource: 'demo', truncated: false } };
-	}
+	// Live mode: propagate failures so the page shows an error with retry
+	// instead of silently rendering demo fixtures as if they were real.
+	const { sessions, truncated } = await fetchLiveSessions(filters, directory);
+	return { sessions, meta: { dataSource: 'live', truncated } };
 };
 
 const summarize = (sessions: ReportSessionRecord[]) => {

@@ -22,7 +22,7 @@
 		type QueuedScan
 	} from '$lib/features/sync/service';
 	import { initStudent, studentState } from '$lib/features/student/store.svelte';
-	import { APIError } from '$lib/api/client';
+	import { APIError, isMockMode } from '$lib/api/client';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
@@ -563,7 +563,9 @@
 <div class="scan">
 	{#if offline || pendingCount > 0}
 		<div class="offline-banner">
-			{#if offline}
+			{#if isMockMode() && pendingCount > 0}
+				Mock mode · {pendingCount} queued (sync disabled without a backend).
+			{:else if offline}
 				You are offline · Records will sync when connected.
 			{:else}
 				Back online · Syncing queued records.
@@ -571,7 +573,7 @@
 			{#if pendingCount > 0}
 				<span class="offline-count">{pendingCount} pending</span>
 			{/if}
-			{#if !offline && pendingCount > 0}
+			{#if !offline && pendingCount > 0 && !isMockMode()}
 				<button class="banner-retry" onclick={() => void flushNow()} disabled={flushing}>
 					{flushing ? 'Syncing…' : 'Retry now'}
 				</button>

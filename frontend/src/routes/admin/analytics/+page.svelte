@@ -102,11 +102,13 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		}))
 	);
 
-	const avgRate = $derived(
-		comparison.length === 0
-			? 0
-			: comparison.reduce((sum, r) => sum + rateFor(r, metric), 0) / comparison.length
-	);
+	const avgRate = $derived.by(() => {
+		// Authoritative term-wide figure from the overview tab — the comparison
+		// mean below is only a fallback when overview has not loaded.
+		if (overview) return metric === 'compliance' ? overview.avg_compliance_rate : overview.avg_participation_rate;
+		if (comparison.length === 0) return 0;
+		return comparison.reduce((sum, r) => sum + rateFor(r, metric), 0) / comparison.length;
+	});
 
 	const trendSeries = $derived([
 		{

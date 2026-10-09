@@ -304,8 +304,8 @@
 						</table>
 					</div>
 					<p class="hint">
-						Showing {filtered.length}
-						{filtered.length === 1 ? 'session' : 'sessions'} · full filterable history lives under
+						Showing {recentSessions.length}
+						{recentSessions.length === 1 ? 'session' : 'sessions'} · full filterable history lives under
 						<button class="link" type="button" onclick={goHistory}>History</button>.
 					</p>
 				</div>

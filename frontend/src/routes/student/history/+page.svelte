@@ -190,6 +190,7 @@
 
 	// Reload server page when the server-side controls change. rows/total/
 	// loading are written by load() but never read here, so no reload loop.
+	// Excuse list refreshes alongside history so sort/page never show stale requests.
 	$effect(() => {
 		const key = sortKey;
 		const asc = sortAsc;
@@ -209,6 +210,7 @@
 				rows = res.items.map(toRow);
 				total = res.total;
 				summary = res.summary;
+				void loadMyRequests();
 			} catch (e) {
 				loadError =
 					e instanceof APIError
@@ -307,12 +309,29 @@
 		exportNote = null;
 		try {
 			const status = filterStatus !== 'All' ? (filterStatus.toLowerCase() as Status) : undefined;
-			const csv = await exportSessionHistoryCsv({
-				status,
-				courseId: courseIdForExport,
-				sortBy: sortKey,
-				sortDir: sortAsc ? 'asc' : 'desc',
-			});
+			let csv: string;
+			try {
+				csv = await exportSessionHistoryCsv({
+					status,
+					courseId: courseIdForExport,
+					sortBy: sortKey,
+					sortDir: sortAsc ? 'asc' : 'desc',
+				});
+			} catch (e) {
+				// getText has no mock path — fall back to the rows on screen
+				// in mock/offline mode instead of always erroring.
+				if (e instanceof APIError && e.code === 'mock_mode') {
+					const header = 'date,course,course_name,status,time,scanned_at';
+					const lines = filtered.map((r) =>
+						[r.date, r.course, `"${r.courseName.replace(/"/g, '""')}"`, r.status, r.time, r.scannedAt].join(',')
+					);
+					csv = [header, ...lines].join('\n');
+					exportNote =
+						'Mock mode: exported the rows on screen (server CSV is unavailable without a backend).';
+				} else {
+					throw e;
+				}
+			}
 
 			// Header-only means the filter matched nothing, which is worth saying
 			// rather than handing over an empty file.
@@ -334,7 +353,7 @@
 			a.remove();
 			URL.revokeObjectURL(url);
 
-			if (droppedFilters.length > 0) {
+			if (droppedFilters.length > 0 && !exportNote) {
 				exportNote = `Exported every matching row. ${droppedFilters.join(' and ')} ${
 					droppedFilters.length === 1 ? 'is' : 'are'
 				} applied on screen only, so ${droppedFilters.length === 1 ? 'it is' : 'they are'} not in the file.`;

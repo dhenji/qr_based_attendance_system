@@ -37,7 +37,7 @@
 		upper: /[A-Z]/.test(newPassword),
 		lower: /[a-z]/.test(newPassword),
 		number: /\d/.test(newPassword),
-		symbol: /[^A-Za-z0-9]/.test(newPassword),
+		symbol: /[^A-Za-z0-9\s]/.test(newPassword),
 	});
 	const passwordOk = $derived(Object.values(passwordReq).every(Boolean));
 	const passwordsMatch = $derived(newPassword === confirmPassword);

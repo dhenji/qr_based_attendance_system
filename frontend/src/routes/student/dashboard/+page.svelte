@@ -36,7 +36,7 @@
 	</header>
 
 	{#if studentState.error}
-		<p class="error">{studentState.error}</p>
+		<p class="error">{studentState.error} <button class="retry-btn" onclick={() => void initStudent()}>Try again</button></p>
 	{/if}
 
 	<section class="hero">
@@ -206,5 +206,18 @@
 	.error {
 		color: var(--danger);
 		margin: 0;
+	}
+
+	.retry-btn {
+		margin-left: 0.75rem;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		border-radius: 8px;
+		padding: 0.375rem 0.875rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: inherit;
+		color: var(--brand);
+		cursor: pointer;
 	}
 </style>

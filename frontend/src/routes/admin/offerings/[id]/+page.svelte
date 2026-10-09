@@ -25,6 +25,7 @@
 		offeringUpdateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
+	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type {
 		AdminBulkEnrollResult,
 		AdminCourse,
@@ -298,12 +299,26 @@
 
 	const onBulkFile = (e: Event) => {
 		const input = e.target as HTMLInputElement;
-		bulkFile = input.files?.[0] ?? null;
+		const picked = input.files?.[0] ?? null;
+		bulkFile = picked;
 		bulkResult = null;
+		if (picked) {
+			const parsed = csvFileSchema.safeParse(picked);
+			if (!parsed.success) {
+				adminOfferingDetailState.actionError = parsed.error.issues[0]?.message ?? 'Invalid CSV file.';
+				bulkFile = null;
+				input.value = '';
+			}
+		}
 	};
 
 	const submitBulk = async () => {
 		if (!offering || !bulkFile || bulkBusy) return;
+		const parsed = csvFileSchema.safeParse(bulkFile);
+		if (!parsed.success) {
+			adminOfferingDetailState.actionError = parsed.error.issues[0]?.message ?? 'Invalid CSV file.';
+			return;
+		}
 		bulkBusy = true;
 		try {
 			bulkResult = await bulkEnrollOffering(offering.id, bulkFile);
