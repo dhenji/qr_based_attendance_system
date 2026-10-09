@@ -1128,7 +1128,7 @@
 		justify-content: center;
 	}
 
-	.viewfinder :global(#qr-reader) {
+	.viewfinder :global(video) {
 		width: 100%;
 		height: 100%;
 	}
