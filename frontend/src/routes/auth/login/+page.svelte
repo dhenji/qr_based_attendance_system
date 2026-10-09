@@ -11,7 +11,6 @@
 		doMfaVerify,
 	} from '$lib/features/auth/store.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
-	import ErrorBoundary from '$lib/components/ErrorBoundary.svelte';
 	import { isMockMode } from '$lib/api/client';
 
 	// 'credentials' -> 'mfa' (when the account has MFA enabled) -> 'change-password'
@@ -28,6 +27,9 @@
 	let confirmPassword = $state('');
 	let error = $state('');
 
+	let passwordInput: HTMLInputElement | undefined = $state();
+	let mfaInput: HTMLInputElement | undefined = $state();
+
 	// Same policy the backend enforces in shared/validators.password_strength:
 	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.
 	// A space is not a symbol server-side, so it is excluded here too.
@@ -42,6 +44,12 @@
 	const passwordsMatch = $derived(newPassword === confirmPassword);
 
 	const describe = (e: unknown, fallback: string) => toAuthMessage(e, fallback);
+
+	// Dismiss a stale failure as soon as the user starts correcting the form,
+	// so the banner never reads as "still broken" while they type.
+	const clearError = () => {
+		if (error) error = '';
+	};
 
 	const handleLogin = async (event: SubmitEvent) => {
 		event.preventDefault();
@@ -63,6 +71,10 @@
 			await finishLogin(user);
 		} catch (e: unknown) {
 			error = describe(e, 'Login failed. Please try again.');
+			// Keep the email so retry is one field, not two; clear the secret
+			// and focus it so the next attempt starts in the right place.
+			password = '';
+			passwordInput?.focus();
 		}
 	};
 
@@ -80,6 +92,9 @@
 			await finishLogin(user);
 		} catch (e: unknown) {
 			error = describe(e, 'Verification failed. Please try again.');
+			// Single-use code: never leave a rejected one in the field.
+			mfaCode = '';
+			mfaInput?.focus();
 		}
 	};
 
@@ -150,8 +165,9 @@
 					<span class="mono">jose.p.rizal@isu.edu.ph</span>.
 				</p>
 			{/if}
-			<ErrorBoundary {error} retryButton={false}>
-				{#snippet children()}
+			{#if error}
+				<div class="error-banner" role="alert">{error}</div>
+			{/if}
 
 			{#if stage === 'credentials'}
 				<form onsubmit={handleLogin}>
@@ -160,7 +176,7 @@
 						<input class="form-input" id="email" type="email" required
 							autocomplete="email" placeholder="universityemail@isu.edu.ph"
 							value={email}
-							oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
+							oninput={(e) => { email = (e.target as HTMLInputElement).value; clearError(); }} />
 					</div>
 
 					<div class="field">
@@ -169,7 +185,8 @@
 							<input class="form-input" id="password" type={showPwd ? 'text' : 'password'}
 								required autocomplete="current-password" placeholder="••••••••••••"
 								value={password}
-								oninput={(e) => { password = (e.target as HTMLInputElement).value; }}
+								bind:this={passwordInput}
+								oninput={(e) => { password = (e.target as HTMLInputElement).value; clearError(); }}
 								style="padding-right: 2.5rem;" />
 							<button type="button" class="pwd-toggle"
 								onclick={() => { showPwd = !showPwd; }}
@@ -201,7 +218,8 @@
 						<input class="form-input mono" id="mfa" required inputmode="numeric"
 							autocomplete="one-time-code" maxlength="16" placeholder="000000"
 							value={mfaCode}
-							oninput={(e) => { mfaCode = (e.target as HTMLInputElement).value; }} />
+							bind:this={mfaInput}
+							oninput={(e) => { mfaCode = (e.target as HTMLInputElement).value; clearError(); }} />
 						<p class="hint">Enter the 6-digit TOTP, or one of your backup codes
 							(formatted <span class="mono">XXXX-XXXX-XX</span>).</p>
 					</div>
@@ -226,14 +244,14 @@
 						<label class="form-label" for="current-password">Current password</label>
 						<input class="form-input" id="current-password" type="password" required
 							autocomplete="current-password" value={currentPassword}
-							oninput={(e) => { currentPassword = (e.target as HTMLInputElement).value; }} />
+							oninput={(e) => { currentPassword = (e.target as HTMLInputElement).value; clearError(); }} />
 					</div>
 
 					<div class="field">
 						<label class="form-label" for="new-password">New password</label>
 						<input class="form-input" id="new-password" type="password" required
 							autocomplete="new-password" value={newPassword}
-							oninput={(e) => { newPassword = (e.target as HTMLInputElement).value; }} />
+							oninput={(e) => { newPassword = (e.target as HTMLInputElement).value; clearError(); }} />
 					</div>
 
 					<ul class="req-list">
@@ -248,7 +266,7 @@
 						<label class="form-label" for="confirm-password">Confirm new password</label>
 						<input class="form-input" id="confirm-password" type="password" required
 							autocomplete="new-password" value={confirmPassword}
-							oninput={(e) => { confirmPassword = (e.target as HTMLInputElement).value; }} />
+							oninput={(e) => { confirmPassword = (e.target as HTMLInputElement).value; clearError(); }} />
 						{#if confirmPassword && !passwordsMatch}
 							<p class="hint warn">Passwords do not match.</p>
 						{/if}
@@ -283,9 +301,6 @@
 					</span>
 				</div>
 			{/if}
-
-			{/snippet}
-		</ErrorBoundary>
 	</div>
 	</div>
 </main>
@@ -349,6 +364,16 @@
 		padding: 2rem;
 		border-radius: 12px;
 		box-shadow: var(--shadow-sm);
+	}
+
+	.error-banner {
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
+		border-radius: 8px;
+		padding: 0.625rem 0.875rem;
+		margin-bottom: 1.25rem;
+		color: var(--danger);
+		font-size: 0.8125rem;
 	}
 
 	.field {
