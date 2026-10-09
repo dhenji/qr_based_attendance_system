@@ -20,9 +20,9 @@
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
-			await goto(Routes.LOGIN);
+			await goto(Routes.LOGIN, { replaceState: true });
 		} else if (!isAdmin()) {
-			await goto(Routes.HOME);
+			await goto(Routes.HOME, { replaceState: true });
 		}
 	});
 

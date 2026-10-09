@@ -50,9 +50,9 @@
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
-			await goto(Routes.LOGIN);
+			await goto(Routes.LOGIN, { replaceState: true });
 		} else if (!isStudent()) {
-			await goto(defaultRouteFor(user));
+			await goto(defaultRouteFor(user), { replaceState: true });
 		} else {
 			void refreshNotif();
 			pollTimer = setInterval(() => {
