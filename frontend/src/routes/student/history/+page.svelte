@@ -495,6 +495,7 @@
 			<input
 				class="form-input search-input"
 				placeholder="Search..."
+				aria-label="Search history"
 				value={search}
 				oninput={(e) => {
 					search = (e.target as HTMLInputElement).value;
@@ -504,6 +505,7 @@
 
 		<select
 			class="form-input select-input"
+			aria-label="Filter by course"
 			value={filterCourse}
 			onchange={(e) => {
 				filterCourse = (e.target as HTMLSelectElement).value;
@@ -518,6 +520,7 @@
 
 		<select
 			class="form-input select-input"
+			aria-label="Filter by status"
 			value={filterStatus}
 			onchange={(e) => {
 				filterStatus = (e.target as HTMLSelectElement).value;

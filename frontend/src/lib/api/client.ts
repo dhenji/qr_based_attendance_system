@@ -343,10 +343,23 @@ export const postForm = async <T>(
 	return response.json() as Promise<T>;
 };
 
-// Raw-text download for CSV templates (GET /admin/students/import/template)
-// and filtered CSV exports (GET /admin/attendance/overview/export). Text/csv
-// routes have no endpoint def (they return text, not JSON), so the path is
-// passed directly. Returns the CSV text for client-side download.
+// Central registry for raw text/blob routes. These return text/csv or binary
+// rather than JSON, so they cannot use the typed EndpointDef registry in
+// endpoints.ts — but every path still lives here, so a contract rename breaks
+// at the import site instead of hiding in scattered string literals.
+export const TEXT_EXPORTS = {
+	studentTemplate: '/admin/students/import/template',
+	studentHistory: '/student/attendance/history/export',
+	adminOverview: '/admin/attendance/overview/export',
+	adminAnalytics: '/admin/analytics/export',
+	professorReports: '/professor/reports/export',
+} as const;
+
+export const backupDownloadPath = (id: number): string => `/admin/backups/${id}/download`;
+
+// Raw-text download for CSV templates (TEXT_EXPORTS.studentTemplate) and
+// filtered CSV exports (TEXT_EXPORTS.adminOverview). Returns the CSV text
+// for client-side download; the path comes from TEXT_EXPORTS above.
 export const getText = async (path: string, params?: QueryParams): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV download is unavailable in mock mode');
@@ -364,10 +377,10 @@ export const getText = async (path: string, params?: QueryParams): Promise<strin
 	return response.text();
 };
 
-// Raw-text POST for CSV exports (POST /professor/reports/export). The export
+// Raw-text POST for CSV exports (TEXT_EXPORTS.professorReports). The export
 // route takes a JSON filter body and returns text/csv, so it fits neither
 // apiCall (JSON response) nor getText (GET). Auth header + 401-refresh reuse
-// fetchWithAuth; the path is passed directly, mirroring getText.
+// fetchWithAuth; the path comes from TEXT_EXPORTS above.
 export const postText = async (path: string, body: unknown): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV export is unavailable in mock mode');
@@ -390,7 +403,7 @@ export const postText = async (path: string, body: unknown): Promise<string> => 
 };
 
 // Binary download for encrypted backup archives
-// (GET /admin/backups/{id}/download → application/octet-stream with a
+// (backupDownloadPath(id) → application/octet-stream with a
 // Content-Disposition filename). getText cannot handle binary, so this fetches
 // a Blob and parses the filename header instead.
 export const getBlob = async (

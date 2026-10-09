@@ -12,7 +12,7 @@
 // docs/architecture/api-contracts.md so the live swap stays mechanical; the
 // page does not change.
 
-import { get, isMockMode, postText } from '$lib/api/client';
+import { get, isMockMode, postText, TEXT_EXPORTS } from '$lib/api/client';
 import type {
 	ProfessorReportsAllCoursesResponse,
 	ProfessorReportsComparisonItemResponse,
@@ -638,7 +638,7 @@ export type ProfessorReportsExportBody = {
 };
 
 export const fetchProfessorReportsCsv = (body: ProfessorReportsExportBody): Promise<string> =>
-	postText('/professor/reports/export', { format: 'csv', ...body });
+	postText(TEXT_EXPORTS.professorReports, { format: 'csv', ...body });
 
 export const buildCsv = (header: string[], rows: Array<Array<string | number>>): string => {
 	const escape = (value: string | number): string => {

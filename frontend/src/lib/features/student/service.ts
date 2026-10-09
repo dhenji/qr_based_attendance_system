@@ -6,7 +6,7 @@
 // GET /student/attendance/history. Scan delegates to
 // features/liveness/service.ts in real mode.
 
-import { get, getText, isMockMode, post } from '$lib/api/client';
+import { get, getText, isMockMode, post, TEXT_EXPORTS } from '$lib/api/client';
 import type {
 	Paginated,
 	StudentExcuseItemResponse,
@@ -189,16 +189,16 @@ export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
 // export paged through the list endpoint and stopped at a 2000-row cap.
 //
 // No endpoint def: the route streams text/csv, which `apiCall` cannot parse,
-// so this goes through `getText` with a raw path the same way the roster
-// template download does. `getText` deliberately has no mock path (it throws
-// `mock_mode`), so callers are expected to fall back — here to the client-side
-// CSV builder.
+// so this goes through `getText` with the TEXT_EXPORTS path the same way the
+// roster template download does. `getText` deliberately has no mock path (it
+// throws `mock_mode`), so callers are expected to fall back — here to the
+// client-side CSV builder.
 //
 // The server knows only the filters below; it has no free-text search, so an
 // active search term is the caller's problem to warn about.
 export const exportSessionHistoryCsv = async (
 	params: StudentHistoryFilters = {}
-): Promise<string> => getText('/student/attendance/history/export', historyQuery(params, { paginate: false }));
+): Promise<string> => getText(TEXT_EXPORTS.studentHistory, historyQuery(params, { paginate: false }));
 
 export const getDashboard = async (): Promise<StudentDashboardResponse> => {
 	return get<StudentDashboardResponse>('studentDashboard');

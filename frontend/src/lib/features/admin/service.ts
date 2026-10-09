@@ -15,7 +15,7 @@
 // the backend resolves to an account first, so those two can fail 409
 // `student_account_unlinked` / `professor_account_unlinked`.
 
-import { del, get, getText, patch, post, postForm } from '$lib/api/client';
+import { del, get, getText, patch, post, postForm, TEXT_EXPORTS } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
 	AdminDashboardResponse,
@@ -211,7 +211,7 @@ const STUDENT_TEMPLATE_FALLBACK =
 
 export const downloadStudentTemplate = async (): Promise<string> => {
 	try {
-		return await getText('/admin/students/import/template');
+		return await getText(TEXT_EXPORTS.studentTemplate);
 	} catch {
 		return STUDENT_TEMPLATE_FALLBACK;
 	}

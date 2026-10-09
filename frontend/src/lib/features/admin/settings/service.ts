@@ -14,7 +14,7 @@
 // builders from the sibling analytics service. Backup download is the one
 // genuine gap: see downloadBackupDescriptor below.
 
-import { get, getBlob, isMockMode, patch, post } from '$lib/api/client';
+import { backupDownloadPath, get, getBlob, isMockMode, patch, post } from '$lib/api/client';
 import type {
 	BackupLogItemResponse,
 	SystemSettingsResponse
@@ -97,14 +97,14 @@ export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 };
 
 // downloadBackupArchive
-// GET /admin/backups/{id}/download (application/octet-stream + filename).
+// backupDownloadPath(id) (application/octet-stream + filename).
 // Saves the real encrypted archive under the server filename. In mock mode
 // (no backend) it falls back to the JSON descriptor so the button still does
 // something; live failures throw so the page surfaces them instead of
 // writing a misleading descriptor.
 export const downloadBackupArchive = async (row: BackupLogItem): Promise<void> => {
 	try {
-		const { blob, filename } = await getBlob(`/admin/backups/${row.id}/download`);
+		const { blob, filename } = await getBlob(backupDownloadPath(row.id));
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement('a');
 		link.href = url;

@@ -12,7 +12,7 @@
 // thresholds (D35) live in schema.ts as named constants mirroring the future
 // backend heuristic; the backend remains the source of truth.
 
-import { get, getText, post, postText, type QueryParams } from '$lib/api/client';
+import { get, getText, post, postText, TEXT_EXPORTS, type QueryParams } from '$lib/api/client';
 import { buildCsv } from '$lib/features/report/service';
 import type {
 	AdminAnalyticsFilters,
@@ -261,7 +261,7 @@ export const attendanceOverviewCsv = (rows: AttendanceOverviewItemResponse[]): s
 // the attendance page falls back to attendanceOverviewCsv above.
 export const fetchAttendanceOverviewCsv = (
 	filters: AttendanceOverviewFilters = {}
-): Promise<string> => getText('/admin/attendance/overview/export', overviewParams(filters));
+): Promise<string> => getText(TEXT_EXPORTS.adminOverview, overviewParams(filters));
 
 // Server CSV export (POST /admin/analytics/export, backend #136). Body
 // mirrors AnalyticsExportRequest; per-course rows for the filter set, so the
@@ -278,7 +278,7 @@ export type AnalyticsExportBody = {
 };
 
 export const fetchAnalyticsExportCsv = (body: AnalyticsExportBody): Promise<string> =>
-	postText('/admin/analytics/export', { format: 'csv', ...body });
+	postText(TEXT_EXPORTS.adminAnalytics, { format: 'csv', ...body });
 
 export const downloadCsv = (filename: string, csv: string): void => {
 	const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });

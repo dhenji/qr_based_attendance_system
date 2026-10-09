@@ -613,6 +613,7 @@
 					<input
 						class="form-input code-input"
 						placeholder="Enter code from projector (e.g. wan9YQXY)"
+						aria-label="Session code"
 						style="text-transform: none;"
 						value={sessionCode}
 						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value; }}

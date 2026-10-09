@@ -586,7 +586,7 @@
 			aria-modal="true"
 			aria-labelledby="excuse-title"
 			tabindex="-1"
-			use:trapFocus
+			use:trapFocus={{ onEscape: closeDetail }}
 		>
 			<h2 id="excuse-title">Excuse #{selected.id} — {selected.studentName}</h2>
 			<p class="modal-sub">
@@ -790,7 +790,7 @@
 			aria-modal="true"
 			aria-labelledby="quick-title"
 			tabindex="-1"
-			use:trapFocus
+			use:trapFocus={{ onEscape: closeQuick }}
 		>
 			<h2 id="quick-title">New quick-excuse (Path A)</h2>
 			<p class="modal-sub">Approves immediately — for direct-knowledge cases. Min 10-char reason.</p>
@@ -913,14 +913,6 @@
 		</div>
 	</div>
 {/if}
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key !== 'Escape') return;
-		if (quickOpen) closeQuick();
-		else if (selected) closeDetail();
-	}}
-/>
 
 <style>
 	.excuses {
