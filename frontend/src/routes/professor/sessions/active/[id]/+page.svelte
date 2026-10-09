@@ -220,6 +220,9 @@
 		currentPage = 1;
 
 		const load = async (initial: boolean) => {
+			// Skip background refreshes while the tab is hidden; the
+			// visibilitychange handler below refreshes on return.
+			if (!initial && document.visibilityState !== 'visible') return;
 			if (initial) {
 				isLoading = true;
 				loadError = null;
@@ -252,13 +255,19 @@
 		void load(true);
 		poll = window.setInterval(() => void load(false), POLL_MS);
 		tick = window.setInterval(() => {
-			if (!cancelled) now = Date.now();
+			// Frozen while hidden; resumes on visibilitychange refresh.
+			if (!cancelled && document.visibilityState === 'visible') now = Date.now();
 		}, TICK_MS);
+		const handleVisible = () => {
+			if (document.visibilityState === 'visible') void load(false);
+		};
+		document.addEventListener('visibilitychange', handleVisible);
 
 		return () => {
 			cancelled = true;
 			window.clearInterval(poll);
 			window.clearInterval(tick);
+			document.removeEventListener('visibilitychange', handleVisible);
 		};
 	});
 

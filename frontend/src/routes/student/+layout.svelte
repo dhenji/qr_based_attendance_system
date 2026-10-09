@@ -43,6 +43,7 @@
 	};
 
 	const onNotifFocus = () => {
+		if (document.visibilityState !== 'visible') return;
 		void refreshNotif();
 	};
 
@@ -54,7 +55,9 @@
 			await goto(defaultRouteFor(user));
 		} else {
 			void refreshNotif();
-			pollTimer = setInterval(() => void refreshNotif(), POLL_INTERVAL_MS);
+			pollTimer = setInterval(() => {
+				if (!document.hidden) void refreshNotif();
+			}, POLL_INTERVAL_MS);
 			window.addEventListener('focus', onNotifFocus);
 			document.addEventListener('visibilitychange', onNotifFocus);
 		}
