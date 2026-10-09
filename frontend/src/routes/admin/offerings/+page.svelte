@@ -423,7 +423,7 @@
 								<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
 								<button
 									class="link"
-									onclick={() => toggleOfferingActive(o).catch(() => {})}
+									onclick={() => void toggleOfferingActive(o)}
 								>
 									{o.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>

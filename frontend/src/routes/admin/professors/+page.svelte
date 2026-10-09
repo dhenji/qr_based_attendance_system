@@ -337,7 +337,7 @@
 								<button class="link" onclick={() => openEdit(p)}>Edit</button>
 								<button
 									class="link"
-									onclick={() => toggleProfessorActive(p).catch(() => {})}
+									onclick={() => void toggleProfessorActive(p)}
 								>
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>

@@ -103,7 +103,7 @@
 							<td class="mono">{s.email}</td>
 							<td>{s.programCode}</td>
 							<td class="row-actions">
-								<button class="link" onclick={() => toggleStudentActive(s).catch(() => {})}>
+								<button class="link" onclick={() => void toggleStudentActive(s)}>
 									Restore
 								</button>
 								<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>

@@ -75,8 +75,9 @@ export const toggleCourseActive = async (course: AdminCourse): Promise<void> => 
 		await setCourseActive(course.id, !course.isActive);
 		await refreshAdminCourses();
 	} catch (e: unknown) {
+		// Surfaced via actionError (role=alert) — no re-throw so callers use
+		// `void toggle...()` with no swallowed rejection.
 		adminCoursesState.actionError = toMessage(e, 'Failed to update course status');
-		throw e;
 	}
 };
 

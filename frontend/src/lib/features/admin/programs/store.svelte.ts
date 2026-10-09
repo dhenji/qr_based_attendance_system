@@ -75,8 +75,9 @@ export const toggleProgramActive = async (program: Program): Promise<void> => {
 		await setProgramActive(program.id, !program.isActive);
 		await refreshAdminPrograms();
 	} catch (e: unknown) {
+		// Surfaced via actionError (role=alert) — no re-throw so callers use
+		// `void toggle...()` with no swallowed rejection.
 		adminProgramsState.actionError = toMessage(e, 'Failed to update program status');
-		throw e;
 	}
 };
 

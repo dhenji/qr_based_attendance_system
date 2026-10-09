@@ -93,8 +93,9 @@ export const toggleOfferingActive = async (offering: AdminOffering): Promise<voi
 		await setOfferingActive(offering.id, !offering.isActive);
 		await refreshAdminOfferings();
 	} catch (e: unknown) {
+		// Surfaced via actionError (role=alert) — no re-throw so callers use
+		// `void toggle...()` with no swallowed rejection.
 		adminOfferingsState.actionError = toMessage(e, 'Failed to update offering status');
-		throw e;
 	}
 };
 
