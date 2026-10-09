@@ -92,6 +92,10 @@
 	let quickFiles = $state<File[]>([]);
 	let quickFileErrors = $state<string[]>([]);
 	let quickUploading = $state(false);
+	let quickUploadStatus = $state('');
+	// Object urls already uploaded in a prior attempt — kept across retries
+	// so a single failed file never discards the rest.
+	let quickStagedUrls = $state<string[]>([]);
 	// Real sessions for the quick-excuse picker (warmed when the modal
 	// opens; falls back to the course directory when the list is empty).
 	let quickSessions = $state<Array<{ id: number; code: string }>>([]);
@@ -236,6 +240,8 @@
 		quickError = null;
 		quickFiles = [];
 		quickFileErrors = [];
+		quickStagedUrls = [];
+		quickUploadStatus = '';
 		// Warm real sessions so the excuse attaches to an actual session id
 		// instead of a fabricated one (the submit itself stays in-memory:
 		// typed numbers cannot resolve to integer ids without backend help).
@@ -272,14 +278,32 @@
 			const picked = quickSessions.find((s) => s.id === quickSessionId) ?? null;
 			// Files upload first via the D24 presigned flow; their object urls
 			// ride along so the created row mirrors them (Path B). Reason-only
-			// stays Path A.
-			let attachmentUrls: string[] = [];
+			// stays Path A. Partial failures keep prior successes staged and
+			// leave only failed files for retry.
+			let attachmentUrls = [...quickStagedUrls];
 			if (quickFiles.length > 0) {
 				quickUploading = true;
+				quickUploadStatus = '';
 				try {
-					attachmentUrls = await uploadAttachments(quickFiles);
+					const result = await uploadAttachments(quickFiles, {
+						onProgress: (done, total) => {
+							quickUploadStatus = `Uploading evidence ${done}/${total}…`;
+						},
+					});
+					attachmentUrls = [...attachmentUrls, ...result.ok];
+					if (result.failed.length > 0) {
+						quickStagedUrls = attachmentUrls;
+						quickFiles = result.failed.map((f) => f.file);
+						quickFileErrors = result.failed.map((f) => f.message);
+						quickError =
+							'Some files failed to upload — retry or remove them. Already-uploaded files are kept.';
+						return;
+					}
+					quickFiles = [];
+					quickFileErrors = [];
 				} finally {
 					quickUploading = false;
+					quickUploadStatus = '';
 				}
 			}
 			const created = await quickExcuse({
@@ -300,6 +324,7 @@
 			quickReason = '';
 			quickFiles = [];
 			quickFileErrors = [];
+			quickStagedUrls = [];
 			notice = `Quick-excused ${created.studentName} (${created.studentNumber}) — approved immediately.`;
 			status = 'approved';
 			currentPage = 1;
@@ -863,8 +888,11 @@
 			{#each quickFileErrors as message (message)}
 				<p class="error">{message}</p>
 			{/each}
+			{#if quickStagedUrls.length > 0 && quickFiles.length > 0}
+				<p class="modal-sub" role="status">{quickStagedUrls.length} file{quickStagedUrls.length === 1 ? '' : 's'} uploaded — retry the remaining.</p>
+			{/if}
 			{#if quickUploading}
-				<p class="modal-sub" role="status">Uploading evidence…</p>
+				<p class="modal-sub" role="status">{quickUploadStatus || 'Uploading evidence…'}</p>
 			{/if}
 			{#if quickError}
 				<p class="error">{quickError}</p>

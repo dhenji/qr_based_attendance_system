@@ -14,6 +14,17 @@ export const ATTACHMENTS_MAX_FILES = 5;
 export const ATTACHMENTS_MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'heic']);
 
+// Expected MIME per extension. file.type is checked only when non-empty —
+// an empty type still passes here (the server re-validates); a non-empty
+// mismatch (e.g. text/plain renamed to .pdf) is rejected early.
+const MIME_FOR_EXTENSION: Record<string, Set<string>> = {
+	pdf: new Set(['application/pdf']),
+	jpg: new Set(['image/jpeg']),
+	jpeg: new Set(['image/jpeg']),
+	png: new Set(['image/png']),
+	heic: new Set(['image/heic', 'image/heif']),
+};
+
 export const attachmentExtension = (filename: string): string => {
 	const dot = filename.lastIndexOf('.');
 	return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase();
@@ -58,6 +69,13 @@ export const validateAttachmentFiles = (files: File[] | FileList): AttachmentVal
 			errors.push(`${file.name}: only PDF, JPG, PNG, or HEIC files are accepted.`);
 			continue;
 		}
+		if (file.type) {
+			const allowed = MIME_FOR_EXTENSION[extension];
+			if (allowed && !allowed.has(file.type.toLowerCase())) {
+				errors.push(`${file.name}: file type does not match its extension.`);
+				continue;
+			}
+		}
 		if (file.size <= 0) {
 			errors.push(`${file.name}: file is empty.`);
 			continue;
@@ -72,29 +90,74 @@ export const validateAttachmentFiles = (files: File[] | FileList): AttachmentVal
 };
 
 // uploadAttachments
-// Mints a presigned URL per file and PUTs the bytes, returning the object
-// urls for the excuse submit body. In mock mode the PUT is skipped (mock
-// upload_urls are not fetchable) and the mock object_urls are returned.
-export const uploadAttachments = async (files: File[]): Promise<string[]> => {
-	const objectUrls: string[] = [];
-	for (const file of files) {
-		const extension = attachmentExtension(file.name);
-		const minted = await post<PresignedUrlResponse>('uploadPresigned', {
-			filename: file.name,
-			size_bytes: file.size,
-			content_type: contentTypeFor(extension, file.type),
+// Mints a presigned URL per file and PUTs the bytes, returning per-file
+// results so one transient failure never discards prior successes. Uploads
+// run with limited concurrency (default 3) with an optional progress
+// callback. In mock mode the PUT is skipped (mock upload_urls are not
+// fetchable) and the mock object_urls are returned.
+export type AttachmentUploadFailure = {
+	file: File;
+	message: string;
+};
+
+export type AttachmentUploadResult = {
+	ok: string[];
+	failed: AttachmentUploadFailure[];
+};
+
+export type UploadProgress = (done: number, total: number) => void;
+
+const uploadOne = async (file: File): Promise<string> => {
+	const extension = attachmentExtension(file.name);
+	const minted = await post<PresignedUrlResponse>('uploadPresigned', {
+		filename: file.name,
+		size_bytes: file.size,
+		content_type: contentTypeFor(extension, file.type),
+	});
+	if (!isMockMode()) {
+		const response = await fetch(minted.upload_url, {
+			method: 'PUT',
+			body: file,
+			headers: { 'Content-Type': contentTypeFor(extension, file.type) },
 		});
-		if (!isMockMode()) {
-			const response = await fetch(minted.upload_url, {
-				method: 'PUT',
-				body: file,
-				headers: { 'Content-Type': contentTypeFor(extension, file.type) },
-			});
-			if (!response.ok) {
-				throw new Error(`${file.name}: upload failed (${response.status}).`);
-			}
+		if (!response.ok) {
+			throw new Error(`${file.name}: upload failed (${response.status}).`);
 		}
-		objectUrls.push(minted.object_url);
 	}
-	return objectUrls;
+	return minted.object_url;
+};
+
+export const uploadAttachments = async (
+	files: File[],
+	opts: { concurrency?: number; onProgress?: UploadProgress } = {}
+): Promise<AttachmentUploadResult> => {
+	const total = files.length;
+	if (total === 0) return { ok: [], failed: [] };
+	const concurrency = Math.max(1, Math.min(opts.concurrency ?? 3, total));
+	const urls: (string | null)[] = new Array(total).fill(null);
+	const failures: (AttachmentUploadFailure | null)[] = new Array(total).fill(null);
+	let done = 0;
+	let next = 0;
+	const worker = async (): Promise<void> => {
+		while (true) {
+			const index = next;
+			next += 1;
+			if (index >= total) return;
+			try {
+				urls[index] = await uploadOne(files[index]);
+			} catch (error) {
+				failures[index] = {
+					file: files[index],
+					message: error instanceof Error && error.message ? error.message : `${files[index].name}: upload failed.`,
+				};
+			}
+			done += 1;
+			opts.onProgress?.(done, total);
+		}
+	};
+	await Promise.all(Array.from({ length: concurrency }, () => worker()));
+	return {
+		ok: urls.filter((url): url is string => url !== null),
+		failed: failures.filter((f): f is AttachmentUploadFailure => f !== null),
+	};
 };
