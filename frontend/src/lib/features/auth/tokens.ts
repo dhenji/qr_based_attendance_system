@@ -114,3 +114,5 @@ export const refreshAccessToken = (): Promise<string | null> => {
 };
 
 setUnauthorizedHandler(refreshAccessToken);
+
+hydrateTokens();
