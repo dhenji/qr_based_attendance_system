@@ -263,10 +263,12 @@ export const queue = {
 			.sort(byOldest);
 	},
 
-	// Actionable queue depth for the scan banner (pending + syncing + rejected)
+	// Actionable queue depth for the scan banner (pending + syncing only).
+	// Rejected rows have their own card with Retry/Discard, so they are
+	// excluded here to avoid double-counting the same record twice.
 	getPendingCount: async (): Promise<number> => {
 		const rows = await listRows();
-		return rows.filter((row) => row.status !== 'synced').length;
+		return rows.filter((row) => row.status === 'pending' || row.status === 'syncing').length;
 	},
 
 	// Rejected items stay visible until the student discards them

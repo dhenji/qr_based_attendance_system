@@ -20,19 +20,47 @@
 	let file = $state<File | null>(null);
 	let fileError = $state<string | null>(null);
 	let templateBusy = $state(false);
-	let templateError = $state<string | null>(null);
 	let importBusy = $state(false);
 	let importError = $state<string | null>(null);
 	let result = $state<ProfessorImportResult | null>(null);
 	let isDragging = $state(false);
 	let fileInput = $state<HTMLInputElement | null>(null);
+	let showAllErrors = $state(false);
+
+	// Client pre-flight preview: parsed locally before POST so a bad header
+	// or empty file is caught without paying an upload.
+	const EXPECTED_HEADERS = ['first_name', 'middle_name', 'last_name', 'email', 'department'];
+	type CsvPreview = {
+		headers: string[];
+		rowCount: number;
+		firstRows: string[][];
+		headerOk: boolean;
+	};
+	let preview = $state<CsvPreview | null>(null);
+
+	const parseCsvPreview = (text: string): CsvPreview => {
+		const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+		const splitRow = (line: string): string[] =>
+			line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, ''));
+		const headers = lines.length > 0 ? splitRow(lines[0]) : [];
+		const rows = lines.slice(1).map(splitRow);
+		const normalized = headers.map((h) => h.toLowerCase());
+		return {
+			headers,
+			rowCount: rows.length,
+			firstRows: rows.slice(0, 5),
+			headerOk: EXPECTED_HEADERS.every((h, i) => normalized[i] === h),
+		};
+	};
 
 	// Single validation path shared by the file picker and drag-and-drop, so
 	// both surface the same csvFileSchema errors (extension, empty, 5 MB cap).
-	const handleFile = (picked: File | null) => {
+	const handleFile = async (picked: File | null) => {
 		fileError = null;
 		importError = null;
 		result = null;
+		preview = null;
+		showAllErrors = false;
 		if (!picked) {
 			file = null;
 			return;
@@ -44,11 +72,16 @@
 			return;
 		}
 		file = parsed.data;
+		try {
+			preview = parseCsvPreview(await picked.text());
+		} catch {
+			preview = null;
+		}
 	};
 
 	const onFileChange = (e: Event) => {
 		const input = e.currentTarget as HTMLInputElement;
-		handleFile(input.files?.[0] ?? null);
+		void handleFile(input.files?.[0] ?? null);
 	};
 
 	const onDragOver = (e: DragEvent) => {
@@ -61,7 +94,7 @@
 		e.preventDefault();
 		isDragging = false;
 		// Multi-file drops keep the first entry and ignore the rest.
-		handleFile(e.dataTransfer?.files?.[0] ?? null);
+		void handleFile(e.dataTransfer?.files?.[0] ?? null);
 	};
 
 	// Clear the attachment (✕ button). The input value is reset too, so
@@ -72,13 +105,16 @@
 		fileError = null;
 		importError = null;
 		result = null;
+		preview = null;
+		showAllErrors = false;
 		if (fileInput) fileInput.value = '';
 	};
 
 	const downloadTemplate = async () => {
 		templateBusy = true;
-		templateError = null;
 		try {
+			// Static header — no server template route exists — so this never
+			// throws; only the DOM download below could.
 			const text = await downloadProfessorTemplate();
 			const blob = new Blob([text], { type: 'text/csv' });
 			const url = URL.createObjectURL(blob);
@@ -89,11 +125,23 @@
 			a.click();
 			a.remove();
 			URL.revokeObjectURL(url);
-		} catch (e: unknown) {
-			templateError = e instanceof Error && e.message ? e.message : 'Template download failed.';
 		} finally {
 			templateBusy = false;
 		}
+	};
+
+	const downloadErrorsCsv = () => {
+		if (!result || result.errors.length === 0) return;
+		const lines = ['line,reason', ...result.errors.map((e) => `${e.line},"${String(e.reason).replace(/"/g, '""')}"`)];
+		const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = 'professors_import_errors.csv';
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
 	};
 
 	const confirmImport = async () => {
@@ -130,9 +178,7 @@
 				{templateBusy ? 'Preparing…' : 'Download CSV Template'}
 			</button>
 		</div>
-		{#if templateError}
-			<p class="error" role="alert">{templateError}</p>
-		{/if}
+		<p class="muted">Static header — no server template route exists for professors.</p>
 	</section>
 
 	<section class="card">
@@ -187,9 +233,26 @@
 		{#if result === null}
 			<p class="muted">
 				{file
-					? `Ready to import ${file.name}. Confirm sends it to POST /admin/professors/import.`
+					? preview
+						? `Ready to import ${file.name} — ${preview.rowCount} data row${preview.rowCount === 1 ? '' : 's'}. Confirm sends it to POST /admin/professors/import.`
+						: `Reading ${file.name}… Confirm sends it to POST /admin/professors/import.`
 					: 'Upload a file to enable the import button.'}
 			</p>
+			{#if preview && file}
+				{#if !preview.headerOk}
+					<p class="error" role="alert">
+						Header mismatch — expected: {EXPECTED_HEADERS.join(', ')}. Found: {preview.headers.join(', ') || '(none)'}.
+					</p>
+				{/if}
+				<ul class="errors preview-list">
+					{#each preview.firstRows as row, i (i)}
+						<li>Row {i + 2}: {row.join(' · ')}</li>
+					{/each}
+				</ul>
+				{#if preview.rowCount > preview.firstRows.length}
+					<p class="muted">…and {preview.rowCount - preview.firstRows.length} more rows.</p>
+				{/if}
+			{/if}
 		{:else}
 			<div class="result">
 				<span class="pill ok">{result.imported} new</span>
@@ -197,12 +260,22 @@
 				<span class="pill warn">{result.errors.length} errors</span>
 			</div>
 			{#if result.errors.length > 0}
-				<ul class="errors">
-					{#each result.errors.slice(0, 10) as err (err.line)}
+				<ul class="errors errors-scroll">
+					{#each (showAllErrors ? result.errors : result.errors.slice(0, 10)) as err, i (i)}
 						<li>Line {err.line}: {err.reason}</li>
 					{/each}
 				</ul>
-				{#if result.errors.length > 10}
+				<div class="actions">
+					{#if result.errors.length > 10}
+						<button class="btn btn-secondary" type="button" onclick={() => (showAllErrors = !showAllErrors)}>
+							{showAllErrors ? 'Show fewer' : `Show all ${result.errors.length}`}
+						</button>
+					{/if}
+					<button class="btn btn-secondary" type="button" onclick={downloadErrorsCsv}>
+						Download errors.csv
+					</button>
+				</div>
+				{#if !showAllErrors && result.errors.length > 10}
 					<p class="muted">…and {result.errors.length - 10} more.</p>
 				{/if}
 			{/if}
@@ -416,6 +489,15 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
+	}
+
+	.errors-scroll {
+		max-height: 15rem;
+		overflow-y: auto;
+	}
+
+	.preview-list {
+		color: var(--text-secondary);
 	}
 
 	.error {

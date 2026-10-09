@@ -386,6 +386,10 @@
 	let excuseFiles = $state<File[]>([]);
 	let excuseFileErrors = $state<string[]>([]);
 	let excuseUploading = $state(false);
+	let excuseUploadStatus = $state('');
+	// Object urls already uploaded in a prior attempt — kept across retries
+	// so a single failed file never discards the rest.
+	let excuseStagedUrls = $state<string[]>([]);
 
 	let myRequests = $state<StudentExcuseRequest[]>([]);
 	let myRequestsError: string | null = $state(null);
@@ -406,6 +410,8 @@
 		excuseError = null;
 		excuseFiles = [];
 		excuseFileErrors = [];
+		excuseStagedUrls = [];
+		excuseUploadStatus = '';
 	};
 
 	const onExcuseFiles = (list: FileList | null) => {
@@ -429,19 +435,38 @@
 		excuseBusy = true;
 		excuseError = null;
 		try {
-			let attachmentUrls: string[] = [];
+			let attachmentUrls = [...excuseStagedUrls];
 			if (excuseFiles.length > 0) {
 				excuseUploading = true;
+				excuseUploadStatus = '';
 				try {
-					attachmentUrls = await uploadAttachments(excuseFiles);
+					const result = await uploadAttachments(excuseFiles, {
+						onProgress: (done, total) => {
+							excuseUploadStatus = `Uploading evidence ${done}/${total}…`;
+						},
+					});
+					attachmentUrls = [...attachmentUrls, ...result.ok];
+					if (result.failed.length > 0) {
+						// Keep successes staged; leave only failed files for retry.
+						excuseStagedUrls = attachmentUrls;
+						excuseFiles = result.failed.map((f) => f.file);
+						excuseFileErrors = result.failed.map((f) => f.message);
+						excuseError =
+							'Some files failed to upload — retry or remove them. Already-uploaded files are kept.';
+						return;
+					}
+					excuseFiles = [];
+					excuseFileErrors = [];
 				} finally {
 					excuseUploading = false;
+					excuseUploadStatus = '';
 				}
 			}
 			await submitStudentExcuse({ sessionId: excuseTarget.sessionId, reason, attachmentUrls });
 			excuseTarget = null;
 			excuseFiles = [];
 			excuseFileErrors = [];
+			excuseStagedUrls = [];
 			excuseNotice = 'Excuse request submitted — your professor will review it.';
 			await loadMyRequests();
 		} catch (error) {
@@ -470,6 +495,7 @@
 			<input
 				class="form-input search-input"
 				placeholder="Search..."
+				aria-label="Search history"
 				value={search}
 				oninput={(e) => {
 					search = (e.target as HTMLInputElement).value;
@@ -479,6 +505,7 @@
 
 		<select
 			class="form-input select-input"
+			aria-label="Filter by course"
 			value={filterCourse}
 			onchange={(e) => {
 				filterCourse = (e.target as HTMLSelectElement).value;
@@ -493,6 +520,7 @@
 
 		<select
 			class="form-input select-input"
+			aria-label="Filter by status"
 			value={filterStatus}
 			onchange={(e) => {
 				filterStatus = (e.target as HTMLSelectElement).value;
@@ -733,8 +761,11 @@
 				{#each excuseFileErrors as message (message)}
 					<p class="error">{message}</p>
 				{/each}
+				{#if excuseStagedUrls.length > 0 && excuseFiles.length > 0}
+					<p class="hint" role="status">{excuseStagedUrls.length} file{excuseStagedUrls.length === 1 ? '' : 's'} uploaded — retry the remaining.</p>
+				{/if}
 				{#if excuseUploading}
-					<p class="hint" role="status">Uploading evidence…</p>
+					<p class="hint" role="status">{excuseUploadStatus || 'Uploading evidence…'}</p>
 				{/if}
 				{#if excuseError}
 					<p class="error">{excuseError}</p>

@@ -18,6 +18,7 @@
 		type ReportMetric
 	} from '$lib/features/report/service';
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
+	import { isMockMode } from '$lib/api/client';
 	import { formatPercentage } from '$lib/shared/utils/format';
 
 	type Tab = 'all' | 'comparison' | 'trends';
@@ -37,10 +38,12 @@
 	];
 	const TREND_COLORS = ['#2563eb', '#16a34a', '#9333ea', '#ca8a04', '#0d9488', '#dc2626'];
 
-	// Course directory: mock fixture until the live assignments warm it. The
-	// report queries and filter options read this, so warming it re-runs the
-	// load effect below with live identity joins.
-	let directory = $state<ReportCourseDir[]>(PROFESSOR_COURSES);
+	// Course directory: mock fixture only in mock mode; live mode starts
+	// empty and warms from GET /professor/courses, so a failed warm shows an
+	// error instead of silently rendering demo courses as filters.
+	let directory = $state<ReportCourseDir[]>(isMockMode() ? PROFESSOR_COURSES : []);
+	let directoryError = $state<string | null>(null);
+	let directoryToken = $state(0);
 	const filterOptions = $derived(getReportFilterOptions(directory));
 	const initialRange = defaultReportRange();
 
@@ -65,10 +68,17 @@
 	let reportMeta = $state<ReportMeta>({ dataSource: 'demo', truncated: false });
 
 	$effect(() => {
+		directoryToken;
 		let cancelled = false;
-		void initReportDirectory().then(({ directory: warmed }) => {
-			if (cancelled || warmed === directory) return;
+		void initReportDirectory().then(({ directory: warmed, live }) => {
+			if (cancelled) return;
+			if (warmed === directory) return;
 			directory = warmed;
+			// Mock mode always serves the fixture (live:false) — that is
+			// expected, not an error. Live mode falling back means the
+			// courses call failed or returned nothing.
+			directoryError =
+				!live && !isMockMode() ? 'Could not load your courses — filters show demo entries.' : null;
 		});
 		return () => {
 			cancelled = true;
@@ -323,11 +333,14 @@
 	// Server-first export (POST /professor/reports/export): the download
 	// matches the backend's per-scan rows. Mock mode and unreachable backends
 	// fall back to the client-side aggregate CSV so Export always works.
+	let exportNote = $state<string | null>(null);
 	const downloadCsv = async () => {
 		if (csvRows.length === 0) return;
+		exportNote = null;
 		try {
 			saveCsv(await fetchProfessorReportsCsv(exportBody));
 		} catch {
+			exportNote = 'Server export unavailable — downloaded the on-screen rows instead.';
 			saveCsv(buildCsv(csvHeader, csvRows));
 		}
 	};
@@ -351,6 +364,14 @@
 			{#if reportMeta.truncated}
 				<p class="warning" role="status">
 					Showing the 500 most recent sessions in this range; narrow the dates to see older ones.
+				</p>
+			{/if}
+			{#if directoryError}
+				<p class="warning" role="alert">
+					{directoryError}
+					<button class="link-button" type="button" onclick={() => (directoryToken += 1)}>
+						Try again
+					</button>
 				</p>
 			{/if}
 		</div>
@@ -626,8 +647,7 @@
 					onclick={downloadCsv}
 				>
 					Download CSV
-				</button>
-				<button
+				</button>				<button
 					class="btn btn-secondary"
 					type="button"
 					disabled={csvRows.length === 0}
@@ -637,6 +657,9 @@
 					Download PDF
 				</button>
 			</div>
+			{#if exportNote}
+				<p class="muted" role="status">{exportNote}</p>
+			{/if}
 		</section>
 	{/if}
 </div>

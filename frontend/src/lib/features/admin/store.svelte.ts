@@ -85,8 +85,9 @@ export const toggleStudentActive = async (student: AdminStudent): Promise<void> 
 		await setStudentActive(student.id, !student.isActive);
 		await refreshAdminStudents();
 	} catch (e: unknown) {
+		// Surfaced via actionError (role=alert in the pages) — no re-throw so
+		// callers use `void toggle...()` with no swallowed rejection.
 		adminStudentsState.actionError = toMessage(e, 'Failed to update student status');
-		throw e;
 	}
 };
 
@@ -136,8 +137,9 @@ export const toggleProfessorActive = async (professor: AdminProfessor): Promise<
 		await setProfessorActive(professor.id, !professor.isActive);
 		await refreshAdminProfessors();
 	} catch (e: unknown) {
+		// Surfaced via actionError (role=alert in the pages) — no re-throw so
+		// callers use `void toggle...()` with no swallowed rejection.
 		adminProfessorsState.actionError = toMessage(e, 'Failed to update professor status');
-		throw e;
 	}
 };
 

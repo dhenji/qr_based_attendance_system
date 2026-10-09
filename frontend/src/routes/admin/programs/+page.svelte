@@ -234,7 +234,7 @@
 								<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
 								<button
 									class="link"
-									onclick={() => toggleProgramActive(p).catch(() => {})}
+									onclick={() => void toggleProgramActive(p)}
 								>
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>

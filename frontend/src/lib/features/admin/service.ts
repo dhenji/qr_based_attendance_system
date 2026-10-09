@@ -15,7 +15,7 @@
 // the backend resolves to an account first, so those two can fail 409
 // `student_account_unlinked` / `professor_account_unlinked`.
 
-import { del, get, getText, patch, post, postForm } from '$lib/api/client';
+import { del, get, getText, patch, post, postForm, TEXT_EXPORTS } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
 	AdminDashboardResponse,
@@ -211,7 +211,7 @@ const STUDENT_TEMPLATE_FALLBACK =
 
 export const downloadStudentTemplate = async (): Promise<string> => {
 	try {
-		return await getText('/admin/students/import/template');
+		return await getText(TEXT_EXPORTS.studentTemplate);
 	} catch {
 		return STUDENT_TEMPLATE_FALLBACK;
 	}
@@ -304,18 +304,13 @@ export const importProfessors = async (file: File): Promise<ProfessorImportResul
 // (only /admin/students/import/template), so this is a static header in
 // backend column order (ROSTER_CSV_COLUMNS in professor/service.py):
 // first_name, middle_name, last_name, email, department. First/last/email
-// are required; middle/department are optional. Tries the server route
-// first so a future backend template is picked up without a UI change.
+// are required; middle/department are optional. Deliberately no server probe
+// here — the route 404s, so fetching first only adds latency and noise.
 const PROFESSOR_TEMPLATE_FALLBACK =
 	'first_name,middle_name,last_name,email,department\n';
 
-export const downloadProfessorTemplate = async (): Promise<string> => {
-	try {
-		return await getText('/admin/professors/import/template');
-	} catch {
-		return PROFESSOR_TEMPLATE_FALLBACK;
-	}
-};
+export const downloadProfessorTemplate = async (): Promise<string> =>
+	PROFESSOR_TEMPLATE_FALLBACK;
 
 // --- Users (super_admin only) --------------------------------------------------
 //

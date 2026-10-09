@@ -74,6 +74,19 @@
 		countdown = 0;
 	};
 
+	// Success overlay owns its auto-dismiss timer. Done navigates away,
+	// Stay keeps the receipt open (stops the timer) for screenshots, slow
+	// readers, and switch control — Escape still dismisses via onOverlayKeydown.
+	const dismissSuccess = () => {
+		clearCountdown();
+		showSuccess = false;
+		void goto(Routes.DASHBOARD);
+	};
+
+	const stayOnSuccess = () => {
+		clearCountdown();
+	};
+
 	const getErrorMessage = (error: unknown, fallback: string) =>
 		error instanceof Error ? error.message : fallback;
 
@@ -402,9 +415,7 @@
 		if (showPermission || showQueued || showFailure) {
 			backToEntry();
 		} else if (showSuccess) {
-			clearCountdown();
-			showSuccess = false;
-			void goto(Routes.DASHBOARD);
+			dismissSuccess();
 		}
 	};
 
@@ -499,13 +510,12 @@
 			resultStatus = result.status;
 			scannedAt = result.scannedAt;
 			showSuccess = true;
+			clearCountdown();
 			countdown = 3;
 			countdownTimerId = setInterval(() => {
 				countdown -= 1;
 				if (countdown <= 0) {
-					clearCountdown();
-					showSuccess = false;
-					goto(Routes.DASHBOARD);
+					dismissSuccess();
 				}
 			}, 1000);
 		} catch (error) {
@@ -603,6 +613,7 @@
 					<input
 						class="form-input code-input"
 						placeholder="Enter code from projector (e.g. wan9YQXY)"
+						aria-label="Session code"
 						style="text-transform: none;"
 						value={sessionCode}
 						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value; }}
@@ -787,7 +798,17 @@
 					<p class="result-line">{formatTime(scannedAt)}</p>
 				{/if}
 				<p class="verified">Liveness evidence accepted</p>
-				<p class="auto-dismiss">Auto-dismissing in {countdown}s...</p>
+				{#if countdown > 0}
+					<p class="auto-dismiss">Auto-dismissing in {countdown}s...</p>
+				{:else}
+					<p class="auto-dismiss">Auto-dismiss paused — receipt stays open.</p>
+				{/if}
+				<div class="result-actions">
+					<button class="btn-primary try-again" onclick={dismissSuccess}>Done</button>
+					{#if countdown > 0}
+						<button class="btn-secondary try-again" onclick={stayOnSuccess}>Stay</button>
+					{/if}
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -1108,7 +1129,7 @@
 		justify-content: center;
 	}
 
-	.viewfinder :global(#qr-reader) {
+	.viewfinder :global(video) {
 		width: 100%;
 		height: 100%;
 	}
@@ -1297,6 +1318,18 @@
 		max-width: 200px;
 		margin: 0 auto;
 		display: block;
+	}
+
+	.result-actions {
+		display: flex;
+		gap: 0.75rem;
+		justify-content: center;
+		flex-wrap: wrap;
+		margin-top: 1rem;
+	}
+
+	.result-actions .try-again {
+		margin: 0;
 	}
 
 	@media (prefers-reduced-motion: reduce) {
