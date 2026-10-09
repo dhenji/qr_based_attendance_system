@@ -93,6 +93,25 @@ const fetchWithAuth = async (
 	});
 };
 
+// Single transparent 401-refresh shared by every transport: runs the fetch,
+// and on a 401 with a registered handler mints one fresh token and retries
+// exactly once. Each caller passes a closure that builds its own request so
+// header handling stays per-site (fetchWithAuth re-reads the live token;
+// postForm rebuilds its manual headers on retry).
+const fetchWith401Retry = async (
+	doFetch: () => Promise<Response>
+): Promise<Response> => {
+	const response = await doFetch();
+	if (response.status === 401 && unauthorizedHandler) {
+		const freshToken = await unauthorizedHandler();
+		if (freshToken) {
+			authToken = freshToken;
+			return doFetch();
+		}
+	}
+	return response;
+};
+
 // Turn an error response into an APIError.
 //
 // The backend has three distinct error envelopes and they need different unwrapping:
@@ -149,16 +168,8 @@ const parseError = async (response: Response): Promise<APIError> => {
 
 // One request/response round trip, with one transparent retry after a 401 when
 // the registered handler can mint a new access token.
-const request = async <T>(url: string, init: RequestInit, alreadyRetried: boolean): Promise<T> => {
-	const response = await fetchWithAuth(url, init);
-
-	if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
-		const freshToken = await unauthorizedHandler();
-		if (freshToken) {
-			authToken = freshToken;
-			return request<T>(url, init, true);
-		}
-	}
+const request = async <T>(url: string, init: RequestInit): Promise<T> => {
+	const response = await fetchWith401Retry(() => fetchWithAuth(url, init));
 
 	if (!response.ok) {
 		throw await parseError(response);
@@ -244,7 +255,7 @@ const apiCall = async <T>(
 		...(headers === undefined ? {} : { headers })
 	};
 
-	return request<T>(url.toString(), init, false);
+	return request<T>(url.toString(), init);
 };
 
 // Convenience exports
@@ -305,40 +316,31 @@ export const postForm = async <T>(
 	const url = new URL(`${API_PREFIX}${endpointDef.url}${suffix ?? ''}`, BASE_URL);
 	appendParams(url, params);
 
-	const headers = new Headers();
-	if (authToken) {
-		headers.set('Authorization', `Bearer ${authToken}`);
-	}
-
-	const doFetch = async (alreadyRetried: boolean): Promise<T> => {
-		const response = await fetch(url.toString(), {
+	// Headers are rebuilt per attempt so the retry carries the fresh token.
+	const doFetch = async (): Promise<Response> => {
+		const headers = new Headers();
+		if (authToken) {
+			headers.set('Authorization', `Bearer ${authToken}`);
+		}
+		return fetch(url.toString(), {
 			method: 'POST',
 			headers,
 			body: form,
 			credentials: 'include',
 		});
-
-		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
-			const freshToken = await unauthorizedHandler();
-			if (freshToken) {
-				authToken = freshToken;
-				headers.set('Authorization', `Bearer ${freshToken}`);
-				return doFetch(true);
-			}
-		}
-
-		if (!response.ok) {
-			throw await parseError(response);
-		}
-
-		if (response.status === 204) {
-			return undefined as T;
-		}
-
-		return response.json() as Promise<T>;
 	};
 
-	return doFetch(false);
+	const response = await fetchWith401Retry(doFetch);
+
+	if (!response.ok) {
+		throw await parseError(response);
+	}
+
+	if (response.status === 204) {
+		return undefined as T;
+	}
+
+	return response.json() as Promise<T>;
 };
 
 // Raw-text download for CSV templates (GET /admin/students/import/template)
@@ -353,25 +355,13 @@ export const getText = async (path: string, params?: QueryParams): Promise<strin
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 	appendParams(url, params);
 
-	const doFetch = async (alreadyRetried: boolean): Promise<string> => {
-		const response = await fetchWithAuth(url.toString(), { method: 'GET' });
+	const response = await fetchWith401Retry(() => fetchWithAuth(url.toString(), { method: 'GET' }));
 
-		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
-			const freshToken = await unauthorizedHandler();
-			if (freshToken) {
-				authToken = freshToken;
-				return doFetch(true);
-			}
-		}
+	if (!response.ok) {
+		throw await parseError(response);
+	}
 
-		if (!response.ok) {
-			throw await parseError(response);
-		}
-
-		return response.text();
-	};
-
-	return doFetch(false);
+	return response.text();
 };
 
 // Raw-text POST for CSV exports (POST /professor/reports/export). The export
@@ -385,28 +375,18 @@ export const postText = async (path: string, body: unknown): Promise<string> => 
 
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 
-	const doFetch = async (alreadyRetried: boolean): Promise<string> => {
-		const response = await fetchWithAuth(url.toString(), {
+	const response = await fetchWith401Retry(() =>
+		fetchWithAuth(url.toString(), {
 			method: 'POST',
 			body: JSON.stringify(body)
-		});
+		})
+	);
 
-		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
-			const freshToken = await unauthorizedHandler();
-			if (freshToken) {
-				authToken = freshToken;
-				return doFetch(true);
-			}
-		}
+	if (!response.ok) {
+		throw await parseError(response);
+	}
 
-		if (!response.ok) {
-			throw await parseError(response);
-		}
-
-		return response.text();
-	};
-
-	return doFetch(false);
+	return response.text();
 };
 
 // Binary download for encrypted backup archives
@@ -424,27 +404,15 @@ export const getBlob = async (
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 	appendParams(url, params);
 
-	const doFetch = async (alreadyRetried: boolean): Promise<{ blob: Blob; filename: string }> => {
-		const response = await fetchWithAuth(url.toString(), { method: 'GET' });
+	const response = await fetchWith401Retry(() => fetchWithAuth(url.toString(), { method: 'GET' }));
 
-		if (response.status === 401 && !alreadyRetried && unauthorizedHandler) {
-			const freshToken = await unauthorizedHandler();
-			if (freshToken) {
-				authToken = freshToken;
-				return doFetch(true);
-			}
-		}
+	if (!response.ok) {
+		throw await parseError(response);
+	}
 
-		if (!response.ok) {
-			throw await parseError(response);
-		}
-
-		const blob = await response.blob();
-		const disposition = response.headers.get('content-disposition') ?? '';
-		const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-		const filename = match?.[1] ? decodeURIComponent(match[1].trim()) : path.split('/').pop() ?? 'download';
-		return { blob, filename };
-	};
-
-	return doFetch(false);
+	const blob = await response.blob();
+	const disposition = response.headers.get('content-disposition') ?? '';
+	const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+	const filename = match?.[1] ? decodeURIComponent(match[1].trim()) : path.split('/').pop() ?? 'download';
+	return { blob, filename };
 };
