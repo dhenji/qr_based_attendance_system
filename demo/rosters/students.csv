@@ -1,0 +1,16 @@
+student_id,first_name,middle_name,last_name,email,program_code,section,year_level
+2026-0001,Maria,Santos,Dela Cruz,maria.delacruz@students.edu,BSCS,A,1
+2026-0002,Juan,Miguel,Reyes,juan.reyes@students.edu,BSCS,A,1
+2026-0003,Ana,Clara,Garcia,ana.garcia@students.edu,BSCS,B,2
+2026-0004,Luis,Pedro,Mendoza,luis.mendoza@students.edu,BSCS,B,2
+2026-0005,Sofia,Anne,Ramos,sofia.ramos@students.edu,BSCS,C,3
+2026-0006,Miguel,Jose,Torres,miguel.torres@students.edu,BSCS,C,3
+2026-0007,Isabella,Rose,Aquino,isabella.aquino@students.edu,BSIT,A,1
+2026-0008,Carlos,Diego,Bautista,carlos.bautista@students.edu,BSIT,A,1
+2026-0009,Gabrielle,Mae,Villanueva,gabrielle.villanueva@students.edu,BSIT,B,2
+2026-0010,Andres,Paul,Navarro,andres.navarro@students.edu,BSIT,B,2
+2026-0011,Kim,Luna,Castillo,kim.castillo@students.edu,BSIT,C,3
+2026-0012,Patricia,Joy,Fernandez,patricia.fernandez@students.edu,BSECE,A,1
+2026-0013,Rafael,Luis,Morales,rafael.morales@students.edu,BSECE,A,1
+2026-0014,Elena,Grace,Domingo,elena.domingo@students.edu,BSECE,B,2
+2026-0015,Marco,Antonio,Salazar,marco.salazar@students.edu,BSECE,B,4

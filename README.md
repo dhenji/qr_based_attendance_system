@@ -86,40 +86,43 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 │   ├── Dockerfile.dev    # Vite dev server on :5173 (node:22-alpine)
 │   ├── static/           # PWA manifest + icons, robots.txt, and vendored MediaPipe assets (models/face_landmarker.task, wasm/)
 │   ├── src/service-worker.ts # Offline cache for queued scans + notification polling
-│   ├── src/routes/       # 45 page routes: landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings), admin (dashboard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
+ │   ├── src/routes/       # 46 +page.svelte files (45 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings), admin (dashboard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
 │   └── src/lib/
 │       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (named typed EndpointDefs with mock fixtures, collected into an `endpoints` registry)
-│       ├── components/   # AppIcon, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, TempPasswordModal
-│       ├── features/     # 13 slices: admin (8 sub-slices: analytics/audit/courses/excuses/liveness/offerings/programs/settings), analytics→liveness, attendance (professor ledger, real API), auth, excuse, notifications (poll.ts only), professor, report, session, settings, student, sync — services + runes stores (auth, student, admin) + components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart)
-│       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user), constants/ (roles/routes/status/terms), utils/ (format/gen/geo/qr/timing), theme.css, index.ts
+ │       ├── components/   # AppIcon, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, Modal, TempPasswordModal (7 shared)
+ │       ├── features/     # 12 top-level dirs (+ analytics under admin = 13th conceptual slice): admin (8 sub-slices: analytics/audit/courses/excuses/liveness/offerings/programs/settings), liveness, attendance (professor ledger, real API), auth, excuse, notifications (poll.ts only), professor, report, session, settings, student, sync — services + runes stores (auth, student, admin) + 5 feature components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart)
+ │       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user + index.ts), constants/ (roles/routes/status/terms), utils/ (format/gen/geo/qr/timing), actions/ (focusTrap), theme.css
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot + cron scheduler, AppException handler)
 │   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP/recovery-grant/backup-code fingerprint, HMAC session codes + versioned QR payload), scheduler.py (APScheduler lifecycle), exceptions.py
 │   │   ├── shared/       # enums.py (15 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py, constants.py, query.py, audit.py, rates.py, storage.py, datetimes.py
-│   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 16 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
+ │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 15 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 18 slices: admin, analytics, attendance, auth, course, course_professor, dashboard, enrollment, excuse, face_enrollment, professor, program, reports, session, student, sync, system, upload
 │   │   │   └── */        # model.py in 13 slices (20 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
-│   │   └── tests/        # pytest suite — 719 cases in 49 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini
+ │   │   └── tests/        # pytest suite — 723 cases in 49 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini
 │   ├── alembic/          # env.py imports all 13 feature models; 10 revisions — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), a562c3f8a6f7 (FK restrict), d4e5f6a7b8c9 (risk-score staging), e7f8a9b0c1d2 (app_settings), f4a9c2b7d103 (audit_logs), b1c4e7f0a2d6, 1e1582c4e9f8 (timestamp indexes) → head 1e1582c4e9f8
 │   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
 │   ├── locustfile.py     # Concurrent-scan load harness (locust; 30 VUs over a pool of SEED-LOAD-* sessions)
 │   ├── bench_timings.py  # One-shot risk-batch / backup timings + the import-safe helpers locustfile reuses
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
 ├── docker-compose.dev.yml # Local dev: PostgreSQL + migrations + API + frontend (+ api-test under profile: test)
+├── demo/                 # Live-demo seed: `seed_demo.py` (idempotent super_admin + BSCS/BSIT/BSECE structure + offerings) + `rosters/` (students/professors/enrollments CSVs) — runbook in `demo/README.md`
 └── docs/                 # Proposals, requirements, architecture, deployment, design, developer, guides, operations, presentations, project, testing
 ```
 
 ### API router mounts
 
-`api/router.py` mounts **23 routers over 16 mount paths** under `/api`, with no
+`api/router.py` mounts **23 routers over 15 mount paths** under `/api`, with no
 `prefix=` argument — each `APIRouter` bakes its own prefix in. Two mounts are
-shared by several features, so their inner paths must not collide:
+shared by several features, so their inner paths must not collide. (`/api/admin/dashboard`
+is a route on the `/admin` mount — `dashboard/admin_router.py` uses `prefix="/admin"`
+with an inner `@router.get("/dashboard")` — not a separate mount.)
 
 | Mount             | Routers (feature/router)                                                                     |
 | ----------------- | --------------------------------------------------------------------------------------------- |
 | `/api/auth`       | `auth`                                                                                        |
-| `/api/admin`      | `system` (audit-logs, system settings, academic-structure), `dashboard/admin_router`          |
+| `/api/admin`      | `system` (audit-logs, system settings, academic-structure), `dashboard/admin_router` (`/dashboard`) |
 | `/api/admin/users` | `admin`                                                                                       |
 | `/api/admin/programs` | `program`                                                                                  |
 | `/api/admin/courses` | `course/router`                                                                            |
@@ -130,13 +133,12 @@ shared by several features, so their inner paths must not collide:
 | `/api/admin/attendance` | `attendance/admin_router` (liveness review)                                               |
 | `/api/admin/excuses` | `excuse/admin_router`                                                                      |
 | `/api/admin/analytics` | `analytics`                                                                                |
-| `/api/admin/dashboard` | `dashboard/admin_router`                                                                  |
 | `/api/professor`  | `session`, `professor` (profile only), `excuse/professor_router`, `reports`, `dashboard/professor_router` |
 | `/api/student`    | `student`, `attendance` (scan/precheck/history), `excuse/student_router`, `dashboard/student_router` |
 | `/api/upload`     | `upload`                                                                                      |
 
 `enrollment/router.py` is a stub and stays intentionally unmounted, so 24
-`*router*.py` files exist for 23 mounts.
+`*router*.py` files exist for 23 routers over 15 mount paths.
 
 ## Getting Started
 
@@ -179,6 +181,16 @@ npm run dev            # http://localhost:5173
 > **Note**: `.npmrc` sets `engine-strict=true` — `npm install` fails if Node
 > doesn't satisfy dependency engine ranges.
 
+### Demo data
+
+See [`demo/README.md`](demo/README.md) for the live-demo runbook:
+
+```bash
+python demo/seed_demo.py   # idempotent: super_admin (superadmin / Demo!1234) + programs/courses/offerings
+```
+
+then import `demo/rosters/students.csv`, `professors.csv`, and `enrollments.csv` as shown in the runbook.
+
 ## Environment Variables
 
 Backend (`backend/.env.example`):
@@ -193,7 +205,7 @@ Backend (`backend/.env.example`):
 | `JWT_SECRET`                     | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32` |
 | `JWT_ALGORITHM`                  | `HS256`                                                                | JWT signing algorithm                                               |
 | `PREAUTH_TOKEN_EXPIRE_MINUTES`   | `5`                                                                    | Pre-auth (claim) token TTL                                          |
-| `RECOVERY_TOKEN_EXPIRE_MINUTES`  | `5`                                                                    | Forgot-password recovery-grant TTL (in `config.py`; missing from `backend/.env.example`) |
+| `RECOVERY_TOKEN_EXPIRE_MINUTES`  | `5`                                                                    | Forgot-password recovery-grant TTL |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`    | `15`                                                                   | Access token TTL                                                    |
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | `7`                                                                    | Refresh token TTL                                                   |
 | `LOCKOUT_ATTEMPTS`               | `5`                                                                    | Failed login attempts before lockout                                |
@@ -263,7 +275,7 @@ Backend tests:
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-The suite is **719 cases across 49 files**. Or run it directly against the local
+The suite is **723 cases across 49 files**. Or run it directly against the local
 venv — no Docker and no database are needed, because `conftest.py` defaults to
 in-memory SQLite.
 
@@ -319,18 +331,18 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite is 719 cases
+There are no linters or formatters configured. The backend suite is 723 cases
 across 49 files.
 
 ### CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
-`main` and every pull request, as three parallel jobs — rationale in
+`main`, every pull request, and manually via `workflow_dispatch`, as three parallel jobs — rationale in
 [ADR-069](docs/project/decision-log.md):
 
 | Job | Gate | Needs |
 | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` — 719 cases on in-memory SQLite | nothing |
+| `backend` | `python -m pytest src/tests -q` — 723 cases on in-memory SQLite | nothing |
 | `migrations` | `alembic upgrade head && alembic check` | a `postgres:16-alpine` service |
 | `frontend` | `npm ci && npm run check` (svelte-check) | nothing |
 
@@ -414,7 +426,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12; 0, 9 and 12 marked `[Done]`)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D70, ADR-055–ADR-070)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D70, ADR-001–ADR-070)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -437,10 +449,10 @@ default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 
 | Area      | Status                                                                                                                                                                                                                     |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend   | 18 feature slices / 20 model classes / 20 tables; 23 routers over 16 mount paths under `/api` (see the mount table above); head migration `1e1582c4e9f8` (10 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`audit.py`/`email.py` infra |
-| Frontend  | 45 page routes across landing/auth/student/professor/admin; 13 feature slices (`admin` has 8 sub-slices) + runes stores (auth, student, admin) + 5 feature components and 6 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
+| Backend   | 18 feature slices / 20 model classes / 20 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `1e1582c4e9f8` (10 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`audit.py`/`email.py` infra |
+| Frontend  | 46 +page.svelte files (45 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 8 sub-slices) + runes stores (auth, student, admin) + 5 feature components and 7 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
 | Schema    | 20 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging` and `mfa_backup_codes` ([ERD](docs/design/database-er.md))                                                                     |
-| Tests     | 719 backend cases in 49 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                     |
+| Tests     | 723 backend cases in 49 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                     |
 | Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7 |
 
 The remaining known gaps are operational rather than structural: Phase 10
