@@ -188,7 +188,10 @@ class AdminService:
         page: int,
         size: int,
     ) -> PaginatedResponse[AdminUserRead]:
-        stmt: Select[Any] = _users_stmt().where(_users_filters(search, role, is_active))
+        filters = _users_filters(search, role, is_active)
+        stmt: Select[Any] = _users_stmt()
+        if filters:
+            stmt = stmt.where(*filters)
 
         total: int = (
             await self._session.scalar(
