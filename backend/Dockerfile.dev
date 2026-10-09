@@ -19,6 +19,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY --from=builder /opt/venv /opt/venv
 COPY src ./src
+# Load-harness helpers live beside src, not inside it: test_locust_discovery
+# imports bench_timings (SlotAssigner/discover_session_pool/poisson_wait) and
+# reads locustfile.py source text, resolving both via <testdir>/../.. (= /app).
+# Baked in as fallback; the api-test Compose mounts override them live.
+COPY bench_timings.py locustfile.py ./
 # The `api-test` service runs pytest from /app and needs this for
 # asyncio_mode and the marker registry; the dev image otherwise has no tests.
 COPY pytest.ini ./pytest.ini
