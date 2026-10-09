@@ -195,7 +195,16 @@
 		</div>
 	</header>
 
-	{#if selected === null}
+	{#if professorState.coursesLoading}
+		<section class="card">
+			<p class="empty">Loading your courses…</p>
+		</section>
+	{:else if professorState.coursesError}
+		<section class="card">
+			<p class="empty">Could not load your courses: {professorState.coursesError}</p>
+			<button class="btn btn-secondary" type="button" onclick={() => void initProfessorCourses()}>Try again</button>
+		</section>
+	{:else if selected === null}
 		<section class="card">
 			<p class="empty">
 				{isLocked

@@ -181,25 +181,38 @@
 
 		<section aria-label="Recent sessions">
 			<div class="section-head">
-				<h2 class="section-title">Recent sessions</h2>
-				<div class="filter-row">
-					<label class="form-label" for="offering-filter">Course</label>
-					<select
-						id="offering-filter"
-						class="form-input"
-						value={offeringFilter ?? ''}
-						onchange={(e) => {
-							const raw = e.currentTarget.value;
-							offeringFilter = raw === '' ? null : Number(raw);
-						}}
-					>
-						<option value="">All courses</option>
-						{#each professorState.courses as course (course.offeringId)}
-							<option value={course.offeringId}>
-								{course.courseCode} · Section {course.sections.length > 0 ? course.sections.join(', ') : '—'}
-							</option>
-						{/each}
-					</select>
+					<h2 class="section-title">Recent sessions</h2>
+					<div class="filter-row">
+						<label class="form-label" for="offering-filter">Course</label>
+						{#if professorState.coursesLoading}
+							<span class="muted">Loading courses…</span>
+						{:else if professorState.coursesError}
+							<span class="error">Courses unavailable</span>
+							<button
+								class="btn btn-ghost"
+								type="button"
+								onclick={() => void initProfessorCourses()}
+							>
+								Try again
+							</button>
+						{:else}
+							<select
+								id="offering-filter"
+								class="form-input"
+								value={offeringFilter ?? ''}
+								onchange={(e) => {
+									const raw = e.currentTarget.value;
+									offeringFilter = raw === '' ? null : Number(raw);
+								}}
+							>
+								<option value="">All courses</option>
+								{#each professorState.courses as course (course.offeringId)}
+									<option value={course.offeringId}>
+										{course.courseCode} · Section {course.sections.length > 0 ? course.sections.join(', ') : '—'}
+									</option>
+								{/each}
+							</select>
+						{/if}
 					<button
 						class="btn btn-ghost"
 						type="button"
