@@ -122,6 +122,12 @@
 	const CENTER_YAW_THRESHOLD = 5;
 	const STAGE_TIMEOUT_MS = 12000;
 	const MAX_POSE_SAMPLES = 120;
+	// Retry budget for stage timeouts: after this many auto-restarts the
+	// challenge halts with a surfaced error + manual Try again instead of
+	// looping the camera forever.
+	const MAX_STAGE_ATTEMPTS = 3;
+	let stageAttempts = $state(0);
+	let stageTimedOut = $state(false);
 
 	// Euclidean distance between two landmarks.
 	const pointDist = (lm: Array<{ x: number; y: number }>, i: number, j: number) =>
@@ -398,6 +404,25 @@
 	};
 
 	const resetChallenge = () => {
+		stageAttempts += 1;
+		if (stageAttempts > MAX_STAGE_ATTEMPTS) {
+			// Budget exhausted: halt auto-restarts with the preview left live
+			// so the user sees the last frame. beginDetection=false stops
+			// evaluate() from re-arming another timeout; the manual Try again
+			// button below resets the budget via start().
+			clearBlinkSuccess();
+			clearCountdown();
+			beginDetection = false;
+			challengeStage = 'blink';
+			challengeMessage = '';
+			stageStartedAt = 0;
+			completionSent = false;
+			status = 'no_face';
+			stageTimedOut = true;
+			error =
+				'Liveness timed out after 3 tries — check your lighting, face the camera, then try again.';
+			return;
+		}
 		clearBlinkSuccess();
 		challengeStage = 'blink';
 		challengeMessage = '';
@@ -429,6 +454,8 @@
 		startToken += 1;
 		const token = startToken;
 		error = null;
+		stageTimedOut = false;
+		stageAttempts = 0;
 		challengeStage = 'blink';
 		challengeMessage = '';
 		blinkFired = false;
@@ -710,6 +737,8 @@
 	// frozen last frame — a retry must restart from a clean live view.
 	const stop = () => {
 		startToken += 1;
+		stageAttempts = 0;
+		stageTimedOut = false;
 		clearCountdown();
 		clearBlinkSuccess();
 		cancelAnimationFrame(rafId);
@@ -757,6 +786,17 @@
 		leftEye = [];
 		rightEye = [];
 	};
+
+	// Manual retry after an error (timeout budget exhausted or camera
+	// failure). start() resets the budget, so this never inherits a spent
+	// counter. Safe to call while `active` stays true — the $effect only
+	// fires on prop toggles, not on this call.
+	const retry = () => {
+		stageAttempts = 0;
+		stageTimedOut = false;
+		error = null;
+		void start();
+	};
 </script>
 
 <div class="scanner">
@@ -768,6 +808,8 @@
 			<div class="face-guide" class:aligned aria-hidden="true"></div>
 		{/if}
 		{#if showTurnCue && challengeStage !== 'blink_success'}
+			<!-- Arrow + label are decorative duplicates: the live .hint below
+				carries the same instruction as the screen-reader text. -->
 			<div class="turn-cue" aria-hidden="true">
 				<span
 					class="turn-arrow"
@@ -779,7 +821,11 @@
 				<span class="turn-label">{turnCue.label}</span>
 				<div
 					class="hold-bar"
-					role="presentation"
+					role="progressbar"
+					aria-label="Hold progress"
+					aria-valuemin={0}
+					aria-valuemax={100}
+					aria-valuenow={Math.round(holdProgress * 100)}
 				>
 					<div
 						class="hold-fill"
@@ -789,7 +835,7 @@
 			</div>
 		{/if}
 		{#if !error && challengeStage !== 'blink_success'}
-			<div class="hint" class:passed={status === 'passed' && beginDetection}>{hintText}</div>
+			<div class="hint" role="status" aria-live="polite" class:passed={status === 'passed' && beginDetection}>{hintText}</div>
 		{/if}
 		{#if countdown > 0}
 			<div class="countdown-overlay" aria-live="polite">
@@ -807,6 +853,7 @@
 	</div>
 	{#if error}
 		<p class="error" role="alert">{error}</p>
+		<button class="retry-btn" type="button" onclick={retry}>Try again</button>
 	{/if}
 </div>
 
@@ -1053,5 +1100,19 @@
 		text-align: center;
 		max-width: 90%;
 		margin: 0.75rem auto 0;
+	}
+
+	.retry-btn {
+		display: block;
+		margin: 0.75rem auto 0;
+		padding: 0.625rem 1.25rem;
+		border-radius: 8px;
+		border: 1px solid var(--brand);
+		background: var(--brand);
+		color: var(--on-brand);
+		font: inherit;
+		font-size: 0.875rem;
+		font-weight: 600;
+		cursor: pointer;
 	}
 </style>
