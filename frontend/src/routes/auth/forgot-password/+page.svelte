@@ -58,7 +58,7 @@
 		upper: /[A-Z]/.test(newPwd),
 		lower: /[a-z]/.test(newPwd),
 		number: /\d/.test(newPwd),
-		symbol: /[^A-Za-z0-9]/.test(newPwd),
+		symbol: /[^A-Za-z0-9\s]/.test(newPwd),
 	});
 
 	const allReqsMet = $derived(req.length && req.upper && req.lower && req.number && req.symbol);

@@ -81,30 +81,35 @@
 			]);
 			summary = dashboard;
 
-			// Tile counts are authoritative — the backend builds them in one
-			// batched query over the same window — so they win over anything
-			// derivable from the list row. The list fallback only covers a tile
-			// the summary did not return.
-			const tiles = new Map(dashboard.today_sessions.map((t) => [t.session_id, t]));
-			sessions = list.items
-				.map((item) => {
-					const tile = tiles.get(item.id);
-					const seats =
-						tile?.enrolled ?? item.presentCount + item.lateCount + item.absentCount;
-					return {
-						id: item.id,
-						offeringId: item.offeringId,
-						code: item.courseCode,
-						name: item.courseName,
-						section: item.section,
-						endsAt: item.status === 'active' ? formatClock(item.expiresAt) : formatClock(item.createdAt),
-						scanned: tile?.scanned ?? item.presentCount + item.lateCount,
-						enrolled: seats,
-						status: item.status,
-						createdAt: item.createdAt
-					};
-				})
-				.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+		// Tile counts are authoritative — the backend builds them in one
+		// batched query over the same window — so they win over anything
+		// derivable from the list row. The list fallback only covers a tile
+		// the summary did not return. List rows carry present/late/absent
+		// only (no excused/pending on the contract), so the fallback is a
+		// lower bound, not an exact enrollment.
+		const tiles = new Map(dashboard.today_sessions.map((t) => [t.session_id, t]));
+		sessions = list.items
+			.map((item) => {
+				const tile = tiles.get(item.id);
+				const seats =
+					tile?.enrolled ?? item.presentCount + item.lateCount + item.absentCount;
+				return {
+					id: item.id,
+					offeringId: item.offeringId,
+					code: item.courseCode,
+					name: item.courseName,
+					section: item.section,
+					endsAt:
+						item.status === 'active'
+							? formatClock(item.expiresAt)
+							: formatClock(item.expiresAt ?? item.createdAt),
+					scanned: tile?.scanned ?? item.presentCount + item.lateCount,
+					enrolled: seats,
+					status: item.status,
+					createdAt: item.createdAt
+				};
+			})
+			.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Unable to load dashboard.';
 			sessions = [];

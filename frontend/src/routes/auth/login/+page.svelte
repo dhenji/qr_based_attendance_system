@@ -30,12 +30,13 @@
 
 	// Same policy the backend enforces in shared/validators.password_strength:
 	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.
+	// A space is not a symbol server-side, so it is excluded here too.
 	const passwordReq = $derived({
 		length: newPassword.length >= 8,
 		upper: /[A-Z]/.test(newPassword),
 		lower: /[a-z]/.test(newPassword),
 		number: /\d/.test(newPassword),
-		symbol: /[^A-Za-z0-9]/.test(newPassword),
+		symbol: /[^A-Za-z0-9\s]/.test(newPassword),
 	});
 	const passwordOk = $derived(Object.values(passwordReq).every(Boolean));
 	const passwordsMatch = $derived(newPassword === confirmPassword);

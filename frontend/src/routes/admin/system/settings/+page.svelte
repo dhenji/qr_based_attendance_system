@@ -31,6 +31,8 @@
 	let geofence = $state('50');
 	let presentWin = $state('5');
 	let lateWin = $state('10');
+	let retentionDaily = $state('30');
+	let retentionMonthly = $state('12');
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
 	let saveNote = $state<string | null>(null);
@@ -58,6 +60,8 @@
 			geofence = String(fetched.geofence_default_radius);
 			presentWin = String(fetched.present_window_default);
 			lateWin = String(fetched.late_window_default);
+			retentionDaily = String(fetched.backup_retention_daily ?? 30);
+			retentionMonthly = String(fetched.backup_retention_monthly ?? 12);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Unable to load system settings.';
 		} finally {
@@ -85,8 +89,10 @@
 		const radius = parsePositiveInt(geofence);
 		const present = parsePositiveInt(presentWin);
 		const late = parsePositiveInt(lateWin);
-		if (radius === null || present === null || late === null) {
-			saveError = 'Geofence radius and both windows must be whole numbers of at least 1.';
+		const daily = parsePositiveInt(retentionDaily);
+		const monthly = parsePositiveInt(retentionMonthly);
+		if (radius === null || present === null || late === null || daily === null || monthly === null) {
+			saveError = 'Geofence, windows, and retention must all be whole numbers of at least 1.';
 			return;
 		}
 		saving = true;
@@ -94,7 +100,9 @@
 			settings = await patchSettings({
 				geofence_default_radius: radius,
 				present_window_default: present,
-				late_window_default: late
+				late_window_default: late,
+				backup_retention_daily: daily,
+				backup_retention_monthly: monthly
 			});
 			// These persist: `app_settings` is a real table and this route commits
 			// through the request dependency, so a success message must not imply
@@ -221,6 +229,14 @@
 					<label class="form-label" for="set-late">Default late window (min)</label>
 					<input id="set-late" class="form-input" inputmode="numeric" bind:value={lateWin} />
 				</div>
+				<div class="field">
+					<label class="form-label" for="set-retention-daily">Backup retention daily (days)</label>
+					<input id="set-retention-daily" class="form-input" inputmode="numeric" bind:value={retentionDaily} />
+				</div>
+				<div class="field">
+					<label class="form-label" for="set-retention-monthly">Backup retention monthly (months)</label>
+					<input id="set-retention-monthly" class="form-input" inputmode="numeric" bind:value={retentionMonthly} />
+				</div>
 			</div>
 			{#if saveError}
 				<p class="error" role="alert">{saveError}</p>
@@ -259,6 +275,24 @@
 				</p>
 			{:else}
 				<p class="muted">No backups recorded yet.</p>
+			{/if}
+			{#if backups.length > 0}
+				<ul class="backup-list">
+					{#each backups.slice(0, 5) as row (row.id)}
+						<li class="backup-row">
+							<span class="mono">#{row.id} · {row.status} · {formatDate(row.started_at)}</span>
+							<button
+								class="btn btn-secondary btn-small"
+								type="button"
+								disabled={downloadBusy || row.status !== 'completed'}
+								title={row.status === 'completed' ? 'Download the encrypted backup archive' : 'Only completed backups can be downloaded'}
+								onclick={() => void downloadBackup(row)}
+							>
+								{downloadBusy ? '⏳ Preparing…' : '📥 Download'}
+							</button>
+						</li>
+					{/each}
+				</ul>
 			{/if}
 			{#if backupError}
 				<p class="error" role="alert">{backupError}</p>
@@ -464,6 +498,37 @@
 		color: #1e293b;
 		font-size: 0.9375rem;
 		margin: 0.75rem 0 0;
+	}
+
+	.backup-list {
+		list-style: none;
+		margin: 0.75rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.backup-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid #f1f5f9;
+		border-radius: 8px;
+		background: #f8fafc;
+		font-size: 0.875rem;
+	}
+
+	.mono {
+		font-family: ui-monospace, monospace;
+	}
+
+	.btn-small {
+		padding: 0.375rem 0.75rem;
+		font-size: 0.8125rem;
 	}
 
 	@media (max-width: 640px) {

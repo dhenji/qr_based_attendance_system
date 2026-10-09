@@ -65,7 +65,9 @@
 	let aggregate = $state<Awaited<ReturnType<typeof getAllCoursesReport>> | null>(null);
 	let comparison = $state<Awaited<ReturnType<typeof getComparisonReport>> | null>(null);
 	let trends = $state<Awaited<ReturnType<typeof getTrendsReport>> | null>(null);
-	let reportMeta = $state<ReportMeta>({ dataSource: 'demo', truncated: false });
+	let reportMeta = $state<ReportMeta>(
+		isMockMode() ? { dataSource: 'demo', truncated: false } : { dataSource: 'live', truncated: false }
+	);
 
 	$effect(() => {
 		directoryToken;
@@ -355,7 +357,9 @@
 		<div>
 			<h1>Attendance Reports</h1>
 			<p class="muted">
-				{#if reportMeta.dataSource === 'live'}
+				{#if isLoading}
+					Loading attendance reports…
+				{:else if reportMeta.dataSource === 'live'}
 					Live attendance data from your reports.
 				{:else}
 					Demo report data — live reports are unavailable.

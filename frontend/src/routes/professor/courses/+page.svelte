@@ -95,6 +95,7 @@
 	{:else if professorState.coursesError}
 		<section class="card">
 			<p class="error">Could not load your courses: {professorState.coursesError}</p>
+			<button class="btn btn-secondary" type="button" onclick={() => void initProfessorCourses()}>Try again</button>
 		</section>
 	{:else if courses.length === 0}
 		<section class="card">

@@ -21,7 +21,9 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
-	onMount(async () => {
+	const load = async () => {
+		loading = true;
+		error = null;
 		try {
 			classes = await getSchedule();
 		} catch (e: unknown) {
@@ -29,6 +31,10 @@
 		} finally {
 			loading = false;
 		}
+	};
+
+	onMount(() => {
+		void load();
 	});
 </script>
 
@@ -43,7 +49,7 @@
 	{#if loading}
 		<p class="empty">Loading…</p>
 	{:else if error}
-		<p class="empty error">Could not load schedule: {error}</p>
+		<p class="empty error">Could not load schedule: {error} <button class="retry-btn" onclick={() => void load()}>Try again</button></p>
 	{:else if classes.length === 0}
 		<p class="empty">No classes scheduled yet. Your enrolled subjects will appear here.</p>
 	{:else}
@@ -101,6 +107,19 @@
 
 	.empty.error {
 		color: var(--danger);
+	}
+
+	.retry-btn {
+		margin-left: 0.75rem;
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		border-radius: 8px;
+		padding: 0.375rem 0.875rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: inherit;
+		color: var(--brand);
+		cursor: pointer;
 	}
 
 	.list {

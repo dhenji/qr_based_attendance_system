@@ -43,9 +43,10 @@ export const getProfile = async (): Promise<Professor | null> => {
 
 // Own active course assignments from GET /professor/courses.
 //
-// One page (size 50, the backend default) — grouping happens client-side on
-// the page. `section` arrives as a string array (possibly empty), so it is
-// passed through untouched and joined at render.
+// Paged to exhaustion (size 100 is the server max) so professors with many
+// assignments never truncate — grouping happens client-side on the page.
+// `section` arrives as a string array (possibly empty), so it is passed
+// through untouched and joined at render.
 const toCourseSummary = (item: ProfessorAssignedOffering): ProfessorCourseSummary => ({
 	offeringId: item.offering_id,
 	courseId: item.course_id,
@@ -62,11 +63,19 @@ const toCourseSummary = (item: ProfessorAssignedOffering): ProfessorCourseSummar
 });
 
 export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {
-	const response = await get<Paginated<ProfessorAssignedOffering>>('professorCourses', {
-		page: '1',
-		size: '50',
-	});
-	return (response.items ?? []).map(toCourseSummary);
+	const all: ProfessorCourseSummary[] = [];
+	let page = 1;
+	for (;;) {
+		const response = await get<Paginated<ProfessorAssignedOffering>>('professorCourses', {
+			page: String(page),
+			size: '100',
+		});
+		for (const item of response.items ?? []) all.push(toCourseSummary(item));
+		const total = response.total ?? all.length;
+		if ((response.items ?? []).length < 100 || all.length >= total) break;
+		page += 1;
+	}
+	return all;
 };
 
 // GET /professor/dashboard — today's session counts, the enrolled roster, and

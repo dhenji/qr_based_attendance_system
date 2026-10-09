@@ -101,7 +101,7 @@ const auditParams = (f: AuditLogFilters): Record<string, string> => {
 // action/entity filter that excludes creates yields no live rows.
 const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 	if (f.action && f.action !== 'create') return [];
-	if (f.performed_by && !'system'.includes(f.performed_by.trim().toLowerCase())) return [];
+	if (f.performed_by && f.performed_by.trim().toLowerCase() !== 'system') return [];
 	const rows: AuditLogRow[] = [];
 	let cursor = -1;
 	const inRange = (iso: string): boolean => {

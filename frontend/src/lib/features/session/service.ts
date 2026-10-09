@@ -80,6 +80,12 @@ export type SessionHistoryFilters = {
 // once per page load; an unclaimed professor simply joins nothing.
 let coursesReady = false;
 
+// Invalidate the warmed course join (e.g. after an admin assignment change).
+// Next list call re-warms from GET /professor/courses.
+export const invalidateCourseCache = (): void => {
+	coursesReady = false;
+};
+
 const ensureCourses = async (): Promise<void> => {
 	if (coursesReady) return;
 	coursesReady = true;
@@ -311,6 +317,8 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 			total: response.total,
 			page: response.page,
 			size: response.size,
+			// Page average only — the backend returns no scope aggregate, so
+			// callers must label this as the current page, not the term.
 			avg_compliance:
 				items.length === 0
 					? 0
@@ -320,21 +328,30 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 	}
 
 	// Course-filtered path: fan out per offering, merge, sort, slice.
+	// Each offering is paged to exhaustion (size 100 is the server max), so
+	// offerings with >100 sessions are fully merged, not truncated.
 	const merged: SessionHistoryRow[] = [];
 	for (const offeringId of offeringIds) {
 		if (offeringId === undefined) continue;
-		const query: Record<string, string> = {
-			offering_id: String(offeringId),
-			sort_by: 'date',
-			sort_dir: 'desc',
-			page: '1',
-			size: '100',
-		};
-		if (params?.section !== undefined) query.section = params.section;
-		if (params?.from) query.date_from = params.from;
-		if (params?.to) query.date_to = params.to;
-		const response = await get<Paginated<SessionHistoryItemResponse>>('sessionHistory', query);
-		for (const item of response.items ?? []) merged.push(toRow(item));
+		let page = 1;
+		for (;;) {
+			const query: Record<string, string> = {
+				offering_id: String(offeringId),
+				sort_by: 'date',
+				sort_dir: 'desc',
+				page: String(page),
+				size: '100',
+			};
+			if (params?.section !== undefined) query.section = params.section;
+			if (params?.from) query.date_from = params.from;
+			if (params?.to) query.date_to = params.to;
+			const response = await get<Paginated<SessionHistoryItemResponse>>('sessionHistory', query);
+			for (const item of response.items ?? []) merged.push(toRow(item));
+			const total = response.total ?? 0;
+			const got = page * 100;
+			if ((response.items ?? []).length < 100 || got >= total) break;
+			page += 1;
+		}
 	}
 	merged.sort(compareRows);
 
@@ -348,6 +365,8 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 		total: merged.length,
 		page,
 		size,
+		// Merged-set average (all offerings matching the course filter), not a
+		// backend scope total — label accordingly.
 		avg_compliance:
 			merged.length === 0
 				? 0

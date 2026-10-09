@@ -60,8 +60,9 @@ export const getProfile = async (): Promise<Student | null> => {
 // Partial profile updates (merged over the existing record).
 // Read-only per D32 and unimplemented server-side; the profile page renders its
 // fields disabled rather than offering edits that would be rejected.
+// Throws instead of returning null so callers never wipe local state.
 export const updateProfile = async (_updates: Partial<Student>): Promise<Student | null> => {
-	return null;
+	throw new Error('Student profile is read-only.');
 };
 
 // Schedule — live on GET /student/schedule (no params; identity from the
