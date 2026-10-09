@@ -53,6 +53,25 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  test-db-init:
+    image: postgres:16-alpine
+    profiles:
+      - test
+    environment:
+      PGPASSWORD: postgres
+    depends_on:
+      db: 
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - | 
+        until pg_isready -h db -U postgres -d attendance_sys; do sleep 1; done
+        EXISTS=$$(psql -h db -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='attendance_test'")
+        if [ "$$EXISTS" != "1" ]; then
+          psql -h db -U postgres -d postgres -c "CREATE DATABASE attendance_test;"
+        fi
+
   api-test:
     build:
       context: ./backend
@@ -63,9 +82,18 @@ services:
     working_dir: /app
     environment:
       DEBUG: "true"
+      JWT_SECRET: "test-secret-0123456789abcdef-0123456789"
       PYTHONPATH: /app/src
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/attendance_test
     volumes:
       - ./backend/src:/app/src
+      - ./backend/bench_timings.py:/app/bench_timings.py:ro
+      - ./backend/locustfile.py:/app/locustfile.py:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      test-db-init:
+        condition: service_completed_successfully
     command:
       - python
       - -m

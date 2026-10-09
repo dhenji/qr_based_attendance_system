@@ -148,13 +148,14 @@ with an inner `@router.get("/dashboard")` — not a separate mount.)
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-This starts five services (four always-on plus one test profile):
+This starts six services (four always-on plus two test profile):
 
 - **Database**: PostgreSQL on `localhost:5432` (`attendance_sys`)
 - **Migrations**: builds the `migrate` target of `backend/Dockerfile.dev` and runs `alembic upgrade head` once, applying the schema before the API boots
 - **API**: builds the `runtime` target of `backend/Dockerfile.dev` — http://localhost:8000, health check at `/health`
 - **Frontend (app)**: builds `frontend/Dockerfile.dev` — Vite dev server at http://localhost:5173 with HMR, source mounted for live reload
-- **api-test** (only with `--profile test`): runs the pytest suite, e.g. `docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test`
+- **test-db-init** (only with `--profile test`): one-shot `postgres:16-alpine` that ensures the dedicated `attendance_test` database exists in the shared `db` container (idempotent — safe on existing `pgdata` volumes)
+- **api-test** (only with `--profile test`): runs the pytest suite against `attendance_test` via `TEST_DATABASE_URL`, e.g. `docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test`
 
 The backend image is multi-stage: a `builder` stage creates a virtualenv at `/opt/venv` and installs dependencies, a `runtime` stage copies it in for the API, and a `migrate` stage reuses the runtime image with `alembic upgrade head` as its command.
 
@@ -269,15 +270,20 @@ Frontend (`frontend/.env.example`):
 
 ## Verification
 
-Backend tests:
+Backend tests (Compose — realistic Postgres path):
 
 ```bash
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-The suite is **723 cases across 49 files**. Or run it directly against the local
-venv — no Docker and no database are needed, because `conftest.py` defaults to
-in-memory SQLite.
+This runs the suite (**723 cases across 49 files**) against the dedicated
+`attendance_test` database: `test-db-init` creates it idempotently, then
+`api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
+The suite runs `create_all`/`drop_all` per test, so it must never point at
+`attendance_sys` — `api-test` deliberately sets no `DATABASE_URL`.
+
+Or run it directly against the local venv — no Docker and no database are
+needed, because `conftest.py` defaults to in-memory SQLite.
 
 ```bash
 cd backend
@@ -288,10 +294,11 @@ DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src .venv/bin/pyth
 which build `Settings()` themselves; `conftest.py` sets both for everything
 it owns. `PYTHONPATH=src` is what makes `core.*`/`features.*` importable.
 
-To run the same suite against a real Postgres instead of SQLite, create a
-dedicated test database first — the Compose Postgres only creates
-`attendance_sys`, and the suite runs `create_all`/`drop_all` per test, so
-never point `TEST_DATABASE_URL` at `attendance_sys` itself:
+To run the same suite against a real Postgres from the local venv (instead
+of SQLite), create a dedicated test database first — the suite runs
+`create_all`/`drop_all` per test, so never point `TEST_DATABASE_URL` at
+`attendance_sys` itself (the Compose path above handles this automatically
+via `test-db-init`):
 
 ```bash
 docker compose -f docker-compose.dev.yml exec db \
