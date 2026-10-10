@@ -106,7 +106,7 @@
 								<button class="link" onclick={() => void toggleProfessorActive(p)}>
 									Restore
 								</button>
-								<button class="link danger" onclick={() => (deleteTarget = p)}>Delete</button>
+								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
 							</td>
 						</tr>
 					{/each}
@@ -145,8 +145,8 @@
 		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} will be removed for good. This fails with 409 if
-				sessions still reference them.
+				{fullName(deleteTarget)} will be removed for good. If class sessions are still
+				linked, deletion will be blocked and the record stays archived.
 			</p>
 			{#if adminProfessorsState.actionError}
 				<p class="error" role="alert">{adminProfessorsState.actionError}</p>

@@ -607,7 +607,7 @@
 									{s.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
 {#if !s.isActive}
-								<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>
+								<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
 							{/if}
 							<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
 							<button class="link" onclick={() => openFace(s)}>
@@ -738,8 +738,9 @@
 		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} ({deleteTarget.studentId}) is inactive. This cannot be undone,
-				and it fails with 409 if enrollments, scans, or excuse requests still reference them.
+				{fullName(deleteTarget)} ({deleteTarget.studentId}) is inactive. This cannot be undone.
+				If enrollment, attendance, or excuse history is still linked, deletion will be
+				blocked and the record stays archived.
 			</p>
 			{#if adminStudentsState.actionError}
 				<p class="error" role="alert">{adminStudentsState.actionError}</p>

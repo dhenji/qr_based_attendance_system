@@ -259,7 +259,7 @@
 							<h3 class="year-title">{year.label}</h3>
 							<div class="year-actions">
 								<button class="link" onclick={() => openTerms(year)}>Manage Terms</button>
-								<button class="link danger" onclick={() => (deleteTarget = year)}>Delete</button>
+								<button class="link danger" onclick={() => { adminProgramDetailState.actionError = null; deleteTarget = year; }}>Delete</button>
 							</div>
 						</div>
 						<p class="muted">Terms: {termsText(year)}</p>
@@ -437,8 +437,8 @@
 		>
 			<h2 id="delete-year-title" class="modal-title">Delete {deleteTarget.label}?</h2>
 			<p class="modal-text">
-				This permanently removes the year level. It fails with 409 if course
-				offerings still reference it — move or delete those first.
+				This permanently removes the year level. If course offerings still use it,
+				deletion will be blocked — move or delete those first.
 			</p>
 			{#if adminProgramDetailState.actionError}
 				<p class="error" role="alert">{adminProgramDetailState.actionError}</p>

@@ -24,6 +24,7 @@ import {
 	setProfessorActive,
 	setStudentActive,
 } from '$lib/features/admin/service';
+import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
 
 export const adminStudentsState = $state({
 	items: [] as AdminStudent[],
@@ -97,7 +98,7 @@ export const deleteArchivedStudent = async (id: number): Promise<void> => {
 		await hardDeleteStudent(id);
 		await refreshAdminStudents();
 	} catch (e: unknown) {
-		adminStudentsState.actionError = toMessage(e, 'Failed to delete student');
+		adminStudentsState.actionError = friendlyDeleteError(e, 'Failed to delete student');
 		throw e;
 	}
 };
@@ -149,7 +150,7 @@ export const deleteArchivedProfessor = async (id: number): Promise<void> => {
 		await hardDeleteProfessor(id);
 		await refreshAdminProfessors();
 	} catch (e: unknown) {
-		adminProfessorsState.actionError = toMessage(e, 'Failed to delete professor');
+		adminProfessorsState.actionError = friendlyDeleteError(e, 'Failed to delete professor');
 		throw e;
 	}
 };
