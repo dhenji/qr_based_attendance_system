@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { toAuthMessage } from '$lib/features/auth/errors';
 	import type { User } from '$lib/shared/types';
@@ -128,7 +129,51 @@
 			stage = 'change-password';
 			return;
 		}
-		await goto(defaultRouteFor(user));
+		await goto(resolvePostLoginRoute(user));
+	};
+
+	// Where to send a user after login, honoring the portal intent the auth
+	// gate stored in ?next=. Strict allowlist + role match: anything foreign
+	// (absolute URL, protocol-relative, encoded slashes, non-portal path) or
+	// any portal that does not belong to this role falls back to the role
+	// default, so a stale or tampered ?next= can neither open-redirect nor
+	// land a user in another portal.
+	const resolvePostLoginRoute = (user: User | null): string => {
+		const fallback = defaultRouteFor(user);
+		const raw = page.url.searchParams.get('next');
+		if (!raw) return fallback;
+		let path: string;
+		try {
+			path = decodeURIComponent(raw);
+		} catch {
+			return fallback;
+		}
+		if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return fallback;
+		if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path)) return fallback;
+		const qIndex = path.indexOf('?');
+		const hashIndex = path.indexOf('#');
+		const end = Math.min(qIndex === -1 ? path.length : qIndex, hashIndex === -1 ? path.length : hashIndex);
+		const pathname = path.slice(0, end);
+		if (pathname.includes('%') || pathname.includes('%2f') || pathname.includes('%2F')) return fallback;
+		const isPortalPath =
+			pathname === '/student' ||
+			pathname.startsWith('/student/') ||
+			pathname === '/professor' ||
+			pathname.startsWith('/professor/') ||
+			pathname === '/admin' ||
+			pathname.startsWith('/admin/');
+		if (!isPortalPath) return fallback;
+		switch (user?.role) {
+			case 'student':
+				return pathname.startsWith('/student/') || pathname === '/student' ? path : fallback;
+			case 'professor':
+				return pathname.startsWith('/professor/') || pathname === '/professor' ? path : fallback;
+			case 'admin':
+			case 'super_admin':
+				return pathname.startsWith('/admin') ? path : fallback;
+			default:
+				return fallback;
+		}
 	};
 
 	const backToCredentials = () => {
