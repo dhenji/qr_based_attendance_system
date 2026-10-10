@@ -14,6 +14,7 @@ import {
 	listPrograms,
 	setProgramActive,
 } from '$lib/features/admin/programs/service';
+import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
 
 export type ProgramSortColumn = 'code' | 'name';
 
@@ -110,7 +111,7 @@ export const deleteProgramYear = async (programId: number, yearId: number): Prom
 		await deleteYearLevel(programId, yearId);
 		await refreshAdminProgramDetail(programId);
 	} catch (e: unknown) {
-		adminProgramDetailState.actionError = toMessage(e, 'Failed to delete year level');
+		adminProgramDetailState.actionError = friendlyDeleteError(e, 'Failed to delete year level');
 		throw e;
 	}
 };

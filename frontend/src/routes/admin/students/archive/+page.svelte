@@ -106,7 +106,7 @@
 								<button class="link" onclick={() => void toggleStudentActive(s)}>
 									Restore
 								</button>
-								<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>
+								<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
 							</td>
 						</tr>
 					{/each}
@@ -145,8 +145,8 @@
 		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} will be removed for good. This fails with 409 if
-				enrollments, attendance, or excuses still reference them.
+				{fullName(deleteTarget)} will be removed for good. If enrollment, attendance, or
+				excuse history is still linked, deletion will be blocked and the record stays archived.
 			</p>
 			{#if adminStudentsState.actionError}
 				<p class="error" role="alert">{adminStudentsState.actionError}</p>

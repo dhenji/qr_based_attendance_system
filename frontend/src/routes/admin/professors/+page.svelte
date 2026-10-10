@@ -337,7 +337,7 @@
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
 {#if !p.isActive}
-								<button class="link danger" onclick={() => (deleteTarget = p)}>Delete</button>
+								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
 							{/if}
 							<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
 						</td>
@@ -435,8 +435,8 @@
 		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} is inactive. This cannot be undone, and it fails
-				with 409 if sessions still reference them.
+				{fullName(deleteTarget)} is inactive. This cannot be undone. If class sessions are
+				still linked, deletion will be blocked and the record stays archived.
 			</p>
 			{#if adminProfessorsState.actionError}
 				<p class="error" role="alert">{adminProfessorsState.actionError}</p>
