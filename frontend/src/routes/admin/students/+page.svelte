@@ -214,6 +214,9 @@
 	};
 
 	// Form fields (strings for inputs; ids coerced by zod on submit).
+	// Program/year are picked from dropdowns (displayed as code — name /
+	// label) but still submit DB ids — the Programs UI never shows ids, so
+	// raw numeric inputs were unusable. See the modal markup below.
 	let f_student_id = $state('');
 	let f_first_name = $state('');
 	let f_middle_name = $state('');
@@ -223,6 +226,11 @@
 	let f_year_level_id = $state('');
 	let f_section = $state('');
 	let f_username = $state('');
+	// Year options for the Add/Edit modal. Separate from `yearOptions` (the
+	// list-filter cascade) so opening the modal never clobbers the filter.
+	let modalYearOptions = $state<YearLevel[]>([]);
+	let modalYearsLoading = $state(false);
+	let modalYearsError = $state<string | null>(null);
 
 	// Fixed page size: the admin store is shared with the dashboard (which
 	// loads it with size=1 for KPI counts), so never inherit size from it —
@@ -277,6 +285,40 @@
 		load(1);
 	};
 
+	// Modal cascade: program select drives the year select via
+	// listYearLevels, mirroring the offerings page pattern. Values are still
+	// DB ids (the create/update contract takes ids); only the display is
+	// human (code — name / label).
+	const changeModalProgram = async () => {
+		f_year_level_id = '';
+		modalYearOptions = [];
+		modalYearsError = null;
+		if (!f_program_id) return;
+		modalYearsLoading = true;
+		try {
+			modalYearOptions = await listYearLevels(Number(f_program_id));
+			if (modalYearOptions.length === 0) {
+				modalYearsError = 'No year levels under this program yet — add one in Program Management first.';
+			}
+		} catch {
+			modalYearOptions = [];
+			modalYearsError = 'Could not load year levels. Re-pick the program to retry.';
+		} finally {
+			modalYearsLoading = false;
+		}
+	};
+
+	// The modal shares `programOptions` with the filter bar; reload it when
+	// empty so the selects work even if the initial list fetch failed.
+	const ensureModalPrograms = async () => {
+		if (programOptions.length > 0) return;
+		try {
+			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
+		} catch {
+			programOptions = [];
+		}
+	};
+
 	const applyFilters = () => {
 		if (searchTimer) {
 			clearTimeout(searchTimer);
@@ -324,7 +366,10 @@
 		f_year_level_id = '';
 		f_section = '';
 		f_username = '';
+		modalYearOptions = [];
+		modalYearsError = null;
 		formOpen = true;
+		void ensureModalPrograms();
 	};
 
 	const openEdit = (s: AdminStudent) => {
@@ -335,11 +380,15 @@
 		f_middle_name = s.middleName ?? '';
 		f_last_name = s.lastName;
 		f_email = s.email;
+		// Empty = "unchanged": PATCH omits the cohort unless both are picked.
 		f_program_id = '';
 		f_year_level_id = '';
 		f_section = s.section ?? '';
 		f_username = '';
+		modalYearOptions = [];
+		modalYearsError = null;
 		formOpen = true;
+		void ensureModalPrograms();
 	};
 
 	const submitForm = async () => {
@@ -376,7 +425,7 @@
 				});
 			} else {
 				if ((f_program_id && !f_year_level_id) || (!f_program_id && f_year_level_id)) {
-					formError = 'Enter both Program ID and Year level ID, or leave both unchanged.';
+					formError = 'Pick both a program and a year level, or leave both unchanged.';
 					return;
 				}
 				const parsed = adminStudentUpdateSchema.safeParse({
@@ -626,19 +675,52 @@
 				</div>
 				{#if !editing}
 					<div class="grid2">
-						<label>Program ID<input class="input" inputmode="numeric" bind:value={f_program_id} placeholder="1" /></label>
-						<label>Year level ID<input class="input" inputmode="numeric" bind:value={f_year_level_id} placeholder="1" /></label>
+						<label>Program
+							<select class="input" aria-label="Program" bind:value={f_program_id} onchange={() => void changeModalProgram()}>
+								<option value="">Select program…</option>
+								{#each programOptions as p (p.id)}
+									<option value={String(p.id)}>{p.code} — {p.name}</option>
+								{/each}
+							</select>
+						</label>
+						<label>Year level
+							<select class="input" aria-label="Year level" bind:value={f_year_level_id} disabled={!f_program_id || modalYearsLoading}>
+								<option value="">{modalYearsLoading ? 'Loading…' : 'Select year level…'}</option>
+								{#each modalYearOptions as y (y.id)}
+									<option value={String(y.id)}>{y.label}</option>
+								{/each}
+							</select>
+						</label>
 					</div>
+					{#if modalYearsError}
+						<p class="hint" role="status">{modalYearsError}</p>
+					{/if}
 					<div class="grid2">
 						<label>Section<input class="input" bind:value={f_section} placeholder="A" /></label>
 						<label>Username (claim slot)<input class="input" bind:value={f_username} placeholder="optional" /></label>
 					</div>
-					<p class="hint">Program and year-level IDs come from the Programs tables (Phase 3 next adds a picker).</p>
 				{:else}
 					<div class="grid2">
-						<label>Program ID<input class="input" inputmode="numeric" bind:value={f_program_id} placeholder="unchanged" /></label>
-						<label>Year level ID<input class="input" inputmode="numeric" bind:value={f_year_level_id} placeholder="unchanged" /></label>
+						<label>Program
+							<select class="input" aria-label="Program" bind:value={f_program_id} onchange={() => void changeModalProgram()}>
+								<option value="">Unchanged (keep current)</option>
+								{#each programOptions as p (p.id)}
+									<option value={String(p.id)}>{p.code} — {p.name}</option>
+								{/each}
+							</select>
+						</label>
+						<label>Year level
+							<select class="input" aria-label="Year level" bind:value={f_year_level_id} disabled={!f_program_id || modalYearsLoading}>
+								<option value="">{modalYearsLoading ? 'Loading…' : 'Unchanged (keep current)'}</option>
+								{#each modalYearOptions as y (y.id)}
+									<option value={String(y.id)}>{y.label}</option>
+								{/each}
+							</select>
+						</label>
 					</div>
+					{#if modalYearsError}
+						<p class="hint" role="status">{modalYearsError}</p>
+					{/if}
 					<label>Section<input class="input" bind:value={f_section} /></label>
 				{/if}
 			</div>
