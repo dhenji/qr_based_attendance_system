@@ -573,6 +573,9 @@ class StudentService:
         student.face_embedding = None
         student.face_enrolled_at = None
         student.face_embedding_version = (student.face_embedding_version or 0) + 1
+        await self._set_linked_user_active(
+            user_id=student.user_id, is_active=False, actor_id=actor_id
+        )
         await self._session.flush()
         # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
         # it is expired and would raise MissingGreenlet if read synchronously.
@@ -596,6 +599,9 @@ class StudentService:
         student: Student = await self._get_or_404(student_id)
         old_value: dict[str, Any] = self._student_snapshot(student)
         student.is_active = True
+        await self._set_linked_user_active(
+            user_id=student.user_id, is_active=True, actor_id=actor_id
+        )
         await self._session.flush()
         # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
         # it is expired and would raise MissingGreenlet if read synchronously.
@@ -789,7 +795,15 @@ class StudentService:
             old_value=old_value,
         )
 
+        # Capture before the delete: the instance is detached once flushed.
+        # The login must not survive the roster row: deactivate instead of
+        # deleting so audit history keyed by the user id stays intact.
+        linked_user_id: int | None = student.user_id
         await self._session.delete(student)
+        await self._session.flush()
+        await self._set_linked_user_active(
+            user_id=linked_user_id, is_active=False, actor_id=actor_id
+        )
         await self._session.flush()
 
     @staticmethod
@@ -837,6 +851,35 @@ class StudentService:
             raise StudentAccountUnlinkedException(student_id)
 
         return student.user_id
+
+    async def _set_linked_user_active(
+        self, *, user_id: int | None, is_active: bool, actor_id: int | None
+    ) -> None:
+        """Sync the login gate with the roster flag.
+
+        Auth (`login`, `refresh_token`, `_get_active_user`) gates only on
+        `users.is_active`, so archiving a roster row without touching the
+        linked user leaves the login working. Unclaimed rows (`user_id=None`)
+        have no login and are a no-op. No-op when the flag already matches so
+        re-archiving does not spam the audit trail.
+        """
+        if user_id is None:
+            return
+        user: User | None = await self._session.get(User, user_id)
+        if user is None or user.is_active == is_active:
+            return
+        old_value: dict[str, Any] = {"is_active": user.is_active}
+        user.is_active = is_active
+        await self._session.flush()
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value={"is_active": is_active},
+        )
 
     async def _year_level(self, year_level_id: int) -> YearLevel:
         year_level: YearLevel | None = await self._session.get(YearLevel, year_level_id)

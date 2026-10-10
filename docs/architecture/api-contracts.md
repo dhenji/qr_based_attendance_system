@@ -1307,7 +1307,7 @@ lock after 5 failed attempts.
 | ------ | ---------------------------------- | ---------------------------------------------------- |
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
 | POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
-| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` · 409 `username_exists` |
 | POST   | `/auth/login`                      | Email/password login (+ MFA gate) | 400 `invalid_credentials` · 423 `account_locked` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |

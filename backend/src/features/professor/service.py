@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import Row, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from features.auth.model import User
 from features.course.exceptions import OfferingNotFoundException
 from features.course.model import Course, CourseOffering
 from features.course_professor.exceptions import OverlappingAssignmentException
@@ -311,6 +312,9 @@ class ProfessorService:
             await self._archive_row(professor, assigned_by)
         elif is_active is True:
             professor.is_active = True
+            await self._set_linked_user_active(
+                user_id=professor.user_id, is_active=True, actor_id=assigned_by
+            )
 
         await self._session.flush()
         # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
@@ -342,6 +346,9 @@ class ProfessorService:
         professor: Professor = await self._get_or_404(professor_id)
         old_value: dict[str, Any] = self._professor_snapshot(professor)
         professor.is_active = True
+        await self._set_linked_user_active(
+            user_id=professor.user_id, is_active=True, actor_id=actor_id
+        )
         await self._session.flush()
         # Reload after the flush: `updated_at` is server-side (TimestampMixin), so
         # it is expired and would raise MissingGreenlet if read synchronously.
@@ -460,7 +467,13 @@ class ProfessorService:
             old_value=old_value,
         )
 
+        # Capture before the delete: the login must not survive the roster row.
+        linked_user_id: int | None = professor.user_id
         await self._session.delete(professor)
+        await self._session.flush()
+        await self._set_linked_user_active(
+            user_id=linked_user_id, is_active=False, actor_id=actor_id
+        )
         await self._session.flush()
 
     async def resolve_professor_id(self, *, user_id: int) -> int:
@@ -529,10 +542,15 @@ class ProfessorService:
     async def _archive_row(
         self, professor: Professor, actor_id: int | None
     ) -> None:
-        # Soft archive touches only its own row (ADR-058): no cascade to
-        # course_professors / sessions / users.
+        # Soft archive touches only its own row for course data (ADR-058): no
+        # cascade to course_professors / sessions. The linked login IS synced
+        # (users.is_active) because auth gates only on the users table — an
+        # archived roster row must not stay login-capable.
         old_value: dict[str, Any] = self._professor_snapshot(professor)
         professor.is_active = False
+        await self._set_linked_user_active(
+            user_id=professor.user_id, is_active=False, actor_id=actor_id
+        )
         await self._session.flush()
 
         await record_audit(
@@ -543,6 +561,28 @@ class ProfessorService:
             entity_id=professor.id,
             old_value=old_value,
             new_value=self._professor_snapshot(professor),
+        )
+
+    async def _set_linked_user_active(
+        self, *, user_id: int | None, is_active: bool, actor_id: int | None
+    ) -> None:
+        """Sync the login gate with the roster flag (see StudentService)."""
+        if user_id is None:
+            return
+        user: User | None = await self._session.get(User, user_id)
+        if user is None or user.is_active == is_active:
+            return
+        old_value: dict[str, Any] = {"is_active": user.is_active}
+        user.is_active = is_active
+        await self._session.flush()
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value={"is_active": is_active},
         )
 
     @staticmethod
