@@ -3,8 +3,6 @@ from __future__ import annotations
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 from features.auth.constants import (
     PASSWORD_MIN_LENGTH,
-    USERNAME_MAX_LENGTH,
-    USERNAME_MIN_LENGTH,
 )
 from shared.pagination import (
     DEFAULT_PAGE,
@@ -44,8 +42,6 @@ __all__: list[str] = [
     "SORT_DIR_OPTIONS",
     "STUDENT_ID_MAX_LENGTH",
     "STUDENT_ID_MIN_LENGTH",
-    "USERNAME_MAX_LENGTH",
-    "USERNAME_MIN_LENGTH",
     "VERIFY_CODE_RATE_LIMIT_MAX_CALLS",
     "VERIFY_CODE_RATE_LIMIT_WINDOW_SECONDS",
 ]

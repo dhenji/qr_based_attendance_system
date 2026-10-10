@@ -18,7 +18,7 @@ from features.auth.constants import (
     USERNAME_MIN_LENGTH,
 )
 from shared.enums import OtpPurpose, UserRole
-from shared.validators import password_strength
+from shared.validators import normalize_username, password_strength
 
 
 class OTPRequest(BaseModel):
@@ -57,6 +57,11 @@ class RegisterRequest(OTPRequest, _OTPCodeRequest):
     security_answer: str = Field(
         min_length=SECURITY_ANSWER_MIN_LENGTH, max_length=SECURITY_ANSWER_MAX_LENGTH
     )
+
+    @field_validator("username")
+    @classmethod
+    def _normalize_username(cls, value: str) -> str:
+        return normalize_username(value)
 
     @field_validator("password")
     @classmethod

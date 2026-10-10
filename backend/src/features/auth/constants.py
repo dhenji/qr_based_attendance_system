@@ -5,6 +5,9 @@ PASSWORD_MAX_LENGTH: int = 128
 OTP_CODE_LENGTH: int = 6
 USERNAME_MIN_LENGTH: int = 3
 USERNAME_MAX_LENGTH: int = 20
+# User-defined handle: lowercase alphanumerics plus dot/underscore/hyphen.
+# Email stays the login identity; this is display + uniqueness-guarded only.
+USERNAME_PATTERN: str = r"^[a-z0-9._-]+$"
 
 SECURITY_QUESTION_MIN_LENGTH: int = 3
 SECURITY_QUESTION_MAX_LENGTH: int = 200

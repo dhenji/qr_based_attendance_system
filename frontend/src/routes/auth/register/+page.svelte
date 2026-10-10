@@ -136,12 +136,17 @@
 		event.preventDefault();
 		error = '';
 
-		if (!username.trim()) {
+		const handle = username.trim().toLowerCase();
+		if (!handle) {
 			error = 'Username is required.';
 			return;
 		}
-		if (username.trim().length < 3 || username.trim().length > 20) {
+		if (handle.length < 3 || handle.length > 20) {
 			error = 'Username must be 3–20 characters.';
+			return;
+		}
+		if (!/^[a-z0-9._-]+$/.test(handle)) {
+			error = 'Username may only contain letters, numbers, dot, underscore and hyphen.';
 			return;
 		}
 		if (!passwordOk) {
@@ -166,7 +171,7 @@
 			const user = await doRegister({
 				email,
 				otpCode: otp.join(''),
-				username: username.trim(),
+				username: handle,
 				password,
 				securityQuestion,
 				securityAnswer,
@@ -273,7 +278,7 @@
 						<input class="form-input" id="reg-username" required minlength="3" maxlength="20"
 							autocomplete="username" placeholder="jrizal" value={username}
 							oninput={(e) => { username = (e.target as HTMLInputElement).value; }} />
-						<p class="hint">3–20 characters. Must be unique across all accounts.</p>
+						<p class="hint">3–20 characters: letters, numbers, dot, underscore and hyphen. Must be unique across all accounts.</p>
 					</div>
 
 					<div class="field">

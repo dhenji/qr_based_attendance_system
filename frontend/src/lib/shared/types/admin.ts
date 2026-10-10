@@ -53,7 +53,6 @@ export interface AdminStudentCreatePayload {
 	program_id: number;
 	year_level_id: number;
 	section?: string;
-	username?: string;
 }
 
 export interface AdminStudentUpdatePayload {
@@ -106,7 +105,6 @@ export interface AdminProfessorCreatePayload {
 	last_name: string;
 	email: string;
 	department?: string;
-	username?: string;
 	courses?: number[];
 }
 
