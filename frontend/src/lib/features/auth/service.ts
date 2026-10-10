@@ -84,7 +84,7 @@ export const register = async (input: {
 		email: input.email.trim().toLowerCase(),
 		purpose: 'claim',
 		otp_code: input.otpCode.trim(),
-		username: input.username.trim(),
+		username: input.username.trim().toLowerCase(),
 		password: input.password,
 		security_question: input.securityQuestion.trim(),
 		security_answer: input.securityAnswer.trim(),

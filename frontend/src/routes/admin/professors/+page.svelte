@@ -49,7 +49,6 @@
 	let f_last_name = $state('');
 	let f_email = $state('');
 	let f_department = $state('');
-	let f_username = $state('');
 	let f_courses = $state<number[]>([]);
 	let offeringOptions = $state<AdminOffering[]>([]);
 	let offeringsLoading = $state(false);
@@ -138,7 +137,6 @@
 		f_last_name = '';
 		f_email = '';
 		f_department = '';
-		f_username = '';
 		f_courses = [];
 		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
@@ -152,7 +150,6 @@
 		f_last_name = p.lastName;
 		f_email = p.email;
 		f_department = p.department ?? '';
-		f_username = '';
 		f_courses = (p.assigned_courses ?? []).map((c) => c.offering_id);
 		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
@@ -169,7 +166,6 @@
 					last_name: f_last_name,
 					email: f_email,
 					department: f_department || undefined,
-					username: f_username || undefined,
 					courses: f_courses,
 				});
 				if (!parsed.success) {
@@ -183,7 +179,6 @@
 					last_name: d.last_name,
 					email: d.email,
 					department: d.department || undefined,
-					username: d.username || undefined,
 					courses: d.courses.length > 0 ? d.courses : undefined,
 				});
 			} else {
@@ -394,12 +389,7 @@
 					<label>Last name<input class="input" bind:value={f_last_name} /></label>
 					<label>Email<input class="input" type="email" bind:value={f_email} /></label>
 				</div>
-				<div class="grid2">
-					<label>Department<input class="input" bind:value={f_department} placeholder="Computer Science" /></label>
-					{#if !editing}
-						<label>Username (claim slot)<input class="input" bind:value={f_username} placeholder="optional" /></label>
-					{/if}
-				</div>
+				<label>Department<input class="input" bind:value={f_department} placeholder="Computer Science" /></label>
 				<fieldset class="courses">
 					<legend>Course assignments (offerings)</legend>
 					{#if offeringsLoading}

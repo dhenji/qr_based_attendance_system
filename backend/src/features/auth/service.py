@@ -321,6 +321,15 @@ class AuthService:
         if student is None and professor is None:
             raise UnrecognizedEmailException()
 
+        # A handle held by a *different* row blocks the claim. The holder may
+        # be this same inactive login (delete -> re-add -> re-register with
+        # the same handle): that row is what `_reclaim_inactive_login`
+        # revives below, so it must not trip this check. Same-row exemption
+        # mirrors `AdminService.create_user`.
+        holder = await self._users.get_by(username=username)
+        if holder is not None and (existing is None or holder.id != existing.id):
+            raise UsernameTakenException()
+
         if existing is not None:
             # Inactive login for this email (e.g. orphaned by a roster
             # hard-delete): reclaim it for the fresh roster row instead of

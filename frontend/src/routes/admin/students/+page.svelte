@@ -225,7 +225,6 @@
 	let f_program_id = $state('');
 	let f_year_level_id = $state('');
 	let f_section = $state('');
-	let f_username = $state('');
 	// Year options for the Add/Edit modal. Separate from `yearOptions` (the
 	// list-filter cascade) so opening the modal never clobbers the filter.
 	let modalYearOptions = $state<YearLevel[]>([]);
@@ -365,7 +364,6 @@
 		f_program_id = '';
 		f_year_level_id = '';
 		f_section = '';
-		f_username = '';
 		modalYearOptions = [];
 		modalYearsError = null;
 		formOpen = true;
@@ -384,7 +382,6 @@
 		f_program_id = '';
 		f_year_level_id = '';
 		f_section = s.section ?? '';
-		f_username = '';
 		modalYearOptions = [];
 		modalYearsError = null;
 		formOpen = true;
@@ -405,7 +402,6 @@
 					program_id: f_program_id,
 					year_level_id: f_year_level_id,
 					section: f_section || undefined,
-					username: f_username || undefined,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -421,7 +417,6 @@
 					program_id: d.program_id,
 					year_level_id: d.year_level_id,
 					section: d.section || undefined,
-					username: d.username || undefined,
 				});
 			} else {
 				if ((f_program_id && !f_year_level_id) || (!f_program_id && f_year_level_id)) {
@@ -695,10 +690,7 @@
 					{#if modalYearsError}
 						<p class="hint" role="status">{modalYearsError}</p>
 					{/if}
-					<div class="grid2">
-						<label>Section<input class="input" bind:value={f_section} placeholder="A" /></label>
-						<label>Username (claim slot)<input class="input" bind:value={f_username} placeholder="optional" /></label>
-					</div>
+					<label>Section<input class="input" bind:value={f_section} placeholder="A" /></label>
 				{:else}
 					<div class="grid2">
 						<label>Program

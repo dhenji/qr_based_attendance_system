@@ -19,18 +19,15 @@ from features.student.constants import (
     SECTION_MAX_LENGTH,
     STUDENT_ID_MAX_LENGTH,
     STUDENT_ID_MIN_LENGTH,
-    USERNAME_MAX_LENGTH,
-    USERNAME_MIN_LENGTH,
 )
 
 
 class StudentCreate(BaseModel):
     """Admin roster create.
 
-    `username` is the claim slot used at self-registration (omitted =
-    auto-generated at claim). It is validated here but NOT persisted:
-    `students` has no username column, and `users.username` uniqueness is
-    enforced at claim time.
+    Identity is by email only. The `username` is chosen by the user at
+    self-registration (`POST /auth/register`); roster create does not
+    accept it.
     """
 
     student_id: str = Field(
@@ -43,9 +40,6 @@ class StudentCreate(BaseModel):
     program_id: int = Field(gt=0)
     year_level_id: int = Field(gt=0)
     section: str | None = Field(default=None, max_length=SECTION_MAX_LENGTH)
-    username: str | None = Field(
-        default=None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH
-    )
 
     @field_validator("student_id")
     @classmethod
@@ -56,14 +50,6 @@ class StudentCreate(BaseModel):
     @classmethod
     def _normalize_email(cls, value: str) -> str:
         return value.strip().lower()
-
-    @field_validator("username")
-    @classmethod
-    def _normalize_username(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        return value.strip()
 
 
 class StudentRead(BaseModel):
