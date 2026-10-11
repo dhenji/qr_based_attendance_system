@@ -89,6 +89,7 @@ class StudentUpdate(BaseModel):
     first_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )
+    middle_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     last_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )

@@ -15,6 +15,7 @@ import {
 	setProgramActive,
 } from '$lib/features/admin/programs/service';
 import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
+import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export type ProgramSortColumn = 'code' | 'name';
 
@@ -72,10 +73,18 @@ export const refreshAdminPrograms = async (): Promise<void> => {
 
 export const toggleProgramActive = async (program: Program): Promise<void> => {
 	adminProgramsState.actionError = null;
+	// Optimistic flip: instant row, 1 GET (the refresh) on success.
+	// Snapshot first — the passed row aliases the store item.
+	const next = !program.isActive;
+	const row = adminProgramsState.items.find((p) => p.id === program.id);
+	const prev = row?.isActive;
+	if (row) row.isActive = next;
 	try {
-		await setProgramActive(program.id, !program.isActive);
+		await setProgramActive(program.id, next);
 		await refreshAdminPrograms();
+		notifyEntityChanged('programs');
 	} catch (e: unknown) {
+		if (row && prev !== undefined) row.isActive = prev;
 		// Surfaced via actionError (role=alert) — no re-throw so callers use
 		// `void toggle...()` with no swallowed rejection.
 		adminProgramsState.actionError = toMessage(e, 'Failed to update program status');
@@ -110,6 +119,7 @@ export const deleteProgramYear = async (programId: number, yearId: number): Prom
 	try {
 		await deleteYearLevel(programId, yearId);
 		await refreshAdminProgramDetail(programId);
+		notifyEntityChanged('programs');
 	} catch (e: unknown) {
 		adminProgramDetailState.actionError = friendlyDeleteError(e, 'Failed to delete year level');
 		throw e;

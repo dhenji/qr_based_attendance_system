@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import {
 		adminAttendanceState,
 		initAttendanceOverview,
@@ -20,6 +20,8 @@
 	import type { AdminCourse, AdminProfessor, AttendanceOverviewItemResponse } from '$lib/shared/types';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import { formatPercentage } from '$lib/shared/utils/format';
+	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { goto } from '$app/navigation';
 	import { adminCourse } from '$lib/shared/constants/routes';
 
@@ -82,6 +84,37 @@
 			date_to: dateTo.trim() || undefined,
 		});
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const reloadCourseLookups = async () => {
+		try {
+			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+		} catch {
+			courseOptions = [];
+		}
+	};
+
+	const reloadProfessorLookups = async () => {
+		try {
+			professorOptions = (await listProfessors({ page: 1, size: 100 })).items;
+		} catch {
+			professorOptions = [];
+		}
+	};
+
+	// Aggregate page (issue #221): no aggregate subscriptions — the overview
+	// is a point-in-time report. Tab focus re-runs it with current filters
+	// (skipped while loading); lookup entities reload picker options only.
+	const refreshVisible = () => {
+		if (adminAttendanceState.loading || liveLoading) return;
+		void load();
+		void loadLiveness();
+	};
+
 	onMount(async () => {
 		try {
 			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
@@ -97,6 +130,11 @@
 		}
 		await load();
 		await loadLiveness();
+		autoRefreshStops.push(
+			subscribeEntity('courses', () => void reloadCourseLookups()),
+			subscribeEntity('professors', () => void reloadProfessorLookups()),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const loadLiveness = async () => {

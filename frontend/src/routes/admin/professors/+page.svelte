@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import {
@@ -23,6 +23,8 @@
 	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
 	import { goto } from '$app/navigation';
 	import { adminProfessor, Routes } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
@@ -88,9 +90,25 @@
 		}
 	};
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminProfessorsState.loading) void refreshAdminProfessors();
+	};
+
 	onMount(() => {
 		load(1);
 		loadOfferings();
+		// Own entity -> refresh the table; offerings feed the assign picker.
+		autoRefreshStops.push(
+			subscribeEntity('professors', refreshVisible),
+			subscribeEntity('offerings', () => void loadOfferings()),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const toggleCourse = (id: number) => {
@@ -182,28 +200,33 @@
 					courses: d.courses.length > 0 ? d.courses : undefined,
 				});
 			} else {
-				const parsed = adminProfessorUpdateSchema.safeParse({
-					first_name: f_first_name || undefined,
-					last_name: f_last_name || undefined,
-					email: f_email || undefined,
-					department: f_department || undefined,
-					courses: f_courses,
-				});
-				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-					return;
-				}
-				const d = parsed.data;
-				await updateProfessor(editing.id, {
-					first_name: d.first_name,
-					last_name: d.last_name,
-					email: d.email,
-					department: d.department,
-					courses: d.courses,
-				});
+			const parsed = adminProfessorUpdateSchema.safeParse({
+				first_name: f_first_name || undefined,
+				middle_name: f_middle_name || undefined,
+				last_name: f_last_name || undefined,
+				email: f_email || undefined,
+				department: f_department || undefined,
+				courses: f_courses,
+			});
+			if (!parsed.success) {
+				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				return;
+			}
+			const d = parsed.data;
+			await updateProfessor(editing.id, {
+				first_name: d.first_name,
+				// Prefilled modal: empty means "cleared" — send null so the
+				// backend nulls the column instead of leaving it unchanged.
+				middle_name: d.middle_name || null,
+				last_name: d.last_name,
+				email: d.email,
+				department: d.department,
+				courses: d.courses,
+			});
 			}
 			formOpen = false;
 			await refreshAdminProfessors();
+			notifyEntityChanged('professors');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {

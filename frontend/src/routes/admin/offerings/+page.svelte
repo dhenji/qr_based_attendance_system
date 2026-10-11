@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -21,6 +21,8 @@
 	} from '$lib/features/admin/offerings/schema';
 	import type { AdminCourse, AdminOffering, Program, YearLevel } from '$lib/shared/types';
 	import { adminOffering } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Offering list: program/year/semester instances of course templates (D44).
@@ -136,6 +138,44 @@
 			await Promise.all(ids.map(cacheYears));
 		});
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminOfferingsState.loading) void refreshAdminOfferings();
+	};
+
+	const reloadCourseLookups = async () => {
+		try {
+			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+		} catch {
+			courseOptions = [];
+		}
+	};
+
+	const reloadProgramLookups = async () => {
+		try {
+			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
+		} catch {
+			programOptions = [];
+		}
+		// Year labels/terms may have changed (rename, new year, new terms):
+		// drop the join cache so rows re-resolve, then re-warm the picked
+		// program's cascade.
+		yearsCache = new Map();
+		if (programFilter) {
+			try {
+				yearOptions = await listYearLevels(Number(programFilter));
+			} catch {
+				yearOptions = [];
+			}
+			await cacheYears(Number(programFilter));
+		}
+	};
+
 	onMount(async () => {
 		try {
 			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
@@ -148,6 +188,14 @@
 			courseOptions = [];
 		}
 		await load(1);
+		autoRefreshStops.push(
+			subscribeEntity('offerings', refreshVisible),
+			// Lookup entities feed the cascade pickers and the joined rows:
+			// reload options only, never the offerings query itself.
+			subscribeEntity('programs', () => void reloadProgramLookups()),
+			subscribeEntity('courses', () => void reloadCourseLookups()),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const changeProgram = async () => {
@@ -289,6 +337,7 @@
 			});
 			formOpen = false;
 			await refreshAdminOfferings();
+			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {

@@ -26,6 +26,8 @@
 	import { APIError } from '$lib/api/client';
 	import type { AdminStudent, Program, YearLevel } from '$lib/shared/types';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -101,9 +103,11 @@
 		clientYearFiltered ? visibleStudents.length : adminStudentsState.total
 	);
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
 		if (searchTimer) clearTimeout(searchTimer);
+		for (const stop of autoRefreshStops) stop();
 	});
 
 	const onSearchInput = () => {
@@ -203,6 +207,7 @@
 			};
 			faceNote = `Enrolled (v${result.faceEmbeddingVersion}). The roster Face column updates on refresh.`;
 			await refreshAdminStudents();
+			notifyEntityChanged('students');
 		} catch (e: unknown) {
 			faceError =
 				e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
@@ -262,13 +267,44 @@
 			PAGE_SIZE
 		);
 
-	onMount(async () => {
+	// Program picker options (list filter + Add/Edit modal share the program
+	// list; the modal keeps its own year options). Reloaded when programs
+	// change elsewhere so renames/creates show without a manual reload.
+	const loadProgramOptions = async () => {
 		try {
 			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
 		} catch {
 			programOptions = [];
 		}
+	};
+
+	const reloadProgramLookups = async () => {
+		await loadProgramOptions();
+		// Keep the picked program's year cascade in sync when its years change.
+		if (programFilter) {
+			try {
+				yearOptions = await listYearLevels(Number(programFilter));
+			} catch {
+				yearOptions = [];
+			}
+		}
+	};
+
+	const refreshVisible = () => {
+		if (!adminStudentsState.loading) void refreshAdminStudents();
+	};
+
+	onMount(() => {
+		void loadProgramOptions();
 		load(1);
+		// Own entity -> refresh the table; lookup entity -> reload picker
+		// options only. Focus return -> refresh the visible page (1 GET,
+		// skipped while hidden/loading; idle tabs issue 0 requests).
+		autoRefreshStops.push(
+			subscribeEntity('students', refreshVisible),
+			subscribeEntity('programs', () => void reloadProgramLookups()),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const changeProgram = async () => {
@@ -423,30 +459,36 @@
 					formError = 'Pick both a program and a year level, or leave both unchanged.';
 					return;
 				}
-				const parsed = adminStudentUpdateSchema.safeParse({
-					first_name: f_first_name || undefined,
-					last_name: f_last_name || undefined,
-					email: f_email || undefined,
-					program_id: f_program_id || undefined,
-					year_level_id: f_year_level_id || undefined,
-					section: f_section || undefined,
-				});
-				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-					return;
-				}
-				const d = parsed.data;
-				await updateStudent(editing.id, {
-					first_name: d.first_name,
-					last_name: d.last_name,
-					email: d.email,
-					program_id: d.program_id,
-					year_level_id: d.year_level_id,
-					section: d.section,
-				});
+			const parsed = adminStudentUpdateSchema.safeParse({
+				first_name: f_first_name || undefined,
+				middle_name: f_middle_name || undefined,
+				last_name: f_last_name || undefined,
+				email: f_email || undefined,
+				program_id: f_program_id || undefined,
+				year_level_id: f_year_level_id || undefined,
+				section: f_section || undefined,
+			});
+			if (!parsed.success) {
+				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				return;
+			}
+			const d = parsed.data;
+			await updateStudent(editing.id, {
+				first_name: d.first_name,
+				// Edit modals prefill from the row, so an empty field means
+				// "cleared" — send null (the backend nulls the column) rather
+				// than omitting, which would make clearing impossible.
+				middle_name: d.middle_name || null,
+				last_name: d.last_name,
+				email: d.email,
+				program_id: d.program_id,
+				year_level_id: d.year_level_id,
+				section: d.section,
+			});
 			}
 			formOpen = false;
 			await refreshAdminStudents();
+			notifyEntityChanged('students');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {

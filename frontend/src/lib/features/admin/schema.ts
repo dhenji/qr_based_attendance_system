@@ -34,6 +34,7 @@ export type AdminStudentCreateInput = z.infer<typeof adminStudentCreateSchema>;
 
 export const adminStudentUpdateSchema = z.object({
 	first_name: nameField.optional(),
+	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
 	last_name: nameField.optional(),
 	email: emailField.optional(),
 	program_id: z.coerce.number().int().positive().optional(),
@@ -57,6 +58,7 @@ export type AdminProfessorCreateInput = z.infer<typeof adminProfessorCreateSchem
 
 export const adminProfessorUpdateSchema = z.object({
 	first_name: nameField.optional(),
+	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
 	last_name: nameField.optional(),
 	email: emailField.optional(),
 	department: z.string().trim().max(100).optional().or(z.literal('')),

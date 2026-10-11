@@ -30,6 +30,7 @@ import type {
 	AdminAssignmentCreatePayload,
 	AdminOfferingUpdatePayload,
 } from '$lib/shared/types';
+import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export const adminOfferingsState = $state({
 	items: [] as AdminOffering[],
@@ -89,10 +90,18 @@ export const refreshAdminOfferings = async (): Promise<void> => {
 
 export const toggleOfferingActive = async (offering: AdminOffering): Promise<void> => {
 	adminOfferingsState.actionError = null;
+	// Optimistic flip: instant row, 1 GET (the refresh) on success.
+	// Snapshot first — the passed row aliases the store item.
+	const next = !offering.isActive;
+	const row = adminOfferingsState.items.find((o) => o.id === offering.id);
+	const prev = row?.isActive;
+	if (row) row.isActive = next;
 	try {
-		await setOfferingActive(offering.id, !offering.isActive);
+		await setOfferingActive(offering.id, next);
 		await refreshAdminOfferings();
+		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
+		if (row && prev !== undefined) row.isActive = prev;
 		// Surfaced via actionError (role=alert) — no re-throw so callers use
 		// `void toggle...()` with no swallowed rejection.
 		adminOfferingsState.actionError = toMessage(e, 'Failed to update offering status');
@@ -104,6 +113,7 @@ export const archiveAdminOffering = async (offering: AdminOffering): Promise<voi
 	try {
 		await archiveOffering(offering.id);
 		await refreshAdminOfferings();
+		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
 		adminOfferingsState.actionError = toMessage(e, 'Failed to archive offering');
 		throw e;
@@ -142,6 +152,7 @@ export const updateAdminOffering = async (
 	adminOfferingDetailState.actionError = null;
 	try {
 		adminOfferingDetailState.offering = await updateOffering(id, payload);
+		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
 		adminOfferingDetailState.actionError = toMessage(e, 'Failed to update offering');
 		throw e;
@@ -167,6 +178,7 @@ export const assignOfferingProfessor = async (
 	try {
 		await assignProfessor(id, payload);
 		await loadOfferingAssignments(id);
+		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
 		adminOfferingDetailState.actionError = toMessage(e, 'Failed to assign professor');
 		throw e;
@@ -181,6 +193,7 @@ export const endOfferingAssignment = async (
 	try {
 		await endAssignment(offeringId, professorId);
 		await loadOfferingAssignments(offeringId);
+		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
 		adminOfferingDetailState.actionError = toMessage(e, 'Failed to end assignment');
 		throw e;
@@ -212,6 +225,7 @@ export const bulkEnrollOffering = async (id: number, file: File) => {
 		const result = await bulkEnroll(id, file);
 		await loadOfferingRoster(id);
 		await refreshAdminOfferingDetail(id);
+		notifyEntityChanged('offerings');
 		return result;
 	} catch (e: unknown) {
 		adminOfferingDetailState.actionError = toMessage(e, 'Bulk enroll failed');

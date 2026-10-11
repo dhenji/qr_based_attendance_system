@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
@@ -18,6 +18,8 @@
 	import { adminUserCreateSchema } from '$lib/features/admin/schema';
 	import type { AdminUser, AdminUserRole } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { formatLocalDate } from '$lib/shared/utils/format';
 
@@ -73,6 +75,16 @@
 			adminUsersState.size
 		);
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminUsersState.loading) void refreshAdminUsers();
+	};
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user || !isSuperAdmin()) {
@@ -80,6 +92,10 @@
 			return;
 		}
 		load(1);
+		autoRefreshStops.push(
+			subscribeEntity('users', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const applyFilters = () => {
@@ -129,6 +145,7 @@
 			copied = false;
 			createdTemp = { email: result.user.email, tempPassword: result.tempPassword };
 			await refreshAdminUsers();
+			notifyEntityChanged('users');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {

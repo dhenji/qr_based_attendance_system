@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -23,6 +23,8 @@
 	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 	import type { YearLevel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Program Detail (wireframe 4.5b): header with totals + edit, year-level
@@ -53,9 +55,25 @@
 
 	let deleteTarget = $state<YearLevel | null>(null);
 	let deleteBusy = $state(false);
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!Number.isFinite(programId)) return;
+		if (!adminProgramDetailState.loading) void refreshAdminProgramDetail(programId);
+	};
 
 	onMount(() => {
 		if (Number.isFinite(programId)) initAdminProgramDetail(programId);
+		// Own entity -> refresh the detail (covers year edits/deletes made
+		// on other tabs; the store mutator emits after its own refresh).
+		autoRefreshStops.push(
+			subscribeEntity('programs', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const program = $derived(adminProgramDetailState.program);
@@ -101,6 +119,7 @@
 			});
 			editOpen = false;
 			await refreshAdminProgramDetail(program.id);
+			notifyEntityChanged('programs');
 		} catch (e: unknown) {
 			editError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {
@@ -147,6 +166,7 @@
 			});
 			yearOpen = false;
 			await refreshAdminProgramDetail(program.id);
+			notifyEntityChanged('programs');
 		} catch (e: unknown) {
 			yearError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {
@@ -177,6 +197,7 @@
 			termsOpen = false;
 			termsTarget = null;
 			await refreshAdminProgramDetail(program.id);
+			notifyEntityChanged('programs');
 		} catch (e: unknown) {
 			termsError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {
