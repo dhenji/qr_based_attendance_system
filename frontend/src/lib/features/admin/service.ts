@@ -439,8 +439,9 @@ const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
 	updatedAt: o.updated_at,
 });
 
-export const offeringLabel = (o: AdminOffering): string =>
-	`Offering ${o.id} · Course ${o.courseId} · ${o.semester} ${o.academicYear}`;
+// NOTE: picker + profile join display names client-side via
+// enrichOfferings() in features/admin/offerings/service.ts. Do not re-add
+// an id-only offeringLabel helper here.
 
 export const listOfferings = async (
 	filters: AdminOfferingFilters = {}
