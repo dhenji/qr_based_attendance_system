@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { getAdminDashboard } from '$lib/features/admin/service';
@@ -8,6 +8,7 @@
 		initAttendanceOverview,
 	} from '$lib/features/admin/analytics/store.svelte';
 	import { formatPercentage, formatLocalDateTime } from '$lib/shared/utils/format';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes } from '$lib/shared/constants/routes';
 	import type { AdminDashboardResponse } from '$lib/shared/types';
 
@@ -37,9 +38,25 @@
 		}
 	};
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	// Aggregate page (issue #221): no entity subscriptions — KPIs are
+	// point-in-time reports, not row tables. Tab focus re-runs the same two
+	// calls as mount (skipped while loading); the manual Refresh buttons stay.
+	const refreshVisible = () => {
+		if (loading || adminAttendanceState.loading) return;
+		initAttendanceOverview();
+		void load();
+	};
+
 	onMount(async () => {
 		initAttendanceOverview();
 		await load();
+		autoRefreshStops.push(onFocusRevalidate(refreshVisible));
 	});
 
 	const today = $derived(

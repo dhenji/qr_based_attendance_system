@@ -57,6 +57,7 @@ export interface AdminStudentCreatePayload {
 
 export interface AdminStudentUpdatePayload {
 	first_name?: string;
+	middle_name?: string | null;
 	last_name?: string;
 	email?: string;
 	program_id?: number;
@@ -110,6 +111,7 @@ export interface AdminProfessorCreatePayload {
 
 export interface AdminProfessorUpdatePayload {
 	first_name?: string;
+	middle_name?: string | null;
 	last_name?: string;
 	email?: string;
 	department?: string;

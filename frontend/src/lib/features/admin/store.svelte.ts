@@ -25,6 +25,7 @@ import {
 	setStudentActive,
 } from '$lib/features/admin/service';
 import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
+import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export const adminStudentsState = $state({
 	items: [] as AdminStudent[],
@@ -82,10 +83,20 @@ export const refreshAdminStudents = async (): Promise<void> => {
 
 export const toggleStudentActive = async (student: AdminStudent): Promise<void> => {
 	adminStudentsState.actionError = null;
+	// Optimistic flip so the row responds instantly; the refresh after the
+	// write reconciles with the server (still 1 GET on success).
+	// Snapshot first: callers pass the live store row, so `row === student`
+	// and reading student.isActive after mutating row would un-flip the value.
+	const next = !student.isActive;
+	const row = adminStudentsState.items.find((s) => s.id === student.id);
+	const prev = row?.isActive;
+	if (row) row.isActive = next;
 	try {
-		await setStudentActive(student.id, !student.isActive);
+		await setStudentActive(student.id, next);
 		await refreshAdminStudents();
+		notifyEntityChanged('students');
 	} catch (e: unknown) {
+		if (row && prev !== undefined) row.isActive = prev;
 		// Surfaced via actionError (role=alert in the pages) — no re-throw so
 		// callers use `void toggle...()` with no swallowed rejection.
 		adminStudentsState.actionError = toMessage(e, 'Failed to update student status');
@@ -97,6 +108,7 @@ export const deleteArchivedStudent = async (id: number): Promise<void> => {
 	try {
 		await hardDeleteStudent(id);
 		await refreshAdminStudents();
+		notifyEntityChanged('students');
 	} catch (e: unknown) {
 		adminStudentsState.actionError = friendlyDeleteError(e, 'Failed to delete student');
 		throw e;
@@ -134,10 +146,18 @@ export const refreshAdminProfessors = async (): Promise<void> => {
 
 export const toggleProfessorActive = async (professor: AdminProfessor): Promise<void> => {
 	adminProfessorsState.actionError = null;
+	// Optimistic flip (see toggleStudentActive): instant row, 1 GET on success.
+	// Snapshot first — the passed row aliases the store item.
+	const next = !professor.isActive;
+	const row = adminProfessorsState.items.find((p) => p.id === professor.id);
+	const prev = row?.isActive;
+	if (row) row.isActive = next;
 	try {
-		await setProfessorActive(professor.id, !professor.isActive);
+		await setProfessorActive(professor.id, next);
 		await refreshAdminProfessors();
+		notifyEntityChanged('professors');
 	} catch (e: unknown) {
+		if (row && prev !== undefined) row.isActive = prev;
 		// Surfaced via actionError (role=alert in the pages) — no re-throw so
 		// callers use `void toggle...()` with no swallowed rejection.
 		adminProfessorsState.actionError = toMessage(e, 'Failed to update professor status');
@@ -149,6 +169,7 @@ export const deleteArchivedProfessor = async (id: number): Promise<void> => {
 	try {
 		await hardDeleteProfessor(id);
 		await refreshAdminProfessors();
+		notifyEntityChanged('professors');
 	} catch (e: unknown) {
 		adminProfessorsState.actionError = friendlyDeleteError(e, 'Failed to delete professor');
 		throw e;
@@ -199,6 +220,7 @@ export const deactivateAdminUser = async (user: AdminUser): Promise<void> => {
 	try {
 		await deactivateUser(user.id);
 		await refreshAdminUsers();
+		notifyEntityChanged('users');
 	} catch (e: unknown) {
 		adminUsersState.actionError = toMessage(e, 'Failed to deactivate user');
 		throw e;

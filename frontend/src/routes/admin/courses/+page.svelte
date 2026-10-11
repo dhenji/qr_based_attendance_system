@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -19,6 +19,8 @@
 	} from '$lib/features/admin/courses/schema';
 	import type { AdminCourse } from '$lib/shared/types';
 	import { adminCourse } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Course template list: standalone reusable templates (D44) — no program,
@@ -70,8 +72,22 @@
 	const load = (page = 1) =>
 		initAdminCourses({ is_active: isActiveFilter }, page, adminCoursesState.size);
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminCoursesState.loading) void refreshAdminCourses();
+	};
+
 	onMount(() => {
 		load(1);
+		autoRefreshStops.push(
+			subscribeEntity('courses', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const applyFilters = () => {
@@ -170,6 +186,7 @@
 			}
 			formOpen = false;
 			await refreshAdminCourses();
+			notifyEntityChanged('courses');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {

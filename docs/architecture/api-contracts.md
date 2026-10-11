@@ -779,7 +779,7 @@ Update student fields (program/year-level/sections; clears face enrollment on id
 
 |                  |                                                       |
 | ---------------- | ----------------------------------------------------- |
-| **Request**      | `{ first_name?, last_name?, email?, program_id?, year_level_id?, section?, is_active? }` |
+| **Request**      | `{ first_name?, middle_name? (null clears), last_name?, email?, program_id?, year_level_id?, section?, is_active? }` |
 | **Response 200** | Updated student                                      |
 | **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). |
 
@@ -818,7 +818,7 @@ Update professor fields + course assignments.
 
 |                  |                                                                       |
 | ---------------- | --------------------------------------------------------------------- |
-| **Request**      | `{ first_name?, last_name?, email?, department?, is_active?, courses?: [offering_id] }` |
+| **Request**      | `{ first_name?, middle_name? (null clears), last_name?, email?, department?, is_active?, courses?: [offering_id] }` |
 | **Response 200** | Updated professor                                                    |
 | **Notes**        | `courses` replaces the assignment set (removes missing; keeps provided). |
 

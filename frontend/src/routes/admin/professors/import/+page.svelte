@@ -7,6 +7,7 @@
 	} from '$lib/features/admin/service';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type { ProfessorImportResult } from '$lib/shared/types';
+	import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// CSV Import: Step 1 download template, Step 2 upload file,
@@ -153,6 +154,9 @@
 		importError = null;
 		try {
 			result = await importProfessors(file);
+			// The list page remounts fresh on Back, but emit anyway so any
+			// mounted professors table updates.
+			if (result.imported > 0) notifyEntityChanged('professors');
 		} catch (e: unknown) {
 			importError = e instanceof Error && e.message ? e.message : 'Import failed. Please try again.';
 		} finally {

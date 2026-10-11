@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -8,12 +8,15 @@
 		offeringLabel,
 	} from '$lib/features/admin/service';
 	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
+	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// Professor profile (admin): card opened by clicking a professor's email
 	// on the roster. Read-only; edits stay on the list modals. Courses come
 	// from the row's assigned_courses (offering_id + course_code), enriched
 	// with semester/year when the offering list has a match.
+	// Auto-refresh (issue #221): roster edits elsewhere re-load the row.
 
 	const professorId = $derived(Number(page.params.id));
 
@@ -21,6 +24,11 @@
 	let offerings = $state<AdminOffering[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
 
 	const fullName = $derived(
 		professor
@@ -37,12 +45,14 @@
 		return match ? `${courseCode} · ${offeringLabel(match)}` : `${courseCode} · Offering ${offeringId}`;
 	};
 
-	onMount(async () => {
+	const load = async () => {
 		if (!Number.isFinite(professorId) || professorId <= 0) {
 			error = 'Invalid professor id.';
 			loading = false;
 			return;
 		}
+		loading = true;
+		error = null;
 		try {
 			const [row, offeringPage] = await Promise.all([
 				getProfessor(professorId),
@@ -60,6 +70,19 @@
 		} finally {
 			loading = false;
 		}
+	};
+
+	const refreshVisible = () => {
+		if (!loading) void load();
+	};
+
+	onMount(() => {
+		void load();
+		autoRefreshStops.push(
+			subscribeEntity('professors', refreshVisible),
+			subscribeEntity('offerings', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const back = () => {
