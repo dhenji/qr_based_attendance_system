@@ -25,9 +25,7 @@ from features.student.constants import (
 class StudentCreate(BaseModel):
     """Admin roster create.
 
-    Identity is by email only. The `username` is chosen by the user at
-    self-registration (`POST /auth/register`); roster create does not
-    accept it.
+    Identity is by email only.
     """
 
     student_id: str = Field(

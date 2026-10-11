@@ -10,13 +10,12 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password
-from features.admin.constants import DEFAULT_USERNAME_MAX_LENGTH, TEMP_PASSWORD_LENGTH
+from features.admin.constants import TEMP_PASSWORD_LENGTH
 from features.admin.exceptions import (
     AdminUserNotFound,
     EmailAlreadyExists,
     RosterLinkImpossible,
     SelfDeactivationForbidden,
-    UsernameAlreadyExists,
 )
 from features.admin.schema import (
     AdminUserCreate,
@@ -78,7 +77,6 @@ def _users_filters(
         filters.append(
             or_(
                 User.email.ilike(term),
-                User.username.ilike(term),
                 Student.first_name.ilike(term),
                 Student.last_name.ilike(term),
                 Professor.first_name.ilike(term),
@@ -99,7 +97,6 @@ def _to_admin_user_read(
     return AdminUserRead(
         id=user.id,
         email=user.email,
-        username=user.username,
         role=UserRole(user.role),
         first_name=student_first or professor_first,
         last_name=student_last or professor_last,
@@ -127,22 +124,10 @@ class AdminService:
         if existing is not None and existing.is_active:
             raise EmailAlreadyExists()
 
-        username: str = payload.username or self._default_username(
-            payload.first_name, payload.last_name
-        )
-
-        username_holder: User | None = await self._users.get_by(username=username)
-
-        if username_holder is not None and (
-            existing is None or username_holder.id != existing.id
-        ):
-            raise UsernameAlreadyExists()
-
         temp_password: str = secrets.token_urlsafe(TEMP_PASSWORD_LENGTH)
 
         if existing is None:
             user: User = await self._users.create(
-                username=username,
                 email=normalized,
                 password_hash=hash_password(temp_password),
                 role=payload.role.value,
@@ -166,7 +151,6 @@ class AdminService:
                 entity_id=user.id,
                 new_value={
                     "email": normalized,
-                    "username": user.username,
                     "role": user.role,
                     "is_active": user.is_active,
                     "must_change_password": True,
@@ -188,7 +172,6 @@ class AdminService:
                     raise RosterLinkImpossible(roster.label)
 
             user = existing
-            user.username = username
             user.password_hash = hash_password(temp_password)
             user.role = payload.role.value
             user.is_active = True
@@ -229,7 +212,6 @@ class AdminService:
         return AdminUserCreateResponse(
             id=user.id,
             email=user.email,
-            username=username,
             role=UserRole(user.role),
             first_name=payload.first_name,
             last_name=payload.last_name,
@@ -316,9 +298,3 @@ class AdminService:
             raise RosterLinkImpossible(role)
 
         record.user_id = user_id
-
-    @staticmethod
-    def _default_username(first_name: str, last_name: str) -> str:
-        return f"{first_name[0].lower()}{last_name.lower()}"[
-            :DEFAULT_USERNAME_MAX_LENGTH
-        ]

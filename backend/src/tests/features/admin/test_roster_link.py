@@ -31,9 +31,6 @@ class _FakeSession:
         if self._user_lookup == 1:
             return SimpleNamespace(one_or_none=lambda: self.existing_user)
 
-        if self._user_lookup == 2:
-            return SimpleNamespace(one_or_none=lambda: self.existing_user)
-
         return SimpleNamespace(one_or_none=lambda: self.roster)
 
     async def flush(self):
@@ -132,7 +129,8 @@ def test_created_user_is_forced_to_change_password() -> None:
     assert result.must_change_password is True
     assert result.is_active is True
     assert isinstance(result.created_at, datetime)
-    assert result.username == "alovelace"
+    assert result.first_name == "Ada"
+    assert result.last_name == "Lovelace"
 
 
 def test_super_admin_cannot_be_created_through_the_api() -> None:

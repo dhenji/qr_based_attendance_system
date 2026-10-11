@@ -26,7 +26,6 @@ class User(CreatedAtMixin, Base):
         primary_key=True,
     )
     role: Mapped[str] = mapped_column(String(20), server_default=UserRole.STUDENT.value)
-    username: Mapped[str] = mapped_column(String(20), unique=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     security_question_hash: Mapped[str | None] = mapped_column(String(255))

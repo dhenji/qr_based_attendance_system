@@ -323,7 +323,6 @@ export const downloadProfessorTemplate = async (): Promise<string> =>
 export const toAdminUser = (u: AdminUserResponse | AdminUserCreateResponse): AdminUser => ({
 	id: u.id,
 	email: u.email,
-	username: u.username ?? undefined,
 	role: u.role as AdminUserRole,
 	firstName: u.first_name ?? undefined,
 	lastName: u.last_name ?? undefined,

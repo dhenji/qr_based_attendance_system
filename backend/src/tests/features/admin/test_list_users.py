@@ -33,13 +33,11 @@ async def _seed(factories: Factories) -> dict[str, Any]:
 
     admin = await factories.user(
         email=ADMIN_EMAIL,
-        username="list.admin",
         role=UserRole.SUPER_ADMIN.value,
         is_active=True,
     )
     student_user = await factories.user(
         email=STUDENT_EMAIL,
-        username="list.student",
         role=UserRole.STUDENT.value,
         is_active=True,
     )
@@ -52,7 +50,6 @@ async def _seed(factories: Factories) -> dict[str, Any]:
     )
     professor_user = await factories.user(
         email=PROFESSOR_EMAIL,
-        username="list.professor",
         role=UserRole.PROFESSOR.value,
         is_active=True,
     )
@@ -197,20 +194,20 @@ async def test_search_matches_a_professor_roster_name(
     assert [item.email for item in result.items] == [PROFESSOR_EMAIL]
 
 
-async def test_search_matches_username_and_email(
+async def test_search_matches_email(
     test_db_session: Any, factories: Factories
 ) -> None:
     await _seed(factories)
     await test_db_session.commit()
 
-    by_username = await AdminService(test_db_session).list_users(
+    by_student = await AdminService(test_db_session).list_users(
         search="list.student", role=None, is_active=None, page=1, size=20
     )
     by_email = await AdminService(test_db_session).list_users(
         search=ADMIN_EMAIL, role=None, is_active=None, page=1, size=20
     )
 
-    assert [item.email for item in by_username.items] == [STUDENT_EMAIL]
+    assert [item.email for item in by_student.items] == [STUDENT_EMAIL]
     assert [item.email for item in by_email.items] == [ADMIN_EMAIL]
 
 

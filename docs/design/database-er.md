@@ -27,7 +27,7 @@
 
 | Table                 | Attributes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`               | id (PK), role (super_admin/admin/professor/student), username, email, password_hash (Argon2id), security_question_hash (**readable plaintext** — ADR-056), security_answer_hash (Argon2id), mfa_enabled, mfa_secret, failed_login_attempts, must_change_password, is_active, is_locked (DEF false), locked_at (NULL), created_at, last_login                                                                                                                                                                                                                                                |
+| `users`               | id (PK), role (super_admin/admin/professor/student), email, password_hash (Argon2id), security_question_hash (**readable plaintext** — ADR-056), security_answer_hash (Argon2id), mfa_enabled, mfa_secret, failed_login_attempts, must_change_password, is_active, is_locked (DEF false), locked_at (NULL), created_at, last_login                                                                                                                                                                                                                                                |
 | `mfa_backup_codes`    | id (PK), user_id (FK → users CASCADE), code_hash (Argon2id, **never plaintext**), code_fingerprint (HMAC-SHA256, indexed — single-lookup verify), used_at (NULL = unconsumed), created_at                                                                                                                                                                                                                                                |
 | `otp_codes`           | id (PK), email (index), purpose (claim/forget_password), otp_hash (Argon2id), expires_at (5-min TTL), consumed_at (single-use), user_id (FK → users, nullable), created_at, index `ix_otp_codes_email_purpose` (email, purpose)                                                                                                                                                                                                                                                                                                                           |
 | `programs`            | id (PK), code (UK), name, description, total_years, is_active, created_at, updated_at                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -86,7 +86,6 @@ erDiagram
     users {
         bigint id PK
         varchar role
-        varchar username
         varchar email
         varchar password_hash
         varchar security_question_hash
@@ -340,7 +339,7 @@ erDiagram
                       │──────────────────────────────────────────────────────────────│
                       │ id                              PK                           │
                       │ role (super_admin/admin/professor/student)                   │
-                      │ username, email, password_hash (Argon2id)                    │
+                       │ email, password_hash (Argon2id)                                 │
                       │ security_question_hash, security_answer_hash                 │
                       │ mfa_enabled, mfa_secret, failed_login_attempts               │
                       │ must_change_password, is_active, created_at, last_login      │

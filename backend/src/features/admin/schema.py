@@ -5,9 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
-from features.auth.constants import USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH
 from shared.enums import UserRole
-from shared.validators import normalize_username
 
 _CREATABLE_ROLES: set[UserRole] = {UserRole.ADMIN, UserRole.PROFESSOR, UserRole.STUDENT}
 
@@ -21,17 +19,6 @@ class AdminUserCreate(AdminUserBase):
     first_name: str = Field(min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH)
     middle_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     last_name: str = Field(min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH)
-    username: str | None = Field(
-        default=None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH
-    )
-
-    @field_validator("username")
-    @classmethod
-    def _normalize_username(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        return normalize_username(value)
 
     @field_validator("role")
     @classmethod
@@ -46,7 +33,6 @@ class AdminUserCreate(AdminUserBase):
 
 class AdminUserRead(AdminUserBase):
     id: int
-    username: str | None
     first_name: str | None = None
     last_name: str | None = None
     is_active: bool

@@ -244,7 +244,6 @@ export const doMfaVerify = async (code: string): Promise<User> => {
 export const doRegister = async (input: {
 	email: string;
 	otpCode: string;
-	username: string;
 	password: string;
 	securityQuestion: string;
 	securityAnswer: string;

@@ -28,7 +28,6 @@ from features.auth.exceptions import (
     InvalidCredentialsException,
     UnrecognizedEmailException,
     UserAlreadyClaimedException,
-    UsernameTakenException,
 )
 from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.auth.service import AuthService
@@ -59,14 +58,12 @@ async def _register(
     settings: Any,
     *,
     email: str,
-    username: str = "newholder",
     password: str = NEW_PASSWORD,
 ) -> Any:
     await _seed_claim_otp(session, email)
     return await AuthService(session, settings).register(
         email=email,
         otp_code=OTP,
-        username=username,
         password=password,
         security_question="Pet?",
         security_answer="Cat",
@@ -206,27 +203,6 @@ async def test_register_does_not_steal_claimed_match(
     await test_db_session.refresh(taken)
     assert orphan.is_active is False
     assert taken.user_id == other.id
-
-
-async def test_register_reclaim_username_taken_rolls_back(
-    test_db_session: AsyncSession, factories: Factories, settings: Any
-) -> None:
-    email = "reuse@isu.edu.ph"
-    orphan = await _hard_deleted_claim(test_db_session, factories, email=email)
-    await factories.user(username="takenname")
-
-    program = await factories.program()
-    year = await factories.year_level(program)
-    fresh = await factories.student(year, user=None, email=email)
-
-    with pytest.raises(UsernameTakenException):
-        await _register(test_db_session, settings, email=email, username="takenname")
-
-    await test_db_session.refresh(orphan)
-    await test_db_session.refresh(fresh)
-    assert orphan.is_active is False
-    assert fresh.user_id is None
-    assert await _user_activation_rows(test_db_session, orphan.id) == []
 
 
 async def test_register_reclaim_resets_mfa_lockout_and_credentials(

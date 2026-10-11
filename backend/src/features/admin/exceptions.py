@@ -41,16 +41,6 @@ class EmailAlreadyExists(AdminDomainException):
         super().__init__(message="A user with this email already exists")
 
 
-class UsernameAlreadyExists(AdminDomainException):
-    """409 - username already taken by another account."""
-
-    status_code: int = 409
-    code: str = "admin_user_username_exists"
-
-    def __init__(self) -> None:
-        super().__init__(message="This username is already taken")
-
-
 class RosterLinkImpossible(AdminDomainException):
     """409 - the account cannot be linked to an active, unclaimed roster record.
 

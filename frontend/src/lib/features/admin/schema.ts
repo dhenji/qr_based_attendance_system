@@ -8,16 +8,6 @@ import { z } from 'zod';
 
 const nameField = z.string().trim().min(1, 'Required').max(100);
 const emailField = z.string().trim().toLowerCase().email('Enter a valid email').max(255);
-// User-defined handle (backend: users.username, 3–20, lowercase letters /
-// numbers / dot / underscore / hyphen). Roster creates (student/professor)
-// take no username — it is picked at self-registration.
-const usernameField = z
-	.string()
-	.trim()
-	.toLowerCase()
-	.min(3, 'Username must be 3–20 characters.')
-	.max(20, 'Username must be 3–20 characters.')
-	.regex(/^[a-z0-9._-]+$/, 'Letters, numbers, dot, underscore and hyphen only.');
 
 export const adminStudentCreateSchema = z.object({
 	student_id: z.string().trim().toUpperCase().min(3).max(50),
@@ -97,7 +87,6 @@ export const adminUserCreateSchema = z.object({
 	first_name: nameField,
 	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
 	last_name: nameField,
-	username: usernameField.optional().or(z.literal('')),
 });
 
 export type AdminUserCreateInput = z.infer<typeof adminUserCreateSchema>;

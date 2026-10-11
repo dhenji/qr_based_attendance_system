@@ -50,7 +50,6 @@
 	let f_first_name = $state('');
 	let f_middle_name = $state('');
 	let f_last_name = $state('');
-	let f_username = $state('');
 
 	const roleParam = $derived(roleFilter === 'all' ? undefined : roleFilter);
 	const isActiveFilter = $derived(
@@ -112,7 +111,6 @@
 		f_first_name = '';
 		f_middle_name = '';
 		f_last_name = '';
-		f_username = '';
 		formOpen = true;
 	};
 
@@ -126,7 +124,6 @@
 				first_name: f_first_name,
 				middle_name: f_middle_name || undefined,
 				last_name: f_last_name,
-				username: f_username || undefined,
 			});
 			if (!parsed.success) {
 				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -139,7 +136,6 @@
 				first_name: d.first_name,
 				middle_name: d.middle_name || undefined,
 				last_name: d.last_name,
-				username: d.username || undefined,
 			});
 			formOpen = false;
 			copied = false;
@@ -193,7 +189,7 @@
 		<input
 			class="input search"
 			type="search"
-			placeholder="Search email, username, name…"
+			placeholder="Search email, name…"
 			aria-label="Search users"
 			bind:value={search}
 			onkeydown={(e) => {
@@ -319,7 +315,6 @@
 				</div>
 				<div class="grid2">
 					<label>Last name<input class="input" bind:value={f_last_name} /></label>
-					<label>Username (optional)<input class="input" bind:value={f_username} placeholder="auto-generated" /></label>
 				</div>
 				<p class="hint">Student/professor accounts link to a matching active roster row by email; admin accounts need no roster row. A temporary password is shown once after creation.</p>
 			</div>

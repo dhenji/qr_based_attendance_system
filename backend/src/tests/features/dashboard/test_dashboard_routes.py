@@ -246,7 +246,6 @@ async def test_student_dashboard_never_shows_another_student(
     theirs_graph = await factories.full_stack()
     their_user = theirs_graph["user"]
     their_user.email = "dash.other@isu.edu.ph"
-    their_user.username = "dash.other"
     await factories.attendance(
         theirs_graph["student"], theirs_graph["session"], timestamp=datetime.now(timezone.utc)
     )
@@ -309,7 +308,6 @@ async def test_professor_dashboard_counts_todays_sessions(
     user = await factories.user(
         email="dash.prof@isu.edu.ph", role=UserRole.PROFESSOR.value
     )
-    user.username = "dash.prof"
     professor.user_id = user.id
 
     now = datetime.now(timezone.utc)
@@ -366,7 +364,6 @@ async def test_professor_dashboard_excludes_yesterdays_sessions(
     user = await factories.user(
         email="dash.prof@isu.edu.ph", role=UserRole.PROFESSOR.value
     )
-    user.username = "dash.prof"
     professor.user_id = user.id
 
     yesterday = datetime.now(timezone.utc) - timedelta(days=1)
@@ -407,7 +404,6 @@ async def test_professor_dashboard_handles_a_professor_with_nothing(
     user = await factories.user(
         email="dash.idle@isu.edu.ph", role=UserRole.PROFESSOR.value
     )
-    user.username = "dash.idle"
     professor.user_id = user.id
     professor.year_level_id = year.id
 
@@ -434,7 +430,6 @@ async def test_professor_dashboard_avg_rate_matches_the_reports_endpoint(
     user = await factories.user(
         email="dash.prof@isu.edu.ph", role=UserRole.PROFESSOR.value
     )
-    user.username = "dash.prof"
     professor.user_id = user.id
 
     now = datetime.now(timezone.utc)
@@ -674,7 +669,6 @@ async def test_dashboard_counts_are_scoped_to_the_caller(
     mine = await _student_graph(factories, scanned_today=1)
     other = await factories.full_stack()
     other["user"].email = "dash.third@isu.edu.ph"
-    other["user"].username = "dash.third"
     await factories.attendance(
         other["student"], other["session"], timestamp=datetime.now(timezone.utc)
     )

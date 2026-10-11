@@ -323,7 +323,6 @@ async def seed(
                 db,
                 User,
                 {
-                    "username": "seedadmin",
                     "password_hash": "seed-not-for-login",
                     "role": UserRole.ADMIN.value,
                 },
@@ -343,7 +342,6 @@ async def seed(
                     db,
                     User,
                     {
-                        "username": email.split("@")[0].replace(".", "")[:20],
                         "password_hash": "seed-not-for-login",
                         "role": UserRole.PROFESSOR.value,
                     },
@@ -456,28 +454,33 @@ async def seed(
             from core.security import hash_password as _hash_password
 
             for idx, (sid, _first, _last, _section) in enumerate(roster[:30], 1):
-                username = f"loadtest{idx:02d}"
+                slot = f"loadtest{idx:02d}"
                 # Deliverable domain: the login contract validates mailboxes
                 # with EmailStr, which rejects reserved TLDs such as `.test`.
-                email = f"{username}@load.uni.edu"
+                email = f"{slot}@load.uni.edu"
                 row = (
-                    await db.scalars(
-                        select(User).where(User.username == username)
-                    )
+                    await db.scalars(select(User).where(User.email == email))
                 ).one_or_none()
                 if row is None:
+                    # Databases seeded before the reserved-TLD domain was
+                    # replaced still hold the `.test` address for the same
+                    # slot; migrate it rather than minting a second user.
+                    legacy = f"{slot}@load.test"
+                    row = (
+                        await db.scalars(
+                            select(User).where(User.email == legacy)
+                        )
+                    ).one_or_none()
+                    if row is not None:
+                        row.email = email
+                        await db.flush()
+                if row is None:
                     row = User(
-                        username=username,
                         email=email,
                         password_hash=_hash_password("Loadtest1!"),
                         role=UserRole.STUDENT.value,
                     )
                     db.add(row)
-                    await db.flush()
-                elif row.email != email:
-                    # Forward migration for databases seeded before the
-                    # reserved-TLD domain was replaced.
-                    row.email = email
                     await db.flush()
                 if students[sid].user_id is None:
                     students[sid].user_id = row.id
