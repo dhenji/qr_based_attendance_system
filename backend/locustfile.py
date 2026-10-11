@@ -192,7 +192,7 @@ class ScanningStudent(HttpUser):
         if not SESSION_IDS:
             raise RuntimeError("session pool is empty")
         self.slot = _assigner.assign()
-        self.username = f"loadtest{self.slot:02d}"
+        self.slot_label = f"loadtest{self.slot:02d}"
         self.profile = _profile_for_slot(self.slot)
         self.cap = _draw_cap(self.profile)
         self.backlog: list[tuple[dict, str, int]] = []
@@ -206,7 +206,7 @@ class ScanningStudent(HttpUser):
         ) as response:
             if response.status_code != 200:
                 response.failure(f"profile {_describe(response)}")
-                raise RuntimeError(f"profile failed for {self.username}")
+                raise RuntimeError(f"profile failed for {self.slot_label}")
             body = response.json()
             self.student_number = body["student_number"] or body["student_id"]
 
@@ -218,7 +218,7 @@ class ScanningStudent(HttpUser):
         for attempt in range(1, LOGIN_ATTEMPTS + 1):
             with self.client.post(
                 "/api/auth/login",
-                json={"email": f"{self.username}@{EMAIL_DOMAIN}",
+                json={"email": f"{self.slot_label}@{EMAIL_DOMAIN}",
                       "password": PASSWORD},
                 catch_response=True,
             ) as response:
@@ -227,7 +227,7 @@ class ScanningStudent(HttpUser):
                     token = response.json()["access_token"]
                     if not token:
                         raise RuntimeError(
-                            f"login returned no token for {self.username}"
+                            f"login returned no token for {self.slot_label}"
                         )
                     return token
                 last = _describe(response)
@@ -236,7 +236,7 @@ class ScanningStudent(HttpUser):
                     time.sleep(min(15 * attempt, 60))
                     continue
                 response.failure(f"login {last}")
-        raise RuntimeError(f"login failed for {self.username}: {last}")
+        raise RuntimeError(f"login failed for {self.slot_label}: {last}")
 
     def _payload(self, session_id: int, scanned_at: datetime) -> dict:
         return {

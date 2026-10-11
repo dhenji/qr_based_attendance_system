@@ -60,7 +60,6 @@ from features.auth.exceptions import (
     UnrecognizedEmailException,
     UserAlreadyClaimedException,
     UserNotFoundException,
-    UsernameTakenException,
 )
 from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.auth.schema import (
@@ -301,7 +300,6 @@ class AuthService:
         self,
         email: str,
         otp_code: str,
-        username: str,
         password: str,
         security_question: str | None = None,
         security_answer: str | None = None,
@@ -321,15 +319,6 @@ class AuthService:
         if student is None and professor is None:
             raise UnrecognizedEmailException()
 
-        # A handle held by a *different* row blocks the claim. The holder may
-        # be this same inactive login (delete -> re-add -> re-register with
-        # the same handle): that row is what `_reclaim_inactive_login`
-        # revives below, so it must not trip this check. Same-row exemption
-        # mirrors `AdminService.create_user`.
-        holder = await self._users.get_by(username=username)
-        if holder is not None and (existing is None or holder.id != existing.id):
-            raise UsernameTakenException()
-
         if existing is not None:
             # Inactive login for this email (e.g. orphaned by a roster
             # hard-delete): reclaim it for the fresh roster row instead of
@@ -340,7 +329,6 @@ class AuthService:
                 existing,
                 student=student,
                 professor=professor,
-                username=username,
                 password=password,
                 security_question=security_question,
                 security_answer=security_answer,
@@ -349,7 +337,6 @@ class AuthService:
         role: UserRole = UserRole.STUDENT if student is not None else UserRole.PROFESSOR
 
         user = await self._users.create(
-            username=username,
             email=normalized,
             password_hash=hash_password(password),
             security_question_hash=security_question,
@@ -374,7 +361,6 @@ class AuthService:
         *,
         student: Student | None,
         professor: Professor | None,
-        username: str,
         password: str,
         security_question: str | None,
         security_answer: str | None,
@@ -400,11 +386,6 @@ class AuthService:
             # claimed match must not be stolen — report it as taken without
             # saying which account holds it.
             raise UserAlreadyClaimedException()
-
-        if username != existing.username:
-            if await self._users.get_by(username=username) is not None:
-                raise UsernameTakenException()
-            existing.username = username
 
         now: datetime = datetime.now(timezone.utc)
 

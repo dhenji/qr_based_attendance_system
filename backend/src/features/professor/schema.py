@@ -28,9 +28,7 @@ class AssignedCourse(BaseModel):
 class ProfessorCreate(BaseModel):
     """Admin roster create.
 
-    Identity is by email only. The `username` is chosen by the user at
-    self-registration (`POST /auth/register`); roster create does not
-    accept it. `courses` assigns offerings immediately via
+    Identity is by email only. `courses` assigns offerings immediately via
     `CourseProfessorService.check_overlap` (course_professors rows); no user
     row is created — the professor stays Unclaimed until self-register.
     """

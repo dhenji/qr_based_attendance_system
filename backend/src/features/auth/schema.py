@@ -14,11 +14,9 @@ from features.auth.constants import (
     SECURITY_ANSWER_MIN_LENGTH,
     SECURITY_QUESTION_MAX_LENGTH,
     SECURITY_QUESTION_MIN_LENGTH,
-    USERNAME_MAX_LENGTH,
-    USERNAME_MIN_LENGTH,
 )
 from shared.enums import OtpPurpose, UserRole
-from shared.validators import normalize_username, password_strength
+from shared.validators import password_strength
 
 
 class OTPRequest(BaseModel):
@@ -44,9 +42,6 @@ class OTPVerifyRequest(OTPRequest, _CodeRequest):
 
 
 class RegisterRequest(OTPRequest, _OTPCodeRequest):
-    username: str = Field(
-        min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH
-    )
     password: str = Field(
         min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
     )
@@ -57,11 +52,6 @@ class RegisterRequest(OTPRequest, _OTPCodeRequest):
     security_answer: str = Field(
         min_length=SECURITY_ANSWER_MIN_LENGTH, max_length=SECURITY_ANSWER_MAX_LENGTH
     )
-
-    @field_validator("username")
-    @classmethod
-    def _normalize_username(cls, value: str) -> str:
-        return normalize_username(value)
 
     @field_validator("password")
     @classmethod
@@ -175,7 +165,6 @@ class BackupCodesSummaryResponse(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
-    username: str
     role: UserRole
     mfa_enabled: bool = False
     must_change_password: bool = False

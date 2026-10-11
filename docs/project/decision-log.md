@@ -1735,3 +1735,43 @@
   `admin_user_username_exists` already existed). `login`'s anti-enumeration
   masking is unchanged. Covered by
   `tests/features/auth/test_register_reclaim.py` (10 tests).
+  > **Superseded in part by ADR-073 (2026-10-11):** `users.username` no longer
+  > exists, so the "taken username" leg of this Consequences list and both the
+  > `username_exists` and `admin_user_username_exists` 409 codes are gone. The
+  > reclaim 409 set is now `user_exists` / `ambiguous_account` /
+  > `unrecognized_email` / `roster_link_impossible`. The reclaim mechanics above
+  > are otherwise unchanged and still authoritative.
+### ADR-073: Remove `users.username` — Email Is the Whole Identity
+
+- **Decision (D73):** Drop the `users.username` column entirely rather than
+  demote it to an optional display field. Login, OTP, forgot-password, rosters
+  and profile are all email-keyed already; `username` was a user-picked handle
+  carrying its own UNIQUE guard and two 409 codes (`username_exists`,
+  `admin_user_username_exists`) but no functional consumer.
+- **Date:** 2026-10-11
+- **Status:** Accepted
+- **Context:** The handle surfaced as a required input on `POST /auth/register`,
+  an optional auto-generated field on `POST /admin/users`, an `ilike` search arm
+  on `GET /admin/users`, and a column in the audit `new_value`. Nothing keyed on
+  it: no login, no join, no token claim. With no production users, a breaking
+  change costs nothing and an optional column would keep a maintainable field
+  with no reader forever.
+- **Alternatives considered:**
+  (1) *Make it nullable + optional (display text).* Rejected: dead weight — still
+  needs normalization, length constants, a factory default, migration drift
+  surface and doc upkeep, to render one string nobody reads.
+  (2) *Keep UNIQUE when present.* Rejected: same, plus a partial unique index.
+  (3) *Full removal (taken).* One migration, one contract break, gone.
+- **Consequences:** `RegisterRequest` loses `username`; `AdminUserCreate` loses
+  it (no more `_default_username`); the `UsernameTakenException` /
+  `UsernameAlreadyExists` codes disappear, so `/auth/register` and
+  `POST /admin/users` 409s narrow to `user_exists` / `admin_user_email_exists`
+  / `roster_link_impossible`. Admin user search drops its username arm;
+  first/last name and email still search. Forward migration `c9d4e5f6a7b8`
+  drops the constraint then the column, per ADR-065 (never edit an applied
+  revision). `shared/validators.normalize_username` and the `USERNAME_*`/
+  `DEFAULT_USERNAME_MAX_LENGTH` constants go with it. The demo seed and load
+  harness key their users by email only. Breaking for any client that still
+  posts `username`; there are none in production. Covered by the existing suite
+  plus `tests/features/auth/test_register_username.py`, which now pins that a
+  stray `username` key on a roster create is still ignored.

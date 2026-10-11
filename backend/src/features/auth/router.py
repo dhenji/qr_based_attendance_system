@@ -66,7 +66,6 @@ async def register(payload: RegisterRequest, service: AuthServiceDep) -> TokenRe
     return await service.register(
         email=payload.email,
         otp_code=payload.otp_code,
-        username=payload.username,
         password=payload.password,
         security_question=payload.security_question,
         security_answer=payload.security_answer,

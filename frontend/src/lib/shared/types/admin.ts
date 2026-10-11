@@ -613,7 +613,6 @@ export type AdminCreatableRole = 'admin' | 'professor' | 'student';
 export interface AdminUserResponse {
 	id: number;
 	email: string;
-	username: string | null;
 	role: AdminUserRole;
 	first_name: string | null;
 	last_name: string | null;
@@ -630,7 +629,6 @@ export interface AdminUserCreateResponse extends AdminUserResponse {
 export interface AdminUser {
 	id: number;
 	email: string;
-	username?: string;
 	role: AdminUserRole;
 	firstName?: string;
 	lastName?: string;
@@ -646,7 +644,6 @@ export interface AdminUserCreatePayload {
 	first_name: string;
 	middle_name?: string;
 	last_name: string;
-	username?: string;
 }
 
 export interface AdminUserFilters {

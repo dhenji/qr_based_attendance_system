@@ -136,16 +136,6 @@ class UserAlreadyClaimedException(AuthDomainException):
         super().__init__(message="An account already exists for this email")
 
 
-class UsernameTakenException(AuthDomainException):
-    """409 - username is taken by another account (reclaim path)."""
-
-    status_code: int = 409
-    code: str = "username_exists"
-
-    def __init__(self) -> None:
-        super().__init__(message="That username is already taken")
-
-
 class MfaVerifyException(AuthDomainException):
     """400 - TOTP/backup code did not verify."""
 

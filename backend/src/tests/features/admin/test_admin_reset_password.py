@@ -52,18 +52,17 @@ async def _admin(
     factories: Factories, *, role: str = UserRole.SUPER_ADMIN.value
 ) -> User:
     return await factories.user(
-        email=ADMIN_EMAIL, username="reset.admin", role=role, is_active=True
+        email=ADMIN_EMAIL, role=role, is_active=True
     )
 
 
 async def _target(
-    factories: Factories, *, email: str, username: str, role: str
+    factories: Factories, *, email: str, role: str
 ) -> User:
     """A linked account with a known password, optionally locked out."""
 
     return await factories.user(
         email=email,
-        username=username,
         role=role,
         password_hash=hash_password(PASSWORD),
         failed_login_attempts=5,
@@ -128,7 +127,6 @@ async def test_reset_returns_a_temp_password_that_authenticates(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
     await test_db_session.commit()
@@ -154,7 +152,6 @@ async def test_reset_does_not_leak_the_old_password(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
 
@@ -185,13 +182,11 @@ async def test_each_reset_issues_a_different_temp_password(
     first = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
     second = await _target(
         factories,
         email=PROFESSOR_EMAIL,
-        username="reset.professor",
         role=UserRole.PROFESSOR.value,
     )
     await test_db_session.commit()
@@ -235,7 +230,6 @@ async def test_reset_clears_the_lockout(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
     await test_db_session.commit()
@@ -265,7 +259,6 @@ async def test_reset_does_not_touch_mfa(
     admin = await _admin(factories)
     target = await factories.user(
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
         password_hash=hash_password(PASSWORD),
         mfa_enabled=True,
@@ -294,7 +287,6 @@ async def test_reset_is_audited_against_the_admin(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
     await test_db_session.commit()
@@ -347,7 +339,6 @@ async def test_student_reset_targets_the_linked_account(
     graph = await factories.full_stack()
     account = await factories.user(
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
         password_hash=hash_password(PASSWORD),
     )
@@ -408,7 +399,6 @@ async def test_professor_reset_targets_the_linked_account(
     professor = await factories.professor(email=PROFESSOR_EMAIL)
     account = await factories.user(
         email=PROFESSOR_EMAIL,
-        username="reset.professor",
         role=UserRole.PROFESSOR.value,
         password_hash=hash_password(PASSWORD),
         failed_login_attempts=5,
@@ -456,7 +446,6 @@ async def test_users_reset_requires_super_admin(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
     admin = await _admin(factories, role=UserRole.ADMIN.value)
@@ -496,7 +485,6 @@ async def test_student_reset_rejects_a_non_admin(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
     headers = await auth_headers(target)
@@ -516,7 +504,6 @@ async def test_reset_requires_authentication(
     target = await _target(
         factories,
         email=STUDENT_EMAIL,
-        username="reset.student",
         role=UserRole.STUDENT.value,
     )
 

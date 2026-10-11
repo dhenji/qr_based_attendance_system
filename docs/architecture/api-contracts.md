@@ -760,7 +760,7 @@ Create a student (wireframes.md 4.2 -> Create Student).
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section }`                        |
 | **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
-| **Notes**        | The `username` is chosen by the user at self-registration (`POST /auth/register`); roster create does not accept it. Email is unique across users.       |
+| **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract (removed in ADR-073). |
 
 | **Errors**       | 404 `year_level_not_found` · 409 `student_email_exists` · 409 `student_id_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/students/{student_id}`
@@ -801,7 +801,7 @@ Create a professor (wireframes.md 4.4).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ first_name, middle_name?, last_name, email, department, courses?: [offering_id] }`                   |
 | **Response 201** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status }`                                   |
-| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. The `username` is chosen by the user at self-registration (`POST /auth/register`). |
+| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. Identity is by email only (no `username` — ADR-073). |
 
 | **Errors**       | 404 `offering_not_found` · 409 `professor_email_exists` |
 #### `GET /admin/professors/{professor_id}`
@@ -836,7 +836,7 @@ admins; admins manage students/professors. Password resets set a temp password
 | --- |
 | ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
 | GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
-| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `admin_user_username_exists` · 409 `roster_link_impossible` |
+| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `roster_link_impossible` |
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
 | POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
@@ -1307,7 +1307,7 @@ lock after 5 failed attempts.
 | ------ | ---------------------------------- | ---------------------------------------------------- |
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
 | POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
-| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` · 409 `username_exists` |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
 | POST   | `/auth/login`                      | Email/password login (+ MFA gate) | 400 `invalid_credentials` · 423 `account_locked` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |

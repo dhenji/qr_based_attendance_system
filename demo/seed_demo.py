@@ -116,7 +116,6 @@ async def _get_or_create(session, model, defaults: dict, **lookup):
 
 
 async def seed_demo(
-    username: str,
     email: str,
     password: str,
     update_password: bool,
@@ -203,18 +202,11 @@ async def seed_demo(
             await db.commit()
 
             existing = (
-                await db.scalars(select(User).where(User.username == username).limit(1))
+                await db.scalars(select(User).where(User.email == email).limit(1))
             ).one_or_none()
-            if existing is None:
-                existing_by_email = (
-                    await db.scalars(select(User).where(User.email == email).limit(1))
-                ).one_or_none()
-                if existing_by_email is not None:
-                    existing = existing_by_email
             if existing is None:
                 db.add(
                     User(
-                        username=username,
                         email=email,
                         password_hash=hash_password(password),
                         role=UserRole.SUPER_ADMIN.value,
@@ -238,7 +230,6 @@ async def seed_demo(
 
 def main(argv: list[str] | None = None) -> dict[str, int]:
     parser = argparse.ArgumentParser(description="Seed demo super_admin + academic structure.")
-    parser.add_argument("--username", default="superadmin")
     parser.add_argument("--email", default="super@attendly.demo")
     parser.add_argument("--password", default=os.environ.get("DEMO_SUPER_ADMIN_PASSWORD", "Demo!1234"))
     parser.add_argument("--update-password", action="store_true",
@@ -248,7 +239,6 @@ def main(argv: list[str] | None = None) -> dict[str, int]:
 
     counts = asyncio.run(
         seed_demo(
-            username=args.username,
             email=args.email,
             password=args.password,
             update_password=args.update_password,
@@ -258,7 +248,7 @@ def main(argv: list[str] | None = None) -> dict[str, int]:
     print("Demo seed complete:")
     for key, value in counts.items():
         print(f"  {key}: {value} created")
-    print(f"super_admin login -> username: {args.username}, email: {args.email}")
+    print(f"super_admin login -> email: {args.email}")
     return counts
 
 

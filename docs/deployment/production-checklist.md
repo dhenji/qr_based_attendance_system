@@ -377,9 +377,8 @@ curl -sf https://attendance-system.vercel.app/ | head -20
 psql "$DATABASE_URL"
 
 -- Create admin user (password should be Argon2id-hashed)
-INSERT INTO users (role, username, email, password_hash, is_active)
+INSERT INTO users (role, email, password_hash, is_active)
 VALUES (
-    'admin',
     'admin',
     'admin@yourdomain.com',
     '$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>',  -- generate with argon2
