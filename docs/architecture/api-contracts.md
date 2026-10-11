@@ -760,7 +760,7 @@ Create a student (wireframes.md 4.2 -> Create Student).
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section }`                        |
 | **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
-| **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract. |
+| **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract (removed in ADR-073). |
 
 | **Errors**       | 404 `year_level_not_found` · 409 `student_email_exists` · 409 `student_id_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/students/{student_id}`
@@ -801,7 +801,7 @@ Create a professor (wireframes.md 4.4).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ first_name, middle_name?, last_name, email, department, courses?: [offering_id] }`                   |
 | **Response 201** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status }`                                   |
-| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. Identity is by email only. |
+| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. Identity is by email only (no `username` — ADR-073). |
 
 | **Errors**       | 404 `offering_not_found` · 409 `professor_email_exists` |
 #### `GET /admin/professors/{professor_id}`

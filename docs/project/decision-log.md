@@ -1735,6 +1735,12 @@
   `admin_user_username_exists` already existed). `login`'s anti-enumeration
   masking is unchanged. Covered by
   `tests/features/auth/test_register_reclaim.py` (10 tests).
+  > **Superseded in part by ADR-073 (2026-10-11):** `users.username` no longer
+  > exists, so the "taken username" leg of this Consequences list and both the
+  > `username_exists` and `admin_user_username_exists` 409 codes are gone. The
+  > reclaim 409 set is now `user_exists` / `ambiguous_account` /
+  > `unrecognized_email` / `roster_link_impossible`. The reclaim mechanics above
+  > are otherwise unchanged and still authoritative.
 ### ADR-073: Remove `users.username` — Email Is the Whole Identity
 
 - **Decision (D73):** Drop the `users.username` column entirely rather than
