@@ -114,7 +114,7 @@ export interface AdminProfessorUpdatePayload {
 	middle_name?: string | null;
 	last_name?: string;
 	email?: string;
-	department?: string;
+	department?: string | null;
 	is_active?: boolean;
 	courses?: number[];
 }

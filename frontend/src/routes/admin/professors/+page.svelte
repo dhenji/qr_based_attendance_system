@@ -9,18 +9,19 @@
 		refreshAdminProfessors,
 		toggleProfessorActive,
 	} from '$lib/features/admin/store.svelte';
+	import { createProfessor, resetProfessorPassword, updateProfessor } from '$lib/features/admin/service';
 	import {
-		createProfessor,
+		enrichOfferings,
 		listOfferings,
-		offeringLabel,
-		resetProfessorPassword,
-		updateProfessor,
-	} from '$lib/features/admin/service';
+		offeringTitle,
+	} from '$lib/features/admin/offerings/service';
+	import { listCourses } from '$lib/features/admin/courses/service';
+	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import {
 		adminProfessorCreateSchema,
 		adminProfessorUpdateSchema,
 	} from '$lib/features/admin/schema';
-	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
+	import type { AdminOffering, AdminProfessor, Program } from '$lib/shared/types';
 	import { goto } from '$app/navigation';
 	import { adminProfessor, Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
@@ -53,6 +54,8 @@
 	let f_department = $state('');
 	let f_courses = $state<number[]>([]);
 	let offeringOptions = $state<AdminOffering[]>([]);
+	let offeringSearch = $state('');
+	let programOptions = $state<Program[]>([]);
 	let offeringsLoading = $state(false);
 	let offeringsError = $state<string | null>(null);
 
@@ -81,13 +84,49 @@
 		offeringsLoading = true;
 		offeringsError = null;
 		try {
-			const result = await listOfferings({ is_active: true, page: 1, size: 50 });
-			offeringOptions = result.items;
+			const [offeringPage, coursePage, programPage] = await Promise.all([
+				listOfferings({ is_active: true, page: 1, size: 50 }),
+				listCourses({ page: 1, size: 100 }).catch(() => ({ items: [] })),
+				listPrograms({ page: 1, size: 50 }).catch(() => ({ items: [] })),
+			]);
+			const programIds = [...new Set(offeringPage.items.map((o) => o.programId))];
+			const yearsNested = await Promise.all(
+				programIds.map((pid) => listYearLevels(pid).catch(() => []))
+			);
+			programOptions = programPage.items ?? [];
+			offeringOptions = enrichOfferings(
+				offeringPage.items,
+				coursePage.items ?? [],
+				programPage.items ?? [],
+				yearsNested.flat()
+			);
 		} catch (e: unknown) {
 			offeringsError = e instanceof Error && e.message ? e.message : 'Could not load offerings';
 		} finally {
 			offeringsLoading = false;
 		}
+	};
+
+	const filteredOfferings = $derived.by(() => {
+		const term = offeringSearch.trim().toLowerCase();
+		if (!term) return offeringOptions;
+		return offeringOptions.filter((o) =>
+			`${o.courseCode ?? ''} ${o.courseName ?? ''} ${o.programCode ?? ''} ${o.semester ?? ''}`
+				.toLowerCase()
+				.includes(term)
+		);
+	});
+
+	const offeringPrimary = (o: AdminOffering): string =>
+		o.courseCode && o.courseName
+			? `${o.courseCode} — ${o.courseName}`
+			: (o.courseCode ?? `Course ${o.courseId}`);
+
+	const offeringSecondary = (o: AdminOffering): string => {
+		const cohort = [o.programCode ?? `Program ${o.programId}`, o.yearLevelLabel].filter(Boolean).join(' · ');
+		const term = `${o.semester} ${o.academicYear}`;
+		const schedule = `${o.scheduleDays} ${o.scheduleStartTime.slice(0, 5)}–${o.scheduleEndTime.slice(0, 5)}`;
+		return [cohort, term, schedule, o.classroomName].filter(Boolean).join(' · ');
 	};
 
 	const autoRefreshStops: (() => void)[] = [];
@@ -107,6 +146,8 @@
 		autoRefreshStops.push(
 			subscribeEntity('professors', refreshVisible),
 			subscribeEntity('offerings', () => void loadOfferings()),
+			// Programs feed the department dropdown + offering joins.
+			subscribeEntity('programs', () => void loadOfferings()),
 			onFocusRevalidate(refreshVisible)
 		);
 	});
@@ -156,6 +197,7 @@
 		f_email = '';
 		f_department = '';
 		f_courses = [];
+		offeringSearch = '';
 		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
@@ -169,6 +211,7 @@
 		f_email = p.email;
 		f_department = p.department ?? '';
 		f_courses = (p.assigned_courses ?? []).map((c) => c.offering_id);
+		offeringSearch = '';
 		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
@@ -220,7 +263,7 @@
 				middle_name: d.middle_name || null,
 				last_name: d.last_name,
 				email: d.email,
-				department: d.department,
+				department: d.department || null,
 				courses: d.courses,
 			});
 			}
@@ -412,26 +455,47 @@
 					<label>Last name<input class="input" bind:value={f_last_name} /></label>
 					<label>Email<input class="input" type="email" bind:value={f_email} /></label>
 				</div>
-				<label>Department<input class="input" bind:value={f_department} placeholder="Computer Science" /></label>
+				<label>Department (optional)<input class="input" bind:value={f_department} list="department-suggestions" autocomplete="off" placeholder="Type or pick a program…" /></label>
+				<datalist id="department-suggestions">
+					{#each programOptions as p (p.id)}
+						<option value={p.code}>{p.name}</option>
+						<option value={p.name}>{p.code}</option>
+					{/each}
+				</datalist>
+				<p class="hint">Optional org unit — teaching scope comes from the offerings below.</p>
 				<fieldset class="courses">
-					<legend>Course assignments (offerings)</legend>
+					<legend>Course assignments (offerings) · {f_courses.length} selected</legend>
 					{#if offeringsLoading}
 						<p class="hint">Loading offerings…</p>
 					{:else if offeringsError}
 						<p class="error" role="alert">{offeringsError}</p>
 					{:else if offeringOptions.length === 0}
-						<p class="hint">No active offerings found.</p>
+						<p class="hint">No active offerings found. Create one under Offerings first.</p>
 					{:else}
-						{#each offeringOptions as o (o.id)}
-							<label class="check">
-								<input
-									type="checkbox"
-									checked={f_courses.includes(o.id)}
-									onchange={() => toggleCourse(o.id)}
-								/>
-								<span>{offeringLabel(o)}</span>
-							</label>
-						{/each}
+						<input
+							class="input offering-search"
+							type="search"
+							placeholder="Filter by code, name, program…"
+							aria-label="Filter offerings"
+							bind:value={offeringSearch}
+						/>
+						{#if filteredOfferings.length === 0}
+							<p class="hint">No offerings match “{offeringSearch.trim()}”.</p>
+						{:else}
+							{#each filteredOfferings as o (o.id)}
+								<label class="check" title={offeringTitle(o)}>
+									<input
+										type="checkbox"
+										checked={f_courses.includes(o.id)}
+										onchange={() => toggleCourse(o.id)}
+									/>
+									<span class="offering-text">
+										<span class="primary">{offeringPrimary(o)}</span>
+										<span class="secondary">{offeringSecondary(o)}</span>
+									</span>
+								</label>
+							{/each}
+						{/if}
 					{/if}
 				</fieldset>
 				<p class="hint">Assignments are saved with the professor (replaces the set on edit); no user row is created until the professor self-registers.</p>
@@ -810,10 +874,37 @@
 
 	.courses .check {
 		flex-direction: row;
-		align-items: center;
+		align-items: flex-start;
 		gap: 0.5rem;
 		font-weight: 500;
 		cursor: pointer;
+	}
+
+	.courses .check input {
+		margin-top: 0.2rem;
+		flex-shrink: 0;
+	}
+
+	.offering-search {
+		width: 100%;
+	}
+
+	.offering-text {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		min-width: 0;
+	}
+
+	.offering-text .primary {
+		font-weight: 600;
+		color: var(--text-strong);
+	}
+
+	.offering-text .secondary {
+		font-size: 0.75rem;
+		font-weight: 400;
+		color: var(--text-muted);
 	}
 
 	.modal-actions {
