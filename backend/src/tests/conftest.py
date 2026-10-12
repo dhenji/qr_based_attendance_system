@@ -81,8 +81,8 @@ DEFAULT_TERM_STRUCTURE: dict[str, Any] = {
     ]
 }
 
-# A counter, not a random suffix: the unique columns (`users.username`,
-# `users.email`, `students.student_id`, `sessions.session_code`) collide
+# A counter, not a random suffix: the unique columns (`users.email`,
+# `students.student_id`, `sessions.session_code`) collide
 # across factories within a single test, and a deterministic sequence keeps
 # failures reproducible.
 _sequence: int = 0
@@ -262,9 +262,9 @@ class Factories:
 
     async def user(self, **overrides: Any) -> User:
         n = _next()
+        overrides.pop("username", None)
         return await self._make(
             User,
-            username=overrides.pop("username", f"user{n}"),
             email=overrides.pop("email", f"user{n}@test.local"),
             password_hash=overrides.pop("password_hash", "not-a-real-hash"),
             role=overrides.pop("role", UserRole.STUDENT.value),

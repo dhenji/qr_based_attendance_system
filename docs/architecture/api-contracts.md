@@ -735,12 +735,16 @@ Permanent delete — allowed only on archived (`is_active=false`) students
 > scanned would otherwise raise a foreign-key violation and return 500. The
 > has-records guard returns 409 instead. The FKs stay `RESTRICT` on purpose:
 > cascading them would silently destroy the attendance audit trail (ADR-057).
+> Hard-delete deactivates (never deletes) the linked `users` row, so the audit
+> trail stays joinable and a later re-creation can reclaim the login (D71/D72).
 
 #### `DELETE /admin/professors/{professor_id}/archive`
 
 Same semantics as the student archive delete, for professors, including
 `409 professor_has_records` when `sessions` still reference the professor
-(`course_professors` is CASCADE, `sessions` is RESTRICT).
+(`course_professors` is CASCADE, `sessions` is RESTRICT). Hard-delete
+deactivates (never deletes) the linked login, so the audit trail stays
+joinable (D71).
 
 #### `GET /admin/students`
 
@@ -758,9 +762,9 @@ Create a student (wireframes.md 4.2 -> Create Student).
 
 |                  |                                                                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section, username?: string }`                        |
+| **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section }`                        |
 | **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
-| **Notes**        | Optional `username` captures the claim slot used at self-registration; omitted = auto-generated at claim. Email is unique across users.       |
+| **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract (removed in ADR-073). Re-creating a roster row for an address whose login was deactivated by a prior hard-delete reclaims that login: fresh CLAIM OTP proof + exactly one live unclaimed roster match required (D72); otherwise 409 `user_exists` / `ambiguous_account` / `unrecognized_email` / `roster_link_impossible`. |
 
 | **Errors**       | 404 `year_level_not_found` · 409 `student_email_exists` · 409 `student_id_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/students/{student_id}`
@@ -779,9 +783,9 @@ Update student fields (program/year-level/sections; clears face enrollment on id
 
 |                  |                                                       |
 | ---------------- | ----------------------------------------------------- |
-| **Request**      | `{ first_name?, last_name?, email?, program_id?, year_level_id?, section?, is_active? }` |
+| **Request**      | `{ first_name?, middle_name? (null clears), last_name?, email?, program_id?, year_level_id?, section?, is_active? }` |
 | **Response 200** | Updated student                                      |
-| **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). |
+| **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). Archiving also deactivates the linked `users` row (`users.is_active=false`); reactivating restores it — the login gate reads `users.is_active` alone (D71). Each sync writes one `UPDATE/USER` audit row. |
 
 | **Errors**       | 404 `student_not_found` · 404 `year_level_not_found` · 409 `student_email_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/professors`
@@ -799,9 +803,9 @@ Create a professor (wireframes.md 4.4).
 
 |                  |                                                                                                                            |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ first_name, middle_name?, last_name, email, department, username?: string, courses?: [offering_id] }`                   |
+| **Request**      | `{ first_name, middle_name?, last_name, email, department, courses?: [offering_id] }`                   |
 | **Response 201** | `{ id, first_name, middle_name, last_name, email, department, is_active, claim_status }`                                   |
-| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. |
+| **Notes**        | `courses` assigns offerings immediately via `assign_professor` (course_professors rows); users are NOT created for professors. Identity is by email only (no `username` — ADR-073). |
 
 | **Errors**       | 404 `offering_not_found` · 409 `professor_email_exists` |
 #### `GET /admin/professors/{professor_id}`
@@ -818,9 +822,9 @@ Update professor fields + course assignments.
 
 |                  |                                                                       |
 | ---------------- | --------------------------------------------------------------------- |
-| **Request**      | `{ first_name?, last_name?, email?, department?, is_active?, courses?: [offering_id] }` |
+| **Request**      | `{ first_name?, middle_name? (null clears), last_name?, email?, department?, is_active?, courses?: [offering_id] }` |
 | **Response 200** | Updated professor                                                    |
-| **Notes**        | `courses` replaces the assignment set (removes missing; keeps provided). |
+| **Notes**        | `courses` replaces the assignment set (removes missing; keeps provided). `is_active=false` also deactivates the linked `users` row; `true` restores it (D71, same as students). |
 
 ---
 
@@ -836,7 +840,7 @@ admins; admins manage students/professors. Password resets set a temp password
 | --- |
 | ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
 | GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
-| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `admin_user_username_exists` · 409 `roster_link_impossible` |
+| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `roster_link_impossible` |
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
 | POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
@@ -1074,9 +1078,9 @@ Change password.
 
 |                  |                                                                  |
 | ---------------- | ---------------------------------------------------------------- |
-| **Request**      | `{ current_password: string, new_password: string }`             |
+| **Request**      | `{ current_password: string, new_password: string }` (strong only: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol → 422 otherwise) |
 | **Response 200** | `{ message: "Password updated" }`                                |
-| **Errors**       | 400 `current_password_invalid` · 400 `password_reused` |
+| **Errors**       | 400 `current_password_invalid` · 400 `password_reused` · 404 `professor_not_found` |
 
 ---
 
@@ -1307,7 +1311,7 @@ lock after 5 failed attempts.
 | ------ | ---------------------------------- | ---------------------------------------------------- |
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
 | POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
-| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
 | POST   | `/auth/login`                      | Email/password login (+ MFA gate) | 400 `invalid_credentials` · 423 `account_locked` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |

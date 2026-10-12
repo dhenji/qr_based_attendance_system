@@ -24,7 +24,6 @@ export interface OtpVerifyRequest extends OtpRequest {
 // and a client-supplied role is ignored.
 export interface RegisterRequest extends OtpRequest {
 	otp_code: string;
-	username: string;
 	password: string;
 	security_question: string;
 	security_answer: string;

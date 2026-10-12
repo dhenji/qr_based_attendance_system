@@ -53,11 +53,11 @@ export interface AdminStudentCreatePayload {
 	program_id: number;
 	year_level_id: number;
 	section?: string;
-	username?: string;
 }
 
 export interface AdminStudentUpdatePayload {
 	first_name?: string;
+	middle_name?: string | null;
 	last_name?: string;
 	email?: string;
 	program_id?: number;
@@ -106,15 +106,15 @@ export interface AdminProfessorCreatePayload {
 	last_name: string;
 	email: string;
 	department?: string;
-	username?: string;
 	courses?: number[];
 }
 
 export interface AdminProfessorUpdatePayload {
 	first_name?: string;
+	middle_name?: string | null;
 	last_name?: string;
 	email?: string;
-	department?: string;
+	department?: string | null;
 	is_active?: boolean;
 	courses?: number[];
 }
@@ -613,7 +613,6 @@ export type AdminCreatableRole = 'admin' | 'professor' | 'student';
 export interface AdminUserResponse {
 	id: number;
 	email: string;
-	username: string | null;
 	role: AdminUserRole;
 	first_name: string | null;
 	last_name: string | null;
@@ -630,7 +629,6 @@ export interface AdminUserCreateResponse extends AdminUserResponse {
 export interface AdminUser {
 	id: number;
 	email: string;
-	username?: string;
 	role: AdminUserRole;
 	firstName?: string;
 	lastName?: string;
@@ -646,7 +644,6 @@ export interface AdminUserCreatePayload {
 	first_name: string;
 	middle_name?: string;
 	last_name: string;
-	username?: string;
 }
 
 export interface AdminUserFilters {

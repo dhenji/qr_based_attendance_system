@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
@@ -18,6 +18,8 @@
 	import { adminUserCreateSchema } from '$lib/features/admin/schema';
 	import type { AdminUser, AdminUserRole } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { formatLocalDate } from '$lib/shared/utils/format';
 
@@ -48,7 +50,6 @@
 	let f_first_name = $state('');
 	let f_middle_name = $state('');
 	let f_last_name = $state('');
-	let f_username = $state('');
 
 	const roleParam = $derived(roleFilter === 'all' ? undefined : roleFilter);
 	const isActiveFilter = $derived(
@@ -73,6 +74,16 @@
 			adminUsersState.size
 		);
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminUsersState.loading) void refreshAdminUsers();
+	};
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user || !isSuperAdmin()) {
@@ -80,6 +91,10 @@
 			return;
 		}
 		load(1);
+		autoRefreshStops.push(
+			subscribeEntity('users', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const applyFilters = () => {
@@ -96,7 +111,6 @@
 		f_first_name = '';
 		f_middle_name = '';
 		f_last_name = '';
-		f_username = '';
 		formOpen = true;
 	};
 
@@ -110,7 +124,6 @@
 				first_name: f_first_name,
 				middle_name: f_middle_name || undefined,
 				last_name: f_last_name,
-				username: f_username || undefined,
 			});
 			if (!parsed.success) {
 				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -123,12 +136,12 @@
 				first_name: d.first_name,
 				middle_name: d.middle_name || undefined,
 				last_name: d.last_name,
-				username: d.username || undefined,
 			});
 			formOpen = false;
 			copied = false;
 			createdTemp = { email: result.user.email, tempPassword: result.tempPassword };
 			await refreshAdminUsers();
+			notifyEntityChanged('users');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {
@@ -176,7 +189,7 @@
 		<input
 			class="input search"
 			type="search"
-			placeholder="Search email, username, name…"
+			placeholder="Search email, name…"
 			aria-label="Search users"
 			bind:value={search}
 			onkeydown={(e) => {
@@ -302,7 +315,6 @@
 				</div>
 				<div class="grid2">
 					<label>Last name<input class="input" bind:value={f_last_name} /></label>
-					<label>Username (optional)<input class="input" bind:value={f_username} placeholder="auto-generated" /></label>
 				</div>
 				<p class="hint">Student/professor accounts link to a matching active roster row by email; admin accounts need no roster row. A temporary password is shown once after creation.</p>
 			</div>

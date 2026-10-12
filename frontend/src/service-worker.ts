@@ -23,15 +23,39 @@
 
 import { build, files, version } from '$service-worker';
 
+// The worker is production-only: under `vite dev` (incl. the docker compose
+// dev stack on :5173) assets rebuild on every edit and the dev server drops
+// connections during HMR restarts, so intercepting fetches only serves stale
+// shells and turns transient blips into unhandled FetchEvent rejections
+// (issue #223). Offline support is tested via `build + preview` instead.
+// NOTE: only `$service-worker` / `$env/*` may be imported here — SvelteKit
+// rejects `$app/environment` in worker bundles at build time, so the Vite
+// `import.meta.env.DEV` flag (inlined per-bundle) is the environment gate.
+const WORKER_ENABLED = !import.meta.env.DEV;
+
 const SHELL_CACHE = `attendly-shell-${version}`;
 const PRECACHE = [...build, ...files];
 
-const isNavigation = (request: Request): boolean => request.mode === 'navigate';
+// `destination === 'document'` covers same-URL `/` requests whose mode is
+// not `navigate` (preload / re-fetch during rebuilds), which previously fell
+// through to the unguarded cache-first branch and rejected at fetch (#223).
+const isNavigation = (request: Request): boolean =>
+	request.mode === 'navigate' || request.destination === 'document';
 
 const isBackendCall = (url: URL): boolean =>
 	url.pathname.startsWith('/api/') || url.origin !== self.location.origin;
 
+// Vite / SvelteKit internals must never be intercepted or cached: HMR
+// (`/@*`, `/__*`), build metadata (`/.svelte-kit`), and data preloads
+// (`?__data`) are ephemeral dev artifacts, not offline assets.
+const isDevInternal = (url: URL): boolean =>
+	url.pathname.startsWith('/@') ||
+	url.pathname.startsWith('/__') ||
+	url.pathname.startsWith('/.svelte-kit') ||
+	url.searchParams.has('__data');
+
 self.addEventListener('install', (event) => {
+	if (!WORKER_ENABLED) return;
 	(event as ExtendableEvent).waitUntil(
 		(async () => {
 			const cache = await caches.open(SHELL_CACHE);
@@ -42,6 +66,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+	if (!WORKER_ENABLED) return;
 	(event as ExtendableEvent).waitUntil(
 		(async () => {
 			const keys = await caches.keys();
@@ -52,12 +77,19 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+	if (!WORKER_ENABLED) return;
 	const { request } = event as FetchEvent;
 	if (request.method !== 'GET') return;
+	// Chrome throws if a worker calls respondWith on an `only-if-cached`
+	// request with a non-`same-origin` mode — never intercept those.
+	if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') return;
 	const url = new URL(request.url);
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
 	// Backend and cross-origin traffic: never touch the cache.
 	if (isBackendCall(url)) return;
+	// Dev internals: let them fall through to the network untouched.
+	if (isDevInternal(url)) return;
 
 	(event as FetchEvent).respondWith(
 		(async () => {
@@ -76,12 +108,19 @@ self.addEventListener('fetch', (event) => {
 					throw new Error('Offline and no cached shell available.');
 				}
 			}
-			// Versioned static assets: cache-first.
-			const cached = await cache.match(request);
-			if (cached) return cached;
-			const fresh = await fetch(request);
-			void cache.put(request, fresh.clone()).catch(() => undefined);
-			return fresh;
+			// Versioned static assets: cache-first, with a cached fallback so a
+			// transient network blip never rejects the FetchEvent (#223).
+			try {
+				const cached = await cache.match(request);
+				if (cached) return cached;
+				const fresh = await fetch(request);
+				void cache.put(request, fresh.clone()).catch(() => undefined);
+				return fresh;
+			} catch {
+				const fallback = await cache.match(request);
+				if (fallback) return fallback;
+				throw new Error('Offline and no cached asset available.');
+			}
 		})()
 	);
 });

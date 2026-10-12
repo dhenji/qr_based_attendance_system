@@ -38,13 +38,11 @@ SECRET = "JBSWY3DPEB2XS2LP"
 # default's `.local` TLD as special-use, so these tests go through the route and
 # need a deliverable-looking address (same trap as `test_login_lockout.py`).
 EMAIL = "mfa.disable.subject@isu.edu.ph"
-USERNAME = "mfa.disable.subject"
 
 
 async def _user(factories: Factories, **overrides: Any) -> User:
     defaults: dict[str, Any] = {
         "email": EMAIL,
-        "username": USERNAME,
         "password_hash": hash_password(PASSWORD),
         "mfa_enabled": True,
         "mfa_secret": SECRET,

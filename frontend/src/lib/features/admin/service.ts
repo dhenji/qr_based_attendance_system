@@ -323,7 +323,6 @@ export const downloadProfessorTemplate = async (): Promise<string> =>
 export const toAdminUser = (u: AdminUserResponse | AdminUserCreateResponse): AdminUser => ({
 	id: u.id,
 	email: u.email,
-	username: u.username ?? undefined,
 	role: u.role as AdminUserRole,
 	firstName: u.first_name ?? undefined,
 	lastName: u.last_name ?? undefined,
@@ -439,8 +438,9 @@ const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
 	updatedAt: o.updated_at,
 });
 
-export const offeringLabel = (o: AdminOffering): string =>
-	`Offering ${o.id} · Course ${o.courseId} · ${o.semester} ${o.academicYear}`;
+// NOTE: picker + profile join display names client-side via
+// enrichOfferings() in features/admin/offerings/service.ts. Do not re-add
+// an id-only offeringLabel helper here.
 
 export const listOfferings = async (
 	filters: AdminOfferingFilters = {}

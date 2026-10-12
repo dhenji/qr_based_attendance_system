@@ -110,7 +110,6 @@ async def test_load_email_migrated_from_reserved_domain(tmp_path: object) -> Non
         async with async_sessionmaker(engine)() as db:
             db.add(
                 User(
-                    username="loadtest01",
                     email="loadtest01@load.test",
                     password_hash="legacy",
                     role="student",
@@ -123,14 +122,14 @@ async def test_load_email_migrated_from_reserved_domain(tmp_path: object) -> Non
         async with async_sessionmaker(engine)() as db:
             row = (
                 await db.scalars(
-                    select(User).where(User.username == "loadtest01")
+                    select(User).where(User.email == "loadtest01@load.uni.edu")
                 )
             ).one()
             assert row.email == "loadtest01@load.uni.edu"
 
             domains = (
                 await db.scalars(
-                    select(User.email).where(User.username.like("loadtest%"))
+                    select(User.email).where(User.email.like("loadtest%"))
                 )
             ).all()
             assert len(domains) == 30

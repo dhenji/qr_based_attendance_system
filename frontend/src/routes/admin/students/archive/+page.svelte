@@ -1,22 +1,32 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import {
 		adminStudentsState,
 		deleteArchivedStudent,
 		initAdminStudents,
+		refreshAdminStudents,
 		toggleStudentActive,
 	} from '$lib/features/admin/store.svelte';
 	import type { AdminStudent } from '$lib/shared/types';
+	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Students archive (wireframe 4.10): inactive roster rows only.
 	// Restore flips is_active back on; Delete permanently removes the row
 	// (backend allows it only with no enrollments/attendance/excuse records,
 	// else 409). No new backend — the list endpoint's is_active filter.
+	// Auto-refresh (issue #221): own-entity events (list-page edits) and tab
+	// focus re-run the archived query; restores/deletes emit via the store.
 
 	let search = $state('');
 	let deleteTarget = $state<AdminStudent | null>(null);
 	let deleteBusy = $state(false);
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
 
 	const totalPages = $derived(
 		Math.max(1, Math.ceil(adminStudentsState.total / adminStudentsState.size))
@@ -29,8 +39,16 @@
 			adminStudentsState.size
 		);
 
+	const refreshVisible = () => {
+		if (!adminStudentsState.loading) void refreshAdminStudents();
+	};
+
 	onMount(() => {
 		load(1);
+		autoRefreshStops.push(
+			subscribeEntity('students', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const applyFilters = () => {
@@ -106,7 +124,7 @@
 								<button class="link" onclick={() => void toggleStudentActive(s)}>
 									Restore
 								</button>
-								<button class="link danger" onclick={() => (deleteTarget = s)}>Delete</button>
+								<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
 							</td>
 						</tr>
 					{/each}
@@ -145,8 +163,8 @@
 		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} will be removed for good. This fails with 409 if
-				enrollments, attendance, or excuses still reference them.
+				{fullName(deleteTarget)} will be removed for good. If enrollment, attendance, or
+				excuse history is still linked, deletion will be blocked and the record stays archived.
 			</p>
 			{#if adminStudentsState.actionError}
 				<p class="error" role="alert">{adminStudentsState.actionError}</p>

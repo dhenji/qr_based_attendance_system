@@ -15,7 +15,6 @@
 
 	let email = $state('');
 	let otp = $state<string[]>(['', '', '', '', '', '']);
-	let username = $state('');
 	let password = $state('');
 	let confirm = $state('');
 	let securityQuestion = $state('');
@@ -136,14 +135,6 @@
 		event.preventDefault();
 		error = '';
 
-		if (!username.trim()) {
-			error = 'Username is required.';
-			return;
-		}
-		if (username.trim().length < 3 || username.trim().length > 20) {
-			error = 'Username must be 3–20 characters.';
-			return;
-		}
 		if (!passwordOk) {
 			error = 'Password does not meet all requirements.';
 			return;
@@ -166,7 +157,6 @@
 			const user = await doRegister({
 				email,
 				otpCode: otp.join(''),
-				username: username.trim(),
 				password,
 				securityQuestion,
 				securityAnswer,
@@ -213,7 +203,7 @@
 				<p class="subtitle">A 6-digit code was sent to <strong>{email}</strong></p>
 			{:else}
 				<h1>Finish Setting Up</h1>
-				<p class="subtitle">Pick a username and password to finish claiming your account.</p>
+				<p class="subtitle">Pick a password to finish claiming your account.</p>
 			{/if}
 		</div>
 
@@ -268,14 +258,6 @@
 				</form>
 			{:else}
 				<form onsubmit={handleRegister}>
-					<div class="field">
-						<label class="form-label" for="reg-username">Username</label>
-						<input class="form-input" id="reg-username" required minlength="3" maxlength="20"
-							autocomplete="username" placeholder="jrizal" value={username}
-							oninput={(e) => { username = (e.target as HTMLInputElement).value; }} />
-						<p class="hint">3–20 characters. Must be unique across all accounts.</p>
-					</div>
-
 					<div class="field">
 						<label class="form-label" for="reg-password">Password</label>
 						<div class="pwd-wrap">

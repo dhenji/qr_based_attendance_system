@@ -3,26 +3,26 @@ from __future__ import annotations
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password
-from features.admin.constants import DEFAULT_USERNAME_MAX_LENGTH, TEMP_PASSWORD_LENGTH
+from features.admin.constants import TEMP_PASSWORD_LENGTH
 from features.admin.exceptions import (
     AdminUserNotFound,
     EmailAlreadyExists,
     RosterLinkImpossible,
     SelfDeactivationForbidden,
-    UsernameAlreadyExists,
 )
 from features.admin.schema import (
     AdminUserCreate,
     AdminUserCreateResponse,
     AdminUserRead,
 )
-from features.auth.model import User
+from features.auth.model import MfaBackupCodes, User
 from features.professor.model import Professor
 from features.student.model import Student
 from shared.audit import record_audit
@@ -77,7 +77,6 @@ def _users_filters(
         filters.append(
             or_(
                 User.email.ilike(term),
-                User.username.ilike(term),
                 Student.first_name.ilike(term),
                 Student.last_name.ilike(term),
                 Professor.first_name.ilike(term),
@@ -98,7 +97,6 @@ def _to_admin_user_read(
     return AdminUserRead(
         id=user.id,
         email=user.email,
-        username=user.username,
         role=UserRole(user.role),
         first_name=student_first or professor_first,
         last_name=student_last or professor_last,
@@ -121,54 +119,99 @@ class AdminService:
     ) -> AdminUserCreateResponse:
         normalized: str = payload.email.lower()
 
-        if await self._users.get_by(email=normalized) is not None:
+        existing: User | None = await self._users.get_by(email=normalized)
+
+        if existing is not None and existing.is_active:
             raise EmailAlreadyExists()
-
-        username: str = payload.username or self._default_username(
-            payload.first_name, payload.last_name
-        )
-
-        if await self._users.get_by(username=username) is not None:
-            raise UsernameAlreadyExists()
 
         temp_password: str = secrets.token_urlsafe(TEMP_PASSWORD_LENGTH)
 
-        user: User = await self._users.create(
-            username=username,
-            email=normalized,
-            password_hash=hash_password(temp_password),
-            role=payload.role.value,
-            must_change_password=True,
-        )
-
-        roster: _RosterHandle | None = self._roster_handles().get(payload.role)
-
-        if roster is not None:
-            await self._link_roster(
-                roster.handle, email=normalized, user_id=user.id, role=roster.label
+        if existing is None:
+            user: User = await self._users.create(
+                email=normalized,
+                password_hash=hash_password(temp_password),
+                role=payload.role.value,
+                must_change_password=True,
             )
 
-        # Account creation is a privilege grant, so it belongs in the trail.
-        # `performed_by` is the super_admin; `entity_id` is the new account.
-        await record_audit(
-            self._session,
-            actor_id=actor_id,
-            action=AuditAction.CREATE,
-            entity_type=AuditEntity.USER,
-            entity_id=user.id,
-            new_value={
-                "email": normalized,
-                "username": user.username,
-                "role": user.role,
-                "is_active": user.is_active,
-                "must_change_password": True,
-            },
-        )
+            roster: _RosterHandle | None = self._roster_handles().get(payload.role)
+
+            if roster is not None:
+                await self._link_roster(
+                    roster.handle, email=normalized, user_id=user.id, role=roster.label
+                )
+
+            # Account creation is a privilege grant, so it belongs in the trail.
+            # `performed_by` is the super_admin; `entity_id` is the new account.
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.CREATE,
+                entity_type=AuditEntity.USER,
+                entity_id=user.id,
+                new_value={
+                    "email": normalized,
+                    "role": user.role,
+                    "is_active": user.is_active,
+                    "must_change_password": True,
+                },
+            )
+        else:
+            # Inactive login for this email (e.g. orphaned by a roster
+            # hard-delete): revive it for the fresh roster row. Eligibility is
+            # checked BEFORE the first write, so a ban without a live,
+            # unclaimed roster row stays dead with the session untouched —
+            # `_link_roster`'s own query would autoflush pending writes.
+            roster = self._roster_handles().get(payload.role)
+            record: Student | Professor | None = None
+
+            if roster is not None:
+                record = await roster.handle.get_by(email=normalized, is_active=True)
+
+                if record is None or record.user_id is not None:
+                    raise RosterLinkImpossible(roster.label)
+
+            user = existing
+            user.password_hash = hash_password(temp_password)
+            user.role = payload.role.value
+            user.is_active = True
+            user.must_change_password = True
+            user.failed_login_attempts = 0
+            user.is_locked = False
+            user.locked_at = None
+            # The new holder must not inherit the old holder's second factor.
+            now: datetime = datetime.now(timezone.utc)
+            outstanding: Sequence[MfaBackupCodes] = (
+                await self._session.scalars(
+                    select(MfaBackupCodes).where(
+                        MfaBackupCodes.user_id == user.id,
+                        MfaBackupCodes.used_at.is_(None),
+                    )
+                )
+            ).all()
+
+            for code in outstanding:
+                code.used_at = now
+
+            user.mfa_enabled = False
+            user.mfa_secret = None
+
+            if record is not None:
+                record.user_id = user.id
+
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.UPDATE,
+                entity_type=AuditEntity.USER,
+                entity_id=user.id,
+                old_value={"is_active": False},
+                new_value={"is_active": True},
+            )
 
         return AdminUserCreateResponse(
             id=user.id,
             email=user.email,
-            username=username,
             role=UserRole(user.role),
             first_name=payload.first_name,
             last_name=payload.last_name,
@@ -188,7 +231,10 @@ class AdminService:
         page: int,
         size: int,
     ) -> PaginatedResponse[AdminUserRead]:
-        stmt: Select[Any] = _users_stmt().where(_users_filters(search, role, is_active))
+        filters = _users_filters(search, role, is_active)
+        stmt: Select[Any] = _users_stmt()
+        if filters:
+            stmt = stmt.where(*filters)
 
         total: int = (
             await self._session.scalar(
@@ -252,9 +298,3 @@ class AdminService:
             raise RosterLinkImpossible(role)
 
         record.user_id = user_id
-
-    @staticmethod
-    def _default_username(first_name: str, last_name: str) -> str:
-        return f"{first_name[0].lower()}{last_name.lower()}"[
-            :DEFAULT_USERNAME_MAX_LENGTH
-        ]

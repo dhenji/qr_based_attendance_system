@@ -301,7 +301,7 @@
 **Goal:** End-to-end testing across all portals, security validation, performance benchmarks.
 
 > **Status:** all deliverables landed and measured; suite was 707 collected cases
-> in 45 files at the time of this run (now 719 in 49 — re-check with
+> in 45 files at the time of this run (now 760 in 56 — re-check with
 > `pytest src/tests -q --collect-only`), green on SQLite and on Postgres. Load: 11.0 req/s over 5 minutes
 > with 30 virtual students, scan p50 18ms / p95 26ms / p99 33ms, zero spurious
 > duplicate rejections. Risk batch: 10,058 rows in 4.2s, identical with

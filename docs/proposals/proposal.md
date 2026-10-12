@@ -360,7 +360,7 @@ Rejection reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mis
 Users
   - id (PK)
   - role (super_admin / admin / professor / student)
-  - username (unique)
+  - username (unique) — removed by ADR-073 (2026-10-11); email is the only identity
   - email (unique — login identity)
   - password_hash (Argon2id)
   - security_question_hash   (for password reset)

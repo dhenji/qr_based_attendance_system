@@ -103,7 +103,14 @@ def test_is_monthly_anchor() -> None:
 
 def test_prune_drops_stale_daily_but_keeps_monthly_anchor() -> None:
     now = datetime.now(timezone.utc)
-    stale_daily = _row(finished_at=(now - timedelta(days=40)).replace(day=15))
+    # (now - 40d).replace(day=15) can shift the date forward up to ~2 weeks
+    # (e.g. Sep 1 -> Sep 15), dropping the age below the 30-day gate
+    # depending on the calendar date. Build a deterministic non-anchor
+    # older than `daily` instead: shifting day 1 -> 2 costs at most 1 day.
+    stale_ts = now - timedelta(days=40)
+    if stale_ts.day == 1:
+        stale_ts = stale_ts.replace(day=2)
+    stale_daily = _row(finished_at=stale_ts)
     fresh_daily = _row(finished_at=now - timedelta(days=3))
     anchor_month = (now.replace(day=1).month - 2) % 12 or 12
     anchor_year = now.year if now.month > 2 else now.year - 1

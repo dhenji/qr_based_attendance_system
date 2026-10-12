@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import {
 		authState,
+		defaultRouteFor,
 		doLogout,
 		isAdmin,
 		isSuperAdmin,
@@ -14,15 +15,23 @@
 
 	let { children } = $props();
 
-	// Admin portal gate: anonymous visitors bounce to login, signed-in
-	// non-admins go to their own portal. restoreSession() runs first so the
-	// topbar shows the signed-in name when there is one.
+	// Admin portal gate: anonymous visitors bounce to login (preserving the
+	// clicked path in ?next=), signed-in non-admins go to their own portal.
+	// restoreSession() runs first so the topbar shows the signed-in name when
+	// there is one. Children stay ungated until the check passes, so a
+	// logged-out portal-card click never paints protected UI before redirect.
+	let gate = $state<'checking' | 'allowed'>('checking');
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
-			await goto(Routes.LOGIN);
+			await goto(`${Routes.LOGIN}?next=${encodeURIComponent(page.url.pathname)}`, {
+				replaceState: true,
+			});
 		} else if (!isAdmin()) {
-			await goto(Routes.HOME);
+			await goto(defaultRouteFor(user), { replaceState: true });
+		} else {
+			gate = 'allowed';
 		}
 	});
 
@@ -148,7 +157,11 @@
 		</aside>
 
 		<main class="content">
-			{@render children()}
+			{#if gate === 'allowed'}
+				{@render children()}
+			{:else}
+				<p class="gate-loading" role="status">Checking your session…</p>
+			{/if}
 		</main>
 	</div>
 </div>
@@ -335,6 +348,12 @@
 		max-width: 1100px;
 		margin-inline: auto;
 		padding: 2rem 2rem 3rem;
+	}
+
+	.gate-loading {
+		color: var(--text-muted);
+		font-size: 0.9375rem;
+		margin: 0;
 	}
 
 	.modal-overlay {

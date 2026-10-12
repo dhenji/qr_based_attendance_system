@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -34,6 +34,8 @@
 		YearLevel,
 	} from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Offering Detail (wireframe 4.5d, admin-manual §2.4): schedule, classroom
@@ -87,6 +89,27 @@
 	let bulkFile = $state<File | null>(null);
 	let bulkBusy = $state(false);
 	let bulkResult = $state<AdminBulkEnrollResult | null>(null);
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	// Own entity -> refresh the detail regions (covers edits made on other
+	// tabs; the store mutators emit after their own reloads). Roster keeps
+	// the current section filter and page.
+	const refreshVisible = () => {
+		if (!Number.isFinite(offeringId) || offeringId <= 0) return;
+		if (adminOfferingDetailState.loading) return;
+		void refreshAdminOfferingDetail(offeringId);
+		if (!adminOfferingDetailState.assignmentsLoading) void loadOfferingAssignments(offeringId);
+		if (!adminOfferingDetailState.rosterLoading)
+			void loadOfferingRoster(
+				offeringId,
+				sectionFilter.trim() || undefined,
+				adminOfferingDetailState.rosterPage
+			);
+	};
 
 	onMount(async () => {
 		if (!Number.isFinite(offeringId) || offeringId <= 0) return;
@@ -99,6 +122,10 @@
 			resolveContext(o.courseId, o.programId, o.yearLevelId),
 		]);
 		fillSettings();
+		autoRefreshStops.push(
+			subscribeEntity('offerings', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const resolveContext = async (courseId: number, programId: number, yearId: number) => {
@@ -155,6 +182,7 @@
 		try {
 			await setOfferingActive(offering.id, !offering.isActive);
 			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
 			adminOfferingDetailState.actionError =
 				e instanceof Error && e.message ? e.message : 'Failed to update offering status';
@@ -166,6 +194,7 @@
 		archiveBusy = true;
 		try {
 			await archiveOffering(offering.id);
+			notifyEntityChanged('offerings');
 			await goto(Routes.ADMIN_OFFERINGS);
 		} catch (e: unknown) {
 			adminOfferingDetailState.actionError =

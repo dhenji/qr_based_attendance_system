@@ -18,13 +18,13 @@ export const adminStudentCreateSchema = z.object({
 	program_id: z.coerce.number().int().positive('Pick a program'),
 	year_level_id: z.coerce.number().int().positive('Pick a year level'),
 	section: z.string().trim().max(50).optional().or(z.literal('')),
-	username: z.string().trim().min(3).max(150).optional().or(z.literal('')),
 });
 
 export type AdminStudentCreateInput = z.infer<typeof adminStudentCreateSchema>;
 
 export const adminStudentUpdateSchema = z.object({
 	first_name: nameField.optional(),
+	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
 	last_name: nameField.optional(),
 	email: emailField.optional(),
 	program_id: z.coerce.number().int().positive().optional(),
@@ -41,7 +41,6 @@ export const adminProfessorCreateSchema = z.object({
 	last_name: nameField,
 	email: emailField,
 	department: z.string().trim().max(100).optional().or(z.literal('')),
-	username: z.string().trim().min(3).max(150).optional().or(z.literal('')),
 	courses: z.array(z.coerce.number().int().positive()).default([]),
 });
 
@@ -49,6 +48,7 @@ export type AdminProfessorCreateInput = z.infer<typeof adminProfessorCreateSchem
 
 export const adminProfessorUpdateSchema = z.object({
 	first_name: nameField.optional(),
+	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
 	last_name: nameField.optional(),
 	email: emailField.optional(),
 	department: z.string().trim().max(100).optional().or(z.literal('')),
@@ -87,7 +87,6 @@ export const adminUserCreateSchema = z.object({
 	first_name: nameField,
 	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
 	last_name: nameField,
-	username: z.string().trim().min(3).max(150).optional().or(z.literal('')),
 });
 
 export type AdminUserCreateInput = z.infer<typeof adminUserCreateSchema>;

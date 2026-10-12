@@ -11,7 +11,6 @@ import { APIError } from '$lib/api/client';
 
 const MESSAGES: Record<string, string> = {
 	invalid_credentials: 'Email or password is incorrect.',
-	account_locked: 'This account is temporarily locked. Please try again later.',
 	rate_limited: 'Too many attempts. Please wait a moment and try again.',
 
 	unrecognized_email:
@@ -37,6 +36,13 @@ const MESSAGES: Record<string, string> = {
 	user_not_found: 'Your account is no longer active. Contact an administrator.',
 };
 
+// "Account is temporarily locked due to too many failed attempts. Try again
+// in N minutes" — the count is ceil-rounded in auth/service.py, so "1" means
+// "less than a minute left".
+const LOCKOUT_MINUTES = /try again in (\d+)\s*minute/i;
+
+const ACCOUNT_LOCKED_FALLBACK = 'This account is temporarily locked. Please try again later.';
+
 // Turn any thrown value into a message worth showing.
 //
 // Prefers our own copy for known codes, falls back to the server's message for
@@ -44,6 +50,18 @@ const MESSAGES: Record<string, string> = {
 // default.
 export const toAuthMessage = (error: unknown, fallback: string): string => {
 	if (error instanceof APIError) {
+		// The static copy would discard the remaining minutes, which is the one
+		// thing a locked-out user needs to know. Parse the count out of the
+		// backend message and keep the generic line as a fallback (mock mode,
+		// drifted wording).
+		if (error.code === 'account_locked') {
+			const match = error.message.match(LOCKOUT_MINUTES);
+			if (match) {
+				const minutes = match[1];
+				return `This account is temporarily locked. Try again in ${minutes} minute${minutes === '1' ? '' : 's'}.`;
+			}
+			return ACCOUNT_LOCKED_FALLBACK;
+		}
 		return MESSAGES[error.code] ?? error.message ?? fallback;
 	}
 	return error instanceof Error && error.message ? error.message : fallback;

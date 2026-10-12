@@ -4,10 +4,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from api.deps import AuthServiceDep, ProfessorServiceDep, require_role
+from api.deps import ProfessorServiceDep, require_role
 from features.auth.model import User
-from features.auth.schema import ChangePasswordRequest
-from features.professor.schema import MessageResponse, ProfessorProfileRead
+from features.professor.schema import (
+    ChangePasswordRequest,
+    MessageResponse,
+    ProfessorProfileRead,
+)
 from shared.enums import UserRole
 
 # ALREADY MOUNTED at /api/professor (see api/router.py). Professor-facing
@@ -48,10 +51,12 @@ async def get_profile(
 async def update_profile_password(
     payload: ChangePasswordRequest,
     user: ProfessorUser,
-    auth_service: AuthServiceDep,
+    service: ProfessorServiceDep,
 ) -> MessageResponse:
-    await auth_service.change_password(
-        user, payload.current_password, payload.new_password
+    await service.change_password(
+        user_id=user.id,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
     )
 
     return MessageResponse(message="Password updated")

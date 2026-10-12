@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
@@ -12,6 +13,8 @@
 	import { programCreateSchema } from '$lib/features/admin/programs/schema';
 	import type { Program } from '$lib/shared/types';
 	import { Routes, adminProgram } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Program Management list (wireframe 4.5a): search + status filter over
@@ -66,6 +69,26 @@
 			page,
 			adminProgramsState.size
 		);
+
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminProgramsState.loading) void refreshAdminPrograms();
+	};
+
+	// No fetch-on-mount here: the live-search effect below fires on mount.
+	// Subscriptions still mount once — own-entity events and tab-focus
+	// refresh the visible page (stored filters/page preserved).
+	onMount(() => {
+		autoRefreshStops.push(
+			subscribeEntity('programs', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
+	});
 
 	// Live search: refetch as the user types, debounced so a burst of keystrokes
 	// only costs one request. The effect body reads `search` (that is what makes
@@ -143,6 +166,7 @@
 			});
 			formOpen = false;
 			await refreshAdminPrograms();
+			notifyEntityChanged('programs');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {

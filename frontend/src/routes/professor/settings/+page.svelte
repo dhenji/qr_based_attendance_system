@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { authState, doChangePassword } from '$lib/features/auth/store.svelte';
+	import { authState } from '$lib/features/auth/store.svelte';
 	import MfaSettings from '$lib/components/MfaSettings.svelte';
 	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
 	import { setSecurityQuestion } from '$lib/features/auth/service';
+	import { Routes } from '$lib/shared/constants/routes';
 	import {
 		DEFAULT_PREFS,
 		getPrefs,
@@ -47,38 +48,9 @@
 
 	let pushNote = $state<string | null>(null);
 
-	// Change Password — wired to the real API via doChangePassword
-	// (POST /auth/change-password, same auth_service.change_password logic as
-	// PATCH /professor/profile/password).
-	let currentPassword = $state('');
-	let newPassword = $state('');
-	let passwordError = $state('');
-	let passwordMsg = $state('');
-	let passwordBusy = $state(false);
-
-	async function onChangePassword() {
-		passwordError = '';
-		passwordMsg = '';
-		if (!currentPassword) {
-			passwordError = 'Current password is required';
-			return;
-		}
-		if (!newPassword) {
-			passwordError = 'New password is required';
-			return;
-		}
-		passwordBusy = true;
-		try {
-			await doChangePassword(currentPassword, newPassword);
-			passwordMsg = 'Password updated.';
-			currentPassword = '';
-			newPassword = '';
-		} catch (e: unknown) {
-			passwordError = e instanceof Error && e.message ? e.message : 'Password change failed.';
-		} finally {
-			passwordBusy = false;
-		}
-	}
+	// Change Password goes through the shared forgot-password recovery wizard
+	// (email → security question → emailed OTP code → strong new password),
+	// the same process as the student settings page.
 
 	// Security Question — live on POST /auth/security-question. The server
 	// is the source of truth (GET /auth/me security_question_set); nothing
@@ -185,20 +157,7 @@
 		<h2 class="section-title">Security</h2>
 
 		<h3 class="sub-title">Change Password</h3>
-		<p class="muted hint">Password policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol</p>
-		<div class="field">
-			<label for="current-password">Current password</label>
-			<input id="current-password" type="password" bind:value={currentPassword} autocomplete="current-password" />
-		</div>
-		<div class="field">
-			<label for="new-password">New password</label>
-			<input id="new-password" type="password" bind:value={newPassword} autocomplete="new-password" />
-		</div>
-		{#if passwordError}<p class="error">{passwordError}</p>{/if}
-		{#if passwordMsg}<p class="success">{passwordMsg}</p>{/if}
-		<button class="btn" onclick={onChangePassword} disabled={passwordBusy}>
-			{passwordBusy ? 'Updating…' : 'Change Password'}
-		</button>
+		<a class="btn" href={Routes.FORGOT_PASSWORD}>Change Password</a>
 
 		<hr class="divider" />
 
@@ -269,10 +228,6 @@
 	.note {
 		font-size: 0.8125rem;
 		margin-top: 0.75rem;
-	}
-
-	.hint {
-		margin-bottom: 0.75rem;
 	}
 
 	.card {

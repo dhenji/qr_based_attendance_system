@@ -1,19 +1,25 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { getProfessor } from '$lib/features/admin/service';
 	import {
-		getProfessor,
+		enrichOfferings,
 		listOfferings,
-		offeringLabel,
-	} from '$lib/features/admin/service';
+		offeringTitle,
+	} from '$lib/features/admin/offerings/service';
+	import { listCourses } from '$lib/features/admin/courses/service';
+	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
+	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// Professor profile (admin): card opened by clicking a professor's email
 	// on the roster. Read-only; edits stay on the list modals. Courses come
 	// from the row's assigned_courses (offering_id + course_code), enriched
 	// with semester/year when the offering list has a match.
+	// Auto-refresh (issue #221): roster edits elsewhere re-load the row.
 
 	const professorId = $derived(Number(page.params.id));
 
@@ -21,6 +27,11 @@
 	let offerings = $state<AdminOffering[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
 
 	const fullName = $derived(
 		professor
@@ -32,19 +43,48 @@
 
 	const offeringById = $derived(new Map(offerings.map((o) => [o.id, o])));
 
-	const courseLabel = (offeringId: number, courseCode: string): string => {
+	const coursePrimary = (offeringId: number, courseCode: string): string => {
 		const match = offeringById.get(offeringId);
-		return match ? `${courseCode} · ${offeringLabel(match)}` : `${courseCode} · Offering ${offeringId}`;
+		if (!match) return `${courseCode} · Offering ${offeringId}`;
+		return match.courseCode && match.courseName
+			? `${match.courseCode} — ${match.courseName}`
+			: (match.courseCode ?? courseCode);
 	};
 
-	onMount(async () => {
+	const courseSecondary = (offeringId: number): string => {
+		const match = offeringById.get(offeringId);
+		if (!match) return '';
+		const cohort = [match.programCode ?? `Program ${match.programId}`, match.yearLevelLabel]
+			.filter(Boolean)
+			.join(' · ');
+		const term = `${match.semester} ${match.academicYear}`;
+		const schedule = `${match.scheduleDays} ${match.scheduleStartTime.slice(0, 5)}–${match.scheduleEndTime.slice(0, 5)}`;
+		return [cohort, term, schedule, match.classroomName].filter(Boolean).join(' · ');
+	};
+
+	const courseTitle = (offeringId: number, courseCode: string): string => {
+		const match = offeringById.get(offeringId);
+		return match ? offeringTitle(match) : `${courseCode} · Offering ${offeringId}`;
+	};
+
+	const teachesIn = $derived.by(() => {
+		if (!professor) return [];
+		const codes = professor.assigned_courses
+			.map((c) => offeringById.get(c.offering_id)?.programCode)
+			.filter((v): v is string => Boolean(v));
+		return [...new Set(codes)];
+	});
+
+	const load = async () => {
 		if (!Number.isFinite(professorId) || professorId <= 0) {
 			error = 'Invalid professor id.';
 			loading = false;
 			return;
 		}
+		loading = true;
+		error = null;
 		try {
-			const [row, offeringPage] = await Promise.all([
+			const [row, offeringPage, coursePage, programPage] = await Promise.all([
 				getProfessor(professorId),
 				listOfferings({ is_active: true, page: 1, size: 50 }).catch(() => ({
 					items: [] as AdminOffering[],
@@ -52,14 +92,38 @@
 					page: 1,
 					size: 50,
 				})),
+				listCourses({ page: 1, size: 100 }).catch(() => ({ items: [] })),
+				listPrograms({ page: 1, size: 50 }).catch(() => ({ items: [] })),
 			]);
 			professor = row;
-			offerings = offeringPage.items;
+			const programIds = [...new Set(offeringPage.items.map((o) => o.programId))];
+			const yearsNested = await Promise.all(
+				programIds.map((pid) => listYearLevels(pid).catch(() => []))
+			);
+			offerings = enrichOfferings(
+				offeringPage.items,
+				coursePage.items ?? [],
+				programPage.items ?? [],
+				yearsNested.flat()
+			);
 		} catch (e: unknown) {
 			error = e instanceof Error && e.message ? e.message : 'Could not load professor.';
 		} finally {
 			loading = false;
 		}
+	};
+
+	const refreshVisible = () => {
+		if (!loading) void load();
+	};
+
+	onMount(() => {
+		void load();
+		autoRefreshStops.push(
+			subscribeEntity('professors', refreshVisible),
+			subscribeEntity('offerings', refreshVisible),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const back = () => {
@@ -108,6 +172,10 @@
 					<dd>{professor.department ?? '—'}</dd>
 				</div>
 				<div>
+					<dt>Teaches in</dt>
+					<dd>{teachesIn.length ? teachesIn.join(' · ') : '—'}</dd>
+				</div>
+				<div>
 					<dt>Email</dt>
 					<dd class="mono">{professor.email}</dd>
 				</div>
@@ -135,7 +203,12 @@
 			{:else}
 				<ul class="courses">
 					{#each professor.assigned_courses as c (c.offering_id)}
-						<li>{courseLabel(c.offering_id, c.course_code)}</li>
+						<li title={courseTitle(c.offering_id, c.course_code)}>
+							<span class="primary">{coursePrimary(c.offering_id, c.course_code)}</span>
+							{#if courseSecondary(c.offering_id)}
+								<span class="secondary">{courseSecondary(c.offering_id)}</span>
+							{/if}
+						</li>
 					{/each}
 				</ul>
 			{/if}
@@ -276,9 +349,24 @@
 		padding-left: 1.25rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: 0.5rem;
 		font-size: 0.9375rem;
 		color: var(--text-strong);
+	}
+
+	.courses li {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+
+	.courses .primary {
+		font-weight: 600;
+	}
+
+	.courses .secondary {
+		font-size: 0.75rem;
+		color: var(--text-muted);
 	}
 
 	.error {

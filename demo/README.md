@@ -23,7 +23,7 @@ defaults `DATABASE_URL` to the compose Postgres on `localhost:5432`, so no
 venv activation or `PYTHONPATH` is needed. It also defaults `DEBUG=true` and a dev
 `JWT_SECRET` for app settings.
 
-Default login: `superadmin` / `Demo!1234` (override with `--username`,
+Default login: `super@attendly.demo` / `Demo!1234` (override with
 `--email`, `--password`, or `DEMO_SUPER_ADMIN_PASSWORD`; `--update-password`
 resets the password on an existing account). Safe to re-run — it reuses
 existing rows.

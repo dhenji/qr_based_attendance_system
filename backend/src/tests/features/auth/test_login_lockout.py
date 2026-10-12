@@ -72,7 +72,6 @@ async def _user(factories: Factories, **overrides: Any) -> User:
     # route, so the address has to be a deliverable-looking one.
     return await factories.user(
         email=overrides.pop("email", "lockout.subject@isu.edu.ph"),
-        username=overrides.pop("username", "lockout.subject"),
         password_hash=hash_password(PASSWORD),
         **overrides,
     )

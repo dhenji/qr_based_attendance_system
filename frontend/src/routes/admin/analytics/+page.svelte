@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
@@ -31,6 +31,8 @@ import {
 } from '$lib/features/admin/analytics/schema';
 import { listCourses } from '$lib/features/admin/courses/service';
 import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+import { subscribeEntity } from '$lib/shared/utils/entityEvents';
+import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
@@ -182,6 +184,46 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		await Promise.all([...programIds].map(cacheYears));
 	};
 
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	// Aggregate page (issue #221): tab focus re-applies the current filters
+	// (skipped while loading); the manual Apply button stays.
+	const refreshVisible = () => {
+		if (adminAnalyticsState.loading || adminStagingState.loading || refreshBusy) return;
+		void apply();
+	};
+
+	const reloadCourseLookups = async () => {
+		try {
+			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+		} catch {
+			courseOptions = [];
+		}
+	};
+
+	const reloadProgramLookups = async () => {
+		try {
+			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
+		} catch {
+			programOptions = [];
+		}
+		// Year labels/terms may have changed: drop the join cache so the
+		// comparison rows re-resolve, then re-warm the picked program.
+		yearsCache = new Map();
+		if (programFilter) {
+			try {
+				yearOptions = await listYearLevels(Number(programFilter));
+			} catch {
+				yearOptions = [];
+			}
+			await cacheYears(Number(programFilter));
+		}
+	};
+
 	onMount(async () => {
 		try {
 			programOptions = (await listPrograms({ page: 1, size: 50 })).items;
@@ -196,6 +238,13 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await apply();
+		autoRefreshStops.push(
+			// Lookup entities reload filter-rail options only — never the
+			// aggregates themselves (issue #221: no aggregate subscriptions).
+			subscribeEntity('programs', () => void reloadProgramLookups()),
+			subscribeEntity('courses', () => void reloadCourseLookups()),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const changeProgram = async () => {

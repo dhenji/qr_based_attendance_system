@@ -790,9 +790,9 @@ export const StudentScheduleEndpoint: EndpointDef<ScheduleResponse> = {
 //
 // GET /professor/profile is fully implemented on the backend
 // (professor/router.py -> ProfessorService.get_self_profile). Password change
-// reuses POST /auth/change-password (authChangePassword above) — it calls the
-// same auth_service.change_password logic as PATCH /professor/profile/password,
-// so no separate endpoint def is needed.
+// goes through the shared forgot-password recovery wizard (email + OTP code),
+// the same process as the student settings page, so no separate endpoint def
+// is needed here.
 
 export const ProfessorProfileEndpoint: EndpointDef<ProfessorProfileResponse> = {
 	url: '/professor/profile',
@@ -2646,7 +2646,6 @@ const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
 	{
 		id: 1,
 		email: 'superadmin@isu.edu.ph',
-		username: 'superadmin',
 		role: 'super_admin',
 		first_name: 'Super',
 		last_name: 'Admin',
@@ -2658,7 +2657,6 @@ const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
 	{
 		id: 2,
 		email: 'admin@isu.edu.ph',
-		username: 'admin',
 		role: 'admin',
 		first_name: 'Admin',
 		last_name: 'User',
@@ -2670,7 +2668,6 @@ const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
 	{
 		id: 3,
 		email: 'maria.c.delacruz@isu.edu.ph',
-		username: 'mdelacruz',
 		role: 'professor',
 		first_name: 'Maria',
 		last_name: 'Dela Cruz',
@@ -2688,7 +2685,7 @@ const mockAdminUsersList = (
 	const search = params?.search?.trim().toLowerCase();
 	if (search) {
 		rows = rows.filter((r) =>
-			`${r.email} ${r.username ?? ''} ${r.first_name ?? ''} ${r.last_name ?? ''}`
+			`${r.email} ${r.first_name ?? ''} ${r.last_name ?? ''}`
 				.toLowerCase()
 				.includes(search)
 		);
@@ -2714,7 +2711,6 @@ interface MockAdminUserPayload {
 	first_name?: unknown;
 	middle_name?: unknown;
 	last_name?: unknown;
-	username?: unknown;
 }
 
 export const AdminUsersEndpoint: EndpointDef<Paginated<AdminUserResponse>> = {
@@ -2740,14 +2736,9 @@ export const AdminUserCreateEndpoint: EndpointDef<AdminUserCreateResponse> = {
 		if (MOCK_ADMIN_USER_ROWS.some((r) => r.email.toLowerCase() === email)) {
 			throw new Error('Email already exists.');
 		}
-		const username = String(p.username ?? '').trim() || null;
-		if (username && MOCK_ADMIN_USER_ROWS.some((r) => (r.username ?? '').toLowerCase() === username.toLowerCase())) {
-			throw new Error('Username already exists.');
-		}
 		const row: AdminUserResponse = {
 			id: Math.max(...MOCK_ADMIN_USER_ROWS.map((r) => r.id), 0) + 1,
 			email,
-			username,
 			role: role as AdminUserResponse['role'],
 			first_name: String(p.first_name ?? '').trim() || null,
 			last_name: String(p.last_name ?? '').trim() || null,

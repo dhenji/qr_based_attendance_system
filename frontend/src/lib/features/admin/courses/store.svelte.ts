@@ -14,6 +14,7 @@ import {
 	listCourses,
 	setCourseActive,
 } from '$lib/features/admin/courses/service';
+import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export type CourseSortColumn = 'code' | 'name';
 
@@ -71,10 +72,18 @@ export const refreshAdminCourses = async (): Promise<void> => {
 
 export const toggleCourseActive = async (course: AdminCourse): Promise<void> => {
 	adminCoursesState.actionError = null;
+	// Optimistic flip: instant row, 1 GET (the refresh) on success.
+	// Snapshot first — the passed row aliases the store item.
+	const next = !course.isActive;
+	const row = adminCoursesState.items.find((c) => c.id === course.id);
+	const prev = row?.isActive;
+	if (row) row.isActive = next;
 	try {
-		await setCourseActive(course.id, !course.isActive);
+		await setCourseActive(course.id, next);
 		await refreshAdminCourses();
+		notifyEntityChanged('courses');
 	} catch (e: unknown) {
+		if (row && prev !== undefined) row.isActive = prev;
 		// Surfaced via actionError (role=alert) — no re-throw so callers use
 		// `void toggle...()` with no swallowed rejection.
 		adminCoursesState.actionError = toMessage(e, 'Failed to update course status');
@@ -86,6 +95,7 @@ export const archiveAdminCourse = async (course: AdminCourse): Promise<void> => 
 	try {
 		await archiveCourse(course.id);
 		await refreshAdminCourses();
+		notifyEntityChanged('courses');
 	} catch (e: unknown) {
 		adminCoursesState.actionError = toMessage(e, 'Failed to archive course');
 		throw e;

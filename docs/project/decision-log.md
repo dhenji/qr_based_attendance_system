@@ -1530,6 +1530,7 @@
   threshold, no frontend test runner, no linters.
 - **Date:** 2026-10-05
 - **Status:** Accepted
+- **Forward note (2026-10-11):** the counts above are the 2026-10-05 snapshot. The suite is now 760 cases across 56 files and the chain is eleven revisions ending at `c9d4e5f6a7b8` (drops `users.username`, ADR-073).
 - **Context:** The suite was strong and entirely unenforced — 719 cases across 49
   files, green on SQLite and Postgres, with no `.github/`, no `Makefile`, no
   `tox.ini`, and no `pyproject.toml`. Every count in the docs was maintained by
@@ -1663,3 +1664,115 @@
   "prefer a function" default and its `CourseProfessorService` holdover note
   stand as written history — this ADR is what settles the question they left
   open.
+### ADR-071: Roster Archive Syncs the Login Gate
+
+- **Decision (D71):** archiving a student or professor deactivates the linked
+  `users` row (`users.is_active=False`); reactivating restores it (`True`);
+  hard-deleting an archived roster row deactivates (never deletes) the linked
+  login. **Qualifies ADR-058's** "no cascade to users" for course data only —
+  course_professors / sessions / enrollments still do not cascade; the login
+  flag does, because every auth gate (`login`, `refresh_token`,
+  `_get_active_user`) reads `users.is_active` alone.
+- **Date:** 2026-10-10
+- **Status:** Accepted
+- **Context:** Student Management deactivates via
+  `PATCH /admin/students/{id} {is_active:false}` → `StudentService.archive()`,
+  which wrote only `students.is_active=False`. `AuthService.login()`
+  (`auth/service.py:343-347`) and `_get_active_user()` (`api/deps.py:101-104`)
+  check only `users.is_active`, so archived — and hard-deleted-orphaned —
+  accounts stayed fully login-capable. Professor archive had the same gap by
+  an explicit no-cascade comment. Only `PATCH /admin/users/{id}/deactivate`
+  blocked login.
+- **Alternatives considered:**
+  (1) *Check roster `is_active` on every auth path.* Rejected: adds roster
+  lookups to the per-request hot path and keeps two sources of truth to drift.
+  (2) *Frontend calls user-deactivate as a second request.* Rejected: leaves
+  the API footgun for every other client.
+  (3) *Cascade to `users.is_active` (taken).* Reuses the five existing gates
+  with no schema change; each cascade writes one `UPDATE/USER` audit row so
+  the now dual-writer flag (`AdminService` + roster services) stays
+  reconstructible. Last-writer-wins by design: a roster restore re-enables
+  the login even after a separate user-ban, so a ban that must survive a
+  restore is re-applied afterwards.
+- **Consequences:** `StudentService.archive()/reactivate()/hard_delete()` and
+  `ProfessorService._archive_row()/reactivate()/update(is_active=True)/
+  hard_delete()` sync the linked user (no-op when `user_id` is None or the
+  flag already matches). No endpoint, payload, or migration change;
+  `alembic check` stays clean. Covered by
+  `tests/features/student/test_archive_login.py` and
+  `tests/features/professor/test_archive_login.py`.
+### ADR-072: Re-creation Reclaims the Deactivated Login
+
+- **Decision (D72):** `AuthService.register()` and `AdminService.create_user()`
+  revive an **inactive** `users` row for a freshly created, unclaimed roster
+  row instead of failing 409 on the still-taken email. Extends ADR-071, which
+  made hard-delete retain (and deactivate) the login for audit joinability but
+  left re-creation dead: roster re-create succeeded, then account creation
+  failed `user_exists` / `admin_user_email_exists` while login failed
+  `invalid_credentials`.
+- **Date:** 2026-10-10
+- **Status:** Accepted
+- **Context:** The retained orphan owns `users.email` (unique), so no second
+  row can be minted for a re-hired address. Revival requires proof plus need:
+  self-register re-verifies ownership with a fresh CLAIM OTP; admin-create is
+  super_admin-only; and both require exactly one live, unclaimed roster match
+  for the address — a ban without a roster row stays dead.
+- **Alternatives considered:**
+  (1) *Delete the `users` row on hard-delete.* Rejected: frees the email but
+  orphans audit rows keyed by that user id, the reason retention exists.
+  (2) *Distinct "deactivated" error + manual admin fix.* Rejected: leaves the
+  user stuck until an admin acts, and still needs a reclaim endpoint.
+  (3) *Auto-reclaim (taken).* One auth gate stays single-sourced on
+  `users.is_active`; no endpoint, payload, or migration change.
+- **Consequences:** Reclaim sets new credentials + role, clears lockout/MFA
+  (backup codes stamped `used_at`, never deleted — same rule as `disable_mfa`),
+  links the new roster row, and writes one `UPDATE/USER`
+  `{is_active:False}→{is_active:True}` row (register records `performed_by`
+  null, the anonymous claimant). All eligibility checks precede the first
+  write in the caller's flush-only transaction, so a 409 (active dupe,
+  ambiguous/none/claimed match, taken username) leaves the orphan inactive,
+  the roster unlinked, and the trail untouched. New `409 username_exists`
+  code on `/auth/register` (documented in api-contracts.md; the admin
+  `admin_user_username_exists` already existed). `login`'s anti-enumeration
+  masking is unchanged. Covered by
+  `tests/features/auth/test_register_reclaim.py` (10 tests).
+  > **Superseded in part by ADR-073 (2026-10-11):** `users.username` no longer
+  > exists, so the "taken username" leg of this Consequences list and both the
+  > `username_exists` and `admin_user_username_exists` 409 codes are gone. The
+  > reclaim 409 set is now `user_exists` / `ambiguous_account` /
+  > `unrecognized_email` / `roster_link_impossible`. The reclaim mechanics above
+  > are otherwise unchanged and still authoritative.
+### ADR-073: Remove `users.username` — Email Is the Whole Identity
+
+- **Decision (D73):** Drop the `users.username` column entirely rather than
+  demote it to an optional display field. Login, OTP, forgot-password, rosters
+  and profile are all email-keyed already; `username` was a user-picked handle
+  carrying its own UNIQUE guard and two 409 codes (`username_exists`,
+  `admin_user_username_exists`) but no functional consumer.
+- **Date:** 2026-10-11
+- **Status:** Accepted
+- **Context:** The handle surfaced as a required input on `POST /auth/register`,
+  an optional auto-generated field on `POST /admin/users`, an `ilike` search arm
+  on `GET /admin/users`, and a column in the audit `new_value`. Nothing keyed on
+  it: no login, no join, no token claim. With no production users, a breaking
+  change costs nothing and an optional column would keep a maintainable field
+  with no reader forever.
+- **Alternatives considered:**
+  (1) *Make it nullable + optional (display text).* Rejected: dead weight — still
+  needs normalization, length constants, a factory default, migration drift
+  surface and doc upkeep, to render one string nobody reads.
+  (2) *Keep UNIQUE when present.* Rejected: same, plus a partial unique index.
+  (3) *Full removal (taken).* One migration, one contract break, gone.
+- **Consequences:** `RegisterRequest` loses `username`; `AdminUserCreate` loses
+  it (no more `_default_username`); the `UsernameTakenException` /
+  `UsernameAlreadyExists` codes disappear, so `/auth/register` and
+  `POST /admin/users` 409s narrow to `user_exists` / `admin_user_email_exists`
+  / `roster_link_impossible`. Admin user search drops its username arm;
+  first/last name and email still search. Forward migration `c9d4e5f6a7b8`
+  drops the constraint then the column, per ADR-065 (never edit an applied
+  revision). `shared/validators.normalize_username` and the `USERNAME_*`/
+  `DEFAULT_USERNAME_MAX_LENGTH` constants go with it. The demo seed and load
+  harness key their users by email only. Breaking for any client that still
+  posts `username`; there are none in production. Covered by the existing suite
+  plus `tests/features/auth/test_register_username.py`, which now pins that a
+  stray `username` key on a roster create is still ignored.

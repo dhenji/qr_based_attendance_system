@@ -57,8 +57,8 @@ alembic upgrade head
 ```
 
 > **Note:** `alembic upgrade head` applies the 16-table baseline migration
-> (`679a319c12d6`) **and** the nine revisions on top of it, ending at head
-> `1e1582c4e9f8`. That chain carries the schema to the current **20 tables** — including
+> (`679a319c12d6`) **and** the ten revisions on top of it, ending at head
+> `c9d4e5f6a7b8` (drops `users.username`, ADR-073). That chain carries the schema to the current **20 tables** — including
 > `mfa_backup_codes`, `audit_logs`, `app_settings` and `student_risk_scores_staging`.
 > See [migration-strategy.md](../architecture/migration-strategy.md) for the target schema
 > reference and the full revision list.
@@ -87,7 +87,7 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-The suite holds **719 cases across 49 files**. `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
+The suite holds **760 cases across 56 files** (228 sync + 490 async test functions, plus parametrized expansions). `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
 
 Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead. Create a dedicated test database first — the Compose Postgres only creates `attendance_sys`, and the suite runs `create_all`/`drop_all` per test, so never point `TEST_DATABASE_URL` at `attendance_sys` itself:
 

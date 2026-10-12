@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
@@ -21,6 +21,8 @@
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import type { AdminOffering, Program, YearLevel } from '$lib/shared/types';
 	import { Routes, adminOffering } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Course Detail: template overview (units, duration) plus the offerings
@@ -45,12 +47,32 @@
 	let editBusy = $state(false);
 
 	let archiveBusy = $state(false);
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!Number.isFinite(courseId) || courseId <= 0) return;
+		if (!adminCourseDetailState.loading) void refreshAdminCourseDetail(courseId);
+	};
 
 	onMount(() => {
 		if (Number.isFinite(courseId) && courseId > 0) {
 			initAdminCourseDetail(courseId);
 			loadOfferings(courseId);
 		}
+		// Own entity -> refresh the detail (1 GET on focus); offerings
+		// events -> reload the joined offerings rows below.
+		autoRefreshStops.push(
+			subscribeEntity('courses', refreshVisible),
+			subscribeEntity('offerings', () => {
+				if (Number.isFinite(courseId) && courseId > 0 && !offeringsLoading)
+					void loadOfferings(courseId);
+			}),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	// Offerings of this template, joined with program/year labels for display
@@ -108,6 +130,7 @@
 			});
 			editOpen = false;
 			await refreshAdminCourseDetail(course.id);
+			notifyEntityChanged('courses');
 		} catch (e: unknown) {
 			editError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {
@@ -120,6 +143,7 @@
 		try {
 			await setCourseActive(course.id, !course.isActive);
 			await refreshAdminCourseDetail(course.id);
+			notifyEntityChanged('courses');
 		} catch {
 			// Surface via the detail state's actionError.
 			adminCourseDetailState.actionError = 'Failed to update course status';
@@ -131,6 +155,7 @@
 		archiveBusy = true;
 		try {
 			await archiveCourse(course.id);
+			notifyEntityChanged('courses');
 			await goto(Routes.ADMIN_COURSES);
 		} catch (e: unknown) {
 			adminCourseDetailState.actionError =

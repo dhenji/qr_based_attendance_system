@@ -300,7 +300,6 @@ class AuthService:
         self,
         email: str,
         otp_code: str,
-        username: str,
         password: str,
         security_question: str | None = None,
         security_answer: str | None = None,
@@ -309,7 +308,9 @@ class AuthService:
 
         await self.verify_otp(normalized, otp_code, OtpPurpose.CLAIM)
 
-        if await self._users.get_by(email=normalized) is not None:
+        existing: User | None = await self._users.get_by(email=normalized)
+
+        if existing is not None and existing.is_active:
             raise UserAlreadyClaimedException()
 
         student, professor = await self._find_roster_match(normalized)
@@ -318,10 +319,24 @@ class AuthService:
         if student is None and professor is None:
             raise UnrecognizedEmailException()
 
+        if existing is not None:
+            # Inactive login for this email (e.g. orphaned by a roster
+            # hard-delete): reclaim it for the fresh roster row instead of
+            # minting a second users row the unique email constraint forbids.
+            # No live roster match, no revival — a ban without a roster row
+            # stays dead.
+            return await self._reclaim_inactive_login(
+                existing,
+                student=student,
+                professor=professor,
+                password=password,
+                security_question=security_question,
+                security_answer=security_answer,
+            )
+
         role: UserRole = UserRole.STUDENT if student is not None else UserRole.PROFESSOR
 
         user = await self._users.create(
-            username=username,
             email=normalized,
             password_hash=hash_password(password),
             security_question_hash=security_question,
@@ -339,6 +354,88 @@ class AuthService:
             professor.user_id = user.id
 
         return self._build_tokens(user)
+
+    async def _reclaim_inactive_login(
+        self,
+        existing: User,
+        *,
+        student: Student | None,
+        professor: Professor | None,
+        password: str,
+        security_question: str | None,
+        security_answer: str | None,
+    ) -> TokenResponse:
+        """Reactivate a deactivated login for a freshly created roster row.
+
+        Hard-delete retains (and deactivates) the linked `users` row so audit
+        history stays joinable, which blocks re-creation: the email is still
+        taken. When the caller proves current ownership of the address with a
+        fresh CLAIM OTP and exactly one live, unclaimed roster row matches,
+        the old login is revived for the new row instead of failing 409.
+
+        Every check precedes the first write, and all writes stay in the
+        caller's flush-only transaction, so a 409 leaves the orphan inactive,
+        the roster row unlinked, and the trail untouched.
+        """
+        match: Student | Professor | None = (
+            student if student is not None else professor
+        )
+
+        if match is None or match.user_id is not None:
+            # Ambiguous/none is already rejected by the caller; an already
+            # claimed match must not be stolen — report it as taken without
+            # saying which account holds it.
+            raise UserAlreadyClaimedException()
+
+        now: datetime = datetime.now(timezone.utc)
+
+        existing.password_hash = hash_password(password)
+        existing.security_question_hash = security_question
+        existing.security_answer_hash = (
+            hash_password(self._normalize_answer(security_answer))
+            if security_answer
+            else None
+        )
+        existing.role = (
+            UserRole.STUDENT if student is not None else UserRole.PROFESSOR
+        ).value
+        existing.is_active = True
+        existing.failed_login_attempts = 0
+        existing.is_locked = False
+        existing.locked_at = None
+        existing.must_change_password = False
+        # The new holder must not inherit the old holder's second factor:
+        # clear it and invalidate outstanding backup codes the same way
+        # `disable_mfa` does (stamp `used_at`, never delete).
+        outstanding: Sequence[MfaBackupCodes] = (
+            await self._session.scalars(
+                select(MfaBackupCodes).where(
+                    MfaBackupCodes.user_id == existing.id,
+                    MfaBackupCodes.used_at.is_(None),
+                )
+            )
+        ).all()
+
+        for record in outstanding:
+            record.used_at = now
+
+        existing.mfa_enabled = False
+        existing.mfa_secret = None
+
+        match.user_id = existing.id
+
+        await self._session.flush()
+        await record_audit(
+            self._session,
+            actor_id=None,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=existing.id,
+            old_value={"is_active": False},
+            new_value={"is_active": True},
+        )
+
+        return self._build_tokens(existing)
 
     async def login(self, email: str, password: str) -> TokenResponse:
         user: User | None = await self._users.get_by(email=email.lower())

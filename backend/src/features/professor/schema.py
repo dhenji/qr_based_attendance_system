@@ -17,9 +17,10 @@ from features.professor.constants import (
     EMAIL_MAX_LENGTH,
     NAME_MAX_LENGTH,
     NAME_MIN_LENGTH,
-    USERNAME_MAX_LENGTH,
-    USERNAME_MIN_LENGTH,
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
 )
+from shared.validators import password_strength
 
 
 class AssignedCourse(BaseModel):
@@ -30,10 +31,7 @@ class AssignedCourse(BaseModel):
 class ProfessorCreate(BaseModel):
     """Admin roster create.
 
-    `username` is the claim slot used at self-registration (omitted =
-    auto-generated at claim). It is validated here but NOT persisted:
-    `professors` has no username column, and `users.username` uniqueness is
-    enforced at claim time. `courses` assigns offerings immediately via
+    Identity is by email only. `courses` assigns offerings immediately via
     `CourseProfessorService.check_overlap` (course_professors rows); no user
     row is created — the professor stays Unclaimed until self-register.
     """
@@ -43,23 +41,12 @@ class ProfessorCreate(BaseModel):
     last_name: str = Field(min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH)
     email: EmailStr = Field(max_length=EMAIL_MAX_LENGTH)
     department: str | None = Field(default=None, max_length=DEPARTMENT_MAX_LENGTH)
-    username: str | None = Field(
-        default=None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH
-    )
     courses: list[int] = Field(default_factory=list)
 
     @field_validator("email")
     @classmethod
     def _normalize_email(cls, value: str) -> str:
         return value.strip().lower()
-
-    @field_validator("username")
-    @classmethod
-    def _normalize_username(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        return value.strip()
 
     @field_validator("courses")
     @classmethod
@@ -94,6 +81,7 @@ class ProfessorUpdate(BaseModel):
     first_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )
+    middle_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     last_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )
@@ -192,3 +180,17 @@ class ProfessorProfileRead(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """Professor self-service password change (mirrors student flow)."""
+
+    current_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
+    new_password: str = Field(
+        min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_policy(cls, value: str) -> str:
+        return password_strength(value)

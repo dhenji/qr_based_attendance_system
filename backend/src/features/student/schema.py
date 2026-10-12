@@ -15,22 +15,19 @@ from features.student.constants import (
     EMAIL_MAX_LENGTH,
     NAME_MAX_LENGTH,
     NAME_MIN_LENGTH,
+    PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
     SECTION_MAX_LENGTH,
     STUDENT_ID_MAX_LENGTH,
     STUDENT_ID_MIN_LENGTH,
-    USERNAME_MAX_LENGTH,
-    USERNAME_MIN_LENGTH,
 )
+from shared.validators import password_strength
 
 
 class StudentCreate(BaseModel):
     """Admin roster create.
 
-    `username` is the claim slot used at self-registration (omitted =
-    auto-generated at claim). It is validated here but NOT persisted:
-    `students` has no username column, and `users.username` uniqueness is
-    enforced at claim time.
+    Identity is by email only.
     """
 
     student_id: str = Field(
@@ -43,9 +40,6 @@ class StudentCreate(BaseModel):
     program_id: int = Field(gt=0)
     year_level_id: int = Field(gt=0)
     section: str | None = Field(default=None, max_length=SECTION_MAX_LENGTH)
-    username: str | None = Field(
-        default=None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH
-    )
 
     @field_validator("student_id")
     @classmethod
@@ -56,14 +50,6 @@ class StudentCreate(BaseModel):
     @classmethod
     def _normalize_email(cls, value: str) -> str:
         return value.strip().lower()
-
-    @field_validator("username")
-    @classmethod
-    def _normalize_username(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        return value.strip()
 
 
 class StudentRead(BaseModel):
@@ -103,6 +89,7 @@ class StudentUpdate(BaseModel):
     first_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )
+    middle_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     last_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )
@@ -181,4 +168,11 @@ class ChangePasswordRequest(BaseModel):
     """Student self-service password change."""
 
     current_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
-    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
+    new_password: str = Field(
+        min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_policy(cls, value: str) -> str:
+        return password_strength(value)

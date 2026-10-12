@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import {
@@ -9,20 +9,23 @@
 		refreshAdminProfessors,
 		toggleProfessorActive,
 	} from '$lib/features/admin/store.svelte';
+	import { createProfessor, resetProfessorPassword, updateProfessor } from '$lib/features/admin/service';
 	import {
-		createProfessor,
+		enrichOfferings,
 		listOfferings,
-		offeringLabel,
-		resetProfessorPassword,
-		updateProfessor,
-	} from '$lib/features/admin/service';
+		offeringTitle,
+	} from '$lib/features/admin/offerings/service';
+	import { listCourses } from '$lib/features/admin/courses/service';
+	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import {
 		adminProfessorCreateSchema,
 		adminProfessorUpdateSchema,
 	} from '$lib/features/admin/schema';
-	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
+	import type { AdminOffering, AdminProfessor, Program } from '$lib/shared/types';
 	import { goto } from '$app/navigation';
 	import { adminProfessor, Routes } from '$lib/shared/constants/routes';
+	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
@@ -49,9 +52,10 @@
 	let f_last_name = $state('');
 	let f_email = $state('');
 	let f_department = $state('');
-	let f_username = $state('');
 	let f_courses = $state<number[]>([]);
 	let offeringOptions = $state<AdminOffering[]>([]);
+	let offeringSearch = $state('');
+	let programOptions = $state<Program[]>([]);
 	let offeringsLoading = $state(false);
 	let offeringsError = $state<string | null>(null);
 
@@ -80,8 +84,22 @@
 		offeringsLoading = true;
 		offeringsError = null;
 		try {
-			const result = await listOfferings({ is_active: true, page: 1, size: 50 });
-			offeringOptions = result.items;
+			const [offeringPage, coursePage, programPage] = await Promise.all([
+				listOfferings({ is_active: true, page: 1, size: 50 }),
+				listCourses({ page: 1, size: 100 }).catch(() => ({ items: [] })),
+				listPrograms({ page: 1, size: 50 }).catch(() => ({ items: [] })),
+			]);
+			const programIds = [...new Set(offeringPage.items.map((o) => o.programId))];
+			const yearsNested = await Promise.all(
+				programIds.map((pid) => listYearLevels(pid).catch(() => []))
+			);
+			programOptions = programPage.items ?? [];
+			offeringOptions = enrichOfferings(
+				offeringPage.items,
+				coursePage.items ?? [],
+				programPage.items ?? [],
+				yearsNested.flat()
+			);
 		} catch (e: unknown) {
 			offeringsError = e instanceof Error && e.message ? e.message : 'Could not load offerings';
 		} finally {
@@ -89,9 +107,49 @@
 		}
 	};
 
+	const filteredOfferings = $derived.by(() => {
+		const term = offeringSearch.trim().toLowerCase();
+		if (!term) return offeringOptions;
+		return offeringOptions.filter((o) =>
+			`${o.courseCode ?? ''} ${o.courseName ?? ''} ${o.programCode ?? ''} ${o.semester ?? ''}`
+				.toLowerCase()
+				.includes(term)
+		);
+	});
+
+	const offeringPrimary = (o: AdminOffering): string =>
+		o.courseCode && o.courseName
+			? `${o.courseCode} — ${o.courseName}`
+			: (o.courseCode ?? `Course ${o.courseId}`);
+
+	const offeringSecondary = (o: AdminOffering): string => {
+		const cohort = [o.programCode ?? `Program ${o.programId}`, o.yearLevelLabel].filter(Boolean).join(' · ');
+		const term = `${o.semester} ${o.academicYear}`;
+		const schedule = `${o.scheduleDays} ${o.scheduleStartTime.slice(0, 5)}–${o.scheduleEndTime.slice(0, 5)}`;
+		return [cohort, term, schedule, o.classroomName].filter(Boolean).join(' · ');
+	};
+
+	const autoRefreshStops: (() => void)[] = [];
+
+	onDestroy(() => {
+		for (const stop of autoRefreshStops) stop();
+	});
+
+	const refreshVisible = () => {
+		if (!adminProfessorsState.loading) void refreshAdminProfessors();
+	};
+
 	onMount(() => {
 		load(1);
 		loadOfferings();
+		// Own entity -> refresh the table; offerings feed the assign picker.
+		autoRefreshStops.push(
+			subscribeEntity('professors', refreshVisible),
+			subscribeEntity('offerings', () => void loadOfferings()),
+			// Programs feed the department dropdown + offering joins.
+			subscribeEntity('programs', () => void loadOfferings()),
+			onFocusRevalidate(refreshVisible)
+		);
 	});
 
 	const toggleCourse = (id: number) => {
@@ -138,8 +196,8 @@
 		f_last_name = '';
 		f_email = '';
 		f_department = '';
-		f_username = '';
 		f_courses = [];
+		offeringSearch = '';
 		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
@@ -152,8 +210,8 @@
 		f_last_name = p.lastName;
 		f_email = p.email;
 		f_department = p.department ?? '';
-		f_username = '';
 		f_courses = (p.assigned_courses ?? []).map((c) => c.offering_id);
+		offeringSearch = '';
 		if (offeringOptions.length === 0) loadOfferings();
 		formOpen = true;
 	};
@@ -169,7 +227,6 @@
 					last_name: f_last_name,
 					email: f_email,
 					department: f_department || undefined,
-					username: f_username || undefined,
 					courses: f_courses,
 				});
 				if (!parsed.success) {
@@ -183,32 +240,36 @@
 					last_name: d.last_name,
 					email: d.email,
 					department: d.department || undefined,
-					username: d.username || undefined,
 					courses: d.courses.length > 0 ? d.courses : undefined,
 				});
 			} else {
-				const parsed = adminProfessorUpdateSchema.safeParse({
-					first_name: f_first_name || undefined,
-					last_name: f_last_name || undefined,
-					email: f_email || undefined,
-					department: f_department || undefined,
-					courses: f_courses,
-				});
-				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-					return;
-				}
-				const d = parsed.data;
-				await updateProfessor(editing.id, {
-					first_name: d.first_name,
-					last_name: d.last_name,
-					email: d.email,
-					department: d.department,
-					courses: d.courses,
-				});
+			const parsed = adminProfessorUpdateSchema.safeParse({
+				first_name: f_first_name || undefined,
+				middle_name: f_middle_name || undefined,
+				last_name: f_last_name || undefined,
+				email: f_email || undefined,
+				department: f_department || undefined,
+				courses: f_courses,
+			});
+			if (!parsed.success) {
+				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				return;
+			}
+			const d = parsed.data;
+			await updateProfessor(editing.id, {
+				first_name: d.first_name,
+				// Prefilled modal: empty means "cleared" — send null so the
+				// backend nulls the column instead of leaving it unchanged.
+				middle_name: d.middle_name || null,
+				last_name: d.last_name,
+				email: d.email,
+				department: d.department || null,
+				courses: d.courses,
+			});
 			}
 			formOpen = false;
 			await refreshAdminProfessors();
+			notifyEntityChanged('professors');
 		} catch (e: unknown) {
 			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
 		} finally {
@@ -342,7 +403,7 @@
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
 {#if !p.isActive}
-								<button class="link danger" onclick={() => (deleteTarget = p)}>Delete</button>
+								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
 							{/if}
 							<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
 						</td>
@@ -394,31 +455,47 @@
 					<label>Last name<input class="input" bind:value={f_last_name} /></label>
 					<label>Email<input class="input" type="email" bind:value={f_email} /></label>
 				</div>
-				<div class="grid2">
-					<label>Department<input class="input" bind:value={f_department} placeholder="Computer Science" /></label>
-					{#if !editing}
-						<label>Username (claim slot)<input class="input" bind:value={f_username} placeholder="optional" /></label>
-					{/if}
-				</div>
+				<label>Department (optional)<input class="input" bind:value={f_department} list="department-suggestions" autocomplete="off" placeholder="Type or pick a program…" /></label>
+				<datalist id="department-suggestions">
+					{#each programOptions as p (p.id)}
+						<option value={p.code}>{p.name}</option>
+						<option value={p.name}>{p.code}</option>
+					{/each}
+				</datalist>
+				<p class="hint">Optional org unit — teaching scope comes from the offerings below.</p>
 				<fieldset class="courses">
-					<legend>Course assignments (offerings)</legend>
+					<legend>Course assignments (offerings) · {f_courses.length} selected</legend>
 					{#if offeringsLoading}
 						<p class="hint">Loading offerings…</p>
 					{:else if offeringsError}
 						<p class="error" role="alert">{offeringsError}</p>
 					{:else if offeringOptions.length === 0}
-						<p class="hint">No active offerings found.</p>
+						<p class="hint">No active offerings found. Create one under Offerings first.</p>
 					{:else}
-						{#each offeringOptions as o (o.id)}
-							<label class="check">
-								<input
-									type="checkbox"
-									checked={f_courses.includes(o.id)}
-									onchange={() => toggleCourse(o.id)}
-								/>
-								<span>{offeringLabel(o)}</span>
-							</label>
-						{/each}
+						<input
+							class="input offering-search"
+							type="search"
+							placeholder="Filter by code, name, program…"
+							aria-label="Filter offerings"
+							bind:value={offeringSearch}
+						/>
+						{#if filteredOfferings.length === 0}
+							<p class="hint">No offerings match “{offeringSearch.trim()}”.</p>
+						{:else}
+							{#each filteredOfferings as o (o.id)}
+								<label class="check" title={offeringTitle(o)}>
+									<input
+										type="checkbox"
+										checked={f_courses.includes(o.id)}
+										onchange={() => toggleCourse(o.id)}
+									/>
+									<span class="offering-text">
+										<span class="primary">{offeringPrimary(o)}</span>
+										<span class="secondary">{offeringSecondary(o)}</span>
+									</span>
+								</label>
+							{/each}
+						{/if}
 					{/if}
 				</fieldset>
 				<p class="hint">Assignments are saved with the professor (replaces the set on edit); no user row is created until the professor self-registers.</p>
@@ -445,8 +522,8 @@
 		>
 			<h2 id="delete-title" class="modal-title">Permanently delete?</h2>
 			<p class="modal-text">
-				{fullName(deleteTarget)} is inactive. This cannot be undone, and it fails
-				with 409 if sessions still reference them.
+				{fullName(deleteTarget)} is inactive. This cannot be undone. If class sessions are
+				still linked, deletion will be blocked and the record stays archived.
 			</p>
 			{#if adminProfessorsState.actionError}
 				<p class="error" role="alert">{adminProfessorsState.actionError}</p>
@@ -797,10 +874,37 @@
 
 	.courses .check {
 		flex-direction: row;
-		align-items: center;
+		align-items: flex-start;
 		gap: 0.5rem;
 		font-weight: 500;
 		cursor: pointer;
+	}
+
+	.courses .check input {
+		margin-top: 0.2rem;
+		flex-shrink: 0;
+	}
+
+	.offering-search {
+		width: 100%;
+	}
+
+	.offering-text {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		min-width: 0;
+	}
+
+	.offering-text .primary {
+		font-weight: 600;
+		color: var(--text-strong);
+	}
+
+	.offering-text .secondary {
+		font-size: 0.75rem;
+		font-weight: 400;
+		color: var(--text-muted);
 	}
 
 	.modal-actions {

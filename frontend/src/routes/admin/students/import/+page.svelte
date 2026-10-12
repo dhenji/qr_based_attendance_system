@@ -7,6 +7,7 @@
 	} from '$lib/features/admin/service';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type { StudentImportResult } from '$lib/shared/types';
+	import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// CSV Import (wireframe 4.3): Step 1 download template, Step 2 upload file,
@@ -160,6 +161,9 @@
 		importError = null;
 		try {
 			result = await importStudents(file);
+			// The list page remounts fresh on Back, but emit anyway so any
+			// mounted students table (or a future auto-navigate) updates.
+			if (result.imported > 0) notifyEntityChanged('students');
 		} catch (e: unknown) {
 			importError = e instanceof Error && e.message ? e.message : 'Import failed. Please try again.';
 		} finally {
