@@ -61,6 +61,7 @@
 	let m_schedule_days = $state('');
 	let m_start = $state('');
 	let m_end = $state('');
+	let m_course_type = $state<'lecture' | 'lab'>('lecture');
 	let m_classroom = $state('');
 	let m_lat = $state('');
 	let m_lng = $state('');
@@ -235,6 +236,7 @@
 		m_schedule_days = '';
 		m_start = '';
 		m_end = '';
+		m_course_type = 'lecture';
 		m_classroom = '';
 		m_lat = '';
 		m_lng = '';
@@ -294,6 +296,7 @@
 				schedule_days: m_schedule_days,
 				schedule_start_time: m_start,
 				schedule_end_time: m_end,
+				course_type: m_course_type,
 				classroom_name: m_classroom || undefined,
 				default_present_window_minutes: m_present,
 				default_late_window_minutes: m_late,
@@ -329,6 +332,7 @@
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
+				course_type: parsed.data.course_type,
 				classroom_name: parsed.data.classroom_name || undefined,
 				classroom_lat: lat,
 				classroom_lng: lng,
@@ -564,6 +568,34 @@
 				<div class="grid2">
 					<label>Start time<input class="input" type="time" bind:value={m_start} /></label>
 					<label>End time<input class="input" type="time" bind:value={m_end} /></label>
+				</div>
+				<div class="field">
+					<span class="form-label">Course Type</span>
+					<div class="toggle-group" role="group" aria-label="Course type">
+						<button
+							type="button"
+							class="toggle-btn"
+							class:selected={m_course_type === 'lecture'}
+							aria-pressed={m_course_type === 'lecture'}
+							onclick={() => (m_course_type = 'lecture')}
+						>
+							Lecture
+						</button>
+						<button
+							type="button"
+							class="toggle-btn"
+							class:selected={m_course_type === 'lab'}
+							aria-pressed={m_course_type === 'lab'}
+							onclick={() => (m_course_type = 'lab')}
+						>
+							Laboratory
+						</button>
+					</div>
+					<p class="hint">
+						{m_course_type === 'lab'
+							? 'Laboratory sessions require classroom coordinates and geofence for attendance tracking.'
+							: 'Lecture sessions use offering defaults. Geofence is optional.'}
+					</p>
 				</div>
 				<div class="grid2">
 					<label>Sessions / week<input class="input" inputmode="numeric" bind:value={m_sessions_per_week} /></label>
@@ -825,6 +857,58 @@
 		background: var(--divider);
 		border: 1px solid transparent;
 		color: var(--text-secondary);
+	}
+
+	.toggle-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.toggle-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.375rem;
+		padding: 0.5rem 0.875rem;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
+		font-family: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	}
+
+	.toggle-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.toggle-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.toggle-btn.selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
+	}
+
+	.form-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: var(--text-secondary);
+		margin-bottom: 0.375rem;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
 	}
 
 	.modal-overlay {

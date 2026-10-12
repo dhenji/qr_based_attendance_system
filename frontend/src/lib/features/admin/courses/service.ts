@@ -32,6 +32,7 @@ export const toCourse = (c: AdminCourseResponse): AdminCourse => ({
 	courseName: c.course_name,
 	units: c.units,
 	sessionDurationHours: c.session_duration_hours,
+	courseType: c.course_type,
 	isActive: c.is_active,
 	createdAt: c.created_at,
 	updatedAt: c.updated_at,

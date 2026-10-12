@@ -48,6 +48,7 @@ export const offeringCreateSchema = z
 		schedule_days: z.string().trim().toUpperCase().min(1).max(10),
 		schedule_start_time: timeField,
 		schedule_end_time: timeField,
+		course_type: z.enum(['lecture', 'lab']),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()
@@ -73,6 +74,7 @@ export const offeringUpdateSchema = z
 		schedule_days: z.string().trim().toUpperCase().min(1).max(10).optional(),
 		schedule_start_time: timeField.optional(),
 		schedule_end_time: timeField.optional(),
+		course_type: z.enum(['lecture', 'lab']).optional(),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()

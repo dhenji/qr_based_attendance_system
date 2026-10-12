@@ -1510,6 +1510,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_days: 'MWF',
 		schedule_start_time: '09:00:00',
 		schedule_end_time: '10:30:00',
+		course_type: 'lecture',
 		classroom_name: 'Lab 101',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1532,6 +1533,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_days: 'TTH',
 		schedule_start_time: '11:00:00',
 		schedule_end_time: '12:30:00',
+		course_type: 'lecture',
 		classroom_name: 'Room 203',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1554,6 +1556,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_days: 'MWF',
 		schedule_start_time: '09:00:00',
 		schedule_end_time: '10:30:00',
+		course_type: 'lecture',
 		classroom_name: 'Lab 101',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1615,6 +1618,7 @@ const MOCK_ADMIN_COURSE_ROWS: AdminCourseResponse[] = [
 		course_name: 'Software Engineering 1',
 		units: 3,
 		session_duration_hours: 1.5,
+		course_type: 'lecture',
 		is_active: true,
 		created_at: '2024-06-01T08:00:00.000Z',
 		updated_at: '2024-06-01T08:00:00.000Z',
@@ -1625,6 +1629,7 @@ const MOCK_ADMIN_COURSE_ROWS: AdminCourseResponse[] = [
 		course_name: 'Data Structures',
 		units: 3,
 		session_duration_hours: 1.5,
+		course_type: 'lecture',
 		is_active: true,
 		created_at: '2024-06-02T08:00:00.000Z',
 		updated_at: '2024-06-02T08:00:00.000Z',
@@ -1635,6 +1640,7 @@ const MOCK_ADMIN_COURSE_ROWS: AdminCourseResponse[] = [
 		course_name: 'Calculus 1',
 		units: 4,
 		session_duration_hours: 2,
+		course_type: 'lecture',
 		is_active: true,
 		created_at: '2024-06-03T08:00:00.000Z',
 		updated_at: '2024-06-03T08:00:00.000Z',
@@ -1645,6 +1651,7 @@ const MOCK_ADMIN_COURSE_ROWS: AdminCourseResponse[] = [
 		course_name: 'Ethics',
 		units: 2,
 		session_duration_hours: 1,
+		course_type: 'lecture',
 		is_active: false,
 		created_at: '2024-06-04T08:00:00.000Z',
 		updated_at: '2024-06-04T08:00:00.000Z',
@@ -1656,6 +1663,7 @@ interface MockCoursePayload {
 	course_name?: unknown;
 	units?: unknown;
 	session_duration_hours?: unknown;
+	course_type?: unknown;
 	is_active?: unknown;
 }
 
@@ -1698,6 +1706,7 @@ export const AdminCourseCreateEndpoint: EndpointDef<AdminCourseResponse> = {
 			course_name: String(p.course_name ?? ''),
 			units: Number(p.units ?? 3),
 			session_duration_hours: Number(p.session_duration_hours ?? 1.5),
+			course_type: p.course_type === 'lab' ? 'lab' : 'lecture',
 			is_active: true,
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString(),
@@ -1732,6 +1741,8 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 			if (p.units !== undefined) row.units = Number(p.units);
 			if (p.session_duration_hours !== undefined)
 				row.session_duration_hours = Number(p.session_duration_hours);
+			if (p.course_type === 'lecture' || p.course_type === 'lab')
+				row.course_type = p.course_type;
 			if (typeof p.is_active === 'boolean') row.is_active = p.is_active;
 			row.updated_at = new Date().toISOString();
 			return row;
@@ -1757,6 +1768,7 @@ interface MockOfferingPayload {
 	schedule_days?: unknown;
 	schedule_start_time?: unknown;
 	schedule_end_time?: unknown;
+	course_type?: unknown;
 	classroom_name?: unknown;
 	classroom_lat?: unknown;
 	classroom_lng?: unknown;
@@ -1804,6 +1816,7 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			schedule_days: String(p.schedule_days ?? 'MWF').trim().toUpperCase(),
 			schedule_start_time: String(p.schedule_start_time ?? '09:00:00'),
 			schedule_end_time: String(p.schedule_end_time ?? '10:30:00'),
+			course_type: p.course_type === 'lab' ? 'lab' : 'lecture',
 			classroom_name: (p.classroom_name as string | null) ?? null,
 			classroom_lat: (p.classroom_lat as number | null) ?? null,
 			classroom_lng: (p.classroom_lng as number | null) ?? null,
@@ -1839,6 +1852,8 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 				row.schedule_start_time = String(p.schedule_start_time);
 			if (p.schedule_end_time !== undefined)
 				row.schedule_end_time = String(p.schedule_end_time);
+			if (p.course_type === 'lecture' || p.course_type === 'lab')
+				row.course_type = p.course_type;
 			if (p.classroom_name !== undefined)
 				row.classroom_name = p.classroom_name ? String(p.classroom_name) : null;
 			if (p.classroom_lat !== undefined)

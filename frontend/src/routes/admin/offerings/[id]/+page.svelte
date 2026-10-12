@@ -65,6 +65,7 @@
 	let s_days = $state('');
 	let s_start = $state('');
 	let s_end = $state('');
+	let s_course_type = $state<'lecture' | 'lab'>('lecture');
 	let s_classroom = $state('');
 	let s_lat = $state('');
 	let s_lng = $state('');
@@ -170,6 +171,7 @@
 		s_days = o.scheduleDays;
 		s_start = o.scheduleStartTime.slice(0, 5);
 		s_end = o.scheduleEndTime.slice(0, 5);
+		s_course_type = o.courseType;
 		s_classroom = o.classroomName ?? '';
 		s_lat = o.classroomLat !== undefined ? String(o.classroomLat) : '';
 		s_lng = o.classroomLng !== undefined ? String(o.classroomLng) : '';
@@ -236,6 +238,7 @@
 				schedule_days: s_days,
 				schedule_start_time: s_start.trim() || undefined,
 				schedule_end_time: s_end.trim() || undefined,
+				course_type: s_course_type,
 				classroom_name: s_classroom,
 			});
 			if (!parsed.success) {
@@ -258,6 +261,7 @@
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
+				course_type: parsed.data.course_type,
 				classroom_name: s_classroom.trim() ? s_classroom.trim() : null,
 				classroom_lat: parseCoord(s_lat, 'Latitude', -90, 90),
 				classroom_lng: parseCoord(s_lng, 'Longitude', -180, 180),
@@ -575,6 +579,34 @@
 					<div class="grid2">
 						<label>Start time<input class="input" type="time" bind:value={s_start} /></label>
 						<label>End time<input class="input" type="time" bind:value={s_end} /></label>
+					</div>
+					<div class="field">
+						<span class="form-label">Course Type</span>
+						<div class="toggle-group" role="group" aria-label="Course type">
+							<button
+								type="button"
+								class="toggle-btn"
+								class:selected={s_course_type === 'lecture'}
+								aria-pressed={s_course_type === 'lecture'}
+								onclick={() => (s_course_type = 'lecture')}
+							>
+								Lecture
+							</button>
+							<button
+								type="button"
+								class="toggle-btn"
+								class:selected={s_course_type === 'lab'}
+								aria-pressed={s_course_type === 'lab'}
+								onclick={() => (s_course_type = 'lab')}
+							>
+								Laboratory
+							</button>
+						</div>
+						<p class="hint">
+							{s_course_type === 'lab'
+								? 'Laboratory sessions require classroom coordinates and geofence for attendance tracking.'
+								: 'Lecture sessions use offering defaults. Geofence is optional.'}
+						</p>
 					</div>
 					<label>Classroom<input class="input" bind:value={s_classroom} placeholder="Lab 101" /></label>
 					<div class="grid2">
@@ -939,6 +971,58 @@
 		background: var(--divider);
 		border: 1px solid transparent;
 		color: var(--text-secondary);
+	}
+
+	.toggle-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.toggle-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.375rem;
+		padding: 0.5rem 0.875rem;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
+		font-family: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	}
+
+	.toggle-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.toggle-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.toggle-btn.selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
+	}
+
+	.form-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: var(--text-secondary);
+		margin-bottom: 0.375rem;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
 	}
 
 	.btn-danger {

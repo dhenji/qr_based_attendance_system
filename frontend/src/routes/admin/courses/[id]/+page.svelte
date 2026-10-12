@@ -43,6 +43,7 @@
 	let e_name = $state('');
 	let e_units = $state('');
 	let e_duration = $state('');
+	let e_type = $state<'lecture' | 'lab'>('lecture');
 	let editError = $state<string | null>(null);
 	let editBusy = $state(false);
 
@@ -104,6 +105,7 @@
 		e_name = course.courseName;
 		e_units = String(course.units);
 		e_duration = String(course.sessionDurationHours);
+		e_type = course.courseType;
 		editOpen = true;
 	};
 
@@ -117,6 +119,7 @@
 				course_name: e_name,
 				units: e_units,
 				session_duration_hours: e_duration,
+				course_type: e_type,
 			});
 			if (!parsed.success) {
 				editError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -127,6 +130,7 @@
 				course_name: parsed.data.course_name,
 				units: parsed.data.units,
 				session_duration_hours: parsed.data.session_duration_hours,
+				course_type: parsed.data.course_type,
 			});
 			editOpen = false;
 			await refreshAdminCourseDetail(course.id);
@@ -181,6 +185,9 @@
 				<h1>{course.courseCode} — {course.courseName}</h1>
 				<p class="muted">
 					Units: {course.units} · Duration: {course.sessionDurationHours}h ·
+					<span class="badge type-lab" class:type-lec={course.courseType === 'lecture'}>
+						{course.courseType === 'lab' ? 'Laboratory' : 'Lecture'}
+					</span>
 					<span class="badge" class:inactive={!course.isActive}>
 						{course.isActive ? 'Active' : 'Inactive'}
 					</span>
@@ -274,6 +281,34 @@
 				</div>
 				<label>Name<input class="input" bind:value={e_name} /></label>
 				<label>Session duration, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={e_duration} /></label>
+				<div class="field">
+					<span class="form-label">Course Type</span>
+					<div class="toggle-group" role="group" aria-label="Course type">
+						<button
+							type="button"
+							class="toggle-btn"
+							class:selected={e_type === 'lecture'}
+							aria-pressed={e_type === 'lecture'}
+							onclick={() => (e_type = 'lecture')}
+						>
+							Lecture
+						</button>
+						<button
+							type="button"
+							class="toggle-btn"
+							class:selected={e_type === 'lab'}
+							aria-pressed={e_type === 'lab'}
+							onclick={() => (e_type = 'lab')}
+						>
+							Laboratory
+						</button>
+					</div>
+					<p class="hint">
+						{e_type === 'lab'
+							? 'Lab sessions require classroom coordinates and geofence for attendance tracking.'
+							: 'Lecture sessions use offering defaults. Geofence is optional.'}
+					</p>
+				</div>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
@@ -378,6 +413,68 @@
 	.badge.inactive {
 		color: var(--text-muted);
 		background: var(--divider);
+	}
+
+	.badge.type-lec {
+		color: var(--success);
+		background: var(--success-bg);
+	}
+
+	.badge.type-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
+
+	.toggle-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.toggle-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.375rem;
+		padding: 0.5rem 0.875rem;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
+		font-family: inherit;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	}
+
+	.toggle-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.toggle-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.toggle-btn.selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
+	}
+
+	.form-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: var(--text-secondary);
+		margin-bottom: 0.375rem;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
 	}
 
 	.row-actions {
