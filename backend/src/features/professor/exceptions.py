@@ -97,3 +97,25 @@ class ProfessorHasRecordsException(ProfessorDomainException):
         super().__init__(
             message=f"Professor {professor_id} has sessions and cannot be permanently deleted"
         )
+
+
+class CurrentPasswordInvalidException(ProfessorDomainException):
+    """400 - the provided current password is incorrect."""
+
+    status_code: int = 400
+    code: str = "current_password_invalid"
+
+    def __init__(self) -> None:
+        super().__init__(message="Current password is incorrect")
+
+
+class PasswordReusedException(ProfessorDomainException):
+    """400 - the new password matches the current one."""
+
+    status_code: int = 400
+    code: str = "password_reused"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="New password must be different from the current password"
+        )

@@ -610,6 +610,21 @@ async def test_change_password_rejects_a_wrong_current_password(
     assert response.json()["detail"]["code"] == "current_password_invalid"
 
 
+async def test_change_password_rejects_a_weak_new_password(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    stack = await linked_stack(factories)
+    stack["user"].password_hash = hash_password("CurrentPass1!")
+
+    response = await api_client.patch(
+        "/api/student/profile/password",
+        json={"current_password": "CurrentPass1!", "new_password": "weakpass1"},
+        headers=await auth_headers(stack["user"]),
+    )
+
+    assert response.status_code == 422
+
+
 # --- 5.8 liveness review queue -------------------------------------------
 
 

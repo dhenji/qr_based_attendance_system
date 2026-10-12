@@ -7,10 +7,9 @@
 // PUBLIC_MOCK_MODE=true. The profile is read-only by design (D32): name,
 // department and assignments are all admin-managed.
 //
-// Password change is NOT owned here — the settings page reuses
-// auth/store.svelte.ts doChangePassword (POST /auth/change-password), which
-// calls the same auth_service.change_password logic as
-// PATCH /professor/profile/password.
+// Password change goes through the shared forgot-password recovery wizard
+// (email → security question → emailed OTP code → strong new password),
+// the same process as the student settings page.
 
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
