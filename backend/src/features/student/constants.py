@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 from features.auth.constants import (
+    PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
 )
 from shared.pagination import (
@@ -35,6 +36,7 @@ __all__: list[str] = [
     "MAX_PAGE_SIZE",
     "NAME_MAX_LENGTH",
     "NAME_MIN_LENGTH",
+    "PASSWORD_MAX_LENGTH",
     "PASSWORD_MIN_LENGTH",
     "SEARCH_MAX_LENGTH",
     "SECTION_MAX_LENGTH",

@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import Row, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.security import hash_password, verify_password
 from features.auth.model import User
 from features.course.exceptions import OfferingNotFoundException
 from features.course.model import Course, CourseOffering
@@ -16,6 +17,8 @@ from features.course_professor.model import CourseProfessor
 from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
 from features.professor.exceptions import (
+    CurrentPasswordInvalidException,
+    PasswordReusedException,
     ProfessorEmailExistsException,
     ProfessorHasRecordsException,
     ProfessorNotArchivedException,
@@ -630,6 +633,28 @@ class ProfessorService:
             raise ProfessorAccountUnlinkedException(professor_id)
 
         return professor.user_id
+
+    async def change_password(
+        self, *, user_id: int, current_password: str, new_password: str
+    ) -> None:
+        """Professor self-service password change (mirrors student flow)."""
+        await self._get_professor_by_user_or_404(user_id)
+
+        user: User | None = await self._session.get(User, user_id)
+
+        if user is None:
+            raise ProfessorNotFoundException(user_id)
+
+        if not verify_password(current_password, user.password_hash):
+            raise CurrentPasswordInvalidException()
+
+        if verify_password(new_password, user.password_hash):
+            raise PasswordReusedException()
+
+        user.password_hash = hash_password(new_password)
+        user.must_change_password = False
+
+        await self._session.flush()
 
     async def _get_professor_by_user_or_404(self, user_id: int) -> Professor:
         professor: Professor | None = await self._professors.get_by(user_id=user_id)

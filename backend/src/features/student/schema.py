@@ -15,11 +15,13 @@ from features.student.constants import (
     EMAIL_MAX_LENGTH,
     NAME_MAX_LENGTH,
     NAME_MIN_LENGTH,
+    PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
     SECTION_MAX_LENGTH,
     STUDENT_ID_MAX_LENGTH,
     STUDENT_ID_MIN_LENGTH,
 )
+from shared.validators import password_strength
 
 
 class StudentCreate(BaseModel):
@@ -166,4 +168,11 @@ class ChangePasswordRequest(BaseModel):
     """Student self-service password change."""
 
     current_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
-    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH)
+    new_password: str = Field(
+        min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_policy(cls, value: str) -> str:
+        return password_strength(value)

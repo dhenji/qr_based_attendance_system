@@ -1078,9 +1078,9 @@ Change password.
 
 |                  |                                                                  |
 | ---------------- | ---------------------------------------------------------------- |
-| **Request**      | `{ current_password: string, new_password: string }`             |
+| **Request**      | `{ current_password: string, new_password: string }` (strong only: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol → 422 otherwise) |
 | **Response 200** | `{ message: "Password updated" }`                                |
-| **Errors**       | 400 `current_password_invalid` · 400 `password_reused` |
+| **Errors**       | 400 `current_password_invalid` · 400 `password_reused` · 404 `professor_not_found` |
 
 ---
 

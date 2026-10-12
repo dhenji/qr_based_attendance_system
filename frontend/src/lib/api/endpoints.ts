@@ -790,9 +790,9 @@ export const StudentScheduleEndpoint: EndpointDef<ScheduleResponse> = {
 //
 // GET /professor/profile is fully implemented on the backend
 // (professor/router.py -> ProfessorService.get_self_profile). Password change
-// reuses POST /auth/change-password (authChangePassword above) — it calls the
-// same auth_service.change_password logic as PATCH /professor/profile/password,
-// so no separate endpoint def is needed.
+// goes through the shared forgot-password recovery wizard (email + OTP code),
+// the same process as the student settings page, so no separate endpoint def
+// is needed here.
 
 export const ProfessorProfileEndpoint: EndpointDef<ProfessorProfileResponse> = {
 	url: '/professor/profile',
