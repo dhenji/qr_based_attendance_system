@@ -1,5 +1,9 @@
 # Project Folder Structure — QR Attendance System
 
+> Historical intent, not current state: this doc shows the planned layout.
+> Truth is `README.md` + the code — 18 feature slices, 20 tables, 23 routers
+> over 15 mounts, 46 `+page.svelte` files.
+
 ```
 attendance-system/
 │
@@ -106,7 +110,7 @@ attendance-system/
 │
 ├── docs/                             # Documentation
 │   ├── project/
-│   │   ├── decision-log.md           # ADR-format decision log (D1–D58)
+│   │   ├── decision-log.md           # ADR-format decision log (D1–D73)
 │   │   └── glossary.md               # Term definitions
 │   ├── proposals/
 │   │   ├── proposal.md               # Full project proposal

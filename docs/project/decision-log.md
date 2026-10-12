@@ -1530,6 +1530,7 @@
   threshold, no frontend test runner, no linters.
 - **Date:** 2026-10-05
 - **Status:** Accepted
+- **Forward note (2026-10-11):** the counts above are the 2026-10-05 snapshot. The suite is now 760 cases across 56 files and the chain is eleven revisions ending at `c9d4e5f6a7b8` (drops `users.username`, ADR-073).
 - **Context:** The suite was strong and entirely unenforced — 719 cases across 49
   files, green on SQLite and Postgres, with no `.github/`, no `Makefile`, no
   `tox.ini`, and no `pyproject.toml`. Every count in the docs was maintained by
