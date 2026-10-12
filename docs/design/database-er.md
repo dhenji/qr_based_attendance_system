@@ -6,7 +6,8 @@
 > `mfa_backup_codes` landed in Phase 2 (ADR-054), so the 16-table baseline became 17.
 > Three more have since landed — `audit_logs` (`f4a9c2b7d103`, Phase 8.5),
 > `app_settings` (`e7f8a9b0c1d2`, Phase 12.0) and `student_risk_scores_staging`
-> (`d4e5f6a7b8c9`) — so the target documented below is **20 tables / 205 columns**.
+> (`d4e5f6a7b8c9`) — plus `c9d4e5f6a7b8` (drops `users.username`, ADR-073) —
+> so the target documented below is **20 tables / 205 columns**.
 >
 > `audit_logs` is written by `shared/audit.record_audit` from every sensitive mutation
 > (ADR-064) and read by `GET /admin/audit-logs`; `GET /admin/system/academic-structure`

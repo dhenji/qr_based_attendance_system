@@ -480,7 +480,7 @@ rather than mounting the same router twice. All 23 mounted routers:
 | `features/dashboard/professor_router.py` | `/professor`           |
 | `features/dashboard/admin_router.py`     | `/admin`               |
 
-These 23 routers collapse onto **16 distinct mount paths**, because a mount point is a
+These 23 routers collapse onto **15 distinct mount paths**, because a mount point is a
 namespace rather than an owner:
 
 | Mount path      | Routers sharing it                                                     |

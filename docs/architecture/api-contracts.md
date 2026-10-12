@@ -735,12 +735,16 @@ Permanent delete — allowed only on archived (`is_active=false`) students
 > scanned would otherwise raise a foreign-key violation and return 500. The
 > has-records guard returns 409 instead. The FKs stay `RESTRICT` on purpose:
 > cascading them would silently destroy the attendance audit trail (ADR-057).
+> Hard-delete deactivates (never deletes) the linked `users` row, so the audit
+> trail stays joinable and a later re-creation can reclaim the login (D71/D72).
 
 #### `DELETE /admin/professors/{professor_id}/archive`
 
 Same semantics as the student archive delete, for professors, including
 `409 professor_has_records` when `sessions` still reference the professor
-(`course_professors` is CASCADE, `sessions` is RESTRICT).
+(`course_professors` is CASCADE, `sessions` is RESTRICT). Hard-delete
+deactivates (never deletes) the linked login, so the audit trail stays
+joinable (D71).
 
 #### `GET /admin/students`
 
@@ -760,7 +764,7 @@ Create a student (wireframes.md 4.2 -> Create Student).
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section }`                        |
 | **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
-| **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract (removed in ADR-073). |
+| **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract (removed in ADR-073). Re-creating a roster row for an address whose login was deactivated by a prior hard-delete reclaims that login: fresh CLAIM OTP proof + exactly one live unclaimed roster match required (D72); otherwise 409 `user_exists` / `ambiguous_account` / `unrecognized_email` / `roster_link_impossible`. |
 
 | **Errors**       | 404 `year_level_not_found` · 409 `student_email_exists` · 409 `student_id_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/students/{student_id}`
@@ -781,7 +785,7 @@ Update student fields (program/year-level/sections; clears face enrollment on id
 | ---------------- | ----------------------------------------------------- |
 | **Request**      | `{ first_name?, middle_name? (null clears), last_name?, email?, program_id?, year_level_id?, section?, is_active? }` |
 | **Response 200** | Updated student                                      |
-| **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). |
+| **Notes**        | Soft-deactivate via `is_active=false` (re-activate with `true`). Archiving also deactivates the linked `users` row (`users.is_active=false`); reactivating restores it — the login gate reads `users.is_active` alone (D71). Each sync writes one `UPDATE/USER` audit row. |
 
 | **Errors**       | 404 `student_not_found` · 404 `year_level_not_found` · 409 `student_email_exists` · 422 `year_level_program_mismatch` |
 #### `GET /admin/professors`
@@ -820,7 +824,7 @@ Update professor fields + course assignments.
 | ---------------- | --------------------------------------------------------------------- |
 | **Request**      | `{ first_name?, middle_name? (null clears), last_name?, email?, department?, is_active?, courses?: [offering_id] }` |
 | **Response 200** | Updated professor                                                    |
-| **Notes**        | `courses` replaces the assignment set (removes missing; keeps provided). |
+| **Notes**        | `courses` replaces the assignment set (removes missing; keeps provided). `is_active=false` also deactivates the linked `users` row; `true` restores it (D71, same as students). |
 
 ---
 
