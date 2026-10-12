@@ -24,7 +24,7 @@
 
 	const isLocked = $derived(lockedOfferingId !== null);
 
-	let selectedOfferingId = $state<number | null>(null);
+let selectedOfferingId = $state<number | null>(null);
 
 	onMount(() => {
 		void (async () => {
@@ -51,6 +51,11 @@
 	// Anything left at these values is sent explicitly, and the server applies
 	// the offering/app fallbacks for fields the form does not cover
 	// (classroom name/coords when no override is typed).
+	//
+	// D28: lecture vs lab mode. When lab is ON, geofence and classroom coords are
+	// required. When lab is OFF (lecture), they are optional and the server uses
+	// offering/app defaults.
+	let isLab = $state(false);
 	let radius = $state(50);
 	let durationMinutes = $state(90);
 	let presentWindow = $state(15);
@@ -78,6 +83,7 @@
 		classroomOverride = '';
 		classroomLat = null;
 		classroomLng = null;
+		isLab = false;
 		// A generated session belongs to the previous offering. Clear it so View
 		// Live Session cannot open stale projector data after switching courses.
 		generatedSessionId = null;
@@ -153,9 +159,10 @@
 				geofenceRadius: radius,
 				// D17: blank means "keep the offering default", so only send the
 				// override when the professor actually typed one.
-				classroomName: overrideActive ? classroomOverride.trim() : undefined,
-				classroomLat: overrideActive ? (classroomLat ?? undefined) : undefined,
-				classroomLng: overrideActive ? (classroomLng ?? undefined) : undefined
+				// D28: in lab mode, always send classroom coords (required).
+				classroomName: (isLab || overrideActive) ? classroomOverride.trim() || undefined : undefined,
+				classroomLat: (isLab || overrideActive) ? (classroomLat ?? undefined) : undefined,
+				classroomLng: (isLab || overrideActive) ? (classroomLng ?? undefined) : undefined
 			});
 
 			generatedSessionId = created.id;
@@ -232,26 +239,65 @@
 						</span>
 					</div>
 				</div>
-			{:else}
-				<div class="field">
-					<label class="form-label" for="offering">Select Course</label>
-					<select
-						id="offering"
-						class="form-input"
-						value={selected.offeringId}
-						onchange={(e) => (selectedOfferingId = Number(e.currentTarget.value))}
-					>
-						{#each professorState.courses as course (course.offeringId)}
-							<option value={course.offeringId}>
-								{course.courseCode} — {course.courseName} ({course.programCode})
-							</option>
-						{/each}
-					</select>
-					<p class="hint">Your active assignments this term.</p>
-				</div>
-			{/if}
+		{:else}
+			<div class="field">
+				<label class="form-label" for="offering">Select Course</label>
+				<select
+					id="offering"
+					class="form-input"
+					value={selected.offeringId}
+					onchange={(e) => (selectedOfferingId = Number(e.currentTarget.value))}
+				>
+					{#each professorState.courses as course (course.offeringId)}
+						<option value={course.offeringId}>
+							{course.courseCode} — {course.courseName} ({course.programCode})
+						</option>
+					{/each}
+				</select>
+				<p class="hint">Your active assignments this term.</p>
+			</div>
+		{/if}
 
-			<div class="location" class:overridden={overrideActive}>
+		<div class="field">
+			<span class="form-label">Session Type</span>
+			<div class="toggle-group" role="group" aria-label="Session type">
+				<button
+					class="toggle-btn"
+					class:selected={!isLab}
+					aria-pressed={!isLab}
+					onclick={() => (isLab = false)}
+				>
+					<AppIcon name="file" size={16} />
+					Lecture
+				</button>
+				<button
+					class="toggle-btn"
+					class:selected={isLab}
+					aria-pressed={isLab}
+					onclick={() => (isLab = true)}
+				>
+					<AppIcon name="shield" size={16} />
+					Laboratory
+				</button>
+			</div>
+			<p class="hint">
+				{isLab
+					? 'Lab sessions require classroom coordinates and geofence for attendance tracking.'
+					: 'Lecture sessions use offering defaults. Geofence is optional.'}
+			</p>
+		</div>
+
+		{#if isLab}
+			<div class="lab-banner">
+				<AppIcon name="alert" size={16} />
+				<span>
+					<strong>Lab mode:</strong> Students must be within the geofence radius to scan attendance.
+					Classroom coordinates are required.
+				</span>
+			</div>
+		{/if}
+
+		<div class="location" class:overridden={overrideActive}>
 				<AppIcon name="pin" size={16} />
 				<span>
 					{effectiveRoom}
@@ -264,21 +310,29 @@
 				{/if}
 			</div>
 
-			<div class="field">
-				<span class="form-label">Geofence Radius</span>
-				<div class="radius-group" role="group" aria-label="Geofence radius">
-					{#each RADII as option (option)}
-						<button
-							class="radius-btn"
-							class:selected={radius === option}
-							aria-pressed={radius === option}
-							onclick={() => (radius = option)}
-						>
-							{option}m
-						</button>
-					{/each}
-				</div>
+		<div class="field">
+			<span class="form-label">
+				Geofence Radius
+				{#if isLab}
+					<span class="required-tag">Required</span>
+				{/if}
+			</span>
+			<div class="radius-group" role="group" aria-label="Geofence radius">
+				{#each RADII as option (option)}
+					<button
+						class="radius-btn"
+						class:selected={radius === option}
+						aria-pressed={radius === option}
+						onclick={() => (radius = option)}
+					>
+						{option}m
+					</button>
+				{/each}
 			</div>
+			{#if isLab}
+				<p class="hint">Students must be within this distance from the classroom to scan.</p>
+			{/if}
+		</div>
 
 			<div class="field">
 				<label class="form-label" for="duration">Duration (minutes)</label>
@@ -329,53 +383,66 @@
 				<AppIcon name={windowsFit ? 'check' : 'alert'} size={18} />
 			</div>
 
-			<div class="field">
-				<label class="form-label" for="classroom">Classroom override</label>
-				<input
-					id="classroom"
-					class="form-input"
-					type="text"
-					placeholder="Offering default classroom"
-					bind:value={classroomOverride}
-				/>
-				<p class="hint">Blank uses the offering default classroom (D17).</p>
+		<div class="field">
+			<label class="form-label" for="classroom">
+				{isLab ? 'Classroom' : 'Classroom override'}
+			</label>
+			<input
+				id="classroom"
+				class="form-input"
+				type="text"
+				placeholder={isLab ? 'e.g. Lab 101, Room 301' : 'Offering default classroom'}
+				bind:value={classroomOverride}
+			/>
+			<p class="hint">
+				{isLab
+					? 'Required for lab sessions. Students will see this room name.'
+					: 'Blank uses the offering default classroom (D17).'}
+			</p>
 
-				{#if overrideActive}
-					<div class="override-box">
-						<div class="field-row">
-							<div class="field">
-								<label class="form-label" for="override-lat">Latitude</label>
-								<input
-									id="override-lat"
-									class="form-input"
-									class:invalid={coordsInvalid}
-									type="number"
-									step="0.0001"
-									bind:value={classroomLat}
-								/>
-							</div>
-							<div class="field">
-								<label class="form-label" for="override-lng">Longitude</label>
-								<input
-									id="override-lng"
-									class="form-input"
-									class:invalid={coordsInvalid}
-									type="number"
-									step="0.0001"
-									bind:value={classroomLng}
-								/>
-							</div>
+			{#if isLab || overrideActive}
+				<div class="override-box">
+					<div class="field-row">
+						<div class="field">
+							<label class="form-label" for="override-lat">Latitude</label>
+							<input
+								id="override-lat"
+								class="form-input"
+								class:invalid={coordsInvalid}
+								type="number"
+								step="0.0001"
+								placeholder="e.g. 13.7563"
+								bind:value={classroomLat}
+							/>
 						</div>
-						<p class="hint">
-							The geofence centers here instead of the offering default. Both
-							coordinates are required.
-						</p>
-						{#if coordsInvalid}
-							<p class="field-error">Both coordinates are required for a classroom override.</p>
-						{/if}
+						<div class="field">
+							<label class="form-label" for="override-lng">Longitude</label>
+							<input
+								id="override-lng"
+								class="form-input"
+								class:invalid={coordsInvalid}
+								type="number"
+								step="0.0001"
+								placeholder="e.g. 100.5018"
+								bind:value={classroomLng}
+							/>
+						</div>
 					</div>
-				{/if}
-			</div>
+					<p class="hint">
+						{isLab
+							? 'The geofence centers here. Both coordinates are required for lab sessions.'
+							: 'The geofence centers here instead of the offering default. Both coordinates are required.'}
+					</p>
+					{#if coordsInvalid}
+						<p class="field-error">
+							{isLab
+								? 'Both coordinates are required for a lab session.'
+								: 'Both coordinates are required for a classroom override.'}
+						</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
 
 			<div class="preview" class:generated={generatedCode !== null}>
 				<span class="preview-label">HMAC Preview · Session Code</span>
@@ -634,6 +701,81 @@
 		background: var(--brand);
 		border-color: var(--brand);
 		color: var(--on-brand);
+	}
+
+	/* --- Session type toggle -------------------------------------------------- */
+
+	.toggle-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.toggle-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
+		font-family: inherit;
+		font-size: 0.875rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	}
+
+	.toggle-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.toggle-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.toggle-btn.selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
+	}
+
+	/* --- Lab mode banner ----------------------------------------------------- */
+
+	.lab-banner {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		padding: 0.75rem 1rem;
+		border-radius: 8px;
+		background: var(--info-bg);
+		border: 1px solid var(--info-bg);
+		color: var(--info-text);
+		font-size: 0.8125rem;
+		line-height: 1.4;
+	}
+
+	.lab-banner :global(svg) {
+		flex-shrink: 0;
+		margin-top: 0.125rem;
+	}
+
+	/* --- Required field tag -------------------------------------------------- */
+
+	.required-tag {
+		display: inline-block;
+		padding: 0.125rem 0.375rem;
+		border-radius: 4px;
+		background: var(--danger-bg);
+		color: var(--danger-strong);
+		font-size: 0.6875rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		margin-left: 0.5rem;
 	}
 
 	/* --- D13 window check ---------------------------------------------------- */

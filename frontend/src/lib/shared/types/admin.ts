@@ -161,12 +161,15 @@ export interface AdminOfferingResponse {
 // ?is_active&page&size (no search/sort params), so search + Code/Name header
 // sorts run client-side over the loaded page, like programs.
 
+export type CourseType = 'lecture' | 'lab';
+
 export interface AdminCourseResponse {
 	id: number;
 	course_code: string;
 	course_name: string;
 	units: number;
 	session_duration_hours: number;
+	course_type: CourseType;
 	is_active: boolean;
 	created_at: string;
 	updated_at: string;
@@ -178,6 +181,7 @@ export interface AdminCourse {
 	courseName: string;
 	units: number;
 	sessionDurationHours: number;
+	courseType: CourseType;
 	isActive: boolean;
 	createdAt: string;
 	updatedAt: string;
@@ -188,6 +192,7 @@ export interface AdminCourseCreatePayload {
 	course_name: string;
 	units: number;
 	session_duration_hours: number;
+	course_type: CourseType;
 }
 
 export interface AdminCourseUpdatePayload {
@@ -195,6 +200,7 @@ export interface AdminCourseUpdatePayload {
 	course_name?: string;
 	units?: number;
 	session_duration_hours?: number;
+	course_type?: CourseType;
 	is_active?: boolean;
 }
 
