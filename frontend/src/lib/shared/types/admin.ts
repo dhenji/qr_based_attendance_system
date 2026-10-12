@@ -141,6 +141,7 @@ export interface AdminOfferingResponse {
 	schedule_days: string;
 	schedule_start_time: string;
 	schedule_end_time: string;
+	course_type: CourseType;
 	classroom_name: string | null;
 	classroom_lat: number | null;
 	classroom_lng: number | null;
@@ -225,6 +226,7 @@ export interface AdminOffering {
 	scheduleDays: string;
 	scheduleStartTime: string;
 	scheduleEndTime: string;
+	courseType: CourseType;
 	classroomName?: string;
 	classroomLat?: number;
 	classroomLng?: number;
@@ -252,6 +254,7 @@ export interface AdminOfferingCreatePayload {
 	schedule_days: string;
 	schedule_start_time: string;
 	schedule_end_time: string;
+	course_type: CourseType;
 	classroom_name?: string;
 	classroom_lat?: number;
 	classroom_lng?: number;
@@ -267,6 +270,7 @@ export interface AdminOfferingUpdatePayload {
 	schedule_days?: string;
 	schedule_start_time?: string;
 	schedule_end_time?: string;
+	course_type?: CourseType;
 	classroom_name?: string | null;
 	classroom_lat?: number | null;
 	classroom_lng?: number | null;
