@@ -39,6 +39,7 @@ import type {
 	AdminRosterFilters,
 	AdminRosterItem,
 	AdminRosterItemResponse,
+	AdminStudent,
 	Program,
 	YearLevel,
 } from '$lib/shared/types';
@@ -258,4 +259,35 @@ export const bulkEnroll = async (
 		undefined,
 		`/${offeringId}/enrollments/bulk`
 	);
+};
+
+// One-row bulk CSV for the Add-student modal: the same validated upload as a
+// file, so single adds inherit the email/program checks, the dedupe
+// (already-enrolled → skipped), and the single audit row. `section` stays
+// blank on purpose — a value would overwrite the student's section for every
+// offering they are in, not just this one.
+const SINGLE_ENROLL_HEADER =
+	'student_id,first_name,middle_name,last_name,email,program_code,year_level,section';
+
+const csvCell = (value: string | undefined): string => {
+	const text = value ?? '';
+	return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const buildSingleEnrollCsv = (student: AdminStudent): File => {
+	const row = [
+		student.studentId,
+		student.firstName,
+		student.middleName ?? '',
+		student.lastName,
+		student.email,
+		student.programCode,
+		student.yearLevelLabel,
+		'',
+	]
+		.map(csvCell)
+		.join(',');
+	return new File([`${SINGLE_ENROLL_HEADER}\n${row}\n`], 'enroll.csv', {
+		type: 'text/csv',
+	});
 };

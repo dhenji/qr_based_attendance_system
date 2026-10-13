@@ -16,11 +16,12 @@
 	} from '$lib/features/admin/offerings/store.svelte';
 	import {
 		archiveOffering,
+		buildSingleEnrollCsv,
 		setOfferingActive,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
-	import { listProfessors } from '$lib/features/admin/service';
+	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
 		assignmentCreateSchema,
 		offeringUpdateSchema,
@@ -31,6 +32,7 @@
 		AdminBulkEnrollResult,
 		AdminCourse,
 		AdminProfessor,
+		AdminStudent,
 		Program,
 		YearLevel,
 	} from '$lib/shared/types';
@@ -91,9 +93,23 @@
 	let bulkFile = $state<File | null>(null);
 	let bulkBusy = $state(false);
 	let bulkResult = $state<AdminBulkEnrollResult | null>(null);
+
+	// Add-student modal (single-row bulk upload under the hood).
+	const ADD_PAGE_SIZE = 8;
+	let addOpen = $state(false);
+	let addQuery = $state('');
+	let addResults = $state<AdminStudent[]>([]);
+	let addTotal = $state(0);
+	let addPage = $state(1);
+	let addSearching = $state(false);
+	let addPicked = $state<AdminStudent | null>(null);
+	let addBusy = $state(false);
+	let addInfo = $state<string | null>(null);
+	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		if (addSearchTimer) clearTimeout(addSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -363,6 +379,95 @@
 		}
 	};
 
+	const openAdd = () => {
+		addOpen = true;
+		addQuery = '';
+		addResults = [];
+		addTotal = 0;
+		addPage = 1;
+		addPicked = null;
+		addInfo = null;
+		adminOfferingDetailState.actionError = null;
+		void loadAddCandidates(1);
+	};
+
+	const onAddQuery = () => {
+		if (addSearchTimer) clearTimeout(addSearchTimer);
+		addPicked = null;
+		addInfo = null;
+		addSearchTimer = setTimeout(() => void loadAddCandidates(1), 300);
+	};
+
+	// One loader for browse, pager, and search: empty query + cohort ids is
+	// the browse list, a query narrows within it. Cohort-scoped, so only
+	// students on the offering's program + year can take this course.
+	const loadAddCandidates = async (page: number) => {
+		const q = addQuery.trim();
+		addSearching = true;
+		try {
+			const result = await listStudents({
+				search: q || undefined,
+				size: ADD_PAGE_SIZE,
+				page,
+				is_active: true,
+				program_id: offering?.programId,
+				year_level_id: offering?.yearLevelId,
+			});
+			if (q !== addQuery.trim()) return;
+			addResults = result.items;
+			addTotal = result.total;
+			addPage = result.page;
+		} catch (e: unknown) {
+			adminOfferingDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to load students';
+		} finally {
+			addSearching = false;
+		}
+	};
+
+	const addTotalPages = $derived(Math.max(1, Math.ceil(addTotal / ADD_PAGE_SIZE)));
+
+	const addCohortLabel = $derived(
+		[programCode, yearLabel].filter(Boolean).join(' ') || 'this cohort'
+	);
+
+	const addEmptyCopy = $derived(
+		addQuery.trim() ? `No matches in ${addCohortLabel}.` : `No students in ${addCohortLabel} yet.`
+	);
+
+	// The upload checks the CSV program against the offering, so a cross-
+	// program pick is blocked here instead of round-tripping the error.
+	const addProgramMismatch = $derived(
+		addPicked !== null && programCode !== null && addPicked.programCode !== programCode
+	);
+
+	// Enrollment status per candidate, read off the loaded roster page.
+	// Advisory for rosters past page 1 (submit stays authoritative via the
+	// skipped branch); membership itself never false-positives, so enrolled
+	// rows are safe to disable.
+	const enrolledIds = $derived(
+		new Set(adminOfferingDetailState.roster.map((r) => r.studentId))
+	);
+
+	const submitAdd = async () => {
+		const picked = addPicked;
+		if (!offering || !picked || addBusy || addProgramMismatch) return;
+		addBusy = true;
+		addInfo = null;
+		try {
+			const result = await bulkEnrollOffering(offering.id, buildSingleEnrollCsv(picked));
+			if (result.enrolled === 0 && result.skipped > 0) {
+				addInfo = `${picked.studentId} is already enrolled in this offering.`;
+			} else {
+				addOpen = false;
+			}
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			addBusy = false;
+		}
+	};
+
 	const rosterTotalPages = $derived(
 		Math.max(1, Math.ceil(adminOfferingDetailState.rosterTotal / 20))
 	);
@@ -479,6 +584,7 @@
 			<section class="card">
 				<div class="row-head">
 					<h2 class="card-title">Roster ({adminOfferingDetailState.rosterTotal})</h2>
+					<button class="btn btn-primary" onclick={openAdd}>Add student</button>
 				</div>
 				<div class="filters">
 					<input
@@ -675,6 +781,99 @@
 				<button class="btn btn-ghost" onclick={() => (assignOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" disabled={assignBusy} onclick={submitAssign}>
 					{assignBusy ? 'Saving…' : 'Assign'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if addOpen && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="add-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (addOpen = false) }}
+		>
+			<h2 id="add-title" class="modal-title">Add student</h2>
+			<div class="form">
+				<label>Find student
+					<input
+						class="input"
+						placeholder="ID, name, or email"
+						aria-label="Find student"
+						bind:value={addQuery}
+						oninput={onAddQuery}
+					/>
+				</label>
+				{#if addSearching && addResults.length === 0}
+					<p class="muted">Searching…</p>
+				{:else if addResults.length === 0}
+					<p class="empty">{addEmptyCopy}</p>
+				{:else}
+					<ul class="pick-list">
+						{#each addResults as s (s.id)}
+							<li class="pick-row">
+								{#if enrolledIds.has(s.studentId)}
+									<span class="muted">{s.studentId} — {s.firstName} {s.lastName}</span>
+									<span class="badge inactive">Already enrolled</span>
+								{:else}
+									<button class="link" disabled={addBusy} onclick={() => (addPicked = s)}>
+										{s.studentId} — {s.firstName} {s.lastName} ({s.programCode})
+									</button>
+									<span class="badge">Can enroll</span>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+					{#if !addSearching && addTotalPages > 1}
+						<div class="pager">
+							<button
+								class="btn btn-secondary"
+								disabled={addPage <= 1 || addBusy}
+								onclick={() => void loadAddCandidates(addPage - 1)}
+							>
+								‹ Prev
+							</button>
+							<span class="muted">Page {addPage} of {addTotalPages}</span>
+							<button
+								class="btn btn-secondary"
+								disabled={addPage >= addTotalPages || addBusy}
+								onclick={() => void loadAddCandidates(addPage + 1)}
+							>
+								Next ›
+							</button>
+						</div>
+					{/if}
+				{/if}
+				{#if addPicked}
+					<p class="muted">
+						{addPicked.studentId} · {addPicked.email} · {addPicked.programCode} ·
+						section {addPicked.section ?? '—'} (kept)
+					</p>
+					{#if addProgramMismatch}
+						<p class="error" role="alert">
+							{addPicked.programCode} does not match this offering ({programCode ?? '—'}).
+						</p>
+					{/if}
+				{/if}
+				{#if addInfo}
+					<p class="muted" role="status">{addInfo}</p>
+				{/if}
+				{#if adminOfferingDetailState.actionError}
+					<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+				{/if}
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (addOpen = false)}>Cancel</button>
+				<button
+					class="btn btn-primary"
+					disabled={!addPicked || addBusy || addProgramMismatch}
+					onclick={submitAdd}
+				>
+					{addBusy ? 'Enrolling…' : 'Enroll'}
 				</button>
 			</div>
 		</div>
@@ -1070,6 +1269,21 @@
 	.form label.check {
 		flex-direction: row;
 		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.pick-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.25rem;
+	}
+
+	.pick-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 		gap: 0.5rem;
 	}
 
