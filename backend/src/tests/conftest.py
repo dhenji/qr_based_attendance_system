@@ -607,7 +607,7 @@ async def auth_headers(
 def reset_process_globals() -> Any:
     """Clear module-level caches that would otherwise leak across tests.
 
-    Six of them, all process-global:
+    Eight of them, all process-global:
 
     - `features.attendance.service._IDEMPOTENCY_STORE` is the scan
       idempotency cache, keyed by user/session/caller-supplied key. A scan
@@ -620,6 +620,12 @@ def reset_process_globals() -> Any:
       at 3 per email. It keys on the email, so it only stayed invisible while
       every recovery test happened to use a distinct address; one test reusing
       another's address would lock itself out for the rest of the window.
+    - `features.auth.service._login_otp_limiter` caps wrong login-OTP codes
+      at 3 per email. Same leak shape as the recovery limiter above.
+    - `features.auth.service._login_otp_ip_limiter` caps wrong login-OTP
+      codes at 15 per client IP. Unlike the email one it is keyed on the
+      caller, so every verify test in the session would spend the same
+      budget without a reset.
     - `shared.cache._cache` holds face embeddings keyed by `student.id`. The
       factory id counter restarts every test, so student 1 in this test is the
       same cache key as student 1 in the last one - a test that enrolls a face
@@ -644,6 +650,8 @@ def reset_process_globals() -> Any:
         attendance_service._IDEMPOTENCY_STORE.clear()
         rate_limit._limiter._windows.clear()
         auth_service._recovery_limiter._windows.clear()
+        auth_service._login_otp_limiter._windows.clear()
+        auth_service._login_otp_ip_limiter._windows.clear()
         cache._cache._store.clear()
         email._PENDING.clear()
         core_scheduler.reset_scheduler()

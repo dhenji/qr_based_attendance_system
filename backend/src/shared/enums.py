@@ -64,6 +64,7 @@ class AuditAction(StrEnum):
 class OtpPurpose(StrEnum):
     CLAIM = "claim"
     FORGET_PASSWORD = "forget_password"
+    LOGIN = "login"
 
 
 class ValidationStatus(StrEnum):

@@ -1776,3 +1776,32 @@
   posts `username`; there are none in production. Covered by the existing suite
   plus `tests/features/auth/test_register_username.py`, which now pins that a
   stray `username` key on a roster create is still ignored.
+
+### ADR-074: Login-OTP Lockout Split — Per-Email Attempts, Per-IP Failures, Resend Resets the Email
+
+- **Decision (D74):** Split the login-OTP abuse controls into three layers with
+  one job each, and make resends reset the per-email budget.
+- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Context:** The shipped OTP gate had two defects, found in manual testing.
+  (1) `POST /auth/login/verify` carried a router flood gate of `5/300s` per IP
+  that counted *every* request including successes, so 5 wrong codes exhausted
+  the IP bucket and switching to a second email still returned 429 — the lock
+  appeared to follow the user across accounts. (2) The per-email service cap
+  (3 wrong codes) lived in the 15-minute password-lockout window, so a user who
+  mistyped 3 times could not verify for 15 minutes even though a resend mints a
+  fresh 5-minute code — the lock outlived the credential by 3x.
+- **Alternatives considered:**
+  (1) *Loosen the router gate only (`5/300s` → `20/60s`).* Rejected alone:
+  fixes the phantom cross-email lock but leaves email rotation unbounded.
+  (2) *Key the IP limiter per (IP, email).* Rejected: the verify body carries
+  the grant, not an email; a client-supplied email field would let a guessing
+  client dodge by rotating it.
+  (3) *Taken:* per-email 3/300s (423, reset on resend) + per-IP 15 failures/300s
+  (429, failure-only, not reset on resend) + router `20/60s` flood gate.
+- **Consequences:** `verify_login_otp` takes the client IP; a new
+  `FixedWindowLimiter.reset(key)` clears one email's window on resend; the
+  423 `retry_after` is now `otp_expires_minutes` (5), superseding the earlier
+  15-minute note in the OTP contract. The 429 UI copy is device-aware so the
+  two clocks read differently. Recovery keeps its 15-minute lock — security
+  answers don't change, so no reset applies there.

@@ -27,16 +27,16 @@ as `/admin/users/{id}`. A roster row with no linked account is a 409, not a
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.security import hash_password
-from features.auth.model import User
+from core.security import hash_otp, hash_password
+from features.auth.model import OtpCodes, User
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity, UserRole
+from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
 from tests.conftest import Factories
 
 # `LoginRequest.email` is an `EmailStr`, and email-validator rejects the
@@ -142,7 +142,28 @@ async def test_reset_returns_a_temp_password_that_authenticates(
 
     login = await _login(api_client, STUDENT_EMAIL, temp)
     assert login.status_code == 200
-    assert login.json()["access_token"]
+    # The temp password passes the password gate (OTP grant issued); the
+    # mandatory login OTP still stands between it and a session.
+    assert login.json()["otp_pending"] is True
+    assert login.json()["otp_token"]
+
+    # A seeded code completes the proof: the temp password authenticates.
+    test_db_session.add(
+        OtpCodes(
+            email=STUDENT_EMAIL.lower(),
+            purpose=OtpPurpose.LOGIN.value,
+            otp_hash=hash_otp("123456"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+    )
+    await test_db_session.commit()
+
+    verified = await api_client.post(
+        "/api/auth/login/verify",
+        json={"otp_token": login.json()["otp_token"], "code": "123456"},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["access_token"]
 
 
 async def test_reset_does_not_leak_the_old_password(
