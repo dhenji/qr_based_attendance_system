@@ -6,16 +6,24 @@ WARNING: this limiter lives in process memory only. When the API runs as
 multiple instances behind a load balancer, the buckets are not shared - swap
 the backing store for a shared one (Redis, etc.) using the same composite key ``"{path}|{source}"``. Also reused later by the attendance-scan and analytics
 risk-refresh endpoints to dampen abuse.
+
+Client IPs resolve through `client_ip()`: the direct peer by default, or the
+leftmost X-Forwarded-For entry when (and only when) the peer is inside the
+configured `trusted_proxy_cidrs`. Without that setting, every IP-keyed
+bucket behind a balancer collapses onto the balancer's address.
 """
 
 import asyncio
+import ipaddress
 import json
 import time
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 from typing import Any, Literal
 
 from fastapi import Request
 
+from core.config import Settings, get_settings
 from core.exceptions import AppException
 
 RequestKey = Literal["ip", "email"]
@@ -99,8 +107,74 @@ class FixedWindowLimiter:
 
             return True
 
+    async def reset(self, key: str) -> None:
+        """Forget ``key``'s budget entirely.
+
+        Used when the guarded credential itself is replaced (a resend mints a
+        fresh OTP): guesses spent against the burned code must not haunt the
+        new one. Lock-protected like `hit`, for the same races.
+        """
+
+        async with self._lock:
+            self._windows.pop(key, None)
+
 
 _limiter = FixedWindowLimiter()
+
+
+@lru_cache(maxsize=32)
+def _trusted_networks(raw: str) -> tuple[ipaddress._BaseNetwork, ...]:
+    """Parse the CIDR allowlist once per distinct value (lock-free read path).
+
+    Cached on the raw string, so tests passing different values never collide.
+    """
+
+    return tuple(
+        ipaddress.ip_network(part.strip(), strict=False)
+        for part in raw.split(",")
+        if part.strip()
+    )
+
+
+def client_ip(
+    request: Request, settings: Settings | None = None
+) -> str | None:
+    """Best-effort client IP for limiter keys and Turnstile `remoteip`.
+
+    Default (no trusted proxies configured): the direct peer, exactly as
+    before. Behind a configured proxy: the leftmost X-Forwarded-For entry,
+    but only when the direct peer itself is inside `trusted_proxy_cidrs`.
+    Anything malformed — unparseable CIDRs, missing peer, garbage header —
+    fails closed to the peer (or None), never to a crash and never to a
+    header an untrusted client supplied.
+    """
+
+    current: Settings = settings or get_settings()
+    peer: str | None = request.client.host if request.client is not None else None
+
+    raw: str = (current.trusted_proxy_cidrs or "").strip()
+    if not raw or peer is None:
+        return peer
+
+    try:
+        networks = _trusted_networks(raw)
+        peer_addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer
+
+    if not any(peer_addr in net for net in networks):
+        return peer
+
+    first: str = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if not first:
+        return peer
+
+    try:
+        ipaddress.ip_address(first)
+    except ValueError:
+        return peer
+
+    return first
 
 
 async def _email_from(request: Request) -> str | None:
@@ -132,7 +206,9 @@ def rate_limit(
 ) -> Callable[..., Awaitable[None]]:
     """FastAPI dependency factory enforcing a per-key fixed-window limit.
 
-    - ``key="ip"``: bucket by ``request.client.host``, ``X-Forwarded-For`` is intentionally NOT trusted - use it only behind a configured trusted proxy.
+    - ``key="ip"``: bucket by the resolved client IP (`client_ip()` — direct
+      peer by default, leftmost X-Forwarded-For only behind a configured
+      trusted proxy).
     - ``key="email"``: bucket by the normalized ``email`` in the JSON body, falling back to the client IP when the body can't be parsed or has none.
 
     Raises ``RateLimitedException`` (HTTP 429, ``{detail: {code: "rate_limited", message}}``) once the window budget is spent.
@@ -141,10 +217,7 @@ def rate_limit(
     limiter: FixedWindowLimiter = _limiter
 
     async def dependency(request: Request) -> None:
-        ip: str = "unknown"
-
-        if request.client is not None:
-            ip = request.client.host
+        ip: str | None = client_ip(request)
 
         source: str
         email: str | None = await _email_from(request) if key == "email" else None

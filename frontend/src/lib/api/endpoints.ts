@@ -297,6 +297,8 @@ const MOCK_TOKENS: TokenResponse = {
 	refresh_token: 'mock-refresh-token',
 	mfa_pending: false,
 	preauth_token: null,
+	otp_pending: false,
+	otp_token: null,
 	must_change_password: false,
 };
 
@@ -322,6 +324,21 @@ export const AuthLoginEndpoint: EndpointDef<TokenResponse> = {
 	url: '/auth/login',
 	method: 'POST',
 	mock: () => MOCK_TOKENS,
+};
+
+// Login OTP (mandatory second factor). The password step returns an otp_token
+// grant instead of tokens; verify exchanges grant + emailed code for tokens
+// (or an MFA challenge), resend burns the previous code and mints a fresh one.
+export const AuthLoginOtpVerifyEndpoint: EndpointDef<TokenResponse> = {
+	url: '/auth/login/verify',
+	method: 'POST',
+	mock: () => MOCK_TOKENS,
+};
+
+export const AuthLoginOtpResendEndpoint: EndpointDef<void> = {
+	url: '/auth/login/resend',
+	method: 'POST',
+	mock: () => undefined,
 };
 
 export const AuthRefreshEndpoint: EndpointDef<TokenResponse> = {
@@ -446,10 +463,10 @@ export const ForgotPasswordVerifyEndpoint: EndpointDef<ForgotPasswordVerifyRespo
 	mock: () => ({ recovery_token: 'mock-recovery-token' }),
 };
 
-export const ResetPasswordEndpoint: EndpointDef<void> = {
+export const ResetPasswordEndpoint: EndpointDef<TokenResponse> = {
 	url: '/auth/reset-password',
 	method: 'POST',
-	mock: () => undefined,
+	mock: () => MOCK_TOKENS,
 };
 
 // Set/update security question (authenticated) —
@@ -3123,6 +3140,8 @@ export const endpoints = {
 	authOtpVerify: AuthOtpVerifyEndpoint,
 	authRegister: AuthRegisterEndpoint,
 	authLogin: AuthLoginEndpoint,
+	authLoginOtpVerify: AuthLoginOtpVerifyEndpoint,
+	authLoginOtpResend: AuthLoginOtpResendEndpoint,
 	authRefresh: AuthRefreshEndpoint,
 	authMe: AuthMeEndpoint,
 	authMfaVerify: AuthMfaVerifyEndpoint,

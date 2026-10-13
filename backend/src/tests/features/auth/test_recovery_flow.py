@@ -351,6 +351,99 @@ def test_reset_password_rejects_reused_password() -> None:
         asyncio.run(service.reset_password("u@example.com", "123456", "OldPass1!"))
 
 
+def _resettable_user(**kwargs):
+    """A merged OTP-row + account namespace: `verify_otp` reads the code
+    fields, `reset_password` the account ones — same trick as the reused
+    test above, plus the columns `_build_tokens` needs."""
+
+    from datetime import datetime, timedelta, timezone
+
+    from core.security import hash_otp
+
+    defaults = dict(
+        id=11,
+        role="student",
+        email="reset.me@example.com",
+        is_active=True,
+        mfa_enabled=False,
+        must_change_password=False,
+        failed_login_attempts=0,
+        is_locked=False,
+        locked_at=None,
+        password_hash=hash_password("OldPass1!"),
+        consumed_at=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        otp_hash=hash_otp("123456"),
+    )
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def test_reset_password_returns_tokens() -> None:
+    record = _resettable_user()
+
+    tokens = asyncio.run(_service(record).reset_password(
+        "reset.me@example.com", "123456", "NewPass2@"
+    ))
+
+    assert tokens.access_token
+    assert tokens.refresh_token
+    assert tokens.mfa_pending is False
+    assert tokens.must_change_password is False
+
+
+def test_reset_password_returns_mfa_challenge_when_enabled() -> None:
+    record = _resettable_user(mfa_enabled=True)
+
+    tokens = asyncio.run(_service(record).reset_password(
+        "reset.me@example.com", "123456", "NewPass2@"
+    ))
+
+    assert tokens.mfa_pending is True
+    assert tokens.preauth_token
+    assert tokens.access_token is None
+
+
+async def test_reset_password_route_returns_the_session(
+    api_client, test_db_session, factories
+) -> None:
+    """POST /api/auth/reset-password issues tokens, not a 204.
+
+    A real user plus a seeded FORGET_PASSWORD OTP (the emailed code is
+    hashed and unknowable, same trick as the login-OTP suite): proves the
+    route contract changed with the service.
+    """
+
+    from datetime import datetime, timedelta, timezone
+
+    from core.security import hash_otp
+    from features.auth.model import OtpCodes
+    from shared.enums import OtpPurpose
+
+    email = "reset.route@isu.edu.ph"
+    await factories.user(email=email, password_hash=hash_password("OldPass1!"))
+    test_db_session.add(
+        OtpCodes(
+            email=email.lower(),
+            purpose=OtpPurpose.FORGET_PASSWORD.value,
+            otp_hash=hash_otp("123456"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+    )
+    await test_db_session.commit()
+
+    response = await api_client.post(
+        "/api/auth/reset-password",
+        json={"email": email, "otp_code": "123456", "new_password": "NewPass2@"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["access_token"]
+    assert body["refresh_token"]
+    assert body.get("mfa_pending") is not True
+
+
 def test_change_password_rejects_reused_password() -> None:
     from features.auth.exceptions import PasswordReusedException
 

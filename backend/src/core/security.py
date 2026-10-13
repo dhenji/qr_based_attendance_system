@@ -16,6 +16,7 @@ from core.config import Settings, get_settings
 REFRESH_TOKEN_TYPE: str = "refresh"
 PREAUTH_TOKEN_TYPE: str = "preauth"
 RECOVERY_TOKEN_TYPE: str = "recovery"
+LOGIN_OTP_TOKEN_TYPE: str = "login_otp"
 
 _hasher = argon2.PasswordHasher()
 
@@ -127,6 +128,32 @@ def decode_recovery_token(
         return None
 
     return payload
+
+
+def create_login_otp_token(
+    user_id: int, email: str, settings: Settings | None = None
+) -> str:
+    """Short-lived proof that the password gate was passed for login OTP.
+
+    Issued by `login` after the password (and lockout) checks and required to
+    verify or resend the LOGIN OTP. Reuses the preauth expiry: both are
+    login-flow grants with the same 5-minute semantics, so one knob covers
+    both. Carries a `type` claim, so like every other grant it is rejected
+    outright by the access-token dependency and can never buy API access.
+    """
+
+    settings = settings or get_settings()
+    now: datetime = datetime.now(timezone.utc)
+
+    payload: dict[str, Any] = {
+        "sub": str(user_id),
+        "email": email.lower(),
+        "type": LOGIN_OTP_TOKEN_TYPE,
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.preauth_token_expire_minutes),
+    }
+
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
 def extract_user_id(payload: dict) -> int:

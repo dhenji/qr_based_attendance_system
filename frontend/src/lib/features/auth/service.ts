@@ -11,6 +11,8 @@ import type {
 	BackupCodesResponse,
 	BackupCodesSummaryResponse,
 	ChangePasswordRequest,
+	LoginOtpResendRequest,
+	LoginOtpVerifyRequest,
 	LoginRequest,
 	MeResponse,
 	MfaDisableRequest,
@@ -26,10 +28,12 @@ import {
 	mockForgotPassword,
 	mockForgotPasswordVerify,
 	mockLogin,
+	mockLoginOtpVerify,
 	mockMe,
 	mockMfaVerify,
 	mockNoop,
 	mockRegister,
+	mockResetPassword,
 } from '$lib/features/auth/mock';
 
 // Send a 6-digit OTP. `claim` proves ownership of a roster email before the
@@ -95,6 +99,35 @@ export const login = async (email: string, password: string): Promise<TokenRespo
 
 	const body: LoginRequest = { email: email.trim().toLowerCase(), password };
 	return post<TokenResponse>('authLogin', body);
+};
+
+// Login OTP (mandatory second factor). The password step returns
+// {otp_pending: true, otp_token} instead of tokens; verify exchanges the
+// grant plus the emailed 6-digit code for a session. Admins with MFA enabled
+// get an MFA challenge back (OTP then TOTP), which doMfaVerify finishes.
+//
+// Throws APIError: 'otp_invalid' / 'otp_expired' (400),
+// 'login_otp_locked' (423), 'invalid_credentials' (400, grant rejected or
+// the account is gone).
+export const verifyLoginOtp = async (
+	otpToken: string,
+	code: string
+): Promise<TokenResponse> => {
+	if (isMockMode()) return mockLoginOtpVerify();
+
+	const body: LoginOtpVerifyRequest = { otp_token: otpToken, code: code.trim() };
+	return post<TokenResponse>('authLoginOtpVerify', body);
+};
+
+// Mint a fresh login OTP. The grant proves the password gate was passed, so
+// no email is posted; the previous code is burned server-side. Flood control
+// lives in the service (5/per minute per IP).
+//
+// Throws APIError: 'rate_limited' (429), 'invalid_credentials' (400).
+export const resendLoginOtp = async (otpToken: string): Promise<void> => {
+	if (isMockMode()) return mockNoop();
+
+	await post<void>('authLoginOtpResend', { otp_token: otpToken });
 };
 
 // Current identity. Returns null when the token is missing, expired beyond
@@ -176,7 +209,8 @@ export const changePassword = async (currentPassword: string, newPassword: strin
 //  1. forgotPassword(email) -> { question } (decoy for unknown emails).
 //  2. forgotPasswordVerify(email, answer) -> { recovery_token } (5-min grant).
 //  3. requestOtp(email, 'forget_password', recoveryToken) + verifyOtp.
-//  4. resetPassword(email, otpCode, newPassword) -> 204.
+//  4. resetPassword(email, otpCode, newPassword) -> TokenResponse (the
+//     session itself, or an MFA challenge for MFA-enabled accounts).
 // Throws APIError: 'security_answer_invalid' (400), 'recovery_locked' (423),
 // 'otp_invalid' / 'otp_expired' (400), 'unrecognized_email' (404),
 // 'password_policy_violation' (422), 'invalid_captcha' (400).
@@ -210,10 +244,10 @@ export const resetPassword = async (
 	email: string,
 	otpCode: string,
 	newPassword: string
-): Promise<void> => {
-	if (isMockMode()) return mockNoop();
+): Promise<TokenResponse> => {
+	if (isMockMode()) return mockResetPassword(email);
 
-	await post<void>('authResetPassword', {
+	return post<TokenResponse>('authResetPassword', {
 		email: email.trim().toLowerCase(),
 		otp_code: otpCode.trim(),
 		new_password: newPassword

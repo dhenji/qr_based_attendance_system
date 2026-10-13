@@ -24,15 +24,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.security import hash_password
-from features.auth.model import MfaBackupCodes, User
+from core.security import hash_otp, hash_password
+from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
+from shared.enums import AuditAction, AuditEntity, OtpPurpose
 from tests.conftest import Factories
 
 PASSWORD = "correct-horse-battery-staple"
 WRONG = "not-the-password"
 SECRET = "JBSWY3DPEB2XS2LP"
+LOGIN_OTP = "654321"
 
 # `LoginRequest.email` is an `EmailStr` and email-validator rejects the factory
 # default's `.local` TLD as special-use, so these tests go through the route and
@@ -271,5 +272,26 @@ async def test_login_no_longer_challenges_after_disable(
         "/api/auth/login", json={"email": EMAIL, "password": PASSWORD}
     )
     assert after.status_code == 200
+    # MFA no longer gates, but the mandatory login OTP does: no preauth, no
+    # tokens yet — just the OTP grant.
     assert after.json().get("mfa_pending") is not True
-    assert after.json()["access_token"]
+    assert after.json()["otp_pending"] is True
+    assert after.json().get("access_token") is None
+
+    # Completing the OTP step issues the session the old test asserted here.
+    test_db_session.add(
+        OtpCodes(
+            email=EMAIL.lower(),
+            purpose=OtpPurpose.LOGIN.value,
+            otp_hash=hash_otp(LOGIN_OTP),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+    )
+    await test_db_session.commit()
+
+    verified = await api_client.post(
+        "/api/auth/login/verify",
+        json={"otp_token": after.json()["otp_token"], "code": LOGIN_OTP},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["access_token"]

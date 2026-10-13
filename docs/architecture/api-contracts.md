@@ -1302,7 +1302,7 @@ backup retention pruning never touches them.
 
 Phase 2 auth surface. Schemas live in `backend/src/features/auth/schema.py`.
 The register is an exact-one roster match and captures the security question;
-login applies the MFA preauth gate; refresh returns tokens in the body; accounts
+login applies the OTP + MFA gates; refresh returns tokens in the body; accounts
 lock after 5 failed attempts.
 
 | Method | Path                               | Purpose                                              |
@@ -1312,11 +1312,13 @@ lock after 5 failed attempts.
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
 | POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
 | POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
-| POST   | `/auth/login`                      | Email/password login (+ MFA gate) | 400 `invalid_credentials` · 423 `account_locked` |
+| POST   | `/auth/login`                      | Email/password login (+ OTP & MFA gates) | 400 `invalid_credentials` · 423 `account_locked` |
+| POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 423 `login_otp_locked` · 429 `rate_limited` |
+| POST   | `/auth/login/resend`               | Resend login OTP (burns the previous code) | 400 `invalid_credentials` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
 | POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
@@ -1325,6 +1327,26 @@ lock after 5 failed attempts.
 | POST   | `/auth/mfa/setup`                  | Generate TOTP secret | 409 `mfa_already_enabled` |
 | POST   | `/auth/mfa/verify`                 | Verify TOTP or backup code (login exchange or setup) | 400 `invalid_credentials` · 400 `invalid_mfa_code` |
 | POST   | `/auth/mfa/disable`                | Disable MFA (password required; clears backup codes) | 400 `current_password_invalid` · 409 `mfa_not_enabled` |
+
+**Login OTP (mandatory second factor):** a password-OK `POST /auth/login` no
+longer issues tokens directly, except for students/professors with MFA enabled
+(who keep the TOTP preauth path and receive no email — TOTP is strictly
+stronger than an emailed code). Everyone else gets `{otp_pending: true,
+otp_token}` plus a 6-digit LOGIN OTP by email (`otp_codes` row, purpose
+`login`, 5-minute expiry, Argon2id hash, single-use). `POST /auth/login/verify`
+exchanges `{otp_token, code}` for the token pair — or, for an admin with MFA
+enabled, for `{mfa_pending: true, preauth_token}` (OTP then TOTP). `POST
+ /auth/login/resend` mints a fresh code and burns the previous one — and resets
+ the email's wrong-code budget, since guesses against the burned code are
+ guesses against a dead credential. Wrong codes are capped at 3 per email
+ inside the 5-minute OTP window (then 423 `login_otp_locked`); a second,
+ failure-only cap of 15 misses per client IP (then 429 `rate_limited`) survives
+ email rotation — resends do not reset it. Expired codes and correct codes
+ spend neither budget. The `otp_token` is a
+5-minute `type="login_otp"` JWT carrying the account email: a missing,
+malformed, expired, wrong-typed, or email-mismatched grant — like a missing or
+inactive account — returns generic 400 `invalid_credentials`, and the grant is
+rejected by the access-token dependency so it can never buy API access.
 
 **Forgot-password flow (wireframes.md:152-260, ADR-052, hardened by ADR-056):**
 Step 1 (`/auth/forgot-password`, email) → Step 2 (`/auth/forgot-password/verify`,
@@ -1351,8 +1373,13 @@ email, and a 5-minute expiry. Step 3 will not mint a `forget_password` OTP witho
 a valid grant — a missing, malformed, expired, or email-mismatched grant returns
 `400 invalid_credentials` with a generic message, so the gate is not itself
 probeable. The grant is rejected by the access-token dependency (it carries a
-`type` claim) and so cannot be replayed for API access. `/auth/reset-password` is
-unchanged.
+`type` claim) and so cannot be replayed for API access. `/auth/reset-password`
+(step 4) consumes the OTP and returns the session directly — a `TokenResponse`
+with the token pair, or `{mfa_pending: true, preauth_token}` for MFA-enabled
+accounts (same shape as login, finished with TOTP). Like registration, there
+is no second login dance: recovery already proved inbox access plus the
+security answer, and `must_change_password` is False because the password is
+user-chosen, not admin-issued.
 
 **Security-question storage (ADR-056):** only the **answer** is hashed
 (`users.security_answer_hash`, Argon2id). `users.security_question_hash` stores the

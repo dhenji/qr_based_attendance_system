@@ -1776,3 +1776,65 @@
   posts `username`; there are none in production. Covered by the existing suite
   plus `tests/features/auth/test_register_username.py`, which now pins that a
   stray `username` key on a roster create is still ignored.
+
+### ADR-074: Login-OTP Lockout Split — Per-Email Attempts, Per-IP Failures, Resend Resets the Email
+
+- **Decision (D74):** Split the login-OTP abuse controls into three layers with
+  one job each, and make resends reset the per-email budget.
+- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Context:** The shipped OTP gate had two defects, found in manual testing.
+  (1) `POST /auth/login/verify` carried a router flood gate of `5/300s` per IP
+  that counted *every* request including successes, so 5 wrong codes exhausted
+  the IP bucket and switching to a second email still returned 429 — the lock
+  appeared to follow the user across accounts. (2) The per-email service cap
+  (3 wrong codes) lived in the 15-minute password-lockout window, so a user who
+  mistyped 3 times could not verify for 15 minutes even though a resend mints a
+  fresh 5-minute code — the lock outlived the credential by 3x.
+- **Alternatives considered:**
+  (1) *Loosen the router gate only (`5/300s` → `20/60s`).* Rejected alone:
+  fixes the phantom cross-email lock but leaves email rotation unbounded.
+  (2) *Key the IP limiter per (IP, email).* Rejected: the verify body carries
+  the grant, not an email; a client-supplied email field would let a guessing
+  client dodge by rotating it.
+  (3) *Taken:* per-email 3/300s (423, reset on resend) + per-IP 15 failures/300s
+  (429, failure-only, not reset on resend) + router `20/60s` flood gate.
+- **Consequences:** `verify_login_otp` takes the client IP; a new
+  `FixedWindowLimiter.reset(key)` clears one email's window on resend; the
+  423 `retry_after` is now `otp_expires_minutes` (5), superseding the earlier
+  15-minute note in the OTP contract. The 429 UI copy is device-aware so the
+  two clocks read differently. Recovery keeps its 15-minute lock — security
+  answers don't change, so no reset applies there.
+
+### ADR-075: Password Reset Signs the User In (Except MFA)
+
+- **Decision (D75):** `POST /auth/reset-password` returns the session
+  (`TokenResponse`) instead of a 204 — the token pair, or `{mfa_pending: true,
+  preauth_token}` for MFA-enabled accounts, finished with TOTP exactly like
+  login.
+- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Context:** After the mandatory login-OTP work, a recovered user had to sign
+  in again with password + OTP on top of the recovery OTP just entered — three
+  proofs where the register flow needs one. Anyone who completes recovery
+  (security answer + single-use inbox OTP inside a short window) can complete a
+  login anyway, so the extra round is friction, not a boundary. The register
+  precedent is decisive: inbox OTP plus a brand-new credential already mints a
+  session directly, without even a security question.
+- **Alternatives considered:**
+  (1) *Keep the 204 + re-login (status quo).* Rejected: the password was set
+  seconds ago by the same flow, so retyping it proves nothing, and the fresh
+  inbox OTP adds nothing over the consumed recovery OTP — except for MFA
+  accounts, where TOTP genuinely adds a factor the recovery never sees.
+  (2) *Session for everyone including MFA (taken in part).* Rejected for MFA:
+  `verify_mfa` is the only writer that flips `mfa_enabled` True and the only
+  path back is `disable_mfa`; letting email+security-answer skip TOTP would
+  break that invariant for the accounts that opted into it.
+  (3) *Taken:* tokens for non-MFA, preauth challenge for MFA (mirrors
+  `login()`'s branch). `must_change_password` is False — the password is
+  user-chosen, not an admin temp.
+- **Consequences:** Frontend `handleStep4` calls one `doResetPassword` action
+  (reset + establish, same shape as `doRegister`) and keeps its 1.5 s success
+  beat before navigating; MFA accounts land on the login page for TOTP with
+  the password they just set — no TOTP UI added to the wizard. Mock
+  `mockResetPassword` resolves identity by email like `mockLogin`.

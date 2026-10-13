@@ -53,6 +53,23 @@ async def _seed_claim_otp(session: AsyncSession, email: str) -> None:
     await session.flush()
 
 
+async def _seed_login_otp(session: AsyncSession, email: str) -> None:
+    """Insert a known LOGIN OTP: the real one is emailed (hashed, unknowable).
+
+    The seeded row is newer than the one `login()` minted, and `verify_otp`
+    picks the newest unconsumed row, so verification consumes this code.
+    """
+    session.add(
+        OtpCodes(
+            email=email.lower(),
+            purpose=OtpPurpose.LOGIN.value,
+            otp_hash=hash_otp(OTP),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+    )
+    await session.flush()
+
+
 async def _register(
     session: AsyncSession,
     settings: Any,
@@ -140,8 +157,15 @@ async def test_register_reclaims_hard_deleted_student(
     assert orphan.is_active is True
     assert fresh.user_id == orphan.id
 
-    # New credentials work, old ones do not.
-    authed = await AuthService(test_db_session, settings).login(email, NEW_PASSWORD)
+    # New credentials work, old ones do not. Login now gates on the email
+    # OTP, so complete the second step with a seeded code.
+    pending = await AuthService(test_db_session, settings).login(email, NEW_PASSWORD)
+    assert pending.otp_pending is True
+    assert pending.otp_token is not None
+    await _seed_login_otp(test_db_session, email)
+    authed = await AuthService(test_db_session, settings).verify_login_otp(
+        pending.otp_token, OTP
+    )
     assert authed.access_token
     assert await _get_active_user(test_db_session, orphan.id) is not None
 

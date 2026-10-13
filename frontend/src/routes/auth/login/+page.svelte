@@ -9,20 +9,28 @@
 		defaultRouteFor,
 		doChangePassword,
 		doLogin,
+		doLoginOtpResend,
+		doLoginOtpVerify,
 		doMfaVerify,
 	} from '$lib/features/auth/store.svelte';
+	import { createOtpWindow } from '$lib/features/auth/store.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
+	import OtpInput from '$lib/components/OtpInput.svelte';
+	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 	import { isMockMode } from '$lib/api/client';
 
-	// 'credentials' -> 'mfa' (when the account has MFA enabled) -> 'change-password'
-	// (when an admin issued a temporary password).
-	type Stage = 'credentials' | 'mfa' | 'change-password';
+	// 'credentials' -> 'login-otp' (mandatory OTP) -> 'mfa' (admins with MFA
+	// enabled, chained after the OTP) -> 'change-password' (temporary password).
+	type Stage = 'credentials' | 'login-otp' | 'mfa' | 'change-password';
 	let stage = $state<Stage>('credentials');
 
 	let email = $state('');
 	let password = $state('');
 	let showPwd = $state(false);
 	let mfaCode = $state('');
+	let otp = $state<string[]>(['', '', '', '', '', '']);
+	let resending = $state(false);
+	let otpRound = $state(0);
 	let currentPassword = $state('');
 	let newPassword = $state('');
 	let confirmPassword = $state('');
@@ -30,6 +38,10 @@
 
 	let passwordInput: HTMLInputElement | undefined = $state();
 	let mfaInput: HTMLInputElement | undefined = $state();
+	let otpInput: import('$lib/components/OtpInput.svelte').default | undefined = $state();
+
+	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
+	const win = createOtpWindow();
 
 	// Same policy the backend enforces in shared/validators.password_strength:
 	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.
@@ -64,9 +76,14 @@
 		try {
 			const user = await doLogin(email, password);
 			if (!user) {
-				// Password accepted, second factor required.
-				stage = 'mfa';
+				// Password accepted; continue with the step the backend asked for.
+				const otpStep = authState.otpPending;
+				stage = otpStep ? 'login-otp' : 'mfa';
+				otp = ['', '', '', '', '', ''];
 				mfaCode = '';
+				if (otpStep) {
+					win.restart();
+				}
 				return;
 			}
 			await finishLogin(user);
@@ -76,6 +93,48 @@
 			// and focus it so the next attempt starts in the right place.
 			password = '';
 			passwordInput?.focus();
+		}
+	};
+
+	const handleLoginOtp = async (event: SubmitEvent) => {
+		event.preventDefault();
+		error = '';
+
+		if (otp.some((d) => !d)) {
+			error = 'Enter the 6-digit code from your email.';
+			return;
+		}
+
+		try {
+			const user = await doLoginOtpVerify(otp.join(''));
+			if (!user) {
+				// OTP verified, MFA still required (admins with MFA enabled).
+				stage = 'mfa';
+				mfaCode = '';
+				return;
+			}
+			await finishLogin(user);
+		} catch (e: unknown) {
+			error = describe(e, 'Verification failed. Please try again.');
+			// Single-use code: never leave a rejected one in the field.
+			otp = ['', '', '', '', '', ''];
+			otpInput?.focus();
+		}
+	};
+
+	const handleResendOtp = async () => {
+		error = '';
+		resending = true;
+		try {
+			await doLoginOtpResend();
+			otp = ['', '', '', '', '', ''];
+			otpRound += 1;
+			win.restart();
+			otpInput?.focus();
+		} catch (e: unknown) {
+			error = describe(e, 'Could not resend the code. Please try again.');
+		} finally {
+			resending = false;
 		}
 	};
 
@@ -179,7 +238,9 @@
 	const backToCredentials = () => {
 		stage = 'credentials';
 		error = '';
+		otp = ['', '', '', '', '', ''];
 		mfaCode = '';
+		win.stop();
 	};
 </script>
 
@@ -191,6 +252,9 @@
 			{#if stage === 'credentials'}
 				<h1>Log In</h1>
 				<p class="subtitle">Enter your registered email and password.</p>
+			{:else if stage === 'login-otp'}
+				<h1>Verify It's You</h1>
+				<p class="subtitle">Enter the 6-digit code sent to <strong>{email}</strong>.</p>
 			{:else if stage === 'mfa'}
 				<h1>Two-Factor Authentication</h1>
 				<p class="subtitle">Enter the 6-digit code for {email}.</p>
@@ -254,6 +318,28 @@
 						{:else}
 							Login
 						{/if}
+					</button>
+				</form>
+			{:else if stage === 'login-otp'}
+				<form onsubmit={handleLoginOtp}>
+					{#key otpRound}
+						<OtpInput bind:digits={otp} bind:this={otpInput} disabled={authState.loading} onChange={clearError} />
+					{/key}
+
+					<OtpCodeRow win={win} busy={resending} onresend={handleResendOtp} />
+
+					<button class="btn-primary" type="submit" disabled={authState.loading}>
+						{#if authState.loading}
+							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+								<LoadingSpinner size="sm" message="" />
+								<span>Verifying…</span>
+							</div>
+						{:else}
+							Verify
+						{/if}
+					</button>
+					<button type="button" class="link-btn block" onclick={backToCredentials}>
+						Back to sign in
 					</button>
 				</form>
 			{:else if stage === 'mfa'}
@@ -346,7 +432,7 @@
 					</span>
 				</div>
 			{/if}
-	</div>
+		</div>
 	</div>
 </main>
 

@@ -71,6 +71,8 @@ const studentTokens: TokenResponse = {
 	refresh_token: 'mock-refresh-token-student',
 	mfa_pending: false,
 	preauth_token: null,
+	otp_pending: false,
+	otp_token: null,
 	must_change_password: false,
 };
 
@@ -79,6 +81,8 @@ const professorTokens: TokenResponse = {
 	refresh_token: 'mock-refresh-token-professor',
 	mfa_pending: false,
 	preauth_token: null,
+	otp_pending: false,
+	otp_token: null,
 	must_change_password: false,
 };
 
@@ -87,6 +91,8 @@ const adminTokens: TokenResponse = {
 	refresh_token: 'mock-refresh-token-admin',
 	mfa_pending: false,
 	preauth_token: null,
+	otp_pending: false,
+	otp_token: null,
 	must_change_password: false,
 };
 
@@ -95,6 +101,8 @@ const superAdminTokens: TokenResponse = {
 	refresh_token: 'mock-refresh-token-super-admin',
 	mfa_pending: false,
 	preauth_token: null,
+	otp_pending: false,
+	otp_token: null,
 	must_change_password: false,
 };
 
@@ -105,24 +113,36 @@ let signedInAs: MeResponse = MOCK_STUDENT;
 export const mockLogin = async (email: string): Promise<TokenResponse> => {
 	const normalized = email.trim().toLowerCase();
 
+	// Mock mode mirrors the live login-OTP gate: the password step returns an
+	// otp_pending grant, and the code is accepted by mockLoginOtpVerify.
+	const pending = (tokens: TokenResponse): TokenResponse => ({
+		access_token: null,
+		refresh_token: null,
+		mfa_pending: false,
+		preauth_token: null,
+		otp_pending: true,
+		otp_token: 'mock-login-otp-token',
+		must_change_password: tokens.must_change_password,
+	});
+
 	if (normalized === MOCK_SUPER_ADMIN.email) {
 		signedInAs = MOCK_SUPER_ADMIN;
-		return delay(superAdminTokens);
+		return delay(pending(superAdminTokens));
 	}
 
 	if (normalized === MOCK_ADMIN.email) {
 		signedInAs = MOCK_ADMIN;
-		return delay(adminTokens);
+		return delay(pending(adminTokens));
 	}
 
 	if (normalized === MOCK_PROFESSOR.email) {
 		signedInAs = MOCK_PROFESSOR;
-		return delay(professorTokens);
+		return delay(pending(professorTokens));
 	}
 
 	if (normalized === MOCK_STUDENT.email) {
 		signedInAs = MOCK_STUDENT;
-		return delay(studentTokens);
+		return delay(pending(studentTokens));
 	}
 
 	throw new Error(
@@ -130,9 +150,69 @@ export const mockLogin = async (email: string): Promise<TokenResponse> => {
 	);
 };
 
+// The login-OTP step: any 6-digit code verifies, then the real token pair
+// for whoever signed in at the password step (admins with MFA chained get a
+// TOTP challenge back instead, exactly like the live backend).
+export const mockLoginOtpVerify = async (): Promise<TokenResponse> => {
+	if (signedInAs === MOCK_SUPER_ADMIN) {
+		if (signedInAs.mfa_enabled) {
+			return delay(mfaChallenge(superAdminTokens));
+		}
+		return delay(superAdminTokens);
+	}
+
+	if (signedInAs === MOCK_ADMIN) {
+		if (signedInAs.mfa_enabled) {
+			return delay(mfaChallenge(adminTokens));
+		}
+		return delay(adminTokens);
+	}
+
+	return delay(signedInAs === MOCK_PROFESSOR ? professorTokens : studentTokens);
+};
+
+// An MFA challenge after a passed OTP — preauth gate for TOTP.
+const mfaChallenge = (tokens: TokenResponse): TokenResponse => ({
+	access_token: null,
+	refresh_token: null,
+	mfa_pending: true,
+	preauth_token: 'mock-preauth-token',
+	otp_pending: false,
+	otp_token: null,
+	must_change_password: tokens.must_change_password,
+});
+
 export const mockRegister = async (): Promise<TokenResponse> => {
 	signedInAs = MOCK_STUDENT;
 	return delay(studentTokens);
+};
+
+// Step 4 mirrors the live contract: the reset itself signs the account in,
+// so resolve the identity by email exactly like mockLogin does. No mock
+// account has MFA on today, but the challenge branch stays for parity with
+// mockLoginOtpVerify — flipping one on must not silently mint a session.
+export const mockResetPassword = async (email: string): Promise<TokenResponse> => {
+	const normalized = email.trim().toLowerCase();
+
+	if (normalized === MOCK_SUPER_ADMIN.email) signedInAs = MOCK_SUPER_ADMIN;
+	else if (normalized === MOCK_ADMIN.email) signedInAs = MOCK_ADMIN;
+	else if (normalized === MOCK_PROFESSOR.email) signedInAs = MOCK_PROFESSOR;
+	else if (normalized === MOCK_STUDENT.email) signedInAs = MOCK_STUDENT;
+	else {
+		throw new Error(
+			`Unknown mock account. Use ${MOCK_SUPER_ADMIN.email}, ${MOCK_ADMIN.email}, ${MOCK_PROFESSOR.email}, or ${MOCK_STUDENT.email} with any password.`
+		);
+	}
+
+	if (signedInAs === MOCK_SUPER_ADMIN) {
+		if (signedInAs.mfa_enabled) return delay(mfaChallenge(superAdminTokens));
+		return delay(superAdminTokens);
+	}
+	if (signedInAs === MOCK_ADMIN) {
+		if (signedInAs.mfa_enabled) return delay(mfaChallenge(adminTokens));
+		return delay(adminTokens);
+	}
+	return delay(signedInAs === MOCK_PROFESSOR ? professorTokens : studentTokens);
 };
 
 export const mockMe = async (): Promise<MeResponse> => delay(signedInAs);

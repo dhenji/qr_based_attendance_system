@@ -17,6 +17,9 @@ import {
 	login,
 	me,
 	register,
+	resendLoginOtp,
+	resetPassword,
+	verifyLoginOtp,
 	verifyMfa,
 } from '$lib/features/auth/service';
 import {
@@ -41,6 +44,13 @@ export const authState = $state({
 	mfaPending: false,
 	// Single-use token that /auth/mfa/verify exchanges for a real session.
 	preauthToken: null as string | null,
+	// True when the password step passed but the emailed login OTP is still
+	// required. Students/professors with MFA never see this — their TOTP path
+	// mfaPending above replaces the email step.
+	otpPending: false,
+	// Single-use grant that /auth/login/verify exchanges for tokens (or an
+	// MFA challenge, for admins with MFA). Never touches storage.
+	otpToken: null as string | null,
 	mustChangePassword: false,
 	error: null as string | null,
 });
@@ -115,6 +125,8 @@ const reset = () => {
 	authState.status = 'anonymous';
 	authState.mfaPending = false;
 	authState.preauthToken = null;
+	authState.otpPending = false;
+	authState.otpToken = null;
 	authState.mustChangePassword = false;
 	authState.error = null;
 };
@@ -199,13 +211,24 @@ export const restoreSession = (): Promise<User | null> => {
 // Actions
 //
 // doLogin resolves to the signed-in user, or to null when the password was
-// accepted but a second factor is still required (authState.mfaPending is then
-// true and holds the preauth token). Real failures reject.
+// accepted but a second factor is still required: either the emailed OTP
+// (authState.otpPending holds the grant) or MFA (authState.mfaPending holds
+// the preauth token). Real failures reject.
 export const doLogin = async (email: string, password: string): Promise<User | null> => {
 	authState.error = null;
 	return withLoading(async () => {
 		try {
 			const tokens = await login(email, password);
+
+			if (tokens.otp_pending) {
+				// Password accepted but the emailed OTP is still required. Hold the
+				// grant and let the caller collect the code; there is no session yet.
+				clearTokens();
+				authState.otpPending = true;
+				authState.otpToken = tokens.otp_token;
+				authState.status = 'anonymous';
+				return null;
+			}
 
 			if (tokens.mfa_pending) {
 				// Password accepted but a second factor is required. Hold the preauth
@@ -220,6 +243,50 @@ export const doLogin = async (email: string, password: string): Promise<User | n
 			return await establishSession(tokens);
 		} catch (error: unknown) {
 			authState.error = toMessage(error, 'Login failed. Please try again.');
+			throw error;
+		}
+	});
+};
+
+// Complete the login-OTP step. Resolves to the signed-in user, or to null
+// when the code verified but an MFA challenge follows (admins with MFA
+// enabled); authState.mfaPending is then true and holds the preauth token.
+export const doLoginOtpVerify = async (code: string): Promise<User | null> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			const tokens = await verifyLoginOtp(authState.otpToken ?? '', code);
+
+			if (tokens.mfa_pending) {
+				// OTP done, TOTP now: swap the OTP grant for the preauth one and let
+				// the MFA stage of the wizard finish the sign-in.
+				authState.otpPending = false;
+				authState.otpToken = null;
+				authState.mfaPending = true;
+				authState.preauthToken = tokens.preauth_token;
+				authState.status = 'anonymous';
+				return null;
+			}
+
+			authState.otpPending = false;
+			authState.otpToken = null;
+			return await establishSession(tokens);
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Verification failed. Please try again.');
+			throw error;
+		}
+	});
+};
+
+// Ask for a fresh login OTP. The previous code is burned server-side, so the
+// countdown restarts and any typed digits are cleared by the caller.
+export const doLoginOtpResend = async (): Promise<void> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			await resendLoginOtp(authState.otpToken ?? '');
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Could not resend the code. Please try again.');
 			throw error;
 		}
 	});
@@ -254,6 +321,38 @@ export const doRegister = async (input: {
 			return await establishSession(await register(input));
 		} catch (error: unknown) {
 			authState.error = toMessage(error, 'Registration failed. Please try again.');
+			throw error;
+		}
+	});
+};
+
+// Complete a forgot-password reset. Step 4 returns the session directly
+// (like registration, not like login): the recovery already proved inbox
+// access plus the security answer, so no second login dance. Resolves to the
+// signed-in user, or to null when the account has MFA enabled —
+// authState.mfaPending then holds the preauth token and the caller sends the
+// user to the login page for their TOTP challenge.
+export const doResetPassword = async (
+	email: string,
+	otpCode: string,
+	newPassword: string
+): Promise<User | null> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			const tokens = await resetPassword(email, otpCode, newPassword);
+
+			if (tokens.mfa_pending) {
+				clearTokens();
+				authState.mfaPending = true;
+				authState.preauthToken = tokens.preauth_token;
+				authState.status = 'anonymous';
+				return null;
+			}
+
+			return await establishSession(tokens);
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Password reset failed. Please try again.');
 			throw error;
 		}
 	});
@@ -325,3 +424,62 @@ export const doMfaDisable = async (password: string): Promise<void> => {
 		}
 	});
 };
+
+// ============================================================================
+// OTP window composable — shared by login, register, forgot-password
+// ============================================================================
+
+export const CODE_TTL_SECONDS = 300;
+export const RESEND_COOLDOWN_SECONDS = 60;
+
+export interface OtpWindow {
+	readonly remaining: number;
+	readonly resendIn: number;
+	restart(): void;
+	stop(): void;
+}
+
+export function createOtpWindow(
+	codeTtl = CODE_TTL_SECONDS,
+	cooldown = RESEND_COOLDOWN_SECONDS
+): OtpWindow {
+	let remaining = $state(codeTtl);
+	let resendIn = $state(cooldown);
+	let id: number | null = null;
+
+	const stop = () => {
+		if (id !== null) {
+			window.clearInterval(id);
+			id = null;
+		}
+	};
+
+	const restart = () => {
+		stop();
+		remaining = CODE_TTL_SECONDS;
+		resendIn = RESEND_COOLDOWN_SECONDS;
+		id = window.setInterval(() => {
+			remaining -= 1;
+			if (resendIn > 0) resendIn -= 1;
+			if (remaining <= 0 && resendIn <= 0) stop();
+		}, 1000);
+	};
+
+	return {
+		get remaining() {
+			return remaining;
+		},
+		get resendIn() {
+			return resendIn;
+		},
+		restart,
+		stop,
+	};
+}
+
+export function formatClock(seconds: number): string {
+	const t = Math.max(seconds, 0);
+	const m = Math.floor(t / 60);
+	const s = t % 60;
+	return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}

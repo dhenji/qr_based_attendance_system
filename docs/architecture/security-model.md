@@ -78,6 +78,7 @@ Student scans QR or types code → server verifies
 - Access token: 15-minute expiry
 - Refresh token: 7-day expiry, returned in `TokenResponse` body (D51); httpOnly cookie form deferred to Phase 10 (same-origin HTTPS)
 - MFA login gating (D51): if `user.mfa_enabled`, `POST /auth/login` returns `{mfa_pending: true, preauth_token}` (5-min JWT `type="preauth"`, grants no access); `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for full token pair
+- Login OTP (mandatory second factor): a password-OK login returns `{otp_pending: true, otp_token}` (5-min JWT `type="login_otp"`, grants no access) plus a 6-digit emailed code, except students/professors with MFA who keep the TOTP path; `POST /auth/login/verify` exchanges the grant + code for tokens (admins with MFA get an MFA challenge instead: OTP then TOTP). Wrong codes capped at 3 per email inside the 5-min OTP window (then 423 `login_otp_locked`); a second failure-only cap of 15 misses per client IP (then 429) survives email rotation. A resend mints a fresh code and resets the email budget only. Expired codes and successes spend neither budget
 - Forgot-password (ADR-052, supersedes D51's OTP-only deferral): mandatory 4-step — email → security question (Argon2id-hashed answer, 3-attempt cap then lock) → OTP via `OtpPurpose.FORGET_PASSWORD` → new password. Turnstile on step 1 was deferred in ADR-052; it is now implemented as key-gated siteverify (ADR-053).
 - Recovery-flow hardening (ADR-056):
   - **Step 1 does not leak account existence.** Unknown emails receive a *deterministic* decoy question (HMAC of the normalized email over `SECURITY_QUESTION_POOL`) and `set: true`, so a given address always returns the same question and the response shape matches the known-email case. This mitigates enumeration rather than eliminating it — the decoy text differs from a real question. Emailing the question instead of returning it would close the gap; deferred.
@@ -227,8 +228,11 @@ weakened one, none.
 
 `shared/rate_limit.py` is a fixed-window limiter keyed on `request.url.path` plus either the
 client IP or the normalized email in the JSON body. Exhausting a window raises 429
-`rate_limited`. `X-Forwarded-For` is deliberately **not** trusted, so a deployment behind a proxy
-rates by the proxy's address unless the limiter is given `key="email"`.
+`rate_limited`. The client IP resolves through `client_ip()`: the direct peer by
+default, or the leftmost `X-Forwarded-For` entry — but only when the peer itself
+is inside the configured `TRUSTED_PROXY_CIDRS`, otherwise any client could pick
+its own bucket. With that setting empty (the default), a deployment behind a
+proxy rates IP-keyed buckets by the proxy's address.
 
 | Route | Key | Limit | Window | Note |
 | --- | --- | --- | --- | --- |
@@ -237,6 +241,8 @@ rates by the proxy's address unless the limiter is given `key="email"`.
 | `POST /auth/forgot-password` | email | 5 | 60s | |
 | `POST /auth/forgot-password/verify` | email | 5 | 300s | Answer brute-force |
 | `POST /auth/login` | **ip + email** | 20 + 5 | 60s | Two limiters on one route: 20/IP alongside the email-keyed 5 |
+| `POST /auth/login/verify` | ip | 20 | 60s | Flood gate only — counts successes too. The attempt caps live in the service, failure-only: 3/email/300s (423) + 15/IP/300s (429, survives email rotation) |
+| `POST /auth/login/resend` | ip | 5 | 60s | Same keying note; each resend burns the previous code and resets the email's wrong-code budget (not the IP one) |
 | `POST /admin/analytics/refresh-risk` | ip | 1 | 60s | Manual trigger, per-IP |
 | `POST /student/sessions/verify-code` | ip | 10 | 60s | T7 — brute-force guard on the only unauthenticated-code probe (closes #191) |
 | `POST /student/attendance/scan` | ip | 30 | 60s | `SCAN_RATE_LIMIT_MAX_CALLS` / `_WINDOW_SECONDS`; skipped under `BENCHMARK_MODE` |

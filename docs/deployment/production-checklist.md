@@ -37,6 +37,7 @@
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | Yes      | `7`                        | Or per policy                                                 |
 | `HMAC_SECRET_KEY`                | Yes      | `openssl rand -base64 32`  | For session code signing                                      |
 | `CORS_ORIGINS`                   | Yes      | Vercel frontend URL        | `https://attendance-system.vercel.app`                                 |
+| `TRUSTED_PROXY_CIDRS`          | If behind proxy | LB/ingress CIDRs, comma-separated | Empty = trust nothing (dev default). Behind an ingress with this empty, every IP-keyed rate limit is shared deployment-wide — see §3 |
 | `BACKUP_ENCRYPTION_KEY`          | Yes      | `openssl rand -base64 32`  | AES-256-GCM key                                               |
 | `BACKUP_ENCRYPTION_KEY_VERSION`  | Yes      | `1`                        | Increment on key rotation                                     |
 | `BACKUP_STORAGE_TYPE`            | Yes      | `local` or `s3`            | `local` for dev, `s3` for prod                                |
@@ -140,6 +141,21 @@ curl -I -X OPTIONS https://attendance-system-api.fly.dev/health \
 
 > **Note:** Turnstile integration is optional. If not used, remove these vars and
 > ensure rate limiting and account lockout provide adequate bot protection (D25).
+
+### Reverse Proxy / Client IP
+
+| Item                  | Check                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `TRUSTED_PROXY_CIDRS` | Set to the ingress/LB CIDRs when behind a proxy; empty otherwise                                   |
+| Rate-limit keying     | IP-keyed buckets (`/auth/login*`, scan, risk-refresh) resolve per client, not per proxy            |
+
+All rate limits and Turnstile `remoteip` resolve through `client_ip()`: the direct
+peer by default, or the leftmost `X-Forwarded-For` entry **only** when the peer
+itself is inside `TRUSTED_PROXY_CIDRS`. An untrusted peer's header is always
+ignored, so a client cannot pick its own bucket. With the setting empty behind a
+balancer, every IP-keyed bucket collapses onto the balancer's address — 20
+logins/min and 15 OTP failures/5 min **deployment-wide**. The per-email caps
+(`423`) stay correct regardless of proxying.
 
 ### Face Embedding Security
 
@@ -427,6 +443,32 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 | 11  | Student scan          | POST `/student/attendance/scan` | 200 + status                |
 | 12  | Backup trigger        | POST `/admin/backups`       | 202 Accepted                    |
 | 13  | Backup log            | Query `backup_log`          | New entry with `status=completed` |
+| 14  | Flood gate live       | 21 rapid `POST /auth/login/verify` | Twenty `400`s, then `429` |
+| 15  | Proxy header ignored  | Same burst with forged `X-Forwarded-For` from an untrusted network | Same `429` at the same count |
+
+```bash
+# 14 — the verify flood gate fires (garbage grants return 400 fast, but the
+# dependency budget is still consumed, so the 21st request trips the gate):
+for i in $(seq 1 21); do
+  curl -s -o /dev/null -w "%{http_code} " -X POST \
+    https://attendance-system-api.fly.dev/auth/login/verify \
+    -H "Content-Type: application/json" \
+    -d '{"otp_token":"x","code":"000000"}'
+done; echo
+# Expected: twenty 400s, then a 429
+
+# 15 — a forged header from outside the trusted CIDRs must not dodge it:
+for i in $(seq 1 21); do
+  curl -s -o /dev/null -w "%{http_code} " -X POST \
+    https://attendance-system-api.fly.dev/auth/login/verify \
+    -H "Content-Type: application/json" \
+    -H "X-Forwarded-For: 1.2.3.4" \
+    -d '{"otp_token":"x","code":"000000"}'
+done; echo
+# Expected: identical — the 429 lands at the same count, keyed on your IP.
+# (Run this from a network OUTSIDE TRUSTED_PROXY_CIDRS; from inside, the
+# header is legitimately honoured.)
+```
 
 ### Performance Baseline
 
