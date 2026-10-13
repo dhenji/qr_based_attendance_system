@@ -228,8 +228,11 @@ weakened one, none.
 
 `shared/rate_limit.py` is a fixed-window limiter keyed on `request.url.path` plus either the
 client IP or the normalized email in the JSON body. Exhausting a window raises 429
-`rate_limited`. `X-Forwarded-For` is deliberately **not** trusted, so a deployment behind a proxy
-rates by the proxy's address unless the limiter is given `key="email"`.
+`rate_limited`. The client IP resolves through `client_ip()`: the direct peer by
+default, or the leftmost `X-Forwarded-For` entry — but only when the peer itself
+is inside the configured `TRUSTED_PROXY_CIDRS`, otherwise any client could pick
+its own bucket. With that setting empty (the default), a deployment behind a
+proxy rates IP-keyed buckets by the proxy's address.
 
 | Route | Key | Limit | Window | Note |
 | --- | --- | --- | --- | --- |

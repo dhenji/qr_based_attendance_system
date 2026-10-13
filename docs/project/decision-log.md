@@ -1805,3 +1805,36 @@
   15-minute note in the OTP contract. The 429 UI copy is device-aware so the
   two clocks read differently. Recovery keeps its 15-minute lock — security
   answers don't change, so no reset applies there.
+
+### ADR-075: Password Reset Signs the User In (Except MFA)
+
+- **Decision (D75):** `POST /auth/reset-password` returns the session
+  (`TokenResponse`) instead of a 204 — the token pair, or `{mfa_pending: true,
+  preauth_token}` for MFA-enabled accounts, finished with TOTP exactly like
+  login.
+- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Context:** After the mandatory login-OTP work, a recovered user had to sign
+  in again with password + OTP on top of the recovery OTP just entered — three
+  proofs where the register flow needs one. Anyone who completes recovery
+  (security answer + single-use inbox OTP inside a short window) can complete a
+  login anyway, so the extra round is friction, not a boundary. The register
+  precedent is decisive: inbox OTP plus a brand-new credential already mints a
+  session directly, without even a security question.
+- **Alternatives considered:**
+  (1) *Keep the 204 + re-login (status quo).* Rejected: the password was set
+  seconds ago by the same flow, so retyping it proves nothing, and the fresh
+  inbox OTP adds nothing over the consumed recovery OTP — except for MFA
+  accounts, where TOTP genuinely adds a factor the recovery never sees.
+  (2) *Session for everyone including MFA (taken in part).* Rejected for MFA:
+  `verify_mfa` is the only writer that flips `mfa_enabled` True and the only
+  path back is `disable_mfa`; letting email+security-answer skip TOTP would
+  break that invariant for the accounts that opted into it.
+  (3) *Taken:* tokens for non-MFA, preauth challenge for MFA (mirrors
+  `login()`'s branch). `must_change_password` is False — the password is
+  user-chosen, not an admin temp.
+- **Consequences:** Frontend `handleStep4` calls one `doResetPassword` action
+  (reset + establish, same shape as `doRegister`) and keeps its 1.5 s success
+  beat before navigating; MFA accounts land on the login page for TOTP with
+  the password they just set — no TOTP UI added to the wizard. Mock
+  `mockResetPassword` resolves identity by email like `mockLogin`.

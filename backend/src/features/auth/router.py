@@ -27,7 +27,7 @@ from features.auth.schema import (
     TokenResponse,
 )
 from shared.captcha import verify_turnstile_token
-from shared.rate_limit import rate_limit
+from shared.rate_limit import client_ip, rate_limit
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
 router = APIRouter(prefix="/auth")
@@ -88,7 +88,7 @@ async def login(
 ) -> TokenResponse:
     await verify_turnstile_token(
         payload.turnstile_token,
-        client_ip=request.client.host if request.client is not None else None,
+        client_ip=client_ip(request),
     )
 
     return await service.login(payload.email, payload.password)
@@ -114,7 +114,7 @@ async def login_verify(
     return await service.verify_login_otp(
         payload.otp_token,
         payload.code,
-        request.client.host if request.client is not None else None,
+        client_ip(request),
     )
 
 
@@ -148,7 +148,7 @@ async def forgot_password(
 ) -> SecurityQuestionResponse:
     await verify_turnstile_token(
         payload.turnstile_token,
-        client_ip=request.client.host if request.client is not None else None,
+        client_ip=client_ip(request),
     )
 
     return await service.forgot_password(payload.email)
@@ -169,14 +169,16 @@ async def forgot_password_verify(
 
 @router.post(
     "/reset-password",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Reset password with OTP",
+    response_model=TokenResponse,
+    summary="Reset password with OTP (returns the session, or an MFA challenge)",
 )
 async def reset_password(
     payload: ResetPasswordRequest,
     service: AuthServiceDep,
-) -> None:
-    await service.reset_password(payload.email, payload.otp_code, payload.new_password)
+) -> TokenResponse:
+    return await service.reset_password(
+        payload.email, payload.otp_code, payload.new_password
+    )
 
 
 @router.post(

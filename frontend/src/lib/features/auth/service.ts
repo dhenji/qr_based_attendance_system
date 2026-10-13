@@ -33,6 +33,7 @@ import {
 	mockMfaVerify,
 	mockNoop,
 	mockRegister,
+	mockResetPassword,
 } from '$lib/features/auth/mock';
 
 // Send a 6-digit OTP. `claim` proves ownership of a roster email before the
@@ -208,7 +209,8 @@ export const changePassword = async (currentPassword: string, newPassword: strin
 //  1. forgotPassword(email) -> { question } (decoy for unknown emails).
 //  2. forgotPasswordVerify(email, answer) -> { recovery_token } (5-min grant).
 //  3. requestOtp(email, 'forget_password', recoveryToken) + verifyOtp.
-//  4. resetPassword(email, otpCode, newPassword) -> 204.
+//  4. resetPassword(email, otpCode, newPassword) -> TokenResponse (the
+//     session itself, or an MFA challenge for MFA-enabled accounts).
 // Throws APIError: 'security_answer_invalid' (400), 'recovery_locked' (423),
 // 'otp_invalid' / 'otp_expired' (400), 'unrecognized_email' (404),
 // 'password_policy_violation' (422), 'invalid_captcha' (400).
@@ -242,10 +244,10 @@ export const resetPassword = async (
 	email: string,
 	otpCode: string,
 	newPassword: string
-): Promise<void> => {
-	if (isMockMode()) return mockNoop();
+): Promise<TokenResponse> => {
+	if (isMockMode()) return mockResetPassword(email);
 
-	await post<void>('authResetPassword', {
+	return post<TokenResponse>('authResetPassword', {
 		email: email.trim().toLowerCase(),
 		otp_code: otpCode.trim(),
 		new_password: newPassword

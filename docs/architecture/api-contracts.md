@@ -1318,7 +1318,7 @@ lock after 5 failed attempts.
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
 | POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
@@ -1373,8 +1373,13 @@ email, and a 5-minute expiry. Step 3 will not mint a `forget_password` OTP witho
 a valid grant — a missing, malformed, expired, or email-mismatched grant returns
 `400 invalid_credentials` with a generic message, so the gate is not itself
 probeable. The grant is rejected by the access-token dependency (it carries a
-`type` claim) and so cannot be replayed for API access. `/auth/reset-password` is
-unchanged.
+`type` claim) and so cannot be replayed for API access. `/auth/reset-password`
+(step 4) consumes the OTP and returns the session directly — a `TokenResponse`
+with the token pair, or `{mfa_pending: true, preauth_token}` for MFA-enabled
+accounts (same shape as login, finished with TOTP). Like registration, there
+is no second login dance: recovery already proved inbox access plus the
+security answer, and `must_change_password` is False because the password is
+user-chosen, not admin-issued.
 
 **Security-question storage (ADR-056):** only the **answer** is hashed
 (`users.security_answer_hash`, Argon2id). `users.security_question_hash` stores the
