@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import {
-		exportSessionHistoryCsv,
+		exportSessionHistoryCsvWithFallback,
 		getSchedule,
 		getSessionHistory,
 		listStudentExcuses,
@@ -309,28 +309,18 @@
 		exportNote = null;
 		try {
 			const status = filterStatus !== 'All' ? (filterStatus.toLowerCase() as Status) : undefined;
-			let csv: string;
-			try {
-				csv = await exportSessionHistoryCsv({
+			const { csv, fromFallback } = await exportSessionHistoryCsvWithFallback(
+				{
 					status,
 					courseId: courseIdForExport,
 					sortBy: sortKey,
 					sortDir: sortAsc ? 'asc' : 'desc',
-				});
-			} catch (e) {
-				// getText has no mock path — fall back to the rows on screen
-				// in mock/offline mode instead of always erroring.
-				if (e instanceof APIError && e.code === 'mock_mode') {
-					const header = 'date,course,course_name,status,time,scanned_at';
-					const lines = filtered.map((r) =>
-						[r.date, r.course, `"${r.courseName.replace(/"/g, '""')}"`, r.status, r.time, r.scannedAt].join(',')
-					);
-					csv = [header, ...lines].join('\n');
-					exportNote =
-						'Mock mode: exported the rows on screen (server CSV is unavailable without a backend).';
-				} else {
-					throw e;
-				}
+				},
+				filtered
+			);
+			if (fromFallback) {
+				exportNote =
+					'Mock mode: exported the rows on screen (server CSV is unavailable without a backend).';
 			}
 
 			// Header-only means the filter matched nothing, which is worth saying

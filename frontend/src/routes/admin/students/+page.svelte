@@ -30,6 +30,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Student Management (wireframe 4.2): search + status filter + sortable
 	// table + pagination over GET /admin/students. Deactivate flips
@@ -490,7 +491,7 @@
 			await refreshAdminStudents();
 			notifyEntityChanged('students');
 		} catch (e: unknown) {
-			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
 			formBusy = false;
 		}

@@ -13,18 +13,18 @@
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 
 	// Forgot-password recovery (ADR-056), live against the backend:
-	//  1. POST /auth/forgot-password {email} -> {question} (decoy for unknown
-	//     emails — always render it, never hint at account existence).
+	//  1. POST /auth/forgot-password {email, turnstile_token?} -> {question}
+	//     (decoy for unknown emails — always render it, never hint at account
+	//     existence; turnstile_token omitted when unconfigured).
 	//  2. POST /auth/forgot-password/verify {email, answer} -> recovery_token
 	//     (5-min grant held in memory; 423 recovery_locked on lockout).
 	//  3. OTP request (grant-gated); the code is collected here and verified
 	//     + consumed exactly once, by the reset call at step 4 (ADR-056).
-	//  4. POST /auth/reset-password {email, otp_code, new_password}.
+	//  4. POST /auth/reset-password {email, otp_code, new_password}
+	//     -> TokenResponse (session or MFA challenge).
 	//  5. On success, auto-login with the new password and land on the role
 	//     dashboard (mfa_pending or a login failure falls back to the login
 	//     page).
-	// No Turnstile widget exists yet — turnstile_token is sent null and the
-	// backend no-ops when its secret is empty.
 
 	let step = $state(1);
 	let email = $state('');
@@ -71,7 +71,14 @@
 	};
 
 	const toMessage = (e: unknown, fallback: string): string => {
-		if (e instanceof APIError && e.code === 'recovery_locked') return e.message;
+		if (e instanceof APIError && e.code === 'recovery_locked') {
+			const match = e.message.match(/try again in (\d+)\s*minute/i);
+			if (match) {
+				const minutes = match[1];
+				return `Too many recovery attempts. Try again in ${minutes} minute${minutes === '1' ? '' : 's'}.`;
+			}
+			return e.message;
+		}
 		if (e instanceof APIError && e.code === 'security_answer_invalid')
 			return 'Incorrect answer. Check your security answer and try again.';
 		if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired'))
@@ -312,7 +319,7 @@
 					</div>
 
 					{#if success}
-						<div class="success-banner">Password updated. Redirecting to login.</div>
+						<div class="success-banner">Password updated. Signing you in…</div>
 					{/if}
 
 					<div class="req-list">

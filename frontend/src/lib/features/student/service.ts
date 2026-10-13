@@ -6,7 +6,7 @@
 // GET /student/attendance/history. Scan delegates to
 // features/liveness/service.ts in real mode.
 
-import { get, getText, isMockMode, post, TEXT_EXPORTS } from '$lib/api/client';
+import { APIError, get, getText, isMockMode, post, TEXT_EXPORTS } from '$lib/api/client';
 import type {
 	Paginated,
 	StudentExcuseItemResponse,
@@ -201,6 +201,44 @@ export const exportSessionHistoryCsv = async (
 	params: StudentHistoryFilters = {}
 ): Promise<string> => getText(TEXT_EXPORTS.studentHistory, historyQuery(params, { paginate: false }));
 
+// Mock-mode fallback builder: getText throws `mock_mode` without a backend,
+// so the history page renders this from the rows on screen instead. Kept here
+// (not in the route) so transport codes never leak into page logic beyond a
+// single isMockMode branch.
+export const buildHistoryFallbackCsv = (
+	rows: Array<{ date: string; course: string; courseName: string; status: string; time: string; scannedAt: string }>
+): string => {
+	const header = 'date,course,course_name,status,time,scanned_at';
+	const lines = rows.map((r) =>
+		[r.date, r.course, `"${r.courseName.replace(/"/g, '""')}"`, r.status, r.time, r.scannedAt].join(',')
+	);
+	return [header, ...lines].join('\n');
+};
+
+// Mock-mode export with fallback: tries the server CSV first, falls back to
+// the on-screen rows when getText throws `mock_mode`. Live failures still
+// throw so the page surfaces them.
+export const exportSessionHistoryCsvWithFallback = async (
+	params: StudentHistoryFilters = {},
+	fallbackRows: Array<{
+		date: string;
+		course: string;
+		courseName: string;
+		status: string;
+		time: string;
+		scannedAt: string;
+	}> = []
+): Promise<{ csv: string; fromFallback: boolean }> => {
+	try {
+		return { csv: await exportSessionHistoryCsv(params), fromFallback: false };
+	} catch (e) {
+		if (e instanceof APIError && e.code === 'mock_mode') {
+			return { csv: buildHistoryFallbackCsv(fallbackRows), fromFallback: true };
+		}
+		throw e;
+	}
+};
+
 export const getDashboard = async (): Promise<StudentDashboardResponse> => {
 	return get<StudentDashboardResponse>('studentDashboard');
 };
@@ -271,9 +309,10 @@ export const listStudentExcuses = async (
 };
 
 // Attendance scan
-// Mock mode randomizes the outcome so every UI branch (present/late/rejected)
-// can be exercised. Real mode delegates to features/liveness/service.ts
-// (POST /student/attendance/scan) so there is exactly one live scan path.
+// Mock mode is deterministic (seeded by session + student number) so every UI
+// branch (present/late/rejected) is exercisable without flakiness. Real mode
+// delegates to features/liveness/service.ts (POST /student/attendance/scan)
+// so there is exactly one live scan path.
 export const submitScan = async (scanData: {
 	sessionId: number;
 	qrStudentNumber: string;
@@ -285,9 +324,14 @@ export const submitScan = async (scanData: {
 	const statuses = ['present', 'late', 'rejected'] as const;
 
 	if (isMockMode()) {
+		const seed = `${scanData.sessionId}:${scanData.qrStudentNumber.trim().toUpperCase()}`;
+		let hash = 0;
+		for (let i = 0; i < seed.length; i += 1) {
+			hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+		}
 		return {
-			attendance_id: Math.floor(Math.random() * 10000) + 1,
-			status: statuses[Math.floor(Math.random() * statuses.length)],
+			attendance_id: (hash % 9000) + 1000,
+			status: statuses[hash % statuses.length],
 			scanned_at: scanData.scannedAt,
 			expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
 		};

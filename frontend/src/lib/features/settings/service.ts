@@ -1,6 +1,7 @@
 // features/settings/service.ts
-// Mock-first settings prefs persisted in localStorage (no backend yet).
-// Follows the auth/security.ts localStorage pattern; swap for API calls later.
+// Device-only display/behaviour prefs persisted in localStorage (no backend
+// by design — theme, notifications, GPS/camera toggles are per-device, not
+// per-account, so they intentionally never leave the browser).
 
 import { browser } from '$app/environment';
 

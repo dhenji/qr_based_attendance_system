@@ -48,7 +48,9 @@ export const offeringCreateSchema = z
 		schedule_days: z.string().trim().toUpperCase().min(1).max(10),
 		schedule_start_time: timeField,
 		schedule_end_time: timeField,
-		course_type: z.enum(['lecture', 'lab']),
+		// Local-only label: optional with a lecture default so the form never
+		// blocks on a value the backend does not persist.
+		course_type: z.enum(['lecture', 'lab']).optional().default('lecture'),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()

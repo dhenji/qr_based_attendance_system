@@ -24,6 +24,21 @@ const DELETE_ERROR_MESSAGES: Record<string, string> = {
 		'Cannot delete this year level — course offerings still use it. Move or delete those first.',
 };
 
+// 409 conflict codes surfaced by create/update/archive/toggle writes. Same
+// rule as deletes: never render the raw backend message (row ids, codes).
+const ACTION_ERROR_MESSAGES: Record<string, string> = {
+	...DELETE_ERROR_MESSAGES,
+	user_exists: 'An account already exists for that email. Try a different email.',
+	admin_user_email_exists: 'An account already exists for that email. Try a different email.',
+	student_id_exists: 'That student ID is already in use. Check the roster and try again.',
+	student_email_exists: 'That email is already on the roster. Try a different email.',
+	professor_email_exists: 'That email is already on the roster. Try a different email.',
+	course_code_exists: 'That course code already exists. Pick a different code.',
+	offering_exists: 'That offering already exists for this term. Adjust the schedule or term.',
+	program_code_exists: 'That program code already exists. Pick a different code.',
+	year_number_exists: 'That year level already exists for this program.',
+};
+
 // Map a delete failure to user-facing copy. Known backend `code`s return the
 // friendly string above; unknown APIErrors fall back (raw messages can carry
 // status codes and row ids, so they are never shown); non-API errors keep
@@ -31,6 +46,18 @@ const DELETE_ERROR_MESSAGES: Record<string, string> = {
 export const friendlyDeleteError = (e: unknown, fallback: string): string => {
 	if (e instanceof APIError) {
 		if (e.code && DELETE_ERROR_MESSAGES[e.code]) return DELETE_ERROR_MESSAGES[e.code];
+		return fallback;
+	}
+	return e instanceof Error && e.message ? e.message : fallback;
+};
+
+// Map any archive/toggle/create/update failure to user-facing copy. Covers
+// the delete codes plus 409 conflict codes (user_exists,
+// course_code_exists, offering_exists, …) so pages never render raw
+// `e.message` for known backend codes.
+export const friendlyActionError = (e: unknown, fallback: string): string => {
+	if (e instanceof APIError) {
+		if (e.code && ACTION_ERROR_MESSAGES[e.code]) return ACTION_ERROR_MESSAGES[e.code];
 		return fallback;
 	}
 	return e instanceof Error && e.message ? e.message : fallback;

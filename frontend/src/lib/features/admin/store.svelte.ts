@@ -24,7 +24,7 @@ import {
 	setProfessorActive,
 	setStudentActive,
 } from '$lib/features/admin/service';
-import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
+import { friendlyDeleteError, friendlyActionError } from '$lib/shared/utils/deleteErrors';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export const adminStudentsState = $state({
@@ -50,7 +50,7 @@ export const adminProfessorsState = $state({
 });
 
 const toMessage = (e: unknown, fallback: string) =>
-	e instanceof Error && e.message ? e.message : fallback;
+	friendlyActionError(e, e instanceof Error && e.message ? e.message : fallback);
 
 export const initAdminStudents = async (
 	filters: AdminStudentFilters = {},

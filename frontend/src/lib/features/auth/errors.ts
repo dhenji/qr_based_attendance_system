@@ -26,9 +26,14 @@ const MESSAGES: Record<string, string> = {
 	otp_expired: 'That code has expired. Request a new one.',
 	login_otp_locked:
 		'Too many incorrect codes. Wait a few minutes before trying again, or start over.',
+	recovery_locked:
+		'Too many recovery attempts. Wait a few minutes before trying again.',
 
 	invalid_mfa_code: 'Invalid verification code.',
 	mfa_already_enabled: 'Two-factor authentication is already enabled.',
+	mfa_not_enabled: 'Two-factor authentication is not enabled for this account.',
+
+	security_answer_invalid: 'Incorrect answer. Check your security answer and try again.',
 
 	password_policy_violation: 'Password does not meet the required policy.',
 	password_reused: 'New password must be different from your current one.',
@@ -59,13 +64,21 @@ export const toAuthMessage = (error: unknown, fallback: string): string => {
 		// thing a locked-out user needs to know. Parse the count out of the
 		// backend message and keep the generic line as a fallback (mock mode,
 		// drifted wording).
-		if (error.code === 'account_locked') {
+		if (
+			error.code === 'account_locked' ||
+			error.code === 'login_otp_locked' ||
+			error.code === 'recovery_locked'
+		) {
 			const match = error.message.match(LOCKOUT_MINUTES);
 			if (match) {
 				const minutes = match[1];
-				return `This account is temporarily locked. Try again in ${minutes} minute${minutes === '1' ? '' : 's'}.`;
+				if (error.code === 'account_locked') {
+					return `This account is temporarily locked. Try again in ${minutes} minute${minutes === '1' ? '' : 's'}.`;
+				}
+				return `${MESSAGES[error.code] ?? 'Too many attempts. Try again later.'} (${minutes} minute${minutes === '1' ? '' : 's'} remaining.)`;
 			}
-			return ACCOUNT_LOCKED_FALLBACK;
+			if (error.code === 'account_locked') return ACCOUNT_LOCKED_FALLBACK;
+			return MESSAGES[error.code] ?? error.message ?? fallback;
 		}
 		return MESSAGES[error.code] ?? error.message ?? fallback;
 	}

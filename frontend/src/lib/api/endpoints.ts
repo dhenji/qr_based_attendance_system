@@ -428,17 +428,19 @@ export const AuthChangePasswordEndpoint: EndpointDef<void> = {
 
 // Forgot-password recovery (ADR-056). Four steps against the live backend
 // (features/auth/router.py + service.py):
-//  1. POST /auth/forgot-password {email} -> {question, set} (decoy question
-//     for unknown emails — always render it, never hint at existence).
+//  1. POST /auth/forgot-password {email, turnstile_token?} -> {question, set}
+//     (decoy question for unknown emails — always render it, never hint at
+//     existence; turnstile_token omitted when unconfigured, enforced once
+//     TURNSTILE_SECRET is set).
 //  2. POST /auth/forgot-password/verify {email, answer} -> {recovery_token}
 //     (5-min type=recovery JWT; 400 security_answer_invalid,
 //     423 recovery_locked after repeated failures).
 //  3. POST /auth/otp/request {email, purpose=forget_password, recovery_token}
 //     -> 204, then POST /auth/otp/verify {email, purpose, code} -> 204
 //     (existing AuthOtpRequest/Verify defs; pass purpose + recovery_token).
-//  4. POST /auth/reset-password {email, otp_code, new_password} -> 204
-//     (server re-verifies the OTP). Turnstile is sent as null — the backend
-//     no-ops when its secret is empty.
+//  4. POST /auth/reset-password {email, otp_code, new_password}
+//     -> TokenResponse (the session itself, or an MFA challenge for
+//     MFA-enabled accounts — NOT a 204).
 export interface ForgotPasswordResponse {
 	question: string;
 	set: boolean;

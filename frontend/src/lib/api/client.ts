@@ -4,10 +4,19 @@
 
 import { endpoints } from './endpoints';
 
-// Base API URL — from Vite env with localhost fallback
-const BASE_URL = (
-	(import.meta.env.PUBLIC_API_URL as string | undefined) || 'http://localhost:8000'
-).replace(/\/+$/, '');
+// Base API URL — from Vite env with localhost fallback.
+// Warns once in dev when PUBLIC_API_URL is unset so a misconfigured
+// deployment surfaces early instead of silently hitting localhost.
+const RAW_BASE_URL = import.meta.env.PUBLIC_API_URL as string | undefined;
+const BASE_URL = (RAW_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+
+if (!RAW_BASE_URL && import.meta.env.DEV) {
+	console.warn('[api] PUBLIC_API_URL is unset — falling back to http://localhost:8000');
+}
+
+// Default per-request timeout (ms). Each transport aborts hung requests so
+// spinners surface "Request timed out, try again." instead of hanging forever.
+export const DEFAULT_TIMEOUT_MS = 30_000;
 
 // Every backend router is mounted under /api (backend/src/api/router.py), so the
 // urls in endpoints.ts are stored relative to that prefix.
@@ -71,7 +80,8 @@ export const setUnauthorizedHandler = (handler: UnauthorizedHandler | null) => {
 	unauthorizedHandler = handler;
 };
 
-// Configured fetch with auth headers
+// Configured fetch with auth headers. Accepts an optional AbortSignal so
+// callers (and the apiCall timeout below) can cancel hung requests.
 const fetchWithAuth = async (
 	input: RequestInfo,
 	init: RequestInit = {}
@@ -91,6 +101,38 @@ const fetchWithAuth = async (
 		headers,
 		credentials: 'include',
 	});
+};
+
+// Race a fetch against a timeout. Returns the response, or throws an
+// APIError with code 'request_timeout' when the deadline fires. A caller
+// signal is honoured too — aborting it rejects the same way.
+const fetchWithTimeout = async (
+	doFetch: (signal: AbortSignal) => Promise<Response>,
+	timeoutMs: number,
+	outerSignal?: AbortSignal | null
+): Promise<Response> => {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	const onOuterAbort = () => controller.abort();
+	try {
+		if (outerSignal) {
+			if (outerSignal.aborted) controller.abort();
+			else outerSignal.addEventListener('abort', onOuterAbort, { once: true });
+		}
+		return await doFetch(controller.signal);
+	} catch (e) {
+		if (controller.signal.aborted) {
+			const causedByCaller = outerSignal?.aborted ?? false;
+			throw new APIError(
+				causedByCaller ? 'request_cancelled' : 'request_timeout',
+				causedByCaller ? 'Request was cancelled.' : 'Request timed out, try again.'
+			);
+		}
+		throw e;
+	} finally {
+		clearTimeout(timer);
+		if (outerSignal) outerSignal.removeEventListener('abort', onOuterAbort);
+	}
 };
 
 // Single transparent 401-refresh shared by every transport: runs the fetch,
@@ -147,16 +189,40 @@ const parseError = async (response: Response): Promise<APIError> => {
 		if (detail.length === 0) {
 			return new APIError('validation_error', 'Validation failed', undefined, status);
 		}
-		const first = isRecord(detail[0]) ? detail[0] : undefined;
-		const loc = first && Array.isArray(first.loc) ? first.loc : [];
-		// loc is ["body", "password"] — the trailing entry is the offending field
-		const field = loc.length > 1 ? String(loc[loc.length - 1]) : undefined;
-		const message = first && typeof first.msg === 'string' ? first.msg : 'Validation failed';
+		// Surface every issue, not just the first: multi-field forms otherwise
+		// lose all but one error. Field stays the first offending one so
+		// callers can still focus it.
+		const messages: string[] = [];
+		let field: string | undefined;
+		for (const entry of detail) {
+			if (!isRecord(entry)) continue;
+			const msg = typeof entry.msg === 'string' ? entry.msg : null;
+			if (msg) messages.push(msg);
+			if (field === undefined && Array.isArray(entry.loc) && entry.loc.length > 1) {
+				// loc is ["body", "password"] — the trailing entry is the field.
+				field = String(entry.loc[entry.loc.length - 1]);
+			}
+		}
+		const message = messages.length > 0 ? messages.join('; ') : 'Validation failed';
 		return new APIError('validation_error', message, field, status);
 	}
 
 	if (typeof detail === 'string') {
-		return new APIError('request_failed', detail, undefined, status);
+		// Plain-string HTTPException (401/403/404/429 from the backend).
+		// Give it a stable code derived from the status so callers branching
+		// on e.code (scan/excuse maps) can distinguish it instead of seeing
+		// a generic 'request_failed'.
+		const code =
+			status === 401
+				? 'invalid_token'
+				: status === 403
+					? 'forbidden'
+					: status === 404
+						? 'not_found'
+						: status === 429
+							? 'rate_limited'
+							: 'request_failed';
+		return new APIError(code, detail, undefined, status);
 	}
 
 	// Plain-text or empty body (e.g. FastAPI's default 500 page): preserve a
@@ -167,9 +233,17 @@ const parseError = async (response: Response): Promise<APIError> => {
 };
 
 // One request/response round trip, with one transparent retry after a 401 when
-// the registered handler can mint a new access token.
-const request = async <T>(url: string, init: RequestInit): Promise<T> => {
-	const response = await fetchWith401Retry(() => fetchWithAuth(url, init));
+// the registered handler can mint a new access token. Success JSON is parsed
+// defensively: a non-JSON/empty body surfaces as APIError (not a raw
+// SyntaxError) so toUserMessage/toAuthMessage always apply.
+const request = async <T>(
+	url: string,
+	init: RequestInit,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<T> => {
+	const doRoundTrip = (signal: AbortSignal): Promise<Response> =>
+		fetchWith401Retry(() => fetchWithAuth(url, { ...init, signal }));
+	const response = await fetchWithTimeout(doRoundTrip, timeoutMs, init.signal ?? null);
 
 	if (!response.ok) {
 		throw await parseError(response);
@@ -180,7 +254,16 @@ const request = async <T>(url: string, init: RequestInit): Promise<T> => {
 		return undefined as T;
 	}
 
-	return response.json() as Promise<T>;
+	try {
+		return (await response.json()) as T;
+	} catch {
+		throw new APIError(
+			'request_failed',
+			'Invalid response from the server. Please try again.',
+			undefined,
+			response.status
+		);
+	}
 };
 
 // Query values accept arrays for repeated keys (?course_ids=1&course_ids=2)
@@ -226,9 +309,12 @@ const apiCall = async <T>(
 		// Content-Type still applied there). Used for X-Idempotency-Key on
 		// offline-queue replays (docs/architecture/offline-first.md).
 		headers?: Record<string, string>;
+		// Per-request timeout override (ms) and caller abort signal.
+		timeoutMs?: number;
+		signal?: AbortSignal | null;
 	} = {}
 ): Promise<T> => {
-	const { method = 'GET', body, params, suffix = '', headers } = options;
+	const { method = 'GET', body, params, suffix = '', headers, timeoutMs, signal } = options;
 	const endpointDef = endpoints[endpoint];
 
 	// Mock mode — return mock data (call inputs forwarded so stateful mocks
@@ -252,10 +338,11 @@ const apiCall = async <T>(
 	const init: RequestInit = {
 		method,
 		body: body === undefined ? undefined : JSON.stringify(body),
-		...(headers === undefined ? {} : { headers })
+		...(headers === undefined ? {} : { headers }),
+		...(signal ? { signal } : {})
 	};
 
-	return request<T>(url.toString(), init);
+	return request<T>(url.toString(), init, timeoutMs ?? DEFAULT_TIMEOUT_MS);
 };
 
 // Convenience exports
@@ -264,32 +351,43 @@ const apiCall = async <T>(
 export const get = <T>(
 	endpoint: keyof typeof endpoints,
 	params?: QueryParams,
-	suffix?: string
-) => apiCall<T>(endpoint, { method: 'GET', params, suffix });
+	suffix?: string,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+) => apiCall<T>(endpoint, { method: 'GET', params, suffix, ...opts });
 
 export const post = <T>(
 	endpoint: keyof typeof endpoints,
 	body?: unknown,
 	params?: QueryParams,
 	suffix?: string,
-	headers?: Record<string, string>
-) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix, headers });
+	headers?: Record<string, string>,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix, headers, ...opts });
 
-export const put = <T>(endpoint: keyof typeof endpoints, body?: unknown, params?: QueryParams) =>
-	apiCall<T>(endpoint, { method: 'PUT', body, params });
+export const put = <T>(
+	endpoint: keyof typeof endpoints,
+	body?: unknown,
+	params?: QueryParams,
+	suffix?: string,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+) => apiCall<T>(endpoint, { method: 'PUT', body, params, suffix, ...opts });
 
 export const patch = <T>(
 	endpoint: keyof typeof endpoints,
 	body?: unknown,
 	params?: QueryParams,
-	suffix?: string
-) => apiCall<T>(endpoint, { method: 'PATCH', body, params, suffix });
+	suffix?: string,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+) => apiCall<T>(endpoint, { method: 'PATCH', body, params, suffix, ...opts });
 
 export const del = <T>(
 	endpoint: keyof typeof endpoints,
 	params?: QueryParams,
-	suffix?: string
-) => apiCall<T>(endpoint, { method: 'DELETE', params, suffix });
+	suffix?: string,
+	body?: unknown,
+	headers?: Record<string, string>,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+) => apiCall<T>(endpoint, { method: 'DELETE', params, suffix, body, headers, ...opts });
 
 // Multipart upload for CSV roster imports (POST /admin/students/import,
 // POST /admin/professors/import). Sends FormData without a JSON Content-Type
@@ -299,7 +397,8 @@ export const postForm = async <T>(
 	endpoint: keyof typeof endpoints,
 	form: FormData,
 	params?: QueryParams,
-	suffix?: string
+	suffix?: string,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
 ): Promise<T> => {
 	const endpointDef = endpoints[endpoint];
 
@@ -317,20 +416,23 @@ export const postForm = async <T>(
 	appendParams(url, params);
 
 	// Headers are rebuilt per attempt so the retry carries the fresh token.
-	const doFetch = async (): Promise<Response> => {
+	const doFetch = (signal: AbortSignal): Promise<Response> => {
 		const headers = new Headers();
 		if (authToken) {
 			headers.set('Authorization', `Bearer ${authToken}`);
 		}
-		return fetch(url.toString(), {
-			method: 'POST',
-			headers,
-			body: form,
-			credentials: 'include',
-		});
+		return fetchWith401Retry(() =>
+			fetch(url.toString(), {
+				method: 'POST',
+				headers,
+				body: form,
+				credentials: 'include',
+				signal
+			})
+		);
 	};
 
-	const response = await fetchWith401Retry(doFetch);
+	const response = await fetchWithTimeout(doFetch, opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS, opts?.signal ?? null);
 
 	if (!response.ok) {
 		throw await parseError(response);
@@ -340,7 +442,16 @@ export const postForm = async <T>(
 		return undefined as T;
 	}
 
-	return response.json() as Promise<T>;
+	try {
+		return (await response.json()) as T;
+	} catch {
+		throw new APIError(
+			'request_failed',
+			'Invalid response from the server. Please try again.',
+			undefined,
+			response.status
+		);
+	}
 };
 
 // Central registry for raw text/blob routes. These return text/csv or binary
@@ -360,7 +471,11 @@ export const backupDownloadPath = (id: number): string => `/admin/backups/${id}/
 // Raw-text download for CSV templates (TEXT_EXPORTS.studentTemplate) and
 // filtered CSV exports (TEXT_EXPORTS.adminOverview). Returns the CSV text
 // for client-side download; the path comes from TEXT_EXPORTS above.
-export const getText = async (path: string, params?: QueryParams): Promise<string> => {
+export const getText = async (
+	path: string,
+	params?: QueryParams,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV download is unavailable in mock mode');
 	}
@@ -368,11 +483,17 @@ export const getText = async (path: string, params?: QueryParams): Promise<strin
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 	appendParams(url, params);
 
-	const response = await fetchWith401Retry(() => fetchWithAuth(url.toString(), { method: 'GET' }));
+	const response = await fetchWithTimeout(
+		(signal) => fetchWith401Retry(() => fetchWithAuth(url.toString(), { method: 'GET', signal })),
+		opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+		opts?.signal ?? null
+	);
 
 	if (!response.ok) {
 		throw await parseError(response);
 	}
+
+	if (response.status === 204) return '';
 
 	return response.text();
 };
@@ -381,23 +502,35 @@ export const getText = async (path: string, params?: QueryParams): Promise<strin
 // route takes a JSON filter body and returns text/csv, so it fits neither
 // apiCall (JSON response) nor getText (GET). Auth header + 401-refresh reuse
 // fetchWithAuth; the path comes from TEXT_EXPORTS above.
-export const postText = async (path: string, body: unknown): Promise<string> => {
+export const postText = async (
+	path: string,
+	body: unknown,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV export is unavailable in mock mode');
 	}
 
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 
-	const response = await fetchWith401Retry(() =>
-		fetchWithAuth(url.toString(), {
-			method: 'POST',
-			body: JSON.stringify(body)
-		})
+	const response = await fetchWithTimeout(
+		(signal) =>
+			fetchWith401Retry(() =>
+				fetchWithAuth(url.toString(), {
+					method: 'POST',
+					body: JSON.stringify(body),
+					signal
+				})
+			),
+		opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+		opts?.signal ?? null
 	);
 
 	if (!response.ok) {
 		throw await parseError(response);
 	}
+
+	if (response.status === 204) return '';
 
 	return response.text();
 };
@@ -408,7 +541,8 @@ export const postText = async (path: string, body: unknown): Promise<string> => 
 // a Blob and parses the filename header instead.
 export const getBlob = async (
 	path: string,
-	params?: QueryParams
+	params?: QueryParams,
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
 ): Promise<{ blob: Blob; filename: string }> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server file download is unavailable in mock mode');
@@ -417,7 +551,11 @@ export const getBlob = async (
 	const url = new URL(`${API_PREFIX}${path}`, BASE_URL);
 	appendParams(url, params);
 
-	const response = await fetchWith401Retry(() => fetchWithAuth(url.toString(), { method: 'GET' }));
+	const response = await fetchWithTimeout(
+		(signal) => fetchWith401Retry(() => fetchWithAuth(url.toString(), { method: 'GET', signal })),
+		opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+		opts?.signal ?? null
+	);
 
 	if (!response.ok) {
 		throw await parseError(response);

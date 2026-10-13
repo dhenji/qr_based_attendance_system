@@ -16,6 +16,13 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
+	const humanizeInitiatedVia = (value: string): string => {
+		if (value === 'quick') return 'Quick excuse';
+		if (value === 'prof_with_evidence') return 'With evidence';
+		if (value === 'request') return 'Student request';
+		return value ? value.replace(/_/g, ' ') : '—';
+	};
+
 	const load = async () => {
 		loading = true;
 		error = null;
@@ -62,7 +69,10 @@
 	{#if loading}
 		<section class="card"><p class="muted">Loading excuse requests…</p></section>
 	{:else if error}
-		<section class="card"><p class="error">{error}</p></section>
+		<section class="card">
+			<p class="error">{error}</p>
+			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Retry</button>
+		</section>
 	{:else if items.length === 0}
 		<section class="card"><p class="empty">No {status} excuse requests.</p></section>
 	{:else}
@@ -81,9 +91,9 @@
 						<tr>
 							<td>
 								<span class="strong">Student #{row.student_id}</span>
-								<div class="muted small">{row.initiated_via} · {row.status}</div>
+								<div class="muted small">{humanizeInitiatedVia(row.initiated_via)} · {row.status}</div>
 							</td>
-							<td>Session {row.session_id}</td>
+							<td>Session #{row.session_id}</td>
 							<td class="reason">{row.reason}</td>
 							<td>{formatLocalDateTime(row.requested_at)}</td>
 						</tr>

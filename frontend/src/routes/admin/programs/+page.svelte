@@ -16,6 +16,7 @@
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Program Management list (wireframe 4.5a): search + status filter over
 	// GET /admin/programs. Aggregates (Years/Terms/Courses) are derived
@@ -168,7 +169,7 @@
 			await refreshAdminPrograms();
 			notifyEntityChanged('programs');
 		} catch (e: unknown) {
-			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
 			formBusy = false;
 		}

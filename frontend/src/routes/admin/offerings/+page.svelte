@@ -24,6 +24,7 @@
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Offering list: program/year/semester instances of course templates (D44).
 	// Filters are the backend list query itself — Program → Year → Semester →
@@ -343,7 +344,7 @@
 			await refreshAdminOfferings();
 			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
-			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
 			formBusy = false;
 		}

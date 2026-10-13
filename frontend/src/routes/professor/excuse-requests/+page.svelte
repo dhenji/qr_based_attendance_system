@@ -274,6 +274,15 @@
 		quickBusy = true;
 		quickError = null;
 		try {
+			// Typed student numbers cannot resolve to the integer ids the live
+			// per-record routes need (no professor endpoint returns them), so
+			// the quick modal is mock-only. Live callers use queue-row actions
+			// (quickExcuseByIds) or Excuse all absent instead.
+			if (!isMockMode()) {
+				throw new Error(
+					'Quick excuse by student number is unavailable with a live backend — use the review queue row actions or Excuse all absent instead.'
+				);
+			}
 			const offering = directory.find((c) => c.courseCode === quickCourse);
 			const picked = quickSessions.find((s) => s.id === quickSessionId) ?? null;
 			// Files upload first via the D24 presigned flow; their object urls

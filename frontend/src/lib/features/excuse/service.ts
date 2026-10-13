@@ -4,9 +4,9 @@
 // Real API by default; in-memory mock only when PUBLIC_MOCK_MODE=true (see
 // api/client.ts). List + review hit the live backend
 // (features/excuse/professor_router.py), as do quick/edit/revoke/bulk by
-// integer id. The typed-number quick flow stays in-memory: no professor
+// integer id. The typed-number quick modal is mock-only: no professor
 // endpoint returns integer student ids (only numbers/names), so a typed
-// student number cannot be resolved to the id the per-record routes need
+// student number cannot resolve to the id the per-record routes need.
 // without backend help. Path B (evidence upload) rides the D24 presigned
 // flow: the quick modal collects files and sends attachment_urls (presence
 // selects prof_with_evidence server-side); reason-only stays Path A.
@@ -319,17 +319,21 @@ export type QuickExcuseInput = {
 // quickExcuse
 // Professor-initiated excuse (Path A): creates an immediately-approved row.
 //
-// Typed-number flow (queue quick modal, live-session rows): no professor
-// endpoint returns integer student ids — only numbers/names — so a typed
-// number cannot be resolved to the integer id the live route needs. That
-// flow stays in-memory (mock store below in MOCK mode; same in-memory row in
-// real mode with a clear note), while quickExcuseByIds below serves callers
-// that already hold integer ids (queue rows carry student_id).
+// Mock-only: typed numbers cannot resolve to the integer ids the live
+// per-record routes need (no professor endpoint returns them), so live
+// callers must use quickExcuseByIds (queue rows carry student_id) or
+// excuseAllAbsent. Calling this outside mock mode throws instead of creating
+// an in-memory row with studentId -1 that edit/revoke would later reject.
 // Reason min 10 chars per excuse-workflow.md Path A modal spec. The quick
 // modal collects evidence files via the D24 presigned flow; their object
 // urls ride along as attachment names so the created row mirrors them.
 // Contract: POST /professor/sessions/{id}/attendance/{sid}/excuse
 export const quickExcuse = async (input: QuickExcuseInput & { attachmentUrls?: string[] }): Promise<ExcuseRequest> => {
+	if (!isMockMode()) {
+		throw new Error(
+			'Quick excuse by student number is unavailable with a live backend — use the review queue row actions or Excuse all absent instead.'
+		);
+	}
 	const reason = input.reason.trim();
 	if (reason.length < 10) throw new Error('Reason must be at least 10 characters.');
 	if (input.studentNumber.trim().length === 0) throw new Error('Student number is required.');
