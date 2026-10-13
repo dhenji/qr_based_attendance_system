@@ -99,6 +99,17 @@ class FixedWindowLimiter:
 
             return True
 
+    async def reset(self, key: str) -> None:
+        """Forget ``key``'s budget entirely.
+
+        Used when the guarded credential itself is replaced (a resend mints a
+        fresh OTP): guesses spent against the burned code must not haunt the
+        new one. Lock-protected like `hit`, for the same races.
+        """
+
+        async with self._lock:
+            self._windows.pop(key, None)
+
 
 _limiter = FixedWindowLimiter()
 

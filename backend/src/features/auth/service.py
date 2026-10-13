@@ -16,11 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.database import database
 from core.security import (
+    LOGIN_OTP_TOKEN_TYPE,
     PREAUTH_TOKEN_TYPE,
     RECOVERY_TOKEN_TYPE,
     REFRESH_TOKEN_TYPE,
     backup_code_fingerprint,
     create_access_token,
+    create_login_otp_token,
     create_preauth_token,
     create_recovery_token,
     create_refresh_token,
@@ -39,6 +41,8 @@ from features.auth.constants import (
     BACKUP_CODE_COUNT,
     BACKUP_CODE_GROUPS,
     BACKUP_CODE_LENGTH,
+    LOGIN_OTP_IP_MAX_ATTEMPTS,
+    LOGIN_OTP_MAX_ATTEMPTS,
     SECURITY_QUESTION_POOL,
     SECURITY_RECOVERY_MAX_ATTEMPTS,
     TEMP_PASSWORD_LENGTH,
@@ -48,6 +52,7 @@ from features.auth.exceptions import (
     AmbiguousAccountException,
     CurrentPasswordInvalid,
     InvalidCredentialsException,
+    LoginOtpLockedException,
     MfaAlreadyEnabledException,
     MfaNotEnabledException,
     MfaVerifyException,
@@ -77,11 +82,13 @@ from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.email import send_otp_email
 from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
-from shared.rate_limit import FixedWindowLimiter
+from shared.rate_limit import FixedWindowLimiter, RateLimitedException
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 _recovery_limiter = FixedWindowLimiter()
+_login_otp_limiter = FixedWindowLimiter()
+_login_otp_ip_limiter = FixedWindowLimiter()
 
 
 def _decoy_question(email: str, settings: Settings) -> str:
@@ -466,6 +473,93 @@ class AuthService:
         user.last_login = now
         await self._session.flush()
 
+        # Second factor, by role. Students and professors who enrolled in MFA
+        # keep their TOTP path (no email is sent): TOTP is strictly stronger
+        # than an emailed code, so replacing the OTP loses no security while
+        # sparing the SMTP relay one message per MFA login. Everyone else —
+        # including admins with MFA, who chain OTP then TOTP on verify —
+        # gets an email OTP first and a short-lived grant to exchange it.
+        if user.mfa_enabled and user.role in (
+            UserRole.STUDENT.value,
+            UserRole.PROFESSOR.value,
+        ):
+            return TokenResponse(
+                mfa_pending=True,
+                preauth_token=create_preauth_token(user.id, self._settings),
+                must_change_password=user.must_change_password,
+            )
+
+        await self.request_otp(user.email, OtpPurpose.LOGIN)
+
+        return TokenResponse(
+            otp_pending=True,
+            otp_token=create_login_otp_token(user.id, user.email, self._settings),
+            must_change_password=user.must_change_password,
+        )
+
+    async def verify_login_otp(
+        self, otp_token: str, code: str, client_ip: str | None = None
+    ) -> TokenResponse:
+        """Exchange a login-OTP grant plus the emailed code for the session.
+
+        The grant proves the password gate was passed; the code proves inbox
+        access. Admins with MFA enabled get a preauth challenge back instead
+        of tokens (OTP then TOTP); everyone else gets tokens directly.
+
+        Two failure-only caps, each counting wrong codes alone:
+
+        - per email (`423 login_otp_locked`): 3 guesses against the current
+          code inside the OTP TTL. A resend mints a fresh code and resets
+          this budget, so a lock can never outlive the credential it
+          protects by more than 1x.
+        - per IP (`429 rate_limited`, reused code): 15 misses inside the same
+          window. Resends do NOT reset this one — that is what stops a client
+          from dodging the email cap by rotating addresses. Successes and
+          expired codes never touch either budget.
+
+        No audit row is recorded here: like the recovery flow, a failure
+        raises, and `_get_db` would roll the row back with it.
+        """
+
+        user: User = await self._user_from_login_otp_grant(otp_token)
+        normalized: str = user.email.lower()
+        limiter_key: str = f"login_otp|{normalized}"
+        # Mirrors the router's own `ip or "unknown"` fallback: a missing
+        # client pools unknowns, which can only ever happen off the wire.
+        ip_key: str = f"login_otp_ip|{client_ip or 'unknown'}"
+        window_seconds: int = self._settings.otp_expires_minutes * 60
+
+        if await _login_otp_limiter.exhausted(
+            limiter_key,
+            LOGIN_OTP_MAX_ATTEMPTS,
+            window_seconds,
+        ):
+            raise LoginOtpLockedException(self._settings.otp_expires_minutes)
+
+        if await _login_otp_ip_limiter.exhausted(
+            ip_key,
+            LOGIN_OTP_IP_MAX_ATTEMPTS,
+            window_seconds,
+        ):
+            raise RateLimitedException()
+
+        try:
+            await self.verify_otp(normalized, code, OtpPurpose.LOGIN)
+        except OtpExpiredException:
+            raise
+        except OtpInvalidException:
+            await _login_otp_limiter.hit(
+                limiter_key,
+                LOGIN_OTP_MAX_ATTEMPTS,
+                window_seconds,
+            )
+            await _login_otp_ip_limiter.hit(
+                ip_key,
+                LOGIN_OTP_IP_MAX_ATTEMPTS,
+                window_seconds,
+            )
+            raise
+
         if user.mfa_enabled:
             return TokenResponse(
                 mfa_pending=True,
@@ -474,6 +568,47 @@ class AuthService:
             )
 
         return self._build_tokens(user)
+
+    async def resend_login_otp(self, otp_token: str) -> None:
+        """Mint a fresh LOGIN OTP for the grant holder (burns the previous).
+
+        Flood control lives at the router (`5/60s`); the grant itself is the
+        per-account gate, so no service counter is needed here. The fresh code
+        resets the email's wrong-code budget: guesses spent against the burned
+        code are guesses against a dead credential. The per-IP budget is
+        deliberately NOT reset — a resend loop is exactly what it exists to
+        catch.
+        """
+
+        user: User = await self._user_from_login_otp_grant(otp_token)
+        await self.request_otp(user.email, OtpPurpose.LOGIN)
+        await _login_otp_limiter.reset(f"login_otp|{user.email.lower()}")
+
+    async def _user_from_login_otp_grant(self, otp_token: str) -> User:
+        """Resolve the grant to its live account, or fail non-probeably.
+
+        A bad, expired, or wrong-typed grant and a missing/inactive account
+        all report generic invalid-credentials, mirroring `_assert_recovery_grant`
+        and the preauth branch of `verify_mfa`.
+        """
+
+        payload: dict[str, Any] | None = decode_access_token(
+            otp_token, self._settings
+        )
+
+        if payload is None or payload.get("type") != LOGIN_OTP_TOKEN_TYPE:
+            raise InvalidCredentialsException()
+
+        user: User | None = await self._users.get(extract_user_id(payload))
+
+        if (
+            user is None
+            or not user.is_active
+            or user.email.lower() != str(payload.get("email", "")).lower()
+        ):
+            raise InvalidCredentialsException()
+
+        return user
 
     async def refresh_token(self, token: str) -> TokenResponse:
         payload: dict[str, Any] | None = decode_access_token(token, self._settings)

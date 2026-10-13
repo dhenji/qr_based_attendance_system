@@ -4,8 +4,10 @@
 	import { Routes } from '$lib/shared/constants/routes';
 	import { toAuthMessage } from '$lib/features/auth/errors';
 	import { requestOtp } from '$lib/features/auth/service';
-	import { authState, defaultRouteFor, doRegister } from '$lib/features/auth/store.svelte';
+	import { authState, defaultRouteFor, doRegister, createOtpWindow } from '$lib/features/auth/store.svelte';
 	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
+	import OtpInput from '$lib/components/OtpInput.svelte';
+	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 
 	// Mirrors the backend's claim flow: prove you own the roster email with an
 	// OTP, then set the credentials. POST /auth/register consumes the CLAIM OTP
@@ -27,9 +29,9 @@
 	let submitting = $state(false);
 	let error = $state('');
 
-	let otpInputs: HTMLInputElement[] = $state([]);
-	let countdown = $state(300);
-	let intervalId: ReturnType<typeof setInterval> | null = null;
+	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
+	const win = createOtpWindow();
+	let otpInput: import('$lib/components/OtpInput.svelte').default | undefined = $state();
 
 	onMount(() => {
 		function onDocClick(e: MouseEvent) {
@@ -54,29 +56,15 @@
 		passwordChecks.number && passwordChecks.symbol
 	);
 
-	const countdownText = $derived.by(() => {
-		const m = Math.floor(countdown / 60);
-		const s = countdown % 60;
-		return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-	});
-
-	const canResend = $derived(countdown <= 0);
-
 	onDestroy(() => {
-		if (intervalId) clearInterval(intervalId);
+		win.stop();
 	});
 
-	function startCountdown() {
-		if (intervalId) clearInterval(intervalId);
-		countdown = 300;
-		intervalId = setInterval(() => {
-			countdown -= 1;
-			if (countdown <= 0) {
-				if (intervalId) clearInterval(intervalId);
-				intervalId = null;
-			}
-		}, 1000);
-	}
+	// Dismiss a stale failure as soon as the user starts correcting the form,
+	// so the banner never reads as "still broken" while they type.
+	const clearError = () => {
+		if (error) error = '';
+	};
 
 	// Step 1 -> 2: ask the backend to email a CLAIM OTP.
 	const handleEmail = async (event: SubmitEvent) => {
@@ -95,7 +83,7 @@
 			email = trimmed;
 			otp = ['', '', '', '', '', ''];
 			step = 'otp';
-			startCountdown();
+			win.restart();
 		} catch (e: unknown) {
 			error = toAuthMessage(e, 'Could not send the verification code. Please try again.');
 		} finally {
@@ -111,8 +99,8 @@
 		try {
 			await requestOtp(email, 'claim');
 			otp = ['', '', '', '', '', ''];
-			startCountdown();
-			otpInputs[0]?.focus();
+			win.restart();
+			otpInput?.focus();
 		} catch (e: unknown) {
 			error = toAuthMessage(e, 'Could not resend the code. Please try again.');
 		} finally {
@@ -172,22 +160,12 @@
 		}
 	};
 
-	function onOtpInput(i: number, value: string) {
-		const v = value.replace(/\D/g, '').slice(-1);
-		if (v) error = '';
-		otp[i] = v;
-		if (v && i < 5) otpInputs[i + 1]?.focus();
-	}
-
-	function onOtpKeydown(i: number, e: KeyboardEvent) {
-		if (e.key === 'Backspace' && otp[i] === '' && i > 0) {
-			otpInputs[i - 1]?.focus();
-		}
-	}
-
 	const back = (to: Step) => {
 		step = to;
 		error = '';
+		if (to === 'email') {
+			win.stop();
+		}
 	};
 </script>
 
@@ -237,21 +215,9 @@
 				</form>
 			{:else if step === 'otp'}
 				<form onsubmit={continueToDetails}>
-					<div class="otp-row">
-						{#each otp as digit, i}
-							<input class="otp-input" maxlength="1" inputmode="numeric"
-								aria-label={`Digit ${i + 1}`} value={digit}
-								bind:this={otpInputs[i]}
-								oninput={(e) => onOtpInput(i, (e.target as HTMLInputElement).value)}
-								onkeydown={(e) => onOtpKeydown(i, e)} />
-						{/each}
-					</div>
+					<OtpInput bind:digits={otp} bind:this={otpInput} disabled={submitting} onChange={clearError} />
 
-					<div class="expiry">
-						Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong> ·
-						<button type="button" class="resend-btn" onclick={resend}
-							disabled={!canResend || submitting}>Resend code</button>
-					</div>
+					<OtpCodeRow win={win} busy={submitting} onresend={resend} />
 
 					<button class="btn-primary" type="submit" disabled={submitting}>Continue</button>
 					<button type="button" class="back-btn" onclick={() => back('email')}>← Back</button>
@@ -627,68 +593,6 @@
 		color: var(--success);
 	}
 
-	.otp-row {
-		display: flex;
-		gap: 0.5rem;
-		justify-content: center;
-		margin-bottom: 1.25rem;
-	}
-
-	.otp-input {
-		width: 46px;
-		height: 52px;
-		text-align: center;
-		font-size: 1.25rem;
-		font-family: monospace;
-		font-weight: 700;
-		color: var(--brand);
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		outline: none;
-		transition: border-color 0.15s;
-		background: var(--bg-card);
-	}
-
-	.otp-input:focus {
-		border-color: var(--accent);
-	}
-
-	.expiry {
-		text-align: center;
-		color: var(--text-muted);
-		font-size: 0.8125rem;
-		margin-bottom: 1.25rem;
-	}
-
-	.expiry strong {
-		color: var(--brand);
-	}
-
-	.expiry strong.expired {
-		color: var(--danger);
-	}
-
-	.resend-btn {
-		background: none;
-		border: none;
-		cursor: pointer;
-		color: #0d9488;
-		font-weight: 600;
-		font-size: 0.8125rem;
-		font-family: inherit;
-		padding: 0;
-	}
-
-	.resend-btn:hover:not(:disabled) {
-		text-decoration: underline;
-	}
-
-	.resend-btn:disabled {
-		color: var(--text-muted);
-		cursor: not-allowed;
-		text-decoration: none;
-	}
-
 	.btn-primary {
 		width: 100%;
 		padding: 0.75rem;
@@ -738,7 +642,7 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #0d9488;
+		color: var(--accent);
 		font-size: 0.8125rem;
 		font-weight: 600;
 		font-family: inherit;

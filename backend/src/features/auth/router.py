@@ -9,6 +9,8 @@ from features.auth.schema import (
     ChangePasswordRequest,
     ForgotPasswordStep1Request,
     ForgotPasswordStep2Request,
+    LoginOtpResendRequest,
+    LoginOtpVerifyRequest,
     LoginRequest,
     MeResponse,
     MFADisableRequest,
@@ -75,7 +77,7 @@ async def register(payload: RegisterRequest, service: AuthServiceDep) -> TokenRe
 @router.post(
     "/login",
     response_model=TokenResponse,
-    summary="Email/password login (with MFA gate)",
+    summary="Email/password login (with OTP + MFA gates)",
 )
 async def login(
     payload: LoginRequest,
@@ -90,6 +92,43 @@ async def login(
     )
 
     return await service.login(payload.email, payload.password)
+
+
+# The verify/resend bodies carry the login-OTP grant rather than an email,
+# so the generic `key="email"` bucket would fall back to the client IP
+# anyway: key on IP explicitly. This is a flood gate only (throughput, not
+# wrong guesses — it counts successes too), so it stays coarse at 20/60s:
+# the per-email and per-IP *failure* caps live in the service, failure-only,
+# where they never penalise correct codes or NAT neighbours.
+@router.post(
+    "/login/verify",
+    response_model=TokenResponse,
+    summary="Verify login OTP (grants tokens, or an MFA challenge for admins)",
+)
+async def login_verify(
+    payload: LoginOtpVerifyRequest,
+    request: Request,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(20, 60, key="ip")),
+) -> TokenResponse:
+    return await service.verify_login_otp(
+        payload.otp_token,
+        payload.code,
+        request.client.host if request.client is not None else None,
+    )
+
+
+@router.post(
+    "/login/resend",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Resend login OTP (burns the previous code)",
+)
+async def login_resend(
+    payload: LoginOtpResendRequest,
+    service: AuthServiceDep,
+    _: None = Depends(rate_limit(5, 60, key="ip")),
+) -> None:
+    await service.resend_login_otp(payload.otp_token)
 
 
 @router.post("/refresh", response_model=TokenResponse, summary="Refresh-token rotation")

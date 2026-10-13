@@ -9,7 +9,9 @@
 		resetPassword,
 	} from '$lib/features/auth/service';
 	import { Routes } from '$lib/shared/constants/routes';
-	import { defaultRouteFor, doLogin } from '$lib/features/auth/store.svelte';
+	import { defaultRouteFor, doLogin, createOtpWindow } from '$lib/features/auth/store.svelte';
+	import OtpInput from '$lib/components/OtpInput.svelte';
+	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 
 	// Forgot-password recovery (ADR-056), live against the backend:
 	//  1. POST /auth/forgot-password {email} -> {question} (decoy for unknown
@@ -39,15 +41,10 @@
 	let securityQuestion = $state('');
 	let recoveryToken = $state<string | null>(null);
 
-	let otpInputs: HTMLInputElement[] = $state([]);
-	let countdown = $state(300);
-	let intervalId: ReturnType<typeof setInterval> | null = null;
+	let otpInput: import('$lib/components/OtpInput.svelte').default | undefined = $state();
 
-	const countdownText = $derived.by(() => {
-		const m = Math.floor(countdown / 60);
-		const s = countdown % 60;
-		return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-	});
+	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
+	const win = createOtpWindow();
 
 	const passwordsMatch = $derived(
 		newPwd !== '' && confirmPwd !== '' ? newPwd === confirmPwd : null
@@ -65,8 +62,14 @@
 	let success = $state(false);
 
 	onDestroy(() => {
-		if (intervalId) clearInterval(intervalId);
+		win.stop();
 	});
+
+	// Dismiss a stale failure as soon as the user starts correcting the form,
+	// so the banner never reads as "still broken" while they type.
+	const clearError = () => {
+		if (error) error = '';
+	};
 
 	const toMessage = (e: unknown, fallback: string): string => {
 		if (e instanceof APIError && e.code === 'recovery_locked') return e.message;
@@ -82,18 +85,6 @@
 			return 'New password must be different from your current one.';
 		return e instanceof Error && e.message ? e.message : fallback;
 	};
-
-	function startCountdown() {
-		if (intervalId) clearInterval(intervalId);
-		countdown = 300;
-		intervalId = setInterval(() => {
-			countdown -= 1;
-			if (countdown <= 0) {
-				if (intervalId) clearInterval(intervalId);
-				intervalId = null;
-			}
-		}, 1000);
-	}
 
 	async function handleStep1() {
 		if (!email.trim()) {
@@ -125,7 +116,7 @@
 			recoveryToken = grant.recoveryToken;
 			await requestOtp(email, 'forget_password', grant.recoveryToken);
 			step = 3;
-			startCountdown();
+			win.restart();
 		} catch (e: unknown) {
 			error = toMessage(e, 'Verification failed. Please try again.');
 		} finally {
@@ -179,19 +170,6 @@
 		}
 	}
 
-	function onOtpInput(i: number, value: string) {
-		const v = value.replace(/\D/g, '').slice(-1);
-		if (v) error = '';
-		otp[i] = v;
-		if (v && i < 5) otpInputs[i + 1]?.focus();
-	}
-
-	function onOtpKeydown(i: number, e: KeyboardEvent) {
-		if (e.key === 'Backspace' && otp[i] === '' && i > 0) {
-			otpInputs[i - 1]?.focus();
-		}
-	}
-
 	async function resend() {
 		busy = true;
 		error = '';
@@ -201,7 +179,8 @@
 				return;
 			}
 			await requestOtp(email, 'forget_password', recoveryToken);
-			startCountdown();
+			win.restart();
+			otpInput?.focus();
 		} catch (e: unknown) {
 			error = toMessage(e, 'Could not resend the code. Please try again.');
 		} finally {
@@ -282,22 +261,9 @@
 						<div class="error-banner">{error}</div>
 					{/if}
 
-					<div class="otp-row">
-						{#each otp as digit, i}
-							<input class="otp-input" maxlength="1" inputmode="numeric"
-								aria-label={`Digit ${i + 1}`} value={digit}
-								bind:this={otpInputs[i]}
-								oninput={(e) => onOtpInput(i, (e.target as HTMLInputElement).value)}
-								onkeydown={(e) => onOtpKeydown(i, e)} />
-						{/each}
-					</div>
+					<OtpInput bind:digits={otp} bind:this={otpInput} disabled={busy} onChange={clearError} />
 
-					<div class="expiry">
-						Expires in <strong class={countdown <= 0 ? 'expired' : ''}>{countdownText}</strong>.
-						<button class="resend-btn" onclick={resend} disabled={busy || (countdown > 0 && countdown < 300)}>
-							{busy ? 'Sending…' : 'Resend code'}
-						</button>
-					</div>
+					<OtpCodeRow win={win} busy={busy} onresend={resend} />
 
 					<button class="btn-primary" onclick={handleStep3} disabled={busy}>
 						{busy ? 'Verifying…' : 'Verify'}
@@ -564,68 +530,6 @@
 		color: var(--brand);
 		font-style: italic;
 		font-weight: 500;
-	}
-
-	.otp-row {
-		display: flex;
-		gap: 0.5rem;
-		justify-content: center;
-		margin-bottom: 1rem;
-	}
-
-	.otp-input {
-		width: 46px;
-		height: 52px;
-		text-align: center;
-		font-size: 1.25rem;
-		font-family: monospace;
-		font-weight: 700;
-		color: var(--brand);
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		outline: none;
-		transition: border-color 0.15s;
-		background: var(--bg-card);
-	}
-
-	.otp-input:focus {
-		border-color: var(--accent);
-	}
-
-	.expiry {
-		text-align: center;
-		color: var(--text-muted);
-		font-size: 0.8125rem;
-		margin-bottom: 1.25rem;
-	}
-
-	.expiry strong {
-		color: var(--brand);
-	}
-
-	.expiry strong.expired {
-		color: var(--danger);
-	}
-
-	.resend-btn {
-		background: none;
-		border: none;
-		cursor: pointer;
-		color: #0d9488;
-		font-weight: 600;
-		font-size: 0.8125rem;
-		font-family: inherit;
-		padding: 0;
-	}
-
-	.resend-btn:hover {
-		text-decoration: underline;
-	}
-
-	.resend-btn:disabled {
-		color: var(--text-muted);
-		cursor: not-allowed;
-		text-decoration: none;
 	}
 
 	.req-list {

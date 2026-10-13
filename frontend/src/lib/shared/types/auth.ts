@@ -3,7 +3,7 @@
 // schemas in backend/src/features/auth/schema.py exactly (snake_case, no
 // renaming) so services can pass them straight through to the API layer.
 
-export type OtpPurpose = 'claim' | 'forget_password';
+export type OtpPurpose = 'claim' | 'forget_password' | 'login';
 
 export type AuthRole = 'super_admin' | 'admin' | 'professor' | 'student';
 
@@ -39,6 +39,20 @@ export interface LoginRequest {
 // POST /auth/refresh
 export interface RefreshRequest {
 	refresh_token: string;
+}
+
+// POST /auth/login/verify
+// Exchanges the login-OTP grant plus the emailed 6-digit code for tokens
+// (or an MFA challenge for admins with MFA enabled).
+export interface LoginOtpVerifyRequest {
+	otp_token: string;
+	code: string;
+}
+
+// POST /auth/login/resend
+// Mints a fresh LOGIN OTP; the grant proves the password gate was passed.
+export interface LoginOtpResendRequest {
+	otp_token: string;
 }
 
 // POST /auth/mfa/verify
@@ -92,16 +106,21 @@ export interface ChangePasswordRequest {
 	current_password: string;
 }
 
-// POST /auth/login | /auth/register | /auth/refresh | /auth/mfa/verify
+// POST /auth/login | /auth/register | /auth/refresh | /auth/mfa/verify |
+// /auth/login/verify
 //
 // Carries no user object — identity is resolved separately via GET /auth/me.
 // When mfa_pending is true, access_token/refresh_token are null and the caller
-// must exchange preauth_token at /auth/mfa/verify to finish signing in.
+// must exchange preauth_token at /auth/mfa/verify to finish signing in. When
+// otp_pending is true, the caller must exchange otp_token + the emailed code
+// at /auth/login/verify first (which may itself return an MFA challenge).
 export interface TokenResponse {
 	access_token: string | null;
 	refresh_token: string | null;
 	mfa_pending: boolean;
 	preauth_token: string | null;
+	otp_pending: boolean;
+	otp_token: string | null;
 	must_change_password: boolean;
 }
 

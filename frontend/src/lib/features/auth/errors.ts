@@ -11,7 +11,10 @@ import { APIError } from '$lib/api/client';
 
 const MESSAGES: Record<string, string> = {
 	invalid_credentials: 'Email or password is incorrect.',
-	rate_limited: 'Too many attempts. Please wait a moment and try again.',
+	// Every router limit is IP-keyed (or IP-fallback), so "this device" is
+	// accurate for all of them. Kept distinct from login_otp_locked below:
+	// that one is per-account, this one follows the device.
+	rate_limited: 'Too many attempts from this device. Wait a moment and try again.',
 
 	unrecognized_email:
 		'No student or professor record matches that email. Ask an administrator to add you to the roster.',
@@ -21,6 +24,8 @@ const MESSAGES: Record<string, string> = {
 
 	otp_invalid: 'That code is incorrect. Check your email and try again.',
 	otp_expired: 'That code has expired. Request a new one.',
+	login_otp_locked:
+		'Too many incorrect codes. Wait a few minutes before trying again, or start over.',
 
 	invalid_mfa_code: 'Invalid verification code.',
 	mfa_already_enabled: 'Two-factor authentication is already enabled.',

@@ -197,6 +197,21 @@ class RecoveryLockedException(AuthDomainException):
         )
 
 
+class LoginOtpLockedException(AuthDomainException):
+    """423 - too many wrong login-OTP codes for this email."""
+
+    status_code: int = 423
+    code: str = "login_otp_locked"
+
+    def __init__(self, retry_after_minutes: int) -> None:
+        super().__init__(
+            message=(
+                "Login verification is temporarily locked due to too many "
+                f"failed attempts. Try again in {retry_after_minutes} minutes"
+            )
+        )
+
+
 class RecoveryGrantRequiredException(AuthDomainException):
     """400 - a FORGET_PASSWORD OTP was requested without passing step 2.
 

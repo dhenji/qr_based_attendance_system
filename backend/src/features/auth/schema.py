@@ -74,7 +74,23 @@ class TokenResponse(BaseModel):
     refresh_token: str | None = None
     mfa_pending: bool = False
     preauth_token: str | None = None  # grant no access; exchanged via /auth/mfa/verify
+    otp_pending: bool = False
+    otp_token: str | None = None  # grant no access; exchanged via /auth/login/verify
     must_change_password: bool = False
+
+
+class LoginOtpVerifyRequest(BaseModel):
+    """Exchange the login-OTP grant plus the emailed 6-digit code for tokens
+    (or an MFA challenge for admins with MFA enabled)."""
+
+    otp_token: str
+    code: str = Field(min_length=OTP_CODE_LENGTH, max_length=OTP_CODE_LENGTH)
+
+
+class LoginOtpResendRequest(BaseModel):
+    """Mint a fresh LOGIN OTP; the grant proves the password gate was passed."""
+
+    otp_token: str
 
 
 class SetSecurityQuestionRequest(BaseModel):
