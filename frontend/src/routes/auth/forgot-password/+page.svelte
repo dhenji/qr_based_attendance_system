@@ -6,10 +6,9 @@
 		forgotPassword,
 		forgotPasswordVerify,
 		requestOtp,
-		resetPassword,
 	} from '$lib/features/auth/service';
 	import { Routes } from '$lib/shared/constants/routes';
-	import { defaultRouteFor, doLogin, createOtpWindow } from '$lib/features/auth/store.svelte';
+	import { defaultRouteFor, doResetPassword, createOtpWindow } from '$lib/features/auth/store.svelte';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 
@@ -149,16 +148,14 @@
 		busy = true;
 		error = '';
 		try {
-			await resetPassword(email, otp.join(''), newPwd);
+			// Step 4 signs the account in directly (or returns an MFA
+			// challenge for MFA-enabled accounts); the success beat below
+			// only delays the navigation, not the request.
+			const user = await doResetPassword(email, otp.join(''), newPwd);
 			success = true;
-			setTimeout(async () => {
-				try {
-					const user = await doLogin(email, newPwd);
-					if (user) goto(defaultRouteFor(user));
-					else goto(Routes.LOGIN);
-				} catch {
-					goto(Routes.LOGIN);
-				}
+			setTimeout(() => {
+				if (user) goto(defaultRouteFor(user));
+				else goto(Routes.LOGIN);
 			}, 1500);
 		} catch (e: unknown) {
 			error = toMessage(e, 'Password reset failed. Please try again.');

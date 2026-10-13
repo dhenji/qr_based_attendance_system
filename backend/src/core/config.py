@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     hmac_secret_key: str = ""
 
+    # Client-IP resolution behind proxies. Empty (default) trusts nothing:
+    # limiter keys and Turnstile use `request.client.host` exactly as
+    # received. Set to the comma-separated CIDRs of your load balancer /
+    # ingress when deployed behind one; the leftmost X-Forwarded-For entry is
+    # then used, but ONLY when the direct peer is inside those CIDRs — an
+    # untrusted peer's header is always ignored, otherwise any client could
+    # pick its own rate-limit bucket.
+    trusted_proxy_cidrs: str = ""
+
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     preauth_token_expire_minutes: int = 5

@@ -463,10 +463,10 @@ export const ForgotPasswordVerifyEndpoint: EndpointDef<ForgotPasswordVerifyRespo
 	mock: () => ({ recovery_token: 'mock-recovery-token' }),
 };
 
-export const ResetPasswordEndpoint: EndpointDef<void> = {
+export const ResetPasswordEndpoint: EndpointDef<TokenResponse> = {
 	url: '/auth/reset-password',
 	method: 'POST',
-	mock: () => undefined,
+	mock: () => MOCK_TOKENS,
 };
 
 // Set/update security question (authenticated) —

@@ -18,6 +18,7 @@ import {
 	me,
 	register,
 	resendLoginOtp,
+	resetPassword,
 	verifyLoginOtp,
 	verifyMfa,
 } from '$lib/features/auth/service';
@@ -320,6 +321,38 @@ export const doRegister = async (input: {
 			return await establishSession(await register(input));
 		} catch (error: unknown) {
 			authState.error = toMessage(error, 'Registration failed. Please try again.');
+			throw error;
+		}
+	});
+};
+
+// Complete a forgot-password reset. Step 4 returns the session directly
+// (like registration, not like login): the recovery already proved inbox
+// access plus the security answer, so no second login dance. Resolves to the
+// signed-in user, or to null when the account has MFA enabled —
+// authState.mfaPending then holds the preauth token and the caller sends the
+// user to the login page for their TOTP challenge.
+export const doResetPassword = async (
+	email: string,
+	otpCode: string,
+	newPassword: string
+): Promise<User | null> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			const tokens = await resetPassword(email, otpCode, newPassword);
+
+			if (tokens.mfa_pending) {
+				clearTokens();
+				authState.mfaPending = true;
+				authState.preauthToken = tokens.preauth_token;
+				authState.status = 'anonymous';
+				return null;
+			}
+
+			return await establishSession(tokens);
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Password reset failed. Please try again.');
 			throw error;
 		}
 	});

@@ -187,6 +187,34 @@ export const mockRegister = async (): Promise<TokenResponse> => {
 	return delay(studentTokens);
 };
 
+// Step 4 mirrors the live contract: the reset itself signs the account in,
+// so resolve the identity by email exactly like mockLogin does. No mock
+// account has MFA on today, but the challenge branch stays for parity with
+// mockLoginOtpVerify — flipping one on must not silently mint a session.
+export const mockResetPassword = async (email: string): Promise<TokenResponse> => {
+	const normalized = email.trim().toLowerCase();
+
+	if (normalized === MOCK_SUPER_ADMIN.email) signedInAs = MOCK_SUPER_ADMIN;
+	else if (normalized === MOCK_ADMIN.email) signedInAs = MOCK_ADMIN;
+	else if (normalized === MOCK_PROFESSOR.email) signedInAs = MOCK_PROFESSOR;
+	else if (normalized === MOCK_STUDENT.email) signedInAs = MOCK_STUDENT;
+	else {
+		throw new Error(
+			`Unknown mock account. Use ${MOCK_SUPER_ADMIN.email}, ${MOCK_ADMIN.email}, ${MOCK_PROFESSOR.email}, or ${MOCK_STUDENT.email} with any password.`
+		);
+	}
+
+	if (signedInAs === MOCK_SUPER_ADMIN) {
+		if (signedInAs.mfa_enabled) return delay(mfaChallenge(superAdminTokens));
+		return delay(superAdminTokens);
+	}
+	if (signedInAs === MOCK_ADMIN) {
+		if (signedInAs.mfa_enabled) return delay(mfaChallenge(adminTokens));
+		return delay(adminTokens);
+	}
+	return delay(signedInAs === MOCK_PROFESSOR ? professorTokens : studentTokens);
+};
+
 export const mockMe = async (): Promise<MeResponse> => delay(signedInAs);
 
 export const mockMfaVerify = async (): Promise<TokenResponse> => {

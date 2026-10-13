@@ -702,7 +702,21 @@ class AuthService:
 
     async def reset_password(
         self, email: str, otp_code: str, new_password: str
-    ) -> None:
+    ) -> TokenResponse:
+        """Consume a FORGET_PASSWORD OTP and set the new password — then sign in.
+
+        Step 4 of recovery returns the session directly instead of a 204, so a
+        user who just proved inbox access (single-use OTP) plus the security
+        answer does not have to prove the same inbox again through login+OTP.
+        Anyone who can complete recovery could complete a login anyway, so the
+        extra round is friction, not security. `must_change_password` is False:
+        this is a user-chosen password, not an admin-issued temp.
+
+        MFA is not skipped: an account with MFA enabled gets the preauth
+        challenge back (same shape as `login`), and the caller finishes with
+        TOTP. Mirrors `doRegister`'s contract on the frontend.
+        """
+
         normalized: str = email.lower()
         await self.verify_otp(normalized, otp_code, OtpPurpose.FORGET_PASSWORD)
 
@@ -732,6 +746,14 @@ class AuthService:
             new_value=_account_snapshot(user),
         )
         await self._session.flush()
+
+        if user.mfa_enabled:
+            return TokenResponse(
+                mfa_pending=True,
+                preauth_token=create_preauth_token(user.id, self._settings),
+            )
+
+        return self._build_tokens(user)
 
     async def change_password(
         self, user: User, current_password: str, new_password: str
