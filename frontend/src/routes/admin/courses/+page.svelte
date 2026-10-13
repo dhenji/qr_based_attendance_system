@@ -22,6 +22,7 @@
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Course template list: standalone reusable templates (D44) — no program,
 	// scheduling, or classroom columns (those live on offerings). The list
@@ -195,7 +196,7 @@
 			await refreshAdminCourses();
 			notifyEntityChanged('courses');
 		} catch (e: unknown) {
-			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
 			formBusy = false;
 		}

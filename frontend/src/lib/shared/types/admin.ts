@@ -141,7 +141,11 @@ export interface AdminOfferingResponse {
 	schedule_days: string;
 	schedule_start_time: string;
 	schedule_end_time: string;
-	course_type: CourseType;
+	// Optional: the backend has no course_type column (frontend-only label).
+	// Absent on live GETs — services fall back to 'lecture' so badges never
+	// render undefined. Do not treat as persisted until a backend migration
+	// lands.
+	course_type?: CourseType;
 	classroom_name: string | null;
 	classroom_lat: number | null;
 	classroom_lng: number | null;
@@ -170,7 +174,9 @@ export interface AdminCourseResponse {
 	course_name: string;
 	units: number;
 	session_duration_hours: number;
-	course_type: CourseType;
+	// Optional for the same reason as AdminOfferingResponse.course_type:
+	// live GETs carry no value, so toCourse() falls back to 'lecture'.
+	course_type?: CourseType;
 	is_active: boolean;
 	created_at: string;
 	updated_at: string;
@@ -193,7 +199,9 @@ export interface AdminCourseCreatePayload {
 	course_name: string;
 	units: number;
 	session_duration_hours: number;
-	course_type: CourseType;
+	// Sent when set; the backend ignores unknown keys (Pydantic v2 default),
+	// so this is a local-only label until a migration lands.
+	course_type?: CourseType;
 }
 
 export interface AdminCourseUpdatePayload {
@@ -254,7 +262,8 @@ export interface AdminOfferingCreatePayload {
 	schedule_days: string;
 	schedule_start_time: string;
 	schedule_end_time: string;
-	course_type: CourseType;
+	// Local-only label (see AdminOfferingResponse.course_type).
+	course_type?: CourseType;
 	classroom_name?: string;
 	classroom_lat?: number;
 	classroom_lng?: number;

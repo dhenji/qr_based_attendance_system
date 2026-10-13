@@ -55,7 +55,8 @@ export const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
 	scheduleDays: o.schedule_days,
 	scheduleStartTime: o.schedule_start_time,
 	scheduleEndTime: o.schedule_end_time,
-	courseType: o.course_type,
+	// Backend has no column — fall back so live rows never render undefined.
+	courseType: o.course_type ?? 'lecture',
 	classroomName: o.classroom_name ?? undefined,
 	classroomLat: o.classroom_lat ?? undefined,
 	classroomLng: o.classroom_lng ?? undefined,

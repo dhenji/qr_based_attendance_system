@@ -166,8 +166,9 @@ export const toReportDirectory = (courses: ProfessorCourseSummary[]): ReportCour
 };
 
 // Warms the directory from GET /professor/courses. Returns the mock fixture
-// (live: false) when the app runs without a backend or the courses call
-// fails, so filter options and identity joins always have something to read.
+// only in mock mode; in live mode a failed/empty warm returns an empty
+// directory so the page shows an error + retry instead of silently rendering
+// demo courses as filters.
 export const initReportDirectory = async (): Promise<{
 	directory: ReportCourseDir[];
 	live: boolean;
@@ -177,7 +178,7 @@ export const initReportDirectory = async (): Promise<{
 		await initProfessorCourses();
 	}
 	if (professorState.coursesError || professorState.courses.length === 0) {
-		return { directory: PROFESSOR_COURSES, live: false };
+		return { directory: [], live: false };
 	}
 	return { directory: toReportDirectory(professorState.courses), live: true };
 };
@@ -434,7 +435,7 @@ export const defaultReportRange = (days = 30): { from: string; to: string } => {
 	return { from: toDateKey(from), to: toDateKey(to) };
 };
 
-export const getReportFilterOptions = (directory: ReportCourseDir[] = PROFESSOR_COURSES) => {
+export const getReportFilterOptions = (directory: ReportCourseDir[] = []) => {
 	const unique = (values: string[]): string[] => [...new Set(values)].sort();
 	const courses = new Map<string, string>();
 	for (const course of directory) {
@@ -451,7 +452,7 @@ export const getReportFilterOptions = (directory: ReportCourseDir[] = PROFESSOR_
 
 export const getAllCoursesReport = async (
 	filters: ReportFilters,
-	directory: ReportCourseDir[] = PROFESSOR_COURSES
+	directory: ReportCourseDir[] = []
 ) => {
 	// Dedicated aggregate first; history derivation stays the fallback.
 	if (!isMockMode()) {
@@ -500,7 +501,7 @@ export const getAllCoursesReport = async (
 
 export const getComparisonReport = async (
 	filters: ReportFilters,
-	directory: ReportCourseDir[] = PROFESSOR_COURSES
+	directory: ReportCourseDir[] = []
 ) => {
 	if (!isMockMode()) {
 		try {
@@ -570,7 +571,7 @@ export const getComparisonReport = async (
 
 export const getTrendsReport = async (
 	filters: ReportFilters,
-	directory: ReportCourseDir[] = PROFESSOR_COURSES
+	directory: ReportCourseDir[] = []
 ) => {
 	if (!isMockMode()) {
 		try {

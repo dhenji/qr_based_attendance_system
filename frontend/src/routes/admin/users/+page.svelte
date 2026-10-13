@@ -22,6 +22,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { formatLocalDate } from '$lib/shared/utils/format';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// User Management (super_admin only, wireframe 4.13): wraps
 	// GET/POST /admin/users, PATCH /{id}/deactivate, and
@@ -143,7 +144,7 @@
 			await refreshAdminUsers();
 			notifyEntityChanged('users');
 		} catch (e: unknown) {
-			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
 			formBusy = false;
 		}

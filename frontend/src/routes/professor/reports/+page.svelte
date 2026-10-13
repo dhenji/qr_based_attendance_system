@@ -77,10 +77,10 @@
 			if (warmed === directory) return;
 			directory = warmed;
 			// Mock mode always serves the fixture (live:false) — that is
-			// expected, not an error. Live mode falling back means the
-			// courses call failed or returned nothing.
+			// expected, not an error. Live mode with no courses is an error:
+			// filters stay empty so demo entries never render as real.
 			directoryError =
-				!live && !isMockMode() ? 'Could not load your courses — filters show demo entries.' : null;
+				!live && !isMockMode() ? 'Could not load your courses — filters are unavailable.' : null;
 		});
 		return () => {
 			cancelled = true;
@@ -361,10 +361,18 @@
 					Loading attendance reports…
 				{:else if reportMeta.dataSource === 'live'}
 					Live attendance data from your reports.
+				{:else if isMockMode()}
+					Demo report data — mock mode.
 				{:else}
-					Demo report data — live reports are unavailable.
+					Live reports are unavailable.
 				{/if}
 			</p>
+			{#if !isLoading && !isMockMode() && reportMeta.dataSource === 'demo'}
+				<p class="warning" role="alert">
+					Could not load live reports.
+					<button class="link-button" type="button" onclick={retry}>Try again</button>
+				</p>
+			{/if}
 			{#if reportMeta.truncated}
 				<p class="warning" role="status">
 					Showing the 500 most recent sessions in this range; narrow the dates to see older ones.

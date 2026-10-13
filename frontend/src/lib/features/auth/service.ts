@@ -94,10 +94,18 @@ export const register = async (input: {
 	return post<TokenResponse>('authRegister', body);
 };
 
-export const login = async (email: string, password: string): Promise<TokenResponse> => {
+export const login = async (
+	email: string,
+	password: string,
+	turnstileToken?: string | null
+): Promise<TokenResponse> => {
 	if (isMockMode()) return mockLogin(email);
 
 	const body: LoginRequest = { email: email.trim().toLowerCase(), password };
+	// Forwarded only when the page holds a Turnstile token; omitted otherwise
+	// so the backend no-ops when its secret is empty. Required once
+	// TURNSTILE_SECRET is set (400 invalid_captcha without it).
+	if (turnstileToken) body.turnstile_token = turnstileToken;
 	return post<TokenResponse>('authLogin', body);
 };
 
@@ -219,12 +227,17 @@ export interface ForgotPasswordQuestion {
 	set: boolean;
 }
 
-export const forgotPassword = async (email: string): Promise<ForgotPasswordQuestion> => {
+export const forgotPassword = async (
+	email: string,
+	turnstileToken?: string | null
+): Promise<ForgotPasswordQuestion> => {
 	if (isMockMode()) return mockForgotPassword();
 
-	return post<ForgotPasswordQuestion>('authForgotPassword', {
-		email: email.trim().toLowerCase()
-	});
+	const body: Record<string, string> = { email: email.trim().toLowerCase() };
+	// Same Turnstile contract as login: omitted when unconfigured, enforced
+	// once TURNSTILE_SECRET is set.
+	if (turnstileToken) body.turnstile_token = turnstileToken;
+	return post<ForgotPasswordQuestion>('authForgotPassword', body);
 };
 
 export const forgotPasswordVerify = async (

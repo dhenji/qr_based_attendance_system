@@ -371,7 +371,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	<header class="header">
 		<div>
 			<h1>Analytics &amp; Reports</h1>
-			<p class="muted">Aggregates from the live analytics backend (mocks only when PUBLIC_MOCK_MODE=true)</p>
+			<p class="muted">Aggregates from the live analytics backend</p>
 		</div>
 		<div class="header-actions" role="group" aria-label="Rate metric">
 			<button

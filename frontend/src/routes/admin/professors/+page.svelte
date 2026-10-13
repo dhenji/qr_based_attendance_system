@@ -27,6 +27,7 @@
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
 	// the roster seeds the records professors claim at registration. Columns:
@@ -271,7 +272,7 @@
 			await refreshAdminProfessors();
 			notifyEntityChanged('professors');
 		} catch (e: unknown) {
-			formError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
 			formBusy = false;
 		}

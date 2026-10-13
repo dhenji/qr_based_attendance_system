@@ -69,15 +69,17 @@ export const cleanupSystem = async (): Promise<{ removed: number }> =>
 
 // downloadBackupDescriptor
 // Mock-mode stand-in: describes the row as JSON because getBlob throws in
-// mock mode (no backend to fetch from). Live mode never calls this directly —
-// downloadBackupArchive below fetches the encrypted archive first.
+// mock mode (no backend to fetch from). The file is clearly labelled
+// mock-only so it is never mistaken for a real encrypted archive. Live mode
+// never calls this directly — downloadBackupArchive below fetches the
+// encrypted archive first.
 export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 	const blob = new Blob(
 		[
 			JSON.stringify(
 				{
-					demo: true,
-					note: 'Descriptor only — the backup archive itself is not fetched yet.',
+					mock: true,
+					note: 'Mock-mode descriptor only — the backup archive itself is unavailable without a backend.',
 					backup: row
 				},
 				null,
@@ -89,7 +91,7 @@ export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 	const url = URL.createObjectURL(blob);
 	const link = document.createElement('a');
 	link.href = url;
-	link.download = `backup-${row.id}-descriptor.json`;
+	link.download = `backup-${row.id}-mock-descriptor.json`;
 	document.body.appendChild(link);
 	link.click();
 	link.remove();
