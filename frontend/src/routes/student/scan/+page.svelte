@@ -419,8 +419,10 @@
 		}
 	};
 
-	const getCurrentPosition = () =>
-		new Promise<{ lat: number; lng: number; accuracy: number }>((resolve, reject) => {
+	const getPositionOnce = (
+		options: PositionOptions
+	): Promise<{ lat: number; lng: number; accuracy: number }> =>
+		new Promise((resolve, reject) => {
 			if (!navigator.geolocation) {
 				reject(new Error('Location services are unavailable'));
 				return;
@@ -433,10 +435,35 @@
 						lng: coords.longitude,
 						accuracy: coords.accuracy,
 					}),
-				() => reject(new Error('Location permission is required')),
-				{ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+				(err) => {
+					if (err.code === err.PERMISSION_DENIED) {
+						reject(new Error('Location permission is required'));
+					} else if (err.code === err.TIMEOUT) {
+						reject(new Error('Location timed out. Try again near a window or outdoors.'));
+					} else {
+						reject(new Error('Unable to read your location. Try again.'));
+					}
+				},
+				options
 			);
 		});
+
+	const getCurrentPosition = async (): Promise<{
+		lat: number;
+		lng: number;
+		accuracy: number;
+	}> => {
+		// High-accuracy first; on timeout fall back once to a faster low-power
+		// fix so a weak GPS signal still yields a scan instead of a hard fail.
+		try {
+			return await getPositionOnce({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('timed out')) {
+				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 30000, timeout: 8000 });
+			}
+			throw e;
+		}
+	};
 
 	const handleLivenessComplete = async (livenessEvidence: LivenessEvidence) => {
 		if (submitting) return;
@@ -613,10 +640,11 @@
 				<h2 class="section-title">Session Code (manual entry)</h2>
 				<div class="code-row">
 					<input
-						class="form-input code-input"
+						class="form-input code-input code-input-plain"
 						placeholder="Enter code from projector (e.g. wan9YQXY)"
 						aria-label="Session code"
-						style="text-transform: none;"
+						autocomplete="off"
+						spellcheck={false}
 						value={sessionCode}
 						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value; }}
 					/>
@@ -1041,6 +1069,10 @@
 		font-family: 'JetBrains Mono', monospace;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
+	}
+
+	.code-input-plain {
+		text-transform: none;
 	}
 
 	.btn-primary,

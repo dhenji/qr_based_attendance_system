@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -42,6 +43,10 @@
 
 	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
 	const win = createOtpWindow();
+
+	onDestroy(() => {
+		win.stop();
+	});
 
 	// Same policy the backend enforces in shared/validators.password_strength:
 	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.

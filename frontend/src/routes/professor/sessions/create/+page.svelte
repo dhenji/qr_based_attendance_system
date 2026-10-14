@@ -9,6 +9,7 @@
 	} from '$lib/features/professor/store.svelte';
 	import type { ProfessorCourseSummary } from '$lib/shared/types';
 	import { openSession, SESSION_CODE_SAMPLE } from '$lib/features/session/service';
+	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
 
 	// D11: two entry points, one page. Arriving from a My Courses card carries
@@ -169,6 +170,7 @@ let selectedOfferingId = $state<number | null>(null);
 			generatedCode = created.qrPayload.code;
 			generatedExpiry =
 				created.expiresAt === null ? null : dateTimeText(new Date(created.expiresAt));
+			invalidateAttendanceDirectory();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to open session';
 		} finally {

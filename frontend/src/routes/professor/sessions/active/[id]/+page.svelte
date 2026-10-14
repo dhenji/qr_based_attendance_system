@@ -6,6 +6,7 @@
 		closeSession,
 		getActiveSession
 	} from '$lib/features/session/service';
+	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
 	import {
 		excuseAllAbsent,
 		quickExcuse
@@ -84,7 +85,8 @@
 		document.body.appendChild(link);
 		link.click();
 		link.remove();
-		URL.revokeObjectURL(url);
+		// Revoke late: immediate revoke can abort large downloads on Safari.
+		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	};
 	const exportCurrent = async () => {
 		const current = session;
@@ -442,6 +444,7 @@
 		try {
 			const requestStartedAt = Date.now();
 			await closeSession(id);
+			invalidateAttendanceDirectory();
 			closedNotice = true;
 			const live = await getActiveSession(id);
 			session = live;

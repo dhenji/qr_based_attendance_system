@@ -285,7 +285,7 @@
 			document.body.appendChild(anchor);
 			anchor.click();
 			anchor.remove();
-			URL.revokeObjectURL(url);
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		} catch (e: unknown) {
 			exportError = e instanceof Error && e.message ? e.message : 'Export failed. Please try again.';
 		} finally {

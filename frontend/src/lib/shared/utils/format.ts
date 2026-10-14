@@ -1,34 +1,40 @@
 // format.ts
 // Display helpers for dates, times, and percentages.
 
-// e.g. "Wed, Sep 22, 2026"
+// e.g. "Wed, Sep 22, 2026" (viewer locale). Returns "—" for invalid input
+// rather than "Invalid Date".
 export const formatDate = (isoString: string): string => {
-  const date = new Date(isoString);
-  return date.toLocaleDateString(undefined, {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+	const date = new Date(isoString);
+	if (Number.isNaN(date.getTime())) return '—';
+	return date.toLocaleDateString(undefined, {
+		weekday: 'short',
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+	});
 };
 
-// e.g. "10:30 PM"
+// e.g. "10:30 PM" (viewer locale). Returns "—" for invalid input.
 export const formatTime = (isoString: string): string => {
-  const date = new Date(isoString);
-  return date.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+	const date = new Date(isoString);
+	if (Number.isNaN(date.getTime())) return '—';
+	return date.toLocaleTimeString(undefined, {
+		hour: '2-digit',
+		minute: '2-digit',
+	});
 };
 
 // Rounds a 0-100 value to an integer and appends "%".
 export const formatPercentage = (value: number): string =>
   `${Math.round(value)}%`;
 
-// Full ISO timestamp squashed to "YYYY-MM-DD HH:MM:SS".
+// Full ISO timestamp squashed to "YYYY-MM-DD HH:MM:SS" in UTC (not local).
+// Kept for log-like surfaces; prefer formatLocalDateTime for user-facing times.
+// Returns "—" for invalid input.
 export const formatTimestamp = (isoString: string): string => {
-  const date = new Date(isoString);
-  return date.toISOString().replace("T", " ").slice(0, 19);
+	const date = new Date(isoString);
+	if (Number.isNaN(date.getTime())) return '—';
+	return date.toISOString().replace('T', ' ').slice(0, 19);
 };
 
 // Local datetime in "YYYY-MM-DD HH:MM:SS" format (user's timezone)

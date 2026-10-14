@@ -83,6 +83,11 @@ type SessionDirectory = Map<
 let directoryReady = false;
 let sessionDirectory: SessionDirectory = new Map();
 
+export const invalidateAttendanceDirectory = (): void => {
+	directoryReady = false;
+	sessionDirectory = new Map();
+};
+
 const ensureDirectory = async (): Promise<void> => {
 	if (directoryReady) return;
 	directoryReady = true;

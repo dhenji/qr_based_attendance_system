@@ -59,9 +59,11 @@
 
 	const allReqsMet = $derived(req.length && req.upper && req.lower && req.number && req.symbol);
 	let success = $state(false);
+	let successTimer: ReturnType<typeof setTimeout> | null = null;
 
 	onDestroy(() => {
 		win.stop();
+		if (successTimer) clearTimeout(successTimer);
 	});
 
 	// Dismiss a stale failure as soon as the user starts correcting the form,
@@ -160,9 +162,11 @@
 			// only delays the navigation, not the request.
 			const user = await doResetPassword(email, otp.join(''), newPwd);
 			success = true;
-			setTimeout(() => {
-				if (user) goto(defaultRouteFor(user));
-				else goto(Routes.LOGIN);
+			if (successTimer) clearTimeout(successTimer);
+			successTimer = setTimeout(() => {
+				successTimer = null;
+				if (user) void goto(defaultRouteFor(user));
+				else void goto(Routes.LOGIN);
 			}, 1500);
 		} catch (e: unknown) {
 			error = toMessage(e, 'Password reset failed. Please try again.');
