@@ -295,3 +295,16 @@ export const buildEnrollCsv = (students: AdminStudent[]): File => {
 		type: 'text/csv',
 	});
 };
+
+// Unenroll one student — 204, link row only. `studentNumber` is the roster
+// string id (e.g. "24-2111"), matching the Enrolled tab row key.
+export const unenrollStudent = async (
+	offeringId: number,
+	studentNumber: string
+): Promise<void> => {
+	await del<void>(
+		'adminOfferingUnenroll',
+		undefined,
+		`/${offeringId}/students/${encodeURIComponent(studentNumber)}`
+	);
+};

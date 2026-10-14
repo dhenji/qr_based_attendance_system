@@ -12,6 +12,7 @@
 		loadOfferingAssignments,
 		loadOfferingRoster,
 		refreshAdminOfferingDetail,
+		unenrollStudentFromOffering,
 		updateAdminOffering,
 	} from '$lib/features/admin/offerings/store.svelte';
 	import {
@@ -32,6 +33,7 @@
 		AdminBulkEnrollResult,
 		AdminCourse,
 		AdminProfessor,
+		AdminRosterItem,
 		AdminStudent,
 		Program,
 		YearLevel,
@@ -114,6 +116,8 @@
 		null
 	);
 	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	let unenrollTarget = $state<AdminRosterItem | null>(null);
+	let unenrollBusy = $state(false);
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
@@ -517,6 +521,23 @@
 		}
 	};
 
+	const askUnenroll = (row: AdminRosterItem) => {
+		unenrollTarget = row;
+	};
+
+	const confirmUnenroll = async () => {
+		if (!offering || !unenrollTarget || unenrollBusy) return;
+		unenrollBusy = true;
+		try {
+			await unenrollStudentFromOffering(offering.id, unenrollTarget.studentId);
+			unenrollTarget = null;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			unenrollBusy = false;
+		}
+	};
+
 	const rosterTotalPages = $derived(
 		Math.max(1, Math.ceil(adminOfferingDetailState.rosterTotal / 20))
 	);
@@ -660,6 +681,7 @@
 									<th>Name</th>
 									<th>Section</th>
 									<th>Enrolled</th>
+									<th><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -669,6 +691,9 @@
 										<td>{r.name}</td>
 										<td>{r.section ?? '—'}</td>
 										<td>{r.enrolledAt.slice(0, 10)}</td>
+										<td class="row-actions">
+											<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+										</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -942,6 +967,34 @@
 					onclick={submitAdd}
 				>
 					{addBusy ? 'Enrolling…' : addSelected.length > 1 ? `Enroll ${addSelected.length}` : 'Enroll'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if unenrollTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="unenroll-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (unenrollTarget = null) }}
+		>
+			<h2 id="unenroll-title" class="modal-title">Remove student?</h2>
+			<p class="muted">
+				{unenrollTarget.name} ({unenrollTarget.studentId}) will be unenrolled from
+				this offering. Past attendance history is kept; future scans will be blocked.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (unenrollTarget = null)}>Cancel</button>
+				<button class="btn btn-danger" disabled={unenrollBusy} onclick={confirmUnenroll}>
+					{unenrollBusy ? 'Removing…' : 'Remove'}
 				</button>
 			</div>
 		</div>

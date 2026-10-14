@@ -200,3 +200,19 @@ async def get_roster(
     return await service.get_roster(
         offering_id=offering_id, section=section, page=page, size=size
     )
+
+
+@router.delete(
+    "/{offering_id}/students/{student_number}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Unenroll a student from the offering (link row only)",
+)
+async def unenroll_student(
+    offering_id: int,
+    student_number: str,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> None:
+    await service.unenroll_student(
+        offering_id=offering_id, student_number=student_number, actor_id=user.id
+    )

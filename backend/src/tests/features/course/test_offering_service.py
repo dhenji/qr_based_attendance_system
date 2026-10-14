@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from features.course.exceptions import (
     CourseNotFoundException,
+    EnrollmentNotFoundException,
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingNotFoundException,
@@ -24,6 +25,7 @@ from features.enrollment.model import Enrollment
 from features.professor.model import Professor
 from features.program.exceptions import YearLevelNotFoundException
 from features.program.model import Program, YearLevel
+from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity
@@ -61,6 +63,7 @@ class _FakeSession:
         self.rows = rows if rows is not None else {}
         self.counts = list(counts or [])
         self.added = []
+        self.deleted = []
 
     async def get(self, model, ident):
         return self.store.get((model, ident))
@@ -78,6 +81,9 @@ class _FakeSession:
 
     async def flush(self):
         pass
+
+    async def delete(self, obj):
+        self.deleted.append(obj)
 
     def add(self, obj):
         # Server defaults are applied by the real DB on flush; fill them so
@@ -540,3 +546,92 @@ def test_roster_maps_items() -> None:
     assert page.items[0].name == "Ada Lovelace"
     assert page.items[0].section == "B"
     assert page.items[0].enrolled_at == NOW
+
+
+# -- unenroll ------------------------------------------------------------------
+
+
+def test_unenroll_removes_link_and_audits() -> None:
+    ada = _student()
+    link = _enrollment()
+    session = _FakeSession(
+        objs=(_offering(), ada),
+        rows={Student: [ada], Enrollment: [link]},
+    )
+
+    _run(
+        CourseService(session).unenroll_student(
+            offering_id=10, student_number="S001", actor_id=99
+        )
+    )
+
+    assert session.deleted == [link]
+    assert [type(obj) for obj in session.added] == [AuditLog]
+    audit = session.added[0]
+    assert audit.action == "unenroll"
+    assert audit.entity_type == "enrollment"
+    assert audit.entity_id == link.id
+    assert audit.old_value["offering_id"] == 10
+    assert audit.old_value["student_id"] == "S001"
+    assert audit.performed_by == 99
+
+
+def test_unenroll_unknown_offering_404() -> None:
+    session = _FakeSession(objs=())
+
+    try:
+        _run(
+            CourseService(session).unenroll_student(
+                offering_id=99, student_number="S001"
+            )
+        )
+    except OfferingNotFoundException as exc:
+        assert exc.code == "offering_not_found"
+    else:
+        raise AssertionError("expected OfferingNotFoundException")
+
+    assert session.deleted == []
+    assert session.added == []
+
+
+def test_unenroll_unknown_student_404() -> None:
+    session = _FakeSession(
+        objs=(_offering(),),
+        rows={Student: []},
+    )
+
+    try:
+        _run(
+            CourseService(session).unenroll_student(
+                offering_id=10, student_number="S999"
+            )
+        )
+    except StudentNotFoundException as exc:
+        assert exc.code == "student_not_found"
+    else:
+        raise AssertionError("expected StudentNotFoundException")
+
+    assert session.deleted == []
+    assert session.added == []
+
+
+def test_unenroll_not_enrolled_404() -> None:
+    ada = _student()
+    session = _FakeSession(
+        objs=(_offering(), ada),
+        rows={Student: [ada], Enrollment: []},
+    )
+
+    try:
+        _run(
+            CourseService(session).unenroll_student(
+                offering_id=10, student_number="S001"
+            )
+        )
+    except EnrollmentNotFoundException as exc:
+        assert exc.code == "enrollment_not_found"
+    else:
+        raise AssertionError("expected EnrollmentNotFoundException")
+
+    assert session.deleted == []
+    assert session.added == []
