@@ -19,6 +19,10 @@ const DELETE_ERROR_MESSAGES: Record<string, string> = {
 	student_not_found: 'Student record not found. Refresh the list and try again.',
 	professor_not_found: 'Professor record not found. Refresh the list and try again.',
 	program_not_found: 'Program record not found. Refresh the list and try again.',
+	program_has_offerings:
+		'Cannot permanently delete this program — course offerings still use it. Move or delete those first.',
+	program_has_students:
+		'Cannot permanently delete this program — students are still enrolled under it. Move those students first.',
 	year_level_not_found: 'Year level not found. Refresh and try again.',
 	year_has_courses:
 		'Cannot delete this year level — course offerings still use it. Move or delete those first.',

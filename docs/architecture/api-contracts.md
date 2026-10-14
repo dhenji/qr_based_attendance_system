@@ -214,13 +214,15 @@ Create a new program.
 
 #### `DELETE /admin/programs/{program_id}`
 
-Archive program (sets `is_active=false` on the program row only). PATCH the same row with
-`is_active: true` to reactivate.
+Permanent delete — allowed only on archived (`is_active=false`) programs with
+no dependents. Archive via `PATCH` the same row with `is_active: false`;
+reactivate with `is_active: true`.
 
 |                  |            |
 | ---------------- | ---------- |
 | **Response 204** | No content |
-| **Notes**        | No cascade. An earlier version of this contract said archiving "cascades year-levels/courses inactive"; that predates D44 and cannot be implemented — `year_levels` has no `is_active` column and `courses` is a standalone template with no program FK (the program FK lives on `course_offerings`). `course_offerings` rows are left untouched. See ADR-058. |
+| **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `program_has_offerings` (`course_offerings` still reference this program)<br>409 `program_has_students` (students are still enrolled under this program's year levels)<br>404 `program_not_found` |
+| **Notes**        | Empty year levels cascade (`delete-orphan`); the guards above run first so the `RESTRICT` FKs on `course_offerings.program_id` and `students.year_level_id` can never surface as a 500. One `delete` audit row on `program` per hard delete. |
 
 ---
 

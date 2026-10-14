@@ -9,6 +9,7 @@
 
 import type { Program, ProgramDetail, ProgramFilters } from '$lib/shared/types';
 import {
+	deleteProgram,
 	deleteYearLevel,
 	getProgram,
 	listPrograms,
@@ -93,6 +94,23 @@ export const toggleProgramActive = async (program: Program): Promise<void> => {
 		// Surfaced via actionError (role=alert) — no re-throw so callers use
 		// `void toggle...()` with no swallowed rejection.
 		adminProgramsState.actionError = toMessage(e, 'Failed to update program status');
+	}
+};
+
+export const deleteArchivedProgram = async (id: number): Promise<void> => {
+	adminProgramsState.actionError = null;
+	try {
+		await deleteProgram(id);
+		// Deleting the last row on a page > 1 would leave an empty page —
+		// step back first so the refresh lands on a populated one.
+		if (adminProgramsState.items.length === 1 && adminProgramsState.page > 1) {
+			adminProgramsState.page -= 1;
+		}
+		await refreshAdminPrograms();
+		notifyEntityChanged('programs');
+	} catch (e: unknown) {
+		adminProgramsState.actionError = friendlyDeleteError(e, 'Failed to delete program');
+		throw e;
 	}
 };
 

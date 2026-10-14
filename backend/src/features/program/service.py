@@ -9,11 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from features.course.model import CourseOffering
 from features.program.exceptions import (
     ProgramCodeExistsException,
+    ProgramHasOfferingsException,
+    ProgramHasStudentsException,
+    ProgramNotArchivedException,
     ProgramNotFoundException,
     YearLevelHasCoursesException,
     YearLevelNotFoundException,
     YearLevelNumberExistsException,
 )
+from features.program.model import Program, YearLevel
+from features.student.model import Student
 from features.program.model import Program, YearLevel
 from features.program.schema import (
     ProgramCreate,
@@ -176,21 +181,56 @@ class ProgramService:
             )
         )
 
-    async def archive(self, *, program_id: int, actor_id: int | None = None) -> None:
+    async def hard_delete(
+        self, *, program_id: int, actor_id: int | None = None
+    ) -> None:
+        """Permanently delete an archived program with no offerings or students."""
         program: Program = await self._get_or_404(program_id)
+
+        if program.is_active:
+            raise ProgramNotArchivedException(program.id)
+
+        offering_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseOffering)
+                .where(CourseOffering.program_id == program_id)
+            )
+            or 0
+        )
+
+        if offering_count > 0:
+            raise ProgramHasOfferingsException(program_id)
+
+        student_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Student)
+                .join(YearLevel, YearLevel.id == Student.year_level_id)
+                .where(YearLevel.program_id == program_id)
+            )
+            or 0
+        )
+
+        if student_count > 0:
+            raise ProgramHasStudentsException(program_id)
+
+        # Snapshot before the delete: the instance is detached once flushed.
         old_value = self._program_snapshot(program)
-        program.is_active = False
-        await self._session.flush()
 
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action=AuditAction.ARCHIVE,
+            action=AuditAction.DELETE,
             entity_type=AuditEntity.PROGRAM,
             entity_id=program.id,
             old_value=old_value,
-            new_value=self._program_snapshot(program),
         )
+
+        # Year levels cascade (`delete-orphan` on Program.year_levels) — safe
+        # now that both RESTRICT boundaries above are proven empty.
+        await self._session.delete(program)
+        await self._session.flush()
 
     async def list_years(
         self, *, program_id: int, page: int, size: int
