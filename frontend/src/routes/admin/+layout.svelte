@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import {
 		authState,
 		defaultRouteFor,
@@ -10,6 +11,11 @@
 		isSuperAdmin,
 		restoreSession,
 	} from '$lib/features/auth/store.svelte';
+	import NotificationBell, {
+		type NotificationBellItem,
+	} from '$lib/components/NotificationBell.svelte';
+	import { listAdminExcuses } from '$lib/features/admin/excuses/service';
+	import { POLL_INTERVAL_MS } from '$lib/features/notifications/poll';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -22,6 +28,49 @@
 	// logged-out portal-card click never paints protected UI before redirect.
 	let gate = $state<'checking' | 'allowed'>('checking');
 
+	// Pending-excuse bell (read-only workload view): polls the live pending
+	// total (fail-soft — mock/offline/401 hides the badge). Clicking opens
+	// the preview panel; the panel action jumps to the Excuses page.
+	let pendingCount = $state(0);
+	let notifPreview = $state<NotificationBellItem[]>([]);
+	let notifLoading = $state(false);
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+	const refreshNotif = async () => {
+		try {
+			const result = await listAdminExcuses({ status: 'pending', page: 1, size: 1 });
+			pendingCount = result.total ?? 0;
+		} catch {
+			pendingCount = 0;
+		}
+	};
+
+	const onNotifFocus = () => {
+		if (document.visibilityState !== 'visible') return;
+		void refreshNotif();
+	};
+
+	// Lazy preview for the bell panel: newest pending requests, fail-soft
+	// (the badge count is the source of truth; a failed preview just shows
+	// the empty state, never an error).
+	const loadNotifPreview = async () => {
+		notifLoading = true;
+		try {
+			const result = await listAdminExcuses({ status: 'pending', page: 1, size: 5 });
+			notifPreview = (result.items ?? []).map((row) => ({
+				id: row.id,
+				title: `Excuse request #${row.id}`,
+				sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+			}));
+		} catch {
+			notifPreview = [];
+		} finally {
+			notifLoading = false;
+		}
+	};
+
+	const openNotifExcuses = () => void goto(Routes.ADMIN_EXCUSES);
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
@@ -32,7 +81,23 @@
 			await goto(defaultRouteFor(user), { replaceState: true });
 		} else {
 			gate = 'allowed';
+			void refreshNotif();
+			pollTimer = setInterval(() => {
+				if (!document.hidden) void refreshNotif();
+			}, POLL_INTERVAL_MS);
+			window.addEventListener('focus', onNotifFocus);
+			document.addEventListener('visibilitychange', onNotifFocus);
 		}
+	});
+
+	onDestroy(() => {
+		// onDestroy also runs during SSR teardown, where window/document do
+		// not exist — and onMount (the only place listeners attach) never
+		// runs on the server, so there is nothing to clean up there.
+		if (!browser) return;
+		if (pollTimer) clearInterval(pollTimer);
+		window.removeEventListener('focus', onNotifFocus);
+		document.removeEventListener('visibilitychange', onNotifFocus);
 	});
 
 // MVP nav: Dashboard, Students, Professors, Programs, Courses,
@@ -131,6 +196,18 @@
 		{#if displayName}
 			<span class="who" title={authState.user?.email ?? displayName}>{displayName}</span>
 		{/if}
+
+		<NotificationBell
+			count={pendingCount}
+			buttonLabel={pendingCount > 0 ? `${pendingCount} pending excuse requests` : 'No new notifications'}
+			panelTitle={pendingCount > 0 ? `${pendingCount} excuse request${pendingCount === 1 ? '' : 's'} awaiting review` : 'Excuse requests'}
+			items={notifPreview}
+			loading={notifLoading}
+			emptyText="You're caught up — no pending excuse requests."
+			actionLabel="Open Excuses"
+			onOpen={() => void loadNotifPreview()}
+			onAction={openNotifExcuses}
+		/>
 
 		<button class="icon-btn logout" type="button" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

@@ -53,9 +53,10 @@ let selectedOfferingId = $state<number | null>(null);
 	// the offering/app fallbacks for fields the form does not cover
 	// (classroom name/coords when no override is typed).
 	//
-	// D28: lecture vs lab mode. When lab is ON, geofence and classroom coords are
-	// required. When lab is OFF (lecture), they are optional and the server uses
-	// offering/app defaults.
+	// Geofence is mandatory for every session type (lecture and lab): the
+	// professor always types classroom coordinates, which are sent as the
+	// session location. The server still falls back to the offering for the
+	// classroom *name* when no override name is typed (D17).
 	let isLab = $state(false);
 	let radius = $state(50);
 	let durationMinutes = $state(90);
@@ -104,13 +105,14 @@ let selectedOfferingId = $state<number | null>(null);
 		overrideActive ? classroomOverride.trim() : 'Offering default classroom'
 	);
 
-	const effectiveLat = $derived(overrideActive ? classroomLat : null);
+	const effectiveLat = $derived(classroomLat);
 
-	const effectiveLng = $derived(overrideActive ? classroomLng : null);
+	const effectiveLng = $derived(classroomLng);
 
+	// Coordinates are required for every session: without them the scan
+	// gate has nothing to enforce against.
 	const coordsInvalid = $derived(
-		overrideActive &&
-			(classroomLat == null || classroomLng == null || Number.isNaN(classroomLat) || Number.isNaN(classroomLng))
+		classroomLat == null || classroomLng == null || Number.isNaN(classroomLat) || Number.isNaN(classroomLng)
 	);
 
 	// D13: present + late must fit inside the duration. The backend answers
@@ -160,10 +162,12 @@ let selectedOfferingId = $state<number | null>(null);
 				geofenceRadius: radius,
 				// D17: blank means "keep the offering default", so only send the
 				// override when the professor actually typed one.
-				// D28: in lab mode, always send classroom coords (required).
-				classroomName: (isLab || overrideActive) ? classroomOverride.trim() || undefined : undefined,
-				classroomLat: (isLab || overrideActive) ? (classroomLat ?? undefined) : undefined,
-				classroomLng: (isLab || overrideActive) ? (classroomLng ?? undefined) : undefined
+				// Coordinates are always sent: every session carries a geofence,
+// lecture and lab alike (canSubmit already blocks until both are
+// typed, so the ?? fallbacks below are type-level only).
+				classroomName: classroomOverride.trim() || undefined,
+				classroomLat: classroomLat ?? undefined,
+				classroomLng: classroomLng ?? undefined
 			});
 
 			generatedSessionId = created.id;
@@ -283,21 +287,17 @@ let selectedOfferingId = $state<number | null>(null);
 				</button>
 			</div>
 			<p class="hint">
-				{isLab
-					? 'Lab sessions require classroom coordinates and geofence for attendance tracking.'
-					: 'Lecture sessions use offering defaults. Geofence is optional.'}
+				Both types enforce the geofence: students must be within the radius to scan.
 			</p>
 		</div>
 
-		{#if isLab}
-			<div class="lab-banner">
-				<AppIcon name="alert" size={16} />
-				<span>
-					<strong>Lab mode:</strong> Students must be within the geofence radius to scan attendance.
-					Classroom coordinates are required.
-				</span>
-			</div>
-		{/if}
+		<div class="lab-banner">
+			<AppIcon name="alert" size={16} />
+			<span>
+				<strong>Geofence required:</strong> Students must be within the geofence radius to scan attendance.
+				Classroom coordinates are required for every session.
+			</span>
+		</div>
 
 		<div class="location" class:overridden={overrideActive}>
 				<AppIcon name="pin" size={16} />
@@ -315,9 +315,7 @@ let selectedOfferingId = $state<number | null>(null);
 		<div class="field">
 			<span class="form-label">
 				Geofence Radius
-				{#if isLab}
-					<span class="required-tag">Required</span>
-				{/if}
+				<span class="required-tag">Required</span>
 			</span>
 			<div class="radius-group" role="group" aria-label="Geofence radius">
 				{#each RADII as option (option)}
@@ -331,9 +329,7 @@ let selectedOfferingId = $state<number | null>(null);
 					</button>
 				{/each}
 			</div>
-			{#if isLab}
-				<p class="hint">Students must be within this distance from the classroom to scan.</p>
-			{/if}
+			<p class="hint">Students must be within this distance from the classroom to scan.</p>
 		</div>
 
 			<div class="field">
@@ -387,23 +383,20 @@ let selectedOfferingId = $state<number | null>(null);
 
 		<div class="field">
 			<label class="form-label" for="classroom">
-				{isLab ? 'Classroom' : 'Classroom override'}
+				Classroom name (optional)
 			</label>
 			<input
 				id="classroom"
 				class="form-input"
 				type="text"
-				placeholder={isLab ? 'e.g. Lab 101, Room 301' : 'Offering default classroom'}
+				placeholder="e.g. Lab 101, Room 301"
 				bind:value={classroomOverride}
 			/>
 			<p class="hint">
-				{isLab
-					? 'Required for lab sessions. Students will see this room name.'
-					: 'Blank uses the offering default classroom (D17).'}
+				Blank uses the offering default classroom name (D17). Coordinates below always apply.
 			</p>
 
-			{#if isLab || overrideActive}
-				<div class="override-box">
+			<div class="override-box">
 					<div class="field-row">
 						<div class="field">
 							<label class="form-label" for="override-lat">Latitude</label>
@@ -431,19 +424,14 @@ let selectedOfferingId = $state<number | null>(null);
 						</div>
 					</div>
 					<p class="hint">
-						{isLab
-							? 'The geofence centers here. Both coordinates are required for lab sessions.'
-							: 'The geofence centers here instead of the offering default. Both coordinates are required.'}
+						The geofence centers here. Both coordinates are required for every session.
 					</p>
 					{#if coordsInvalid}
 						<p class="field-error">
-							{isLab
-								? 'Both coordinates are required for a lab session.'
-								: 'Both coordinates are required for a classroom override.'}
+							Both coordinates are required to open a session.
 						</p>
 					{/if}
 				</div>
-			{/if}
 		</div>
 
 			<div class="preview" class:generated={generatedCode !== null}>
