@@ -2087,8 +2087,20 @@ export const AdminProgramCreateEndpoint: EndpointDef<ProgramResponse> = {
 export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 	url: '/admin/programs',
 	method: 'GET',
-	mock: (_params, suffix) => {
+	mock: (_params, suffix, _body, method) => {
 		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (method === 'DELETE') {
+			const idx = MOCK_PROGRAMS.items.findIndex((p) => p.id === id);
+			if (idx === -1) throw new Error('Program not found.');
+			if (MOCK_PROGRAMS.items[idx].is_active)
+				throw new Error('Only inactive programs can be deleted.');
+			const [removed] = MOCK_PROGRAMS.items.splice(idx, 1);
+			MOCK_PROGRAMS.total = MOCK_PROGRAMS.items.length;
+			for (let i = MOCK_YEARS.length - 1; i >= 0; i--) {
+				if (MOCK_YEARS[i].program_id === removed.id) MOCK_YEARS.splice(i, 1);
+			}
+			return undefined as unknown as ProgramDetailResponse;
+		}
 		const program = MOCK_PROGRAMS.items.find((p) => p.id === id) ?? MOCK_PROGRAMS.items[0];
 		return {
 			...program,

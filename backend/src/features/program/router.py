@@ -98,14 +98,14 @@ async def update_program(
 @router.delete(
     "/{program_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Archive a program (is_active=false, no cascade)",
+    summary="Permanently delete an archived program with no offerings or students",
 )
-async def archive_program(
+async def hard_delete_program(
     program_id: int,
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> None:
-    await service.archive(program_id=program_id, actor_id=user.id)
+    await service.hard_delete(program_id=program_id, actor_id=user.id)
 
 
 @router.get(

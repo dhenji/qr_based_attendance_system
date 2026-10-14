@@ -4,6 +4,7 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminProgramsState,
+		deleteArchivedProgram,
 		initAdminPrograms,
 		refreshAdminPrograms,
 		toggleProgramActive,
@@ -22,9 +23,9 @@
 	// GET /admin/programs. Aggregates (Years/Terms/Courses) are derived
 	// per-request server-side and rendered as-is. The list endpoint takes no
 	// sort params, so the Code/Name headers sort client-side over the loaded
-	// page. Deactivate/Reactivate is the single status control: it PATCHes
-	// is_active. DELETE /admin/programs/{id} is the same soft archive (ADR-058)
-	// and stays on the backend, but has no UI caller.
+	// page. Deactivate/Reactivate PATCHes is_active; Delete permanently
+	// removes an archived program (DELETE /admin/programs/{id}, blocked with
+	// 409 while offerings or students still reference it).
 
 	// Keystrokes pause this long before a live-search request goes out.
 	const SEARCH_DEBOUNCE_MS = 250;
@@ -35,6 +36,9 @@
 	let formOpen = $state(false);
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
+
+	let deleteTarget = $state<Program | null>(null);
+	let deleteBusy = $state(false);
 
 	let f_code = $state('');
 	let f_name = $state('');
@@ -180,6 +184,22 @@
 			formBusy = false;
 		}
 	};
+
+	const confirmDelete = async () => {
+		if (!deleteTarget) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedProgram(deleteTarget.id);
+			deleteTarget = null;
+		} finally {
+			deleteBusy = false;
+		}
+	};
+
+	const closeDelete = () => {
+		adminProgramsState.actionError = null;
+		deleteTarget = null;
+	};
 </script>
 
 <div class="page">
@@ -225,7 +245,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminProgramsState.loading}>
-			{#if adminProgramsState.actionError}
+			{#if adminProgramsState.actionError && !deleteTarget}
 				<p class="error" role="alert">{adminProgramsState.actionError}</p>
 			{/if}
 			<table>
@@ -269,6 +289,14 @@
 								>
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
+								{#if !p.isActive}
+									<button
+										class="link danger"
+										onclick={() => { adminProgramsState.actionError = null; deleteTarget = p; }}
+									>
+										Delete
+									</button>
+								{/if}
 							</td>
 						</tr>
 					{/each}
@@ -322,6 +350,35 @@
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-program" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-program-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDelete }}
+		>
+			<h2 id="delete-program-title" class="modal-title">Permanently delete {deleteTarget.code}?</h2>
+			<p class="modal-text">
+				{deleteTarget.name} will be removed for good, along with its year levels.
+				If course offerings or students still use it, deletion will be blocked
+				and the program stays archived.
+			</p>
+			{#if adminProgramsState.actionError}
+				<p class="error" role="alert">{adminProgramsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDelete}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -475,6 +532,10 @@
 		text-decoration: underline;
 	}
 
+	.link.danger {
+		color: var(--danger);
+	}
+
 	.link.strong {
 		font-size: 0.875rem;
 		font-weight: 700;
@@ -553,6 +614,12 @@
 		background: var(--divider);
 	}
 
+	.btn-danger {
+		background: var(--danger);
+		border: 1px solid var(--danger);
+		color: var(--on-brand);
+	}
+
 	.btn-ghost {
 		background: var(--divider);
 		border: 1px solid transparent;
@@ -587,6 +654,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.form {
