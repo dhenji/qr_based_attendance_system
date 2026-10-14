@@ -58,6 +58,9 @@ export const adminProgram = (id: number): string => `${Routes.ADMIN_PROGRAMS}/${
 // The admin professor profile route is parameterised by professor id.
 export const adminProfessor = (id: number): string => `${Routes.ADMIN_PROFESSORS}/${id}`;
 
+// The admin student profile route is parameterised by student id.
+export const adminStudent = (id: number): string => `${Routes.ADMIN_STUDENTS}/${id}`;
+
 // The admin course template route is parameterised by course id.
 export const adminCourse = (id: number): string => `${Routes.ADMIN_COURSES}/${id}`;
 

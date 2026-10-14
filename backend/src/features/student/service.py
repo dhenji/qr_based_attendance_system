@@ -961,6 +961,7 @@ class StudentService:
             year_level_label=year_level.label,
             section=student.section,
             is_active=student.is_active,
+            claim_status="Claimed" if student.user_id is not None else "Unclaimed",
             face_enrolled=student.face_embedding is not None,
             created_at=student.created_at,
             scan_count=await self._scan_count(student.id),

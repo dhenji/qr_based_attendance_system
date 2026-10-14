@@ -153,7 +153,7 @@
 				<div class="avatar" aria-hidden="true">
 					{(professor.firstName[0] ?? '?') + (professor.lastName[0] ?? '')}
 				</div>
-				<div>
+				<div class="profile-meta">
 					<h1>{fullName}</h1>
 					<p class="muted mono">{professor.email}</p>
 					<div class="pills">
@@ -174,18 +174,6 @@
 				<div>
 					<dt>Teaches in</dt>
 					<dd>{teachesIn.length ? teachesIn.join(' · ') : '—'}</dd>
-				</div>
-				<div>
-					<dt>Email</dt>
-					<dd class="mono">{professor.email}</dd>
-				</div>
-				<div>
-					<dt>Claim status</dt>
-					<dd>{professor.claimStatus}</dd>
-				</div>
-				<div>
-					<dt>Status</dt>
-					<dd>{professor.isActive ? 'Active' : 'Inactive'}</dd>
 				</div>
 				<div>
 					<dt>Member since</dt>
@@ -241,6 +229,11 @@
 		gap: 1rem;
 		align-items: center;
 		margin-bottom: 1.25rem;
+	}
+
+	.profile-meta {
+		min-width: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.profile-head h1 {
@@ -317,7 +310,7 @@
 
 	.facts {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 		gap: 1rem;
 		margin: 0;
 	}
@@ -397,5 +390,11 @@
 
 	.btn-secondary:hover {
 		background: var(--divider);
+	}
+	@media (max-width: 640px) {
+		.profile-head {
+			flex-direction: column;
+			align-items: flex-start;
+		}
 	}
 </style>

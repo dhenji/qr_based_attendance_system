@@ -68,6 +68,7 @@ const toStudent = (s: AdminStudentResponse | AdminStudentDetailResponse): AdminS
 	yearLevelLabel: s.year_level_label,
 	section: s.section ?? undefined,
 	isActive: s.is_active,
+	claimStatus: s.claim_status,
 	faceEnrolled: s.face_enrolled,
 	createdAt: s.created_at,
 	scanCount: s.scan_count,

@@ -31,11 +31,10 @@
 
 	// Professor Management (wireframe 4.4): same CRUD pattern as students, but
 	// the roster seeds the records professors claim at registration. Columns:
-	// Name, Email, Department, Courses, Claim, Status.
+	// Name, Email, Department, Courses, Claim. (Status lives in the Archive.)
 
 	let search = $state('');
 	let department = $state('');
-	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
 	let sortBy = $state<'last_name' | 'email' | 'created_at'>('last_name');
 	let sortDir = $state<'asc' | 'desc'>('asc');
 
@@ -45,6 +44,8 @@
 	let formBusy = $state(false);
 	let deleteTarget = $state<AdminProfessor | null>(null);
 	let deleteBusy = $state(false);
+	let toggleTarget = $state<AdminProfessor | null>(null);
+	let toggleBusy = $state(false);
 	// Credential reset; see the students page for why the modal is shared.
 	let resetTarget = $state<AdminProfessor | null>(null);
 
@@ -60,10 +61,6 @@
 	let offeringsLoading = $state(false);
 	let offeringsError = $state<string | null>(null);
 
-	const isActiveFilter = $derived(
-		statusFilter === 'all' ? undefined : statusFilter === 'active'
-	);
-
 	const totalPages = $derived(
 		Math.max(1, Math.ceil(adminProfessorsState.total / adminProfessorsState.size))
 	);
@@ -73,7 +70,7 @@
 			{
 				search: search.trim() || undefined,
 				department: department.trim() || undefined,
-				is_active: isActiveFilter,
+				is_active: true,
 				sort_by: sortBy,
 				sort_dir: sortDir,
 			},
@@ -288,6 +285,17 @@
 			deleteBusy = false;
 		}
 	};
+
+	const confirmToggle = async () => {
+		if (!toggleTarget || toggleBusy) return;
+		toggleBusy = true;
+		try {
+			await toggleProfessorActive(toggleTarget);
+			if (!adminProfessorsState.actionError) toggleTarget = null;
+		} finally {
+			toggleBusy = false;
+		}
+	};
 </script>
 
 <div class="page">
@@ -332,11 +340,6 @@
 				if (e.key === 'Enter') applyFilters();
 			}}
 		/>
-		<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={applyFilters}>
-			<option value="all">All statuses</option>
-			<option value="active">Active</option>
-			<option value="inactive">Inactive</option>
-		</select>
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
@@ -369,7 +372,6 @@
 						<th>Department</th>
 						<th>Courses</th>
 						<th>Claim</th>
-						<th>Status</th>
 						<th><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
@@ -390,16 +392,14 @@
 							<td>{p.department ?? '—'}</td>
 							<td>{p.assigned_courses.length}</td>
 							<td>{p.claimStatus}</td>
-							<td>
-								<span class={p.isActive ? 'status-active' : 'status-inactive'}>
-									{p.isActive ? 'Active' : 'Inactive'}
-								</span>
-							</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => openEdit(p)}>Edit</button>
 								<button
 									class="link"
-									onclick={() => void toggleProfessorActive(p)}
+									onclick={() => {
+										adminProfessorsState.actionError = null;
+										toggleTarget = p;
+									}}
 								>
 									{p.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
@@ -505,6 +505,43 @@
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-professor" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if toggleTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="toggle-professor-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (toggleBusy ? undefined : (toggleTarget = null)) }}
+		>
+			<h2 id="toggle-professor-title" class="modal-title">
+				{toggleTarget.isActive ? 'Deactivate professor?' : 'Reactivate professor?'}
+			</h2>
+			<p class="modal-text">
+				{#if toggleTarget.isActive}
+					{fullName(toggleTarget)} will be moved to the Archive and lose login access. You can restore them later from the Archive.
+				{:else}
+					{fullName(toggleTarget)} will return to the active roster and regain login access.
+				{/if}
+			</p>
+			{#if adminProfessorsState.actionError}
+				<p class="error" role="alert">{adminProfessorsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
+				<button
+					class="btn {toggleTarget.isActive ? 'btn-danger' : 'btn-primary'}"
+					disabled={toggleBusy}
+					onclick={() => void confirmToggle()}
+				>
+					{toggleBusy ? 'Saving…' : (toggleTarget.isActive ? 'Deactivate' : 'Reactivate')}
 				</button>
 			</div>
 		</div>
@@ -662,26 +699,6 @@
 	.mono {
 		font-variant-numeric: tabular-nums;
 		font-weight: 500;
-	}
-
-	.status-active,
-	.status-inactive {
-		display: inline-block;
-		padding: 0.125rem 0.625rem;
-		border-radius: 999px;
-		font-size: 0.75rem;
-		font-weight: 600;
-		white-space: nowrap;
-	}
-
-	.status-active {
-		background: var(--success-bg);
-		color: var(--success);
-	}
-
-	.status-inactive {
-		background: var(--danger-bg);
-		color: var(--danger);
 	}
 
 	.row-actions {
