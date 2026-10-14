@@ -16,6 +16,7 @@ from features.program.exceptions import (
     YearLevelHasCoursesException,
     YearLevelNotFoundException,
     YearLevelNumberExistsException,
+    YearLevelTermInUseException,
 )
 from features.program.model import Program, YearLevel
 from features.student.model import Student
@@ -314,6 +315,33 @@ class ProgramService:
     ) -> YearLevelRead:
         year_level: YearLevel = await self._get_year_or_404(program_id, year_id)
         old_value = self._year_snapshot(year_level)
+
+        old_term_codes: set[str] = {
+            str(term.get("code"))
+            for term in ((year_level.term_structure or {}).get("terms") or [])
+            if term.get("code") is not None
+        }
+
+        if "term_structure" in payload.model_fields_set:
+            new_terms = []
+            if payload.term_structure is not None:
+                new_terms = payload.term_structure.terms
+            new_term_codes = {str(term.code) for term in new_terms}
+            removed_or_renamed = old_term_codes - new_term_codes
+
+            if removed_or_renamed:
+                referenced = await self._session.execute(
+                    select(CourseOffering.semester, func.count())
+                    .where(CourseOffering.year_level_id == year_id)
+                    .group_by(CourseOffering.semester)
+                )
+                in_use_codes = {
+                    str(semester)
+                    for semester, count in referenced.all()
+                    if count and str(semester) in removed_or_renamed
+                }
+                if in_use_codes:
+                    raise YearLevelTermInUseException(year_id, sorted(in_use_codes))
 
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(year_level, field, value)

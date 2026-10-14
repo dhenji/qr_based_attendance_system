@@ -130,3 +130,21 @@ class YearLevelHasCoursesException(ProgramDomainException):
         super().__init__(
             message=f"Year level {year_level_id} has courses and cannot be deleted"
         )
+
+
+class YearLevelTermInUseException(ProgramDomainException):
+    """409 - a term code still referenced by course offerings.
+
+    `course_offerings.semester` stores the term code as text, so renaming or
+    removing a code that an offering still uses would orphan that offering.
+    The admin must add a new term (and migrate offerings) instead.
+    """
+
+    status_code: int = 409
+    code: str = "term_code_in_use"
+
+    def __init__(self, year_level_id: int, term_codes: list[str] | tuple[str, ...]) -> None:
+        joined = ", ".join(sorted(term_codes))
+        super().__init__(
+            message=f"Year level {year_level_id} term code(s) in use by offerings: {joined}"
+        )
