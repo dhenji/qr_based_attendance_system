@@ -11,3 +11,15 @@ export const TERM_LABELS = ["1st Semester", "2nd Semester", "Midyear"] as const;
 
 export type TermCode = (typeof TERM_CODES)[number];
 export type TermLabel = (typeof TERM_LABELS)[number];
+
+export type TermEditorRow = { code: string; label: string; existing?: boolean };
+
+export function nextTermRow(rows: TermEditorRow[]): TermEditorRow {
+	const usedCodes = new Set(rows.map((row) => row.code));
+	const usedLabels = new Set(rows.map((row) => row.label));
+	return {
+		code: TERM_CODES.find((code) => !usedCodes.has(code)) ?? TERM_CODES[0],
+		label: TERM_LABELS.find((label) => !usedLabels.has(label)) ?? TERM_LABELS[0],
+		existing: false,
+	};
+}

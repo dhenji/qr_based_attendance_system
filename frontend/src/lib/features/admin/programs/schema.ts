@@ -26,22 +26,32 @@ export type ProgramUpdateInput = z.infer<typeof programUpdateSchema>;
 
 export const termSchema = z.object({
 	code: z.enum(TERM_CODES, { message: 'Pick a term code' }),
-	label: z.enum(TERM_LABELS, { message: 'Pick a term label' }),
+	label: z.enum(TERM_LABELS, { message: 'Pick a display name' }),
 });
 
 export type TermInput = z.infer<typeof termSchema>;
 
-export const yearLevelCreateSchema = z.object({
-	year_number: z.coerce.number().int().min(1).max(10),
-	label: z.string().trim().min(1, 'Required').max(50),
-	terms: z.array(termSchema).default([]),
-});
+export const yearLevelCreateSchema = z
+	.object({
+		year_number: z.coerce.number().int().min(1).max(10),
+		label: z.string().trim().min(1, 'Required').max(50),
+		terms: z.array(termSchema).default([]),
+	})
+	.refine(
+		(data) => new Set(data.terms.map((term) => term.code)).size === data.terms.length,
+		{ message: 'Term codes must be unique within a year.', path: ['terms'] }
+	);
 
 export type YearLevelCreateInput = z.infer<typeof yearLevelCreateSchema>;
 
-export const yearLevelUpdateSchema = z.object({
-	label: z.string().trim().min(1).max(50).optional(),
-	terms: z.array(termSchema).optional(),
-});
+export const yearLevelUpdateSchema = z
+	.object({
+		label: z.string().trim().min(1).max(50).optional(),
+		terms: z.array(termSchema).optional(),
+	})
+	.refine(
+		(data) => !data.terms || new Set(data.terms.map((term) => term.code)).size === data.terms.length,
+		{ message: 'Term codes must be unique within a year.', path: ['terms'] }
+	);
 
 export type YearLevelUpdateInput = z.infer<typeof yearLevelUpdateSchema>;

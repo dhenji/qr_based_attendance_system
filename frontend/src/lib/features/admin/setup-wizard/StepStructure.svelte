@@ -9,7 +9,8 @@
 	import { yearLevelCreateSchema } from '$lib/features/admin/programs/schema';
 	import { createCourse, listCourses } from '$lib/features/admin/courses/service';
 	import { courseCreateSchema } from '$lib/features/admin/courses/schema';
-	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
+	import { nextTermRow } from '$lib/shared/constants/terms';
+import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEditor.svelte';
 	import { yearLabel } from '$lib/shared/utils/format';
 	import type { AdminCourse, ProgramDetail } from '$lib/shared/types';
 	import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
@@ -101,17 +102,6 @@
 	const termsText = (terms: { label: string }[]): string =>
 		terms.length > 0 ? terms.map((t) => t.label).join(' · ') : 'No terms yet';
 
-	// The user picks the code and the label; this only picks sensible starting
-	// values for a new row from whichever are not already in use, so the
-	// default never collides (same helper as the program detail page).
-	const nextTermRow = (rows: TermRow[]): TermRow => {
-		const usedCodes = new Set(rows.map((r) => r.code));
-		const usedLabels = new Set(rows.map((r) => r.label));
-		return {
-			code: TERM_CODES.find((c) => !usedCodes.has(c)) ?? TERM_CODES[0],
-			label: TERM_LABELS.find((l) => !usedLabels.has(l)) ?? TERM_LABELS[0],
-		};
-	};
 
 	const openYear = () => {
 		yearError = null;
@@ -267,34 +257,12 @@
 						</label>
 						<div class="terms">
 							<span class="form-label">Terms in this year</span>
-							{#each y_terms as row, i (i)}
-								<div class="term-row">
-									<select class="input" bind:value={row.code} aria-label={`Term ${i + 1} code`}>
-										{#each TERM_CODES as c (c)}
-											<option value={c}>{c}</option>
-										{/each}
-									</select>
-									<select class="input" bind:value={row.label} aria-label={`Term ${i + 1} label`}>
-										{#each TERM_LABELS as l (l)}
-											<option value={l}>{l}</option>
-										{/each}
-									</select>
-									<button
-										class="btn btn-secondary btn-sm"
-										disabled={y_terms.length <= 1}
-										aria-label={`Remove term ${i + 1}`}
-										onclick={() => (y_terms = y_terms.filter((_, j) => j !== i))}
-									>
-										Remove
-									</button>
-								</div>
-							{/each}
-							<button
-								class="btn btn-secondary btn-sm"
-								onclick={() => (y_terms = [...y_terms, nextTermRow(y_terms)])}
-							>
-								Add term
-							</button>
+							<TermRowsEditor
+								bind:rows={y_terms}
+								busy={yearBusy}
+								lockCodeForExisting={false}
+								emptyMessage="No terms yet. Add one below, or save empty — a termless year cannot back offerings yet."
+							/>
 						</div>
 						<div class="form-actions">
 							<button class="btn btn-ghost" onclick={() => (yearOpen = false)}>Cancel</button>
@@ -586,12 +554,6 @@
 		gap: 0.5rem;
 	}
 
-	.term-row {
-		display: grid;
-		grid-template-columns: 1fr 1fr auto;
-		gap: 0.5rem;
-	}
-
 	.form-actions {
 		display: flex;
 		gap: 0.75rem;
@@ -690,10 +652,6 @@
 		}
 
 		.grid2 {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
-		.term-row {
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}

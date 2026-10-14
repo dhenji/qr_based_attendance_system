@@ -66,7 +66,7 @@ The **Program Management** suite replaces the legacy Course Management. It imple
 **Year Level Management**:
 
 - Each _year level_ owns its own _term structure_ ([D3](../project/decision-log.md)) — e.g., BSCS Year 3 has three terms (1st Sem, 2nd Sem, Midyear)
-- **[Manage Terms]**: Opens a modal to add/remove/rename term chips. Terms are stored in `year_levels.term_structure` JSONB
+- **[Manage Terms]**: Opens a modal to add/remove term rows and rename their display names. A saved term code is an identity key for offerings and cannot be renamed; add a new term instead. Terms are stored in `year_levels.term_structure` JSONB
 - **[View Courses]** → navigates to [Year-Level Courses](#23-year-level-courses---adminprogramspidyidcourses)
 - **[+Add Year]**: Creates a new year level under this program
 

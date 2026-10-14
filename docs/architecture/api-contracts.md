@@ -256,7 +256,7 @@ reactivate with `is_active: true`.
 | **Request**      | `{ label?, term_structure?, sort_order? }` |
 | **Response 200** | Updated year level                         |
 
-| **Errors**       | 404 `year_level_not_found` |
+| **Errors**       | 404 `year_level_not_found` · 409 `term_code_in_use` |
 #### `DELETE /admin/programs/{program_id}/years/{year_id}`
 
 Archive year level. Restrict if courses exist.
