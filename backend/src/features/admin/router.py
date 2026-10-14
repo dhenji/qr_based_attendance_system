@@ -90,3 +90,16 @@ async def deactivate_user(
     service: AdminServiceDep,
 ) -> None:
     await service.deactivate_user(actor_id=actor.id, user_id=user_id)
+
+
+@router.patch(
+    "/{user_id}/reactivate",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Reactivate a previously deactivated user (rejects self-reactivation)",
+)
+async def reactivate_user(
+    user_id: int,
+    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    service: AdminServiceDep,
+) -> None:
+    await service.reactivate_user(actor_id=actor.id, user_id=user_id)
