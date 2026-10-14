@@ -1870,3 +1870,35 @@
   Re-enrolling is a normal bulk-enroll row (the dedupe no longer matches).
   The Enrolled tab gains a per-row Remove with a confirm modal; the roster
   path id is the student string id, matching the row key.
+
+### ADR-075: Reactivate Admin User Accounts
+
+- **Decision (D75):** `PATCH /admin/users/{user_id}/reactivate` restores a
+  deactivated account by setting `users.is_active = True`. It is the symmetric
+  counterpart to `PATCH /admin/users/{user_id}/deactivate` and is available
+  from the User Management page for any inactive account.
+- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Context:** User Management could deactivate accounts but had no way to
+  reactivate them. The deactivate modal explicitly stated the action was
+  irreversible from the UI. This was inconsistent with Student/Professor
+  Management, where archive and reactivate are symmetric toggles on
+  `is_active`.
+- **Alternatives considered:**
+  (1) *Reuse account re-creation (ADR-072) as the reactivate path.* Rejected:
+  re-creation resets the password, may change the role, and requires a live
+  unclaimed roster row for student/professor accounts. It is a credential
+  reset, not a status toggle.
+  (2) *Add a generic `PATCH /admin/users/{id}` with an `is_active` payload.*
+  Rejected: the existing contract already establishes the
+  `/{id}/deactivate` convention; a separate `/{id}/reactivate` keeps the
+  route surface explicit and symmetric.
+  (3) *Taken:* a dedicated `PATCH /{user_id}/reactivate` route mirroring the
+  deactivation route.
+- **Consequences:** `AdminService.reactivate_user()` sets `is_active = True`
+  and flushes. Password, MFA, lockout state, and role are intentionally
+  preserved — reactivation is a status transition, not a credential reset.
+  Self-reactivation is rejected with `SelfDeactivationForbidden`. The User
+  Management page shows a Reactivate button on inactive rows with a
+  confirmation modal. No migration is required. Covered by
+  `tests/features/admin/test_user_status.py`.

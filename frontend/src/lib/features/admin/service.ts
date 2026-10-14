@@ -369,6 +369,10 @@ export const deactivateUser = async (id: number): Promise<void> => {
 	await patch<void>('adminUserDeactivate', undefined, undefined, `/${id}/deactivate`);
 };
 
+export const reactivateUser = async (id: number): Promise<void> => {
+	await patch<void>('adminUserReactivate', undefined, undefined, `/${id}/reactivate`);
+};
+
 // --- Password reset -----------------------------------------------------------
 //
 // Three routes, one backend implementation. Each sets a fresh temp password,

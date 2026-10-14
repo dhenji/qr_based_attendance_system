@@ -856,6 +856,7 @@ admins; admins manage students/professors. Password resets set a temp password
 | GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
 | POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `roster_link_impossible` |
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
+| PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated admin (rejects self-reactivation; preserves password, MFA, lockout, and role) | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
 | POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
 | POST   | `/admin/professors/{professor_id}/reset-password` | Reset linked professor-account password (temp once)| admin | 404 `professor_not_found` · 404 `user_not_found` · 409 `professor_account_unlinked` |

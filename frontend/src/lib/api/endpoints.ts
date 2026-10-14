@@ -2744,6 +2744,17 @@ const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
 		last_login: null,
 		created_at: '2025-09-01T08:00:00.000Z',
 	},
+	{
+		id: 4,
+		email: 'juan.delacruz@isu.edu.ph',
+		role: 'student',
+		first_name: 'Juan',
+		last_name: 'Dela Cruz',
+		is_active: false,
+		must_change_password: true,
+		last_login: null,
+		created_at: '2025-09-15T08:00:00.000Z',
+	},
 ];
 
 const mockAdminUsersList = (
@@ -2828,6 +2839,18 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = false;
+		return undefined as unknown as void;
+	},
+};
+
+export const AdminUserReactivateEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'PATCH',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('User not found.');
+		row.is_active = true;
 		return undefined as unknown as void;
 	},
 };
@@ -3265,6 +3288,7 @@ export const endpoints = {
 	adminUsers: AdminUsersEndpoint,
 	adminUserCreate: AdminUserCreateEndpoint,
 	adminUserDeactivate: AdminUserDeactivateEndpoint,
+	adminUserReactivate: AdminUserReactivateEndpoint,
 	// Admin password reset (three rosters, one backend implementation)
 	adminUserResetPassword: AdminUserResetPasswordEndpoint,
 	adminStudentResetPassword: AdminStudentResetPasswordEndpoint,
