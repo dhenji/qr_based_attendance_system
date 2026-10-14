@@ -16,6 +16,7 @@ export interface AdminStudentResponse {
 	year_level_label: string;
 	section: string | null;
 	is_active: boolean;
+	claim_status: 'Claimed' | 'Unclaimed';
 	face_enrolled: boolean;
 	created_at: string;
 	scan_count: number;
@@ -37,6 +38,7 @@ export interface AdminStudent {
 	yearLevelLabel: string;
 	section?: string;
 	isActive: boolean;
+	claimStatus: 'Claimed' | 'Unclaimed';
 	faceEnrolled: boolean;
 	createdAt: string;
 	scanCount: number;

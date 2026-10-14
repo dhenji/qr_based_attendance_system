@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import {
 		adminStudentsState,
 		deleteArchivedStudent,
@@ -11,6 +12,7 @@
 	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { Routes } from '$lib/shared/constants/routes';
 
 	// Students archive (wireframe 4.10): inactive roster rows only.
 	// Restore flips is_active back on; Delete permanently removes the row
@@ -22,6 +24,8 @@
 	let search = $state('');
 	let deleteTarget = $state<AdminStudent | null>(null);
 	let deleteBusy = $state(false);
+	let toggleTarget = $state<AdminStudent | null>(null);
+	let toggleBusy = $state(false);
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
@@ -68,9 +72,23 @@
 			deleteBusy = false;
 		}
 	};
+
+	const confirmToggle = async () => {
+		if (!toggleTarget || toggleBusy) return;
+		toggleBusy = true;
+		try {
+			await toggleStudentActive(toggleTarget);
+			if (!adminStudentsState.actionError) toggleTarget = null;
+		} finally {
+			toggleBusy = false;
+		}
+	};
 </script>
 
 <div class="page">
+	<button class="btn btn-secondary back" data-testid="back-to-students" onclick={() => goto(Routes.ADMIN_STUDENTS)}>
+		‹ Back to students
+	</button>
 	<header class="header">
 		<div>
 			<h1>Archived Students</h1>
@@ -121,7 +139,13 @@
 							<td class="mono">{s.email}</td>
 							<td>{s.programCode}</td>
 							<td class="row-actions">
-								<button class="link" onclick={() => void toggleStudentActive(s)}>
+								<button
+									class="link success"
+									onclick={() => {
+										adminStudentsState.actionError = null;
+										toggleTarget = s;
+									}}
+								>
 									Restore
 								</button>
 								<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
@@ -150,6 +174,33 @@
 		</section>
 	{/if}
 </div>
+
+{#if toggleTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="restore-student-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (toggleBusy ? undefined : (toggleTarget = null)) }}
+		>
+			<h2 id="restore-student-title" class="modal-title">Reactivate student?</h2>
+			<p class="modal-text">
+				{fullName(toggleTarget)} will return to the active roster and regain login access. Face enrollment will need to be re-enrolled.
+			</p>
+			{#if adminStudentsState.actionError}
+				<p class="error" role="alert">{adminStudentsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
+				<button class="btn btn-success" disabled={toggleBusy} onclick={() => void confirmToggle()}>
+					{toggleBusy ? 'Saving…' : 'Restore'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if deleteTarget}
 	<div class="modal-overlay" role="presentation">
@@ -185,6 +236,10 @@
 		flex-direction: column;
 		gap: 1.5rem;
 		font-family: system-ui, sans-serif;
+	}
+
+	.back {
+		align-self: flex-start;
 	}
 
 	.header h1 {
@@ -279,6 +334,16 @@
 		color: var(--danger);
 	}
 
+	.link.success {
+		color: var(--success);
+	}
+
+	.btn-success {
+		background: var(--success);
+		border: 1px solid var(--success);
+		color: var(--on-brand);
+	}
+
 	.sr {
 		position: absolute;
 		width: 1px;
@@ -323,6 +388,10 @@
 		background: var(--bg-card);
 		border: 1px solid var(--border-strong);
 		color: var(--text-strong);
+	}
+
+	.btn-secondary:hover {
+		background: var(--divider);
 	}
 
 	.btn-ghost {

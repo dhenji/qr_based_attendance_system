@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from datetime import datetime, time
 
 from pydantic import (
@@ -63,6 +65,7 @@ class StudentRead(BaseModel):
     year_level_label: str
     section: str | None = None
     is_active: bool
+    claim_status: Literal["Claimed", "Unclaimed"]
     face_enrolled: bool = False
     created_at: datetime
     scan_count: int = 0

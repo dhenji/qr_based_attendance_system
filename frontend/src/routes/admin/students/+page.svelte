@@ -28,18 +28,18 @@
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
-	import { Routes } from '$lib/shared/constants/routes';
+	import { Routes, adminStudent } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
-	// Student Management (wireframe 4.2): search + status filter + sortable
-	// table + pagination over GET /admin/students. Deactivate flips
-	// is_active (soft); permanent delete is only offered on inactive rows and
-	// goes to DELETE /{id}/archive with its 409 has-records guard.
+	// Student Management (wireframe 4.2): search + sortable table + pagination
+	// over GET /admin/students. Active roster only; deactivated rows live in the
+	// Archive. Deactivate flips is_active (soft); permanent delete is only
+	// offered on inactive rows and goes to DELETE /{id}/archive with its
+	// 409 has-records guard.
 
 	let search = $state('');
 	let sectionFilter = $state('');
-	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
 	let programFilter = $state('');
 	// Year filter is label-based (1st-6th Year) so it works with AND without
 	// a program picked: year_level_ids are per-program, so with no program
@@ -49,7 +49,7 @@
 	let programOptions = $state<Program[]>([]);
 	let yearOptions = $state<YearLevel[]>([]);
 	let sortBy = $state<
-		'last_name' | 'student_id' | 'created_at' | 'program_code' | 'section' | 'year_level_label'
+		'last_name' | 'student_id' | 'program_code' | 'section' | 'year_level_label'
 	>('last_name');
 	let sortDir = $state<'asc' | 'desc'>('asc');
 
@@ -124,6 +124,8 @@
 	let formBusy = $state(false);
 	let deleteTarget = $state<AdminStudent | null>(null);
 	let deleteBusy = $state(false);
+	let toggleTarget = $state<AdminStudent | null>(null);
+	let toggleBusy = $state(false);
 	// Credential reset: the row drives the modal, the call and its copy live in
 	// TempPasswordModal because all three rosters share one backend path.
 	let resetTarget = $state<AdminStudent | null>(null);
@@ -244,10 +246,6 @@
 	// that leak is what shrank this table to one row per page.
 	const PAGE_SIZE = 10;
 
-	const isActiveFilter = $derived(
-		statusFilter === 'all' ? undefined : statusFilter === 'active'
-	);
-
 	const totalPages = $derived(
 		Math.max(1, Math.ceil(displayTotal / PAGE_SIZE))
 	);
@@ -261,7 +259,7 @@
 				section: sectionFilter.trim() || undefined,
 				program_id: programFilter ? Number(programFilter) : undefined,
 				year_level_id: yearIdForServer,
-				is_active: isActiveFilter,
+				is_active: true,
 				// Client-side columns sort locally (see visibleStudents), so
 				// leave the request unsorted rather than sending sort_by the
 				// backend rejects.
@@ -516,6 +514,19 @@
 			deleteBusy = false;
 		}
 	};
+
+	const confirmToggle = async () => {
+		if (!toggleTarget || toggleBusy) return;
+		toggleBusy = true;
+		try {
+			await toggleStudentActive(toggleTarget);
+			// Keep the modal open on failure so the surfaced error stays visible;
+			// on success the store clears actionError and the row leaves the view.
+			if (!adminStudentsState.actionError) toggleTarget = null;
+		} finally {
+			toggleBusy = false;
+		}
+	};
 </script>
 
 <div class="page">
@@ -562,11 +573,6 @@
 				if (e.key === 'Enter') applyFilters();
 			}}
 		/>
-		<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={applyFilters}>
-			<option value="all">All statuses</option>
-			<option value="active">Active</option>
-			<option value="inactive">Inactive</option>
-		</select>
 		<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
 			<option value="">All programs</option>
 			{#each programOptions as p (p.id)}
@@ -611,6 +617,7 @@
 								Name<span aria-hidden="true">{sortArrow('last_name')}</span>
 							</button>
 						</th>
+						<th scope="col">Email</th>
 						<th scope="col" aria-sort={ariaSort('program_code')}>
 							<button class="th-btn" type="button" onclick={() => toggleSort('program_code')} aria-label={sortLabel('program_code', 'Program')}>
 								Program<span aria-hidden="true">{sortArrow('program_code')}</span>
@@ -626,13 +633,8 @@
 								Year<span aria-hidden="true">{sortArrow('year_level_label')}</span>
 							</button>
 						</th>
-						<th scope="col">Status</th>
 						<th scope="col">Face</th>
-						<th scope="col" aria-sort={ariaSort('created_at')}>
-							<button class="th-btn" type="button" onclick={() => toggleSort('created_at')} aria-label={sortLabel('created_at', 'Added')}>
-								Added<span aria-hidden="true">{sortArrow('created_at')}</span>
-							</button>
-						</th>
+						<th scope="col">Claim</th>
 						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
@@ -641,17 +643,24 @@
 						<tr>
 							<td class="mono">{s.studentId}</td>
 							<td>{fullName(s)}</td>
+							<td>
+								<button class="link mono" onclick={() => goto(adminStudent(s.id))}>
+									{s.email}
+								</button>
+							</td>
 							<td>{s.programCode}</td>
 							<td>{s.section ?? '—'}</td>
 							<td>{s.yearLevelLabel}</td>
-							<td><span class={s.isActive ? 'status-active' : 'status-inactive'}>{s.isActive ? 'Active' : 'Inactive'}</span></td>
 							<td>{s.faceEnrolled ? 'Yes' : '—'}</td>
-							<td class="mono">{new Date(s.createdAt).toLocaleDateString()}</td>
+							<td>{s.claimStatus}</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => openEdit(s)}>Edit</button>
 								<button
 									class="link"
-									onclick={() => void toggleStudentActive(s)}
+									onclick={() => {
+										adminStudentsState.actionError = null;
+										toggleTarget = s;
+									}}
 								>
 									{s.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
@@ -798,6 +807,43 @@
 				<button class="btn btn-ghost" onclick={() => (deleteTarget = null)}>Cancel</button>
 				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
 					{deleteBusy ? 'Deleting…' : 'Delete'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if toggleTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="toggle-student-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (toggleBusy ? undefined : (toggleTarget = null)) }}
+		>
+			<h2 id="toggle-student-title" class="modal-title">
+				{toggleTarget.isActive ? 'Deactivate student?' : 'Reactivate student?'}
+			</h2>
+			<p class="modal-text">
+				{#if toggleTarget.isActive}
+					{fullName(toggleTarget)} will be moved to the Archive, lose login access, and have their face enrollment revoked. You can restore them later from the Archive.
+				{:else}
+					{fullName(toggleTarget)} will return to the active roster and regain login access. Face enrollment will need to be re-enrolled.
+				{/if}
+			</p>
+			{#if adminStudentsState.actionError}
+				<p class="error" role="alert">{adminStudentsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
+				<button
+					class="btn {toggleTarget.isActive ? 'btn-danger' : 'btn-primary'}"
+					disabled={toggleBusy}
+					onclick={() => void confirmToggle()}
+				>
+					{toggleBusy ? 'Saving…' : (toggleTarget.isActive ? 'Deactivate' : 'Reactivate')}
 				</button>
 			</div>
 		</div>
@@ -980,26 +1026,6 @@
 		font-variant-numeric: tabular-nums;
 		font-weight: 600;
 		white-space: nowrap;
-	}
-
-	.status-active,
-	.status-inactive {
-		display: inline-block;
-		padding: 0.125rem 0.625rem;
-		border-radius: 999px;
-		font-size: 0.75rem;
-		font-weight: 600;
-		white-space: nowrap;
-	}
-
-	.status-active {
-		background: var(--success-bg);
-		color: var(--success);
-	}
-
-	.status-inactive {
-		background: var(--divider);
-		color: var(--text-muted);
 	}
 
 	.row-actions {
