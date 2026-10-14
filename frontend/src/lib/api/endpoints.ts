@@ -1996,6 +1996,17 @@ export const AdminOfferingBulkEnrollEndpoint: EndpointDef<AdminBulkEnrollResult>
 	mock: () => ({ enrolled: 3, skipped: 1, errors: [] }),
 };
 
+// Unenroll one student —
+// DELETE /admin/offerings/{id}/students/{student_number} (204, no body).
+// Removes the enrollment link row only; past attendance rows keep their
+// student+session identity. No mock: the roster mock fixture is static, so a
+// mock success would leave the removed row on screen; mock mode instead
+// throws the explicit mock_mode error like other unwired mutations.
+export const AdminOfferingUnenrollEndpoint: EndpointDef<void> = {
+	url: '/admin/offerings',
+	method: 'DELETE',
+};
+
 // --- Admin programs (Phase A: 4.5a + 4.5b) ----------------------------------
 //
 // Live routes on program/router.py (/api/admin/programs). Collection routes
@@ -3213,6 +3224,7 @@ export const endpoints = {
 	adminOfferingProfessors: AdminOfferingProfessorsEndpoint,
 	adminOfferingRoster: AdminOfferingRosterEndpoint,
 	adminOfferingBulkEnroll: AdminOfferingBulkEnrollEndpoint,
+	adminOfferingUnenroll: AdminOfferingUnenrollEndpoint,
 	// Admin analytics + attendance overview (Phase 7; backend #136/#137/#138)
 	adminAnalyticsOverview: AdminAnalyticsOverviewEndpoint,
 	adminAnalyticsComparison: AdminAnalyticsComparisonEndpoint,

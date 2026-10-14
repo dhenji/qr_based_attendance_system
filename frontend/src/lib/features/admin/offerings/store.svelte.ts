@@ -24,6 +24,7 @@ import {
 	listAssignments,
 	listOfferings,
 	setOfferingActive,
+	unenrollStudent,
 	updateOffering,
 } from '$lib/features/admin/offerings/service';
 import type {
@@ -229,6 +230,22 @@ export const bulkEnrollOffering = async (id: number, file: File) => {
 		return result;
 	} catch (e: unknown) {
 		adminOfferingDetailState.actionError = toMessage(e, 'Bulk enroll failed');
+		throw e;
+	}
+};
+
+export const unenrollStudentFromOffering = async (
+	id: number,
+	studentNumber: string
+): Promise<void> => {
+	adminOfferingDetailState.actionError = null;
+	try {
+		await unenrollStudent(id, studentNumber);
+		await loadOfferingRoster(id);
+		await refreshAdminOfferingDetail(id);
+		notifyEntityChanged('offerings');
+	} catch (e: unknown) {
+		adminOfferingDetailState.actionError = toMessage(e, 'Failed to remove student');
 		throw e;
 	}
 };

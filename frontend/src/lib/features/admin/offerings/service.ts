@@ -39,6 +39,7 @@ import type {
 	AdminRosterFilters,
 	AdminRosterItem,
 	AdminRosterItemResponse,
+	AdminStudent,
 	Program,
 	YearLevel,
 } from '$lib/shared/types';
@@ -257,5 +258,53 @@ export const bulkEnroll = async (
 		form,
 		undefined,
 		`/${offeringId}/enrollments/bulk`
+	);
+};
+
+// Bulk-enroll CSV built in the browser for the Add-student modal: the same
+// validated upload as a file, so manual adds inherit the email/program checks,
+// the per-row dedupe (already-enrolled → skipped), and a single audit row for
+// the whole batch. `section` stays blank on purpose — a value would overwrite
+// the student's section for every offering they are in, not just this one.
+// Rows are emitted in the caller's order so a reported error line can be mapped
+// back to the student at that index (the parser numbers data rows from line 2).
+const ENROLL_CSV_HEADER =
+	'student_id,first_name,middle_name,last_name,email,program_code,year_level,section';
+
+const csvCell = (value: string | undefined): string => {
+	const text = value ?? '';
+	return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const buildEnrollCsv = (students: AdminStudent[]): File => {
+	const rows = students.map((student) =>
+		[
+			student.studentId,
+			student.firstName,
+			student.middleName ?? '',
+			student.lastName,
+			student.email,
+			student.programCode,
+			student.yearLevelLabel,
+			'',
+		]
+			.map(csvCell)
+			.join(',')
+	);
+	return new File([`${ENROLL_CSV_HEADER}\n${rows.join('\n')}\n`], 'enroll.csv', {
+		type: 'text/csv',
+	});
+};
+
+// Unenroll one student — 204, link row only. `studentNumber` is the roster
+// string id (e.g. "24-2111"), matching the Enrolled tab row key.
+export const unenrollStudent = async (
+	offeringId: number,
+	studentNumber: string
+): Promise<void> => {
+	await del<void>(
+		'adminOfferingUnenroll',
+		undefined,
+		`/${offeringId}/students/${encodeURIComponent(studentNumber)}`
 	);
 };

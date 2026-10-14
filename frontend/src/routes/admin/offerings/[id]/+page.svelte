@@ -12,15 +12,17 @@
 		loadOfferingAssignments,
 		loadOfferingRoster,
 		refreshAdminOfferingDetail,
+		unenrollStudentFromOffering,
 		updateAdminOffering,
 	} from '$lib/features/admin/offerings/store.svelte';
 	import {
 		archiveOffering,
+		buildEnrollCsv,
 		setOfferingActive,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
-	import { listProfessors } from '$lib/features/admin/service';
+	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
 		assignmentCreateSchema,
 		offeringUpdateSchema,
@@ -31,6 +33,8 @@
 		AdminBulkEnrollResult,
 		AdminCourse,
 		AdminProfessor,
+		AdminRosterItem,
+		AdminStudent,
 		Program,
 		YearLevel,
 	} from '$lib/shared/types';
@@ -91,9 +95,33 @@
 	let bulkFile = $state<File | null>(null);
 	let bulkBusy = $state(false);
 	let bulkResult = $state<AdminBulkEnrollResult | null>(null);
+
+	// Add-student modal (single-row bulk upload under the hood).
+	const ADD_PAGE_SIZE = 8;
+	let addOpen = $state(false);
+	let addQuery = $state('');
+	let addResults = $state<AdminStudent[]>([]);
+	let addTotal = $state(0);
+	let addPage = $state(1);
+	let addSearching = $state(false);
+	// Reactive array of the selected rows: `$state` proxies arrays but not
+	// Map/Set, so selection lives here (house multi-select idiom — see
+	// admin/analytics and admin/professors) while insertion order gives the
+	// CSV row order and the error-line mapping for free. Objects, not ids:
+	// the list only holds the current page, so an id-only set could not
+	// rebuild rows chosen on other pages.
+	let addSelected = $state<AdminStudent[]>([]);
+	let addBusy = $state(false);
+	let addReport = $state<{ enrolled: number; skipped: number; failures: string[] } | null>(
+		null
+	);
+	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	let unenrollTarget = $state<AdminRosterItem | null>(null);
+	let unenrollBusy = $state(false);
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		if (addSearchTimer) clearTimeout(addSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -363,6 +391,153 @@
 		}
 	};
 
+	const openAdd = () => {
+		addOpen = true;
+		addQuery = '';
+		addResults = [];
+		addTotal = 0;
+		addPage = 1;
+		addReport = null;
+		addSelected = [];
+		adminOfferingDetailState.actionError = null;
+		void loadAddCandidates(1);
+	};
+
+	const onAddQuery = () => {
+		if (addSearchTimer) clearTimeout(addSearchTimer);
+		addSearchTimer = setTimeout(() => void loadAddCandidates(1), 300);
+	};
+
+	// One loader for browse, pager, and search: empty query + cohort ids is
+	// the browse list, a query narrows within it. Cohort-scoped, so only
+	// students on the offering's program + year can take this course.
+	const loadAddCandidates = async (page: number) => {
+		const q = addQuery.trim();
+		addSearching = true;
+		try {
+			const result = await listStudents({
+				search: q || undefined,
+				size: ADD_PAGE_SIZE,
+				page,
+				is_active: true,
+				program_id: offering?.programId,
+				year_level_id: offering?.yearLevelId,
+			});
+			if (q !== addQuery.trim()) return;
+			addResults = result.items;
+			addTotal = result.total;
+			addPage = result.page;
+		} catch (e: unknown) {
+			adminOfferingDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to load students';
+		} finally {
+			addSearching = false;
+		}
+	};
+
+	const addTotalPages = $derived(Math.max(1, Math.ceil(addTotal / ADD_PAGE_SIZE)));
+
+	const addCohortLabel = $derived(
+		[programCode, yearLabel].filter(Boolean).join(' ') || 'this cohort'
+	);
+
+	const addEmptyCopy = $derived(
+		addQuery.trim() ? `No matches in ${addCohortLabel}.` : `No students in ${addCohortLabel} yet.`
+	);
+
+	// The upload checks the CSV program against the offering, so a cross-
+	// program pick is blocked here instead of round-tripping the error.
+	const addProgramMismatch = $derived(
+		programCode !== null &&
+			addSelected.some((s) => s.programCode !== programCode)
+	);
+
+	// Enrollment status per candidate, read off the loaded roster page.
+	// Advisory for rosters past page 1 (submit stays authoritative via the
+	// skipped branch); membership itself never false-positives, so enrolled
+	// rows are safe to disable.
+	const enrolledIds = $derived(
+		new Set(adminOfferingDetailState.roster.map((r) => r.studentId))
+	);
+
+	// House toggle idiom (admin/analytics, admin/professors): reassign
+	// through filter/append so the reactive array invalidates.
+	const toggleAddSelection = (student: AdminStudent) => {
+		addSelected = addSelected.some((s) => s.id === student.id)
+			? addSelected.filter((s) => s.id !== student.id)
+			: [...addSelected, student];
+	};
+
+	const clearAddSelection = () => {
+		if (addBusy) return;
+		addSelected = [];
+	};
+
+	// Every eligible student on the visible page, so a cohort can be paged
+	// through without checking boxes one by one.
+	const pageEligible = $derived(
+		addResults.filter((s) => !enrolledIds.has(s.studentId))
+	);
+	const pageAllSelected = $derived(
+		pageEligible.length > 0 && pageEligible.every((s) => addSelected.some((x) => x.id === s.id))
+	);
+	const togglePageSelection = () => {
+		if (addBusy || pageEligible.length === 0) return;
+		addSelected = pageAllSelected
+			? addSelected.filter((x) => !pageEligible.some((s) => s.id === x.id))
+			: [...addSelected, ...pageEligible.filter((s) => !addSelected.some((x) => x.id === s.id))];
+	};
+
+	const submitAdd = async () => {
+		const chosen = addSelected;
+		if (!offering || chosen.length === 0 || addBusy || addProgramMismatch) return;
+		addBusy = true;
+		addReport = null;
+		try {
+			// Row order matches `chosen`, and the parser numbers data rows from
+			// line 2, so an error line maps back to its student deterministically.
+			const result = await bulkEnrollOffering(offering.id, buildEnrollCsv(chosen));
+			const failures = result.errors.map((err) => {
+				const student = chosen[err.line - 2];
+				return student ? `${student.studentId} — ${err.reason}` : err.reason;
+			});
+			if (result.errors.length === 0 && result.skipped === 0) {
+				addSelected = [];
+				addOpen = false;
+			} else {
+				// Stay open with the report: the roster reload above already
+				// flipped the newly-enrolled rows to "Already enrolled", so the
+				// badges self-correct and a re-submit is at worst a repeat skip.
+				addReport = {
+					enrolled: result.enrolled,
+					skipped: result.skipped,
+					failures,
+				};
+			}
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			addBusy = false;
+		}
+	};
+
+	const askUnenroll = (row: AdminRosterItem) => {
+		unenrollTarget = row;
+	};
+
+	const confirmUnenroll = async () => {
+		if (!offering || !unenrollTarget || unenrollBusy) return;
+		unenrollBusy = true;
+		try {
+			await unenrollStudentFromOffering(offering.id, unenrollTarget.studentId);
+			unenrollTarget = null;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			unenrollBusy = false;
+		}
+	};
+
 	const rosterTotalPages = $derived(
 		Math.max(1, Math.ceil(adminOfferingDetailState.rosterTotal / 20))
 	);
@@ -479,6 +654,7 @@
 			<section class="card">
 				<div class="row-head">
 					<h2 class="card-title">Roster ({adminOfferingDetailState.rosterTotal})</h2>
+					<button class="btn btn-primary" onclick={openAdd}>Add student</button>
 				</div>
 				<div class="filters">
 					<input
@@ -505,6 +681,7 @@
 									<th>Name</th>
 									<th>Section</th>
 									<th>Enrolled</th>
+									<th><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -514,6 +691,9 @@
 										<td>{r.name}</td>
 										<td>{r.section ?? '—'}</td>
 										<td>{r.enrolledAt.slice(0, 10)}</td>
+										<td class="row-actions">
+											<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+										</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -675,6 +855,146 @@
 				<button class="btn btn-ghost" onclick={() => (assignOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" disabled={assignBusy} onclick={submitAssign}>
 					{assignBusy ? 'Saving…' : 'Assign'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if addOpen && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="add-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (addOpen = false) }}
+		>
+			<h2 id="add-title" class="modal-title">Add student</h2>
+			<div class="form">
+				<label>Find student
+					<input
+						class="input"
+						placeholder="ID, name, or email"
+						aria-label="Find student"
+						bind:value={addQuery}
+						oninput={onAddQuery}
+					/>
+				</label>
+				{#if addSearching && addResults.length === 0}
+					<p class="muted">Searching…</p>
+				{:else if addResults.length === 0}
+					<p class="empty">{addEmptyCopy}</p>
+				{:else}
+					<div class="pick-bar">
+						<label class="check pick-all">
+							<input
+								type="checkbox"
+								checked={pageAllSelected}
+								disabled={addBusy || pageEligible.length === 0}
+								onchange={togglePageSelection}
+							/>
+							<span>Select all on page</span>
+						</label>
+						{#if addSelected.length > 0}
+							<span class="muted">{addSelected.length} selected</span>
+							<button class="link" disabled={addBusy} onclick={clearAddSelection}>
+								Clear
+							</button>
+						{/if}
+					</div>
+					<ul class="pick-list">
+						{#each addResults as s (s.id)}
+							<li class="pick-row">
+								{#if enrolledIds.has(s.studentId)}
+									<span class="muted">{s.studentId} — {s.firstName} {s.lastName}</span>
+									<span class="badge inactive">Already enrolled</span>
+								{:else}
+									<label class="check">
+										<input
+											type="checkbox"
+											checked={addSelected.some((x) => x.id === s.id)}
+											disabled={addBusy}
+											aria-label={`Select ${s.studentId}`}
+											onchange={() => toggleAddSelection(s)}
+										/>
+										<span>{s.studentId} — {s.firstName} {s.lastName} ({s.programCode})</span>
+									</label>
+									<span class="badge">Can enroll</span>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+					{#if !addSearching && addTotalPages > 1}
+						<div class="pager">
+							<button
+								class="btn btn-secondary"
+								disabled={addPage <= 1 || addBusy}
+								onclick={() => void loadAddCandidates(addPage - 1)}
+							>
+								‹ Prev
+							</button>
+							<span class="muted">Page {addPage} of {addTotalPages}</span>
+							<button
+								class="btn btn-secondary"
+								disabled={addPage >= addTotalPages || addBusy}
+								onclick={() => void loadAddCandidates(addPage + 1)}
+							>
+								Next ›
+							</button>
+						</div>
+					{/if}
+				{/if}
+				{#if addReport}
+					<p class="muted" role="status">
+						Enrolled {addReport.enrolled} · skipped {addReport.skipped}
+						{#if addReport.failures.length > 0} · {addReport.failures.length} error{addReport.failures.length === 1 ? '' : 's'}:{/if}
+					</p>
+					{#each addReport.failures as failure (failure)}
+						<p class="error" role="alert">{failure}</p>
+					{/each}
+				{/if}
+				{#if adminOfferingDetailState.actionError}
+					<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+				{/if}
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (addOpen = false)}>Cancel</button>
+				<button
+					class="btn btn-primary"
+					disabled={addSelected.length === 0 || addBusy || addProgramMismatch}
+					onclick={submitAdd}
+				>
+					{addBusy ? 'Enrolling…' : addSelected.length > 1 ? `Enroll ${addSelected.length}` : 'Enroll'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if unenrollTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="unenroll-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (unenrollTarget = null) }}
+		>
+			<h2 id="unenroll-title" class="modal-title">Remove student?</h2>
+			<p class="muted">
+				{unenrollTarget.name} ({unenrollTarget.studentId}) will be unenrolled from
+				this offering. Past attendance history is kept; future scans will be blocked.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (unenrollTarget = null)}>Cancel</button>
+				<button class="btn btn-danger" disabled={unenrollBusy} onclick={confirmUnenroll}>
+					{unenrollBusy ? 'Removing…' : 'Remove'}
 				</button>
 			</div>
 		</div>
@@ -1071,6 +1391,28 @@
 		flex-direction: row;
 		align-items: center;
 		gap: 0.5rem;
+	}
+
+	.pick-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.25rem;
+	}
+
+	.pick-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.pick-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 0.8125rem;
 	}
 
 	.grid2 {

@@ -391,6 +391,18 @@ new roster students is `POST /admin/students/import`).
 | **Response 201** | `{ enrolled: int, skipped: int, errors: [{ line, reason }] }` |
 | **Errors**       | 422 `validation_error` · 404 `offering_not_found` |
 
+#### `DELETE /admin/offerings/{offering_id}/students/{student_number}`
+
+Unenroll one student (wireframes.md 4.5d Enrolled tab Remove action). Deletes
+the enrollment link row only — past attendance rows keep their
+student+session identity, and future scans are blocked by the live
+enrollment check. No attendance guard and no `is_active` gate (ADR-076).
+
+|                  |                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------- |
+| **Response 204** | No content                                                                       |
+| **Errors**       | 404 `offering_not_found` · 404 `student_not_found` · 404 `enrollment_not_found` |
+
 #### `GET /admin/offerings/{offering_id}/students`
 
 Offering roster read (wireframes.md 4.5d Enrolled tab; drives the D2 `section`
