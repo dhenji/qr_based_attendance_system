@@ -25,6 +25,7 @@ import {
 	setStudentActive,
 } from '$lib/features/admin/service';
 import { friendlyDeleteError, friendlyActionError } from '$lib/shared/utils/deleteErrors';
+import { APIError } from '$lib/api/client';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export const adminStudentsState = $state({
@@ -55,18 +56,24 @@ const toMessage = (e: unknown, fallback: string) =>
 export const initAdminStudents = async (
 	filters: AdminStudentFilters = {},
 	page = 1,
-	size = 20
+	size = 20,
+	opts?: { signal?: AbortSignal | null }
 ): Promise<void> => {
 	adminStudentsState.loading = true;
 	adminStudentsState.error = null;
 	try {
-		const result = await listStudents({ ...filters, page, size });
+		const result = await listStudents({ ...filters, page, size }, opts);
 		adminStudentsState.items = result.items;
 		adminStudentsState.total = result.total;
 		adminStudentsState.page = result.page;
 		adminStudentsState.size = result.size;
 		adminStudentsState.filters = filters;
 	} catch (e: unknown) {
+		if (e instanceof APIError && (e.code === 'request_cancelled' || e.code === 'request_timeout')) {
+			// Superseded search — a newer request is in flight. Leave the
+			// current rows alone rather than flashing an error.
+			return;
+		}
 		adminStudentsState.error = toMessage(e, 'Failed to load students');
 	} finally {
 		adminStudentsState.loading = false;

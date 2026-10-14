@@ -125,7 +125,7 @@
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
-			URL.revokeObjectURL(url);
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		} finally {
 			templateBusy = false;
 		}
@@ -142,7 +142,7 @@
 		document.body.appendChild(a);
 		a.click();
 		a.remove();
-		URL.revokeObjectURL(url);
+		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	};
 
 	const confirmImport = async () => {

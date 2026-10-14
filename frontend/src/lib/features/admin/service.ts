@@ -92,11 +92,14 @@ const studentParams = (f: AdminStudentFilters): Record<string, string> => {
 };
 
 export const listStudents = async (
-	filters: AdminStudentFilters = {}
+	filters: AdminStudentFilters = {},
+	opts?: { signal?: AbortSignal | null }
 ): Promise<{ items: AdminStudent[]; total: number; page: number; size: number }> => {
 	const response = await get<Paginated<AdminStudentResponse>>(
 		'adminStudents',
-		studentParams(filters)
+		studentParams(filters),
+		undefined,
+		opts
 	);
 	return {
 		items: (response.items ?? []).map(toStudent),

@@ -67,11 +67,14 @@ const programParams = (f: ProgramFilters): Record<string, string> => {
 };
 
 export const listPrograms = async (
-	filters: ProgramFilters = {}
+	filters: ProgramFilters = {},
+	opts?: { signal?: AbortSignal | null }
 ): Promise<{ items: Program[]; total: number; page: number; size: number }> => {
 	const response = await get<Paginated<ProgramResponse>>(
 		'adminPrograms',
-		programParams(filters)
+		programParams(filters),
+		undefined,
+		opts
 	);
 	return {
 		items: (response.items ?? []).map(toProgram),

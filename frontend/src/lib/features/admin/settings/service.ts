@@ -95,7 +95,7 @@ export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 	document.body.appendChild(link);
 	link.click();
 	link.remove();
-	URL.revokeObjectURL(url);
+	setTimeout(() => URL.revokeObjectURL(url), 60_000);
 };
 
 // downloadBackupArchive
@@ -114,7 +114,7 @@ export const downloadBackupArchive = async (row: BackupLogItem): Promise<void> =
 		document.body.appendChild(link);
 		link.click();
 		link.remove();
-		URL.revokeObjectURL(url);
+		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	} catch (e) {
 		if (isMockMode()) {
 			downloadBackupDescriptor(row);

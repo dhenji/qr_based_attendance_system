@@ -117,6 +117,7 @@
 	}
 
 	.install-text span {
+		color: rgba(255, 255, 255, 0.8);
 		color: color-mix(in srgb, var(--on-brand) 80%, transparent);
 		font-size: 0.8125rem;
 	}
@@ -138,6 +139,7 @@
 	.install-dismiss {
 		background: none;
 		border: none;
+		color: rgba(255, 255, 255, 0.7);
 		color: color-mix(in srgb, var(--on-brand) 70%, transparent);
 		font-size: 1rem;
 		cursor: pointer;

@@ -104,16 +104,18 @@
 		clientYearFiltered ? visibleStudents.length : adminStudentsState.total
 	);
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	let searchAbort: AbortController | null = null;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
 		if (searchTimer) clearTimeout(searchTimer);
+		searchAbort?.abort();
 		for (const stop of autoRefreshStops) stop();
 	});
 
 	const onSearchInput = () => {
 		if (searchTimer) clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => load(1), 300);
+		searchTimer = setTimeout(() => void load(1), 300);
 	};
 
 	let formOpen = $state(false);
@@ -250,8 +252,10 @@
 		Math.max(1, Math.ceil(displayTotal / PAGE_SIZE))
 	);
 
-	const load = (page = 1) =>
-		initAdminStudents(
+	const load = (page = 1) => {
+		searchAbort?.abort();
+		searchAbort = new AbortController();
+		return initAdminStudents(
 			{
 				search: search.trim() || undefined,
 				section: sectionFilter.trim() || undefined,
@@ -265,8 +269,10 @@
 				sort_dir: isClientSort(sortBy) ? undefined : sortDir,
 			},
 			page,
-			PAGE_SIZE
+			PAGE_SIZE,
+			{ signal: searchAbort.signal }
 		);
+	};
 
 	// Program picker options (list filter + Add/Edit modal share the program
 	// list; the modal keeps its own year options). Reloaded when programs

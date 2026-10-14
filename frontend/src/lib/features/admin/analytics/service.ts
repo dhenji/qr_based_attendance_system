@@ -289,5 +289,5 @@ export const downloadCsv = (filename: string, csv: string): void => {
 	document.body.appendChild(link);
 	link.click();
 	link.remove();
-	URL.revokeObjectURL(url);
+	setTimeout(() => URL.revokeObjectURL(url), 60_000);
 };
