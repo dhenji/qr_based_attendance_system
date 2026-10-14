@@ -42,6 +42,7 @@
 // stays hidden for plain admins.
 	const baseNavItems = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
+		{ label: 'Setup Wizard', path: Routes.ADMIN_SETUP_WIZARD, enabled: true, icon: 'wizard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
 		{ label: 'Professors', path: Routes.ADMIN_PROFESSORS, enabled: true, icon: 'professors' },
 		{ label: 'Programs', path: Routes.ADMIN_PROGRAMS, enabled: true, icon: 'programs' },
@@ -65,6 +66,8 @@
 	const iconPaths: Record<string, string> = {
 		dashboard:
 			'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+		wizard:
+			'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m9 13 2 2 4-4"/>',
 		students:
 			'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6"/><path d="M18 14.8c2.1.7 3.5 2.4 3.5 5.2"/>',
 		professors:
