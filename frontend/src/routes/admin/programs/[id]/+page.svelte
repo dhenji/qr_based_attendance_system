@@ -5,6 +5,8 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminProgramDetailState,
+		adminProgramsState,
+		deleteArchivedProgram,
 		deleteProgramYear,
 		initAdminProgramDetail,
 		refreshAdminProgramDetail,
@@ -29,7 +31,9 @@
 
 	// Program Detail (wireframe 4.5b): header with totals + edit, year-level
 	// cards with editable term chips, add-year and manage-terms modals, year
-	// delete with its 409 has-offerings guard surfaced inline. Terms persist
+	// delete with its 409 has-offerings guard surfaced inline, and program
+	// delete (archived programs only) with its 409 has-offerings/has-students
+	// guards surfaced inline. Terms persist
 	// via PATCH {program}/years/{year} — one save per modal, and an empty term
 	// list is allowed (a termless year just can't back offerings yet).
 
@@ -55,6 +59,8 @@
 
 	let deleteTarget = $state<YearLevel | null>(null);
 	let deleteBusy = $state(false);
+	let programDeleteOpen = $state(false);
+	let programDeleteBusy = $state(false);
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
@@ -216,6 +222,23 @@
 		}
 	};
 
+	const confirmDeleteProgram = async () => {
+		if (!program) return;
+		programDeleteBusy = true;
+		try {
+			await deleteArchivedProgram(program.id);
+			programDeleteOpen = false;
+			await goto(Routes.ADMIN_PROGRAMS);
+		} finally {
+			programDeleteBusy = false;
+		}
+	};
+
+	const closeProgramDelete = () => {
+		adminProgramsState.actionError = null;
+		programDeleteOpen = false;
+	};
+
 	const termsText = (year: YearLevel) =>
 		year.terms.length > 0 ? year.terms.map((t) => t.label).join(' · ') : 'No terms yet';
 </script>
@@ -248,6 +271,14 @@
 					<AppIcon name="file" size={18} />
 					Edit
 				</button>
+				{#if !program.isActive}
+					<button
+						class="btn btn-danger"
+						onclick={() => { adminProgramsState.actionError = null; programDeleteOpen = true; }}
+					>
+						Delete
+					</button>
+				{/if}
 			</div>
 		</header>
 
@@ -468,6 +499,35 @@
 				<button class="btn btn-ghost" onclick={() => (deleteTarget = null)}>Cancel</button>
 				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDeleteYear}>
 					{deleteBusy ? 'Deleting…' : 'Delete'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if programDeleteOpen && program}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-program-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeProgramDelete }}
+		>
+			<h2 id="delete-program-title" class="modal-title">Permanently delete {program.code}?</h2>
+			<p class="modal-text">
+				{program.name} will be removed for good, along with its year levels.
+				If course offerings or students still use it, deletion will be blocked
+				and the program stays archived.
+			</p>
+			{#if adminProgramsState.actionError}
+				<p class="error" role="alert">{adminProgramsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeProgramDelete}>Cancel</button>
+				<button class="btn btn-danger" disabled={programDeleteBusy} onclick={confirmDeleteProgram}>
+					{programDeleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>

@@ -8,11 +8,11 @@
 // PUBLIC_MOCK_MODE=true (see api/client.ts).
 //
 // Status semantics (ADR-058): the Deactivate/Reactivate toggle PATCHes
-// is_active. DELETE /admin/programs/{id} is an equivalent soft archive that
-// stays on the backend with no UI caller — there is nothing to cascade to,
-// since year_levels has no is_active column and courses carries no program
-// FK. Year-level DELETE is a real delete that 409s when offerings reference
-// the row (`year_has_courses`).
+// is_active. DELETE /admin/programs/{id} is a permanent delete guarded
+// server-side — only archived programs with no offerings or students go
+// through (409 `not_archived` / `program_has_offerings` /
+// `program_has_students`). Year-level DELETE is a real delete that 409s when
+// offerings reference the row (`year_has_courses`).
 
 import { del, get, patch, post } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
@@ -119,6 +119,12 @@ export const updateProgram = async (
 
 export const setProgramActive = async (id: number, isActive: boolean): Promise<Program> =>
 	updateProgram(id, { is_active: isActive });
+
+// Permanent delete — 409 `not_archived` when still active,
+// `program_has_offerings` / `program_has_students` when dependents remain.
+export const deleteProgram = async (id: number): Promise<void> => {
+	await del<void>('adminProgramDetail', undefined, `/${id}`);
+};
 
 export const listYearLevels = async (programId: number): Promise<YearLevel[]> => {
 	const response = await get<Paginated<YearLevelResponse>>(
