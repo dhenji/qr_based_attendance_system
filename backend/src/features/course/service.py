@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from features.course.exceptions import (
     CourseCodeExistsException,
     CourseNotFoundException,
+    EnrollmentNotFoundException,
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingNotFoundException,
@@ -42,6 +43,7 @@ from features.program.exceptions import (
     YearLevelNotFoundException,
 )
 from features.program.model import Program, YearLevel
+from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from shared.audit import record_audit
 from shared.base import BaseCRUD
@@ -684,6 +686,56 @@ class CourseService:
                 academic_year=offering.academic_year,
             )
             is not None
+        )
+
+    async def unenroll_student(
+        self, *, offering_id: int, student_number: str, actor_id: int | None = None
+    ) -> None:
+        """Remove one enrollment link row.
+
+        The link only: past attendance, excuse, and risk rows keep their
+        student+session identity, and future scans are blocked by the live
+        enrollment check. No `is_active` gate — cleanup on an archived
+        offering must still work. Re-enrolling afterwards is a normal
+        bulk-enroll row (the dedupe no longer matches).
+        """
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+
+        student: Student | None = await self._students.get_by(
+            student_id=student_number
+        )
+
+        if student is None:
+            raise StudentNotFoundException(student_number)
+
+        enrollment: Enrollment | None = await self._enrollments.get_by(
+            student_id=student.id,
+            offering_id=offering.id,
+            academic_year=offering.academic_year,
+        )
+
+        if enrollment is None:
+            raise EnrollmentNotFoundException(offering_id, student_number)
+
+        # Snapshot before the delete: the instance is detached once flushed.
+        enrollment_id: int = enrollment.id
+        old_value: dict[str, Any] = {
+            "offering_id": offering_id,
+            "student_id": student.student_id,
+            "semester": enrollment.semester,
+            "academic_year": enrollment.academic_year,
+        }
+
+        await self._session.delete(enrollment)
+        await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UNENROLL,
+            entity_type=AuditEntity.ENROLLMENT,
+            entity_id=enrollment_id,
+            old_value=old_value,
         )
 
     async def get_roster(

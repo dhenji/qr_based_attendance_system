@@ -1838,3 +1838,35 @@
   beat before navigating; MFA accounts land on the login page for TOTP with
   the password they just set — no TOTP UI added to the wizard. Mock
   `mockResetPassword` resolves identity by email like `mockLogin`.
+
+### ADR-076: Unenrollment Deletes Only the Link Row
+
+- **Decision (D76):** `DELETE /admin/offerings/{id}/students/{number}`
+  removes the `enrollments` row and nothing else. Past attendance, excuse,
+  and risk rows keep their student+session identity; future scans are
+  blocked by the live enrollment check. No attendance guard (no 409) and no
+  `is_active` gate — cleanup on an archived offering must still work.
+  Audited as `unenroll` on `enrollment` with the deleted row's PK.
+- **Date:** 2026-10-13
+- **Status:** Accepted
+- **Context:** Mistaken enrollments were unfixable short of deleting the
+  student row, which the `student_has_records` guard rightly blocks. Nothing
+  FK-references `enrollments.id` (attendance points at students+sessions),
+  so the link delete cannot cascade or trip a `RESTRICT`. The ADR-057
+  principle — FKs stay `RESTRICT` so the attendance trail is never destroyed
+  — is upheld by construction: the trail rows are untouched, and
+  `security-model.md` already promised unenrollment is audited.
+- **Alternatives considered:**
+  (1) *Block with 409 when scans exist (guard).* Rejected: it recreates the
+  unfixable-mistake trap for exactly the rows most likely to be mistakes,
+  while the trail it claims to protect is preserved anyway.
+  (2) *Soft-delete via a status flag on enrollments.* Rejected: `Enrollment`
+  has no status column by design, and a flag would need a predicate in every
+  read (`_schedule_stmt`, `_roster_stmt`, session overview, dashboards) for
+  no benefit over deleting the link.
+  (3) *Taken:* hard-delete the link, keep the trail, audit the removal.
+- **Consequences:** Roster, schedule, `enrolledCount`, and session overview
+  recompute live, so removal takes effect everywhere with no backfill.
+  Re-enrolling is a normal bulk-enroll row (the dedupe no longer matches).
+  The Enrolled tab gains a per-row Remove with a confirm modal; the roster
+  path id is the student string id, matching the row key.

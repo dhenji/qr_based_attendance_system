@@ -48,6 +48,7 @@ class AuditAction(StrEnum):
     DELETE = "delete"
     IMPORT = "import"
     ENROLL = "enroll"
+    UNENROLL = "unenroll"
     ASSIGN = "assign"
     UNASSIGN = "unassign"
     OPEN = "open"

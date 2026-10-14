@@ -39,7 +39,7 @@ class StudentNotFoundException(StudentDomainException):
     status_code: int = 404
     code: str = "student_not_found"
 
-    def __init__(self, student_id: int) -> None:
+    def __init__(self, student_id: int | str) -> None:
         super().__init__(message=f"Student {student_id} not found")
 
 

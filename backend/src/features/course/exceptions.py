@@ -116,3 +116,20 @@ class OfferingAssignmentNotFoundException(CourseDomainException):
             message=f"No assignment found for professor {professor_id} "
             f"on offering {offering_id}"
         )
+
+
+class EnrollmentNotFoundException(CourseDomainException):
+    """404 - the student has no enrollment row on this offering.
+
+    An unknown roster id raises `StudentNotFoundException` instead, so the
+    unenroll path distinguishes "no such student" from "not enrolled here".
+    """
+
+    status_code: int = 404
+    code: str = "enrollment_not_found"
+
+    def __init__(self, offering_id: int, student_number: str) -> None:
+        super().__init__(
+            message=f"Student {student_number} is not enrolled "
+            f"in offering {offering_id}"
+        )
