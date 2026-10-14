@@ -16,7 +16,7 @@
 	} from '$lib/features/admin/offerings/store.svelte';
 	import {
 		archiveOffering,
-		buildSingleEnrollCsv,
+		buildEnrollCsv,
 		setOfferingActive,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
@@ -102,9 +102,17 @@
 	let addTotal = $state(0);
 	let addPage = $state(1);
 	let addSearching = $state(false);
-	let addPicked = $state<AdminStudent | null>(null);
+	// Reactive array of the selected rows: `$state` proxies arrays but not
+	// Map/Set, so selection lives here (house multi-select idiom — see
+	// admin/analytics and admin/professors) while insertion order gives the
+	// CSV row order and the error-line mapping for free. Objects, not ids:
+	// the list only holds the current page, so an id-only set could not
+	// rebuild rows chosen on other pages.
+	let addSelected = $state<AdminStudent[]>([]);
 	let addBusy = $state(false);
-	let addInfo = $state<string | null>(null);
+	let addReport = $state<{ enrolled: number; skipped: number; failures: string[] } | null>(
+		null
+	);
 	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
 	const autoRefreshStops: (() => void)[] = [];
 
@@ -385,16 +393,14 @@
 		addResults = [];
 		addTotal = 0;
 		addPage = 1;
-		addPicked = null;
-		addInfo = null;
+		addReport = null;
+		addSelected = [];
 		adminOfferingDetailState.actionError = null;
 		void loadAddCandidates(1);
 	};
 
 	const onAddQuery = () => {
 		if (addSearchTimer) clearTimeout(addSearchTimer);
-		addPicked = null;
-		addInfo = null;
 		addSearchTimer = setTimeout(() => void loadAddCandidates(1), 300);
 	};
 
@@ -438,7 +444,8 @@
 	// The upload checks the CSV program against the offering, so a cross-
 	// program pick is blocked here instead of round-tripping the error.
 	const addProgramMismatch = $derived(
-		addPicked !== null && programCode !== null && addPicked.programCode !== programCode
+		programCode !== null &&
+			addSelected.some((s) => s.programCode !== programCode)
 	);
 
 	// Enrollment status per candidate, read off the loaded roster page.
@@ -449,17 +456,59 @@
 		new Set(adminOfferingDetailState.roster.map((r) => r.studentId))
 	);
 
+	// House toggle idiom (admin/analytics, admin/professors): reassign
+	// through filter/append so the reactive array invalidates.
+	const toggleAddSelection = (student: AdminStudent) => {
+		addSelected = addSelected.some((s) => s.id === student.id)
+			? addSelected.filter((s) => s.id !== student.id)
+			: [...addSelected, student];
+	};
+
+	const clearAddSelection = () => {
+		if (addBusy) return;
+		addSelected = [];
+	};
+
+	// Every eligible student on the visible page, so a cohort can be paged
+	// through without checking boxes one by one.
+	const pageEligible = $derived(
+		addResults.filter((s) => !enrolledIds.has(s.studentId))
+	);
+	const pageAllSelected = $derived(
+		pageEligible.length > 0 && pageEligible.every((s) => addSelected.some((x) => x.id === s.id))
+	);
+	const togglePageSelection = () => {
+		if (addBusy || pageEligible.length === 0) return;
+		addSelected = pageAllSelected
+			? addSelected.filter((x) => !pageEligible.some((s) => s.id === x.id))
+			: [...addSelected, ...pageEligible.filter((s) => !addSelected.some((x) => x.id === s.id))];
+	};
+
 	const submitAdd = async () => {
-		const picked = addPicked;
-		if (!offering || !picked || addBusy || addProgramMismatch) return;
+		const chosen = addSelected;
+		if (!offering || chosen.length === 0 || addBusy || addProgramMismatch) return;
 		addBusy = true;
-		addInfo = null;
+		addReport = null;
 		try {
-			const result = await bulkEnrollOffering(offering.id, buildSingleEnrollCsv(picked));
-			if (result.enrolled === 0 && result.skipped > 0) {
-				addInfo = `${picked.studentId} is already enrolled in this offering.`;
-			} else {
+			// Row order matches `chosen`, and the parser numbers data rows from
+			// line 2, so an error line maps back to its student deterministically.
+			const result = await bulkEnrollOffering(offering.id, buildEnrollCsv(chosen));
+			const failures = result.errors.map((err) => {
+				const student = chosen[err.line - 2];
+				return student ? `${student.studentId} — ${err.reason}` : err.reason;
+			});
+			if (result.errors.length === 0 && result.skipped === 0) {
+				addSelected = [];
 				addOpen = false;
+			} else {
+				// Stay open with the report: the roster reload above already
+				// flipped the newly-enrolled rows to "Already enrolled", so the
+				// badges self-correct and a re-submit is at worst a repeat skip.
+				addReport = {
+					enrolled: result.enrolled,
+					skipped: result.skipped,
+					failures,
+				};
 			}
 		} catch {
 			// Surfaced via the detail state's actionError.
@@ -813,6 +862,23 @@
 				{:else if addResults.length === 0}
 					<p class="empty">{addEmptyCopy}</p>
 				{:else}
+					<div class="pick-bar">
+						<label class="check pick-all">
+							<input
+								type="checkbox"
+								checked={pageAllSelected}
+								disabled={addBusy || pageEligible.length === 0}
+								onchange={togglePageSelection}
+							/>
+							<span>Select all on page</span>
+						</label>
+						{#if addSelected.length > 0}
+							<span class="muted">{addSelected.length} selected</span>
+							<button class="link" disabled={addBusy} onclick={clearAddSelection}>
+								Clear
+							</button>
+						{/if}
+					</div>
 					<ul class="pick-list">
 						{#each addResults as s (s.id)}
 							<li class="pick-row">
@@ -820,9 +886,16 @@
 									<span class="muted">{s.studentId} — {s.firstName} {s.lastName}</span>
 									<span class="badge inactive">Already enrolled</span>
 								{:else}
-									<button class="link" disabled={addBusy} onclick={() => (addPicked = s)}>
-										{s.studentId} — {s.firstName} {s.lastName} ({s.programCode})
-									</button>
+									<label class="check">
+										<input
+											type="checkbox"
+											checked={addSelected.some((x) => x.id === s.id)}
+											disabled={addBusy}
+											aria-label={`Select ${s.studentId}`}
+											onchange={() => toggleAddSelection(s)}
+										/>
+										<span>{s.studentId} — {s.firstName} {s.lastName} ({s.programCode})</span>
+									</label>
 									<span class="badge">Can enroll</span>
 								{/if}
 							</li>
@@ -848,19 +921,14 @@
 						</div>
 					{/if}
 				{/if}
-				{#if addPicked}
-					<p class="muted">
-						{addPicked.studentId} · {addPicked.email} · {addPicked.programCode} ·
-						section {addPicked.section ?? '—'} (kept)
+				{#if addReport}
+					<p class="muted" role="status">
+						Enrolled {addReport.enrolled} · skipped {addReport.skipped}
+						{#if addReport.failures.length > 0} · {addReport.failures.length} error{addReport.failures.length === 1 ? '' : 's'}:{/if}
 					</p>
-					{#if addProgramMismatch}
-						<p class="error" role="alert">
-							{addPicked.programCode} does not match this offering ({programCode ?? '—'}).
-						</p>
-					{/if}
-				{/if}
-				{#if addInfo}
-					<p class="muted" role="status">{addInfo}</p>
+					{#each addReport.failures as failure (failure)}
+						<p class="error" role="alert">{failure}</p>
+					{/each}
 				{/if}
 				{#if adminOfferingDetailState.actionError}
 					<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
@@ -870,10 +938,10 @@
 				<button class="btn btn-ghost" onclick={() => (addOpen = false)}>Cancel</button>
 				<button
 					class="btn btn-primary"
-					disabled={!addPicked || addBusy || addProgramMismatch}
+					disabled={addSelected.length === 0 || addBusy || addProgramMismatch}
 					onclick={submitAdd}
 				>
-					{addBusy ? 'Enrolling…' : 'Enroll'}
+					{addBusy ? 'Enrolling…' : addSelected.length > 1 ? `Enroll ${addSelected.length}` : 'Enroll'}
 				</button>
 			</div>
 		</div>
@@ -1285,6 +1353,13 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5rem;
+	}
+
+	.pick-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 0.8125rem;
 	}
 
 	.grid2 {
