@@ -10,11 +10,15 @@
 		isProfessor,
 		restoreSession
 	} from '$lib/features/auth/store.svelte';
+	import NotificationBell, {
+		type NotificationBellItem,
+	} from '$lib/components/NotificationBell.svelte';
 	import {
 		getProfessorPendingCount,
 		maybeNotify,
 		POLL_INTERVAL_MS,
 	} from '$lib/features/notifications/poll';
+	import { listExcuseRequests } from '$lib/features/excuse/service';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -28,9 +32,12 @@
 	let gate = $state<'checking' | 'allowed'>('checking');
 	//
 	// Pending-excuse bell: polls the live pending-queue total (fail-soft —
-	// mock/offline/401 hides the badge). Clicking jumps to the queue.
+	// mock/offline/401 hides the badge). Clicking opens the preview panel;
+	// the panel action jumps to the queue.
 	let pendingCount = $state(0);
 	let notifToast = $state<string | null>(null);
+	let notifPreview = $state<NotificationBellItem[]>([]);
+	let notifLoading = $state(false);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const refreshNotif = async () => {
@@ -47,6 +54,27 @@
 		if (document.visibilityState !== 'visible') return;
 		void refreshNotif();
 	};
+
+	// Lazy preview for the bell panel: newest pending requests, fail-soft
+	// (the badge count is the source of truth; a failed preview just shows
+	// the empty state, never an error).
+	const loadNotifPreview = async () => {
+		notifLoading = true;
+		try {
+			const result = await listExcuseRequests({ status: 'pending', page: 1, size: 5 });
+			notifPreview = result.items.map((row) => ({
+				id: row.id,
+				title: `${row.studentName} — ${row.courseCode}`,
+				sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+			}));
+		} catch {
+			notifPreview = [];
+		} finally {
+			notifLoading = false;
+		}
+	};
+
+	const openNotifQueue = () => void goto(Routes.PROFESSOR_EXCUSE_REQUESTS);
 
 	onMount(async () => {
 		const user = await restoreSession();
@@ -154,19 +182,17 @@
 			<span class="who" title={authState.user?.email ?? displayName}>{displayName}</span>
 		{/if}
 
-		<button
-			class="icon-btn notif"
-			onclick={() => void goto(Routes.PROFESSOR_EXCUSE_REQUESTS)}
-			aria-label={pendingCount > 0 ? `${pendingCount} pending excuse requests` : 'No new notifications'}
-		>
-			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<path d="M6 9a6 6 0 0 1 12 0c0 4 2 5 2 6H4c0-1 2-2 2-6Z" />
-				<path d="M10 19a2 2 0 0 0 4 0" />
-			</svg>
-			{#if pendingCount > 0}
-				<span class="badge" aria-hidden="true">{pendingCount > 9 ? '9+' : pendingCount}</span>
-			{/if}
-		</button>
+		<NotificationBell
+			count={pendingCount}
+			buttonLabel={pendingCount > 0 ? `${pendingCount} pending excuse requests` : 'No new notifications'}
+			panelTitle={pendingCount > 0 ? `${pendingCount} excuse request${pendingCount === 1 ? '' : 's'} awaiting review` : 'Excuse requests'}
+			items={notifPreview}
+			loading={notifLoading}
+			emptyText="You're caught up — no pending excuse requests."
+			actionLabel="Open excuse queue"
+			onOpen={() => void loadNotifPreview()}
+			onAction={openNotifQueue}
+		/>
 
 		<button class="icon-btn logout" type="button" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -276,27 +302,6 @@
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
 		color: var(--on-brand);
-	}
-
-	.icon-btn.notif {
-		position: relative;
-	}
-
-	.icon-btn .badge {
-		position: absolute;
-		top: 2px;
-		right: 2px;
-		min-width: 18px;
-		height: 18px;
-		padding: 0 5px;
-		border-radius: 999px;
-		background: var(--danger);
-		color: #fff;
-		font-size: 0.6875rem;
-		font-weight: 700;
-		display: flex;
-		align-items: center;
-		justify-content: center;
 	}
 
 	.toast {

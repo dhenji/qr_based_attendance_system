@@ -16,6 +16,7 @@
 		type SessionHistorySortDir
 	} from '$lib/features/session/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 	import { formatDate, formatPercentage } from '$lib/shared/utils/format';
 
 	type HistoryRow = Awaited<ReturnType<typeof listSessionHistory>>['items'][number];
@@ -43,6 +44,7 @@
 	let loadError = $state<string | null>(null);
 	let reloadToken = $state(0);
 	let exporting = $state(false);
+	let exportError = $state<string | null>(null);
 
 	// Course options deduped by code; sections join from the live courses
 	// store (the history rows carry no section identity of their own, and the
@@ -159,20 +161,37 @@
 
 	const viewDetail = (id: number) => void goto(professorActiveSession(id));
 
+	// Export page size: the history endpoint caps `size` at the server max
+	// (shared/pagination.py MAX_PAGE_SIZE), so one giant page is a 422.
+	// Page to exhaustion instead; the page cap bounds the whole export at
+	// 10k rows (the old single-shot intent) so a huge scope can never loop
+	// forever.
+	const EXPORT_PAGE_SIZE = 100;
+	const EXPORT_MAX_PAGES = 100;
+
 	const exportCsv = async () => {
 		if (exporting) return;
 		exporting = true;
+		exportError = null;
 		try {
-			const result = await listSessionHistory({
-				course: course === 'All' ? undefined : course,
-				section: section === 'All' ? undefined : section,
-				from: from || undefined,
-				to: to || undefined,
-				sortBy,
-				sortDir,
-				page: 1,
-				size: 10000
-			});
+			const all: HistoryRow[] = [];
+			let page = 1;
+			for (;;) {
+				const result = await listSessionHistory({
+					course: course === 'All' ? undefined : course,
+					section: section === 'All' ? undefined : section,
+					from: from || undefined,
+					to: to || undefined,
+					sortBy,
+					sortDir,
+					page,
+					size: EXPORT_PAGE_SIZE
+				});
+				all.push(...result.items);
+				if (result.items.length === 0 || all.length >= result.total) break;
+				page += 1;
+				if (page > EXPORT_MAX_PAGES) break;
+			}
 			const csv = buildCsv(
 				[
 					'Date',
@@ -186,7 +205,7 @@
 					'Compliance %',
 					'Participation %'
 				],
-				result.items.map((row) => [
+				all.map((row) => [
 					row.created_at.slice(0, 10),
 					row.session_code,
 					row.course_code,
@@ -207,6 +226,8 @@
 			anchor.click();
 			anchor.remove();
 			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		} catch (e: unknown) {
+			exportError = friendlyActionError(e, 'Export failed. Please try again.');
 		} finally {
 			exporting = false;
 		}
@@ -437,6 +458,9 @@
 						{exporting ? 'Exporting…' : 'Export CSV'}
 					</button>
 				</div>
+				{#if exportError}
+					<p class="error" role="alert">{exportError}</p>
+				{/if}
 			</div>
 		</section>
 	{/if}

@@ -10,12 +10,16 @@
 		isStudent,
 		restoreSession
 	} from '$lib/features/auth/store.svelte';
+	import NotificationBell, {
+		type NotificationBellItem,
+	} from '$lib/components/NotificationBell.svelte';
 	import {
 		getStudentUpdateCount,
 		markStudentSeen,
 		maybeNotify,
 		POLL_INTERVAL_MS,
 	} from '$lib/features/notifications/poll';
+	import { listStudentExcuses } from '$lib/features/student/service';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -30,9 +34,12 @@
 	//
 	// Excuse-decision bell: polls the student's own excuse list for newly
 	// reviewed rows (fail-soft — mock/offline/401 hides the badge). Clicking
-	// the bell marks them seen and jumps to History.
+	// the bell opens the preview panel; the panel action marks them seen and
+	// jumps to History.
 	let notifCount = $state(0);
 	let notifToast = $state<string | null>(null);
+	let notifPreview = $state<NotificationBellItem[]>([]);
+	let notifLoading = $state(false);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const refreshNotif = async () => {
@@ -79,7 +86,30 @@
 		document.removeEventListener('visibilitychange', onNotifFocus);
 	});
 
-	const openNotif = async () => {
+	// Lazy preview for the bell panel: newest reviewed decisions first,
+	// fail-soft (the badge count is the source of truth; a failed preview
+	// just shows the empty state, never an error).
+	const loadNotifPreview = async () => {
+		notifLoading = true;
+		try {
+			const { items } = await listStudentExcuses({ page: 1, size: 10 });
+			notifPreview = items
+				.filter((row) => row.status !== 'pending')
+				.sort((a, b) => (b.reviewedAt ?? '').localeCompare(a.reviewedAt ?? ''))
+				.slice(0, 5)
+				.map((row) => ({
+					id: row.id,
+					title: `Excuse ${row.status}`,
+					sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+				}));
+		} catch {
+			notifPreview = [];
+		} finally {
+			notifLoading = false;
+		}
+	};
+
+	const openNotifHistory = async () => {
 		markStudentSeen();
 		notifCount = 0;
 		notifToast = null;
@@ -150,19 +180,17 @@
 			<span class="who" title={authState.user?.email ?? displayName}>{displayName}</span>
 		{/if}
 
-		<button
-			class="icon-btn notif"
-			onclick={() => void openNotif()}
-			aria-label={notifCount > 0 ? `${notifCount} new excuse decisions` : 'No new notifications'}
-		>
-			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<path d="M6 9a6 6 0 0 1 12 0c0 4 2 5 2 6H4c0-1 2-2 2-6Z" />
-				<path d="M10 19a2 2 0 0 0 4 0" />
-			</svg>
-			{#if notifCount > 0}
-				<span class="badge" aria-hidden="true">{notifCount > 9 ? '9+' : notifCount}</span>
-			{/if}
-		</button>
+		<NotificationBell
+			count={notifCount}
+			buttonLabel={notifCount > 0 ? `${notifCount} new excuse decisions` : 'No new notifications'}
+			panelTitle={notifCount > 0 ? `${notifCount} professor decision${notifCount === 1 ? '' : 's'} on your excuses` : 'Excuse decisions'}
+			items={notifPreview}
+			loading={notifLoading}
+			emptyText="No professor decisions yet — you'll see them here."
+			actionLabel="Review in History"
+			onOpen={() => void loadNotifPreview()}
+			onAction={() => void openNotifHistory()}
+		/>
 
 		<button class="icon-btn logout" type="button" data-testid="logout" onclick={() => (logoutOpen = true)} aria-label="Logout">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -272,27 +300,6 @@
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
 		color: var(--on-brand);
-	}
-
-	.icon-btn.notif {
-		position: relative;
-	}
-
-	.icon-btn .badge {
-		position: absolute;
-		top: 2px;
-		right: 2px;
-		min-width: 18px;
-		height: 18px;
-		padding: 0 5px;
-		border-radius: 999px;
-		background: var(--danger);
-		color: #fff;
-		font-size: 0.6875rem;
-		font-weight: 700;
-		display: flex;
-		align-items: center;
-		justify-content: center;
 	}
 
 	.toast {
