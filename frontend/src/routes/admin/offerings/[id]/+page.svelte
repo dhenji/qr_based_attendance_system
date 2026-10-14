@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import DayPicker from '$lib/components/DayPicker.svelte';
 	import {
 		adminOfferingDetailState,
 		assignOfferingProfessor,
@@ -575,7 +576,7 @@
 						<label>Sessions / week<input class="input" inputmode="numeric" bind:value={s_sessions} /></label>
 						<label>Semester weeks<input class="input" inputmode="numeric" bind:value={s_weeks} /></label>
 					</div>
-					<label>Schedule days<input class="input" bind:value={s_days} placeholder="MWF" /></label>
+					<DayPicker bind:value={s_days} />
 					<div class="grid2">
 						<label>Start time<input class="input" type="time" bind:value={s_start} /></label>
 						<label>End time<input class="input" type="time" bind:value={s_end} /></label>

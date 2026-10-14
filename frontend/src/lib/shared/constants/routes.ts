@@ -33,6 +33,7 @@ export const Routes = {
   ADMIN_PROGRAMS: "/admin/programs",
   ADMIN_COURSES: "/admin/courses",
   ADMIN_OFFERINGS: "/admin/offerings",
+  ADMIN_SETUP_WIZARD: "/admin/setup-wizard",
   ADMIN_ANALYTICS: "/admin/analytics",
   ADMIN_ATTENDANCE: "/admin/attendance",
   ADMIN_EXCUSES: "/admin/excuses",
