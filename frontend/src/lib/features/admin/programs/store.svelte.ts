@@ -15,6 +15,7 @@ import {
 	setProgramActive,
 } from '$lib/features/admin/programs/service';
 import { friendlyDeleteError, friendlyActionError } from '$lib/shared/utils/deleteErrors';
+import { APIError } from '$lib/api/client';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export type ProgramSortColumn = 'code' | 'name';
@@ -45,18 +46,22 @@ const toMessage = (e: unknown, fallback: string) =>
 export const initAdminPrograms = async (
 	filters: ProgramFilters = {},
 	page = 1,
-	size = 20
+	size = 20,
+	opts?: { signal?: AbortSignal | null }
 ): Promise<void> => {
 	adminProgramsState.loading = true;
 	adminProgramsState.error = null;
 	try {
-		const result = await listPrograms({ ...filters, page, size });
+		const result = await listPrograms({ ...filters, page, size }, opts);
 		adminProgramsState.items = result.items;
 		adminProgramsState.total = result.total;
 		adminProgramsState.page = result.page;
 		adminProgramsState.size = result.size;
 		adminProgramsState.filters = filters;
 	} catch (e: unknown) {
+		if (e instanceof APIError && (e.code === 'request_cancelled' || e.code === 'request_timeout')) {
+			return;
+		}
 		adminProgramsState.error = toMessage(e, 'Failed to load programs');
 	} finally {
 		adminProgramsState.loading = false;

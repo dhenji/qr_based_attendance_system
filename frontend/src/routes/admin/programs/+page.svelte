@@ -61,19 +61,25 @@
 		return items;
 	});
 
-	const load = (page = 1, term?: string) =>
-		initAdminPrograms(
+	const load = (page = 1, term?: string) => {
+		searchAbort?.abort();
+		searchAbort = new AbortController();
+		return initAdminPrograms(
 			{
 				search: (term ?? search.trim()) || undefined,
 				is_active: isActiveFilter,
 			},
 			page,
-			adminProgramsState.size
+			adminProgramsState.size,
+			{ signal: searchAbort.signal }
 		);
+	};
 
+	let searchAbort: AbortController | null = null;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		searchAbort?.abort();
 		for (const stop of autoRefreshStops) stop();
 	});
 

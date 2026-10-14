@@ -324,7 +324,20 @@ const apiCall = async <T>(
 	// failures.
 	if (MOCK) {
 		if (endpointDef.mock) {
-			return endpointDef.mock(forMock(params), suffix, body, method) as unknown as T;
+			try {
+				return endpointDef.mock(forMock(params), suffix, body, method) as unknown as T;
+			} catch (e: unknown) {
+				// Stateful mocks throw plain Errors for domain rejections
+				// (not-found, duplicate). Normalize to APIError so callers
+				// branching on `e instanceof APIError` (e.g. scan's
+				// isNetworkError offline-queue gate) treat them as
+				// server-decided, never as network failures to retry/queue.
+				if (e instanceof APIError) throw e;
+				throw new APIError(
+					'request_failed',
+					e instanceof Error && e.message ? e.message : 'Mock request failed'
+				);
+			}
 		}
 		throw new APIError(
 			'mock_mode',
@@ -404,7 +417,15 @@ export const postForm = async <T>(
 
 	if (MOCK) {
 		if (endpointDef.mock) {
-			return endpointDef.mock(forMock(params), suffix, undefined, 'POST') as unknown as T;
+			try {
+				return endpointDef.mock(forMock(params), suffix, undefined, 'POST') as unknown as T;
+			} catch (e: unknown) {
+				if (e instanceof APIError) throw e;
+				throw new APIError(
+					'request_failed',
+					e instanceof Error && e.message ? e.message : 'Mock request failed'
+				);
+			}
 		}
 		throw new APIError(
 			'mock_mode',

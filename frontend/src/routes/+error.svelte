@@ -30,7 +30,10 @@
 	<ErrorBoundary error={page.error} {fallback} showDetails={dev} retryButton={false} />
 
 	<nav class="actions" aria-label="Recovery">
-		<button class="btn" type="button" onclick={() => window.history.back()}>Go back</button>
+		<button class="btn" type="button" onclick={() => {
+			if (window.history.length > 1) window.history.back();
+			else window.location.href = Routes.HOME;
+		}}>Go back</button>
 		<a class="btn" href={Routes.HOME}>Home</a>
 	</nav>
 </div>

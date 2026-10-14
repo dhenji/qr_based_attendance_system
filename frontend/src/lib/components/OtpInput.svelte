@@ -35,9 +35,9 @@
 	}
 
 	function setDigit(i: number, value: string) {
-		const v = value.replace(/\D/g, '').slice(0, count);
+		const v = value.replace(/\D/g, '').slice(-1);
 		if (!v) return;
-		digits = digits.map((d, index) => (index === i ? v[0] : d));
+		digits = digits.map((d, index) => (index === i ? v : d));
 		onChange?.();
 		inputs[Math.min(i + 1, count - 1)]?.focus();
 	}
@@ -46,11 +46,13 @@
 		const pasted = (event.clipboardData?.getData('text') ?? '').replace(/\D/g, '').slice(0, count);
 		if (!pasted) return;
 		event.preventDefault();
-		const next = ['', '', '', '', '', ''];
-		for (let j = 0; j < pasted.length; j++) next[j] = pasted[j];
+		const next = [...digits];
+		// Fill forward from the focused box so pasting into any box works,
+		// not just box one.
+		for (let j = 0; j < pasted.length && i + j < count; j++) next[i + j] = pasted[j];
 		digits = next;
 		onChange?.();
-		inputs[Math.min(pasted.length, count - 1)]?.focus();
+		inputs[Math.min(i + pasted.length, count - 1)]?.focus();
 	}
 
 	function handleKeydown(i: number, event: KeyboardEvent) {
@@ -59,6 +61,10 @@
 				digits = digits.map((d, index) => (index === i ? '' : d));
 				onChange?.();
 			} else if (i > 0) {
+				// Clear the previous box as well as moving to it — one press
+				// deletes, not just navigates.
+				digits = digits.map((d, index) => (index === i - 1 ? '' : d));
+				onChange?.();
 				inputs[i - 1]?.focus();
 			}
 		}

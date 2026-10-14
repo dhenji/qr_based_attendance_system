@@ -19,14 +19,26 @@ export const calculateDistance = (
 };
 
 // True when the student's position is within the classroom's radius (metres).
+// Invalid coordinates or a negative radius never match — fail closed rather
+// than letting NaN compare its way into a false present.
 export const isWithinGeofence = (
-  studentLat: number,
-  studentLng: number,
-  centerLat: number,
-  centerLng: number,
-  radiusMetres: number
+	studentLat: number,
+	studentLng: number,
+	centerLat: number,
+	centerLng: number,
+	radiusMetres: number
 ): boolean => {
-  const distanceKm = calculateDistance(studentLat, studentLng, centerLat, centerLng);
-  const distanceMetres = distanceKm * 1000;
-  return distanceMetres <= radiusMetres;
+	if (
+		!Number.isFinite(studentLat) ||
+		!Number.isFinite(studentLng) ||
+		!Number.isFinite(centerLat) ||
+		!Number.isFinite(centerLng) ||
+		!Number.isFinite(radiusMetres) ||
+		radiusMetres < 0
+	) {
+		return false;
+	}
+	const distanceKm = calculateDistance(studentLat, studentLng, centerLat, centerLng);
+	const distanceMetres = distanceKm * 1000;
+	return distanceMetres <= radiusMetres;
 };

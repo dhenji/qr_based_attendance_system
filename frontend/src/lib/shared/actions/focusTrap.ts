@@ -42,20 +42,39 @@ const focusableWithin = (node: HTMLElement): HTMLElement[] =>
 		(el) => el.getClientRects().length > 0
 	);
 
+let lockCount = 0;
+let savedOverflow = '';
+
 export function trapFocus(node: HTMLElement, options: TrapFocusOptions = {}) {
 	const { onEscape, lockScroll = true } = options;
 
 	const previouslyFocused =
 		document.activeElement instanceof HTMLElement ? document.activeElement : null;
-	const previousOverflow = document.body.style.overflow;
 
-	if (lockScroll) document.body.style.overflow = 'hidden';
+	// Stack-aware scroll lock: nested dialogs each push; only the outermost
+	// restores. Without the count, closing an inner dialog re-enables scroll
+	// while the outer dialog is still open.
+	lockCount += lockScroll ? 1 : 0;
+	if (lockScroll && lockCount === 1) {
+		savedOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+	}
 
 	const focusFirst = () => {
 		const targets = focusableWithin(node);
 		(targets[0] ?? node).focus();
 	};
 	focusFirst();
+
+	const onFocusIn = (event: FocusEvent) => {
+		// Click-outside (or programmatic) focus escaping the dialog gets
+		// pulled back in, so aria-modal's promise holds for pointer users too.
+		const target = event.target as HTMLElement | null;
+		if (target && !node.contains(target)) {
+			const targets = focusableWithin(node);
+			(targets[0] ?? node).focus();
+		}
+	};
 
 	const onKeydown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
@@ -92,11 +111,16 @@ export function trapFocus(node: HTMLElement, options: TrapFocusOptions = {}) {
 	};
 
 	node.addEventListener('keydown', onKeydown);
+	document.addEventListener('focusin', onFocusIn);
 
 	return {
 		destroy() {
 			node.removeEventListener('keydown', onKeydown);
-			if (lockScroll) document.body.style.overflow = previousOverflow;
+			document.removeEventListener('focusin', onFocusIn);
+			if (lockScroll) {
+				lockCount = Math.max(0, lockCount - 1);
+				if (lockCount === 0) document.body.style.overflow = savedOverflow;
+			}
 			// Only restore if the trigger is still in the document and focusable.
 			if (previouslyFocused?.isConnected) previouslyFocused.focus();
 		},

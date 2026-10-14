@@ -170,7 +170,8 @@
 	};
 
 	onMount(() => {
-		void load();
+		// Server rows load via the $effect below (sort/status/page), so no
+		// explicit load() here — otherwise mount fires two identical GETs.
 		void refreshQueue();
 		void getSchedule()
 			.then((courses) => {
@@ -341,7 +342,7 @@
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
-			URL.revokeObjectURL(url);
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
 
 			if (droppedFilters.length > 0 && !exportNote) {
 				exportNote = `Exported every matching row. ${droppedFilters.join(' and ')} ${

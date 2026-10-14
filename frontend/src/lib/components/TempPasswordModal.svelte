@@ -14,6 +14,7 @@
 	// never stored anywhere. For that reason Escape is wired to `onclose` ONLY
 	// on the confirm step — once the password is on screen the dialog becomes
 	// Escape-inert, so a stray keypress cannot silently discard it.
+	import { onDestroy } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -39,6 +40,11 @@
 	let issued = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let copied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 
 	const subjectNoun = $derived(KIND_NOUN[subjectKind]);
 
@@ -77,7 +83,11 @@
 		try {
 			await navigator.clipboard.writeText(issued);
 			copied = true;
-			setTimeout(() => (copied = false), 2000);
+			if (copyTimer) clearTimeout(copyTimer);
+			copyTimer = setTimeout(() => {
+				copied = false;
+				copyTimer = null;
+			}, 2000);
 		} catch {
 			// Clipboard is gated on some browsers and insecure origins; the
 			// password is on screen and selectable either way, so a failure here

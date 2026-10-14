@@ -329,7 +329,7 @@
 		document.body.appendChild(link);
 		link.click();
 		link.remove();
-		URL.revokeObjectURL(url);
+		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	};
 
 	// Server-first export (POST /professor/reports/export): the download
