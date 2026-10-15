@@ -14,7 +14,7 @@
 // `program_has_students`). Year-level DELETE is a real delete that 409s when
 // offerings reference the row (`year_has_courses`).
 
-import { del, get, patch, post } from '$lib/api/client';
+import { del, get, getText, patch, post, postForm, TEXT_EXPORTS } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
 	Program,
@@ -22,6 +22,7 @@ import type {
 	ProgramDetail,
 	ProgramDetailResponse,
 	ProgramFilters,
+	ProgramImportResult,
 	ProgramResponse,
 	ProgramTerm,
 	ProgramUpdatePayload,
@@ -165,4 +166,22 @@ export const updateYearLevel = async (
 // Hard delete — 409 `year_has_courses` when offerings still reference the row.
 export const deleteYearLevel = async (programId: number, yearId: number): Promise<void> => {
 	await del<void>('adminYearLevelDetail', undefined, `/${programId}/years/${yearId}`);
+};
+
+export const importPrograms = async (file: File): Promise<ProgramImportResult> => {
+	const form = new FormData();
+	form.append('file', file);
+	return postForm<ProgramImportResult>('adminProgramImport', form);
+};
+
+// CSV template. Server text in live mode; the static header keeps
+// mock-mode/offline imports working when the template route is unreachable.
+const PROGRAM_TEMPLATE_FALLBACK = 'code,name,description,total_years\n';
+
+export const downloadProgramTemplate = async (): Promise<string> => {
+	try {
+		return await getText(TEXT_EXPORTS.programTemplate);
+	} catch {
+		return PROGRAM_TEMPLATE_FALLBACK;
+	}
 };

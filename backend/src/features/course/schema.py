@@ -295,3 +295,14 @@ class BulkEnrollResult(BaseModel):
     enrolled: int
     skipped: int
     errors: list[BulkEnrollError] = Field(default_factory=list)
+
+
+class CourseImportError(BaseModel):
+    line: int
+    reason: str
+
+
+class CourseImportResult(BaseModel):
+    imported: int
+    duplicates: int
+    errors: list[CourseImportError] = Field(default_factory=list)
