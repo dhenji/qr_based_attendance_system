@@ -40,34 +40,63 @@ import type {
 	AdminRosterItem,
 	AdminRosterItemResponse,
 	AdminStudent,
+	OfferingComponent,
+	OfferingComponentCreatePayload,
+	OfferingComponentResponse,
+	OfferingComponentUpdatePayload,
 	Program,
 	YearLevel,
 } from '$lib/shared/types';
 
-export const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
-	id: o.id,
-	courseId: o.course_id,
-	programId: o.program_id,
-	yearLevelId: o.year_level_id,
-	semester: o.semester,
-	academicYear: o.academic_year,
-	sessionsPerWeek: o.sessions_per_week,
-	semesterWeeks: o.semester_weeks,
-	scheduleDays: o.schedule_days,
-	scheduleStartTime: o.schedule_start_time,
-	scheduleEndTime: o.schedule_end_time,
-	// Backend has no column — fall back so live rows never render undefined.
-	courseType: o.course_type ?? 'lecture',
-	classroomName: o.classroom_name ?? undefined,
-	classroomLat: o.classroom_lat ?? undefined,
-	classroomLng: o.classroom_lng ?? undefined,
-	presentWindowMinutes: o.default_present_window_minutes,
-	lateWindowMinutes: o.default_late_window_minutes,
-	isActive: o.is_active,
-	enrolledCount: o.enrolled_count ?? 0,
-	createdAt: o.created_at,
-	updatedAt: o.updated_at,
+export const toComponent = (c: OfferingComponentResponse): OfferingComponent => ({
+	id: c.id,
+	offeringId: c.offering_id,
+	sessionType: c.session_type,
+	scheduleDays: c.schedule_days,
+	scheduleStartTime: c.schedule_start_time,
+	scheduleEndTime: c.schedule_end_time,
+	classroomName: c.classroom_name ?? undefined,
+	classroomLat: c.classroom_lat ?? undefined,
+	classroomLng: c.classroom_lng ?? undefined,
+	isActive: c.is_active,
+	createdAt: c.created_at,
+	updatedAt: c.updated_at,
 });
+
+export const toOffering = (o: AdminOfferingResponse): AdminOffering => {
+	const components = (o.components ?? []).map(toComponent);
+	// Live reads carry the distinct active types; fall back to the legacy
+	// label (then lecture) for rows that predate the field.
+	const sessionTypes =
+		o.session_types && o.session_types.length > 0
+			? [...o.session_types]
+			: [o.course_type ?? 'lecture'];
+	return {
+		id: o.id,
+		courseId: o.course_id,
+		programId: o.program_id,
+		yearLevelId: o.year_level_id,
+		semester: o.semester,
+		academicYear: o.academic_year,
+		sessionsPerWeek: o.sessions_per_week,
+		semesterWeeks: o.semester_weeks,
+		scheduleDays: o.schedule_days,
+		scheduleStartTime: o.schedule_start_time,
+		scheduleEndTime: o.schedule_end_time,
+		courseType: sessionTypes[0] ?? 'lecture',
+		sessionTypes,
+		components,
+		classroomName: o.classroom_name ?? undefined,
+		classroomLat: o.classroom_lat ?? undefined,
+		classroomLng: o.classroom_lng ?? undefined,
+		presentWindowMinutes: o.default_present_window_minutes,
+		lateWindowMinutes: o.default_late_window_minutes,
+		isActive: o.is_active,
+		enrolledCount: o.enrolled_count ?? 0,
+		createdAt: o.created_at,
+		updatedAt: o.updated_at,
+	};
+};
 
 // Client-side joins for display: the OfferingRead contract carries ids only.
 // Looks up course/program/year metadata already loaded for the filter
@@ -166,6 +195,62 @@ export const setOfferingActive = async (id: number, isActive: boolean): Promise<
 // Soft archive — 204, flips is_active=false server-side.
 export const archiveOffering = async (id: number): Promise<void> => {
 	await del<void>('adminOfferingDetail', undefined, `/${id}`);
+};
+
+// --- Offering components (D77: per-type schedules) -------------------------
+
+
+export const listComponents = async (offeringId: number): Promise<OfferingComponent[]> => {
+	const response = await get<OfferingComponentResponse[]>(
+		'adminOfferingComponents',
+		undefined,
+		`/${offeringId}/components`
+	);
+	return (response ?? []).map(toComponent);
+};
+
+export const createComponent = async (
+	offeringId: number,
+	payload: OfferingComponentCreatePayload
+): Promise<OfferingComponent> => {
+	const response = await post<OfferingComponentResponse>(
+		'adminOfferingComponentCreate',
+		{
+			...payload,
+			schedule_days: payload.schedule_days.trim().toUpperCase(),
+		},
+		undefined,
+		`/${offeringId}/components`
+	);
+	return toComponent(response);
+};
+
+export const updateComponent = async (
+	offeringId: number,
+	componentId: number,
+	payload: OfferingComponentUpdatePayload
+): Promise<OfferingComponent> => {
+	const response = await patch<OfferingComponentResponse>(
+		'adminOfferingComponentDetail',
+		payload.schedule_days !== undefined
+			? { ...payload, schedule_days: payload.schedule_days.trim().toUpperCase() }
+			: payload,
+		undefined,
+		`/${offeringId}/components/${componentId}`
+	);
+	return toComponent(response);
+};
+
+// Soft archive — 204, flips is_active=false server-side.
+export const archiveComponent = async (
+	offeringId: number,
+	componentId: number
+): Promise<void> => {
+	await del<void>(
+		'adminOfferingComponentDetail',
+		undefined,
+		`/${offeringId}/components/${componentId}`
+	);
 };
 
 // --- Professor assignments ---------------------------------------------------

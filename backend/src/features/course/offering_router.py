@@ -12,6 +12,9 @@ from features.course.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_
 from features.course.schema import (
     AssignmentRead,
     BulkEnrollResult,
+    ComponentCreate,
+    ComponentRead,
+    ComponentUpdate,
     OfferingCreate,
     OfferingRead,
     OfferingUpdate,
@@ -116,6 +119,75 @@ async def archive_offering(
     service: CourseServiceDep,
 ) -> None:
     await service.archive_offering(offering_id=offering_id, actor_id=user.id)
+
+
+# -- offering components (D77: per-type schedules) -----------------------
+
+
+@router.get(
+    "/{offering_id}/components",
+    response_model=list[ComponentRead],
+    summary="List active scheduled components of an offering",
+)
+async def list_components(
+    offering_id: int,
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> Sequence[ComponentRead]:
+    return await service.list_components(offering_id=offering_id)
+
+
+@router.post(
+    "/{offering_id}/components",
+    response_model=ComponentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a scheduled component (lecture/lab) to an offering",
+)
+async def create_component(
+    offering_id: int,
+    payload: ComponentCreate,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> ComponentRead:
+    return await service.create_component(
+        offering_id=offering_id, payload=payload, actor_id=user.id
+    )
+
+
+@router.patch(
+    "/{offering_id}/components/{component_id}",
+    response_model=ComponentRead,
+    summary="Update a scheduled component (mutable fields only)",
+)
+async def update_component(
+    offering_id: int,
+    component_id: int,
+    payload: ComponentUpdate,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> ComponentRead:
+    return await service.update_component(
+        offering_id=offering_id,
+        component_id=component_id,
+        payload=payload,
+        actor_id=user.id,
+    )
+
+
+@router.delete(
+    "/{offering_id}/components/{component_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Archive a scheduled component (is_active=false)",
+)
+async def archive_component(
+    offering_id: int,
+    component_id: int,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> None:
+    await service.archive_component(
+        offering_id=offering_id, component_id=component_id, actor_id=user.id
+    )
 
 
 @router.get(

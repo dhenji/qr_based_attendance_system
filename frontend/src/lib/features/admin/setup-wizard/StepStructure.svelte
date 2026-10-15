@@ -49,7 +49,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	let c_name = $state('');
 	let c_units = $state('');
 	let c_duration = $state('');
-	let c_type = $state<'lecture' | 'lab'>('lecture');
 	let courseError = $state<string | null>(null);
 	let courseBusy = $state(false);
 
@@ -145,7 +144,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		c_name = '';
 		c_units = '';
 		c_duration = '';
-		c_type = 'lecture';
 		courseOpen = true;
 	};
 
@@ -158,7 +156,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 				course_name: c_name,
 				units: c_units,
 				session_duration_hours: c_duration,
-				course_type: c_type,
 			});
 			if (!parsed.success) {
 				courseError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -169,7 +166,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 				course_name: parsed.data.course_name,
 				units: parsed.data.units,
 				session_duration_hours: parsed.data.session_duration_hours,
-				course_type: parsed.data.course_type,
 			});
 			courseOpen = false;
 			await reloadCourses();
@@ -316,15 +312,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 							<label>Units<input class="input" inputmode="numeric" bind:value={c_units} placeholder="3" /></label>
 						</div>
 						<label>Name<input class="input" bind:value={c_name} placeholder="Intro to Computing" /></label>
-						<div class="grid2">
-							<label>Session hours<input class="input" inputmode="decimal" bind:value={c_duration} placeholder="1.5" /></label>
-							<label>Type
-								<select class="input" bind:value={c_type}>
-									<option value="lecture">Lecture</option>
-									<option value="lab">Laboratory</option>
-								</select>
-							</label>
-						</div>
+						<label>Session hours<input class="input" inputmode="decimal" bind:value={c_duration} placeholder="1.5" /></label>
 						<div class="form-actions">
 							<button class="btn btn-ghost" onclick={() => (courseOpen = false)}>Cancel</button>
 							<button

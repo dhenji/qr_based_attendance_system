@@ -121,6 +121,18 @@ class ScannedVia(StrEnum):
     MANUAL_CODE = "manual_code"
 
 
+class SessionType(StrEnum):
+    """Lecture vs laboratory session/component vocabulary (D77).
+
+    Stored as free-form `String(20)` with a CHECK constraint, mirroring how
+    `ValidationStatus` is handled: the enum is the contract, the database
+    only guards the value set.
+    """
+
+    LECTURE = "lecture"
+    LAB = "lab"
+
+
 class SyncStatus(StrEnum):
     SYNCED = "synced"
     PENDING = "pending"

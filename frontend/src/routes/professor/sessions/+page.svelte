@@ -286,6 +286,7 @@
 											</span>
 										</button>
 									</th>
+									<th scope="col">Type</th>
 									<th scope="col">Status</th>
 									<th scope="col"><span class="sr-only">Action</span></th>
 								</tr>
@@ -300,6 +301,11 @@
 											<div class="course-sub">Section {session.section}</div>
 										</td>
 										<td class="numeric">{plaText(session)}</td>
+										<td>
+											<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
+												{session.sessionType === 'lab' ? 'Lab' : 'Lecture'}
+											</span>
+										</td>
 										<td><span class="status status-{session.status}">{session.status}</span></td>
 										<td>
 											<button
@@ -651,6 +657,22 @@
 	.status-closed {
 		background: var(--bg-muted);
 		color: var(--text-muted);
+	}
+
+	.type-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--success);
+		background: var(--success-bg);
+		white-space: nowrap;
+	}
+
+	.type-badge.is-lab {
+		color: #92400e;
+		background: #fef3c7;
 	}
 
 	.mini {

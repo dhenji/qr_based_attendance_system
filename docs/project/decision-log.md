@@ -1839,6 +1839,47 @@
   the password they just set — no TOTP UI added to the wizard. Mock
   `mockResetPassword` resolves identity by email like `mockLogin`.
 
+### ADR-077: Lecture/Laboratory as Session Types + Offering Components
+
+- **Decision (D77):** Lecture vs laboratory is a property of sessions and
+  offering schedules, not of courses. `sessions.session_type`
+  (`lecture`/`lab`, default `lecture`) records each session's kind, and a new
+  `offering_components` child of `course_offerings` carries one scheduled
+  component per type (days, start/end time, classroom) so a single course can
+  mix a Monday laboratory with a Wednesday lecture in distinct rooms.
+  Laboratory sessions always enforce the geofence: opening one without
+  resolvable coordinates fails with 422 `lab_coordinates_required`
+  (payload → matching lab component → offering fallback); lectures keep
+  coordinates optional.
+- **Date:** 2026-10-15
+- **Status:** Accepted
+- **Context:** Course Management showed a Type toggle (Lecture/Laboratory)
+  that lived only in the frontend: the backend had no column, silently
+  dropped the value, and rendered every live row as Lecture. A per-course
+  enum could not represent mixed courses anyway, and a per-offering enum
+  could not either — an offering holds one schedule and one classroom.
+- **Alternatives considered:**
+  (1) *`courses.course_type` column.* Rejected: the template is
+  type-agnostic (D44) and one enum cannot mix lab Monday with lecture
+  Wednesday.
+  (2) *`course_offerings.course_type` single enum.* Rejected: same
+  single-schedule/single-room limitation; splitting a mixed class into two
+  offerings would break the `uq_course_offering` identity and split
+  enrollment/attendance/risk, which are all offering-scoped (D45).
+  (3) *Taken:* session type + components. Enrollment, professor
+  assignments, and risk stay offering-scoped; sessions, history, and the
+  ledger expose and filter by type.
+- **Consequences:** Forward-only migration backfills existing sessions to
+  `lecture` and gives every offering one lecture component mirroring its
+  schedule/classroom, so old rows and old callers keep working. Course
+  Management drops the stored Type in favour of a derived
+  Lecture/Lab/Mixed badge; the professor session-create toggle is wired to
+  `session_type`. The offering-level schedule/room columns stay as the
+  legacy display default and session fallback, and the service mirrors the
+  lone active meeting onto them whenever an offering has exactly one —
+  with zero or several meetings there is no single truth to mirror, so the
+  columns are left untouched.
+
 ### ADR-076: Unenrollment Deletes Only the Link Row
 
 - **Decision (D76):** `DELETE /admin/offerings/{id}/students/{number}`

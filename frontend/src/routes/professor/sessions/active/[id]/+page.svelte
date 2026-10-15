@@ -466,7 +466,10 @@
 			<div class="title">
 				<h1>Active: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offeringSections} · Code {session.sessionCode}
+					Section {session.offeringSections} · Code {session.sessionCode} ·
+					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
+						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
+					</span>
 				</p>
 			</div>
 			<button
@@ -1188,6 +1191,22 @@
 	.status-excused { background: var(--info-bg); color: #6d28d9; }
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
+
+	.type-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--success);
+		background: var(--success-bg);
+		white-space: nowrap;
+	}
+
+	.type-badge.is-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
 
 	.mini {
 		padding: 0.375rem 0.75rem;

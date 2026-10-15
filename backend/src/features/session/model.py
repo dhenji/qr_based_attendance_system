@@ -28,6 +28,10 @@ class Session(CreatedAtMixin, Base):
             "present_window_minutes + late_window_minutes <= duration_minutes",
             name="ck_session_window_sum_lte_duration",
         ),
+        CheckConstraint(
+            "session_type IN ('lecture', 'lab')",
+            name="ck_sessions_session_type",
+        ),
         # Every session-scoped date filter keys on `created_at` rather than
         # `scheduled_start_time` (see `SessionService._sessions_stmt`), including
         # the UTC day bounds the dashboards and reports build. It was unindexed.
@@ -57,6 +61,11 @@ class Session(CreatedAtMixin, Base):
     classroom_name: Mapped[str | None] = mapped_column(String(100))
     classroom_lat: Mapped[float | None] = mapped_column(Float)
     classroom_lng: Mapped[float | None] = mapped_column(Float)
+    # Lecture vs laboratory (D77). Defaults to lecture so pre-existing rows
+    # and callers that do not send a type keep working.
+    session_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'lecture'")
+    )
 
     @property
     def computed_expires_at(self) -> datetime:

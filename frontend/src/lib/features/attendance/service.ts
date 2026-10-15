@@ -16,7 +16,7 @@
 
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
-import type { ProfessorAttendanceItemResponse } from '$lib/shared/types';
+import type { CourseType, ProfessorAttendanceItemResponse } from '$lib/shared/types';
 import { listSessions } from '$lib/features/session/service';
 import {
 	initProfessorCourses,
@@ -34,6 +34,7 @@ export type ProfessorAttendanceStatus =
 export type ProfessorAttendanceRow = {
 	id: number;
 	session_id: number;
+	session_type: CourseType;
 	session_code: string;
 	created_at: string;
 	expires_at: string;
@@ -59,6 +60,7 @@ export type AttendanceLedgerFilters = {
 	course?: string;
 	section?: string;
 	sessionId?: number;
+	sessionType?: CourseType;
 	status?: ProfessorAttendanceStatus;
 	from?: string;
 	to?: string;
@@ -162,6 +164,7 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 	}
 	if (params?.section !== undefined) query.section = params.section;
 	if (params?.sessionId !== undefined) query.session_id = String(params.sessionId);
+	if (params?.sessionType) query.session_type = params.sessionType;
 	if (params?.status !== undefined) query.status = params.status;
 	if (params?.from) query.date_from = params.from;
 	if (params?.to) query.date_to = params.to;
@@ -183,6 +186,7 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 		return {
 			id: item.id,
 			session_id: item.session_id,
+			session_type: item.session_type ?? 'lecture',
 			session_code: session?.sessionCode ?? '—',
 			created_at: session?.createdAt ?? item.scanned_at,
 			expires_at: session?.expiresAt ?? item.scanned_at,

@@ -36,6 +36,34 @@ const endAfterStart = <T extends { schedule_start_time?: string; schedule_end_ti
 	}
 };
 
+export const componentCreateSchema = z
+	.object({
+		session_type: z.enum(['lecture', 'lab']).default('lecture'),
+		schedule_days: z.string().trim().toUpperCase().min(1).max(10),
+		schedule_start_time: timeField,
+		schedule_end_time: timeField,
+		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
+		classroom_lat: z.string().trim().optional().or(z.literal('')),
+		classroom_lng: z.string().trim().optional().or(z.literal('')),
+	})
+	.superRefine(endAfterStart);
+
+export type OfferingComponentCreateInput = z.infer<typeof componentCreateSchema>;
+
+export const componentUpdateSchema = z
+	.object({
+		schedule_days: z.string().trim().toUpperCase().min(1).max(10).optional(),
+		schedule_start_time: timeField.optional(),
+		schedule_end_time: timeField.optional(),
+		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
+		classroom_lat: z.string().trim().optional().or(z.literal('')),
+		classroom_lng: z.string().trim().optional().or(z.literal('')),
+		is_active: z.boolean().optional(),
+	})
+	.superRefine(endAfterStart);
+
+export type OfferingComponentUpdateInput = z.infer<typeof componentUpdateSchema>;
+
 export const offeringCreateSchema = z
 	.object({
 		course_id: z.coerce.number().int().gt(0, 'Pick a course'),
@@ -48,9 +76,9 @@ export const offeringCreateSchema = z
 		schedule_days: z.string().trim().toUpperCase().min(1).max(10),
 		schedule_start_time: timeField,
 		schedule_end_time: timeField,
-		// Local-only label: optional with a lecture default so the form never
-		// blocks on a value the backend does not persist.
-		course_type: z.enum(['lecture', 'lab']).optional().default('lecture'),
+		// Per-type schedules (D77). Omitted means a single lecture component
+		// mirroring the offering schedule/classroom (same default as live).
+		components: z.array(componentCreateSchema).max(4).optional(),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()
@@ -76,7 +104,6 @@ export const offeringUpdateSchema = z
 		schedule_days: z.string().trim().toUpperCase().min(1).max(10).optional(),
 		schedule_start_time: timeField.optional(),
 		schedule_end_time: timeField.optional(),
-		course_type: z.enum(['lecture', 'lab']).optional(),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()
