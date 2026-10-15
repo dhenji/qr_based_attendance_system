@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from api.deps import ProgramServiceDep, require_role
 from features.auth.model import User
@@ -15,12 +15,15 @@ from features.program.constants import (
 from features.program.schema import (
     ProgramCreate,
     ProgramDetail,
+    ProgramImportResult,
     ProgramRead,
     ProgramUpdate,
     YearLevelCreate,
     YearLevelRead,
     YearLevelUpdate,
 )
+from features.program.service import PROGRAM_CSV_COLUMNS
+from shared.csv_import import csv_template_header
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
@@ -66,6 +69,37 @@ async def create_program(
     service: ProgramServiceDep,
 ) -> ProgramRead:
     return await service.create(payload=payload, actor_id=user.id)
+
+
+# Static import/template routes are declared before /{program_id} so they
+# are not captured as program ids.
+@router.post(
+    "/import",
+    response_model=ProgramImportResult,
+    summary="Import new programs from a CSV upload",
+)
+async def import_programs(
+    file: Annotated[UploadFile, File(description="programs.csv")],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: ProgramServiceDep,
+) -> ProgramImportResult:
+    content: bytes = await file.read()
+
+    return await service.import_roster(content=content, actor_id=user.id)
+
+
+@router.get(
+    "/import/template",
+    summary="Download the program import CSV template",
+)
+async def download_import_template(
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+) -> Response:
+    return Response(
+        content=csv_template_header(PROGRAM_CSV_COLUMNS),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=programs_template.csv"},
+    )
 
 
 @router.get(

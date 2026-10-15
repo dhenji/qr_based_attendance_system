@@ -18,7 +18,7 @@
 		courseUpdateSchema,
 	} from '$lib/features/admin/courses/schema';
 	import type { AdminCourse } from '$lib/shared/types';
-	import { adminCourse } from '$lib/shared/constants/routes';
+	import { adminCourse, Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
@@ -210,6 +210,10 @@
 			<p class="muted">Reusable templates — scheduling lives on offerings · {adminCoursesState.total} total</p>
 		</div>
 		<div class="header-actions">
+			<button class="btn btn-secondary" data-testid="import" onclick={() => goto(Routes.ADMIN_COURSES_IMPORT)}>
+				<AppIcon name="file" size={18} />
+				Import
+			</button>
 			<button class="btn btn-primary" data-testid="add-course" onclick={openCreate}>
 				<AppIcon name="plus" size={18} />
 				Add Course

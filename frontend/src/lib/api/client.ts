@@ -481,6 +481,8 @@ export const postForm = async <T>(
 // at the import site instead of hiding in scattered string literals.
 export const TEXT_EXPORTS = {
 	studentTemplate: '/admin/students/import/template',
+	programTemplate: '/admin/programs/import/template',
+	courseTemplate: '/admin/courses/import/template',
 	studentHistory: '/student/attendance/history/export',
 	adminOverview: '/admin/attendance/overview/export',
 	adminAnalytics: '/admin/analytics/export',

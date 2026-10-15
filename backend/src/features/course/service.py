@@ -24,6 +24,8 @@ from features.course.schema import (
     BulkEnrollError,
     BulkEnrollResult,
     CourseCreate,
+    CourseImportError,
+    CourseImportResult,
     CourseRead,
     CourseUpdate,
     OfferingCreate,
@@ -54,10 +56,20 @@ from shared.csv_import import (
     CsvRow,
     CsvSchema,
     parse_import_csv,
+    strip_upper,
 )
 from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
+from features.course.constants import (
+    CODE_MAX_LENGTH,
+    CODE_MIN_LENGTH,
+    DURATION_MAX,
+    DURATION_MIN,
+    NAME_MAX_LENGTH,
+    UNITS_MAX,
+    UNITS_MIN,
+)
 
 BULK_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn("student_id", required_reason="missing student_id"),
@@ -141,6 +153,102 @@ def parse_enrollment_csv(content: bytes) -> tuple[list[_CsvRow], list[BulkEnroll
     )
 
     return [_to_csv_row(row) for row in rows], errors
+
+
+COURSE_CSV_COLUMNS: tuple[CsvColumn, ...] = (
+    CsvColumn(
+        "course_code", normalize=strip_upper, required_reason="missing course_code"
+    ),
+    CsvColumn("course_name"),
+    CsvColumn("units", required_reason="missing units"),
+    CsvColumn(
+        "session_duration_hours", required_reason="missing session_duration_hours"
+    ),
+)
+
+COURSE_CSV_SCHEMA = CsvSchema(
+    columns=COURSE_CSV_COLUMNS,
+    subject="course",
+    subject_column="course_code",
+    subject_fallback="on line",
+    checks=(
+        CsvGroup(
+            columns=("course_name",),
+            reason="missing required field for {subject} {key}",
+        ),
+    ),
+)
+
+
+@dataclass(kw_only=True)
+class _CourseRow:
+    line: int
+    course_code: str
+    course_name: str
+    units: str
+    session_duration_hours: str
+
+
+def _to_course_row(raw: CsvRow) -> _CourseRow:
+    values: dict[str, str] = raw.values
+
+    return _CourseRow(
+        line=raw.line,
+        course_code=values["course_code"],
+        course_name=values["course_name"],
+        units=values["units"],
+        session_duration_hours=values["session_duration_hours"],
+    )
+
+
+def parse_course_csv(
+    content: bytes,
+) -> tuple[list[_CourseRow], list[CourseImportError]]:
+    """Parse the course-import CSV upload.
+
+    Returns (valid_rows, errors). Never raises on bad rows — every problem
+    is reported as a CourseImportError with its 1-based line number
+    (header = 1). Codes are uppercased so duplicate detection agrees with
+    single-create.
+    """
+    rows, errors = parse_import_csv(
+        content,
+        COURSE_CSV_SCHEMA,
+        error=lambda line, reason: CourseImportError(line=line, reason=reason),
+    )
+
+    return [_to_course_row(row) for row in rows], errors
+
+
+def _validate_course_row(row: _CourseRow) -> str | None:
+    """Domain validation beyond presence. Returns the reason or None."""
+    if not (CODE_MIN_LENGTH <= len(row.course_code) <= CODE_MAX_LENGTH):
+        return (
+            f"invalid course_code for course {row.course_code}: "
+            f"must be {CODE_MIN_LENGTH}-{CODE_MAX_LENGTH} characters"
+        )
+    name = row.course_name.strip()
+    if not (1 <= len(name) <= NAME_MAX_LENGTH):
+        return f"invalid course_name for course {row.course_code}"
+    try:
+        units = int(row.units.strip())
+    except ValueError:
+        return f"invalid units for course {row.course_code}"
+    if not (UNITS_MIN <= units <= UNITS_MAX):
+        return (
+            f"invalid units for course {row.course_code}: "
+            f"must be {UNITS_MIN}-{UNITS_MAX}"
+        )
+    try:
+        duration = float(row.session_duration_hours.strip())
+    except ValueError:
+        return f"invalid session_duration_hours for course {row.course_code}"
+    if not (DURATION_MIN <= duration <= DURATION_MAX):
+        return (
+            f"invalid session_duration_hours for course {row.course_code}: "
+            f"must be {DURATION_MIN}-{DURATION_MAX}"
+        )
+    return None
 
 
 class CourseService:
@@ -260,6 +368,72 @@ class CourseService:
             entity_id=course.id,
             old_value=old_value,
             new_value=self._course_snapshot(course),
+        )
+
+    async def import_roster(
+        self, *, content: bytes, actor_id: int | None
+    ) -> CourseImportResult:
+        """Create NEW course templates from a CSV upload.
+
+        Rows whose course_code already exists — in the database or earlier
+        in the same file — are counted as duplicates, not errors. Courses
+        stay standalone templates (D44): no program, schedule, or classroom
+        linkage is created here; offerings attach later.
+        """
+        rows, errors = parse_course_csv(content)
+        imported = 0
+        duplicates = 0
+        seen_codes: set[str] = set()
+
+        for row in rows:
+            if (
+                row.course_code in seen_codes
+                or await self._courses.get_by(course_code=row.course_code) is not None
+            ):
+                duplicates += 1
+                seen_codes.add(row.course_code)
+                continue
+
+            seen_codes.add(row.course_code)
+            reason = _validate_course_row(row)
+
+            if reason is not None:
+                errors.append(CourseImportError(line=row.line, reason=reason))
+                continue
+
+            self._session.add(
+                Course(
+                    course_code=row.course_code,
+                    course_name=row.course_name.strip(),
+                    units=int(row.units.strip()),
+                    session_duration_hours=float(
+                        row.session_duration_hours.strip()
+                    ),
+                )
+            )
+            imported += 1
+
+        await self._session.flush()
+
+        # One row for the upload rather than one per course, so a large
+        # file cannot bury every other action in the trail.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.IMPORT,
+            entity_type=AuditEntity.COURSE,
+            entity_id=None,
+            new_value={
+                "imported": imported,
+                "duplicates": duplicates,
+                "errors": len(errors),
+            },
+        )
+
+        errors.sort(key=lambda e: e.line)
+
+        return CourseImportResult(
+            imported=imported, duplicates=duplicates, errors=errors
         )
 
     @staticmethod

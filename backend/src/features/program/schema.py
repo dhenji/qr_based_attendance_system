@@ -122,3 +122,14 @@ class YearLevelUpdate(BaseModel):
 
 class ProgramDetail(ProgramRead):
     year_levels: list[YearLevelRead] = Field(default_factory=list)
+
+
+class ProgramImportError(BaseModel):
+    line: int
+    reason: str
+
+
+class ProgramImportResult(BaseModel):
+    imported: int
+    duplicates: int
+    errors: list[ProgramImportError] = Field(default_factory=list)

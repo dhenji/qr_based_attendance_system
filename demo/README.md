@@ -37,8 +37,16 @@ course offerings for `1st_sem`, `2026-2027`.
 TOKEN=<login token for superadmin>
 curl -X POST http://localhost:8000/api/admin/students/import   -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/students.csv"
 curl -X POST http://localhost:8000/api/admin/professors/import -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/professors.csv"
+curl -X POST http://localhost:8000/api/admin/programs/import   -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/programs.csv"
+curl -X POST http://localhost:8000/api/admin/courses/import    -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/courses.csv"
 curl -X POST http://localhost:8000/api/admin/offerings/{id}/enrollments/bulk -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/enrollments.csv"
 ```
+
+The programs/courses CSVs use fresh codes on purpose: the seed already owns
+`BSCS/BSIT/BSECE` and the `GE101/CS101/…` courses, and the import counts
+existing codes as duplicates (skipped, 0 imported). Year levels for the new
+programs and offerings for the new courses attach later via the detail pages
+— the import creates the records only.
 
 Find an offering id via `GET /api/admin/offerings`. The enrollments CSV column
 order follows `docs/architecture/api-contracts.md` (bulk-enroll contract).

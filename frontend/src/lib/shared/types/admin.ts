@@ -620,6 +620,18 @@ export interface ProfessorImportResult {
 	errors: CsvImportError[];
 }
 
+export interface ProgramImportResult {
+	imported: number;
+	duplicates: number;
+	errors: CsvImportError[];
+}
+
+export interface CourseImportResult {
+	imported: number;
+	duplicates: number;
+	errors: CsvImportError[];
+}
+
 // --- Admin users (super_admin only, D60) --------------------------------------
 //
 // Wire shapes mirror backend/src/features/admin/schema.py exactly

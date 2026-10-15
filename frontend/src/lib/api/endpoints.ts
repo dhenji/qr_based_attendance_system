@@ -42,7 +42,9 @@ import type {
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
 	AuditLogItemResponse,
+	CourseImportResult,
 	ProfessorImportResult,
+	ProgramImportResult,
 	PromoteStagingResponse,
 	RecentScanResponse,
 	RiskRefreshResponse,
@@ -1781,6 +1783,12 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 	},
 };
 
+export const AdminCourseImportEndpoint: EndpointDef<CourseImportResult> = {
+	url: '/admin/courses/import',
+	method: 'POST',
+	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+};
+
 // --- Admin offering detail: CRUD + professors + roster + bulk enroll ---------
 //
 // Live routes on course/offering_router.py (/api/admin/offerings). Same
@@ -2118,6 +2126,12 @@ export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 			year_levels: MOCK_YEARS.filter((y) => y.program_id === program.id),
 		};
 	},
+};
+
+export const AdminProgramImportEndpoint: EndpointDef<ProgramImportResult> = {
+	url: '/admin/programs/import',
+	method: 'POST',
+	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
 };
 
 export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
@@ -3297,10 +3311,12 @@ export const endpoints = {
 	adminCourses: AdminCoursesEndpoint,
 	adminCourseCreate: AdminCourseCreateEndpoint,
 	adminCourseDetail: AdminCourseDetailEndpoint,
+	adminCourseImport: AdminCourseImportEndpoint,
 	// Admin programs (Phase A)
 	adminPrograms: AdminProgramsEndpoint,
 	adminProgramCreate: AdminProgramCreateEndpoint,
 	adminProgramDetail: AdminProgramDetailEndpoint,
+	adminProgramImport: AdminProgramImportEndpoint,
 	adminYearLevels: AdminYearLevelsEndpoint,
 	adminYearLevelDetail: AdminYearLevelDetailEndpoint,
 	// Dashboard summaries (three roles, three mount points)

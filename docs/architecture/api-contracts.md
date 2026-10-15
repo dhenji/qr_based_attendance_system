@@ -733,6 +733,47 @@ Columns: `student_id, first_name, middle_name, last_name, email, program_code, s
 | ---------------- | --------------------- |
 | **Response 200** | CSV file download     |
 
+#### `POST /admin/programs/import`
+
+CSV program import — creates NEW program records. Year levels are not
+created here; they are added later on the program detail page, matching
+single-create semantics.
+Columns: `code, name, description, total_years`.
+
+|                  |                                                              |
+| ---------------- | ------------------------------------------------------------ |
+| **Request**      | `multipart/form-data` CSV file                                |
+| **Response 200** | `{ imported, duplicates, errors: [{ line, reason }] }`        |
+
+#### `GET /admin/programs/import/template`
+
+CSV template download for the program import screen.
+Columns: `code, name, description, total_years`.
+
+|                  |                       |
+| ---------------- | --------------------- |
+| **Response 200** | CSV file download     |
+
+#### `POST /admin/courses/import`
+
+CSV course import — creates NEW standalone course templates (D44: no
+program, schedule, or classroom linkage; offerings attach later).
+Columns: `course_code, course_name, units, session_duration_hours`.
+
+|                  |                                                              |
+| ---------------- | ------------------------------------------------------------ |
+| **Request**      | `multipart/form-data` CSV file                                |
+| **Response 200** | `{ imported, duplicates, errors: [{ line, reason }] }`        |
+
+#### `GET /admin/courses/import/template`
+
+CSV template download for the course import screen.
+Columns: `course_code, course_name, units, session_duration_hours`.
+
+|                  |                       |
+| ---------------- | --------------------- |
+| **Response 200** | CSV file download     |
+
 #### `DELETE /admin/students/{student_id}/archive`
 
 Permanent delete — allowed only on archived (`is_active=false`) students
