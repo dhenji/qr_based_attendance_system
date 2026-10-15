@@ -14,6 +14,7 @@ from shared.constants import (
     SEMESTER_MAX_LENGTH,
     SEMESTER_MIN_LENGTH,
 )
+from shared.enums import SessionType
 from features.course.constants import (
     ACADEMIC_YEAR_MAX_LENGTH,
     ACADEMIC_YEAR_MIN_LENGTH,
@@ -98,6 +99,101 @@ class CourseUpdate(BaseModel):
         return self
 
 
+class ComponentCreate(BaseModel):
+    """One scheduled component of an offering (D77).
+
+    A laboratory component should carry classroom coordinates: lab sessions
+    always enforce the geofence, and creation rejects a lab session whose
+    resolved location has none (`lab_coordinates_required`).
+    """
+
+    session_type: SessionType = SessionType.LECTURE
+    schedule_days: str = Field(
+        min_length=SCHEDULE_DAYS_MIN_LENGTH, max_length=SCHEDULE_DAYS_MAX_LENGTH
+    )
+    schedule_start_time: time
+    schedule_end_time: time
+    classroom_name: str | None = Field(
+        default=None, max_length=CLASSROOM_NAME_MAX_LENGTH
+    )
+    classroom_lat: float | None = Field(
+        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
+    )
+    classroom_lng: float | None = Field(
+        default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
+    )
+
+    @field_validator("schedule_days")
+    @classmethod
+    def _normalize_days(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @model_validator(mode="after")
+    def _times_order(self) -> "ComponentCreate":
+        if self.schedule_end_time <= self.schedule_start_time:
+            raise ValueError("schedule_end_time must be after schedule_start_time")
+
+        return self
+
+
+class ComponentRead(BaseModel):
+    id: int
+    offering_id: int
+    session_type: SessionType
+    schedule_days: str
+    schedule_start_time: time
+    schedule_end_time: time
+    classroom_name: str | None = None
+    classroom_lat: float | None = None
+    classroom_lng: float | None = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ComponentUpdate(BaseModel):
+    schedule_days: str | None = Field(
+        default=None,
+        min_length=SCHEDULE_DAYS_MIN_LENGTH,
+        max_length=SCHEDULE_DAYS_MAX_LENGTH,
+    )
+    schedule_start_time: time | None = None
+    schedule_end_time: time | None = None
+    classroom_name: str | None = None
+    classroom_lat: float | None = Field(
+        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
+    )
+    classroom_lng: float | None = Field(
+        default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
+    )
+    is_active: bool | None = None
+
+    @field_validator("schedule_days")
+    @classmethod
+    def _normalize_days(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return value.strip().upper()
+
+    @model_validator(mode="after")
+    def _reject_null_on_not_nullable(self) -> "ComponentUpdate":
+        # classroom_* are nullable columns, so an explicit null clears them;
+        # every other mutable field rejects null like OfferingUpdate does.
+        for field in (
+            "schedule_days",
+            "schedule_start_time",
+            "schedule_end_time",
+            "is_active",
+        ):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+
+        return self
+
+
 class OfferingCreate(BaseModel):
     course_id: int = Field(gt=0)
     program_id: int = Field(gt=0)
@@ -134,6 +230,10 @@ class OfferingCreate(BaseModel):
         ge=WINDOW_MINUTES_MIN,
         le=WINDOW_MINUTES_MAX,
     )
+    # Optional per-type schedules (D77). Omitted means a single lecture
+    # component mirroring the offering schedule/classroom above, so
+    # pre-existing callers keep working unchanged.
+    components: list[ComponentCreate] | None = None
 
     @field_validator("semester", "academic_year", "schedule_days")
     @classmethod
@@ -171,6 +271,11 @@ class OfferingRead(BaseModel):
     default_present_window_minutes: int
     default_late_window_minutes: int
     enrolled_count: int = 0
+    # Distinct session types across the active components (D77) — feeds the
+    # Lecture / Lab / Mixed badges. Empty only when an offering has no
+    # active component left.
+    session_types: list[SessionType] = Field(default_factory=list)
+    components: list[ComponentRead] = Field(default_factory=list)
     is_active: bool
     created_at: datetime
     updated_at: datetime

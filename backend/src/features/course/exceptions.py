@@ -133,3 +133,34 @@ class EnrollmentNotFoundException(CourseDomainException):
             message=f"Student {student_number} is not enrolled "
             f"in offering {offering_id}"
         )
+
+
+class ComponentNotFoundException(CourseDomainException):
+    """404 - the target offering component does not exist."""
+
+    status_code: int = 404
+    code: str = "component_not_found"
+
+    def __init__(self, component_id: int) -> None:
+        super().__init__(message=f"Offering component {component_id} not found")
+
+
+class ComponentExistsException(CourseDomainException):
+    """409 - the offering already has this scheduled component.
+
+    `offering_components` carries the `uq_offering_component` unique
+    constraint (offering_id, session_type, schedule_days,
+    schedule_start_time), so the duplicate is rejected before the INSERT
+    instead of letting the unique violation surface as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "component_exists"
+
+    def __init__(self, offering_id: int, session_type: str) -> None:
+        super().__init__(
+            message=(
+                f"Offering {offering_id} already has a {session_type} "
+                "component on that schedule"
+            )
+        )

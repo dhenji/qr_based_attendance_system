@@ -54,7 +54,7 @@ _ensure_backend_venv()
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("JWT_SECRET", "dev-only-secret-0123456789abcdef")
 
-from shared.enums import UserRole  # noqa: E402
+from shared.enums import SessionType, UserRole  # noqa: E402
 
 PROGRAMS = [
     ("BSCS", "Bachelor of Science in Computer Science", 4),
@@ -126,7 +126,7 @@ async def seed_demo(
 
     from core.security import hash_password
     from features.auth.model import User
-    from features.course.model import Course, CourseOffering
+    from features.course.model import Course, CourseOffering, OfferingComponent
     from features.program.model import Program, YearLevel
 
     counts = {"programs": 0, "year_levels": 0, "courses": 0, "offerings": 0, "super_admin": 0}
@@ -179,7 +179,7 @@ async def seed_demo(
                 year_of[code] = {y.year_number: y for y in rows}
 
             for code, prog, year_no, days, start, end in OFFERING_SPECS:
-                _, created = await _get_or_create(
+                offering, created = await _get_or_create(
                     db,
                     CourseOffering,
                     {
@@ -199,6 +199,23 @@ async def seed_demo(
                     academic_year="2026-2027",
                 )
                 counts["offerings"] += int(created)
+                # D77: every offering gets its default lecture component so
+                # sessions have a schedule to inherit (idempotent lookup on
+                # the uq_offering_component key).
+                await _get_or_create(
+                    db,
+                    OfferingComponent,
+                    {
+                        "schedule_end_time": end,
+                        "classroom_name": "Room 301",
+                        "classroom_lat": 14.5995,
+                        "classroom_lng": 120.9842,
+                    },
+                    offering_id=offering.id,
+                    session_type=SessionType.LECTURE.value,
+                    schedule_days=days,
+                    schedule_start_time=start,
+                )
             await db.commit()
 
             existing = (

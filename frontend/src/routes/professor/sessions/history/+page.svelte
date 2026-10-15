@@ -31,6 +31,7 @@
 
 	let course = $state('All');
 	let section = $state('All');
+	let sessionType = $state<'All' | 'lecture' | 'lab'>('All');
 	let from = $state(initialRange.from);
 	let to = $state(initialRange.to);
 	let sortBy = $state<SessionHistorySortBy>('date');
@@ -76,6 +77,7 @@
 		const query = {
 			course: course === 'All' ? undefined : course,
 			section: section === 'All' ? undefined : section,
+			sessionType: sessionType === 'All' ? undefined : sessionType,
 			from: from || undefined,
 			to: to || undefined,
 			sortBy,
@@ -154,6 +156,7 @@
 	const resetFilters = () => {
 		course = 'All';
 		section = 'All';
+		sessionType = 'All';
 		from = initialRange.from;
 		to = initialRange.to;
 		currentPage = 1;
@@ -180,6 +183,7 @@
 				const result = await listSessionHistory({
 					course: course === 'All' ? undefined : course,
 					section: section === 'All' ? undefined : section,
+					sessionType: sessionType === 'All' ? undefined : sessionType,
 					from: from || undefined,
 					to: to || undefined,
 					sortBy,
@@ -196,6 +200,7 @@
 				[
 					'Date',
 					'Session code',
+					'Type',
 					'Course',
 					'Section',
 					'Present',
@@ -208,6 +213,7 @@
 				all.map((row) => [
 					row.created_at.slice(0, 10),
 					row.session_code,
+					row.session_type,
 					row.course_code,
 					row.section,
 					row.present_count,
@@ -278,6 +284,19 @@
 					{#each availableSections as option (option)}
 						<option value={option}>{option}</option>
 					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="session-type">Type</label>
+				<select
+					id="session-type"
+					class="form-input"
+					bind:value={sessionType}
+					onchange={() => (currentPage = 1)}
+				>
+					<option value="All">Lecture + Lab</option>
+					<option value="lecture">Lecture</option>
+					<option value="lab">Laboratory</option>
 				</select>
 			</div>
 			<div class="field">
@@ -354,6 +373,7 @@
 								</button>
 							</th>
 						<th scope="col">Section</th>
+						<th scope="col">Type</th>
 						<th scope="col">P / L / A</th>
 							<th scope="col" aria-sort={ariaSort('rate')}>
 								<button
@@ -379,6 +399,11 @@
 								<td>
 									<div class="course-name">{row.course_code}</div>
 									<div class="course-sub">Section {row.section}</div>
+								</td>
+								<td>
+									<span class="type-badge" class:is-lab={row.session_type === 'lab'}>
+										{row.session_type === 'lab' ? 'Lab' : 'Lecture'}
+									</span>
 								</td>
 								<td class="numeric">{plaText(row)}</td>
 								<td>
@@ -564,7 +589,7 @@
 
 	table {
 		width: 100%;
-		min-width: 680px;
+		min-width: 760px;
 		border-collapse: collapse;
 		font-size: 0.9375rem;
 	}
@@ -646,6 +671,22 @@
 	.course-sub {
 		font-size: 0.8125rem;
 		color: var(--text-muted);
+	}
+
+	.type-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--success);
+		background: var(--success-bg);
+		white-space: nowrap;
+	}
+
+	.type-badge.is-lab {
+		color: #92400e;
+		background: #fef3c7;
 	}
 
 	/* D36: compliance by default; the title/aria-label reveals participation. */

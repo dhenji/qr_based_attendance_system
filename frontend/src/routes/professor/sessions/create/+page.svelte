@@ -156,6 +156,7 @@ let selectedOfferingId = $state<number | null>(null);
 
 		try {
 			const created = await openSession(course.offeringId, {
+				sessionType: isLab ? 'lab' : 'lecture',
 				durationMinutes,
 				presentWindowMinutes: presentWindow,
 				lateWindowMinutes: lateWindow,

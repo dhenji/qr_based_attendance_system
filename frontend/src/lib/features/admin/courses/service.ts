@@ -33,7 +33,8 @@ export const toCourse = (c: AdminCourseResponse): AdminCourse => ({
 	courseName: c.course_name,
 	units: c.units,
 	sessionDurationHours: c.session_duration_hours,
-	// Backend has no column — fall back so live rows never render undefined.
+	// Course templates carry no type (D77) — the badge UI derives
+	// Lecture/Lab/Mixed from the course's offerings instead.
 	courseType: c.course_type ?? 'lecture',
 	isActive: c.is_active,
 	createdAt: c.created_at,
