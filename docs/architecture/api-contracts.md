@@ -302,11 +302,15 @@ A course is a standalone reusable **template** (D44) — it carries no program, 
 
 #### `DELETE /admin/courses/{course_id}`
 
-Archive course template (soft-delete: `is_active=false`).
+Permanent delete — allowed only on archived (`is_active=false`) courses with
+no dependents. Archive via `PATCH` the same row with `is_active: false`;
+reactivate with `is_active: true`.
 
 |                  |            |
 | ---------------- | ---------- |
 | **Response 204** | No content |
+| **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `course_has_offerings` (`course_offerings` still reference this course)<br>404 `course_not_found` |
+| **Notes**        | The guard runs first so the `RESTRICT` FK on `course_offerings.course_id` can never surface as a 500. One `delete` audit row on `course` per hard delete. |
 
 ---
 
@@ -391,13 +395,16 @@ Archive a scheduled component (soft-delete: `is_active=false`).
 
 #### `DELETE /admin/offerings/{offering_id}`
 
-Archive course offering.
+Permanent delete — allowed only on archived (`is_active=false`) offerings with
+no dependents. Archive via `PATCH` the same row with `is_active: false`;
+reactivate with `is_active: true`.
 
 |                  |            |
 | ---------------- | ---------- |
 | **Response 204** | No content |
 
-| **Errors**       | 404 `offering_not_found` |
+| **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `offering_has_enrollments` (students are still enrolled)<br>409 `offering_has_sessions` (sessions were already opened — history is kept)<br>409 `offering_has_assignments` (professor assignments still reference it, including ended ones)<br>404 `offering_not_found` |
+| **Notes**        | Guards run in FK order (enrollments → sessions → assignments) so a `RESTRICT` violation can never surface as a 500. Components are owned by the offering and are removed with it once the guards pass. One `delete` audit row on `course_offering` per hard delete. |
 #### `GET /admin/offerings/{offering_id}/professors`
 
 |                  |                                                                                                                               |

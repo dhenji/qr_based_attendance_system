@@ -4,11 +4,12 @@
 	import { page } from '$app/state';
 	import {
 		adminCourseDetailState,
+		adminCoursesState,
+		deleteArchivedCourse,
 		initAdminCourseDetail,
 		refreshAdminCourseDetail,
 	} from '$lib/features/admin/courses/store.svelte';
 	import {
-		archiveCourse,
 		setCourseActive,
 		updateCourse,
 	} from '$lib/features/admin/courses/service';
@@ -155,14 +156,36 @@ import { sessionMixLabel } from '$lib/shared/types';
 		if (!course || archiveBusy) return;
 		archiveBusy = true;
 		try {
-			await archiveCourse(course.id);
+			await setCourseActive(course.id, false);
+			await refreshAdminCourseDetail(course.id);
 			notifyEntityChanged('courses');
-			await goto(Routes.ADMIN_COURSES);
 		} catch (e: unknown) {
 			adminCourseDetailState.actionError =
 				e instanceof Error && e.message ? e.message : 'Failed to archive course';
 		} finally {
 			archiveBusy = false;
+		}
+	};
+
+	let deleteOpen = $state(false);
+	let deleteBusy = $state(false);
+
+	const confirmDelete = async () => {
+		if (!course || deleteBusy) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedCourse(course.id);
+			deleteOpen = false;
+			notifyEntityChanged('courses');
+			await goto(Routes.ADMIN_COURSES);
+		} catch {
+			// The store holds the friendly guard copy (`course_has_offerings`,
+			// …); mirror it onto the detail state so the modal shows it even
+			// on a direct landing.
+			adminCourseDetailState.actionError =
+				adminCoursesState.actionError ?? 'Failed to delete course';
+		} finally {
+			deleteBusy = false;
 		}
 	};
 </script>
@@ -195,7 +218,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 			</div>
 		</header>
 
-		{#if adminCourseDetailState.actionError}
+		{#if adminCourseDetailState.actionError && !deleteOpen}
 			<section class="card"><p class="error" role="alert">{adminCourseDetailState.actionError}</p></section>
 		{/if}
 
@@ -253,9 +276,22 @@ import { sessionMixLabel } from '$lib/shared/types';
 		<section class="card danger">
 			<h2 class="card-title">Danger zone</h2>
 			<p class="muted">Archiving flips this template to inactive. Existing offerings keep working.</p>
-			<button class="btn btn-danger" disabled={archiveBusy || !course.isActive} onclick={onArchive}>
-				{archiveBusy ? 'Archiving…' : 'Archive course'}
-			</button>
+			<div class="danger-actions">
+				<button class="btn btn-danger" disabled={archiveBusy || !course.isActive} onclick={onArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive course'}
+				</button>
+				<button
+					class="btn btn-danger"
+					disabled={deleteBusy || course.isActive}
+					title={course.isActive ? 'Deactivate (archive) first — only archived courses can be deleted' : undefined}
+					onclick={() => { adminCourseDetailState.actionError = null; deleteOpen = true; }}
+				>
+					Delete permanently
+				</button>
+			</div>
+			{#if !course.isActive}
+				<p class="hint">Delete is blocked while offerings still use this template.</p>
+			{/if}
 		</section>
 	{/if}
 </div>
@@ -286,6 +322,35 @@ import { sessionMixLabel } from '$lib/shared/types';
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteOpen && course}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="course-delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteOpen = false) }}
+		>
+			<h2 id="course-delete-title" class="modal-title">Permanently delete {course.courseCode}?</h2>
+			<p class="modal-text">
+				{course.courseName} will be removed for good.
+				If offerings still use it, deletion will be blocked
+				and the course stays archived.
+			</p>
+			{#if adminCourseDetailState.actionError}
+				<p class="error" role="alert">{adminCourseDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (deleteOpen = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -349,6 +414,12 @@ import { sessionMixLabel } from '$lib/shared/types';
 
 	.danger {
 		border-color: var(--danger-bg);
+	}
+
+	.danger-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 	}
 
 	table {
@@ -539,6 +610,12 @@ import { sessionMixLabel } from '$lib/shared/types';
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.form {

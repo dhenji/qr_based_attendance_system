@@ -192,8 +192,11 @@ export const updateOffering = async (
 export const setOfferingActive = async (id: number, isActive: boolean): Promise<AdminOffering> =>
 	updateOffering(id, { is_active: isActive });
 
-// Soft archive — 204, flips is_active=false server-side.
-export const archiveOffering = async (id: number): Promise<void> => {
+// Permanent delete — 409 `not_archived` when still active,
+// `offering_has_enrollments` / `offering_has_sessions` /
+// `offering_has_assignments` when dependents remain. Archive via PATCH,
+// like programs.
+export const deleteOffering = async (id: number): Promise<void> => {
 	await del<void>('adminOfferingDetail', undefined, `/${id}`);
 };
 

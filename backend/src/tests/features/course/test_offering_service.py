@@ -82,6 +82,9 @@ class _FakeSession:
     async def flush(self):
         pass
 
+    async def refresh(self, obj):
+        pass
+
     async def delete(self, obj):
         self.deleted.append(obj)
 
@@ -354,11 +357,18 @@ def test_get_offering_not_found_404() -> None:
         raise AssertionError("expected OfferingNotFoundException")
 
 
-def test_archive_offering_flips_flag() -> None:
-    offering = _offering()
-    session = _FakeSession(objs=(offering,))
+def test_archive_offering_via_patch_flips_flag() -> None:
+    """Archive is now `PATCH is_active=false` (DELETE is the hard delete)."""
+    from features.course.schema import OfferingUpdate
 
-    _run(CourseService(session).archive_offering(offering_id=10))
+    offering = _offering()
+    session = _FakeSession(objs=(offering, _course()))
+
+    _run(
+        CourseService(session).update_offering(
+            offering_id=10, payload=OfferingUpdate(is_active=False)
+        )
+    )
 
     assert offering.is_active is False
 

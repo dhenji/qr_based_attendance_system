@@ -111,14 +111,14 @@ async def update_offering(
 @router.delete(
     "/{offering_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Archive a course offering (is_active=false)",
+    summary="Permanently delete an archived offering with no enrollments, sessions, or assignments",
 )
-async def archive_offering(
+async def hard_delete_offering(
     offering_id: int,
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> None:
-    await service.archive_offering(offering_id=offering_id, actor_id=user.id)
+    await service.hard_delete_offering(offering_id=offering_id, actor_id=user.id)
 
 
 # -- offering components (D77: per-type schedules) -----------------------
