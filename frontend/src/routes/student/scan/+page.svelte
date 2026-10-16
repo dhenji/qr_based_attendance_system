@@ -114,10 +114,13 @@
 		return getErrorMessage(error, fallback);
 	};
 
-	// Network failures surface as plain TypeErrors (api/client.ts); APIError
-	// means the server responded — including 4xx rejections — and must never
-	// be queued, because the server already decided those.
-	const isNetworkError = (error: unknown): boolean => !(error instanceof APIError);
+	// Only transport failures may be queued/retried as offline
+	// ('network_error' from the fetch wrapper, plus 'request_timeout' whose
+	// idempotent replay is safe via X-Idempotency-Key). Any other APIError is
+	// a server decision (4xx rejections) and must never be queued; any
+	// non-APIError is a local bug (GPS, programming error) and must surface.
+	const isNetworkError = (error: unknown): boolean =>
+		error instanceof APIError && (error.code === 'network_error' || error.code === 'request_timeout');
 
 	const refreshQueueState = async () => {
 		try {

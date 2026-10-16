@@ -298,11 +298,19 @@ const toScanBody = (payload: QueuedScanPayload) => ({
 	scannedAt: payload.scannedAt
 });
 
-// Transient API failures worth another attempt: 429 rate-limit, timeouts,
-// cancellations, and 5xx. Everything else the server decided (duplicate,
-// mismatch, validation) is terminal.
+// Transient API failures worth another attempt: offline, 429 rate-limit,
+// timeouts, cancellations, and 5xx. Everything else the server decided
+// (duplicate, mismatch, validation) is terminal. Offline (network_error)
+// stays pending the same way it always did via the non-APIError else-branch
+// — naming it here only documents the intent after the fetch wrapper started
+// emitting it as an APIError.
 const isTransientApiError = (error: APIError): boolean => {
-	if (error.code === 'rate_limited' || error.code === 'request_timeout' || error.code === 'request_cancelled')
+	if (
+		error.code === 'network_error' ||
+		error.code === 'rate_limited' ||
+		error.code === 'request_timeout' ||
+		error.code === 'request_cancelled'
+	)
 		return true;
 	if (error.status !== undefined && error.status >= 500) return true;
 	return false;

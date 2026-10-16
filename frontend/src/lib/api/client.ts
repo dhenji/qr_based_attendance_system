@@ -34,8 +34,9 @@ export class APIError extends Error {
 		public code: string,
 		public message: string,
 		public field?: string,
-		// HTTP status, when the failure came from a response. Absent for network
-		// failures, which surface as plain TypeErrors instead.
+		// HTTP status, when the failure came from a response. Absent for
+		// transport failures, which surface as APIError with code
+		// 'network_error' (or 'request_timeout' / 'request_cancelled').
 		public status?: number
 	) {
 		super(message);
@@ -128,7 +129,18 @@ const fetchWithTimeout = async (
 				causedByCaller ? 'Request was cancelled.' : 'Request timed out, try again.'
 			);
 		}
-		throw e;
+		// Transport failure (offline, DNS, refused connection): fetch rejects
+		// with a plain TypeError. Wrap it so callers branching on
+		// `e instanceof APIError` (e.g. the scan offline-queue gate) never
+		// mistake a programming bug for a dropped connection — only these
+		// codes may be queued/retried as offline.
+		if (e instanceof APIError) throw e;
+		throw new APIError(
+			'network_error',
+			e instanceof Error && e.message
+				? e.message
+				: 'You appear to be offline. Check your connection and try again.'
+		);
 	} finally {
 		clearTimeout(timer);
 		if (outerSignal) outerSignal.removeEventListener('abort', onOuterAbort);
