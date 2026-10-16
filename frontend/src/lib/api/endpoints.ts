@@ -213,29 +213,47 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 	}),
 };
 
+// Mock session registry: deterministic per mock-mode run so an opened session
+// can be inspected and closed by id. Random ids made open→close unmatchable
+// (close echoed a fixed id:0 and could collide) and the QR payload carried a
+// different code than the session itself.
+let mockSessionSeq = 1000;
+const mockSessions = new Map<number, string>();
+
+const mockSessionCode = (seq: number): string => {
+	const base = seq.toString(36).toUpperCase().padStart(6, '0').slice(-6);
+	return `${base.slice(0, 2)}-${base.slice(2)}`;
+};
+
 export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: (_params, _suffix, body) => ({
-		id: Math.floor(Math.random() * 1000) + 1,
-		session_code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-		offering_id: 1,
-		session_type:
-			(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
-				? ('lab' as const)
-				: ('lecture' as const),
-		qr_payload: {
-			v: 1,
-			code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-			offering: 1,
-			radius: 50,
-			pw: 15,
-			lw: 5,
-		},
-		expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-		created_at: new Date().toISOString(),
-	}),
+	mock: (_params, _suffix, body) => {
+		mockSessionSeq += 1;
+		const id = mockSessionSeq;
+		const sessionCode = mockSessionCode(id);
+		mockSessions.set(id, sessionCode);
+		return {
+			id,
+			session_code: sessionCode,
+			offering_id: 1,
+			session_type:
+				(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
+					? ('lab' as const)
+					: ('lecture' as const),
+			qr_payload: {
+				v: 1,
+				code: sessionCode,
+				offering: 1,
+				radius: 50,
+				pw: 15,
+				lw: 5,
+			},
+			expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+			scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+			created_at: new Date().toISOString(),
+		};
+	},
 };
 
 // Session history (professor) — wireframe 3.5, GET /professor/sessions/history.
@@ -259,20 +277,24 @@ export const SessionHistoryEndpoint: EndpointDef<Paginated<SessionHistoryItemRes
 export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 	url: '/professor/sessions/active',
 	method: 'GET',
-	mock: () => ({
-		id: 1,
-		offering: 1,
-		session_type: 'lecture' as const,
-		session_code: '7X-9K2M',
-		scan_window_remaining: 2400,
-		scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
-		status: 'active',
-		enrolled_count: 30,
-		remaining: 12,
-		pending_sync_count: 0,
-		students: [],
-		counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
-	}),
+	mock: (_params, suffix) => {
+		const match = suffix?.match(/\/(\d+)/);
+		const id = match ? parseInt(match[1], 10) : 1;
+		return {
+			id,
+			offering: 1,
+			session_type: 'lecture' as const,
+			session_code: mockSessions.get(id) ?? '7X-9K2M',
+			scan_window_remaining: 2400,
+			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+			status: 'active',
+			enrolled_count: 30,
+			remaining: 12,
+			pending_sync_count: 0,
+			students: [],
+			counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
+		};
+	},
 };
 
 // Close session (professor).
@@ -281,7 +303,16 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 export const SessionCloseEndpoint: EndpointDef<SessionCloseResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: () => ({ id: 0, status: 'closed' as const, final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 } }),
+	mock: (_params, suffix) => {
+		const match = suffix?.match(/\/(\d+)\/close/);
+		const ids = [...mockSessions.keys()];
+		const id = match ? parseInt(match[1], 10) : (ids.pop() ?? 0);
+		return {
+			id,
+			status: 'closed' as const,
+			final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 },
+		};
+	},
 };
 
 // Attendance records (professor) — GET /professor/attendance.
