@@ -4,8 +4,10 @@
 	import { page } from '$app/state';
 	import {
 		adminOfferingDetailState,
+		adminOfferingsState,
 		assignOfferingProfessor,
 		bulkEnrollOffering,
+		deleteArchivedOffering,
 		endOfferingAssignment,
 		initAdminOfferingDetail,
 		loadOfferingAssignments,
@@ -15,7 +17,6 @@
 		updateAdminOffering,
 	} from '$lib/features/admin/offerings/store.svelte';
 	import {
-		archiveOffering,
 		buildEnrollCsv,
 		archiveComponent,
 		createComponent,
@@ -236,14 +237,35 @@
 		if (!offering || archiveBusy) return;
 		archiveBusy = true;
 		try {
-			await archiveOffering(offering.id);
+			await setOfferingActive(offering.id, false);
+			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
-			await goto(Routes.ADMIN_OFFERINGS);
 		} catch (e: unknown) {
 			adminOfferingDetailState.actionError =
 				e instanceof Error && e.message ? e.message : 'Failed to archive offering';
 		} finally {
 			archiveBusy = false;
+		}
+	};
+
+	let deleteOpen = $state(false);
+	let deleteBusy = $state(false);
+
+	const confirmDelete = async () => {
+		if (!offering || deleteBusy) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedOffering(offering.id);
+			deleteOpen = false;
+			notifyEntityChanged('offerings');
+			await goto(Routes.ADMIN_OFFERINGS);
+		} catch {
+			// The store holds the friendly guard copy; mirror it onto the
+			// detail state so the modal shows it on a direct landing.
+			adminOfferingDetailState.actionError =
+				adminOfferingsState.actionError ?? 'Failed to delete offering';
+		} finally {
+			deleteBusy = false;
 		}
 	};
 
@@ -670,7 +692,7 @@
 			</div>
 		</header>
 
-		{#if adminOfferingDetailState.actionError}
+		{#if adminOfferingDetailState.actionError && !deleteOpen}
 			<section class="card"><p class="error" role="alert">{adminOfferingDetailState.actionError}</p></section>
 		{/if}
 
@@ -979,9 +1001,22 @@
 			<section class="card danger">
 				<h2 class="card-title">Danger zone</h2>
 				<p class="muted">Archiving flips this offering to inactive. Sessions history is kept.</p>
-				<button class="btn btn-danger" disabled={archiveBusy || !offering.isActive} onclick={onArchive}>
-					{archiveBusy ? 'Archiving…' : 'Archive offering'}
-				</button>
+				<div class="danger-actions">
+					<button class="btn btn-danger" disabled={archiveBusy || !offering.isActive} onclick={onArchive}>
+						{archiveBusy ? 'Archiving…' : 'Archive offering'}
+					</button>
+					<button
+						class="btn btn-danger"
+						disabled={deleteBusy || offering.isActive}
+						title={offering.isActive ? 'Deactivate (archive) first — only archived offerings can be deleted' : undefined}
+						onclick={() => { adminOfferingDetailState.actionError = null; deleteOpen = true; }}
+					>
+						Delete permanently
+					</button>
+				</div>
+				{#if !offering.isActive}
+					<p class="hint">Delete is blocked while students, sessions, or professor assignments still use this offering.</p>
+				{/if}
 			</section>
 		{/if}
 	{/if}
@@ -1169,6 +1204,35 @@
 	</div>
 {/if}
 
+{#if deleteOpen && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="offering-delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteOpen = false) }}
+		>
+			<h2 id="offering-delete-title" class="modal-title">Permanently delete this offering?</h2>
+			<p class="modal-text">
+				The offering and its meetings will be removed for good.
+				If students, sessions, or professor assignments still use it, deletion will be blocked
+				and the offering stays archived.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (deleteOpen = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.page {
 		display: flex;
@@ -1230,6 +1294,12 @@
 
 	.danger {
 		border-color: var(--danger-bg);
+	}
+
+	.danger-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 	}
 
 	.tabs {
@@ -1602,6 +1672,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.modal-actions {

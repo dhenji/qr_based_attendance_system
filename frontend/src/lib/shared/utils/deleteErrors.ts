@@ -23,6 +23,16 @@ const DELETE_ERROR_MESSAGES: Record<string, string> = {
 		'Cannot permanently delete this program — course offerings still use it. Move or delete those first.',
 	program_has_students:
 		'Cannot permanently delete this program — students are still enrolled under it. Move those students first.',
+	course_not_found: 'Course record not found. Refresh the list and try again.',
+	course_has_offerings:
+		'Cannot permanently delete this course — offerings still use it. Move or delete those first.',
+	offering_not_found: 'Offering record not found. Refresh the list and try again.',
+	offering_has_enrollments:
+		'Cannot permanently delete this offering — students are still enrolled. Unenroll them first.',
+	offering_has_sessions:
+		'Cannot permanently delete this offering — class sessions were already opened for it. Session history is kept, so keep the offering archived instead.',
+	offering_has_assignments:
+		'Cannot permanently delete this offering — professor assignments still reference it. End those assignments and remove the history first.',
 	year_level_not_found: 'Year level not found. Refresh and try again.',
 	year_has_courses:
 		'Cannot delete this year level — course offerings still use it. Move or delete those first.',

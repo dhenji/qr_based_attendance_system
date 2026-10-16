@@ -122,11 +122,11 @@ async def update_course(
 @router.delete(
     "/{course_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Archive a course template (is_active=false)",
+    summary="Permanently delete an archived course with no offerings",
 )
-async def archive_course(
+async def hard_delete_course(
     course_id: int,
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> None:
-    await service.archive(course_id=course_id, actor_id=user.id)
+    await service.hard_delete(course_id=course_id, actor_id=user.id)
