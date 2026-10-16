@@ -214,11 +214,15 @@ export const restoreSession = (): Promise<User | null> => {
 // accepted but a second factor is still required: either the emailed OTP
 // (authState.otpPending holds the grant) or MFA (authState.mfaPending holds
 // the preauth token). Real failures reject.
-export const doLogin = async (email: string, password: string): Promise<User | null> => {
+export const doLogin = async (
+	email: string,
+	password: string,
+	turnstileToken?: string | null
+): Promise<User | null> => {
 	authState.error = null;
 	return withLoading(async () => {
 		try {
-			const tokens = await login(email, password);
+			const tokens = await login(email, password, turnstileToken);
 
 			if (tokens.otp_pending) {
 				// Password accepted but the emailed OTP is still required. Hold the
