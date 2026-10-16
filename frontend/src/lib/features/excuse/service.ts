@@ -49,6 +49,19 @@ import type {
 	ExcuseStatus
 } from '$lib/shared/types/excuse';
 
+// Single home for the excuse-reason rule (excuse-workflow.md Path A modal
+// spec: min 10 chars). Every quick/edit/bulk entry point — service and page
+// pre-checks — goes through here so the client message can never drift from
+// itself; a server 422 still surfaces verbatim via the thrown APIError.
+export const EXCUSE_REASON_MIN_LENGTH = 10;
+export const EXCUSE_REASON_SHORT_MESSAGE = `Reason must be at least ${EXCUSE_REASON_MIN_LENGTH} characters.`;
+
+export const requireExcuseReason = (reason: string): string => {
+	const clean = reason.trim();
+	if (clean.length < EXCUSE_REASON_MIN_LENGTH) throw new Error(EXCUSE_REASON_SHORT_MESSAGE);
+	return clean;
+};
+
 // Mock only when the whole app runs without a backend. Defaults to real API.
 // Evaluated per call (not frozen at import) so tests and HMR toggling
 // PUBLIC_MOCK_MODE cannot leave the service pinned to the wrong backend.
@@ -334,8 +347,7 @@ export const quickExcuse = async (input: QuickExcuseInput & { attachmentUrls?: s
 			'Quick excuse by student number is unavailable with a live backend — use the review queue row actions or Excuse all absent instead.'
 		);
 	}
-	const reason = input.reason.trim();
-	if (reason.length < 10) throw new Error('Reason must be at least 10 characters.');
+	const reason = requireExcuseReason(input.reason);
 	if (input.studentNumber.trim().length === 0) throw new Error('Student number is required.');
 
 	const now = new Date().toISOString();
@@ -384,11 +396,7 @@ const requireIds = (row: { studentId: number; sessionId: number }): void => {
 	}
 };
 
-const requireReason = (reason: string): string => {
-	const clean = reason.trim();
-	if (clean.length < 10) throw new Error('Reason must be at least 10 characters.');
-	return clean;
-};
+const requireReason = (reason: string): string => requireExcuseReason(reason);
 
 // quickExcuseByIds — Path A quick-excuse (Path B with evidence when
 // attachmentUrls are passed) for callers holding integer ids.
@@ -453,10 +461,8 @@ export const editExcuse = async (
 ): Promise<ExcuseRequest> => {
 	const reason = (input.reason ?? '').trim();
 	const notes = (input.reviewNotes ?? '').trim();
-	if (reason.length > 0 && reason.length < 10)
-		throw new Error('Reason must be at least 10 characters.');
-	if (reason.length === 0 && notes.length === 0)
-		throw new Error('Provide a reason, review notes, or both.');
+	if (reason.length > 0) requireExcuseReason(reason);
+	else if (notes.length === 0) throw new Error('Provide a reason, review notes, or both.');
 
 	if (isMockMode()) {
 		const index = store.findIndex((item) => item.id === row.id);

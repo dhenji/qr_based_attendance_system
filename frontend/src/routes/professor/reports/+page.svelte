@@ -334,7 +334,8 @@
 
 	// Server-first export (POST /professor/reports/export): the download
 	// matches the backend's per-scan rows. Mock mode and unreachable backends
-	// fall back to the client-side aggregate CSV so Export always works.
+	// fall back to the client-side aggregate CSV under a distinct filename so
+	// the two never get confused (different columns: per-scan vs aggregate).
 	let exportNote = $state<string | null>(null);
 	const downloadCsv = async () => {
 		if (csvRows.length === 0) return;
@@ -342,8 +343,18 @@
 		try {
 			saveCsv(await fetchProfessorReportsCsv(exportBody));
 		} catch {
-			exportNote = 'Server export unavailable — downloaded the on-screen rows instead.';
-			saveCsv(buildCsv(csvHeader, csvRows));
+			exportNote =
+				'Server per-scan export unavailable — downloaded the on-screen aggregate rows instead (fewer columns). Narrow filters and retry for the full export.';
+			const fallback = buildCsv(csvHeader, csvRows);
+			const blob = new Blob([fallback], { type: 'text/csv;charset=utf-8' });
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = csvFilename.replace(/\.csv$/, '-onscreen.csv');
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		}
 	};
 

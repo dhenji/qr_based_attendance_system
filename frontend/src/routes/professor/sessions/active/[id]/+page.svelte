@@ -9,6 +9,8 @@
 	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
 	import {
 		excuseAllAbsent,
+		EXCUSE_REASON_MIN_LENGTH,
+		EXCUSE_REASON_SHORT_MESSAGE,
 		quickExcuse
 	} from '$lib/features/excuse/service';
 	import {
@@ -146,8 +148,8 @@
 	const submitExcuse = async () => {
 		if (!excuseTarget || !session || excuseBusy) return;
 		const reason = excuseReason.trim();
-		if (reason.length < 10) {
-			excuseError = 'Reason must be at least 10 characters.';
+		if (reason.length < EXCUSE_REASON_MIN_LENGTH) {
+			excuseError = EXCUSE_REASON_SHORT_MESSAGE;
 			return;
 		}
 		excuseBusy = true;
@@ -183,8 +185,8 @@
 	const submitBulk = async () => {
 		if (!session || bulkBusy) return;
 		const reason = bulkReason.trim();
-		if (reason.length < 10) {
-			bulkError = 'Reason must be at least 10 characters.';
+		if (reason.length < EXCUSE_REASON_MIN_LENGTH) {
+			bulkError = EXCUSE_REASON_SHORT_MESSAGE;
 			return;
 		}
 		bulkBusy = true;
