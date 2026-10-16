@@ -16,6 +16,7 @@
 		cacheSession,
 		flushQueue,
 		getCachedSession,
+		newQueueId,
 		queue,
 		registerOutboxSync,
 		retryDelayMs,
@@ -485,9 +486,7 @@
 		}
 
 		// Generate idempotency key once per attempt (shared between live POST and offline replay)
-		const idempotencyKey = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-			? crypto.randomUUID()
-			: Math.random().toString(36).substring(2, 15);
+		const idempotencyKey = newQueueId();
 
 		livenessActive = false;
 		submitting = true;
