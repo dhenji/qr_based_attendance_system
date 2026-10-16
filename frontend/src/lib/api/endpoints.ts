@@ -118,6 +118,12 @@ export interface EndpointDef<T> {
 	) => T;
 }
 
+// Mock 204 No Content: the live client returns `undefined as T` for empty
+// responses, and callers issue these deletes as `del<void>`, so a mock
+// DELETE produces no value either. `never` is assignable to every T, which
+// keeps the single cast here instead of an `as unknown as X` at each site.
+const mockNoContent = (): never => undefined as unknown as never;
+
 // Session QR payload (D18)
 export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 	url: '/student/sessions/verify-code',
@@ -1294,7 +1300,7 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 			const row = findMockStudentRow(suffix);
 			if (row.is_active) throw new Error('Only inactive students can be deleted.');
 			MOCK_ADMIN_STUDENT_ROWS.splice(MOCK_ADMIN_STUDENT_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminStudentDetailResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockStudentRow(suffix);
@@ -1574,7 +1580,7 @@ export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> =
 			const row = findMockProfessorRow(suffix);
 			if (row.is_active) throw new Error('Only inactive professors can be deleted.');
 			MOCK_ADMIN_PROFESSOR_ROWS.splice(MOCK_ADMIN_PROFESSOR_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminProfessorResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockProfessorRow(suffix);
@@ -1893,7 +1899,7 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 			const row = findMockCourseRow(suffix);
 			if (row.is_active) throw new Error('Only inactive courses can be deleted.');
 			MOCK_ADMIN_COURSE_ROWS.splice(MOCK_ADMIN_COURSE_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminCourseResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockCourseRow(suffix);
@@ -2124,7 +2130,7 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 			const row = findMockOfferingRow(suffix);
 			if (row.is_active) throw new Error('Only inactive offerings can be deleted.');
 			MOCK_ADMIN_OFFERINGS.splice(MOCK_ADMIN_OFFERINGS.indexOf(row), 1);
-			return undefined as unknown as AdminOfferingResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockOfferingRow(suffix);
@@ -2213,7 +2219,7 @@ export const AdminOfferingComponentDetailEndpoint: EndpointDef<OfferingComponent
 			component.is_active = false;
 			component.updated_at = new Date().toISOString();
 			refreshMockSessionTypes(offering);
-			return undefined as unknown as OfferingComponentResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const p = (body ?? {}) as MockComponentPayload;
@@ -2288,7 +2294,7 @@ export const AdminOfferingProfessorsEndpoint: EndpointDef<
 			);
 			if (!row) throw new Error('Assignment not found.');
 			row.effective_to = new Date().toISOString().slice(0, 10);
-			return undefined as unknown as AdminAssignmentResponse;
+			return mockNoContent();
 		}
 		if (method === 'POST') {
 			const p = (body ?? {}) as MockAssignmentPayload;
@@ -2453,7 +2459,7 @@ export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 			for (let i = MOCK_YEARS.length - 1; i >= 0; i--) {
 				if (MOCK_YEARS[i].program_id === removed.id) MOCK_YEARS.splice(i, 1);
 			}
-			return undefined as unknown as ProgramDetailResponse;
+			return mockNoContent();
 		}
 		const program = MOCK_PROGRAMS.items.find((p) => p.id === id) ?? MOCK_PROGRAMS.items[0];
 		return {
@@ -3188,7 +3194,7 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = false;
-		return undefined as unknown as void;
+		return undefined;
 	},
 };
 
@@ -3200,7 +3206,7 @@ export const AdminUserReactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = true;
-		return undefined as unknown as void;
+		return undefined;
 	},
 };
 
