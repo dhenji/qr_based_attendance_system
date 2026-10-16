@@ -430,7 +430,17 @@ export const postForm = async <T>(
 	if (MOCK) {
 		if (endpointDef.mock) {
 			try {
-				return endpointDef.mock(forMock(params), suffix, undefined, 'POST') as unknown as T;
+				// Forward the uploaded file to the mock so CSV imports can
+				// derive counts/errors from its real rows instead of a fixed
+				// fixture. Face-enrollment uploads carry photo fields, not a
+				// 'file' field — those mocks read the suffix and ignore this.
+				let mockBody: unknown;
+				const uploaded = form.get('file');
+				if (typeof File !== 'undefined' && uploaded instanceof File) {
+					const fileText = await uploaded.text().catch(() => '');
+					mockBody = { fileName: uploaded.name, fileSize: uploaded.size, fileText };
+				}
+				return endpointDef.mock(forMock(params), suffix, mockBody, 'POST') as unknown as T;
 			} catch (e: unknown) {
 				if (e instanceof APIError) throw e;
 				throw new APIError(

@@ -1314,10 +1314,54 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 	},
 };
 
+// Mock CSV import: derives counts from the uploaded file's real rows when
+// postForm forwards them (see client.ts postForm), so duplicate/error paths
+// are testable in mock mode. Without file info it keeps the legacy fixed
+// fixture. Line numbers are 1-based file lines (header is line 1); a repeat
+// first-column value counts as a duplicate, a wrong column count or a blank
+// first cell counts as an error.
+const mockCsvImport = (
+	body: unknown,
+	legacyImported: number
+): { imported: number; duplicates: number; errors: { line: number; reason: string }[] } => {
+	const fileText = (body as { fileText?: unknown } | undefined)?.fileText;
+	if (typeof fileText !== 'string')
+		return { imported: legacyImported, duplicates: 0, errors: [] };
+	const lines = fileText.split(/\r?\n/);
+	const expectedCols = (lines[0] ?? '').split(',').length;
+	let imported = 0;
+	let duplicates = 0;
+	const errors: { line: number; reason: string }[] = [];
+	const seen = new Set<string>();
+	lines.slice(1).forEach((line, index) => {
+		if (line.trim() === '') return;
+		const lineNo = index + 2;
+		const cells = line.split(',');
+		const key = (cells[0] ?? '').trim().toLowerCase();
+		if (cells.length !== expectedCols || key === '') {
+			errors.push({
+				line: lineNo,
+				reason:
+					cells.length !== expectedCols
+						? `Expected ${expectedCols} columns, found ${cells.length}.`
+						: 'Missing identifier in the first column.',
+			});
+			return;
+		}
+		if (seen.has(key)) {
+			duplicates += 1;
+			return;
+		}
+		seen.add(key);
+		imported += 1;
+	});
+	return { imported, duplicates, errors };
+};
+
 export const AdminStudentImportEndpoint: EndpointDef<StudentImportResult> = {
 	url: '/admin/students/import',
 	method: 'POST',
-	mock: () => ({ imported: 25, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 25),
 };
 
 // --- Admin face enrollment (3-photo upload, D43) --------------------------------
@@ -1561,7 +1605,7 @@ export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> =
 export const AdminProfessorImportEndpoint: EndpointDef<ProfessorImportResult> = {
 	url: '/admin/professors/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 // --- Admin offerings (professor assignment picker) ---------------------------
@@ -1881,7 +1925,7 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 export const AdminCourseImportEndpoint: EndpointDef<CourseImportResult> = {
 	url: '/admin/courses/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 // --- Admin offering detail: CRUD + professors + roster + bulk enroll ---------
@@ -2422,7 +2466,7 @@ export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 export const AdminProgramImportEndpoint: EndpointDef<ProgramImportResult> = {
 	url: '/admin/programs/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
