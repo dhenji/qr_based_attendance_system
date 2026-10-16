@@ -242,6 +242,8 @@ reactivate with `is_active: true`.
 | **Response 201** | Created year level                                                                  |
 
 | **Errors**       | 409 `year_number_exists` |
+
+| **Notes**        | `year_number` is unique per program, but there is deliberately no `year_number <= program.total_years` check — the `1..total_years` bound is enforced only by the Programs UI and Setup Wizard year pickers (frontend-only). Empty `terms: []` is accepted; the Setup Wizard treats termless years as unusable for offerings (frontend-only), while the API accepts an offering on a termless year with a free-text `semester`. |
 #### `GET /admin/programs/{program_id}/years/{year_id}`
 
 |                  |                                                               |
@@ -334,6 +336,8 @@ A course offering is a specific instance of a course template for a program, yea
 | **Response 201** | Created course offering (with `components` + `session_types`)                                                                                                                                                                                                                                             |
 | **Errors**       | 409 `offering_exists` · 409 `component_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 404 `year_level_not_found` |
 | **Notes**        | Omitting `components` creates a single lecture component mirroring the offering schedule/classroom, so pre-existing callers keep working unchanged. |
+|                  | Uniqueness is `(course_id, program_id, semester, academic_year)` — `year_level_id` is **not** part of the key, so the same course/program/term/year on a different year level still 409s. `semester` is free text with no vocabulary (`invalid_semester` is defined but unreachable); the year-terms dropdowns in the Offerings page and Setup Wizard are the only entry path (UI guidance only — free-text entry is not offered). The Setup Wizard builds the same meeting rows (up to 4) as the Offerings page modal; further meetings are added via `POST …/components` afterwards. A new offering still needs a professor assignment (`POST …/professors`) and enrollment before sessions can run. |
+|                  | Scheduling model: one row per meeting on a single day (type + day + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. `sessions_per_week` is the meeting entry count (one entry is exactly one weekly session) and the term total shown is `sessions_per_week × semester_weeks` — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. |
 
 #### `GET /admin/offerings/{offering_id}`
 

@@ -17,7 +17,7 @@ export const programCreateSchema = z.object({
 export type ProgramCreateInput = z.infer<typeof programCreateSchema>;
 
 export const programUpdateSchema = z.object({
-	name: z.string().trim().min(1).max(100).optional(),
+	name: z.string().trim().min(1, 'Required').max(100).optional(),
 	description: z.string().trim().max(1000).optional().or(z.literal('')),
 	is_active: z.boolean().optional(),
 });
@@ -46,7 +46,7 @@ export type YearLevelCreateInput = z.infer<typeof yearLevelCreateSchema>;
 
 export const yearLevelUpdateSchema = z
 	.object({
-		label: z.string().trim().min(1).max(50).optional(),
+		label: z.string().trim().min(1, 'Required').max(50).optional(),
 		terms: z.array(termSchema).optional(),
 	})
 	.refine(

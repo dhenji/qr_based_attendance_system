@@ -2,7 +2,11 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import DayPicker from '$lib/components/DayPicker.svelte';
+	import MeetingRowsEditor, {
+		blankMeeting,
+		type MeetingDraft,
+	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
+	import { findDuplicateMeetings, findOverlappingMeetings } from '$lib/shared/utils/schedule';
 	import {
 		adminOfferingsState,
 		deleteArchivedOffering,
@@ -60,33 +64,16 @@
 
 	// Create-form fields (strings for inputs; ids coerced by zod on submit).
 	// Meetings (D77): one row per weekly meeting, each with its own type,
-	// days, time, and room. Meeting 1 also feeds the offering's own
-	// schedule/room columns (the legacy display default).
-	type MeetingDraft = {
-		type: 'lecture' | 'lab';
-		days: string;
-		start: string;
-		end: string;
-		room: string;
-		lat: string;
-		lng: string;
-	};
-	const blankMeeting = (type: 'lecture' | 'lab' = 'lecture'): MeetingDraft => ({
-		type,
-		days: '',
-		start: '',
-		end: '',
-		room: '',
-		lat: '',
-		lng: '',
-	});
+	// days, time, and room — edited with the shared MeetingRowsEditor (also
+	// used by the Setup Wizard step 3). Meeting 1 also feeds the offering's
+	// own schedule/room columns (the legacy display default).
 	let meetings = $state<MeetingDraft[]>([blankMeeting()]);
+	let meetingErrors = $state<string[]>([]);
 	let m_course_id = $state('');
 	let m_program_id = $state('');
 	let m_year_level_id = $state('');
 	let m_semester = $state('');
 	let m_academic_year = $state('');
-	let m_sessions_per_week = $state('2');
 	let m_semester_weeks = $state('18');
 	let m_present = $state('5');
 	let m_late = $state('10');
@@ -103,7 +90,7 @@
 	// Semester options for the filter: the picked year's term codes.
 	const semesterOptions = $derived(
 		yearFilter
-			? (yearOptions.find((y) => String(y.id) === yearFilter)?.terms ?? [])
+			? (yearOptions.find((y) => String(y.id) === String(yearFilter))?.terms ?? [])
 			: []
 	);
 
@@ -249,12 +236,12 @@
 
 	const openCreate = async () => {
 		formError = null;
+		meetingErrors = [];
 		m_course_id = '';
 		m_program_id = '';
 		m_year_level_id = '';
 		m_semester = '';
-		m_academic_year = '';
-		m_sessions_per_week = '2';
+		m_academic_year = defaultAcademicYear();
 		m_semester_weeks = '18';
 		meetings = [blankMeeting()];
 		m_present = '5';
@@ -272,6 +259,7 @@
 
 	const changeModalProgram = async () => {
 		m_year_level_id = '';
+		m_semester = '';
 		m_yearOptions = [];
 		if (m_program_id) {
 			try {
@@ -282,10 +270,43 @@
 		}
 	};
 
+	// Year change resets the semester to the new year's first term (same as
+	// the Setup Wizard) so a stale term code from another year cannot leak
+	// into the submit.
+	const changeModalYear = () => {
+		m_semester = '';
+		const year = m_yearOptions.find((y) => String(y.id) === String(m_year_level_id));
+		if (year && year.terms.length > 0) {
+			m_semester = year.terms[0].code;
+		}
+	};
+
+	// Academic-year suggestion from the calendar (August start): editable,
+	// just a starting value so the field is rarely blank. Same default as
+	// the Setup Wizard step 3.
+	const defaultAcademicYear = (): string => {
+		const now = new Date();
+		const year = now.getFullYear();
+		const start = now.getMonth() + 1 >= 8 ? year : year - 1;
+		return `${start}-${start + 1}`;
+	};
+
 	const modalSemesterOptions = $derived(
 		m_year_level_id
-			? (m_yearOptions.find((y) => String(y.id) === m_year_level_id)?.terms ?? [])
+			? (m_yearOptions.find((y) => String(y.id) === String(m_year_level_id))?.terms ?? [])
 			: []
+	);
+
+	// Same-day time intersections across meeting rows (any types). Guidance
+	// only — the backend permits overlaps, so these never block the submit.
+	const overlapNotes = $derived(
+		findOverlappingMeetings(
+			meetings.map((m) => ({
+				schedule_days: m.days,
+				schedule_start_time: m.start,
+				schedule_end_time: m.end,
+			}))
+		).map((o) => `Meetings ${o.a + 1} and ${o.b + 1} overlap on ${o.days}.`)
 	);
 
 	const parseCoord = (raw: string, label: string, min: number, max: number): number | undefined => {
@@ -298,8 +319,9 @@
 		return value;
 	};
 
-	const submitForm = async () => {
+	const submitForm = async (openAfter = false) => {
 		formError = null;
+		meetingErrors = [];
 		formBusy = true;
 		try {
 			// Meeting 1 feeds the offering's own schedule columns (the
@@ -315,7 +337,9 @@
 				year_level_id: m_year_level_id,
 				semester: m_semester,
 				academic_year: m_academic_year,
-				sessions_per_week: m_sessions_per_week,
+				// Sessions/week is the meeting entry count (entries are
+				// single-day, so one entry is exactly one weekly session).
+				sessions_per_week: meetings.length,
 				semester_weeks: m_semester_weeks,
 				schedule_days: first.days,
 				schedule_start_time: first.start,
@@ -351,6 +375,9 @@
 				classroom_lat?: number;
 				classroom_lng?: number;
 			}[] = [];
+			// Per-row failures render inline under the offending row; the
+			// banner carries the first one so the error is also announced.
+			const rowErrors: string[] = meetings.map(() => '');
 			for (let i = 0; i < meetings.length; i += 1) {
 				const m = meetings[i];
 				const rowParsed = componentCreateSchema.safeParse({
@@ -361,21 +388,47 @@
 					classroom_name: m.room || undefined,
 				});
 				if (!rowParsed.success) {
-					formError = `Meeting ${i + 1}: ${rowParsed.error.issues[0]?.message ?? 'check the meeting and try again.'}`;
-					return;
+					rowErrors[i] =
+						rowParsed.error.issues[0]?.message ?? 'Check the meeting and try again.';
+					continue;
 				}
-				components.push({
-					session_type: rowParsed.data.session_type,
-					schedule_days: rowParsed.data.schedule_days,
-					schedule_start_time: rowParsed.data.schedule_start_time,
-					schedule_end_time: rowParsed.data.schedule_end_time,
-					...(rowParsed.data.classroom_name ? { classroom_name: rowParsed.data.classroom_name } : {}),
-					...(m.lat.trim() ? { classroom_lat: parseCoord(m.lat, `Meeting ${i + 1} latitude`, -90, 90) } : {}),
-					...(m.lng.trim() ? { classroom_lng: parseCoord(m.lng, `Meeting ${i + 1} longitude`, -180, 180) } : {}),
-				});
+				try {
+					components.push({
+						session_type: rowParsed.data.session_type,
+						schedule_days: rowParsed.data.schedule_days,
+						schedule_start_time: rowParsed.data.schedule_start_time,
+						schedule_end_time: rowParsed.data.schedule_end_time,
+						...(rowParsed.data.classroom_name ? { classroom_name: rowParsed.data.classroom_name } : {}),
+						...(m.lat.trim() ? { classroom_lat: parseCoord(m.lat, `Meeting ${i + 1} latitude`, -90, 90) } : {}),
+						...(m.lng.trim() ? { classroom_lng: parseCoord(m.lng, `Meeting ${i + 1} longitude`, -180, 180) } : {}),
+					});
+				} catch (e: unknown) {
+					rowErrors[i] = e instanceof Error && e.message ? e.message : 'Check the coordinates and try again.';
+				}
+			}
+			// Exact-duplicate rows per the backend unique key (session_type,
+			// schedule_days, schedule_start_time) — checked over the rows
+			// that parsed, so one bad row cannot mask another.
+			const validRows = meetings
+				.map((m, index) => ({ m, index }))
+				.filter(({ index }) => !rowErrors[index])
+				.map(({ m, index }) => ({
+					index,
+					session_type: m.type,
+					schedule_days: m.days,
+					schedule_start_time: m.start,
+				}));
+			for (const dup of findDuplicateMeetings(validRows)) {
+				rowErrors[dup.index] = `Duplicates meeting ${dup.first + 1}. Change the type, days, or time.`;
+			}
+			meetingErrors = rowErrors;
+			const firstRowError = rowErrors.find((message) => message !== '');
+			if (firstRowError !== undefined) {
+				formError = firstRowError;
+				return;
 			}
 			const head = components[0];
-			await createOffering({
+			const saved = await createOffering({
 				course_id: parsed.data.course_id,
 				program_id: parsed.data.program_id,
 				year_level_id: parsed.data.year_level_id,
@@ -396,6 +449,9 @@
 			formOpen = false;
 			await refreshAdminOfferings();
 			notifyEntityChanged('offerings');
+			// "Save & open" lands on the new offering's detail page, where
+			// professor assignment and enrollment live.
+			if (openAfter) await goto(adminOffering(saved.id));
 		} catch (e: unknown) {
 			formError = friendlyActionError(e, 'Save failed. Please try again.');
 		} finally {
@@ -626,62 +682,35 @@
 						</select>
 					</label>
 					<label>Year level
-						<select class="input" bind:value={m_year_level_id} disabled={!m_program_id}>
+						<select class="input" bind:value={m_year_level_id} disabled={!m_program_id} onchange={changeModalYear}>
 							<option value="">Pick a year…</option>
 							{#each m_yearOptions as y (y.id)}
-								<option value={y.id}>{y.label}</option>
+								<option value={y.id} disabled={y.terms.length === 0}>
+									{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}
+								</option>
 							{/each}
 						</select>
 					</label>
 				</div>
-				<div class="field">
-					<span class="form-label">Class meetings</span>
-					<p class="hint">Each meeting has its own days, time, and room — e.g. a laboratory on Monday plus a lecture on Wednesday. One row, one time: days on the same row share its time, so add another row for a different time.</p>
-				</div>
-				{#each meetings as m, i (i)}
-					<div class="meeting-box">
-						<div class="meeting-head">
-							<span class="meeting-title">Meeting {i + 1}</span>
-							{#if meetings.length > 1}
-								<button
-									class="link"
-									type="button"
-									onclick={() => (meetings = meetings.filter((_, j) => j !== i))}
-								>
-									Remove
-								</button>
-							{/if}
-						</div>
-						<div class="grid2">
-							<label>Type
-								<select class="input" bind:value={m.type}>
-									<option value="lecture">Lecture</option>
-									<option value="lab">Laboratory</option>
-								</select>
-							</label>
-							<label>Room (optional)<input class="input" bind:value={m.room} placeholder="Lab 101" /></label>
-						</div>
-						<DayPicker bind:value={m.days} />
-						<div class="grid2">
-							<label>Start time<input class="input" type="time" bind:value={m.start} /></label>
-							<label>End time<input class="input" type="time" bind:value={m.end} /></label>
-						</div>
-						<div class="grid2">
-							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={m.lat} placeholder="14.5995" /></label>
-							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={m.lng} placeholder="120.9842" /></label>
-						</div>
-						{#if m.type === 'lab'}
-							<p class="hint">Laboratory sessions enforce the geofence: opening one without coordinates fails.</p>
-						{/if}
-					</div>
-				{/each}
-				<button
-					class="btn btn-secondary"
-					type="button"
-					onclick={() => (meetings = [...meetings, blankMeeting('lab')])}
-				>
-					Add another meeting
-				</button>
+				<label>Semester
+					<select class="input" bind:value={m_semester} aria-label="Pick a semester" disabled={!m_year_level_id} title={!m_year_level_id ? 'Pick a year level first' : undefined}>
+						<option value="">{m_year_level_id ? 'Pick a term…' : 'Pick a year level first…'}</option>
+						{#each modalSemesterOptions as t (t.code)}
+							<option value={t.code}>{t.label}</option>
+						{/each}
+					</select>
+				</label>
+				<p class="hint">Meetings per week: {meetings.length} (counted automatically — one per meeting above).</p>
+				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={m_semester_weeks} /></label>
+				<p class="hint">One offering per course + program + term + academic year — the year level doesn't disambiguate, so re-offering the same course in the same term fails as a duplicate.</p>
+				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} />
+				{#if overlapNotes.length > 0}
+					{#each overlapNotes as note (note)}
+						<p class="warn" role="note">
+							{note} Overlapping meetings are allowed, but sessions for one offering run one at a time.
+						</p>
+					{/each}
+				{/if}
 				<div class="grid2">
 					<label>Present window, min<input class="input" inputmode="numeric" bind:value={m_present} /></label>
 					<label>Late window, min<input class="input" inputmode="numeric" bind:value={m_late} /></label>
@@ -690,7 +719,10 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-offering" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-secondary" data-testid="save-open-offering" disabled={formBusy} onclick={() => void submitForm(true)}>
+					{formBusy ? 'Saving…' : 'Save & open'}
+				</button>
+				<button class="btn btn-primary" data-testid="save-offering" disabled={formBusy} onclick={() => void submitForm(false)}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -984,41 +1016,15 @@
 		color: var(--on-brand);
 	}
 
-	.form-label {
+	.warn {
 		font-size: 0.8125rem;
-		font-weight: 600;
-		letter-spacing: 0.02em;
 		color: var(--text-secondary);
-		margin-bottom: 0.375rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-
-	.meeting-box {
-		display: flex;
-		flex-direction: column;
-		gap: 0.875rem;
-		padding: 1rem;
-		background: var(--bg-page);
-		border: 1px solid var(--border);
+		background: var(--bg-muted);
+		border: 1px solid var(--border-strong);
+		border-left: 3px solid var(--accent);
 		border-radius: 8px;
-	}
-
-	.meeting-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
-	}
-
-	.meeting-title {
-		font-size: 0.875rem;
-		font-weight: 700;
-		color: var(--text-strong);
+		padding: 0.625rem 0.875rem;
+		margin: 0;
 	}
 
 	.modal-overlay {

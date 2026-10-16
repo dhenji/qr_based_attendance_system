@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import DayPicker from '$lib/components/DayPicker.svelte';
 	import { goToStep, setWizardYear, wizardState } from './store.svelte';
 	import { getProgram } from '$lib/features/admin/programs/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
@@ -9,18 +8,33 @@
 		offeringTitle,
 	} from '$lib/features/admin/offerings/service';
 	import {
+		componentCreateSchema,
 		offeringCreateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
+	import MeetingRowsEditor, {
+		blankMeeting,
+		type MeetingDraft,
+	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
+	import {
+		findDuplicateMeetings,
+		findOverlappingMeetings,
+		totalExpectedSessions,
+		weeklyMeetingHours,
+	} from '$lib/shared/utils/schedule';
 	import type { AdminCourse, AdminOffering, ProgramDetail } from '$lib/shared/types';
-	import { Routes } from '$lib/shared/constants/routes';
+	import { Routes, adminOffering } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Wizard step 3: schedule offerings for the chosen program. The program is
 	// locked in from step 1 and the year picker defaults to the first usable
 	// year (a year with terms — a termless year cannot back offerings), so the
-	// admin only answers “which course, which term, when and where”. The form
+	// admin only answers “which course, which term, when and where”. The
+	// schedule is one or more class meetings (each with its own type, days,
+	// time, and room — e.g. a lecture plus a lab on different days), edited
+	// with the shared MeetingRowsEditor also used by the Offerings page
+	// modal. The form
 	// validates exactly like the Offerings page create modal (same schema,
 	// same windows-within-duration guard, same coordinate parsing), and every
 	// success notifies so the management pages stay fresh.
@@ -37,16 +51,15 @@
 	let f_course_id = $state('');
 	let f_semester = $state('');
 	let f_academic_year = $state('');
-	let f_sessions_per_week = $state('2');
 	let f_semester_weeks = $state('18');
-	let f_schedule_days = $state('');
-	let f_start = $state('');
-	let f_end = $state('');
-	let f_classroom = $state('');
-	let f_lat = $state('');
-	let f_lng = $state('');
 	let f_present = $state('5');
 	let f_late = $state('10');
+
+	// Class meetings (D77): one row per weekly meeting, starting with a
+	// single lecture. Row 1 also feeds the offering's own schedule/room
+	// columns (the legacy display default).
+	let meetings = $state<MeetingDraft[]>([blankMeeting('lecture')]);
+	let meetingErrors = $state<string[]>([]);
 
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
@@ -66,25 +79,51 @@
 	const usableYears = $derived((program?.yearLevels ?? []).filter((y) => y.terms.length > 0));
 
 	const pickedYear = $derived(
-		usableYears.find((y) => String(y.id) === f_year_id) ??
-			(program?.yearLevels ?? []).find((y) => String(y.id) === f_year_id) ??
+		usableYears.find((y) => String(y.id) === String(f_year_id)) ??
+			(program?.yearLevels ?? []).find((y) => String(y.id) === String(f_year_id)) ??
 			null
 	);
 
 	// Semester options come from the picked year's own term structure
 	// (frontend-only read of data the year list already carries — no new
-	// endpoint). A year with no terms falls back to free text, mirroring the
-	// Offerings page modal.
+	// endpoint). A year without terms cannot back offerings, so the form
+	// below only renders for a termed year.
 	const semesterOptions = $derived(pickedYear?.terms ?? []);
 
 	const selectedCourse = $derived(
-		courses.find((c) => String(c.id) === f_course_id) ?? null
+		courses.find((c) => String(c.id) === String(f_course_id)) ?? null
 	);
 
 	const windowBudget = $derived(
 		selectedCourse === null
 			? null
 			: Math.round(selectedCourse.sessionDurationHours * 60)
+	);
+
+	// Live schedule summary. Sessions per week is the meeting entry count
+	// (entries are single-day, so one entry is exactly one weekly session);
+	// the term total is the same product the risk batch uses as its expected
+	// session count (semester_weeks × sessions_per_week).
+	const asScheduleRows = $derived(
+		meetings.map((m) => ({
+			schedule_days: m.days,
+			schedule_start_time: m.start,
+			schedule_end_time: m.end,
+		}))
+	);
+
+	const weeklyHours = $derived(weeklyMeetingHours(asScheduleRows));
+
+	const sessionsPerWeek = $derived(meetings.length);
+
+	const expectedTotal = $derived(totalExpectedSessions(String(sessionsPerWeek), f_semester_weeks));
+
+	// Same-day time intersections (any types). Guidance only — the backend
+	// permits overlaps, so these never block the submit.
+	const overlapNotes = $derived(
+		findOverlappingMeetings(asScheduleRows).map(
+			(o) => `Meetings ${o.a + 1} and ${o.b + 1} overlap on ${o.days}.`
+		)
 	);
 
 	onMount(async () => {
@@ -138,32 +177,36 @@
 
 	const resetIdentityFields = () => {
 		f_course_id = '';
-		f_schedule_days = '';
-		f_start = '';
-		f_end = '';
-		f_classroom = '';
-		f_lat = '';
-		f_lng = '';
+		meetings = [blankMeeting('lecture')];
+		meetingErrors = [];
 	};
 
 	const submitForm = async () => {
 		if (program === null) return;
 		formError = null;
 		lastSaved = null;
+		meetingErrors = [];
 		formBusy = true;
 		try {
+			// Meeting 1 feeds the offering's own schedule columns (the
+			// legacy display default); every row is stored as a component.
+			const first = meetings[0];
+			if (!first) {
+				formError = 'Add at least one meeting.';
+				return;
+			}
 			const parsed = offeringCreateSchema.safeParse({
 				course_id: f_course_id,
 				program_id: program.id,
 				year_level_id: f_year_id,
 				semester: f_semester,
 				academic_year: f_academic_year,
-				sessions_per_week: f_sessions_per_week,
+				sessions_per_week: sessionsPerWeek,
 				semester_weeks: f_semester_weeks,
-				schedule_days: f_schedule_days,
-				schedule_start_time: f_start,
-				schedule_end_time: f_end,
-				classroom_name: f_classroom || undefined,
+				schedule_days: first.days,
+				schedule_start_time: first.start,
+				schedule_end_time: first.end,
+				classroom_name: first.room || undefined,
 				default_present_window_minutes: f_present,
 				default_late_window_minutes: f_late,
 			});
@@ -185,8 +228,68 @@
 				formError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
 			}
-			const lat = parseCoord(f_lat, 'Latitude', -90, 90);
-			const lng = parseCoord(f_lng, 'Longitude', -180, 180);
+			// Per-row failures render inline under the offending row; the
+			// banner carries the first one so the error is also announced.
+			const components: {
+				session_type: 'lecture' | 'lab';
+				schedule_days: string;
+				schedule_start_time: string;
+				schedule_end_time: string;
+				classroom_name?: string;
+				classroom_lat?: number;
+				classroom_lng?: number;
+			}[] = [];
+			const rowErrors: string[] = meetings.map(() => '');
+			for (let i = 0; i < meetings.length; i += 1) {
+				const m = meetings[i];
+				const rowParsed = componentCreateSchema.safeParse({
+					session_type: m.type,
+					schedule_days: m.days,
+					schedule_start_time: m.start,
+					schedule_end_time: m.end,
+					classroom_name: m.room || undefined,
+				});
+				if (!rowParsed.success) {
+					rowErrors[i] =
+						rowParsed.error.issues[0]?.message ?? 'Check the meeting and try again.';
+					continue;
+				}
+				try {
+					components.push({
+						session_type: rowParsed.data.session_type,
+						schedule_days: rowParsed.data.schedule_days,
+						schedule_start_time: rowParsed.data.schedule_start_time,
+						schedule_end_time: rowParsed.data.schedule_end_time,
+						...(rowParsed.data.classroom_name ? { classroom_name: rowParsed.data.classroom_name } : {}),
+						...(m.lat.trim() ? { classroom_lat: parseCoord(m.lat, `Meeting ${i + 1} latitude`, -90, 90) } : {}),
+						...(m.lng.trim() ? { classroom_lng: parseCoord(m.lng, `Meeting ${i + 1} longitude`, -180, 180) } : {}),
+					});
+				} catch (e: unknown) {
+					rowErrors[i] = e instanceof Error && e.message ? e.message : 'Check the coordinates and try again.';
+				}
+			}
+			// Exact-duplicate rows per the backend unique key (session_type,
+			// schedule_days, schedule_start_time) — checked over the rows
+			// that parsed, so one bad row cannot mask another.
+			const validRows = meetings
+				.map((m, index) => ({ m, index }))
+				.filter(({ index }) => !rowErrors[index])
+				.map(({ m, index }) => ({
+					index,
+					session_type: m.type,
+					schedule_days: m.days,
+					schedule_start_time: m.start,
+				}));
+			for (const dup of findDuplicateMeetings(validRows)) {
+				rowErrors[dup.index] = `Duplicates meeting ${dup.first + 1}. Change the type, days, or time.`;
+			}
+			meetingErrors = rowErrors;
+			const firstRowError = rowErrors.find((message) => message !== '');
+			if (firstRowError !== undefined) {
+				formError = firstRowError;
+				return;
+			}
+			const head = components[0];
 			const saved = await createOffering({
 				course_id: parsed.data.course_id,
 				program_id: parsed.data.program_id,
@@ -199,10 +302,11 @@
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
 				classroom_name: parsed.data.classroom_name || undefined,
-				classroom_lat: lat,
-				classroom_lng: lng,
+				classroom_lat: head?.classroom_lat,
+				classroom_lng: head?.classroom_lng,
 				default_present_window_minutes: parsed.data.default_present_window_minutes,
 				default_late_window_minutes: parsed.data.default_late_window_minutes,
+				components,
 			});
 			lastSaved = saved;
 			created = [saved, ...created];
@@ -263,9 +367,17 @@
 			{#if created.length > 0}
 				<ul class="rows">
 					{#each created as o (o.id)}
-						<li>{savedTitle(o)}</li>
+						<li>
+							<a class="link strong" href={adminOffering(o.id)}>{savedTitle(o)}</a>
+							<span class="row-links">
+								<a class="link" href={`${adminOffering(o.id)}?tab=professors`}>Assign professor</a>
+								<span aria-hidden="true">·</span>
+								<a class="link" href={`${adminOffering(o.id)}?tab=enrolled`}>Enroll students</a>
+							</span>
+						</li>
 					{/each}
 				</ul>
+				<p class="muted">Sessions can't run until a professor is assigned.</p>
 			{/if}
 			<div class="done-links">
 				<a class="btn btn-secondary" href={Routes.ADMIN_PROGRAMS}>Programs</a>
@@ -307,6 +419,15 @@
 				<button class="btn btn-secondary" onclick={() => goToStep(2)}>Back to Step 2</button>
 				<span></span>
 			</div>
+		{:else if !pickedYear || pickedYear.terms.length === 0}
+			<p class="error" role="alert">
+				The selected year level has no terms yet — offerings schedule against a
+				term. Add terms in Step 2 first.
+			</p>
+			<div class="nav-row">
+				<button class="btn btn-secondary" onclick={() => goToStep(2)}>Back to Step 2</button>
+				<span></span>
+			</div>
 		{:else}
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
@@ -334,32 +455,37 @@
 						</select>
 					</label>
 					<label>Semester
-						{#if semesterOptions.length > 0}
-							<select class="input" bind:value={f_semester} aria-label="Pick a semester">
-								<option value="">Pick a term…</option>
-								{#each semesterOptions as t (t.code)}
-									<option value={t.code}>{t.label}</option>
-								{/each}
-							</select>
-						{:else}
-							<input class="input" bind:value={f_semester} placeholder="e.g. 1st Sem" />
-						{/if}
+						<select class="input" bind:value={f_semester} aria-label="Pick a semester">
+							<option value="">Pick a term…</option>
+							{#each semesterOptions as t (t.code)}
+								<option value={t.code}>{t.label}</option>
+							{/each}
+						</select>
 					</label>
 				</div>
-				<DayPicker bind:value={f_schedule_days} />
-				<div class="grid2">
-					<label>Sessions / week<input class="input" inputmode="numeric" bind:value={f_sessions_per_week} /></label>
-					<label>Semester weeks<input class="input" inputmode="numeric" bind:value={f_semester_weeks} /></label>
-				</div>
-				<div class="grid2">
-					<label>Start time<input class="input" type="time" bind:value={f_start} /></label>
-					<label>End time<input class="input" type="time" bind:value={f_end} /></label>
-				</div>
-				<label>Classroom (optional)<input class="input" bind:value={f_classroom} placeholder="Room 301" /></label>
-				<div class="grid2">
-					<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={f_lat} placeholder="14.5995" /></label>
-					<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={f_lng} placeholder="120.9842" /></label>
-				</div>
+				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} />
+				{#if overlapNotes.length > 0}
+					{#each overlapNotes as note (note)}
+						<p class="warn" role="note">
+							{note} Overlapping meetings are allowed, but sessions for one offering run one at a time.
+						</p>
+					{/each}
+				{/if}
+				<p class="hint">Meetings per week: {sessionsPerWeek} (counted automatically — one per meeting above).</p>
+				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={f_semester_weeks} placeholder="How many weeks does this term run?" /></label>
+				{#if weeklyHours > 0}
+					<p class="hint">{weeklyHours} scheduled {weeklyHours === 1 ? 'hour' : 'hours'} per week across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+				{/if}
+				{#if expectedTotal !== null}
+					<p class="hint">{sessionsPerWeek} sessions/week × {f_semester_weeks.trim()} weeks = {expectedTotal} expected sessions this term.</p>
+				{:else}
+					<p class="hint">Enter the semester weeks to see the expected session total.</p>
+				{/if}
+				<p class="hint">
+					One offering per course + program + term + academic year — the year level
+					doesn't disambiguate, so re-offering the same course in the same term fails
+					as a duplicate.
+				</p>
 				<div class="grid2">
 					<label>Present window, min<input class="input" inputmode="numeric" bind:value={f_present} /></label>
 					<label>Late window, min<input class="input" inputmode="numeric" bind:value={f_late} /></label>
@@ -371,6 +497,10 @@
 				{:else}
 					<p class="hint">Pick a course to see its session budget for the attendance windows.</p>
 				{/if}
+				<p class="hint">
+					Attendance windows are shared across all meetings above. Need more than
+					7 meetings? Add further ones on the offering's detail page.
+				</p>
 			</div>
 			<div class="nav-row">
 				<button class="btn btn-secondary" onclick={() => goToStep(2)}>Back</button>
@@ -451,6 +581,22 @@
 
 	.link:hover {
 		text-decoration: underline;
+	}
+
+	.link.strong {
+		font-size: 0.875rem;
+		font-weight: 700;
+	}
+
+	.warn {
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+		background: var(--bg-muted);
+		border: 1px solid var(--border-strong);
+		border-left: 3px solid var(--accent);
+		border-radius: 8px;
+		padding: 0.625rem 0.875rem;
+		margin: 0;
 	}
 
 	.form {
@@ -545,6 +691,16 @@
 		font-size: 0.875rem;
 		color: var(--text-strong);
 		background: var(--bg-card);
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.rows li .row-links {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+		font-size: 0.8125rem;
 	}
 
 	.done-links {

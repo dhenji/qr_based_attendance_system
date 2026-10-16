@@ -19,7 +19,7 @@ export type CourseCreateInput = z.infer<typeof courseCreateSchema>;
 
 export const courseUpdateSchema = z.object({
 	course_code: z.string().trim().toUpperCase().min(2).max(20).optional(),
-	course_name: z.string().trim().min(1).max(100).optional(),
+	course_name: z.string().trim().min(1, 'Required').max(100).optional(),
 	units: z.coerce.number().int().min(1).max(6).optional(),
 	session_duration_hours: z.coerce.number().min(0.5).max(8).optional(),
 	is_active: z.boolean().optional(),
