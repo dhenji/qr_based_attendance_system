@@ -26,17 +26,16 @@
 </script>
 
 <script lang="ts">
-	import { DAY_OPTIONS } from '$lib/shared/constants/days';
+	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
 
-	// One row per weekly meeting on a single day: each row has its own day,
-	// type, time, and room — e.g. a lecture Monday plus a laboratory
-	// Wednesday, or two sessions on the same day. One session per entry, so
-	// the entry count is the sessions/week count. Validation lives with the
+	// One row per meeting: each row has its own days, type, time, and room —
+	// e.g. a lecture on Monday/Wednesday plus a laboratory Friday, or two
+	// sessions on the same day. Sessions per week is one per meeting day, so
+	// a multi-day row counts each of its days. Validation lives with the
 	// caller (per-row messages in `rowErrors`, parallel to `rows`); this
 	// component only edits rows and reports structure. At least one row is
 	// always kept — removal is offered only past the first — and growth
-	// stops at `maxRows` (a week has 7 days; the backend caps
-	// sessions_per_week at 7, so more rows could not submit anyway).
+	// stops at `maxRows`.
 
 	interface Props {
 		rows: MeetingDraft[];
@@ -71,10 +70,10 @@
 <div class="field">
 	<span class="form-label">Class meetings</span>
 	<p class="hint">
-		One row, one day: each meeting has its own day, type, time, and room. Add
-		another row for each additional day or time — e.g. a lecture Monday plus a
-		laboratory Wednesday, or two sessions on the same day. Each row counts as
-		one session per week.
+		One row, one time: each meeting has its own days, type, time, and room.
+		Check several days to repeat a meeting across the week — e.g. a lecture
+		Monday/Wednesday plus a laboratory Friday. Sessions per week count one
+		per meeting day.
 	</p>
 </div>
 {#each rows as m, i (i)}
@@ -95,15 +94,8 @@
 		{#if rowErrors[i]}
 			<p class="error" role="alert">{rowErrors[i]}</p>
 		{/if}
+		<DayPicker bind:value={m.days} disabled={busy} />
 		<div class="grid2">
-			<label>Day
-				<select class="input" bind:value={m.days} disabled={busy} aria-label={`Meeting ${i + 1} day`}>
-					<option value="">Pick a day…</option>
-					{#each DAY_OPTIONS as day (day.code)}
-						<option value={day.code}>{day.label}</option>
-					{/each}
-				</select>
-			</label>
 			<label>Type
 				<select class="input" bind:value={m.type} disabled={busy}>
 					<option value="lecture">Lecture</option>

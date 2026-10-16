@@ -140,6 +140,7 @@ let selectedOfferingId = $state<number | null>(null);
 
 	const canSubmit = $derived(
 		selected !== null &&
+			selected.scheduleOk &&
 			windowsFit &&
 			!durationInvalid &&
 			!windowsInvalid &&
@@ -451,6 +452,15 @@ let selectedOfferingId = $state<number | null>(null);
 
 			{#if error}
 				<p class="error">{error}</p>
+			{/if}
+
+			{#if selected && !selected.scheduleOk}
+				<div class="blocked-note" role="alert">
+					<AppIcon name="alert" size={16} />
+					<span><strong>Sessions can't be opened for {selected.courseCode} yet</strong> — its weekly
+					schedule doesn't match the {selected.units}-unit requirement. Contact
+					your administrator.</span>
+				</div>
 			{/if}
 
 			<div class="actions">
@@ -916,6 +926,25 @@ let selectedOfferingId = $state<number | null>(null);
 		margin: 0;
 		color: var(--danger);
 		font-size: 0.875rem;
+	}
+
+	/* Blocked-sessions callout: icon + tinted box shown before submit. */
+	.blocked-note {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		font-size: 0.875rem;
+		color: var(--danger);
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
+		border-radius: 8px;
+		padding: 0.625rem 0.875rem;
+		margin: 0;
+	}
+
+	.blocked-note :global(svg) {
+		flex-shrink: 0;
+		margin-top: 0.125rem;
 	}
 
 	.empty {

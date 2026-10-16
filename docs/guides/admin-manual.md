@@ -82,8 +82,8 @@ A _course_ is a reusable template — a subject definition with no schedule, cla
 | --------------------- | ---------------------------------------- |
 | `course_code`         | Unique code (e.g., `CS101`)              |
 | `course_name`         | Full name (e.g., Software Engineering)   |
-| `units`               | Credit units (affects expected sessions) |
-| `session_duration_hours` | Length per meeting (e.g., 1.5)         |
+| `units`               | Credit units — required scheduled meeting hours per week (D79) |
+| `session_duration_hours` | Default session length: attendance window budget + fallback session length (e.g., 1.5) |
 
 **Create Course Offering** (per program / year level / semester):
 
@@ -95,7 +95,7 @@ An _offering_ is a specific instance of a course for a program, year level, and 
 | `year_level`                                         | Target _year level_ (e.g., Year 2)       |
 | `semester`                                           | Term (e.g., 1st Sem)                     |
 | `academic_year`                                      | Academic year (e.g., 2025–2026)          |
-| `sessions_per_week`                                  | Meetings per week                        |
+| `sessions_per_week`                                  | Meetings per week — counted automatically, one per meeting day (D80) |
 | `semester_weeks`                                     | Weeks in the semester                    |
 | `schedule_days`                                      | Pattern (e.g., `MWF`, `TTH`)             |
 | `schedule_start_time` / `schedule_end_time`          | Class times                              |
@@ -104,6 +104,10 @@ An _offering_ is a specific instance of a course for a program, year level, and 
 | `default_late_window_minutes`                        | Default _late window_ (default 10)       |
 
 > **Note**: A _course_ template can span multiple programs/year levels ([D6](../project/decision-log.md)). Create a separate _offering_ for each program/year/semester combination, each with its own schedule and classroom.
+>
+> **Weekly-hours requirement** ([D79](../project/decision-log.md), reshapes per [D81](../project/decision-log.md)): the course's `units` are the required scheduled meeting hours per week across all meetings. New offerings and added meetings must land on the total (or converge toward it); plain meeting edits reshape freely so multi-step changes can pass through a mismatched total, with the over/short panels tracking back to exact. A 3-unit course holds Mon 07:00–08:30 + Tue 13:00–14:30 (3.0h) but a fresh 3.5h or 1.5h schedule is rejected (over/short). The create forms and the offering detail page show the requirement, scheduled, and over/short hours live.
+>
+> **Already offered, but no row in sight?** One offering covers a course + program + term + academic year regardless of year level, so the existing instance may belong to a different year level than the one filtered. Follow the "Open offering" link in the message, or clear the year filter to reveal it.
 
 ### 2.4 Course Detail — `/admin/courses/{cid}`
 
@@ -111,7 +115,7 @@ An _offering_ is a specific instance of a course for a program, year level, and 
 
 #### Overview Tab
 
-Shows template metadata (units, duration). _Offering_ details (schedule, classroom GPS, weeks, default windows) are shown on the _offering_ overview.
+Shows template metadata (units, default session length). _Offering_ details (schedule, classroom GPS, weeks, default windows) are shown on the _offering_ overview.
 
 #### Professors Tab (Assignment & History)
 

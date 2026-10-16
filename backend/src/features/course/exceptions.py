@@ -180,6 +180,98 @@ class OfferingScheduleWindowException(CourseDomainException):
         )
 
 
+class WeeklyHoursExceedUnitsException(CourseDomainException):
+    """422 - weekly scheduled meeting hours exceed the course units total.
+
+    `courses.units` is the required total of scheduled meeting hours per week
+    across all active components of the offering (D79). The check runs against
+    the merged active set, so API requests cannot bypass the frontend totals.
+    """
+
+    code: str = "weekly_hours_exceed_units"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str | None = None,
+        units: int | None = None,
+    ) -> None:
+        over_hours = round(scheduled_hours - limit_hours, 2)
+        if course_code is not None and units is not None:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) exceed the "
+                f"{units}-unit requirement ({limit_hours}h) for course {course_code}; "
+                f"{over_hours}h over"
+            )
+        else:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) exceed the "
+                f"weekly requirement ({limit_hours}h); {over_hours}h over"
+            )
+        super().__init__(message=message, field="components")
+
+
+class WeeklyHoursBelowUnitsException(CourseDomainException):
+    """422 - weekly scheduled meeting hours fall short of the course units total."""
+
+    code: str = "weekly_hours_below_units"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str | None = None,
+        units: int | None = None,
+    ) -> None:
+        short_hours = round(limit_hours - scheduled_hours, 2)
+        if course_code is not None and units is not None:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) fall short of the "
+                f"{units}-unit requirement ({limit_hours}h) for course {course_code}; "
+                f"{short_hours}h short"
+            )
+        else:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) fall short of the "
+                f"weekly requirement ({limit_hours}h); {short_hours}h short"
+            )
+        super().__init__(message=message, field="components")
+
+
+class ScheduleMismatchException(CourseDomainException):
+    """422 - an offering whose meetings mismatch the requirement cannot go live.
+
+    Activation (is_active False -> True) requires the merged active-component
+    total to equal `courses.units * 60` exactly (D82), including the
+    zero-meeting case. The message names the course code and both hours and
+    carries no row ids: the list/detail toggles render it verbatim.
+    """
+
+    code: str = "schedule_mismatch"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str | None = None,
+        units: int | None = None,
+    ) -> None:
+        if course_code is not None and units is not None:
+            message = (
+                f"Cannot activate: weekly scheduled hours ({scheduled_hours}h) "
+                f"do not match the {units}-unit requirement ({limit_hours}h) "
+                f"for course {course_code}. Fix the meetings first."
+            )
+        else:
+            message = (
+                f"Cannot activate: weekly scheduled hours ({scheduled_hours}h) "
+                f"do not match the weekly requirement ({limit_hours}h). "
+                "Fix the meetings first."
+            )
+        super().__init__(message=message, field="is_active")
+
+
 class WindowsExceedDurationException(CourseDomainException):
     """422 - present + late windows exceed the course session duration."""
 

@@ -6,9 +6,8 @@
 // them) without rendering anything.
 //
 // Counting rule (also documented in api-contracts.md): one session per
-// meeting entry. Entries are single-day, so a Monday lecture plus a
-// Wednesday lab counts 2 sessions/week. Weekly hours are Σ duration
-// (one day each).
+// meeting day. A Monday lecture plus a Wednesday lab counts 2 sessions/week,
+// and one MWF row counts 3. Weekly hours are Σ duration × day count.
 
 export interface ScheduleMeetingLike {
 	schedule_days: string;
@@ -50,9 +49,72 @@ export const weeklyMeetingHours = (rows: ScheduleMeetingLike[]): number => {
 	return Math.round(total * 100) / 100;
 };
 
-// Sessions per week is the meeting entry count (entries are single-day, so
-// one entry is exactly one weekly session). Callers pass `rows.length`
-// directly — no helper needed.
+export interface WeeklyHoursBreakdown {
+	/** Σ meeting durations in hours/week, rounded to two decimals. */
+	scheduled: number;
+	/** Course units requirement in hours/week (1 unit = 1 hour). */
+	limit: number;
+	/** limit − scheduled, rounded to two decimals (negative when over). */
+	remaining: number;
+	/** True when scheduled exceeds the requirement. */
+	over: boolean;
+	/** True when scheduled falls short of the requirement. */
+	under: boolean;
+	/** Minute-rounded verdict: 'ok' when the total matches the requirement. */
+	status: 'ok' | 'over' | 'under';
+}
+
+// Weekly total against the course units requirement (D79): units are the
+// required scheduled meeting hours per week. Pure, so both offering create
+// surfaces and the offering detail page share it with the backend rule
+// (`_check_weekly_hours` in course/service.py). Comparison is in whole
+// minutes — meeting durations are minute-precise times an integer day count,
+// so rounding here only absorbs float dust, never a real deviation.
+export const weeklyHoursBreakdown = (
+	rows: ScheduleMeetingLike[],
+	units: number | null | undefined
+): WeeklyHoursBreakdown | null => {
+	if (units === null || units === undefined || !Number.isFinite(units)) return null;
+	const scheduled = weeklyMeetingHours(rows);
+	const limit = Math.round(units * 100) / 100;
+	const remaining = Math.round((limit - scheduled) * 100) / 100;
+	const status =
+		Math.round(scheduled * 60) === Math.round(limit * 60)
+			? ('ok' as const)
+			: scheduled > limit
+				? ('over' as const)
+				: ('under' as const);
+	return { scheduled, limit, remaining, over: status === 'over', under: status === 'under', status };
+};
+
+// Whether a schedule write must be blocked (D79). `oldScheduled` is the
+// current active-set total, or null when there is none (offering creation:
+// the payload is the whole schedule, so it must match exactly).
+// Grandfathered or mid-build totals off the requirement may only converge:
+// strictly closer without crossing to the other side. Mirrors
+// `_check_weekly_hours` — keep the two in sync.
+export const weeklyWriteBlocked = (
+	oldScheduled: number | null | undefined,
+	newScheduled: number,
+	limit: number
+): boolean => {
+	const limMin = Math.round(limit * 60);
+	const newMin = Math.round(newScheduled * 60);
+	if (newMin === limMin) return false;
+	if (oldScheduled === null || oldScheduled === undefined || !Number.isFinite(oldScheduled))
+		return true;
+	const oldMin = Math.round(oldScheduled * 60);
+	if (oldMin === limMin) return true;
+	const sameSide = (newMin - limMin) * (oldMin - limMin) > 0;
+	return !(sameSide && Math.abs(newMin - limMin) < Math.abs(oldMin - limMin));
+};
+
+// Weekly session count: one session per meeting day, so a multi-day row
+// counts each of its days (MWF is 3 sessions). The Setup Wizard rows are
+// single-day, so there it reduces to the row count; the offering detail
+// reuses this for multi-day rows. It only ever sums integer day counts.
+export const weeklySessionCount = (rows: ScheduleMeetingLike[]): number =>
+	rows.reduce((total, row) => total + distinctDayCount(row.schedule_days), 0);
 
 // Total expected sessions for the term — the same product the risk batch
 // uses (semester_weeks × sessions_per_week). Null until both inputs hold

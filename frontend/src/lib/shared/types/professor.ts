@@ -25,6 +25,10 @@ export interface ProfessorAssignedOffering {
 	effective_to?: string | null;
 	units?: number;
 	enrolled_count?: number;
+	// Sessions-open readiness (D82): False when the configured meetings
+	// mismatch the units requirement. Absent on old/mock payloads, which
+	// read as OK.
+	schedule_ok?: boolean;
 }
 
 export interface Professor {
@@ -74,6 +78,8 @@ export interface ProfessorCourseSummary {
 	sections: string[];
 	isPrimary: boolean;
 	enrolledCount: number;
+	// Mirrors `schedule_ok` (defaults True for payloads without it).
+	scheduleOk: boolean;
 }
 
 // GET /professor/dashboard

@@ -26,10 +26,15 @@ venv activation or `PYTHONPATH` is needed. It also defaults `DEBUG=true` and a d
 Default login: `super@attendly.demo` / `Demo!1234` (override with
 `--email`, `--password`, or `DEMO_SUPER_ADMIN_PASSWORD`; `--update-password`
 resets the password on an existing account). Safe to re-run — it reuses
-existing rows.
+existing rows. For a guaranteed-clean slate instead, reset the database
+first (`docker compose -f docker-compose.dev.yml down -v`, then `up` to
+recreate and re-migrate before seeding).
 
 This creates programs (BSCS/BSIT/BSECE) with year levels, demo courses, and
-course offerings for `1st_sem`, `2026-2027`.
+course offerings for `1st_sem`, `2026-2027`. Meeting schedules match their
+course units exactly and session counts follow the meeting days, so the demo
+opens with clean weekly-requirement panels. Re-running repairs previously
+seeded offerings to match (skipped for offerings with opened sessions).
 
 ## 3. Import the rosters (as super_admin or admin)
 

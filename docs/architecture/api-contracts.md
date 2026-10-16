@@ -272,7 +272,7 @@ Archive year level. Restrict if courses exist.
 
 ### Courses
 
-A course is a standalone reusable **template** (D44) — it carries no program, year-level, scheduling, or classroom fields. Program/year-specific instances are `CourseOfferings` (next section). It also carries no lecture/laboratory type (D77): the distinction lives on sessions (`session_type`) and offering components, so one course can mix both.
+A course is a standalone reusable **template** (D44) — it carries no program, year-level, scheduling, or classroom fields. Program/year-specific instances are `CourseOfferings` (next section). It also carries no lecture/laboratory type (D77): the distinction lives on sessions (`session_type`) and offering components, so one course can mix both. `units` are the required scheduled meeting hours per week across an offering's active components (D79); `session_duration_hours` is the default session length — the ceiling for `present + late` windows and the fallback `duration_minutes` when a professor opens a session without an override.
 
 #### `GET /admin/courses`
 
@@ -334,10 +334,10 @@ A course offering is a specific instance of a course template for a program, yea
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int, components?: [{ session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name?, classroom_lat?, classroom_lng? }] }` |
 | **Response 201** | Created course offering (with `components` + `session_types`)                                                                                                                                                                                                                                             |
-| **Errors**       | 409 `offering_exists` · 409 `component_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 404 `year_level_not_found` |
+| **Errors**       | 409 `offering_exists` · 409 `component_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 422 `weekly_hours_exceed_units` · 422 `weekly_hours_below_units` · 404 `year_level_not_found` |
 | **Notes**        | Omitting `components` creates a single lecture component mirroring the offering schedule/classroom, so pre-existing callers keep working unchanged. |
-|                  | Uniqueness is `(course_id, program_id, semester, academic_year)` — `year_level_id` is **not** part of the key, so the same course/program/term/year on a different year level still 409s. `semester` is free text with no vocabulary (`invalid_semester` is defined but unreachable); the year-terms dropdowns in the Offerings page and Setup Wizard are the only entry path (UI guidance only — free-text entry is not offered). The Setup Wizard builds the same meeting rows (up to 4) as the Offerings page modal; further meetings are added via `POST …/components` afterwards. A new offering still needs a professor assignment (`POST …/professors`) and enrollment before sessions can run. |
-|                  | Scheduling model: one row per meeting on a single day (type + day + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. `sessions_per_week` is the meeting entry count (one entry is exactly one weekly session) and the term total shown is `sessions_per_week × semester_weeks` — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. |
+|                  | Uniqueness is `(course_id, program_id, semester, academic_year)` — `year_level_id` is **not** part of the key, so the same course/program/term/year on a different year level still 409s. On 409 `offering_exists` the admin UI looks the conflicting offering up and links straight to it (it may sit under a different year level than the one filtered). `semester` is free text with no vocabulary (`invalid_semester` is defined but unreachable); the year-terms dropdowns in the Offerings page and Setup Wizard are the only entry path (UI guidance only — free-text entry is not offered). The Setup Wizard builds the same meeting rows (up to 4) as the Offerings page modal; further meetings are added via `POST …/components` afterwards. A new offering still needs a professor assignment (`POST …/professors`) and enrollment before sessions can run. |
+|                  | Scheduling model: one row per meeting (type + days + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. A multi-day meeting (e.g. MWF 08:00–09:00) is stored as a single component with a day-letter string — never fanned out into one row per day — so a time change stays atomic across its days. `sessions_per_week` is derived server-side as one session per meeting day (an `MWF` row counts 3) and re-synced on every component write; the create payload value is recomputed, and the detail Settings tab shows it read-only. The term total shown is `sessions_per_week × semester_weeks` — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. Weekly scheduled hours are Σ meeting durations × day-letter counts and must equal the course's `units` (D79): a 3-unit course holds Mon 07:00–08:30 + Tue 13:00–14:30 (3.0h) but rejects Mon 07:00–08:30 + Tue 13:00–15:00 (3.5h, 422 `weekly_hours_exceed_units`) and a lone Mon 07:00–08:30 (1.5h, 422 `weekly_hours_below_units`). Creation must land exactly; adds (and reactivations) may only converge — strictly closer without crossing sides — while plain meeting edits reshape freely so multi-step changes can pass through mismatched totals (D81). |
 
 #### `GET /admin/offerings/{offering_id}`
 
@@ -366,9 +366,9 @@ Add a scheduled component (lecture/lab) to an offering.
 | **Request**      | `{ session_type: "lecture" \| "lab", schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
 | **Response 201** | Created component                                                                                                            |
 
-| **Errors**       | 404 `offering_not_found` · 409 `component_exists` |
+| **Errors**       | 404 `offering_not_found` · 409 `component_exists` · 422 `weekly_hours_exceed_units` · 422 `weekly_hours_below_units` |
 
-| **Notes**        | When the change leaves exactly one active component, its schedule/room is mirrored onto the offering columns (the legacy display default and session fallback); with zero or several, the offering columns are left untouched. |
+| **Notes**        | When the change leaves exactly one active component, its schedule/room is mirrored onto the offering columns (the legacy display default and session fallback); with zero or several, the offering columns are left untouched. An add must meet the course's `units` (D79) or converge toward them; reactivating an archived component revalidates the same way. Plain meeting edits reshape freely (D81). |
 
 #### `PATCH /admin/offerings/{offering_id}/components/{component_id}`
 
@@ -377,7 +377,7 @@ Add a scheduled component (lecture/lab) to an offering.
 | **Request**      | Any mutable component field (`schedule_days`, `schedule_start/end_time`, `classroom_*`, `is_active`) |
 | **Response 200** | Updated component                                                        |
 
-| **Errors**       | 404 `offering_not_found` · 404 `component_not_found` · 422 `invalid_schedule_window` |
+| **Errors**       | 404 `offering_not_found` · 404 `component_not_found` · 422 `invalid_schedule_window` · 422 `weekly_hours_exceed_units` · 422 `weekly_hours_below_units` |
 
 #### `DELETE /admin/offerings/{offering_id}/components/{component_id}`
 
@@ -394,8 +394,8 @@ Archive a scheduled component (soft-delete: `is_active=false`).
 | ---------------- | ---------------------------------------------- |
 | **Request**      | Any mutable field from POST (except course_id, program_id, year_level_id, semester, academic_year) |
 | **Response 200** | Updated course offering                        |
-| **Errors**       | 404 `offering_not_found` · 422 `invalid_schedule_window` |
-| **Notes**        | `invalid_schedule_window` is 422 when the *merged* result would end at or before it starts. A PATCH that moves only `schedule_start_time` past the stored end is caught here, because the request body's own validator only sees the fields it was sent. |
+| **Errors**       | 404 `offering_not_found` · 422 `invalid_schedule_window` · 422 `schedule_mismatch` |
+| **Notes**        | `invalid_schedule_window` is 422 when the *merged* result would end at or before it starts. A PATCH that moves only `schedule_start_time` past the stored end is caught here, because the request body's own validator only sees the fields it was sent. Activation (`is_active` False → True) additionally requires the merged meeting total to equal the course units requirement exactly, including the zero-meeting case — 422 `schedule_mismatch` otherwise; deactivation and unrelated PATCHes are unaffected. |
 
 #### `DELETE /admin/offerings/{offering_id}`
 
@@ -980,8 +980,8 @@ List professor's active course assignments with program/year badges.
 |                  |                                                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | professor                                                                                                                                      |
-| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to, units, enrolled_count }], ... }` |
-| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. `units` comes from `courses.units`; `enrolled_count` is the active-enrollment count (wireframes.md 3.6 cards). |
+| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to, units, enrolled_count, schedule_ok }], ... }` |
+| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. `units` comes from `courses.units`; `enrolled_count` is the active-enrollment count (wireframes.md 3.6 cards). `schedule_ok` is False when the configured meetings mismatch the units requirement (D82) — the professor UI badges those rows and disables opening up front; rows with no configured meetings read True. |
 
 ---
 
@@ -1017,8 +1017,8 @@ Open a new attendance session.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ offering_id: int, session_type?: "lecture" \| "lab" (default "lecture"), duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
 | **Response 201** | `{ id, session_code, offering_id, session_type, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 422 `lab_coordinates_required` · 403 `not_assigned` · 404 `offering_not_found` |
-| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49). The classroom falls back payload → matching active component of the same type → offering. Laboratory sessions always enforce the geofence, so a lab open that resolves to no coordinates is rejected with `lab_coordinates_required`; lecture sessions keep coordinates optional. |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 422 `lab_coordinates_required` · 422 `offering_schedule_mismatch` · 403 `not_assigned` · 404 `offering_not_found` |
+| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49). The classroom falls back payload → matching active component of the same type → offering. Laboratory sessions always enforce the geofence, so a lab open that resolves to no coordinates is rejected with `lab_coordinates_required`; lecture sessions keep coordinates optional. Opening additionally requires the merged meeting total to equal the course units requirement (D82) — 422 `offering_schedule_mismatch` otherwise — except when no meetings are configured at all, which is exempt as legacy. Closing is never gated. |
 
 #### `GET /professor/sessions/active/{session_id}`
 

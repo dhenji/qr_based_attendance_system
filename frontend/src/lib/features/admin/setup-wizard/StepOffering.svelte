@@ -5,6 +5,7 @@
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import {
 		createOffering,
+		findConflictingOffering,
 		offeringTitle,
 	} from '$lib/features/admin/offerings/service';
 	import {
@@ -20,10 +21,14 @@
 		findDuplicateMeetings,
 		findOverlappingMeetings,
 		totalExpectedSessions,
+		weeklyHoursBreakdown,
 		weeklyMeetingHours,
+		weeklySessionCount,
 	} from '$lib/shared/utils/schedule';
 	import type { AdminCourse, AdminOffering, ProgramDetail } from '$lib/shared/types';
 	import { Routes, adminOffering } from '$lib/shared/constants/routes';
+	import { APIError } from '$lib/api/client';
+	import { WEEKLY_HOURS_CODES } from '$lib/shared/utils/deleteErrors';
 	import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
@@ -63,6 +68,9 @@
 
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
+	// 409 rescue: the conflicting offering may sit under a different year
+	// level than the one being scheduled, so link straight to it.
+	let conflictOffering = $state<AdminOffering | null>(null);
 	let lastSaved = $state<AdminOffering | null>(null);
 	let created = $state<AdminOffering[]>([]);
 	let done = $state(false);
@@ -94,16 +102,42 @@
 		courses.find((c) => String(c.id) === String(f_course_id)) ?? null
 	);
 
+	const conflictCourse = $derived.by(() => {
+		const c = conflictOffering;
+		return c ? (courses.find((x) => x.id === c.courseId) ?? null) : null;
+	});
+	const conflictYearLabel = $derived.by(() => {
+		const c = conflictOffering;
+		if (!c) return null;
+		return (
+			program?.yearLevels.find((y) => y.id === c.yearLevelId)?.label ?? `Year ${c.yearLevelId}`
+		);
+	});
+
+	const resolveConflict = async (): Promise<AdminOffering | null> => {
+		const courseId = Number(f_course_id);
+		if (!Number.isInteger(courseId) || courseId <= 0 || program === null) return null;
+		try {
+			return await findConflictingOffering({
+				course_id: courseId,
+				program_id: program.id,
+				semester: f_semester,
+				academic_year: f_academic_year,
+			});
+		} catch {
+			return null;
+		}
+	};
 	const windowBudget = $derived(
 		selectedCourse === null
 			? null
 			: Math.round(selectedCourse.sessionDurationHours * 60)
 	);
 
-	// Live schedule summary. Sessions per week is the meeting entry count
-	// (entries are single-day, so one entry is exactly one weekly session);
-	// the term total is the same product the risk batch uses as its expected
-	// session count (semester_weeks × sessions_per_week).
+	// Live schedule summary. Sessions per week is one per meeting day
+	// (entries are single-day here, so one entry is exactly one weekly
+	// session); the term total is the same product the risk batch uses as its
+	// expected session count (semester_weeks × sessions_per_week).
 	const asScheduleRows = $derived(
 		meetings.map((m) => ({
 			schedule_days: m.days,
@@ -114,7 +148,14 @@
 
 	const weeklyHours = $derived(weeklyMeetingHours(asScheduleRows));
 
-	const sessionsPerWeek = $derived(meetings.length);
+	// Units requirement (D79): the selected course's units are the required
+	// scheduled meeting hours per week. Null until a course is
+	// picked, so the banner below stays hidden instead of showing NaN.
+	const weeklyBreakdown = $derived(
+		weeklyHoursBreakdown(asScheduleRows, selectedCourse?.units ?? null)
+	);
+
+	const sessionsPerWeek = $derived(weeklySessionCount(asScheduleRows));
 
 	const expectedTotal = $derived(totalExpectedSessions(String(sessionsPerWeek), f_semester_weeks));
 
@@ -184,6 +225,7 @@
 	const submitForm = async () => {
 		if (program === null) return;
 		formError = null;
+		conflictOffering = null;
 		lastSaved = null;
 		meetingErrors = [];
 		formBusy = true;
@@ -289,6 +331,19 @@
 				formError = firstRowError;
 				return;
 			}
+			// Weekly-hours requirement (backend 422 weekly_hours_exceed_units /
+			// weekly_hours_below_units): the course's units are the required
+			// scheduled meeting hours per week. Creation carries the whole
+			// schedule, so it must match exactly. Runs after per-row
+			// validation so invalid rows (which contribute nothing to the
+			// total) cannot mask or fake the sum.
+			if (selectedCourse && weeklyBreakdown && weeklyBreakdown.status !== 'ok') {
+				formError =
+					weeklyBreakdown.status === 'over'
+						? `Weekly scheduled hours (${weeklyBreakdown.scheduled}h) exceed the ${selectedCourse.units}-unit requirement (${weeklyBreakdown.limit}h) for ${selectedCourse.courseCode} — remove or shorten a meeting.`
+						: `Weekly scheduled hours (${weeklyBreakdown.scheduled}h) fall short of the ${selectedCourse.units}-unit requirement (${weeklyBreakdown.limit}h) for ${selectedCourse.courseCode} — add or lengthen a meeting.`;
+				return;
+			}
 			const head = components[0];
 			const saved = await createOffering({
 				course_id: parsed.data.course_id,
@@ -314,7 +369,21 @@
 			notifyEntityChanged('offerings');
 			resetIdentityFields();
 		} catch (e: unknown) {
-			formError = friendlyActionError(e, 'Save failed. Please try again.');
+			// 409 rescue: the conflicting offering may sit under a different
+			// year level, so look it up and link straight to it instead of
+			// leaving a dead-end message.
+			if (e instanceof APIError && e.code === 'offering_exists') {
+				conflictOffering = await resolveConflict();
+				if (!conflictOffering) {
+					formError = friendlyActionError(e, 'Save failed. Please try again.');
+				}
+			} else if (e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code)) {
+				// Race safety: the guards above already block mismatches, but a
+				// backend 422 from another surface still shows its numbers.
+				formError = e.message;
+			} else {
+				formError = friendlyActionError(e, 'Save failed. Please try again.');
+			}
 		} finally {
 			formBusy = false;
 		}
@@ -432,6 +501,14 @@
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
 			{/if}
+			{#if conflictOffering}
+				<p class="error" role="alert">
+					{conflictCourse?.courseCode ?? `Course ${conflictOffering.courseId}`} is already
+					offered for {program?.code ?? `Program ${conflictOffering.programId}`} · {conflictOffering.semester}
+					{conflictOffering.academicYear}{conflictYearLabel ? ` under ${conflictYearLabel}` : ''}.
+					<a class="link strong" href={adminOffering(conflictOffering.id)}>Open offering</a>
+				</p>
+			{/if}
 			<div class="form">
 				<div class="grid2">
 					<label>Course
@@ -471,9 +548,17 @@
 						</p>
 					{/each}
 				{/if}
-				<p class="hint">Meetings per week: {sessionsPerWeek} (counted automatically — one per meeting above).</p>
+				<p class="hint">Meetings per week: {sessionsPerWeek} (counted automatically — one per meeting day).</p>
 				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={f_semester_weeks} placeholder="How many weeks does this term run?" /></label>
-				{#if weeklyHours > 0}
+				{#if weeklyBreakdown && weeklyHours > 0}
+					{#if weeklyBreakdown.status === 'ok'}
+						<p class="hint">{weeklyBreakdown.scheduled}h scheduled of {weeklyBreakdown.limit}h weekly requirement ({selectedCourse?.courseCode} · exact) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+					{:else if weeklyBreakdown.status === 'over'}
+						<p class="error" role="alert">{weeklyBreakdown.scheduled}h scheduled of {weeklyBreakdown.limit}h weekly requirement ({selectedCourse?.courseCode} · {-weeklyBreakdown.remaining}h over) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+					{:else}
+						<p class="error" role="alert">{weeklyBreakdown.scheduled}h scheduled of {weeklyBreakdown.limit}h weekly requirement ({selectedCourse?.courseCode} · {weeklyBreakdown.remaining}h short) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+					{/if}
+				{:else if weeklyHours > 0}
 					<p class="hint">{weeklyHours} scheduled {weeklyHours === 1 ? 'hour' : 'hours'} per week across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
 				{/if}
 				{#if expectedTotal !== null}
