@@ -18,6 +18,7 @@
 		markStudentSeen,
 		maybeNotify,
 		POLL_INTERVAL_MS,
+		truncateNotifPreview,
 	} from '$lib/features/notifications/poll';
 	import { listStudentExcuses } from '$lib/features/student/service';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -113,7 +114,7 @@
 				.map((row) => ({
 					id: row.id,
 					title: `Excuse ${row.status}`,
-					sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+					sub: truncateNotifPreview(row.reason),
 				}));
 		} catch {
 			notifPreview = [];

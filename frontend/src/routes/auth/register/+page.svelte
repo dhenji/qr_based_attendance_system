@@ -6,6 +6,7 @@
 	import { requestOtp } from '$lib/features/auth/service';
 	import { authState, defaultRouteFor, doRegister, createOtpWindow } from '$lib/features/auth/store.svelte';
 	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
+	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 
@@ -41,20 +42,10 @@
 		return () => document.removeEventListener('click', onDocClick);
 	});
 
-	// Mirrors shared/validators.py:password_strength plus the 8-char minimum.
-	// The symbol rule excludes whitespace, because the backend counts a symbol as
-	// "not alphanumeric and not a space" — a bare space must not satisfy it.
-	const passwordChecks = $derived({
-		length: password.length >= 8,
-		upper: /[A-Z]/.test(password),
-		lower: /[a-z]/.test(password),
-		number: /\d/.test(password),
-		symbol: /[^A-Za-z0-9\s]/.test(password),
-	});
-	const passwordOk = $derived(
-		passwordChecks.length && passwordChecks.upper && passwordChecks.lower &&
-		passwordChecks.number && passwordChecks.symbol
-	);
+	// Password policy lives in lib/shared/utils/password.ts (mirrors the
+	// backend) — derived here so the checklist can never drift.
+	const passwordChecks = $derived(evaluatePassword(password));
+	const passwordOk = $derived(isPasswordStrong(passwordChecks));
 
 	onDestroy(() => {
 		win.stop();

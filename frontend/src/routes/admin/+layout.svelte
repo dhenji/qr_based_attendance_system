@@ -15,7 +15,7 @@
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
 	import { listAdminExcuses } from '$lib/features/admin/excuses/service';
-	import { POLL_INTERVAL_MS } from '$lib/features/notifications/poll';
+	import { POLL_INTERVAL_MS, truncateNotifPreview } from '$lib/features/notifications/poll';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -65,7 +65,7 @@
 			notifPreview = (result.items ?? []).map((row) => ({
 				id: row.id,
 				title: `Excuse request #${row.id}`,
-				sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+				sub: truncateNotifPreview(row.reason),
 			}));
 		} catch {
 			notifPreview = [];

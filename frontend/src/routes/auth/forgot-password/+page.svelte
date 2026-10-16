@@ -9,6 +9,7 @@
 	} from '$lib/features/auth/service';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { defaultRouteFor, doResetPassword, createOtpWindow } from '$lib/features/auth/store.svelte';
+	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 
@@ -49,15 +50,9 @@
 		newPwd !== '' && confirmPwd !== '' ? newPwd === confirmPwd : null
 	);
 
-	const req = $derived({
-		length: newPwd.length >= 8,
-		upper: /[A-Z]/.test(newPwd),
-		lower: /[a-z]/.test(newPwd),
-		number: /\d/.test(newPwd),
-		symbol: /[^A-Za-z0-9\s]/.test(newPwd),
-	});
+	const req = $derived(evaluatePassword(newPwd));
 
-	const allReqsMet = $derived(req.length && req.upper && req.lower && req.number && req.symbol);
+	const allReqsMet = $derived(isPasswordStrong(req));
 	let success = $state(false);
 	let successTimer: ReturnType<typeof setTimeout> | null = null;
 

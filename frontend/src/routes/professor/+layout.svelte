@@ -17,6 +17,7 @@
 		getProfessorPendingCount,
 		maybeNotify,
 		POLL_INTERVAL_MS,
+		truncateNotifPreview,
 	} from '$lib/features/notifications/poll';
 	import { listExcuseRequests } from '$lib/features/excuse/service';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -72,7 +73,7 @@
 			notifPreview = result.items.map((row) => ({
 				id: row.id,
 				title: `${row.studentName} — ${row.courseCode}`,
-				sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+				sub: truncateNotifPreview(row.reason),
 			}));
 		} catch {
 			notifPreview = [];

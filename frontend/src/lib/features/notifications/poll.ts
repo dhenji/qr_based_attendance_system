@@ -16,6 +16,13 @@ import { listStudentExcuses } from '$lib/features/student/service';
 
 export const POLL_INTERVAL_MS = 60_000;
 
+// Bell preview truncation, shared so the student/professor/admin layouts can
+// never drift apart (previously the same 60-char slice lived in 3 files).
+export const NOTIF_PREVIEW_MAX_LENGTH = 60;
+
+export const truncateNotifPreview = (reason: string, max: number = NOTIF_PREVIEW_MAX_LENGTH): string =>
+	reason.length > max ? `${reason.slice(0, max)}…` : reason;
+
 const STUDENT_SEEN_KEY = 'notif_student_excuse_seen';
 
 const readSeen = (): string | null => {

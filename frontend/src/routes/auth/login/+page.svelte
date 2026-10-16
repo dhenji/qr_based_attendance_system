@@ -15,6 +15,7 @@
 		doMfaVerify,
 	} from '$lib/features/auth/store.svelte';
 	import { createOtpWindow } from '$lib/features/auth/store.svelte';
+	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
@@ -48,17 +49,11 @@
 		win.stop();
 	});
 
-	// Same policy the backend enforces in shared/validators.password_strength:
-	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.
-	// A space is not a symbol server-side, so it is excluded here too.
-	const passwordReq = $derived({
-		length: newPassword.length >= 8,
-		upper: /[A-Z]/.test(newPassword),
-		lower: /[a-z]/.test(newPassword),
-		number: /\d/.test(newPassword),
-		symbol: /[^A-Za-z0-9\s]/.test(newPassword),
-	});
-	const passwordOk = $derived(Object.values(passwordReq).every(Boolean));
+	// Same policy the backend enforces in shared/validators.password_strength
+	// (see lib/shared/utils/password.ts) — derived here so the checklist can
+	// never drift from the other signup/recovery forms.
+	const passwordReq = $derived(evaluatePassword(newPassword));
+	const passwordOk = $derived(isPasswordStrong(passwordReq));
 	const passwordsMatch = $derived(newPassword === confirmPassword);
 
 	const describe = (e: unknown, fallback: string) => toAuthMessage(e, fallback);
