@@ -63,7 +63,19 @@
 	const offeringId = $derived(Number(page.params.id));
 	const offering = $derived(adminOfferingDetailState.offering);
 
-	let tab = $state<'overview' | 'professors' | 'enrolled' | 'settings'>('overview');
+	type OfferingTab = 'overview' | 'professors' | 'enrolled' | 'settings';
+	const OFFERING_TABS: OfferingTab[] = ['overview', 'professors', 'enrolled', 'settings'];
+
+	// Deep-linkable tabs (?tab=professors) so the Setup Wizard completion
+	// screen can point at the next step directly. Read once on entry (same
+	// convention as ?offering= on professor session create); in-page tab
+	// clicks stay local state. Unknown values fall back to overview.
+	const initialTab = (): OfferingTab => {
+		const raw = page.url.searchParams.get('tab');
+		return OFFERING_TABS.includes(raw as OfferingTab) ? (raw as OfferingTab) : 'overview';
+	};
+
+	let tab = $state<OfferingTab>(initialTab());
 
 	let course = $state<AdminCourse | null>(null);
 	let programCode = $state<string | null>(null);

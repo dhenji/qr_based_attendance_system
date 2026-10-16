@@ -49,6 +49,8 @@ const ACTION_ERROR_MESSAGES: Record<string, string> = {
 	professor_email_exists: 'That email is already on the roster. Try a different email.',
 	course_code_exists: 'That course code already exists. Pick a different code.',
 	offering_exists: 'That offering already exists for this term. Adjust the schedule or term.',
+	component_exists:
+		'That meeting duplicates an existing one for this offering. Change the type, days, or time.',
 	program_code_exists: 'That program code already exists. Pick a different code.',
 	year_number_exists: 'That year level already exists for this program.',
 };
