@@ -15,9 +15,9 @@ import type {
 	AdminRosterItem,
 } from '$lib/shared/types';
 import {
-	archiveOffering,
 	assignProfessor,
 	bulkEnroll,
+	deleteOffering,
 	endAssignment,
 	getOffering,
 	getRoster,
@@ -31,6 +31,7 @@ import type {
 	AdminAssignmentCreatePayload,
 	AdminOfferingUpdatePayload,
 } from '$lib/shared/types';
+import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export const adminOfferingsState = $state({
@@ -109,14 +110,19 @@ export const toggleOfferingActive = async (offering: AdminOffering): Promise<voi
 	}
 };
 
-export const archiveAdminOffering = async (offering: AdminOffering): Promise<void> => {
+export const deleteArchivedOffering = async (id: number): Promise<void> => {
 	adminOfferingsState.actionError = null;
 	try {
-		await archiveOffering(offering.id);
+		await deleteOffering(id);
+		// Deleting the last row on a page > 1 would leave an empty page —
+		// step back first so the refresh lands on a populated one.
+		if (adminOfferingsState.items.length === 1 && adminOfferingsState.page > 1) {
+			adminOfferingsState.page -= 1;
+		}
 		await refreshAdminOfferings();
 		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
-		adminOfferingsState.actionError = toMessage(e, 'Failed to archive offering');
+		adminOfferingsState.actionError = friendlyDeleteError(e, 'Failed to delete offering');
 		throw e;
 	}
 };

@@ -12,9 +12,10 @@
 // so search + Code/Name sorts run client-side over the loaded page (same
 // convention as programs).
 //
-// Status semantics: Deactivate/Reactivate PATCHes is_active. DELETE archives
-// (soft, is_active=false, 204) — same effect, kept as a separate call so the
-// UI can offer both like the students/professors slices do.
+// Status semantics (ADR-058): Deactivate/Reactivate PATCHes is_active.
+// DELETE /admin/courses/{id} is a permanent delete guarded server-side —
+// only archived courses with no offerings go through (409 `not_archived` /
+// `course_has_offerings`). Archive via PATCH, like programs.
 
 import { del, get, getText, patch, post, postForm, TEXT_EXPORTS } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
@@ -101,8 +102,9 @@ export const updateCourse = async (
 export const setCourseActive = async (id: number, isActive: boolean): Promise<AdminCourse> =>
 	updateCourse(id, { is_active: isActive });
 
-// Soft archive — 204, flips is_active=false server-side.
-export const archiveCourse = async (id: number): Promise<void> => {
+// Permanent delete — 409 `not_archived` when still active,
+// `course_has_offerings` when offerings still reference the template.
+export const deleteCourse = async (id: number): Promise<void> => {
 	await del<void>('adminCourseDetail', undefined, `/${id}`);
 };
 

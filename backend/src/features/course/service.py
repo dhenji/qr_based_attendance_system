@@ -12,10 +12,16 @@ from features.course.exceptions import (
     ComponentExistsException,
     ComponentNotFoundException,
     CourseCodeExistsException,
+    CourseHasOfferingsException,
+    CourseNotArchivedException,
     CourseNotFoundException,
     EnrollmentNotFoundException,
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
+    OfferingHasAssignmentsException,
+    OfferingHasEnrollmentsException,
+    OfferingHasSessionsException,
+    OfferingNotArchivedException,
     OfferingNotFoundException,
     OfferingScheduleWindowException,
     WindowsExceedDurationException,
@@ -45,6 +51,7 @@ from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
 from features.professor.exceptions import ProfessorNotFoundException
 from features.professor.model import Professor
+from features.session.model import Session
 from features.program.exceptions import (
     ProgramNotFoundException,
     YearLevelNotFoundException,
@@ -362,21 +369,41 @@ class CourseService:
 
         return CourseRead.model_validate(course)
 
-    async def archive(self, *, course_id: int, actor_id: int | None = None) -> None:
+    async def hard_delete(
+        self, *, course_id: int, actor_id: int | None = None
+    ) -> None:
+        """Permanently delete an archived course with no offerings."""
         course: Course = await self._get_or_404(course_id)
+
+        if course.is_active:
+            raise CourseNotArchivedException(course.id)
+
+        offering_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseOffering)
+                .where(CourseOffering.course_id == course_id)
+            )
+            or 0
+        )
+
+        if offering_count > 0:
+            raise CourseHasOfferingsException(course_id)
+
+        # Snapshot before the delete: the instance is detached once flushed.
         old_value = self._course_snapshot(course)
-        course.is_active = False
-        await self._session.flush()
 
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action=AuditAction.ARCHIVE,
+            action=AuditAction.DELETE,
             entity_type=AuditEntity.COURSE,
             entity_id=course.id,
             old_value=old_value,
-            new_value=self._course_snapshot(course),
         )
+
+        await self._session.delete(course)
+        await self._session.flush()
 
     async def import_roster(
         self, *, content: bytes, actor_id: int | None
@@ -615,23 +642,84 @@ class CourseService:
 
         return await self._to_offering_read(offering)
 
-    async def archive_offering(
+    async def hard_delete_offering(
         self, *, offering_id: int, actor_id: int | None = None
     ) -> None:
+        """Permanently delete an archived offering with no dependents.
+
+        Guards run in FK order — enrollments, sessions, assignments — before
+        the delete, so a `RESTRICT` violation can never surface as a 500.
+        Components are owned by the offering and are removed with it once the
+        guards above are proven empty.
+        """
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
+
+        if offering.is_active:
+            raise OfferingNotArchivedException(offering.id)
+
+        enrollment_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Enrollment)
+                .where(Enrollment.offering_id == offering_id)
+            )
+            or 0
+        )
+
+        if enrollment_count > 0:
+            raise OfferingHasEnrollmentsException(offering_id)
+
+        session_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Session)
+                .where(Session.offering_id == offering_id)
+            )
+            or 0
+        )
+
+        if session_count > 0:
+            raise OfferingHasSessionsException(offering_id)
+
+        assignment_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseProfessor)
+                .where(CourseProfessor.offering_id == offering_id)
+            )
+            or 0
+        )
+
+        if assignment_count > 0:
+            raise OfferingHasAssignmentsException(offering_id)
+
+        # Snapshot before the delete: the instance is detached once flushed.
         old_value = self._offering_snapshot(offering)
-        offering.is_active = False
-        await self._session.flush()
 
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action=AuditAction.ARCHIVE,
+            action=AuditAction.DELETE,
             entity_type=AuditEntity.COURSE_OFFERING,
             entity_id=offering.id,
             old_value=old_value,
-            new_value=self._offering_snapshot(offering),
         )
+
+        # Components have no meaning without their offering — remove them with
+        # it now that enrollments/sessions/assignments are proven empty.
+        components: Sequence[OfferingComponent] = (
+            await self._session.scalars(
+                select(OfferingComponent).where(
+                    OfferingComponent.offering_id == offering_id
+                )
+            )
+        ).all()
+
+        for component in components:
+            await self._session.delete(component)
+
+        await self._session.delete(offering)
+        await self._session.flush()
 
     # -- professor assignments -------------------------------------------
 

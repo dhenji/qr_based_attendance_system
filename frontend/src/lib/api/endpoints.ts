@@ -1701,8 +1701,9 @@ export const AdminOfferingsEndpoint: EndpointDef<Paginated<AdminOfferingResponse
 // "" on the backend (no trailing slash); detail routes pass the id via the
 // client's `suffix` option (e.g. `/3`). The list query takes only
 // ?is_active&page&size — search + Code/Name sorts run client-side over the
-// loaded page (same convention as programs). DELETE is a soft archive
-// (is_active=false, 204), toggled in the UI the same way.
+// loaded page (same convention as programs). DELETE is a permanent delete
+// guarded server-side — only archived courses with no offerings go through
+// (409 `not_archived` / `course_has_offerings`).
 
 const MOCK_ADMIN_COURSE_ROWS: AdminCourseResponse[] = [
 	{
@@ -1814,7 +1815,9 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 	method: 'GET',
 	mock: (_params, suffix, body, method) => {
 		if (method === 'DELETE') {
-			findMockCourseRow(suffix).is_active = false;
+			const row = findMockCourseRow(suffix);
+			if (row.is_active) throw new Error('Only inactive courses can be deleted.');
+			MOCK_ADMIN_COURSE_ROWS.splice(MOCK_ADMIN_COURSE_ROWS.indexOf(row), 1);
 			return undefined as unknown as AdminCourseResponse;
 		}
 		if (method === 'PATCH') {
@@ -2043,7 +2046,9 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 	method: 'GET',
 	mock: (_params, suffix, body, method) => {
 		if (method === 'DELETE') {
-			findMockOfferingRow(suffix).is_active = false;
+			const row = findMockOfferingRow(suffix);
+			if (row.is_active) throw new Error('Only inactive offerings can be deleted.');
+			MOCK_ADMIN_OFFERINGS.splice(MOCK_ADMIN_OFFERINGS.indexOf(row), 1);
 			return undefined as unknown as AdminOfferingResponse;
 		}
 		if (method === 'PATCH') {

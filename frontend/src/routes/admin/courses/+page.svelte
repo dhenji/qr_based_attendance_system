@@ -4,6 +4,7 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminCoursesState,
+		deleteArchivedCourse,
 		initAdminCourses,
 		refreshAdminCourses,
 		toggleCourseActive,
@@ -29,8 +30,9 @@
 	// endpoint takes no search/sort params, so the search box and Code/Name
 	// header toggles filter/sort client-side over the loaded page while the
 	// status filter goes to the server (?is_active). Deactivate/Reactivate
-	// PATCHes is_active; archiving (DELETE, same soft effect) lives on the
-	// course detail page.
+	// PATCHes is_active; Delete permanently removes an archived course
+	// (DELETE /admin/courses/{id}, blocked with 409 while offerings still
+	// reference it).
 
 	let search = $state('');
 	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
@@ -39,6 +41,9 @@
 	let editing = $state<AdminCourse | null>(null);
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
+
+	let deleteTarget = $state<AdminCourse | null>(null);
+	let deleteBusy = $state(false);
 
 	let f_code = $state('');
 	let f_name = $state('');
@@ -194,6 +199,22 @@
 			formBusy = false;
 		}
 	};
+
+	const confirmDelete = async () => {
+		if (!deleteTarget) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedCourse(deleteTarget.id);
+			deleteTarget = null;
+		} finally {
+			deleteBusy = false;
+		}
+	};
+
+	const closeDelete = () => {
+		adminCoursesState.actionError = null;
+		deleteTarget = null;
+	};
 </script>
 
 <div class="page">
@@ -240,7 +261,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminCoursesState.loading}>
-			{#if adminCoursesState.actionError}
+			{#if adminCoursesState.actionError && !deleteTarget}
 				<p class="error" role="alert">{adminCoursesState.actionError}</p>
 			{/if}
 			<table>
@@ -283,6 +304,14 @@
 								>
 									{c.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
+								{#if !c.isActive}
+									<button
+										class="link danger"
+										onclick={() => { adminCoursesState.actionError = null; deleteTarget = c; }}
+									>
+										Delete
+									</button>
+								{/if}
 							</td>
 						</tr>
 					{/each}
@@ -336,6 +365,35 @@
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-course" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-course-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDelete }}
+		>
+			<h2 id="delete-course-title" class="modal-title">Permanently delete {deleteTarget.courseCode}?</h2>
+			<p class="modal-text">
+				{deleteTarget.courseName} will be removed for good.
+				If offerings still use it, deletion will be blocked
+				and the course stays archived.
+			</p>
+			{#if adminCoursesState.actionError}
+				<p class="error" role="alert">{adminCoursesState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDelete}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -489,6 +547,10 @@
 		text-decoration: underline;
 	}
 
+	.link.danger {
+		color: var(--danger);
+	}
+
 	.link.strong {
 		font-size: 0.875rem;
 		font-weight: 700;
@@ -573,6 +635,12 @@
 		color: var(--text-secondary);
 	}
 
+	.btn-danger {
+		background: var(--danger);
+		border: 1px solid var(--danger);
+		color: var(--on-brand);
+	}
+
 	.modal-overlay {
 		position: fixed;
 		inset: 0;
@@ -601,6 +669,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.form {

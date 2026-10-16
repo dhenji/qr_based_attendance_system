@@ -5,6 +5,7 @@
 	import DayPicker from '$lib/components/DayPicker.svelte';
 	import {
 		adminOfferingsState,
+		deleteArchivedOffering,
 		initAdminOfferings,
 		refreshAdminOfferings,
 		toggleOfferingActive,
@@ -53,6 +54,9 @@
 	let formOpen = $state(false);
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
+
+	let deleteTarget = $state<AdminOffering | null>(null);
+	let deleteBusy = $state(false);
 
 	// Create-form fields (strings for inputs; ids coerced by zod on submit).
 	// Meetings (D77): one row per weekly meeting, each with its own type,
@@ -399,6 +403,22 @@
 		}
 	};
 
+	const confirmDelete = async () => {
+		if (!deleteTarget) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedOffering(deleteTarget.id);
+			deleteTarget = null;
+		} finally {
+			deleteBusy = false;
+		}
+	};
+
+	const closeDelete = () => {
+		adminOfferingsState.actionError = null;
+		deleteTarget = null;
+	};
+
 	const rowTitle = (o: AdminOffering) => offeringTitle(o);
 </script>
 
@@ -485,7 +505,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminOfferingsState.loading}>
-			{#if adminOfferingsState.actionError}
+			{#if adminOfferingsState.actionError && !deleteTarget}
 				<p class="error" role="alert">{adminOfferingsState.actionError}</p>
 			{/if}
 			<table>
@@ -536,6 +556,14 @@
 								>
 									{o.isActive ? 'Deactivate' : 'Reactivate'}
 								</button>
+								{#if !o.isActive}
+									<button
+										class="link danger"
+										onclick={() => { adminOfferingsState.actionError = null; deleteTarget = o; }}
+									>
+										Delete
+									</button>
+								{/if}
 							</td>
 						</tr>
 					{/each}
@@ -664,6 +692,35 @@
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-offering" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-offering-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDelete }}
+		>
+			<h2 id="delete-offering-title" class="modal-title">Permanently delete this offering?</h2>
+			<p class="modal-text">
+				{rowTitle(deleteTarget)} will be removed for good, along with its meetings.
+				If students, sessions, or professor assignments still use it, deletion will be blocked
+				and the offering stays archived.
+			</p>
+			{#if adminOfferingsState.actionError}
+				<p class="error" role="alert">{adminOfferingsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDelete}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -833,6 +890,10 @@
 		text-decoration: underline;
 	}
 
+	.link.danger {
+		color: var(--danger);
+	}
+
 	.link.strong {
 		font-size: 0.875rem;
 		font-weight: 700;
@@ -917,6 +978,12 @@
 		color: var(--text-secondary);
 	}
 
+	.btn-danger {
+		background: var(--danger);
+		border: 1px solid var(--danger);
+		color: var(--on-brand);
+	}
+
 	.form-label {
 		font-size: 0.8125rem;
 		font-weight: 600;
@@ -986,6 +1053,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.form {

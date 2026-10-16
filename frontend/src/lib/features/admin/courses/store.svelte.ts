@@ -9,11 +9,12 @@
 
 import type { AdminCourse, AdminCourseFilters } from '$lib/shared/types';
 import {
-	archiveCourse,
+	deleteCourse,
 	getCourse,
 	listCourses,
 	setCourseActive,
 } from '$lib/features/admin/courses/service';
+import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 
 export type CourseSortColumn = 'code' | 'name';
@@ -90,14 +91,19 @@ export const toggleCourseActive = async (course: AdminCourse): Promise<void> => 
 	}
 };
 
-export const archiveAdminCourse = async (course: AdminCourse): Promise<void> => {
+export const deleteArchivedCourse = async (id: number): Promise<void> => {
 	adminCoursesState.actionError = null;
 	try {
-		await archiveCourse(course.id);
+		await deleteCourse(id);
+		// Deleting the last row on a page > 1 would leave an empty page —
+		// step back first so the refresh lands on a populated one.
+		if (adminCoursesState.items.length === 1 && adminCoursesState.page > 1) {
+			adminCoursesState.page -= 1;
+		}
 		await refreshAdminCourses();
 		notifyEntityChanged('courses');
 	} catch (e: unknown) {
-		adminCoursesState.actionError = toMessage(e, 'Failed to archive course');
+		adminCoursesState.actionError = friendlyDeleteError(e, 'Failed to delete course');
 		throw e;
 	}
 };
