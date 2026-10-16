@@ -774,7 +774,9 @@
 					Phase 2: blink once for face liveness — then the head-tilt check
 					starts automatically (left, center, right, center).
 					Your result is submitted to the attendance service for verification.
-					The face-match score is provisional while server-side matching lands.
+					The face-match score sent with your scan is a provisional client
+					value while server-side matching lands — what is verified today
+					is your liveness evidence.
 				</p>
 				{#if submitting}
 					<p class="footnote">Submitting attendance…</p>
@@ -831,6 +833,7 @@
 					<p class="result-line">{formatTime(scannedAt)}</p>
 				{/if}
 				<p class="verified">Liveness evidence accepted</p>
+				<p class="result-line">Face match provisional — liveness verified</p>
 				{#if countdown > 0}
 					<p class="auto-dismiss">Auto-dismissing in {countdown}s...</p>
 				{:else}
