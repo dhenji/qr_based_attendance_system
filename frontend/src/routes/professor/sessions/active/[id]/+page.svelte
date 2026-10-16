@@ -731,7 +731,7 @@
 						<p class="error" role="alert">{excuseError}</p>
 					{/if}
 					<label class="field">
-						Reason (min 10 characters)
+						Reason (min {EXCUSE_REASON_MIN_LENGTH} characters)
 						<textarea class="form-input" rows="3" bind:value={excuseReason}></textarea>
 					</label>
 					<div class="modal-actions">
@@ -765,7 +765,7 @@
 						<p class="error" role="alert">{bulkError}</p>
 					{/if}
 					<label class="field">
-						Reason (min 10 characters)
+						Reason (min {EXCUSE_REASON_MIN_LENGTH} characters)
 						<textarea class="form-input" rows="3" bind:value={bulkReason}></textarea>
 					</label>
 					<div class="modal-actions">

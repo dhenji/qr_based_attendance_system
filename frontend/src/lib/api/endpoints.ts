@@ -623,10 +623,11 @@ export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
 
 // Student excuse requests — live on features/excuse/student_router.py.
 // Submit creates a pending request (201); the professor reviews it in the
-// queue. Reason floor is 20 chars here (REASON_MIN_LENGTH_STUDENT), not the
-// professor 10. Attachments ride presigned-upload URLs (D24): the client
-// mints a URL per file, PUTs the bytes itself, then submits the returned
-// object_urls (1..5). Reason-only submits stay valid (pending without files).
+// queue. Reason floor is STUDENT_EXCUSE_REASON_MIN_LENGTH (student/service),
+// not the professor 10. Attachments ride presigned-upload URLs (D24): the
+// client mints a URL per file, PUTs the bytes itself, then submits the
+// returned object_urls (up to ATTACHMENTS_MAX_FILES). Reason-only submits
+// stay valid (pending without files).
 // List/detail read the student's own rows (a 404 doubles as not-yours).
 export interface StudentExcuseSubmitBody {
 	session_id: number;

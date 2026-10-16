@@ -6,6 +6,8 @@
 		getSchedule,
 		getSessionHistory,
 		listStudentExcuses,
+		STUDENT_EXCUSE_REASON_MIN_LENGTH,
+		STUDENT_EXCUSE_REASON_SHORT_MESSAGE,
 		submitStudentExcuse,
 		type StudentExcuseRequest,
 		type StudentHistoryRow,
@@ -363,8 +365,8 @@
 	// Student excuse requests (Path C submit side). Only absent/late/rejected
 	// rows are excusable server-side (422 excuse_not_eligible otherwise); a
 	// second submit while one is pending fails with 409 duplicate_excuse.
-	// Reason floor is 20 chars (REASON_MIN_LENGTH_STUDENT). Evidence files
-	// (up to 5) upload via the D24 presigned flow before submit.
+	// Reason floor is STUDENT_EXCUSE_REASON_MIN_LENGTH. Evidence files (up to
+	// ATTACHMENTS_MAX_FILES) upload via the D24 presigned flow before submit.
 	const canRequestExcuse = (status: Status): boolean =>
 		status === 'absent' || status === 'late' || status === 'rejected';
 
@@ -438,8 +440,8 @@
 	const submitExcuse = async () => {
 		if (!excuseTarget || excuseBusy) return;
 		const reason = excuseReason.trim();
-		if (reason.length < 20) {
-			excuseError = 'Reason must be at least 20 characters.';
+		if (reason.length < STUDENT_EXCUSE_REASON_MIN_LENGTH) {
+			excuseError = STUDENT_EXCUSE_REASON_SHORT_MESSAGE;
 			return;
 		}
 		excuseBusy = true;
@@ -737,7 +739,7 @@
 				<p class="modal-sub">
 					{excuseTarget.course} · {excuseTarget.date} {excuseTarget.time} · currently {excuseTarget.status}
 				</p>
-				<label class="form-label" for="excuse-reason">Reason (min 20 characters)</label>
+				<label class="form-label" for="excuse-reason">Reason (min {STUDENT_EXCUSE_REASON_MIN_LENGTH} characters)</label>
 				<textarea
 					id="excuse-reason"
 					class="form-input area"

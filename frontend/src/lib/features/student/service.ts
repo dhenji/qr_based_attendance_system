@@ -27,6 +27,7 @@ import type {
 } from '$lib/shared/types';
 import type { LivenessEvidence } from '$lib/shared/types';
 import { submitAttendanceScan } from '$lib/features/liveness/service';
+import { ATTACHMENTS_MAX_FILES } from '$lib/features/excuse/attachments';
 import { isWithinGeofence } from '$lib/shared/utils/geo';
 
 // Profile view-model assembled from GET /student/profile.
@@ -245,10 +246,11 @@ export const getDashboard = async (): Promise<StudentDashboardResponse> => {
 
 // Student excuse requests — live on features/excuse/student_router.py.
 // Submit creates a pending professor-reviewed request (201); list reads the
-// student's own rows newest-first. Reason floor is 20 chars
-// (REASON_MIN_LENGTH_STUDENT). Attachments ride presigned-upload URLs (D24):
-// pass object_urls from the attachments helper (1..5); reason-only submits
-// stay valid (pending without files).
+// student's own rows newest-first. Reason floor is
+// STUDENT_EXCUSE_REASON_MIN_LENGTH. Attachments ride presigned-upload URLs
+// (D24): pass object_urls from the attachments helper (up to
+// ATTACHMENTS_MAX_FILES); reason-only submits stay valid (pending without
+// files).
 // Real API by default; deterministic mocks only when PUBLIC_MOCK_MODE=true.
 export interface StudentExcuseRequest {
 	id: number;
@@ -272,15 +274,30 @@ const toStudentExcuse = (item: StudentExcuseItemResponse): StudentExcuseRequest 
 	attachmentUrls: [...(item.attachment_urls ?? [])],
 });
 
+// Single home for the student excuse-reason rule (Path C submit side: min
+// 20 chars — longer than the professor-side 10 because the student text is
+// the review basis). The history page pre-check goes through here too so the
+// client message can never drift from itself; a server 422 still surfaces
+// verbatim via the thrown APIError.
+export const STUDENT_EXCUSE_REASON_MIN_LENGTH = 20;
+export const STUDENT_EXCUSE_REASON_SHORT_MESSAGE = `Reason must be at least ${STUDENT_EXCUSE_REASON_MIN_LENGTH} characters.`;
+
+export const requireStudentExcuseReason = (reason: string): string => {
+	const clean = reason.trim();
+	if (clean.length < STUDENT_EXCUSE_REASON_MIN_LENGTH)
+		throw new Error(STUDENT_EXCUSE_REASON_SHORT_MESSAGE);
+	return clean;
+};
+
 export const submitStudentExcuse = async (input: {
 	sessionId: number;
 	reason: string;
 	attachmentUrls?: string[];
 }): Promise<StudentExcuseRequest> => {
-	const reason = input.reason.trim();
-	if (reason.length < 20) throw new Error('Reason must be at least 20 characters.');
+	const reason = requireStudentExcuseReason(input.reason);
 	const urls = [...(input.attachmentUrls ?? [])];
-	if (urls.length > 5) throw new Error('At most 5 files can be attached.');
+	if (urls.length > ATTACHMENTS_MAX_FILES)
+		throw new Error(`At most ${ATTACHMENTS_MAX_FILES} files can be attached.`);
 	const body: StudentExcuseSubmitBody = { session_id: input.sessionId, reason };
 	if (urls.length > 0) body.attachment_urls = urls;
 	const response = await post<StudentExcuseSubmitResponse>('studentExcuseSubmit', body);
