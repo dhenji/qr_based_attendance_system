@@ -12,6 +12,7 @@
 		adminUsersState,
 		deactivateAdminUser,
 		initAdminUsers,
+		reactivateAdminUser,
 		refreshAdminUsers,
 	} from '$lib/features/admin/store.svelte';
 	import { createUser, resetUserPassword } from '$lib/features/admin/service';
@@ -25,11 +26,9 @@
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// User Management (super_admin only, wireframe 4.13): wraps
-	// GET/POST /admin/users, PATCH /{id}/deactivate, and
-	// POST /{id}/reset-password. Plain admins never see this page — the layout
-	// hides the nav item and this guard bounces them to the dashboard. Still no
-	// edit/reactivate/delete: the backend mounts no such routes, so the UI
-	// omits the buttons rather than calling 404s.
+	// GET/POST /admin/users, PATCH /{id}/deactivate, PATCH /{id}/reactivate,
+	// and POST /{id}/reset-password. Plain admins never see this page — the
+	// layout hides the nav item and this guard bounces them to the dashboard.
 
 	let search = $state('');
 	let roleFilter = $state<'all' | AdminUserRole>('all');
@@ -40,6 +39,8 @@
 	let formBusy = $state(false);
 	let deactivateTarget = $state<AdminUser | null>(null);
 	let deactivateBusy = $state(false);
+	let reactivateTarget = $state<AdminUser | null>(null);
+	let reactivateBusy = $state(false);
 	let createdTemp = $state<{ email: string; tempPassword: string } | null>(null);
 	let copied = $state(false);
 	// Credential reset; shares TempPasswordModal with the students and
@@ -161,6 +162,17 @@
 		}
 	};
 
+	const confirmReactivate = async () => {
+		if (!reactivateTarget) return;
+		reactivateBusy = true;
+		try {
+			await reactivateAdminUser(reactivateTarget);
+			reactivateTarget = null;
+		} finally {
+			reactivateBusy = false;
+		}
+	};
+
 	const copyTemp = async () => {
 		if (!createdTemp) return;
 		try {
@@ -176,7 +188,7 @@
 	<header class="header">
 		<div>
 			<h1>User Management</h1>
-			<p class="muted">Super-admin only · create and deactivate accounts · {adminUsersState.total} total</p>
+			<p class="muted">Super-admin only · create, deactivate, and reactivate accounts · {adminUsersState.total} total</p>
 		</div>
 		<div class="header-actions">
 			<button class="btn btn-primary" data-testid="add-user" onclick={openCreate}>
@@ -258,7 +270,9 @@
 										</button>
 									{/if}
 								{:else}
-									<span class="hint">Deactivated</span>
+									<button class="link" onclick={() => (reactivateTarget = u)}>
+										Reactivate
+									</button>
 								{/if}
 								<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
 							</td>
@@ -342,8 +356,7 @@
 			<h2 id="deactivate-title" class="modal-title">Deactivate account?</h2>
 			<p class="modal-text">
 				{displayName(deactivateTarget)} ({deactivateTarget.email}) will lose access
-				immediately. This cannot be undone from the UI — there is no reactivate
-				endpoint.
+				immediately. You can reactivate the account later from this page.
 			</p>
 			{#if adminUsersState.actionError}
 				<p class="error" role="alert">{adminUsersState.actionError}</p>
@@ -352,6 +365,34 @@
 				<button class="btn btn-ghost" onclick={() => (deactivateTarget = null)}>Cancel</button>
 				<button class="btn btn-danger" disabled={deactivateBusy} onclick={confirmDeactivate}>
 					{deactivateBusy ? 'Deactivating…' : 'Deactivate'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reactivate-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reactivateBusy ? undefined : (reactivateTarget = null)) }}
+		>
+			<h2 id="reactivate-title" class="modal-title">Reactivate account?</h2>
+			<p class="modal-text">
+				{displayName(reactivateTarget)} ({reactivateTarget.email}) will regain access
+				immediately. Their password, MFA settings, and role are unchanged.
+			</p>
+			{#if adminUsersState.actionError}
+				<p class="error" role="alert">{adminUsersState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (reactivateTarget = null)}>Cancel</button>
+				<button class="btn btn-primary" disabled={reactivateBusy} onclick={confirmReactivate}>
+					{reactivateBusy ? 'Reactivating…' : 'Reactivate'}
 				</button>
 			</div>
 		</div>

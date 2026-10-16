@@ -209,6 +209,10 @@
 			<p class="muted">Programs own year levels; courses attach via offerings · {adminProgramsState.total} total</p>
 		</div>
 		<div class="header-actions">
+			<button class="btn btn-secondary" data-testid="import" onclick={() => goto(Routes.ADMIN_PROGRAMS_IMPORT)}>
+				<AppIcon name="file" size={18} />
+				Import
+			</button>
 			<button class="btn btn-primary" data-testid="add-program" onclick={openCreate}>
 				<AppIcon name="plus" size={18} />
 				Add Program

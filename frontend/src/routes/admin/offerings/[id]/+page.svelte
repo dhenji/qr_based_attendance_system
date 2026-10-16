@@ -2,7 +2,6 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import DayPicker from '$lib/components/DayPicker.svelte';
 	import {
 		adminOfferingDetailState,
 		assignOfferingProfessor,
@@ -18,13 +17,17 @@
 	import {
 		archiveOffering,
 		buildEnrollCsv,
+		archiveComponent,
+		createComponent,
 		setOfferingActive,
+		updateComponent,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
 		assignmentCreateSchema,
+		componentCreateSchema,
 		offeringUpdateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
@@ -35,9 +38,11 @@
 		AdminProfessor,
 		AdminRosterItem,
 		AdminStudent,
+		OfferingComponent,
 		Program,
 		YearLevel,
 	} from '$lib/shared/types';
+	import { sessionMixLabel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
@@ -64,21 +69,35 @@
 	let yearLabel = $state<string | null>(null);
 	let professorIndex = $state<Map<number, AdminProfessor>>(new Map());
 
-	// Settings form.
+	// Settings form (offering-level only: rates and windows. Schedule and
+	// rooms live on the class meetings below).
 	let s_sessions = $state('');
 	let s_weeks = $state('');
-	let s_days = $state('');
-	let s_start = $state('');
-	let s_end = $state('');
-	let s_course_type = $state<'lecture' | 'lab'>('lecture');
-	let s_classroom = $state('');
-	let s_lat = $state('');
-	let s_lng = $state('');
 	let s_present = $state('');
 	let s_late = $state('');
 	let settingsError = $state<string | null>(null);
 	let settingsBusy = $state(false);
 	let archiveBusy = $state(false);
+
+	// Scheduled components (D77: per-type schedules). The offering row
+	// already carries its active components, so add/edit/archive refresh
+	// the detail and render from there — no separate fetch.
+	let compError = $state<string | null>(null);
+	let compBusy = $state(false);
+	let c_type = $state<'lecture' | 'lab'>('lab');
+	let c_days = $state('');
+	let c_start = $state('');
+	let c_end = $state('');
+	let c_room = $state('');
+	let c_lat = $state('');
+	let c_lng = $state('');
+	let editingComp = $state<OfferingComponent | null>(null);
+	let e_days = $state('');
+	let e_start = $state('');
+	let e_end = $state('');
+	let e_room = $state('');
+	let e_lat = $state('');
+	let e_lng = $state('');
 
 	// Assign-professor form.
 	let assignOpen = $state(false);
@@ -197,13 +216,6 @@
 		settingsError = null;
 		s_sessions = String(o.sessionsPerWeek);
 		s_weeks = String(o.semesterWeeks);
-		s_days = o.scheduleDays;
-		s_start = o.scheduleStartTime.slice(0, 5);
-		s_end = o.scheduleEndTime.slice(0, 5);
-		s_course_type = o.courseType;
-		s_classroom = o.classroomName ?? '';
-		s_lat = o.classroomLat !== undefined ? String(o.classroomLat) : '';
-		s_lng = o.classroomLng !== undefined ? String(o.classroomLng) : '';
 		s_present = String(o.presentWindowMinutes);
 		s_late = String(o.lateWindowMinutes);
 	};
@@ -235,40 +247,14 @@
 		}
 	};
 
-	const parseCoord = (raw: string, label: string, min: number, max: number): number | null | undefined => {
-		// Empty clears the stored coordinate (nullable column); a value must
-		// parse inside range. `undefined` means "leave untouched".
-		if (!raw.trim()) return offering?.classroomLat !== undefined || offering?.classroomLng !== undefined ? null : undefined;
-		const value = Number(raw.trim());
-		if (!Number.isFinite(value) || value < min || value > max) {
-			throw new Error(`${label} must be a number between ${min} and ${max}`);
-		}
-		return value;
-	};
-
 	const submitSettings = async () => {
 		if (!offering) return;
 		settingsError = null;
 		settingsBusy = true;
 		try {
-			// Merge single-sided time edits against the stored half first: the
-			// schema (like the backend body validator) only sees sent fields,
-			// so a lone moved start past the stored end is caught here before
-			// the request (backend 422 invalid_schedule_window on merge).
-			const mergedStart = s_start.trim() || offering.scheduleStartTime.slice(0, 5);
-			const mergedEnd = s_end.trim() || offering.scheduleEndTime.slice(0, 5);
-			if (mergedEnd <= mergedStart) {
-				settingsError = 'End time must be after start time';
-				return;
-			}
 			const parsed = offeringUpdateSchema.safeParse({
 				sessions_per_week: s_sessions,
 				semester_weeks: s_weeks,
-				schedule_days: s_days,
-				schedule_start_time: s_start.trim() || undefined,
-				schedule_end_time: s_end.trim() || undefined,
-				course_type: s_course_type,
-				classroom_name: s_classroom,
 			});
 			if (!parsed.success) {
 				settingsError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -287,13 +273,6 @@
 			await updateAdminOffering(offering.id, {
 				sessions_per_week: parsed.data.sessions_per_week,
 				semester_weeks: parsed.data.semester_weeks,
-				schedule_days: parsed.data.schedule_days,
-				schedule_start_time: parsed.data.schedule_start_time,
-				schedule_end_time: parsed.data.schedule_end_time,
-				course_type: parsed.data.course_type,
-				classroom_name: s_classroom.trim() ? s_classroom.trim() : null,
-				classroom_lat: parseCoord(s_lat, 'Latitude', -90, 90),
-				classroom_lng: parseCoord(s_lng, 'Longitude', -180, 180),
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
 			});
@@ -313,6 +292,126 @@
 		a_to = '';
 		a_semester = offering?.semester ?? '';
 		assignOpen = true;
+	};
+
+	// -- Scheduled components (D77) ----------------------------------------
+	// The offering row carries its active components; add/edit/archive
+	// refresh the detail and render from there.
+
+	const parseOptCoord = (raw: string, label: string, min: number, max: number): number | undefined => {
+		const trimmed = raw.trim();
+		if (!trimmed) return undefined;
+		const value = Number(trimmed);
+		if (!Number.isFinite(value) || value < min || value > max) {
+			throw new Error(`${label} must be a number between ${min} and ${max}`);
+		}
+		return value;
+	};
+
+	const resetCompForm = () => {
+		c_type = 'lab';
+		c_days = '';
+		c_start = '';
+		c_end = '';
+		c_room = '';
+		c_lat = '';
+		c_lng = '';
+	};
+
+	const submitAddComponent = async () => {
+		if (!offering) return;
+		compError = null;
+		compBusy = true;
+		try {
+			const parsed = componentCreateSchema.safeParse({
+				session_type: c_type,
+				schedule_days: c_days,
+				schedule_start_time: c_start,
+				schedule_end_time: c_end,
+				classroom_name: c_room || undefined,
+			});
+			if (!parsed.success) {
+				compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
+				return;
+			}
+			await createComponent(offering.id, {
+				session_type: parsed.data.session_type,
+				schedule_days: parsed.data.schedule_days,
+				schedule_start_time: parsed.data.schedule_start_time,
+				schedule_end_time: parsed.data.schedule_end_time,
+				classroom_name: parsed.data.classroom_name || undefined,
+				classroom_lat: parseOptCoord(c_lat, 'Latitude', -90, 90),
+				classroom_lng: parseOptCoord(c_lng, 'Longitude', -180, 180),
+			});
+			resetCompForm();
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			compError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+		} finally {
+			compBusy = false;
+		}
+	};
+
+	const openEditComponent = (c: OfferingComponent) => {
+		editingComp = c;
+		compError = null;
+		e_days = c.scheduleDays;
+		e_start = c.scheduleStartTime.slice(0, 5);
+		e_end = c.scheduleEndTime.slice(0, 5);
+		e_room = c.classroomName ?? '';
+		e_lat = c.classroomLat !== undefined ? String(c.classroomLat) : '';
+		e_lng = c.classroomLng !== undefined ? String(c.classroomLng) : '';
+	};
+
+	const submitEditComponent = async () => {
+		if (!offering || !editingComp) return;
+		compError = null;
+		compBusy = true;
+		try {
+			const parsed = componentCreateSchema.safeParse({
+				session_type: editingComp.sessionType,
+				schedule_days: e_days,
+				schedule_start_time: e_start,
+				schedule_end_time: e_end,
+				classroom_name: e_room || undefined,
+			});
+			if (!parsed.success) {
+				compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
+				return;
+			}
+			await updateComponent(offering.id, editingComp.id, {
+				schedule_days: parsed.data.schedule_days,
+				schedule_start_time: parsed.data.schedule_start_time,
+				schedule_end_time: parsed.data.schedule_end_time,
+				classroom_name: e_room.trim() ? e_room.trim() : null,
+				classroom_lat: e_lat.trim() ? parseOptCoord(e_lat, 'Latitude', -90, 90) : null,
+				classroom_lng: e_lng.trim() ? parseOptCoord(e_lng, 'Longitude', -180, 180) : null,
+			});
+			editingComp = null;
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			compError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+		} finally {
+			compBusy = false;
+		}
+	};
+
+	const archiveRow = async (c: OfferingComponent) => {
+		if (!offering || compBusy) return;
+		compError = null;
+		compBusy = true;
+		try {
+			await archiveComponent(offering.id, c.id);
+			if (editingComp?.id === c.id) editingComp = null;
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			compError = e instanceof Error && e.message ? e.message : 'Archive failed. Please try again.';
+		} finally {
+			compBusy = false;
+		}
 	};
 
 	const submitAssign = async () => {
@@ -586,6 +685,20 @@
 			<section class="card">
 				<dl class="facts">
 					<div><dt>Schedule</dt><dd>{offering.scheduleDays} {offering.scheduleStartTime.slice(0, 5)}–{offering.scheduleEndTime.slice(0, 5)}</dd></div>
+					<div>
+						<dt>Meetings</dt>
+						<dd>
+							<span class="badge type-lab" class:type-lec={offering.sessionTypes.length === 1 && offering.sessionTypes[0] === 'lecture'}>
+								{sessionMixLabel(offering.sessionTypes)}
+							</span>
+						</dd>
+					</div>
+					{#each offering.components as comp (comp.id)}
+						<div>
+							<dt>{comp.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}</dt>
+							<dd>{comp.scheduleDays} {comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}{comp.classroomName ? ` · ${comp.classroomName}` : ''}</dd>
+						</div>
+					{/each}
 					<div><dt>Meetings</dt><dd>{offering.sessionsPerWeek} / week · {offering.semesterWeeks} weeks</dd></div>
 					<div><dt>Classroom</dt><dd>{offering.classroomName ?? '—'}</dd></div>
 					{#if offering.classroomLat !== undefined && offering.classroomLng !== undefined}
@@ -746,8 +859,101 @@
 			</section>
 		{:else}
 			<section class="card">
+				<h2 class="card-title">Class meetings</h2>
+				<p class="muted">Each row is one weekly meeting with its own days, time, and room. A course with a Monday laboratory and a Wednesday lecture is two rows — sessions inherit the room of their meeting type.</p>
+				{#if compError}
+					<p class="error" role="alert">{compError}</p>
+				{/if}
+				{#if offering.components.length === 0}
+					<p class="empty">No active components. Add one below so sessions have a schedule to inherit.</p>
+				{:else}
+					<div class="table-wrap">
+						<table>
+							<thead>
+								<tr>
+									<th>Type</th>
+									<th>Days</th>
+									<th>Time</th>
+									<th>Room</th>
+									<th><span class="sr">Actions</span></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each offering.components as comp (comp.id)}
+									<tr>
+										<td>
+											<span class="badge type-lab" class:type-lec={comp.sessionType === 'lecture'}>
+												{comp.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
+											</span>
+										</td>
+										<td>{comp.scheduleDays}</td>
+										<td>{comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}</td>
+										<td>{comp.classroomName ?? '—'}</td>
+										<td class="row-actions">
+											<button class="link" onclick={() => openEditComponent(comp)}>Edit</button>
+											<button class="link" disabled={compBusy} onclick={() => void archiveRow(comp)}>Archive</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+				{#if editingComp}
+					<div class="comp-edit">
+						<h3 class="sub-title">Edit {editingComp.sessionType === 'lab' ? 'laboratory' : 'lecture'} meeting</h3>
+						<label>Days<input class="input" bind:value={e_days} placeholder="MWF" /></label>
+						<div class="grid2">
+							<label>Start time<input class="input" type="time" bind:value={e_start} /></label>
+							<label>End time<input class="input" type="time" bind:value={e_end} /></label>
+						</div>
+						<label>Room (optional)<input class="input" bind:value={e_room} placeholder="Lab 101" /></label>
+						<div class="grid2">
+							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
+							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
+						</div>
+						<div class="modal-actions">
+							<button class="btn btn-ghost" onclick={() => (editingComp = null)}>Cancel</button>
+							<button class="btn btn-primary" disabled={compBusy} onclick={submitEditComponent}>
+								{compBusy ? 'Saving…' : 'Save'}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<div class="comp-add">
+						<h3 class="sub-title">Add a meeting</h3>
+						<p class="hint">One row, one time: days on the same row share the time below. For a different time, add another row.</p>
+						<div class="grid2">
+							<label>Type
+								<select class="input" bind:value={c_type}>
+									<option value="lecture">Lecture</option>
+									<option value="lab">Laboratory</option>
+								</select>
+							</label>
+							<label>Days<input class="input" bind:value={c_days} placeholder="M" /></label>
+						</div>
+						<div class="grid2">
+							<label>Start time<input class="input" type="time" bind:value={c_start} /></label>
+							<label>End time<input class="input" type="time" bind:value={c_end} /></label>
+						</div>
+						<label>Room (optional)<input class="input" bind:value={c_room} placeholder="Lab 101" /></label>
+						<div class="grid2">
+							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={c_lat} placeholder="14.5995" /></label>
+							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
+						</div>
+						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence and inherit this room when the professor opens them without an override.</p>
+						<div class="modal-actions">
+							<button class="btn btn-secondary" disabled={compBusy} onclick={submitAddComponent}>
+								{compBusy ? 'Adding…' : 'Add meeting'}
+							</button>
+						</div>
+					</div>
+				{/if}
+			</section>
+
+			<section class="card">
 				<h2 class="card-title">Offering settings</h2>
-				<p class="muted">Mutable fields only. Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
+				<p class="muted">Rates and windows only. Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
 				{#if settingsError}
 					<p class="error" role="alert">{settingsError}</p>
 				{/if}
@@ -756,49 +962,11 @@
 						<label>Sessions / week<input class="input" inputmode="numeric" bind:value={s_sessions} /></label>
 						<label>Semester weeks<input class="input" inputmode="numeric" bind:value={s_weeks} /></label>
 					</div>
-					<DayPicker bind:value={s_days} />
-					<div class="grid2">
-						<label>Start time<input class="input" type="time" bind:value={s_start} /></label>
-						<label>End time<input class="input" type="time" bind:value={s_end} /></label>
-					</div>
-					<div class="field">
-						<span class="form-label">Course Type</span>
-						<div class="toggle-group" role="group" aria-label="Course type">
-							<button
-								type="button"
-								class="toggle-btn"
-								class:selected={s_course_type === 'lecture'}
-								aria-pressed={s_course_type === 'lecture'}
-								onclick={() => (s_course_type = 'lecture')}
-							>
-								Lecture
-							</button>
-							<button
-								type="button"
-								class="toggle-btn"
-								class:selected={s_course_type === 'lab'}
-								aria-pressed={s_course_type === 'lab'}
-								onclick={() => (s_course_type = 'lab')}
-							>
-								Laboratory
-							</button>
-						</div>
-						<p class="hint">
-							{s_course_type === 'lab'
-								? 'Laboratory sessions require classroom coordinates and geofence for attendance tracking.'
-								: 'Lecture sessions use offering defaults. Geofence is optional.'}
-						</p>
-					</div>
-					<label>Classroom<input class="input" bind:value={s_classroom} placeholder="Lab 101" /></label>
-					<div class="grid2">
-						<label>Latitude<input class="input" inputmode="decimal" bind:value={s_lat} /></label>
-						<label>Longitude<input class="input" inputmode="decimal" bind:value={s_lng} /></label>
-					</div>
 					<div class="grid2">
 						<label>Present window, min<input class="input" inputmode="numeric" bind:value={s_present} /></label>
 						<label>Late window, min<input class="input" inputmode="numeric" bind:value={s_late} /></label>
 					</div>
-					<p class="hint">Clearing the classroom name removes it; clearing a coordinate clears it. Present + late windows must fit the course session duration.</p>
+					<p class="hint">Present + late windows must fit the course session duration.</p>
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" onclick={fillSettings}>Reset</button>
@@ -1177,6 +1345,43 @@
 		background: var(--divider);
 	}
 
+	.badge.type-lec {
+		color: var(--success);
+		background: var(--success-bg);
+	}
+
+	.badge.type-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
+
+	.sub-title {
+		margin: 1.25rem 0 0.75rem;
+		font-size: 1rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.comp-edit,
+	.comp-add {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+		margin-top: 1.25rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--divider);
+	}
+
+	.comp-edit label,
+	.comp-add label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+	}
+
 	.row-actions {
 		display: flex;
 		gap: 0.75rem;
@@ -1292,58 +1497,6 @@
 		background: var(--divider);
 		border: 1px solid transparent;
 		color: var(--text-secondary);
-	}
-
-	.toggle-group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.toggle-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.toggle-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.toggle-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.toggle-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.form-label {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		color: var(--text-secondary);
-		margin-bottom: 0.375rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
 	}
 
 	.btn-danger {

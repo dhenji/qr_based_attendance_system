@@ -18,7 +18,7 @@
 		courseUpdateSchema,
 	} from '$lib/features/admin/courses/schema';
 	import type { AdminCourse } from '$lib/shared/types';
-	import { adminCourse } from '$lib/shared/constants/routes';
+	import { adminCourse, Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
@@ -44,7 +44,6 @@
 	let f_name = $state('');
 	let f_units = $state('');
 	let f_duration = $state('');
-	let f_type = $state<'lecture' | 'lab'>('lecture');
 
 	const isActiveFilter = $derived(
 		statusFilter === 'all' ? undefined : statusFilter === 'active'
@@ -134,7 +133,6 @@
 		f_name = '';
 		f_units = '';
 		f_duration = '';
-		f_type = 'lecture';
 		formOpen = true;
 	};
 
@@ -145,7 +143,6 @@
 		f_name = c.courseName;
 		f_units = String(c.units);
 		f_duration = String(c.sessionDurationHours);
-		f_type = c.courseType;
 		formOpen = true;
 	};
 
@@ -159,7 +156,6 @@
 					course_name: f_name,
 					units: f_units,
 					session_duration_hours: f_duration,
-					course_type: f_type,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -170,7 +166,6 @@
 					course_name: parsed.data.course_name,
 					units: parsed.data.units,
 					session_duration_hours: parsed.data.session_duration_hours,
-					course_type: parsed.data.course_type,
 				});
 			} else {
 				const parsed = courseCreateSchema.safeParse({
@@ -178,7 +173,6 @@
 					course_name: f_name,
 					units: f_units,
 					session_duration_hours: f_duration,
-					course_type: f_type,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -189,7 +183,6 @@
 					course_name: parsed.data.course_name,
 					units: parsed.data.units,
 					session_duration_hours: parsed.data.session_duration_hours,
-					course_type: parsed.data.course_type,
 				});
 			}
 			formOpen = false;
@@ -210,6 +203,10 @@
 			<p class="muted">Reusable templates — scheduling lives on offerings · {adminCoursesState.total} total</p>
 		</div>
 		<div class="header-actions">
+			<button class="btn btn-secondary" data-testid="import" onclick={() => goto(Routes.ADMIN_COURSES_IMPORT)}>
+				<AppIcon name="file" size={18} />
+				Import
+			</button>
 			<button class="btn btn-primary" data-testid="add-course" onclick={openCreate}>
 				<AppIcon name="plus" size={18} />
 				Add Course
@@ -261,7 +258,6 @@
 						</th>
 						<th>Units</th>
 						<th>Duration (h)</th>
-						<th>Type</th>
 						<th>Status</th>
 						<th><span class="sr">Actions</span></th>
 					</tr>
@@ -273,11 +269,6 @@
 							<td>{c.courseName}</td>
 							<td>{c.units}</td>
 							<td>{c.sessionDurationHours}</td>
-							<td>
-								<span class="badge type-lab" class:type-lec={c.courseType === 'lecture'}>
-									{c.courseType === 'lab' ? 'Laboratory' : 'Lecture'}
-								</span>
-							</td>
 							<td>
 								<span class="badge" class:inactive={!c.isActive}>
 									{c.isActive ? 'Active' : 'Inactive'}
@@ -339,35 +330,7 @@
 				</div>
 				<label>Name<input class="input" bind:value={f_name} placeholder="Software Engineering 1" /></label>
 				<label>Session duration, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={f_duration} placeholder="1.5" /></label>
-				<div class="field">
-					<span class="form-label">Course Type</span>
-					<div class="toggle-group" role="group" aria-label="Course type">
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={f_type === 'lecture'}
-							aria-pressed={f_type === 'lecture'}
-							onclick={() => (f_type = 'lecture')}
-						>
-							Lecture
-						</button>
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={f_type === 'lab'}
-							aria-pressed={f_type === 'lab'}
-							onclick={() => (f_type = 'lab')}
-						>
-							Laboratory
-						</button>
-					</div>
-					<p class="hint">
-						{f_type === 'lab'
-							? 'Lab sessions require classroom coordinates and geofence for attendance tracking.'
-							: 'Lecture sessions use offering defaults. Geofence is optional.'}
-					</p>
-				</div>
-				<p class="hint">Program, schedule, and classroom attach later via offerings.</p>
+				<p class="hint">Program, schedule, and classroom attach later via offerings. Lecture/laboratory sessions are scheduled per offering, so one course can mix both.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
@@ -484,68 +447,6 @@
 	.badge.inactive {
 		color: var(--text-muted);
 		background: var(--divider);
-	}
-
-	.badge.type-lec {
-		color: var(--success);
-		background: var(--success-bg);
-	}
-
-	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
-	}
-
-	.toggle-group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.toggle-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.toggle-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.toggle-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.toggle-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.form-label {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		color: var(--text-secondary);
-		margin-bottom: 0.375rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
 	}
 
 	.th-btn {

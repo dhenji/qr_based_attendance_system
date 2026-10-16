@@ -268,6 +268,18 @@ class AdminService:
         user.is_active = False
         await self._session.flush()
 
+    async def reactivate_user(self, *, actor_id: int, user_id: int) -> None:
+        if actor_id == user_id:
+            raise SelfDeactivationForbidden()
+
+        user: User | None = await self._users.get(user_id)
+
+        if user is None:
+            raise AdminUserNotFound()
+
+        user.is_active = True
+        await self._session.flush()
+
     def _roster_handles(self) -> dict[UserRole, _RosterHandle]:
         """Role -> the roster a new account should be linked into."""
         return {

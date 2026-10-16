@@ -17,10 +17,12 @@
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import {
+		componentCreateSchema,
 		offeringCreateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
 	import type { AdminCourse, AdminOffering, Program, YearLevel } from '$lib/shared/types';
+	import { sessionMixLabel } from '$lib/shared/types';
 	import { adminOffering } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
@@ -53,6 +55,28 @@
 	let formBusy = $state(false);
 
 	// Create-form fields (strings for inputs; ids coerced by zod on submit).
+	// Meetings (D77): one row per weekly meeting, each with its own type,
+	// days, time, and room. Meeting 1 also feeds the offering's own
+	// schedule/room columns (the legacy display default).
+	type MeetingDraft = {
+		type: 'lecture' | 'lab';
+		days: string;
+		start: string;
+		end: string;
+		room: string;
+		lat: string;
+		lng: string;
+	};
+	const blankMeeting = (type: 'lecture' | 'lab' = 'lecture'): MeetingDraft => ({
+		type,
+		days: '',
+		start: '',
+		end: '',
+		room: '',
+		lat: '',
+		lng: '',
+	});
+	let meetings = $state<MeetingDraft[]>([blankMeeting()]);
 	let m_course_id = $state('');
 	let m_program_id = $state('');
 	let m_year_level_id = $state('');
@@ -60,13 +84,6 @@
 	let m_academic_year = $state('');
 	let m_sessions_per_week = $state('2');
 	let m_semester_weeks = $state('18');
-	let m_schedule_days = $state('');
-	let m_start = $state('');
-	let m_end = $state('');
-	let m_course_type = $state<'lecture' | 'lab'>('lecture');
-	let m_classroom = $state('');
-	let m_lat = $state('');
-	let m_lng = $state('');
 	let m_present = $state('5');
 	let m_late = $state('10');
 	let m_yearOptions = $state<YearLevel[]>([]);
@@ -235,13 +252,7 @@
 		m_academic_year = '';
 		m_sessions_per_week = '2';
 		m_semester_weeks = '18';
-		m_schedule_days = '';
-		m_start = '';
-		m_end = '';
-		m_course_type = 'lecture';
-		m_classroom = '';
-		m_lat = '';
-		m_lng = '';
+		meetings = [blankMeeting()];
 		m_present = '5';
 		m_late = '10';
 		m_yearOptions = [];
@@ -287,6 +298,13 @@
 		formError = null;
 		formBusy = true;
 		try {
+			// Meeting 1 feeds the offering's own schedule columns (the
+			// legacy display default); every row is stored as a component.
+			const first = meetings[0];
+			if (!first) {
+				formError = 'Add at least one meeting.';
+				return;
+			}
 			const parsed = offeringCreateSchema.safeParse({
 				course_id: m_course_id,
 				program_id: m_program_id,
@@ -295,11 +313,10 @@
 				academic_year: m_academic_year,
 				sessions_per_week: m_sessions_per_week,
 				semester_weeks: m_semester_weeks,
-				schedule_days: m_schedule_days,
-				schedule_start_time: m_start,
-				schedule_end_time: m_end,
-				course_type: m_course_type,
-				classroom_name: m_classroom || undefined,
+				schedule_days: first.days,
+				schedule_start_time: first.start,
+				schedule_end_time: first.end,
+				classroom_name: first.room || undefined,
 				default_present_window_minutes: m_present,
 				default_late_window_minutes: m_late,
 			});
@@ -321,8 +338,39 @@
 				formError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
 			}
-			const lat = parseCoord(m_lat, 'Latitude', -90, 90);
-			const lng = parseCoord(m_lng, 'Longitude', -180, 180);
+			const components: {
+				session_type: 'lecture' | 'lab';
+				schedule_days: string;
+				schedule_start_time: string;
+				schedule_end_time: string;
+				classroom_name?: string;
+				classroom_lat?: number;
+				classroom_lng?: number;
+			}[] = [];
+			for (let i = 0; i < meetings.length; i += 1) {
+				const m = meetings[i];
+				const rowParsed = componentCreateSchema.safeParse({
+					session_type: m.type,
+					schedule_days: m.days,
+					schedule_start_time: m.start,
+					schedule_end_time: m.end,
+					classroom_name: m.room || undefined,
+				});
+				if (!rowParsed.success) {
+					formError = `Meeting ${i + 1}: ${rowParsed.error.issues[0]?.message ?? 'check the meeting and try again.'}`;
+					return;
+				}
+				components.push({
+					session_type: rowParsed.data.session_type,
+					schedule_days: rowParsed.data.schedule_days,
+					schedule_start_time: rowParsed.data.schedule_start_time,
+					schedule_end_time: rowParsed.data.schedule_end_time,
+					...(rowParsed.data.classroom_name ? { classroom_name: rowParsed.data.classroom_name } : {}),
+					...(m.lat.trim() ? { classroom_lat: parseCoord(m.lat, `Meeting ${i + 1} latitude`, -90, 90) } : {}),
+					...(m.lng.trim() ? { classroom_lng: parseCoord(m.lng, `Meeting ${i + 1} longitude`, -180, 180) } : {}),
+				});
+			}
+			const head = components[0];
 			await createOffering({
 				course_id: parsed.data.course_id,
 				program_id: parsed.data.program_id,
@@ -334,10 +382,10 @@
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
-				course_type: parsed.data.course_type,
+				components,
 				classroom_name: parsed.data.classroom_name || undefined,
-				classroom_lat: lat,
-				classroom_lng: lng,
+				classroom_lat: head?.classroom_lat,
+				classroom_lng: head?.classroom_lng,
 				default_present_window_minutes: parsed.data.default_present_window_minutes,
 				default_late_window_minutes: parsed.data.default_late_window_minutes,
 			});
@@ -456,6 +504,7 @@
 						<th scope="col">Cohort</th>
 						<th scope="col">Term</th>
 						<th scope="col">Schedule</th>
+						<th scope="col">Type</th>
 						<th scope="col">Enrolled</th>
 						<th scope="col">Status</th>
 						<th scope="col"><span class="sr">Actions</span></th>
@@ -468,6 +517,11 @@
 							<td>{[o.programCode ?? `Program ${o.programId}`, o.yearLevelLabel ?? `Year ${o.yearLevelId}`].join(' · ')}</td>
 							<td>{o.semester} {o.academicYear}</td>
 							<td>{o.scheduleDays} {o.scheduleStartTime.slice(0, 5)}–{o.scheduleEndTime.slice(0, 5)}</td>
+							<td>
+								<span class="badge type-lab" class:type-lec={o.sessionTypes.length === 1 && o.sessionTypes[0] === 'lecture'}>
+									{sessionMixLabel(o.sessionTypes)}
+								</span>
+							</td>
 							<td>{o.enrolledCount}</td>
 							<td>
 								<span class="badge" class:inactive={!o.isActive}>
@@ -552,60 +606,54 @@
 						</select>
 					</label>
 				</div>
-				<DayPicker bind:value={m_schedule_days} />
-				<label>Semester
-					{#if modalSemesterOptions.length > 0}
-						<select class="input" bind:value={m_semester}>
-							<option value="">Pick a term…</option>
-							{#each modalSemesterOptions as t (t.code)}
-								<option value={t.code}>{t.label}</option>
-							{/each}
-						</select>
-					{:else}
-						<input class="input" bind:value={m_semester} placeholder="1st Sem" />
-					{/if}
-				</label>
-				<div class="grid2">
-					<label>Start time<input class="input" type="time" bind:value={m_start} /></label>
-					<label>End time<input class="input" type="time" bind:value={m_end} /></label>
-				</div>
 				<div class="field">
-					<span class="form-label">Course Type</span>
-					<div class="toggle-group" role="group" aria-label="Course type">
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={m_course_type === 'lecture'}
-							aria-pressed={m_course_type === 'lecture'}
-							onclick={() => (m_course_type = 'lecture')}
-						>
-							Lecture
-						</button>
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={m_course_type === 'lab'}
-							aria-pressed={m_course_type === 'lab'}
-							onclick={() => (m_course_type = 'lab')}
-						>
-							Laboratory
-						</button>
+					<span class="form-label">Class meetings</span>
+					<p class="hint">Each meeting has its own days, time, and room — e.g. a laboratory on Monday plus a lecture on Wednesday. One row, one time: days on the same row share its time, so add another row for a different time.</p>
+				</div>
+				{#each meetings as m, i (i)}
+					<div class="meeting-box">
+						<div class="meeting-head">
+							<span class="meeting-title">Meeting {i + 1}</span>
+							{#if meetings.length > 1}
+								<button
+									class="link"
+									type="button"
+									onclick={() => (meetings = meetings.filter((_, j) => j !== i))}
+								>
+									Remove
+								</button>
+							{/if}
+						</div>
+						<div class="grid2">
+							<label>Type
+								<select class="input" bind:value={m.type}>
+									<option value="lecture">Lecture</option>
+									<option value="lab">Laboratory</option>
+								</select>
+							</label>
+							<label>Room (optional)<input class="input" bind:value={m.room} placeholder="Lab 101" /></label>
+						</div>
+						<DayPicker bind:value={m.days} />
+						<div class="grid2">
+							<label>Start time<input class="input" type="time" bind:value={m.start} /></label>
+							<label>End time<input class="input" type="time" bind:value={m.end} /></label>
+						</div>
+						<div class="grid2">
+							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={m.lat} placeholder="14.5995" /></label>
+							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={m.lng} placeholder="120.9842" /></label>
+						</div>
+						{#if m.type === 'lab'}
+							<p class="hint">Laboratory sessions enforce the geofence: opening one without coordinates fails.</p>
+						{/if}
 					</div>
-					<p class="hint">
-						{m_course_type === 'lab'
-							? 'Laboratory sessions require classroom coordinates and geofence for attendance tracking.'
-							: 'Lecture sessions use offering defaults. Geofence is optional.'}
-					</p>
-				</div>
-				<div class="grid2">
-					<label>Sessions / week<input class="input" inputmode="numeric" bind:value={m_sessions_per_week} /></label>
-					<label>Semester weeks<input class="input" inputmode="numeric" bind:value={m_semester_weeks} /></label>
-				</div>
-				<label>Classroom (optional)<input class="input" bind:value={m_classroom} placeholder="Lab 101" /></label>
-				<div class="grid2">
-					<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={m_lat} placeholder="14.5995" /></label>
-					<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={m_lng} placeholder="120.9842" /></label>
-				</div>
+				{/each}
+				<button
+					class="btn btn-secondary"
+					type="button"
+					onclick={() => (meetings = [...meetings, blankMeeting('lab')])}
+				>
+					Add another meeting
+				</button>
 				<div class="grid2">
 					<label>Present window, min<input class="input" inputmode="numeric" bind:value={m_present} /></label>
 					<label>Late window, min<input class="input" inputmode="numeric" bind:value={m_late} /></label>
@@ -735,6 +783,16 @@
 		background: var(--divider);
 	}
 
+	.badge.type-lec {
+		color: var(--success);
+		background: var(--success-bg);
+	}
+
+	.badge.type-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
+
 	.th-btn {
 		background: none;
 		border: none;
@@ -859,44 +917,6 @@
 		color: var(--text-secondary);
 	}
 
-	.toggle-group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.toggle-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.toggle-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.toggle-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.toggle-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
 	.form-label {
 		font-size: 0.8125rem;
 		font-weight: 600;
@@ -909,6 +929,29 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.375rem;
+	}
+
+	.meeting-box {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+		padding: 1rem;
+		background: var(--bg-page);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+	}
+
+	.meeting-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.meeting-title {
+		font-size: 0.875rem;
+		font-weight: 700;
+		color: var(--text-strong);
 	}
 
 	.modal-overlay {

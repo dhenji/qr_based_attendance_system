@@ -42,7 +42,10 @@ import type {
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
 	AuditLogItemResponse,
+	CourseImportResult,
+	OfferingComponentResponse,
 	ProfessorImportResult,
+	ProgramImportResult,
 	PromoteStagingResponse,
 	RecentScanResponse,
 	RiskRefreshResponse,
@@ -71,6 +74,7 @@ export type ScanStatus = 'present' | 'late' | 'rejected';
 export interface SessionVerificationResponse {
 	session_id: number;
 	offering_id: number;
+	session_type: 'lecture' | 'lab';
 	course_code: string;
 	course_name: string;
 	program_code: string;
@@ -121,6 +125,7 @@ export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 	mock: () => ({
 		session_id: 1,
 		offering_id: 1,
+		session_type: 'lecture' as const,
 		course_code: 'CS101',
 		course_name: 'Software Engineering 1',
 		program_code: 'BSCS',
@@ -191,6 +196,7 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 			{
 				id: 1,
 				offering_id: 1,
+				session_type: 'lecture' as const,
 				session_code: '7X-9K2M',
 				created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
 				expires_at: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
@@ -210,10 +216,14 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: () => ({
+	mock: (_params, _suffix, body) => ({
 		id: Math.floor(Math.random() * 1000) + 1,
 		session_code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
 		offering_id: 1,
+		session_type:
+			(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
+				? ('lab' as const)
+				: ('lecture' as const),
 		qr_payload: {
 			v: 1,
 			code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
@@ -252,6 +262,7 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 	mock: () => ({
 		id: 1,
 		offering: 1,
+		session_type: 'lecture' as const,
 		session_code: '7X-9K2M',
 		scan_window_remaining: 2400,
 		scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
@@ -948,6 +959,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-01T08:00:00.000Z',
 		scan_count: 42,
 	},
@@ -963,6 +975,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'B',
 		is_active: true,
 		face_enrolled: false,
+		claim_status: 'Claimed',
 		created_at: '2024-06-02T08:00:00.000Z',
 		scan_count: 18,
 	},
@@ -978,6 +991,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: false,
 		face_enrolled: false,
+		claim_status: 'Unclaimed',
 		created_at: '2024-06-03T08:00:00.000Z',
 		scan_count: 5,
 	},
@@ -993,6 +1007,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'C',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-04T08:00:00.000Z',
 		scan_count: 30,
 	},
@@ -1008,6 +1023,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'B',
 		is_active: false,
 		face_enrolled: false,
+		claim_status: 'Unclaimed',
 		created_at: '2024-06-05T08:00:00.000Z',
 		scan_count: 0,
 	},
@@ -1023,6 +1039,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-06T08:00:00.000Z',
 		scan_count: 51,
 	},
@@ -1038,6 +1055,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'C',
 		is_active: true,
 		face_enrolled: false,
+		claim_status: 'Claimed',
 		created_at: '2024-06-07T08:00:00.000Z',
 		scan_count: 12,
 	},
@@ -1053,6 +1071,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-08T08:00:00.000Z',
 		scan_count: 27,
 	},
@@ -1068,6 +1087,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'B',
 		is_active: true,
 		face_enrolled: false,
+		claim_status: 'Claimed',
 		created_at: '2024-06-09T08:00:00.000Z',
 		scan_count: 9,
 	},
@@ -1083,6 +1103,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: false,
 		face_enrolled: true,
+		claim_status: 'Unclaimed',
 		created_at: '2024-06-10T08:00:00.000Z',
 		scan_count: 22,
 	},
@@ -1223,6 +1244,7 @@ export const AdminStudentCreateEndpoint: EndpointDef<AdminStudentResponse> = {
 			year_level_label: mockYearLabelFor(Number(p.year_level_id)),
 			section: p.section ? String(p.section) : null,
 			is_active: true,
+			claim_status: 'Unclaimed',
 			face_enrolled: false,
 			created_at: new Date().toISOString(),
 			scan_count: 0,
@@ -1530,6 +1552,23 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_start_time: '09:00:00',
 		schedule_end_time: '10:30:00',
 		course_type: 'lecture',
+		session_types: ['lecture'],
+		components: [
+			{
+				id: 1,
+				offering_id: 1,
+				session_type: 'lecture',
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Lab 101',
+				classroom_lat: null,
+				classroom_lng: null,
+				is_active: true,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			},
+		],
 		classroom_name: 'Lab 101',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1553,6 +1592,23 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_start_time: '11:00:00',
 		schedule_end_time: '12:30:00',
 		course_type: 'lecture',
+		session_types: ['lecture'],
+		components: [
+			{
+				id: 2,
+				offering_id: 2,
+				session_type: 'lecture',
+				schedule_days: 'TTH',
+				schedule_start_time: '11:00:00',
+				schedule_end_time: '12:30:00',
+				classroom_name: 'Room 203',
+				classroom_lat: null,
+				classroom_lng: null,
+				is_active: true,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			},
+		],
 		classroom_name: 'Room 203',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1576,6 +1632,23 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_start_time: '09:00:00',
 		schedule_end_time: '10:30:00',
 		course_type: 'lecture',
+		session_types: ['lecture'],
+		components: [
+			{
+				id: 3,
+				offering_id: 3,
+				session_type: 'lecture',
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Lab 101',
+				classroom_lat: null,
+				classroom_lng: null,
+				is_active: true,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			},
+		],
 		classroom_name: 'Lab 101',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1770,6 +1843,12 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 	},
 };
 
+export const AdminCourseImportEndpoint: EndpointDef<CourseImportResult> = {
+	url: '/admin/courses/import',
+	method: 'POST',
+	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+};
+
 // --- Admin offering detail: CRUD + professors + roster + bulk enroll ---------
 //
 // Live routes on course/offering_router.py (/api/admin/offerings). Same
@@ -1788,6 +1867,7 @@ interface MockOfferingPayload {
 	schedule_start_time?: unknown;
 	schedule_end_time?: unknown;
 	course_type?: unknown;
+	components?: unknown;
 	classroom_name?: unknown;
 	classroom_lat?: unknown;
 	classroom_lng?: unknown;
@@ -1801,6 +1881,106 @@ const findMockOfferingRow = (suffix?: string): AdminOfferingResponse => {
 	const row = MOCK_ADMIN_OFFERINGS.find((r) => r.id === id);
 	if (!row) throw new Error('Offering not found.');
 	return row;
+};
+
+// D77 mock components: the offering rows above are the single source of
+// truth (each carries its components array); these helpers build and
+// maintain them the way the live service does.
+const mockComponentId = (): number =>
+	Math.max(0, ...MOCK_ADMIN_OFFERINGS.flatMap((r) => r.components.map((c) => c.id))) + 1;
+
+const refreshMockSessionTypes = (row: AdminOfferingResponse): void => {
+	row.session_types = [
+		...new Set(
+			row.components.filter((c) => c.is_active).map((c) => c.session_type)
+		),
+	];
+	row.updated_at = new Date().toISOString();
+};
+
+interface MockComponentPayload {
+	session_type?: unknown;
+	schedule_days?: unknown;
+	schedule_start_time?: unknown;
+	schedule_end_time?: unknown;
+	classroom_name?: unknown;
+	classroom_lat?: unknown;
+	classroom_lng?: unknown;
+	is_active?: unknown;
+}
+
+const mockComponentFromPayload = (
+	offeringId: number,
+	p: MockComponentPayload,
+	fallback: { days: string; start: string; end: string; name: string | null; lat: number | null; lng: number | null }
+): OfferingComponentResponse => {
+	const session_type = p.session_type === 'lab' ? 'lab' : 'lecture';
+	const days = String(p.schedule_days ?? fallback.days).trim().toUpperCase();
+	const start = String(p.schedule_start_time ?? fallback.start);
+	const end = String(p.schedule_end_time ?? fallback.end);
+	if (end <= start) throw new Error('schedule_end_time must be after schedule_start_time');
+	return {
+		id: mockComponentId(),
+		offering_id: offeringId,
+		session_type,
+		schedule_days: days,
+		schedule_start_time: start,
+		schedule_end_time: end,
+		classroom_name:
+			p.classroom_name === undefined
+				? fallback.name
+				: p.classroom_name
+					? String(p.classroom_name)
+					: null,
+		classroom_lat:
+			p.classroom_lat === undefined || p.classroom_lat === null
+				? (p.classroom_lat === null ? null : fallback.lat)
+				: Number(p.classroom_lat),
+		classroom_lng:
+			p.classroom_lng === undefined || p.classroom_lng === null
+				? (p.classroom_lng === null ? null : fallback.lng)
+				: Number(p.classroom_lng),
+		is_active: true,
+		created_at: new Date().toISOString(),
+		updated_at: new Date().toISOString(),
+	};
+};
+
+const mockComponentsForCreate = (
+	row: AdminOfferingResponse,
+	raw: unknown
+): OfferingComponentResponse[] => {
+	const items = Array.isArray(raw) ? (raw as MockComponentPayload[]) : [];
+	const fallback = {
+		days: row.schedule_days,
+		start: row.schedule_start_time,
+		end: row.schedule_end_time,
+		name: row.classroom_name,
+		lat: row.classroom_lat,
+		lng: row.classroom_lng,
+	};
+	const list = (
+		items.length > 0
+			? items
+			: [{ session_type: 'lecture' as const }]
+	).map((p) => mockComponentFromPayload(row.id, p, fallback));
+	const seen = new Set<string>();
+	for (const c of list) {
+		const key = `${c.session_type}|${c.schedule_days}|${c.schedule_start_time}`;
+		if (seen.has(key)) throw new Error('Offering already has a component on that schedule.');
+		seen.add(key);
+	}
+	return list;
+};
+
+const findMockComponentRow = (
+	suffix?: string
+): { offering: AdminOfferingResponse; component: OfferingComponentResponse } => {
+	const offering = findMockOfferingRow(suffix);
+	const id = parseInt(suffix?.match(/\/components\/(\d+)/)?.[1] ?? '', 10);
+	const component = offering.components.find((c) => c.id === id);
+	if (!component) throw new Error('Offering component not found.');
+	return { offering, component };
 };
 
 export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
@@ -1836,6 +2016,8 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			schedule_start_time: String(p.schedule_start_time ?? '09:00:00'),
 			schedule_end_time: String(p.schedule_end_time ?? '10:30:00'),
 			course_type: p.course_type === 'lab' ? 'lab' : 'lecture',
+			session_types: ['lecture'],
+			components: [],
 			classroom_name: (p.classroom_name as string | null) ?? null,
 			classroom_lat: (p.classroom_lat as number | null) ?? null,
 			classroom_lng: (p.classroom_lng as number | null) ?? null,
@@ -1846,6 +2028,10 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString(),
 		};
+		// D77: explicit per-type schedules, else one lecture component
+		// mirroring the offering schedule/classroom (same default as live).
+		row.components = mockComponentsForCreate(row, p.components);
+		row.session_types = [...new Set(row.components.map((c) => c.session_type))];
 		MOCK_ADMIN_OFFERINGS.push(row);
 		return row;
 	},
@@ -1888,6 +2074,93 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 			return row;
 		}
 		return findMockOfferingRow(suffix);
+	},
+};
+
+// Offering components (D77: per-type schedules) ---------------------------------
+//
+// Live routes on course/offering_router.py. Same suffix convention:
+// `/{oid}/components`, `/{oid}/components/{cid}`.
+
+export const AdminOfferingComponentsEndpoint: EndpointDef<OfferingComponentResponse[]> = {
+	url: '/admin/offerings',
+	method: 'GET',
+	mock: (_params, suffix) =>
+		findMockOfferingRow(suffix).components.filter((c) => c.is_active),
+};
+
+export const AdminOfferingComponentCreateEndpoint: EndpointDef<OfferingComponentResponse> = {
+	url: '/admin/offerings',
+	method: 'POST',
+	mock: (_params, suffix, body) => {
+		const row = findMockOfferingRow(suffix);
+		const p = (body ?? {}) as MockComponentPayload;
+		const created = mockComponentFromPayload(
+			row.id,
+			p,
+			{
+				days: row.schedule_days,
+				start: row.schedule_start_time,
+				end: row.schedule_end_time,
+				name: row.classroom_name,
+				lat: row.classroom_lat,
+				lng: row.classroom_lng,
+			}
+		);
+		if (
+			row.components.some(
+				(c) =>
+					c.session_type === created.session_type &&
+					c.schedule_days === created.schedule_days &&
+					c.schedule_start_time === created.schedule_start_time
+			)
+		) {
+			throw new Error('Offering already has a component on that schedule.');
+		}
+		row.components.push(created);
+		refreshMockSessionTypes(row);
+		return created;
+	},
+};
+
+export const AdminOfferingComponentDetailEndpoint: EndpointDef<OfferingComponentResponse> = {
+	url: '/admin/offerings',
+	method: 'GET',
+	mock: (_params, suffix, body, method) => {
+		const { offering, component } = findMockComponentRow(suffix);
+		if (method === 'DELETE') {
+			component.is_active = false;
+			component.updated_at = new Date().toISOString();
+			refreshMockSessionTypes(offering);
+			return undefined as unknown as OfferingComponentResponse;
+		}
+		if (method === 'PATCH') {
+			const p = (body ?? {}) as MockComponentPayload;
+			if (p.schedule_days !== undefined)
+				component.schedule_days = String(p.schedule_days).trim().toUpperCase();
+			const start =
+				p.schedule_start_time !== undefined
+					? String(p.schedule_start_time)
+					: component.schedule_start_time;
+			const end =
+				p.schedule_end_time !== undefined
+					? String(p.schedule_end_time)
+					: component.schedule_end_time;
+			if (end <= start) throw new Error('schedule_end_time must be after schedule_start_time');
+			component.schedule_start_time = start;
+			component.schedule_end_time = end;
+			if (p.classroom_name !== undefined)
+				component.classroom_name = p.classroom_name ? String(p.classroom_name) : null;
+			if (p.classroom_lat !== undefined)
+				component.classroom_lat = p.classroom_lat === null ? null : Number(p.classroom_lat);
+			if (p.classroom_lng !== undefined)
+				component.classroom_lng = p.classroom_lng === null ? null : Number(p.classroom_lng);
+			if (typeof p.is_active === 'boolean') component.is_active = p.is_active;
+			component.updated_at = new Date().toISOString();
+			refreshMockSessionTypes(offering);
+			return component;
+		}
+		return component;
 	},
 };
 
@@ -2107,6 +2380,12 @@ export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 			year_levels: MOCK_YEARS.filter((y) => y.program_id === program.id),
 		};
 	},
+};
+
+export const AdminProgramImportEndpoint: EndpointDef<ProgramImportResult> = {
+	url: '/admin/programs/import',
+	method: 'POST',
+	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
 };
 
 export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
@@ -2733,6 +3012,17 @@ const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
 		last_login: null,
 		created_at: '2025-09-01T08:00:00.000Z',
 	},
+	{
+		id: 4,
+		email: 'juan.delacruz@isu.edu.ph',
+		role: 'student',
+		first_name: 'Juan',
+		last_name: 'Dela Cruz',
+		is_active: false,
+		must_change_password: true,
+		last_login: null,
+		created_at: '2025-09-15T08:00:00.000Z',
+	},
 ];
 
 const mockAdminUsersList = (
@@ -2817,6 +3107,18 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = false;
+		return undefined as unknown as void;
+	},
+};
+
+export const AdminUserReactivateEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'PATCH',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('User not found.');
+		row.is_active = true;
 		return undefined as unknown as void;
 	},
 };
@@ -3233,6 +3535,9 @@ export const endpoints = {
 	adminOfferings: AdminOfferingsEndpoint,
 	adminOfferingCreate: AdminOfferingCreateEndpoint,
 	adminOfferingDetail: AdminOfferingDetailEndpoint,
+	adminOfferingComponents: AdminOfferingComponentsEndpoint,
+	adminOfferingComponentCreate: AdminOfferingComponentCreateEndpoint,
+	adminOfferingComponentDetail: AdminOfferingComponentDetailEndpoint,
 	adminOfferingProfessors: AdminOfferingProfessorsEndpoint,
 	adminOfferingRoster: AdminOfferingRosterEndpoint,
 	adminOfferingBulkEnroll: AdminOfferingBulkEnrollEndpoint,
@@ -3254,6 +3559,7 @@ export const endpoints = {
 	adminUsers: AdminUsersEndpoint,
 	adminUserCreate: AdminUserCreateEndpoint,
 	adminUserDeactivate: AdminUserDeactivateEndpoint,
+	adminUserReactivate: AdminUserReactivateEndpoint,
 	// Admin password reset (three rosters, one backend implementation)
 	adminUserResetPassword: AdminUserResetPasswordEndpoint,
 	adminStudentResetPassword: AdminStudentResetPasswordEndpoint,
@@ -3262,10 +3568,12 @@ export const endpoints = {
 	adminCourses: AdminCoursesEndpoint,
 	adminCourseCreate: AdminCourseCreateEndpoint,
 	adminCourseDetail: AdminCourseDetailEndpoint,
+	adminCourseImport: AdminCourseImportEndpoint,
 	// Admin programs (Phase A)
 	adminPrograms: AdminProgramsEndpoint,
 	adminProgramCreate: AdminProgramCreateEndpoint,
 	adminProgramDetail: AdminProgramDetailEndpoint,
+	adminProgramImport: AdminProgramImportEndpoint,
 	adminYearLevels: AdminYearLevelsEndpoint,
 	adminYearLevelDetail: AdminYearLevelDetailEndpoint,
 	// Dashboard summaries (three roles, three mount points)

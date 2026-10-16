@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
@@ -16,13 +17,23 @@ from features.program.exceptions import (
     YearLevelHasCoursesException,
     YearLevelNotFoundException,
     YearLevelNumberExistsException,
+    YearLevelTermInUseException,
 )
+from features.program.constants import (
+    CODE_MAX_LENGTH,
+    CODE_MIN_LENGTH,
+    DESCRIPTION_MAX_LENGTH,
+    TOTAL_YEARS_MAX,
+    TOTAL_YEARS_MIN,
+)
+from features.admin.constants import NAME_MAX_LENGTH
 from features.program.model import Program, YearLevel
 from features.student.model import Student
-from features.program.model import Program, YearLevel
 from features.program.schema import (
     ProgramCreate,
     ProgramDetail,
+    ProgramImportError,
+    ProgramImportResult,
     ProgramRead,
     ProgramUpdate,
     YearLevelCreate,
@@ -31,9 +42,101 @@ from features.program.schema import (
 )
 from shared.audit import record_audit
 from shared.base import BaseCRUD
+from shared.csv_import import (
+    CsvColumn,
+    CsvGroup,
+    CsvRow,
+    CsvSchema,
+    parse_import_csv,
+    strip_upper,
+)
 from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
+
+PROGRAM_CSV_COLUMNS: tuple[CsvColumn, ...] = (
+    CsvColumn("code", normalize=strip_upper, required_reason="missing code"),
+    CsvColumn("name"),
+    CsvColumn("description"),
+    CsvColumn("total_years", required_reason="missing total_years"),
+)
+
+PROGRAM_CSV_SCHEMA = CsvSchema(
+    columns=PROGRAM_CSV_COLUMNS,
+    subject="program",
+    subject_column="code",
+    subject_fallback="on line",
+    checks=(
+        CsvGroup(
+            columns=("name",),
+            reason="missing required field for {subject} {key}",
+        ),
+    ),
+)
+
+
+@dataclass(kw_only=True)
+class _ProgramRow:
+    line: int
+    code: str
+    name: str
+    description: str | None
+    total_years: str
+
+
+def _to_program_row(raw: CsvRow) -> _ProgramRow:
+    values: dict[str, str] = raw.values
+
+    return _ProgramRow(
+        line=raw.line,
+        code=values["code"],
+        name=values["name"],
+        description=values["description"] or None,
+        total_years=values["total_years"],
+    )
+
+
+def parse_program_csv(
+    content: bytes,
+) -> tuple[list[_ProgramRow], list[ProgramImportError]]:
+    """Parse the program-import CSV upload.
+
+    Returns (valid_rows, errors). Never raises on bad rows — every problem
+    is reported as a ProgramImportError with its 1-based line number
+    (header = 1). Codes are uppercased so duplicate detection agrees with
+    single-create.
+    """
+    rows, errors = parse_import_csv(
+        content,
+        PROGRAM_CSV_SCHEMA,
+        error=lambda line, reason: ProgramImportError(line=line, reason=reason),
+    )
+
+    return [_to_program_row(row) for row in rows], errors
+
+
+def _validate_program_row(row: _ProgramRow) -> str | None:
+    """Domain validation beyond presence. Returns the reason or None."""
+    if not (CODE_MIN_LENGTH <= len(row.code) <= CODE_MAX_LENGTH):
+        return (
+            f"invalid code for program {row.code}: "
+            f"must be {CODE_MIN_LENGTH}-{CODE_MAX_LENGTH} characters"
+        )
+    name = row.name.strip()
+    if not (1 <= len(name) <= NAME_MAX_LENGTH):
+        return f"invalid name for program {row.code}"
+    if row.description is not None and len(row.description) > DESCRIPTION_MAX_LENGTH:
+        return f"invalid description for program {row.code}"
+    try:
+        total_years = int(row.total_years.strip())
+    except ValueError:
+        return f"invalid total_years for program {row.code}"
+    if not (TOTAL_YEARS_MIN <= total_years <= TOTAL_YEARS_MAX):
+        return (
+            f"invalid total_years for program {row.code}: "
+            f"must be {TOTAL_YEARS_MIN}-{TOTAL_YEARS_MAX}"
+        )
+    return None
 
 
 class ProgramService:
@@ -65,6 +168,72 @@ class ProgramService:
         )
 
         return ProgramRead(**self._read_fields(program))
+
+    async def import_roster(
+        self, *, content: bytes, actor_id: int | None
+    ) -> ProgramImportResult:
+        """Create NEW program records from a CSV upload.
+
+        Rows whose code already exists — in the database or earlier in the
+        same file — are counted as duplicates, not errors. Year levels are
+        not created here; they are added later on the program detail page,
+        matching single-create semantics.
+        """
+        rows, errors = parse_program_csv(content)
+        imported = 0
+        duplicates = 0
+        seen_codes: set[str] = set()
+
+        for row in rows:
+            if (
+                row.code in seen_codes
+                or await self._programs.get_by(code=row.code) is not None
+            ):
+                duplicates += 1
+                seen_codes.add(row.code)
+                continue
+
+            seen_codes.add(row.code)
+            reason = _validate_program_row(row)
+
+            if reason is not None:
+                errors.append(ProgramImportError(line=row.line, reason=reason))
+                continue
+
+            self._session.add(
+                Program(
+                    code=row.code,
+                    name=row.name.strip(),
+                    description=row.description.strip()
+                    if row.description and row.description.strip()
+                    else None,
+                    total_years=int(row.total_years.strip()),
+                )
+            )
+            imported += 1
+
+        await self._session.flush()
+
+        # One row for the upload rather than one per program, so a large
+        # file cannot bury every other action in the trail.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.IMPORT,
+            entity_type=AuditEntity.PROGRAM,
+            entity_id=None,
+            new_value={
+                "imported": imported,
+                "duplicates": duplicates,
+                "errors": len(errors),
+            },
+        )
+
+        errors.sort(key=lambda e: e.line)
+
+        return ProgramImportResult(
+            imported=imported, duplicates=duplicates, errors=errors
+        )
 
     async def get(self, *, program_id: int) -> ProgramDetail:
         program: Program = await self._get_or_404(program_id)
@@ -314,6 +483,33 @@ class ProgramService:
     ) -> YearLevelRead:
         year_level: YearLevel = await self._get_year_or_404(program_id, year_id)
         old_value = self._year_snapshot(year_level)
+
+        old_term_codes: set[str] = {
+            str(term.get("code"))
+            for term in ((year_level.term_structure or {}).get("terms") or [])
+            if term.get("code") is not None
+        }
+
+        if "term_structure" in payload.model_fields_set:
+            new_terms = []
+            if payload.term_structure is not None:
+                new_terms = payload.term_structure.terms
+            new_term_codes = {str(term.code) for term in new_terms}
+            removed_or_renamed = old_term_codes - new_term_codes
+
+            if removed_or_renamed:
+                referenced = await self._session.execute(
+                    select(CourseOffering.semester, func.count())
+                    .where(CourseOffering.year_level_id == year_id)
+                    .group_by(CourseOffering.semester)
+                )
+                in_use_codes = {
+                    str(semester)
+                    for semester, count in referenced.all()
+                    if count and str(semester) in removed_or_renamed
+                }
+                if in_use_codes:
+                    raise YearLevelTermInUseException(year_id, sorted(in_use_codes))
 
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(year_level, field, value)

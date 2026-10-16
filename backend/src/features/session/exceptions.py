@@ -60,3 +60,22 @@ class DuplicateScanException(SessionDatabaseException):
         super().__init__(
             message=f"Student {student_id} already scanned for session {session_id}"
         )
+
+
+class LabCoordinatesRequiredException(SessionDomainException):
+    """422 - a laboratory session needs classroom coordinates.
+
+    Laboratory sessions always enforce the geofence (D77), so the resolved
+    location — payload override, matching lab component, or offering default —
+    must carry both coordinates. Lecture sessions keep the previous behavior
+    (coordinates optional).
+    """
+
+    status_code: int = 422
+    code: str = "lab_coordinates_required"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Laboratory sessions require classroom coordinates",
+            field="classroom_lat",
+        )

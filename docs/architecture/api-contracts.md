@@ -256,7 +256,7 @@ reactivate with `is_active: true`.
 | **Request**      | `{ label?, term_structure?, sort_order? }` |
 | **Response 200** | Updated year level                         |
 
-| **Errors**       | 404 `year_level_not_found` |
+| **Errors**       | 404 `year_level_not_found` · 409 `term_code_in_use` |
 #### `DELETE /admin/programs/{program_id}/years/{year_id}`
 
 Archive year level. Restrict if courses exist.
@@ -270,7 +270,7 @@ Archive year level. Restrict if courses exist.
 
 ### Courses
 
-A course is a standalone reusable **template** (D44) — it carries no program, year-level, scheduling, or classroom fields. Program/year-specific instances are `CourseOfferings` (next section).
+A course is a standalone reusable **template** (D44) — it carries no program, year-level, scheduling, or classroom fields. Program/year-specific instances are `CourseOfferings` (next section). It also carries no lecture/laboratory type (D77): the distinction lives on sessions (`session_type`) and offering components, so one course can mix both.
 
 #### `GET /admin/courses`
 
@@ -312,31 +312,74 @@ Archive course template (soft-delete: `is_active=false`).
 
 ### Course Offerings
 
-A course offering is a specific instance of a course template for a program, year level, and semester. It holds scheduling, classroom, and window configuration.
+A course offering is a specific instance of a course template for a program, year level, and semester. It holds scheduling, classroom, and window configuration. Per-type schedules live on **offering components** (D77): an offering with one component behaves like before, while a mixed course carries e.g. a laboratory component on Monday plus a lecture component on Wednesday, each with its own days/times/room.
 
 #### `GET /admin/offerings`
 
 |                  |                                                                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?program_id?&year_level_id?&semester?&course_id?&is_active?&page=1&size=20`                                                                                                                                             |
-| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, enrolled_count, is_active, created_at, updated_at }], ... }` |
-| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. |
+| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, enrolled_count, session_types: ["lecture" \| "lab"], components: [Component], is_active, created_at, updated_at }], ... }` |
+| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. `session_types` lists the distinct types across the offering's active components and feeds the Lecture / Lab / Mixed badges. `Component = { id, offering_id, session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, is_active, created_at, updated_at }`. |
 
 #### `POST /admin/offerings`
 
 |                  |                                                                                                                                                                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int }` |
-| **Response 201** | Created course offering                                                                                                                                                                                                                                             |
-| **Errors**       | 409 `offering_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 404 `year_level_not_found` |
+| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int, components?: [{ session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name?, classroom_lat?, classroom_lng? }] }` |
+| **Response 201** | Created course offering (with `components` + `session_types`)                                                                                                                                                                                                                                             |
+| **Errors**       | 409 `offering_exists` · 409 `component_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 404 `year_level_not_found` |
+| **Notes**        | Omitting `components` creates a single lecture component mirroring the offering schedule/classroom, so pre-existing callers keep working unchanged. |
 
 #### `GET /admin/offerings/{offering_id}`
 
-|                  |                  |
-| ---------------- | ---------------- |
-| **Response 200** | Course offering  |
+|                  |                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------- |
+| **Response 200** | Course offering (with `components` + `session_types`, as in the list) |
 
 | **Errors**       | 404 `offering_not_found` |
+
+#### `GET /admin/offerings/{offering_id}/components`
+
+List the offering's active scheduled components, oldest first.
+
+|                  |                                                        |
+| ---------------- | ------------------------------------------------------ |
+| **Response 200** | `[Component]` (bare array, like the professors list)   |
+
+| **Errors**       | 404 `offering_not_found` |
+
+#### `POST /admin/offerings/{offering_id}/components`
+
+Add a scheduled component (lecture/lab) to an offering.
+
+|                  |                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Request**      | `{ session_type: "lecture" \| "lab", schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
+| **Response 201** | Created component                                                                                                            |
+
+| **Errors**       | 404 `offering_not_found` · 409 `component_exists` |
+
+| **Notes**        | When the change leaves exactly one active component, its schedule/room is mirrored onto the offering columns (the legacy display default and session fallback); with zero or several, the offering columns are left untouched. |
+
+#### `PATCH /admin/offerings/{offering_id}/components/{component_id}`
+
+|                  |                                                                          |
+| ---------------- | ------------------------------------------------------------------------ |
+| **Request**      | Any mutable component field (`schedule_days`, `schedule_start/end_time`, `classroom_*`, `is_active`) |
+| **Response 200** | Updated component                                                        |
+
+| **Errors**       | 404 `offering_not_found` · 404 `component_not_found` · 422 `invalid_schedule_window` |
+
+#### `DELETE /admin/offerings/{offering_id}/components/{component_id}`
+
+Archive a scheduled component (soft-delete: `is_active=false`).
+
+|                  |            |
+| ---------------- | ---------- |
+| **Response 204** | No content |
+
+| **Errors**       | 404 `offering_not_found` · 404 `component_not_found` |
 #### `PATCH /admin/offerings/{offering_id}`
 
 |                  |                                                |
@@ -733,6 +776,47 @@ Columns: `student_id, first_name, middle_name, last_name, email, program_code, s
 | ---------------- | --------------------- |
 | **Response 200** | CSV file download     |
 
+#### `POST /admin/programs/import`
+
+CSV program import — creates NEW program records. Year levels are not
+created here; they are added later on the program detail page, matching
+single-create semantics.
+Columns: `code, name, description, total_years`.
+
+|                  |                                                              |
+| ---------------- | ------------------------------------------------------------ |
+| **Request**      | `multipart/form-data` CSV file                                |
+| **Response 200** | `{ imported, duplicates, errors: [{ line, reason }] }`        |
+
+#### `GET /admin/programs/import/template`
+
+CSV template download for the program import screen.
+Columns: `code, name, description, total_years`.
+
+|                  |                       |
+| ---------------- | --------------------- |
+| **Response 200** | CSV file download     |
+
+#### `POST /admin/courses/import`
+
+CSV course import — creates NEW standalone course templates (D44: no
+program, schedule, or classroom linkage; offerings attach later).
+Columns: `course_code, course_name, units, session_duration_hours`.
+
+|                  |                                                              |
+| ---------------- | ------------------------------------------------------------ |
+| **Request**      | `multipart/form-data` CSV file                                |
+| **Response 200** | `{ imported, duplicates, errors: [{ line, reason }] }`        |
+
+#### `GET /admin/courses/import/template`
+
+CSV template download for the course import screen.
+Columns: `course_code, course_name, units, session_duration_hours`.
+
+|                  |                       |
+| ---------------- | --------------------- |
+| **Response 200** | CSV file download     |
+
 #### `DELETE /admin/students/{student_id}/archive`
 
 Permanent delete — allowed only on archived (`is_active=false`) students
@@ -856,6 +940,7 @@ admins; admins manage students/professors. Password resets set a temp password
 | GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
 | POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `roster_link_impossible` |
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
+| PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated admin (rejects self-reactivation; preserves password, MFA, lockout, and role) | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
 | POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
 | POST   | `/admin/professors/{professor_id}/reset-password` | Reset linked professor-account password (temp once)| admin | 404 `professor_not_found` · 404 `user_not_found` · 409 `professor_account_unlinked` |
@@ -909,8 +994,8 @@ passes. The same rule governs the excuse endpoints under `/professor`.
 
 |                  |                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?from?&to?&offering_id?&page=1&size=20`                                                                                               |
-| **Response 200** | `{ items: [{ id, offering_id, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
+| **Query**        | `?from?&to?&offering_id?&session_type=lecture\|lab?&page=1&size=20`                                                                                               |
+| **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
 | **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `active`/`closed` derived from `expires_at`/close time. `expires_at` is a regular column populated by service layer at creation (D49). |
 
 #### `POST /professor/sessions`
@@ -919,10 +1004,10 @@ Open a new attendance session.
 
 |                  |                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ offering_id: int, duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
-| **Response 201** | `{ id, session_code, offering_id, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 403 `not_assigned` · 404 `offering_not_found` |
-| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49).                                |
+| **Request**      | `{ offering_id: int, session_type?: "lecture" \| "lab" (default "lecture"), duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
+| **Response 201** | `{ id, session_code, offering_id, session_type, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 422 `lab_coordinates_required` · 403 `not_assigned` · 404 `offering_not_found` |
+| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49). The classroom falls back payload → matching active component of the same type → offering. Laboratory sessions always enforce the geofence, so a lab open that resolves to no coordinates is rejected with `lab_coordinates_required`; lecture sessions keep coordinates optional. |
 
 #### `GET /professor/sessions/active/{session_id}`
 
@@ -930,7 +1015,7 @@ Live session detail with dual timers.
 
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, offering, session_code, scan_window_remaining, scheduled_end_time, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
+| **Response 200** | `{ id, offering, session_type, session_code, scan_window_remaining, scheduled_end_time, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
 | **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). |
 
 #### `POST /professor/sessions/{session_id}/close`
@@ -1015,8 +1100,8 @@ Query attendance records with filters.
 
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?course_id?&offering_id?&section?&session_id?&status?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
-| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
+| **Query**        | `?course_id?&offering_id?&section?&session_id?&session_type=lecture\|lab?&status?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, session_type, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
 | **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. `sort_by` accepts `date`/`student`/`section`/`status`/`time` (wireframes.md 3.4 column headers). |
 
 #### `GET /professor/sessions/history`
@@ -1025,8 +1110,8 @@ Session history with filters.
 
 |                  |                                                            |
 | ---------------- | ---------------------------------------------------------- |
-| **Query**        | `?offering_id?&section?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
-| **Response 200** | `{ items: [{ id, offering_id, session_code, created_at, expires_at, present_count, late_count, absent_count, compliance_rate, participation_rate }], ... }` |
+| **Query**        | `?offering_id?&section?&session_type=lecture\|lab?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, present_count, late_count, absent_count, compliance_rate, participation_rate }], ... }` |
 | **Notes**        | Per-session `present_count`/`late_count`/`absent_count` + both rates feed the 3.5 columns and the compliance/participation tooltip (D36). |
 
 ---
@@ -1110,7 +1195,7 @@ Verify a typed session code or scan session QR.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
-| **Response 200** | `{ session_id, offering_id, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
+| **Response 200** | `{ session_id, offering_id, session_type, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
 | **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` |
 

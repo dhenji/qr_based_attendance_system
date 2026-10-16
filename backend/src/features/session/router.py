@@ -17,7 +17,7 @@ from features.session.schema import (
     SessionListItem,
     SessionRead,
 )
-from shared.enums import UserRole, ValidationStatus
+from shared.enums import SessionType, UserRole, ValidationStatus
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -70,6 +70,7 @@ async def list_sessions(
     date_from: datetime | None = Query(default=None, alias="from"),
     date_to: datetime | None = Query(default=None, alias="to"),
     offering_id: int | None = Query(default=None, gt=0),
+    session_type: SessionType | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> PaginatedResponse[SessionListItem]:
@@ -80,6 +81,7 @@ async def list_sessions(
         date_from=date_from,
         date_to=date_to,
         offering_id=offering_id,
+        session_type=session_type,
         page=page,
         size=size,
     )
@@ -96,6 +98,7 @@ async def session_history(
     professor_service: ProfessorServiceDep,
     offering_id: int | None = Query(default=None, gt=0),
     section: str | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     sort_by: str | None = Query(default=None),
@@ -109,6 +112,7 @@ async def session_history(
         professor_id=professor_id,
         offering_id=offering_id,
         section=section,
+        session_type=session_type,
         date_from=date_from,
         date_to=date_to,
         sort_by=sort_by,
@@ -186,6 +190,7 @@ async def professor_attendance(
     offering_id: int | None = Query(default=None, gt=0),
     section: str | None = Query(default=None),
     session_id: int | None = Query(default=None, gt=0),
+    session_type: SessionType | None = Query(default=None),
     status: ValidationStatus | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
@@ -202,6 +207,7 @@ async def professor_attendance(
         offering_id=offering_id,
         section=section,
         session_id=session_id,
+        session_type=session_type,
         status=status,
         date_from=date_from,
         date_to=date_to,

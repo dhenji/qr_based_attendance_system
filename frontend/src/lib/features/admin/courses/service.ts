@@ -16,7 +16,7 @@
 // (soft, is_active=false, 204) — same effect, kept as a separate call so the
 // UI can offer both like the students/professors slices do.
 
-import { del, get, patch, post } from '$lib/api/client';
+import { del, get, getText, patch, post, postForm, TEXT_EXPORTS } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
 	AdminCourse,
@@ -24,6 +24,7 @@ import type {
 	AdminCourseFilters,
 	AdminCourseResponse,
 	AdminCourseUpdatePayload,
+	CourseImportResult,
 } from '$lib/shared/types';
 
 export const toCourse = (c: AdminCourseResponse): AdminCourse => ({
@@ -32,7 +33,8 @@ export const toCourse = (c: AdminCourseResponse): AdminCourse => ({
 	courseName: c.course_name,
 	units: c.units,
 	sessionDurationHours: c.session_duration_hours,
-	// Backend has no column — fall back so live rows never render undefined.
+	// Course templates carry no type (D77) — the badge UI derives
+	// Lecture/Lab/Mixed from the course's offerings instead.
 	courseType: c.course_type ?? 'lecture',
 	isActive: c.is_active,
 	createdAt: c.created_at,
@@ -102,4 +104,22 @@ export const setCourseActive = async (id: number, isActive: boolean): Promise<Ad
 // Soft archive — 204, flips is_active=false server-side.
 export const archiveCourse = async (id: number): Promise<void> => {
 	await del<void>('adminCourseDetail', undefined, `/${id}`);
+};
+
+export const importCourses = async (file: File): Promise<CourseImportResult> => {
+	const form = new FormData();
+	form.append('file', file);
+	return postForm<CourseImportResult>('adminCourseImport', form);
+};
+
+// CSV template. Server text in live mode; the static header keeps
+// mock-mode/offline imports working when the template route is unreachable.
+const COURSE_TEMPLATE_FALLBACK = 'course_code,course_name,units,session_duration_hours\n';
+
+export const downloadCourseTemplate = async (): Promise<string> => {
+	try {
+		return await getText(TEXT_EXPORTS.courseTemplate);
+	} catch {
+		return COURSE_TEMPLATE_FALLBACK;
+	}
 };

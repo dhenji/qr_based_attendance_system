@@ -42,7 +42,6 @@
 	let f_schedule_days = $state('');
 	let f_start = $state('');
 	let f_end = $state('');
-	let f_course_type = $state<'lecture' | 'lab'>('lecture');
 	let f_classroom = $state('');
 	let f_lat = $state('');
 	let f_lng = $state('');
@@ -164,7 +163,6 @@
 				schedule_days: f_schedule_days,
 				schedule_start_time: f_start,
 				schedule_end_time: f_end,
-				course_type: f_course_type,
 				classroom_name: f_classroom || undefined,
 				default_present_window_minutes: f_present,
 				default_late_window_minutes: f_late,
@@ -200,7 +198,6 @@
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
-				course_type: parsed.data.course_type,
 				classroom_name: parsed.data.classroom_name || undefined,
 				classroom_lat: lat,
 				classroom_lng: lng,
@@ -358,12 +355,6 @@
 					<label>Start time<input class="input" type="time" bind:value={f_start} /></label>
 					<label>End time<input class="input" type="time" bind:value={f_end} /></label>
 				</div>
-				<label>Type
-					<select class="input" bind:value={f_course_type}>
-						<option value="lecture">Lecture</option>
-						<option value="lab">Laboratory</option>
-					</select>
-				</label>
 				<label>Classroom (optional)<input class="input" bind:value={f_classroom} placeholder="Room 301" /></label>
 				<div class="grid2">
 					<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={f_lat} placeholder="14.5995" /></label>

@@ -43,6 +43,7 @@
 	let course = $state('');
 	let section = $state('');
 	let status = $state<'All' | ProfessorAttendanceStatus>('All');
+	let sessionType = $state<'All' | 'lecture' | 'lab'>('All');
 	let from = $state(initialRange.from);
 	let to = $state(initialRange.to);
 	let sortBy = $state<AttendanceLedgerSortBy>('date');
@@ -104,6 +105,7 @@
 			course: course || undefined,
 			section: section || undefined,
 			status: status === 'All' ? undefined : status,
+			sessionType: sessionType === 'All' ? undefined : sessionType,
 			from: from || undefined,
 			to: to || undefined,
 			sortBy,
@@ -201,6 +203,7 @@
 		course = '';
 		section = '';
 		status = 'All';
+		sessionType = 'All';
 		from = initialRange.from;
 		to = initialRange.to;
 		currentPage = 1;
@@ -234,6 +237,7 @@
 				course: course || undefined,
 				section: section || undefined,
 				status: status === 'All' ? undefined : status,
+				sessionType: sessionType === 'All' ? undefined : sessionType,
 				from: from || undefined,
 				to: to || undefined,
 				sortBy,
@@ -252,6 +256,7 @@
 				[
 					'Date',
 					'Session code',
+					'Type',
 					'Course',
 					'Section',
 					'Student number',
@@ -266,6 +271,7 @@
 				all.map((row) => [
 					row.created_at.slice(0, 10),
 					row.session_code,
+					row.session_type,
 					row.course_code,
 					row.section,
 					row.student_number,
@@ -343,6 +349,19 @@
 		</div>
 		{#if canQuery}
 			<div class="filter-grid refine">
+				<div class="field">
+					<label class="form-label" for="session-type">Type</label>
+					<select
+						id="session-type"
+						class="form-input"
+						bind:value={sessionType}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="All">Lecture + Lab</option>
+						<option value="lecture">Lecture</option>
+						<option value="lab">Laboratory</option>
+					</select>
+				</div>
 				<div class="field">
 					<label class="form-label" for="status">Status</label>
 					<select
@@ -448,6 +467,7 @@
 								</button>
 							</th>
 							<th scope="col">Session</th>
+							<th scope="col">Type</th>
 							<th scope="col" aria-sort={ariaSort('status')}>
 								<button
 									class="sort"
@@ -490,6 +510,11 @@
 									<div class="course-sub">{row.course_name}</div>
 								</td>
 								<td class="mono">{row.session_code}</td>
+								<td>
+									<span class="type-badge" class:is-lab={row.session_type === 'lab'}>
+										{row.session_type === 'lab' ? 'Lab' : 'Lecture'}
+									</span>
+								</td>
 								<td>
 									<span class="status status-{row.status}">{row.status}</span>
 									{#if excuseSub(row)}
@@ -807,6 +832,22 @@
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
 	.status-rejected { background: var(--danger-bg); color: #7f1d1d; }
+
+	.type-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--success);
+		background: var(--success-bg);
+		white-space: nowrap;
+	}
+
+	.type-badge.is-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
 
 	.mini {
 		padding: 0.375rem 0.75rem;

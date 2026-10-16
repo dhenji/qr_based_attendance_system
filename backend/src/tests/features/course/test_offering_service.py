@@ -16,7 +16,7 @@ from features.course.exceptions import (
     OfferingScheduleWindowException,
     WindowsExceedDurationException,
 )
-from features.course.model import Course, CourseOffering
+from features.course.model import Course, CourseOffering, OfferingComponent
 from features.course.schema import OfferingCreate, OfferingUpdate, ProfessorAssignment
 from features.course.service import CourseService, parse_enrollment_csv
 from features.course_professor.exceptions import OverlappingAssignmentException
@@ -265,8 +265,22 @@ def test_create_offering_ok() -> None:
 
     assert read.enrolled_count == 0
     assert read.semester == "1ST"
-    assert [type(obj) for obj in session.added] == [CourseOffering, AuditLog]
-    audit = session.added[1]
+    # The default lecture component is inserted between the offering and the
+    # audit row.
+    assert [type(obj) for obj in session.added] == [
+        CourseOffering,
+        OfferingComponent,
+        AuditLog,
+    ]
+    component = session.added[1]
+    assert component.session_type == "lecture"
+    assert component.schedule_days == "MWF"
+    # The follow-up read sees no component rows through this fake (scalars
+    # returns [] for unregistered entities); DB-backed tests cover the
+    # populated read below.
+    assert read.components == []
+    assert read.session_types == []
+    audit = session.added[2]
     assert audit.action == "create"
     assert audit.entity_type == "course_offering"
     assert audit.entity_id == read.id

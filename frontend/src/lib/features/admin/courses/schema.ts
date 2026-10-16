@@ -11,8 +11,8 @@ export const courseCreateSchema = z.object({
 	course_name: z.string().trim().min(1, 'Required').max(100),
 	units: z.coerce.number().int().min(1).max(6),
 	session_duration_hours: z.coerce.number().min(0.5).max(8),
-	// Local-only label (see offerings/schema.ts): optional, defaults to lecture.
-	course_type: z.enum(['lecture', 'lab']).optional().default('lecture'),
+	// No type: a course template is type-agnostic (D77) — lecture/lab lives
+	// on sessions and offering components, so one course can mix both.
 });
 
 export type CourseCreateInput = z.infer<typeof courseCreateSchema>;
@@ -22,7 +22,6 @@ export const courseUpdateSchema = z.object({
 	course_name: z.string().trim().min(1).max(100).optional(),
 	units: z.coerce.number().int().min(1).max(6).optional(),
 	session_duration_hours: z.coerce.number().min(0.5).max(8).optional(),
-	course_type: z.enum(['lecture', 'lab']).optional(),
 	is_active: z.boolean().optional(),
 });
 

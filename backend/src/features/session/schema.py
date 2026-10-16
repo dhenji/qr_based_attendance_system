@@ -11,7 +11,7 @@ from shared.constants import (
     LONGITUDE_MAX,
     LONGITUDE_MIN,
 )
-from shared.enums import ValidationStatus
+from shared.enums import SessionType, ValidationStatus
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
@@ -38,6 +38,10 @@ class QRPayload(BaseModel):
 
 class SessionCreate(BaseModel):
     offering_id: int = Field(gt=0)
+    # Lecture vs laboratory (D77). Defaults to lecture; lab sessions must
+    # resolve classroom coordinates or creation fails with
+    # `lab_coordinates_required`.
+    session_type: SessionType = SessionType.LECTURE
     duration_minutes: int | None = Field(
         default=None, ge=DURATION_MINUTES_MIN, le=DURATION_MINUTES_MAX
     )
@@ -81,6 +85,7 @@ class SessionRead(BaseModel):
     id: int
     session_code: str
     offering_id: int
+    session_type: SessionType = SessionType.LECTURE
     qr_payload: QRPayload
     expires_at: datetime | None = None
     scheduled_end_time: datetime
@@ -115,6 +120,7 @@ class SessionListItem(BaseModel):
 
     id: int
     offering_id: int
+    session_type: SessionType = SessionType.LECTURE
     session_code: str
     created_at: datetime
     expires_at: datetime | None = None
@@ -154,6 +160,7 @@ class SessionActiveResponse(BaseModel):
 
     id: int
     offering: int
+    session_type: SessionType = SessionType.LECTURE
     session_code: str
     scan_window_remaining: int = Field(
         description=(
@@ -185,6 +192,7 @@ class ProfessorAttendanceItem(BaseModel):
     student_name: str
     section: str | None = None
     session_id: int
+    session_type: SessionType = SessionType.LECTURE
     status: ValidationStatus
     original_status: ValidationStatus | None = None
     scanned_at: datetime
@@ -221,6 +229,7 @@ class VerifyGeofence(BaseModel):
 class VerifyCodeResponse(BaseModel):
     session_id: int
     offering_id: int
+    session_type: SessionType = SessionType.LECTURE
     course_code: str
     course_name: str
     program_code: str
