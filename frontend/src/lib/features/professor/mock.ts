@@ -90,7 +90,7 @@ export const PROFESSOR_COURSES: ProfessorCourse[] = [
 		semester: '1st Sem',
 		academicYear: '2025-2026',
 		section: 'A',
-		scheduleDays: 'TTH',
+		scheduleDays: 'TH',
 		scheduleStartTime: '11:00 AM',
 		scheduleEndTime: '12:30 PM',
 		scheduledMinutes: 90,

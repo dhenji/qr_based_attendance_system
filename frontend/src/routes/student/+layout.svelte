@@ -18,6 +18,7 @@
 		markStudentSeen,
 		maybeNotify,
 		POLL_INTERVAL_MS,
+		truncateNotifPreview,
 	} from '$lib/features/notifications/poll';
 	import { listStudentExcuses } from '$lib/features/student/service';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -41,15 +42,25 @@
 	let notifPreview = $state<NotificationBellItem[]>([]);
 	let notifLoading = $state(false);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let refreshing = false;
+	let notifGeneration = 0;
 
 	const refreshNotif = async () => {
-		const next = await getStudentUpdateCount();
-		if (next > notifCount) {
-			const fresh = next - notifCount;
-			notifToast = `${fresh} excuse decision${fresh === 1 ? '' : 's'} from your professor — tap the bell to review.`;
-			maybeNotify('Excuse decision', 'Your professor reviewed your excuse request.');
+		if (refreshing) return;
+		refreshing = true;
+		const generation = notifGeneration;
+		try {
+			const next = await getStudentUpdateCount();
+			if (generation !== notifGeneration) return;
+			if (next > notifCount) {
+				const fresh = next - notifCount;
+				notifToast = `${fresh} excuse decision${fresh === 1 ? '' : 's'} from your professor — tap the bell to review.`;
+				maybeNotify('Excuse decision', 'Your professor reviewed your excuse request.');
+			}
+			notifCount = next;
+		} finally {
+			refreshing = false;
 		}
-		notifCount = next;
 	};
 
 	const onNotifFocus = () => {
@@ -81,7 +92,10 @@
 		// not exist — and onMount (the only place listeners attach) never
 		// runs on the server, so there is nothing to clean up there.
 		if (!browser) return;
-		if (pollTimer) clearInterval(pollTimer);
+		if (pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
 		window.removeEventListener('focus', onNotifFocus);
 		document.removeEventListener('visibilitychange', onNotifFocus);
 	});
@@ -100,7 +114,7 @@
 				.map((row) => ({
 					id: row.id,
 					title: `Excuse ${row.status}`,
-					sub: row.reason.length > 60 ? `${row.reason.slice(0, 60)}…` : row.reason,
+					sub: truncateNotifPreview(row.reason),
 				}));
 		} catch {
 			notifPreview = [];
@@ -110,6 +124,7 @@
 	};
 
 	const openNotifHistory = async () => {
+		notifGeneration += 1;
 		markStudentSeen();
 		notifCount = 0;
 		notifToast = null;

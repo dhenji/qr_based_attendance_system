@@ -623,10 +623,11 @@ export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
 
 // Student excuse requests — live on features/excuse/student_router.py.
 // Submit creates a pending request (201); the professor reviews it in the
-// queue. Reason floor is 20 chars here (REASON_MIN_LENGTH_STUDENT), not the
-// professor 10. Attachments ride presigned-upload URLs (D24): the client
-// mints a URL per file, PUTs the bytes itself, then submits the returned
-// object_urls (1..5). Reason-only submits stay valid (pending without files).
+// queue. Reason floor is STUDENT_EXCUSE_REASON_MIN_LENGTH (student/service),
+// not the professor 10. Attachments ride presigned-upload URLs (D24): the
+// client mints a URL per file, PUTs the bytes itself, then submits the
+// returned object_urls (up to ATTACHMENTS_MAX_FILES). Reason-only submits
+// stay valid (pending without files).
 // List/detail read the student's own rows (a 404 doubles as not-yours).
 export interface StudentExcuseSubmitBody {
 	session_id: number;
@@ -806,7 +807,7 @@ export const StudentScheduleEndpoint: EndpointDef<ScheduleResponse> = {
 				program_code: 'BSCS',
 				year_level_label: '1st Year',
 				semester: '1st Sem 2025-2026',
-				schedule_days: 'TTh',
+				schedule_days: 'TH',
 				schedule_start_time: '13:00:00',
 				schedule_end_time: '14:30:00',
 				classroom_name: null,
@@ -1588,7 +1589,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		academic_year: '2025-2026',
 		sessions_per_week: 2,
 		semester_weeks: 18,
-		schedule_days: 'TTH',
+		schedule_days: 'TH',
 		schedule_start_time: '11:00:00',
 		schedule_end_time: '12:30:00',
 		course_type: 'lecture',
@@ -1598,7 +1599,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 				id: 2,
 				offering_id: 2,
 				session_type: 'lecture',
-				schedule_days: 'TTH',
+				schedule_days: 'TH',
 				schedule_start_time: '11:00:00',
 				schedule_end_time: '12:30:00',
 				classroom_name: 'Room 203',

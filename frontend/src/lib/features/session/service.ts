@@ -336,6 +336,7 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 					? 0
 					: items.reduce((total, row) => total + row.compliance_rate, 0) / items.length,
 			total_sessions: response.total,
+			avg_scope: 'page' as const,
 		};
 	}
 
@@ -385,5 +386,6 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 				? 0
 				: merged.reduce((total, row) => total + row.compliance_rate, 0) / merged.length,
 		total_sessions: merged.length,
+		avg_scope: 'filtered' as const,
 	};
 };
