@@ -70,6 +70,10 @@ async def test_create_offering_with_mixed_components(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:
     seed = await _seed_offering(factories)
+    # MWF 08:00-09:00 counts 3h plus lab M 13:00-15:00 counts 2h = 5h total,
+    # so the template needs exactly 5 units under the exact-match rule (D79).
+    seed["course"].units = 5
+    await factories.db.flush()
     headers = await _admin_headers(auth_headers, factories)
 
     response = await api_client.post(
@@ -354,6 +358,10 @@ async def test_lab_session_prefills_component_classroom(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:
     seed = await _seed_offering(factories)
+    # The lone lab meeting is 2h, so the template needs exactly 2 units for
+    # the session-open requirement gate (D82).
+    seed["course"].units = 2
+    await factories.db.flush()
     admin_headers = await _admin_headers(auth_headers, factories)
 
     created = await api_client.post(

@@ -6,7 +6,7 @@
 		blankMeeting,
 		type MeetingDraft,
 	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
-	import { findDuplicateMeetings, findOverlappingMeetings } from '$lib/shared/utils/schedule';
+	import { findDuplicateMeetings, findOverlappingMeetings, totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount } from '$lib/shared/utils/schedule';
 	import {
 		adminOfferingsState,
 		deleteArchivedOffering,
@@ -17,6 +17,7 @@
 	import {
 		createOffering,
 		enrichOfferings,
+		findConflictingOffering,
 		offeringTitle,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
@@ -30,6 +31,8 @@
 	import { sessionMixLabel } from '$lib/shared/types';
 	import { adminOffering } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
+	import { APIError } from '$lib/api/client';
+	import { WEEKLY_HOURS_CODES } from '$lib/shared/utils/deleteErrors';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
@@ -58,9 +61,17 @@
 	let formOpen = $state(false);
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
+	// 409 rescue: the conflicting offering may sit under a different year
+	// level than the one being scheduled, so link straight to it.
+	let conflictOffering = $state<AdminOffering | null>(null);
 
 	let deleteTarget = $state<AdminOffering | null>(null);
 	let deleteBusy = $state(false);
+
+	// Deactivate confirm (Deactivate flips to inactive; Reactivate stays
+	// immediate since it only restores).
+	let deactivateTarget = $state<AdminOffering | null>(null);
+	let deactivateBusy = $state(false);
 
 	// Create-form fields (strings for inputs; ids coerced by zod on submit).
 	// Meetings (D77): one row per weekly meeting, each with its own type,
@@ -236,6 +247,7 @@
 
 	const openCreate = async () => {
 		formError = null;
+		conflictOffering = null;
 		meetingErrors = [];
 		m_course_id = '';
 		m_program_id = '';
@@ -297,17 +309,78 @@
 			: []
 	);
 
+	// Shared schedule rows for the derives below: one entry per meeting row.
+	const modalScheduleRows = $derived(
+		meetings.map((m) => ({
+			schedule_days: m.days,
+			schedule_start_time: m.start,
+			schedule_end_time: m.end,
+		}))
+	);
+
 	// Same-day time intersections across meeting rows (any types). Guidance
 	// only — the backend permits overlaps, so these never block the submit.
 	const overlapNotes = $derived(
-		findOverlappingMeetings(
-			meetings.map((m) => ({
-				schedule_days: m.days,
-				schedule_start_time: m.start,
-				schedule_end_time: m.end,
-			}))
-		).map((o) => `Meetings ${o.a + 1} and ${o.b + 1} overlap on ${o.days}.`)
+		findOverlappingMeetings(modalScheduleRows).map(
+			(o) => `Meetings ${o.a + 1} and ${o.b + 1} overlap on ${o.days}.`
+		)
 	);
+
+	// Units requirement (D79): the picked course's units are the required
+	// scheduled meeting hours per week. Null until a course is
+	// picked, so the banner below stays hidden instead of showing NaN.
+	const modalCourse = $derived(courseOptions.find((c) => String(c.id) === m_course_id) ?? null);
+	const modalBreakdown = $derived(
+		weeklyHoursBreakdown(modalScheduleRows, modalCourse?.units ?? null)
+	);
+
+	// Sessions per week is one per meeting day — same helper as the Setup
+	// Wizard, so both create surfaces count identically.
+	const modalSessionsPerWeek = $derived(weeklySessionCount(modalScheduleRows));
+
+	// Term total, same product the risk batch uses as its expected session
+	// count — identical line to the Setup Wizard step 3.
+	const modalExpectedTotal = $derived(
+		totalExpectedSessions(String(modalSessionsPerWeek), m_semester_weeks)
+	);
+
+	// 409 rescue lookup, shared by both save buttons. Null when the identity
+	// fields cannot name a conflict or the lookup itself fails — callers fall
+	// back to the generic friendly message then.
+	const resolveConflict = async (): Promise<AdminOffering | null> => {
+		const courseId = Number(m_course_id);
+		const programId = Number(m_program_id);
+		if (!Number.isInteger(courseId) || courseId <= 0) return null;
+		if (!Number.isInteger(programId) || programId <= 0) return null;
+		try {
+			return await findConflictingOffering({
+				course_id: courseId,
+				program_id: programId,
+				semester: m_semester,
+				academic_year: m_academic_year,
+			});
+		} catch {
+			return null;
+		}
+	};
+
+	const conflictCourse = $derived.by(() => {
+		const c = conflictOffering;
+		return c ? (courseOptions.find((x) => x.id === c.courseId) ?? null) : null;
+	});
+	const conflictProgram = $derived.by(() => {
+		const c = conflictOffering;
+		return c ? (programOptions.find((x) => x.id === c.programId) ?? null) : null;
+	});
+	const conflictYearLabel = $derived.by(() => {
+		const c = conflictOffering;
+		if (!c) return null;
+		return m_yearOptions.find((y) => y.id === c.yearLevelId)?.label ?? `Year ${c.yearLevelId}`;
+	});
+	const conflictHref = $derived.by(() => {
+		const c = conflictOffering;
+		return c ? adminOffering(c.id) : '';
+	});
 
 	const parseCoord = (raw: string, label: string, min: number, max: number): number | undefined => {
 		const trimmed = raw.trim();
@@ -321,6 +394,7 @@
 
 	const submitForm = async (openAfter = false) => {
 		formError = null;
+		conflictOffering = null;
 		meetingErrors = [];
 		formBusy = true;
 		try {
@@ -337,9 +411,8 @@
 				year_level_id: m_year_level_id,
 				semester: m_semester,
 				academic_year: m_academic_year,
-				// Sessions/week is the meeting entry count (entries are
-				// single-day, so one entry is exactly one weekly session).
-				sessions_per_week: meetings.length,
+				// Sessions/week is one per meeting day (shared helper above).
+				sessions_per_week: modalSessionsPerWeek,
 				semester_weeks: m_semester_weeks,
 				schedule_days: first.days,
 				schedule_start_time: first.start,
@@ -427,6 +500,19 @@
 				formError = firstRowError;
 				return;
 			}
+			// Weekly-hours requirement (backend 422 weekly_hours_exceed_units /
+			// weekly_hours_below_units): the course's units are the required
+			// scheduled meeting hours per week. Creation carries the whole
+			// schedule, so it must match exactly. Runs after per-row
+			// validation so invalid rows (which contribute nothing to the
+			// total) cannot mask or fake the sum.
+			if (modalCourse && modalBreakdown && modalBreakdown.status !== 'ok') {
+				formError =
+					modalBreakdown.status === 'over'
+						? `Weekly scheduled hours (${modalBreakdown.scheduled}h) exceed the ${modalCourse.units}-unit requirement (${modalBreakdown.limit}h) for ${modalCourse.courseCode} — remove or shorten a meeting.`
+						: `Weekly scheduled hours (${modalBreakdown.scheduled}h) fall short of the ${modalCourse.units}-unit requirement (${modalBreakdown.limit}h) for ${modalCourse.courseCode} — add or lengthen a meeting.`;
+				return;
+			}
 			const head = components[0];
 			const saved = await createOffering({
 				course_id: parsed.data.course_id,
@@ -453,7 +539,21 @@
 			// professor assignment and enrollment live.
 			if (openAfter) await goto(adminOffering(saved.id));
 		} catch (e: unknown) {
-			formError = friendlyActionError(e, 'Save failed. Please try again.');
+			// 409 rescue: the conflicting offering may sit under a different
+			// year level, so look it up and link straight to it instead of
+			// leaving a dead-end message.
+			if (e instanceof APIError && e.code === 'offering_exists') {
+				conflictOffering = await resolveConflict();
+				if (!conflictOffering) {
+					formError = friendlyActionError(e, 'Save failed. Please try again.');
+				}
+			} else if (e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code)) {
+				// Race safety: the guards above already block mismatches, but a
+				// backend 422 from another surface still shows its numbers.
+				formError = e.message;
+			} else {
+				formError = friendlyActionError(e, 'Save failed. Please try again.');
+			}
 		} finally {
 			formBusy = false;
 		}
@@ -473,6 +573,22 @@
 	const closeDelete = () => {
 		adminOfferingsState.actionError = null;
 		deleteTarget = null;
+	};
+
+	const confirmDeactivate = async () => {
+		if (!deactivateTarget || deactivateBusy) return;
+		deactivateBusy = true;
+		try {
+			await toggleOfferingActive(deactivateTarget);
+			deactivateTarget = null;
+		} finally {
+			deactivateBusy = false;
+		}
+	};
+
+	const closeDeactivate = () => {
+		adminOfferingsState.actionError = null;
+		deactivateTarget = null;
 	};
 
 	const rowTitle = (o: AdminOffering) => offeringTitle(o);
@@ -561,7 +677,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminOfferingsState.loading}>
-			{#if adminOfferingsState.actionError && !deleteTarget}
+			{#if adminOfferingsState.actionError && !deleteTarget && !deactivateTarget}
 				<p class="error" role="alert">{adminOfferingsState.actionError}</p>
 			{/if}
 			<table>
@@ -606,12 +722,21 @@
 							</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
-								<button
-									class="link"
-									onclick={() => void toggleOfferingActive(o)}
-								>
-									{o.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
+								{#if o.isActive}
+									<button
+										class="link"
+										onclick={() => { adminOfferingsState.actionError = null; deactivateTarget = o; }}
+									>
+										Deactivate
+									</button>
+								{:else}
+									<button
+										class="link"
+										onclick={() => void toggleOfferingActive(o)}
+									>
+										Reactivate
+									</button>
+								{/if}
 								{#if !o.isActive}
 									<button
 										class="link danger"
@@ -660,6 +785,15 @@
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
 			{/if}
+			{#if conflictOffering}
+				{@const conflict = conflictOffering}
+				<p class="error" role="alert">
+					{conflictCourse?.courseCode ?? `Course ${conflict.courseId}`} is already
+					offered for {conflictProgram?.code ?? `Program ${conflict.programId}`} · {conflict.semester}
+					{conflict.academicYear}{conflictYearLabel ? ` under ${conflictYearLabel}` : ''}.
+					<a class="link strong" href={conflictHref}>Open offering</a>
+				</p>
+			{/if}
 			<div class="form">
 				<div class="grid2">
 					<label>Course
@@ -700,8 +834,13 @@
 						{/each}
 					</select>
 				</label>
-				<p class="hint">Meetings per week: {meetings.length} (counted automatically — one per meeting above).</p>
+				<p class="hint">Meetings per week: {modalSessionsPerWeek} (counted automatically — one per meeting day).</p>
 				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={m_semester_weeks} /></label>
+				{#if modalExpectedTotal !== null}
+					<p class="hint">{modalSessionsPerWeek} sessions/week × {m_semester_weeks.trim()} weeks = {modalExpectedTotal} expected sessions this term.</p>
+				{:else}
+					<p class="hint">Enter the semester weeks to see the expected session total.</p>
+				{/if}
 				<p class="hint">One offering per course + program + term + academic year — the year level doesn't disambiguate, so re-offering the same course in the same term fails as a duplicate.</p>
 				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} />
 				{#if overlapNotes.length > 0}
@@ -710,6 +849,15 @@
 							{note} Overlapping meetings are allowed, but sessions for one offering run one at a time.
 						</p>
 					{/each}
+				{/if}
+				{#if modalBreakdown}
+					{#if modalBreakdown.status === 'ok'}
+						<p class="hint">{modalBreakdown.scheduled}h scheduled of {modalBreakdown.limit}h weekly requirement ({modalCourse?.courseCode} · exact) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+					{:else if modalBreakdown.status === 'over'}
+						<p class="error" role="alert">{modalBreakdown.scheduled}h scheduled of {modalBreakdown.limit}h weekly requirement ({modalCourse?.courseCode} · {-modalBreakdown.remaining}h over) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+					{:else}
+						<p class="error" role="alert">{modalBreakdown.scheduled}h scheduled of {modalBreakdown.limit}h weekly requirement ({modalCourse?.courseCode} · {modalBreakdown.remaining}h short) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
+					{/if}
 				{/if}
 				<div class="grid2">
 					<label>Present window, min<input class="input" inputmode="numeric" bind:value={m_present} /></label>
@@ -724,6 +872,34 @@
 				</button>
 				<button class="btn btn-primary" data-testid="save-offering" disabled={formBusy} onclick={() => void submitForm(false)}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="deactivate-offering-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDeactivate }}
+		>
+			<h2 id="deactivate-offering-title" class="modal-title">Deactivate this offering?</h2>
+			<p class="modal-text">
+				{rowTitle(deactivateTarget)} will be flipped to inactive. Sessions history
+				is kept, and you can reactivate it anytime.
+			</p>
+			{#if adminOfferingsState.actionError}
+				<p class="error" role="alert">{adminOfferingsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDeactivate}>Cancel</button>
+				<button class="btn btn-danger" disabled={deactivateBusy} onclick={confirmDeactivate}>
+					{deactivateBusy ? 'Deactivating…' : 'Deactivate'}
 				</button>
 			</div>
 		</div>

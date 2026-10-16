@@ -141,6 +141,15 @@
 							<span class="role-badge" class:primary={course.isPrimary}>
 								{course.isPrimary ? 'Primary' : 'Assistant'}
 							</span>
+							{#if !course.scheduleOk}
+								<span
+									class="blocked-badge"
+									title="Weekly schedule does not match the course units requirement — sessions cannot be opened. Contact your administrator."
+								>
+									<AppIcon name="alert" size={12} />
+									Sessions blocked
+								</span>
+							{/if}
 						</div>
 
 						<p class="course-meta">
@@ -152,6 +161,8 @@
 								<button
 									class="btn btn-primary"
 									data-testid="open-session-{course.offeringId}"
+									disabled={!course.scheduleOk}
+									title={!course.scheduleOk ? 'Sessions cannot be opened — the weekly schedule does not match the course units requirement' : undefined}
 									onclick={() => goto(professorSessionCreate(course.offeringId))}
 								>
 									<AppIcon name="qr" size={18} />
@@ -345,6 +356,22 @@
 		background: var(--success-bg);
 		border-color: var(--success-bg);
 		color: var(--success);
+	}
+
+	/* Sessions-open readiness (D82): the backend refuses opens on
+	mis-scheduled offerings, so the button is disabled up front. */
+	.blocked-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3125rem;
+		padding: 0.1875rem 0.5rem;
+		border-radius: 6px;
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
+		color: var(--danger);
+		font-size: 0.75rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
 	}
 
 	.course-meta {

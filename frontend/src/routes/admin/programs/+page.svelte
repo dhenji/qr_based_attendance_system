@@ -40,6 +40,11 @@
 	let deleteTarget = $state<Program | null>(null);
 	let deleteBusy = $state(false);
 
+	// Deactivate confirm (Deactivate flips to archived; Reactivate stays
+	// immediate since it only restores).
+	let deactivateTarget = $state<Program | null>(null);
+	let deactivateBusy = $state(false);
+
 	let f_code = $state('');
 	let f_name = $state('');
 	let f_description = $state('');
@@ -200,6 +205,22 @@
 		adminProgramsState.actionError = null;
 		deleteTarget = null;
 	};
+
+	const confirmDeactivate = async () => {
+		if (!deactivateTarget || deactivateBusy) return;
+		deactivateBusy = true;
+		try {
+			await toggleProgramActive(deactivateTarget);
+			deactivateTarget = null;
+		} finally {
+			deactivateBusy = false;
+		}
+	};
+
+	const closeDeactivate = () => {
+		adminProgramsState.actionError = null;
+		deactivateTarget = null;
+	};
 </script>
 
 <div class="page">
@@ -249,7 +270,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminProgramsState.loading}>
-			{#if adminProgramsState.actionError && !deleteTarget}
+			{#if adminProgramsState.actionError && !deleteTarget && !deactivateTarget}
 				<p class="error" role="alert">{adminProgramsState.actionError}</p>
 			{/if}
 			<table>
@@ -287,12 +308,21 @@
 							</td>
 							<td class="row-actions">
 								<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
-								<button
-									class="link"
-									onclick={() => void toggleProgramActive(p)}
-								>
-									{p.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
+								{#if p.isActive}
+									<button
+										class="link"
+										onclick={() => { adminProgramsState.actionError = null; deactivateTarget = p; }}
+									>
+										Deactivate
+									</button>
+								{:else}
+									<button
+										class="link"
+										onclick={() => void toggleProgramActive(p)}
+									>
+										Reactivate
+									</button>
+								{/if}
 								{#if !p.isActive}
 									<button
 										class="link danger"
@@ -354,6 +384,34 @@
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-program" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="deactivate-program-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDeactivate }}
+		>
+			<h2 id="deactivate-program-title" class="modal-title">Deactivate {deactivateTarget.code}?</h2>
+			<p class="modal-text">
+				{deactivateTarget.name} will be flipped to archived. Year levels stay,
+				offerings and students keep working, and you can reactivate it anytime.
+			</p>
+			{#if adminProgramsState.actionError}
+				<p class="error" role="alert">{adminProgramsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDeactivate}>Cancel</button>
+				<button class="btn btn-danger" disabled={deactivateBusy} onclick={confirmDeactivate}>
+					{deactivateBusy ? 'Deactivating…' : 'Deactivate'}
 				</button>
 			</div>
 		</div>

@@ -45,6 +45,11 @@
 	let deleteTarget = $state<AdminCourse | null>(null);
 	let deleteBusy = $state(false);
 
+	// Deactivate confirm (Deactivate flips to inactive; Reactivate stays
+	// immediate since it only restores).
+	let deactivateTarget = $state<AdminCourse | null>(null);
+	let deactivateBusy = $state(false);
+
 	let f_code = $state('');
 	let f_name = $state('');
 	let f_units = $state('');
@@ -215,6 +220,22 @@
 		adminCoursesState.actionError = null;
 		deleteTarget = null;
 	};
+
+	const confirmDeactivate = async () => {
+		if (!deactivateTarget || deactivateBusy) return;
+		deactivateBusy = true;
+		try {
+			await toggleCourseActive(deactivateTarget);
+			deactivateTarget = null;
+		} finally {
+			deactivateBusy = false;
+		}
+	};
+
+	const closeDeactivate = () => {
+		adminCoursesState.actionError = null;
+		deactivateTarget = null;
+	};
 </script>
 
 <div class="page">
@@ -261,7 +282,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminCoursesState.loading}>
-			{#if adminCoursesState.actionError && !deleteTarget}
+			{#if adminCoursesState.actionError && !deleteTarget && !deactivateTarget}
 				<p class="error" role="alert">{adminCoursesState.actionError}</p>
 			{/if}
 			<table>
@@ -278,7 +299,7 @@
 							</button>
 						</th>
 						<th>Units</th>
-						<th>Duration (h)</th>
+						<th>Default session (h)</th>
 						<th>Status</th>
 						<th><span class="sr">Actions</span></th>
 					</tr>
@@ -298,12 +319,21 @@
 							<td class="row-actions">
 								<button class="link" onclick={() => goto(adminCourse(c.id))}>Open</button>
 								<button class="link" onclick={() => openEdit(c)}>Edit</button>
-								<button
-									class="link"
-									onclick={() => void toggleCourseActive(c)}
-								>
-									{c.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
+								{#if c.isActive}
+									<button
+										class="link"
+										onclick={() => { adminCoursesState.actionError = null; deactivateTarget = c; }}
+									>
+										Deactivate
+									</button>
+								{:else}
+									<button
+										class="link"
+										onclick={() => void toggleCourseActive(c)}
+									>
+										Reactivate
+									</button>
+								{/if}
 								{#if !c.isActive}
 									<button
 										class="link danger"
@@ -358,13 +388,41 @@
 					<label>Units (1–6)<input class="input" inputmode="numeric" bind:value={f_units} placeholder="3" /></label>
 				</div>
 				<label>Name<input class="input" bind:value={f_name} placeholder="Software Engineering 1" /></label>
-				<label>Session duration, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={f_duration} placeholder="1.5" /></label>
-				<p class="hint">Program, schedule, and classroom attach later via offerings. Lecture/laboratory sessions are scheduled per offering, so one course can mix both.</p>
+				<label>Default session length, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={f_duration} placeholder="1.5" /></label>
+				<p class="hint">Attendance window budget and fallback session length — actual meeting lengths are set per offering meeting and must total within the units limit per week. Program, schedule, and classroom attach later via offerings. Lecture/laboratory sessions are scheduled per offering, so one course can mix both.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-course" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="deactivate-course-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDeactivate }}
+		>
+			<h2 id="deactivate-course-title" class="modal-title">Deactivate {deactivateTarget.courseCode}?</h2>
+			<p class="modal-text">
+				{deactivateTarget.courseName} will be flipped to inactive. Its offerings
+				keep working, and you can reactivate it anytime.
+			</p>
+			{#if adminCoursesState.actionError}
+				<p class="error" role="alert">{adminCoursesState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDeactivate}>Cancel</button>
+				<button class="btn btn-danger" disabled={deactivateBusy} onclick={confirmDeactivate}>
+					{deactivateBusy ? 'Deactivating…' : 'Deactivate'}
 				</button>
 			</div>
 		</div>

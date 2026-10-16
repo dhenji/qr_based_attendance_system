@@ -119,6 +119,33 @@ export const enrichOfferings = (
 	}));
 };
 
+// 409 rescue for `offering_exists`: the unique key is
+// (course_id, program_id, semester, academic_year) — the year level does not
+// disambiguate — so the conflicting row may sit under a different year level
+// than the one the admin is looking at. The list endpoint has no
+// academic-year filter, so match it client-side from a narrow page.
+export interface OfferingConflictQuery {
+	course_id: number;
+	program_id: number;
+	semester: string;
+	academic_year: string;
+}
+
+export const findConflictingOffering = async (
+	query: OfferingConflictQuery
+): Promise<AdminOffering | null> => {
+	const { items } = await listOfferings({
+		course_id: query.course_id,
+		program_id: query.program_id,
+		semester: query.semester,
+		size: 50,
+	});
+	const wantYear = query.academic_year.trim().toLowerCase();
+	return (
+		items.find((o) => o.academicYear.trim().toLowerCase() === wantYear) ?? null
+	);
+};
+
 // Display title for an offering row. Prefers joined names, falls back to ids
 // (same fallback the professor assignment picker uses).
 export const offeringTitle = (o: AdminOffering): string => {

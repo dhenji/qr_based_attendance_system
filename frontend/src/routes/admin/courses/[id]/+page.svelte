@@ -140,18 +140,6 @@ import { sessionMixLabel } from '$lib/shared/types';
 		}
 	};
 
-	const toggleActive = async () => {
-		if (!course) return;
-		try {
-			await setCourseActive(course.id, !course.isActive);
-			await refreshAdminCourseDetail(course.id);
-			notifyEntityChanged('courses');
-		} catch {
-			// Surface via the detail state's actionError.
-			adminCourseDetailState.actionError = 'Failed to update course status';
-		}
-	};
-
 	const onArchive = async () => {
 		if (!course || archiveBusy) return;
 		archiveBusy = true;
@@ -167,8 +155,29 @@ import { sessionMixLabel } from '$lib/shared/types';
 		}
 	};
 
+	const onReactivate = async () => {
+		if (!course || archiveBusy) return;
+		archiveBusy = true;
+		try {
+			await setCourseActive(course.id, true);
+			await refreshAdminCourseDetail(course.id);
+			notifyEntityChanged('courses');
+		} catch (e: unknown) {
+			adminCourseDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to reactivate course';
+		} finally {
+			archiveBusy = false;
+		}
+	};
+
 	let deleteOpen = $state(false);
 	let deleteBusy = $state(false);
+	let archiveConfirm = $state(false);
+
+	const confirmArchive = async () => {
+		await onArchive();
+		if (course && !course.isActive) archiveConfirm = false;
+	};
 
 	const confirmDelete = async () => {
 		if (!course || deleteBusy) return;
@@ -191,7 +200,12 @@ import { sessionMixLabel } from '$lib/shared/types';
 </script>
 
 <div class="page">
-	<button class="link back" onclick={() => goto(Routes.ADMIN_COURSES)}>‹ All courses</button>
+	<div class="page-top">
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_COURSES)}>
+			← Back to Course Management
+		</button>
+		<p class="crumb"><a href={Routes.ADMIN_COURSES}>Courses</a> / Detail</p>
+	</div>
 
 	{#if adminCourseDetailState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
@@ -204,7 +218,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 			<div>
 				<h1>{course.courseCode} — {course.courseName}</h1>
 				<p class="muted">
-					Units: {course.units} · Duration: {course.sessionDurationHours}h ·
+					Units: {course.units} · Default session: {course.sessionDurationHours}h ·
 					<span class="badge" class:inactive={!course.isActive}>
 						{course.isActive ? 'Active' : 'Inactive'}
 					</span>
@@ -212,13 +226,10 @@ import { sessionMixLabel } from '$lib/shared/types';
 			</div>
 			<div class="header-actions">
 				<button class="btn btn-secondary" onclick={openEdit}>Edit</button>
-				<button class="btn btn-secondary" onclick={toggleActive}>
-					{course.isActive ? 'Deactivate' : 'Reactivate'}
-				</button>
 			</div>
 		</header>
 
-		{#if adminCourseDetailState.actionError && !deleteOpen}
+		{#if adminCourseDetailState.actionError && !deleteOpen && !archiveConfirm}
 			<section class="card"><p class="error" role="alert">{adminCourseDetailState.actionError}</p></section>
 		{/if}
 
@@ -275,15 +286,26 @@ import { sessionMixLabel } from '$lib/shared/types';
 
 		<section class="card danger">
 			<h2 class="card-title">Danger zone</h2>
-			<p class="muted">Archiving flips this template to inactive. Existing offerings keep working.</p>
+			<p class="muted">
+				Status: <strong>{course.isActive ? 'Active' : 'Inactive'}</strong>. Archiving
+				flips this template to inactive — existing offerings keep working.
+				Reactivating restores it. Deletion is permanent and blocked while
+				offerings still use this template.
+			</p>
 			<div class="danger-actions">
-				<button class="btn btn-danger" disabled={archiveBusy || !course.isActive} onclick={onArchive}>
-					{archiveBusy ? 'Archiving…' : 'Archive course'}
-				</button>
+				{#if course.isActive}
+					<button class="btn btn-danger" disabled={archiveBusy} onclick={() => { adminCourseDetailState.actionError = null; archiveConfirm = true; }}>
+						Archive course
+					</button>
+				{:else}
+					<button class="btn btn-secondary" disabled={archiveBusy} onclick={onReactivate}>
+						{archiveBusy ? 'Reactivating…' : 'Reactivate course'}
+					</button>
+				{/if}
 				<button
 					class="btn btn-danger"
 					disabled={deleteBusy || course.isActive}
-					title={course.isActive ? 'Deactivate (archive) first — only archived courses can be deleted' : undefined}
+					title={course.isActive ? 'Archive first — only archived courses can be deleted' : undefined}
 					onclick={() => { adminCourseDetailState.actionError = null; deleteOpen = true; }}
 				>
 					Delete permanently
@@ -316,12 +338,40 @@ import { sessionMixLabel } from '$lib/shared/types';
 					<label>Units (1–6)<input class="input" inputmode="numeric" bind:value={e_units} /></label>
 				</div>
 				<label>Name<input class="input" bind:value={e_name} /></label>
-				<label>Session duration, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={e_duration} /></label>
+				<label>Default session length, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={e_duration} /></label>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if archiveConfirm && course}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="course-archive-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (archiveConfirm = false) }}
+		>
+			<h2 id="course-archive-title" class="modal-title">Archive {course.courseCode}?</h2>
+			<p class="modal-text">
+				{course.courseName} will be flipped to inactive. Its offerings keep
+				working, and you can reactivate it anytime.
+			</p>
+			{#if adminCourseDetailState.actionError}
+				<p class="error" role="alert">{adminCourseDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
 		</div>
@@ -488,9 +538,29 @@ import { sessionMixLabel } from '$lib/shared/types';
 		text-decoration: underline;
 	}
 
-	.back {
-		align-self: flex-start;
-		font-size: 0.875rem;
+	/* Back button + breadcrumb read as one header block, so the .page flex gap
+	 * does not push them a full row apart (same pattern as Program Management). */
+	.page-top {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.crumb {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	.crumb a {
+		color: var(--accent);
+		text-decoration: none;
+		font-weight: 600;
+	}
+
+	.crumb a:hover {
+		text-decoration: underline;
 	}
 
 	.empty {

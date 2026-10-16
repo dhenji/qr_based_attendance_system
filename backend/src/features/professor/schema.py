@@ -155,6 +155,11 @@ class AssignedOfferingItem(BaseModel):
     effective_to: date | None = None
     units: int = 0
     enrolled_count: int = 0
+    # Sessions-open readiness (D82): False when the configured meetings
+    # mismatch the units requirement, in which case opening is refused.
+    # True when the total matches — or when no meetings are configured at
+    # all, which the open gate exempts as legacy.
+    schedule_ok: bool = True
 
 
 class ProfessorProfileRead(BaseModel):

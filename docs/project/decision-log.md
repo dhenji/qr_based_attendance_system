@@ -1943,3 +1943,195 @@
   Management page shows a Reactivate button on inactive rows with a
   confirmation modal. No migration is required. Covered by
   `tests/features/admin/test_user_status.py`.
+
+### ADR-078: Course Units as the Weekly Scheduled-Hours Cap
+
+- **Decision (D78):** `courses.units` is the maximum permitted total of
+  scheduled meeting hours per week across an offering's active components.
+  Weekly Scheduled Hours = Σ (schedule_end_time − schedule_start_time) ×
+  distinct day-letter count of schedule_days. Valid iff the total fits
+  `units × 60` minutes. Enforced in `CourseService` on offering creation,
+  component add, and component edit against the merged active set (422
+  `weekly_hours_exceed_units` carrying scheduled/limit/remaining); the Setup
+  Wizard, Offerings create modal, and Offering detail Settings tab show
+  limit/scheduled/remaining live and block over-limit submits with the same
+  rule. `session_duration_hours` is retained as the default session length —
+  the ceiling for present + late windows and the fallback `duration_minutes`
+  when a professor opens a session without an override — and is relabeled
+  accordingly in the UI.
+- **Date:** 2026-10-16
+- **Status:** Accepted
+- **Context:** Since D77 an offering mixes meetings of different lengths, so
+  the template-level scalar could no longer describe the schedule, and
+  nothing validated a schedule against `units` at all. The issue (#265)
+  proposed treating units as the weekly cap with Mon 07:00–08:30 +
+  Tue 13:00–14:30 (3.0h) valid on a 3-unit course and the 3.5h variant
+  rejected, all days folding into one total.
+- **Alternatives considered:**
+  (1) *Delete `session_duration_hours` now.* Rejected: it still budgets the
+  attendance windows (`_check_windows`, `ck_session_window_sum_lte_duration`)
+  and defaults session expiry; removal needs a migration plus a per-meeting
+  window-budget redesign (Phase 2).
+  (2) *DB CHECK constraint.* Rejected: the rule is cross-row and needs the
+  merged active set; service-level enforcement is the only home.
+  (3) *Taken:* units cap in the service + shared frontend breakdown helper
+  (`weeklyHoursBreakdown`), grandfathered legacy rows.
+- **Consequences:** No schema change, no migration (`alembic check` stays
+  green). Grandfathered over-limit offerings stay readable and archivable and
+  may only move downward (a schedule-changing write on an over-limit row must
+  strictly decrease the total; room/coords-only edits skip the check).
+  Duplicate components still 409 before the cap is evaluated. Multi-letter
+  day rows count multiplicatively (`MWF` 1h = 3h), matching the pre-existing
+  `weeklyMeetingHours` helper. Covered by
+  `tests/features/course/test_weekly_hours.py`.
+
+### ADR-079: Course Units as the Exact Weekly Scheduled-Hours Requirement
+
+- **Decision (D79):** `courses.units` is the required — not merely maximum —
+  total of scheduled meeting hours per week across an offering's active
+  components. Weekly Scheduled Hours = Σ (schedule_end_time −
+  schedule_start_time) × distinct day-letter count, compared in whole
+  minutes. Offering creation (the payload carries the whole schedule) must
+  land exactly on `units × 60`, else 422 `weekly_hours_exceed_units` (over)
+  or 422 `weekly_hours_below_units` (short). Component add/edit must land
+  exactly or converge: strictly closer to the requirement without crossing to
+  the other side, so legacy off-requirement rows and mid-build schedules can
+  always be fixed incrementally but can never overshoot or drift. Reads,
+  archives, deactivations, and schedule-untouched edits skip the check;
+  reactivating an archived component revalidates the merged total.
+- **Date:** 2026-10-16
+- **Status:** Accepted
+- **Context:** D78 introduced units-as-cap, but a cap still permits
+  under-scheduled offerings (e.g. 1.5h on a 3-unit course) to save. The
+  requirement is exact match: the admin cannot save while the meeting total
+  differs from the units hours in either direction.
+- **Alternatives considered:**
+  (1) *Strict exact-landing on every write, no convergence.* Rejected: it
+  strands rows — splitting one exact meeting into two, or rebuilding after
+  archiving, passes through a mid-build total no single write could land
+  exactly on, leaving no valid next write.
+  (2) *Pure distance (closer is enough, crossing allowed).* Rejected: an
+  under total could overshoot into over (1.5h + 2.0h = 3.5h is "closer" than
+  1.5h was), permitting a save that still mismatches.
+  (3) *Taken:* exact on creation, converge-without-crossing on add/edit.
+  Steady states (exact rows, fresh payloads) behave strictly; only
+  off-requirement rows get the convergence path, which always terminates at
+  exact. The frontend mirrors the rule in `weeklyWriteBlocked`
+  (`schedule.ts`), so the three admin surfaces block the same writes the
+  backend would 422.
+- **Consequences:** Supersedes D78's cap semantics; the `over`/`remaining`
+  copy becomes over/short/exact. No schema change, no migration (`alembic
+  check` stays green). Covered by
+  `tests/features/course/test_weekly_hours.py` (exact create both
+  directions, multi-day counting, converge/block sequences from both sides,
+  reactivation revalidation).
+
+### ADR-080: Sessions-per-Week Auto-Counted from Meeting Days
+
+- **Decision (D80):** `course_offerings.sessions_per_week` is derived, not
+  entered: one session per meeting day (the distinct day-letter count summed
+  over the active components, so an `MWF` row counts 3). The Setup Wizard,
+  Offerings create modal, and offering detail Settings all share one counting
+  rule (`weeklySessionCount` on the frontend). The column is re-synced
+  server-side (`_sync_sessions_per_week`) after every component
+  insert/update/archive and recomputed on offering creation, so the value the
+  risk batch reads never drifts from the meetings; the Settings tab shows it
+  read-only. Zero active meetings syncs to 0 (internal sync only — the API
+  input floor of 1 still applies to client payloads).
+- **Date:** 2026-10-16
+- **Status:** Accepted
+- **Context:** Step 3 counted `meetings.length` (correct only for its
+  single-day rows) while detail Settings exposed a free-typed number that
+  could disagree with the meetings entirely, and multi-day rows counted 1
+  session for 3 days of class.
+- **Alternatives considered:**
+  (1) *Keep the editable input.* Rejected: it is the drift source — nothing
+  kept it consistent with the meetings.
+  (2) *Derive everywhere including the risk batch (drop the column's role).*
+  Rejected: larger cross-cutting change into analytics for no gain; syncing
+  the column at the four existing `CourseService` write points covers every
+  path that can change the meetings.
+  (3) *Taken:* shared helper + server-side re-sync + read-only display.
+- **Consequences:** No schema change, no migration (`alembic check` stays
+  green). Stored values on untouched rows keep their old counts until the
+  next component write re-syncs them; displays always show the derived
+  value, so save/reopen is consistent. Expected-session denominators for
+  multi-day-row offerings rise to the true meeting count going forward.
+  Covered by the D80 block in
+  `tests/features/course/test_weekly_hours.py`.
+
+### ADR-081: Reshape Edits Exempt from the Weekly-Hours Requirement
+
+- **Decision (D81):** Plain component edits (`PATCH
+  /admin/offerings/{id}/components/{cid}` changing schedule/room/coords) save
+  freely with no weekly-hours check. Exactness is enforced where a complete
+  schedule arrives at once (offering creation: must land exactly) and where
+  the total only grows (component add and reactivation: must land exactly or
+  converge strictly closer without crossing sides). The over/short panels
+  stay visible until a reshape converges back to the requirement.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** D79's per-write enforcement froze exact rows: any duration
+  change on an exact total moves away from it, so shrinking a meeting to make
+  room for a new one was rejected and multi-step reshapes had no valid
+  sequence short of archive-everything-and-rebuild. The rule could not see
+  multi-step intent.
+- **Alternatives considered:**
+  (1) *Keep per-write enforcement everywhere.* Rejected: strands exact rows
+  and forces destructive archive-rebuilds for ordinary reshapes.
+  (2) *Bulk replace-all-meetings endpoint validated atomically.* Rejected
+  for now: principled but an order of magnitude more work for the same
+  outcome; reconsider if reshapes routinely span many rows at once.
+  (3) *Taken:* free edits, strict creation, converging adds/reactivations.
+  Never strands — from any total a single minute-precise edit can reach
+  exact — while nothing new can be created mismatched and nothing can grow
+  away from the requirement.
+- **Consequences:** Transient mismatched states can persist if an admin
+  walks away mid-reshape; the red panels plus the converging-add rule keep
+  pulling toward exact. The detail edit form additionally gates divergent
+  saves behind a "Save anyway?" confirm (triggered by the same
+  converge-check), so a mismatch never persists by accident — converging
+  fixes save straight through. Covered by the reshape tests in
+  `tests/features/course/test_weekly_hours.py`.
+
+### ADR-082: Mismatched Offerings Can Neither Go Live Nor Run
+
+- **Decision (D82):** Two gates, no status auto-flips. (1) Activation
+  (`PATCH /admin/offerings/{id}` moving `is_active` False → True) requires
+  the merged active-component total to equal `courses.units * 60` exactly —
+  422 `schedule_mismatch` otherwise, including the zero-meeting case.
+  Deactivation, unrelated PATCHes, and already-active rows are unaffected.
+  (2) Session opening (`POST /professor/sessions`) requires the same exact
+  total — 422 `offering_schedule_mismatch` with professor-safe copy —
+  except when no meetings are configured at all, which is exempt as legacy.
+  Closing is never gated.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** Weekly-requirement enforcement stopped mismatched schedules
+  from being created or grown, but a mismatched offering could still be
+  (re)activated and still run attendance. Auto-deactivation was considered
+  and rejected: it would fire mid-reshape (punishing the D81 workflow),
+  fire on converging fixes, flap student visibility, and attribute a status
+  decision to no human.
+- **Alternatives considered:**
+  (1) *Auto-deactivate on mismatch.* Rejected per above — no good trigger
+  exists that doesn't punish legitimate reshapes.
+  (2) *Gate only activation.* Rejected as insufficient alone: already-active
+  mismatched rows (grandfathered) could still open sessions.
+  (3) *Taken:* activation gate + session-open gate. Nothing mismatched can
+  be created, grown, activated, or run — while edits, archives, legacy
+  reads, and component-less rows keep working, and no system process ever
+  flips a status behind an admin's back.
+- **Consequences:** No schema change, no migration (`alembic check` stays
+  green). The detail Reactivate button disables with a tooltip while the
+  live total is off-requirement (backend remains the enforcer); the
+  professor open form renders the backend message verbatim, so it is kept
+  free of ids and admin jargon. Signs: the admin detail shows an explicit
+  "Sessions blocked" row plus the consequence line on Settings, and every
+  professor assigned-offering row carries a server-derived `schedule_ok`
+  flag (one extra IN-query in the existing enrichment, empty schedules read
+  True) driving a badge, a disabled Open button, and a pre-submit warning —
+  so professors learn before clicking, not after. Covered by the activation
+  tests in `tests/features/course/test_weekly_hours.py`,
+  `tests/features/session/test_schedule_requirement.py`, and
+  `tests/features/professor/test_schedule_flag.py`.

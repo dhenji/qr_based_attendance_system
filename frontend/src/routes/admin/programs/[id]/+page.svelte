@@ -13,6 +13,7 @@
 	} from '$lib/features/admin/programs/store.svelte';
 	import {
 		createYearLevel,
+		setProgramActive,
 		updateProgram,
 		updateYearLevel,
 	} from '$lib/features/admin/programs/service';
@@ -227,6 +228,31 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		}
 	};
 
+	let archiveBusy = $state(false);
+	let archiveConfirm = $state(false);
+
+	const setActive = async (active: boolean, failure: string) => {
+		if (!program || archiveBusy) return;
+		archiveBusy = true;
+		try {
+			await setProgramActive(program.id, active);
+			await refreshAdminProgramDetail(program.id);
+			notifyEntityChanged('programs');
+		} catch (e: unknown) {
+			adminProgramDetailState.actionError =
+				e instanceof Error && e.message ? e.message : failure;
+		} finally {
+			archiveBusy = false;
+		}
+	};
+
+	const onReactivate = () => void setActive(true, 'Failed to reactivate program');
+
+	const confirmArchive = async () => {
+		await setActive(false, 'Failed to archive program');
+		if (program && !program.isActive) archiveConfirm = false;
+	};
+
 	const closeProgramDelete = () => {
 		adminProgramsState.actionError = null;
 		programDeleteOpen = false;
@@ -264,14 +290,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 					<AppIcon name="file" size={18} />
 					Edit
 				</button>
-				{#if !program.isActive}
-					<button
-						class="btn btn-danger"
-						onclick={() => { adminProgramsState.actionError = null; programDeleteOpen = true; }}
-					>
-						Delete
-					</button>
-				{/if}
 			</div>
 		</header>
 
@@ -317,6 +335,38 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 				{/each}
 			</ul>
 		{/if}
+		<section class="card danger">
+			<h2 class="card-title">Danger zone</h2>
+			<p class="muted">
+				Status: <strong>{program.isActive ? 'Active' : 'Archived'}</strong>. Archiving
+				flips this program to archived — year levels stay, offerings and
+				students keep working. Reactivating restores it. Deletion is
+				permanent and blocked while course offerings or students still use
+				this program.
+			</p>
+			<div class="danger-actions">
+				{#if program.isActive}
+					<button class="btn btn-danger" disabled={archiveBusy} onclick={() => { adminProgramDetailState.actionError = null; archiveConfirm = true; }}>
+						Archive program
+					</button>
+				{:else}
+					<button class="btn btn-secondary" disabled={archiveBusy} onclick={onReactivate}>
+						{archiveBusy ? 'Reactivating…' : 'Reactivate program'}
+					</button>
+				{/if}
+				<button
+					class="btn btn-danger"
+					disabled={programDeleteBusy || program.isActive}
+					title={program.isActive ? 'Archive first — only archived programs can be deleted' : undefined}
+					onclick={() => { adminProgramsState.actionError = null; programDeleteOpen = true; }}
+				>
+					Delete permanently
+				</button>
+			</div>
+			{#if !program.isActive}
+				<p class="hint">Delete is blocked while course offerings or students still use this program.</p>
+			{/if}
+		</section>
 	{/if}
 </div>
 
@@ -452,6 +502,34 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	</div>
 {/if}
 
+{#if archiveConfirm && program}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="program-archive-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (archiveConfirm = false) }}
+		>
+			<h2 id="program-archive-title" class="modal-title">Archive {program.code}?</h2>
+			<p class="modal-text">
+				{program.name} will be flipped to archived. Year levels stay, offerings
+				and students keep working, and you can reactivate it anytime.
+			</p>
+			{#if adminProgramDetailState.actionError}
+				<p class="error" role="alert">{adminProgramDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if programDeleteOpen && program}
 	<div class="modal-overlay" role="presentation">
 		<div
@@ -571,6 +649,27 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		border-radius: 8px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
+	}
+
+	.card-title {
+		margin: 0 0 0.375rem;
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.card .muted {
+		margin-bottom: 1rem;
+	}
+
+	.danger {
+		border-color: var(--danger-bg);
+	}
+
+	.danger-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 	}
 
 	.year {

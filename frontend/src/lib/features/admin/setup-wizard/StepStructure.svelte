@@ -318,7 +318,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 							<label>Units<input class="input" inputmode="numeric" bind:value={c_units} placeholder="3" /></label>
 						</div>
 						<label>Name<input class="input" bind:value={c_name} placeholder="Intro to Computing" /></label>
-						<label>Session hours<input class="input" inputmode="decimal" bind:value={c_duration} placeholder="1.5" /></label>
+						<label>Default session length, hours<input class="input" inputmode="decimal" bind:value={c_duration} placeholder="1.5" /></label>
 						<div class="form-actions">
 							<button class="btn btn-ghost" onclick={() => (courseOpen = false)}>Cancel</button>
 							<button
