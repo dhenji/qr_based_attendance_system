@@ -99,7 +99,9 @@ self.addEventListener('fetch', (event) => {
 				// (root document) when not.
 				try {
 					const fresh = await fetch(request);
-					void cache.put(request, fresh.clone()).catch(() => undefined);
+					void cache
+						.put(request, fresh.clone())
+						.catch((error: unknown) => console.debug('[sw] shell cache put failed:', error));
 					return fresh;
 				} catch {
 					const cached =
@@ -114,7 +116,9 @@ self.addEventListener('fetch', (event) => {
 				const cached = await cache.match(request);
 				if (cached) return cached;
 				const fresh = await fetch(request);
-				void cache.put(request, fresh.clone()).catch(() => undefined);
+				void cache
+					.put(request, fresh.clone())
+					.catch((error: unknown) => console.debug('[sw] asset cache put failed:', error));
 				return fresh;
 			} catch {
 				const fallback = await cache.match(request);

@@ -12,6 +12,7 @@
 	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
+	import Turnstile from '$lib/components/Turnstile.svelte';
 
 	// Forgot-password recovery (ADR-056), live against the backend:
 	//  1. POST /auth/forgot-password {email, turnstile_token?} -> {question}
@@ -42,6 +43,7 @@
 	let recoveryToken = $state<string | null>(null);
 
 	let otpInput: import('$lib/components/OtpInput.svelte').default | undefined = $state();
+	let turnstile: import('$lib/components/Turnstile.svelte').default | undefined = $state();
 
 	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
 	const win = createOtpWindow();
@@ -97,11 +99,12 @@
 		busy = true;
 		error = '';
 		try {
-			const result = await forgotPassword(email);
+			const result = await forgotPassword(email, turnstile?.getToken() ?? null);
 			securityQuestion = result.question;
 			step = 2;
 		} catch (e: unknown) {
 			error = toMessage(e, 'Could not start recovery. Please try again.');
+			if (e instanceof APIError && e.code === 'invalid_captcha') turnstile?.reset();
 		} finally {
 			busy = false;
 		}
@@ -227,6 +230,8 @@
 						<input class="form-input" id="fp-email" type="email" placeholder="juan.delacruz@isu.edu.ph"
 							value={email} oninput={(e) => { email = (e.target as HTMLInputElement).value; }} />
 					</div>
+
+					<Turnstile bind:this={turnstile} />
 
 					<button class="btn-primary" onclick={handleStep1} disabled={busy}>
 						{busy ? 'Checking…' : 'Continue'}

@@ -118,6 +118,12 @@ export interface EndpointDef<T> {
 	) => T;
 }
 
+// Mock 204 No Content: the live client returns `undefined as T` for empty
+// responses, and callers issue these deletes as `del<void>`, so a mock
+// DELETE produces no value either. `never` is assignable to every T, which
+// keeps the single cast here instead of an `as unknown as X` at each site.
+const mockNoContent = (): never => undefined as unknown as never;
+
 // Session QR payload (D18)
 export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 	url: '/student/sessions/verify-code',
@@ -213,29 +219,47 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 	}),
 };
 
+// Mock session registry: deterministic per mock-mode run so an opened session
+// can be inspected and closed by id. Random ids made open→close unmatchable
+// (close echoed a fixed id:0 and could collide) and the QR payload carried a
+// different code than the session itself.
+let mockSessionSeq = 1000;
+const mockSessions = new Map<number, string>();
+
+const mockSessionCode = (seq: number): string => {
+	const base = seq.toString(36).toUpperCase().padStart(6, '0').slice(-6);
+	return `${base.slice(0, 2)}-${base.slice(2)}`;
+};
+
 export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: (_params, _suffix, body) => ({
-		id: Math.floor(Math.random() * 1000) + 1,
-		session_code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-		offering_id: 1,
-		session_type:
-			(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
-				? ('lab' as const)
-				: ('lecture' as const),
-		qr_payload: {
-			v: 1,
-			code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-			offering: 1,
-			radius: 50,
-			pw: 15,
-			lw: 5,
-		},
-		expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-		created_at: new Date().toISOString(),
-	}),
+	mock: (_params, _suffix, body) => {
+		mockSessionSeq += 1;
+		const id = mockSessionSeq;
+		const sessionCode = mockSessionCode(id);
+		mockSessions.set(id, sessionCode);
+		return {
+			id,
+			session_code: sessionCode,
+			offering_id: 1,
+			session_type:
+				(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
+					? ('lab' as const)
+					: ('lecture' as const),
+			qr_payload: {
+				v: 1,
+				code: sessionCode,
+				offering: 1,
+				radius: 50,
+				pw: 15,
+				lw: 5,
+			},
+			expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+			scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+			created_at: new Date().toISOString(),
+		};
+	},
 };
 
 // Session history (professor) — wireframe 3.5, GET /professor/sessions/history.
@@ -259,20 +283,24 @@ export const SessionHistoryEndpoint: EndpointDef<Paginated<SessionHistoryItemRes
 export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 	url: '/professor/sessions/active',
 	method: 'GET',
-	mock: () => ({
-		id: 1,
-		offering: 1,
-		session_type: 'lecture' as const,
-		session_code: '7X-9K2M',
-		scan_window_remaining: 2400,
-		scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
-		status: 'active',
-		enrolled_count: 30,
-		remaining: 12,
-		pending_sync_count: 0,
-		students: [],
-		counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
-	}),
+	mock: (_params, suffix) => {
+		const match = suffix?.match(/\/(\d+)/);
+		const id = match ? parseInt(match[1], 10) : 1;
+		return {
+			id,
+			offering: 1,
+			session_type: 'lecture' as const,
+			session_code: mockSessions.get(id) ?? '7X-9K2M',
+			scan_window_remaining: 2400,
+			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+			status: 'active',
+			enrolled_count: 30,
+			remaining: 12,
+			pending_sync_count: 0,
+			students: [],
+			counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
+		};
+	},
 };
 
 // Close session (professor).
@@ -281,7 +309,16 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 export const SessionCloseEndpoint: EndpointDef<SessionCloseResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: () => ({ id: 0, status: 'closed' as const, final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 } }),
+	mock: (_params, suffix) => {
+		const match = suffix?.match(/\/(\d+)\/close/);
+		const ids = [...mockSessions.keys()];
+		const id = match ? parseInt(match[1], 10) : (ids.pop() ?? 0);
+		return {
+			id,
+			status: 'closed' as const,
+			final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 },
+		};
+	},
 };
 
 // Attendance records (professor) — GET /professor/attendance.
@@ -1263,7 +1300,7 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 			const row = findMockStudentRow(suffix);
 			if (row.is_active) throw new Error('Only inactive students can be deleted.');
 			MOCK_ADMIN_STUDENT_ROWS.splice(MOCK_ADMIN_STUDENT_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminStudentDetailResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockStudentRow(suffix);
@@ -1283,10 +1320,54 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 	},
 };
 
+// Mock CSV import: derives counts from the uploaded file's real rows when
+// postForm forwards them (see client.ts postForm), so duplicate/error paths
+// are testable in mock mode. Without file info it keeps the legacy fixed
+// fixture. Line numbers are 1-based file lines (header is line 1); a repeat
+// first-column value counts as a duplicate, a wrong column count or a blank
+// first cell counts as an error.
+const mockCsvImport = (
+	body: unknown,
+	legacyImported: number
+): { imported: number; duplicates: number; errors: { line: number; reason: string }[] } => {
+	const fileText = (body as { fileText?: unknown } | undefined)?.fileText;
+	if (typeof fileText !== 'string')
+		return { imported: legacyImported, duplicates: 0, errors: [] };
+	const lines = fileText.split(/\r?\n/);
+	const expectedCols = (lines[0] ?? '').split(',').length;
+	let imported = 0;
+	let duplicates = 0;
+	const errors: { line: number; reason: string }[] = [];
+	const seen = new Set<string>();
+	lines.slice(1).forEach((line, index) => {
+		if (line.trim() === '') return;
+		const lineNo = index + 2;
+		const cells = line.split(',');
+		const key = (cells[0] ?? '').trim().toLowerCase();
+		if (cells.length !== expectedCols || key === '') {
+			errors.push({
+				line: lineNo,
+				reason:
+					cells.length !== expectedCols
+						? `Expected ${expectedCols} columns, found ${cells.length}.`
+						: 'Missing identifier in the first column.',
+			});
+			return;
+		}
+		if (seen.has(key)) {
+			duplicates += 1;
+			return;
+		}
+		seen.add(key);
+		imported += 1;
+	});
+	return { imported, duplicates, errors };
+};
+
 export const AdminStudentImportEndpoint: EndpointDef<StudentImportResult> = {
 	url: '/admin/students/import',
 	method: 'POST',
-	mock: () => ({ imported: 25, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 25),
 };
 
 // --- Admin face enrollment (3-photo upload, D43) --------------------------------
@@ -1499,7 +1580,7 @@ export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> =
 			const row = findMockProfessorRow(suffix);
 			if (row.is_active) throw new Error('Only inactive professors can be deleted.');
 			MOCK_ADMIN_PROFESSOR_ROWS.splice(MOCK_ADMIN_PROFESSOR_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminProfessorResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockProfessorRow(suffix);
@@ -1530,7 +1611,7 @@ export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> =
 export const AdminProfessorImportEndpoint: EndpointDef<ProfessorImportResult> = {
 	url: '/admin/professors/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 // --- Admin offerings (professor assignment picker) ---------------------------
@@ -1818,7 +1899,7 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 			const row = findMockCourseRow(suffix);
 			if (row.is_active) throw new Error('Only inactive courses can be deleted.');
 			MOCK_ADMIN_COURSE_ROWS.splice(MOCK_ADMIN_COURSE_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminCourseResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockCourseRow(suffix);
@@ -1850,7 +1931,7 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 export const AdminCourseImportEndpoint: EndpointDef<CourseImportResult> = {
 	url: '/admin/courses/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 // --- Admin offering detail: CRUD + professors + roster + bulk enroll ---------
@@ -2049,7 +2130,7 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 			const row = findMockOfferingRow(suffix);
 			if (row.is_active) throw new Error('Only inactive offerings can be deleted.');
 			MOCK_ADMIN_OFFERINGS.splice(MOCK_ADMIN_OFFERINGS.indexOf(row), 1);
-			return undefined as unknown as AdminOfferingResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockOfferingRow(suffix);
@@ -2138,7 +2219,7 @@ export const AdminOfferingComponentDetailEndpoint: EndpointDef<OfferingComponent
 			component.is_active = false;
 			component.updated_at = new Date().toISOString();
 			refreshMockSessionTypes(offering);
-			return undefined as unknown as OfferingComponentResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const p = (body ?? {}) as MockComponentPayload;
@@ -2213,7 +2294,7 @@ export const AdminOfferingProfessorsEndpoint: EndpointDef<
 			);
 			if (!row) throw new Error('Assignment not found.');
 			row.effective_to = new Date().toISOString().slice(0, 10);
-			return undefined as unknown as AdminAssignmentResponse;
+			return mockNoContent();
 		}
 		if (method === 'POST') {
 			const p = (body ?? {}) as MockAssignmentPayload;
@@ -2378,7 +2459,7 @@ export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 			for (let i = MOCK_YEARS.length - 1; i >= 0; i--) {
 				if (MOCK_YEARS[i].program_id === removed.id) MOCK_YEARS.splice(i, 1);
 			}
-			return undefined as unknown as ProgramDetailResponse;
+			return mockNoContent();
 		}
 		const program = MOCK_PROGRAMS.items.find((p) => p.id === id) ?? MOCK_PROGRAMS.items[0];
 		return {
@@ -2391,7 +2472,7 @@ export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 export const AdminProgramImportEndpoint: EndpointDef<ProgramImportResult> = {
 	url: '/admin/programs/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
@@ -3113,7 +3194,7 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = false;
-		return undefined as unknown as void;
+		return undefined;
 	},
 };
 
@@ -3125,7 +3206,7 @@ export const AdminUserReactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = true;
-		return undefined as unknown as void;
+		return undefined;
 	},
 };
 

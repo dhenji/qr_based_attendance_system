@@ -87,9 +87,12 @@ export const registerOutboxSync = async (): Promise<void> => {
 		).sync;
 		if (!syncManager) return;
 		await syncManager.register('attendly-outbox');
-	} catch {
+	} catch (error) {
 		// No service worker / SyncManager (Firefox, iOS): the page-driven
-		// online-event and retry-timer paths already cover the drain.
+		// online-event and retry-timer paths already cover the drain. Log at
+		// debug so a real registration failure (e.g. quota) is diagnosable
+		// instead of silent.
+		console.debug('[sync] Background Sync registration skipped:', error);
 	}
 };
 
@@ -185,10 +188,17 @@ const idbOrMemory = async <T>(fn: () => Promise<T>, fallback: () => T): Promise<
 // --- Queue -------------------------------------------------------------------
 
 const nowIso = (): string => new Date().toISOString();
-const newId = (): string =>
-	typeof crypto !== 'undefined' && 'randomUUID' in crypto
-		? crypto.randomUUID()
-		: Math.random().toString(36).substring(2, 15);
+
+// Queue/idempotency ids: crypto UUIDs when available; the fallback mixes a
+// timestamp, a per-session counter, and randomness so two rapid offline scans
+// can never share an id (bare Math.random() could collide and the second
+// scan would reuse the first scan's idempotency key on replay).
+let fallbackSeq = 0;
+export const newQueueId = (): string => {
+	if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+	fallbackSeq += 1;
+	return `q-${Date.now().toString(36)}-${fallbackSeq.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 const listRows = (): Promise<QueuedScan[]> =>
 	idbOrMemory(
@@ -228,7 +238,7 @@ export const queue = {
 		const createdAt = nowIso();
 		const row: QueuedScan = {
 			...record,
-			id: newId(),
+			id: newQueueId(),
 			status: 'pending',
 			createdAt,
 			updatedAt: createdAt,
@@ -298,11 +308,19 @@ const toScanBody = (payload: QueuedScanPayload) => ({
 	scannedAt: payload.scannedAt
 });
 
-// Transient API failures worth another attempt: 429 rate-limit, timeouts,
-// cancellations, and 5xx. Everything else the server decided (duplicate,
-// mismatch, validation) is terminal.
+// Transient API failures worth another attempt: offline, 429 rate-limit,
+// timeouts, cancellations, and 5xx. Everything else the server decided
+// (duplicate, mismatch, validation) is terminal. Offline (network_error)
+// stays pending the same way it always did via the non-APIError else-branch
+// — naming it here only documents the intent after the fetch wrapper started
+// emitting it as an APIError.
 const isTransientApiError = (error: APIError): boolean => {
-	if (error.code === 'rate_limited' || error.code === 'request_timeout' || error.code === 'request_cancelled')
+	if (
+		error.code === 'network_error' ||
+		error.code === 'rate_limited' ||
+		error.code === 'request_timeout' ||
+		error.code === 'request_cancelled'
+	)
 		return true;
 	if (error.status !== undefined && error.status >= 500) return true;
 	return false;
