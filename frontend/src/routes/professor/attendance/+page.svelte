@@ -23,6 +23,8 @@
 
 	const PAGE_SIZE = 10;
 	const EXPORT_PAGE_SIZE = 100;
+	const EXPORT_MAX_PAGES = 100;
+	const EXPORT_MAX_ROWS = EXPORT_PAGE_SIZE * EXPORT_MAX_PAGES;
 
 	const initialRange = defaultReportRange();
 
@@ -58,6 +60,12 @@
 	let reloadToken = $state(0);
 	let exporting = $state(false);
 	let exportError = $state<string | null>(null);
+	let exportWarning = $state<string | null>(null);
+	let exportProgress = $state<string | null>(null);
+	let exportCapped = $state(false);
+	let exportToken = $state(0);
+	let directoryIncomplete = $state(false);
+	let missingCount = $state(0);
 
 	// Course options deduped by code, sections joined from the live courses
 	// store. The ledger only queries once both are picked.
@@ -96,6 +104,8 @@
 			total = 0;
 			totalSessions = 0;
 			counts = { present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 };
+			directoryIncomplete = false;
+			missingCount = 0;
 			isLoading = false;
 			loadError = null;
 			return;
@@ -127,6 +137,8 @@
 				total = result.total;
 				totalSessions = result.total_sessions;
 				counts = result.counts;
+				directoryIncomplete = result.directoryIncomplete;
+				missingCount = result.missingCount;
 				// The service clamps out-of-range pages (e.g. filters shrank the
 				// result under us); follow it so the pager never points nowhere.
 				if (result.page !== currentPage) currentPage = result.page;
@@ -171,7 +183,13 @@
 	});
 
 	const summaryText = $derived(
-		`Present ${counts.present} · Late ${counts.late} · Excused ${counts.excused} · Absent ${counts.absent} across ${totalSessions} ${totalSessions === 1 ? 'session' : 'sessions'}`
+		`This page: Present ${counts.present} · Late ${counts.late} · Excused ${counts.excused} · Absent ${counts.absent} across ${totalSessions} ${totalSessions === 1 ? 'session' : 'sessions'}`
+	);
+
+	const directoryWarning = $derived(
+		directoryIncomplete
+			? `${missingCount} ${missingCount === 1 ? 'row shows' : 'rows show'} scanned time because ${missingCount === 1 ? 'its' : 'their'} session is outside the warmed window — narrow the date range for exact session dates.`
+			: null
 	);
 
 	const setSort = (key: AttendanceLedgerSortBy) => {
@@ -207,6 +225,9 @@
 		from = initialRange.from;
 		to = initialRange.to;
 		currentPage = 1;
+		exportWarning = null;
+		exportProgress = null;
+		exportCapped = false;
 	};
 
 	const viewDetail = (sessionId: number) => void goto(professorActiveSession(sessionId));
@@ -230,8 +251,13 @@
 
 	const exportCsv = async () => {
 		if (exporting || !canQuery) return;
+		const token = exportToken + 1;
+		exportToken = token;
 		exporting = true;
 		exportError = null;
+		exportWarning = null;
+		exportCapped = false;
+		exportProgress = 'Starting export…';
 		try {
 			const baseQuery = {
 				course: course || undefined,
@@ -243,15 +269,39 @@
 				sortBy,
 				sortDir
 			};
-			// The service caps page size, so walk every page to export the full
-			// filtered set instead of just the first chunk.
+			// Walk pages to export the full filtered set. The cap bounds the
+			// whole export at 10k rows (the history-page pattern) so a huge
+			// scope can never loop forever; progress + cancel keep a large
+			// export interruptible instead of hanging the tab.
 			const first = await listRecords({ ...baseQuery, page: 1, size: EXPORT_PAGE_SIZE });
+			if (exportToken !== token) return;
 			const all = [...first.items];
-			const exportPages = Math.max(1, Math.ceil(first.total / EXPORT_PAGE_SIZE));
-			for (let page = 2; page <= exportPages; page += 1) {
+			let unknownRows = first.missingCount;
+			const totalPages = Math.max(1, Math.ceil(first.total / EXPORT_PAGE_SIZE));
+			const cappedPages = Math.min(totalPages, EXPORT_MAX_PAGES);
+			exportProgress = `Exporting page 1 of ~${totalPages}…`;
+			for (let page = 2; page <= cappedPages; page += 1) {
+				if (exportToken !== token) return;
+				exportProgress = `Exporting page ${page} of ~${totalPages}…`;
 				const next = await listRecords({ ...baseQuery, page, size: EXPORT_PAGE_SIZE });
+				if (exportToken !== token) return;
 				all.push(...next.items);
+				unknownRows += next.missingCount;
+				if (all.length >= EXPORT_MAX_ROWS) break;
 			}
+			if (exportToken !== token) return;
+			exportCapped = totalPages > EXPORT_MAX_PAGES;
+			const warnings: string[] = [];
+			if (exportCapped)
+				warnings.push(
+					`Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows — narrow the date range for the full set.`
+				);
+			if (unknownRows > 0)
+				warnings.push(
+					`${unknownRows} ${unknownRows === 1 ? 'row uses' : 'rows use'} scanned time because ${unknownRows === 1 ? 'its' : 'their'} session is outside the warmed window.`
+				);
+			exportWarning = warnings.length > 0 ? warnings.join(' ') : null;
+			exportProgress = null;
 			const csv = buildCsv(
 				[
 					'Date',
@@ -293,10 +343,18 @@
 			anchor.remove();
 			setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		} catch (e: unknown) {
-			exportError = e instanceof Error && e.message ? e.message : 'Export failed. Please try again.';
+			if (exportToken === token)
+				exportError = e instanceof Error && e.message ? e.message : 'Export failed. Please try again.';
 		} finally {
-			exporting = false;
+			if (exportToken === token) {
+				exporting = false;
+				exportProgress = null;
+			}
 		}
+	};
+
+	const cancelExport = () => {
+		exportToken += 1;
 	};
 
 	const print = () => window.print();
@@ -544,6 +602,9 @@
 			</div>
 			<div class="table-foot">
 				<p class="average">{summaryText}</p>
+				{#if directoryWarning}
+					<p class="warning" role="status">{directoryWarning}</p>
+				{/if}
 				<nav class="pages no-print" aria-label="Attendance pages">
 					<button
 						class="page"
@@ -614,7 +675,18 @@
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
 					</button>
+					{#if exporting}
+						<button class="btn btn-ghost" type="button" onclick={cancelExport}>
+							Cancel
+						</button>
+					{/if}
 				</div>
+				{#if exportProgress}
+					<p class="muted" role="status" aria-live="polite">{exportProgress}</p>
+				{/if}
+				{#if exportWarning}
+					<p class="warning" role="status">{exportWarning}</p>
+				{/if}
 				{#if exportError}
 					<p class="error" role="alert">{exportError}</p>
 				{/if}
@@ -664,6 +736,13 @@
 	.error {
 		margin: 0 0 1rem;
 		color: var(--danger-strong);
+		font-weight: 600;
+	}
+
+	.warning {
+		margin: 0;
+		color: var(--warning-text);
+		font-size: 0.875rem;
 		font-weight: 600;
 	}
 

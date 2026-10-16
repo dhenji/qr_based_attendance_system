@@ -35,18 +35,24 @@ if str(BACKEND_SRC) not in sys.path:
 def _ensure_backend_venv() -> None:
     """Re-exec under backend/.venv so deps (sqlalchemy, asyncpg) resolve."""
     venv_dir = REPO_ROOT / "backend" / ".venv"
+    # If already running under the venv Python, just return.
     if sys.executable.startswith(str(venv_dir)):
         return
     if os.environ.get("_SEED_DEMO_REEXEC"):
         return
-    if not VENV_PYTHON.exists():
+    # Windows uses Scripts\, *nix uses bin/.
+    if sys.platform == "win32":
+        venv_python = str(venv_dir / "Scripts" / "python.exe")
+    else:
+        venv_python = str(venv_dir / "bin" / "python")
+    if not Path(venv_python).exists():
         sys.exit(
             "backend/.venv not found. Create it first:\n"
             "  cd backend && python -m venv .venv && "
-            ".venv/bin/pip install -r requirements.txt"
+            ".venv\\Scripts\\pip install -r ../requirements.txt"
         )
     os.environ["_SEED_DEMO_REEXEC"] = "1"
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), __file__, *sys.argv[1:]])
+    os.execv(venv_python, [venv_python, __file__, *sys.argv[1:]])
 
 
 _ensure_backend_venv()

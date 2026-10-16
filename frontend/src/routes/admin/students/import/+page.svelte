@@ -48,8 +48,30 @@
 
 	const parseCsvPreview = (text: string): CsvPreview => {
 		const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-		const splitRow = (line: string): string[] =>
-			line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, ''));
+		// Quote-aware split: commas inside "..." must not split cells.
+		const splitRow = (line: string): string[] => {
+			const cells: string[] = [];
+			let current = '';
+			let inQuotes = false;
+			for (let i = 0; i < line.length; i += 1) {
+				const ch = line[i];
+				if (ch === '"') {
+					if (inQuotes && line[i + 1] === '"') {
+						current += '"';
+						i += 1;
+					} else {
+						inQuotes = !inQuotes;
+					}
+				} else if (ch === ',' && !inQuotes) {
+					cells.push(current.trim());
+					current = '';
+				} else {
+					current += ch;
+				}
+			}
+			cells.push(current.trim());
+			return cells;
+		};
 		const headers = lines.length > 0 ? splitRow(lines[0]) : [];
 		const rows = lines.slice(1).map(splitRow);
 		const normalized = headers.map((h) => h.toLowerCase());
@@ -159,6 +181,8 @@
 		}
 		importBusy = true;
 		importError = null;
+		result = null;
+		showAllErrors = false;
 		try {
 			result = await importStudents(file);
 			// The list page remounts fresh on Back, but emit anyway so any

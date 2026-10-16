@@ -41,20 +41,6 @@ export type AttendanceValidationStatus =
 	| 'pending'
 	| 'rejected';
 
-// GET /professor/sessions
-export interface SessionListItemResponse {
-	id: number;
-	offering_id: number;
-	session_code: string;
-	created_at: string;
-	expires_at: string | null;
-	duration_minutes: number;
-	present_count: number;
-	late_count: number;
-	absent_count: number;
-	status: SessionRowStatus;
-}
-
 // GET /professor/sessions/history
 export interface SessionHistoryItemResponse extends SessionListItemResponse {
 	compliance_rate: number;

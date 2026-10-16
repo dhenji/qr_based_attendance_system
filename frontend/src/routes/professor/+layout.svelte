@@ -39,15 +39,22 @@
 	let notifPreview = $state<NotificationBellItem[]>([]);
 	let notifLoading = $state(false);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let refreshing = false;
 
 	const refreshNotif = async () => {
-		const next = await getProfessorPendingCount();
-		if (next > pendingCount) {
-			const fresh = next - pendingCount;
-			notifToast = `${fresh} new excuse request${fresh === 1 ? '' : 's'} awaiting review — tap the bell to open the queue.`;
-			maybeNotify('Excuse requests', 'New student excuse requests are awaiting review.');
+		if (refreshing) return;
+		refreshing = true;
+		try {
+			const next = await getProfessorPendingCount();
+			if (next > pendingCount) {
+				const fresh = next - pendingCount;
+				notifToast = `${fresh} new excuse request${fresh === 1 ? '' : 's'} awaiting review — tap the bell to open the queue.`;
+				maybeNotify('Excuse requests', 'New student excuse requests are awaiting review.');
+			}
+			pendingCount = next;
+		} finally {
+			refreshing = false;
 		}
-		pendingCount = next;
 	};
 
 	const onNotifFocus = () => {
@@ -100,7 +107,10 @@
 		// not exist — and onMount (the only place listeners attach) never
 		// runs on the server, so there is nothing to clean up there.
 		if (!browser) return;
-		if (pollTimer) clearInterval(pollTimer);
+		if (pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
 		window.removeEventListener('focus', onNotifFocus);
 		document.removeEventListener('visibilitychange', onNotifFocus);
 	});
