@@ -87,9 +87,12 @@ export const registerOutboxSync = async (): Promise<void> => {
 		).sync;
 		if (!syncManager) return;
 		await syncManager.register('attendly-outbox');
-	} catch {
+	} catch (error) {
 		// No service worker / SyncManager (Firefox, iOS): the page-driven
-		// online-event and retry-timer paths already cover the drain.
+		// online-event and retry-timer paths already cover the drain. Log at
+		// debug so a real registration failure (e.g. quota) is diagnosable
+		// instead of silent.
+		console.debug('[sync] Background Sync registration skipped:', error);
 	}
 };
 
