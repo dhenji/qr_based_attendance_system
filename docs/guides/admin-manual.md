@@ -96,7 +96,7 @@ An _offering_ is a specific instance of a course for a program, year level, and 
 | `semester`                                           | Term (e.g., 1st Sem)                     |
 | `academic_year`                                      | Academic year (e.g., 2025–2026)          |
 | `sessions_per_week`                                  | Meetings per week — counted automatically, one per meeting day (D80) |
-| `semester_weeks`                                     | Weeks in the semester                    |
+| `semester_weeks`                                     | Read-only — the term's session length (set per term in _Manage Terms_, D86) |
 | `schedule_days`                                      | Pattern (e.g., `MWF`, `TTH`)             |
 | `schedule_start_time` / `schedule_end_time`          | Class times                              |
 | `classroom_name` / `classroom_lat` / `classroom_lng` | Default _geofence_ center                |

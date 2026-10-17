@@ -5,7 +5,6 @@
 // year_number_exists, year_has_courses).
 
 import { z } from 'zod';
-import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 
 export const programCreateSchema = z.object({
 	code: z.string().trim().toUpperCase().min(2).max(20),
@@ -25,8 +24,19 @@ export const programUpdateSchema = z.object({
 export type ProgramUpdateInput = z.infer<typeof programUpdateSchema>;
 
 export const termSchema = z.object({
-	code: z.enum(TERM_CODES, { message: 'Pick a term code' }),
-	label: z.enum(TERM_LABELS, { message: 'Pick a display name' }),
+	// Free text, mirroring the backend `Term` (`min_length=1`, trimmed): the
+	// editor offers canonical codes as suggestions, but existing codes
+	// (`1st_sem`, `midyear`, …) must round-trip unchanged — an offering's
+	// `semester` matches the term code verbatim, so renaming one would drop
+	// that offering back to the default weeks (D86).
+	code: z.string().trim().min(1, 'Pick a term code'),
+	label: z.string().trim().min(1, 'Pick a display name'),
+	weeks: z.coerce
+		.number()
+		.int('Whole weeks only')
+		.min(1, 'Enter at least 1 week')
+		.max(52, 'At most 52 weeks')
+		.optional(),
 });
 
 export type TermInput = z.infer<typeof termSchema>;

@@ -178,6 +178,11 @@ class CourseOffering(Base):
 
 **Rollback:** Drop `course_offerings` rows, revert `courses` columns to nullable, restore dropped columns from backup. **Backup before migrate.**
 
+> **Superseded (D86):** `semester_weeks` was later removed from
+> `course_offerings` (migration `f1a2b3c4d5e6`); session weeks now live on the
+> term entry in `year_levels.term_structure` and are derived per offering. The
+> DDL above describes the table as originally created (D44).
+
 ---
 
 ### Step 4: Create `course_professors` Table

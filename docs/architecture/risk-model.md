@@ -13,7 +13,7 @@ Key properties:
 - Runs as a **nightly batch job** at 02:00 (configurable via `RISK_BATCH_CRON`).
 - Writes results to `student_risk_scores` table.
 - Manual refresh endpoint available (admin-only).
-- Expected sessions derived from course offering metadata: `course_offerings.semester_weeks × course_offerings.sessions_per_week` (D35).
+- Expected sessions derived from the offering and its term: `term_weeks(year_level.term_structure, offering.semester) × offering.sessions_per_week` (D35, term-scoped per D86).
 
 ---
 
@@ -24,10 +24,10 @@ For each (student, offering, semester) tuple, the batch job computes:
 ### 2.1 Expected Sessions
 
 ```
-expected_sessions = course_offerings.semester_weeks × course_offerings.sessions_per_week
+expected_sessions = term_weeks(year_level.term_structure, offering.semester) × offering.sessions_per_week
 ```
 
-Example: a 3-unit course meeting 2×/week over 16 weeks = 32 expected sessions.
+Example: a 3-unit course meeting 2×/week over a 16-week term = 32 expected sessions.
 
 ### 2.2 Absence Rate
 
@@ -43,8 +43,8 @@ included in the numerator: `late` and `excused` are resolved attendance
 (handled by the student), and `pending` rows are mid-validation.
 
 The denominator is **not** record count. It is
-`expected_sessions = course_offerings.semester_weeks × course_offerings.sessions_per_week`
-(`batch.py:271-273`) — the number of sessions the course scheduled. Records with
+`expected_sessions = term_weeks(year_level.term_structure, offering.semester) × offering.sessions_per_week`
+(`batch.py::_load_expected_by_offering`) — the number of sessions the course scheduled. Records with
 any `validation_status` simply mean the student had (or did not have) a row for
 one of those sessions; "pending" rows sit nowhere in that framing because
 `expected_sessions` derives from course metadata, not from rows on file.
@@ -186,10 +186,12 @@ BEGIN BATCH
     │
     ├─ 1. Load all active enrollments
     │     SELECT e.student_id, e.offering_id, e.semester,
-    │            co.semester_weeks, co.sessions_per_week
+    │            co.sessions_per_week, yl.term_structure
     │     FROM enrollments e
     │     JOIN course_offerings co ON e.offering_id = co.id
+    │     JOIN year_levels yl ON co.year_level_id = yl.id
     │     WHERE co.is_active = true
+    │     -- weeks resolved per offering: term_weeks(yl.term_structure, co.semester)
     │
     ├─ 2. For each (student, offering, semester):
     │     a. Fetch attendance records for student+offering+semester
@@ -260,7 +262,7 @@ POST /admin/analytics/refresh-risk
 **Student:** Maria Santos, ID 24-2111
 **Course:** CS101 — Introduction to Programming (BSCS Year 1)
 **Semester:** 1st_sem
-**Course metadata:** `semester_weeks = 16`, `sessions_per_week = 2`
+**Course metadata:** term `1st_sem` `weeks = 16`, `sessions_per_week = 2`
 **Expected sessions:** 16 × 2 = 32
 
 ### Attendance Record (last 12 weeks, 24 sessions)

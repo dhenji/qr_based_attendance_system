@@ -54,7 +54,6 @@ def _offering_payload(seed: dict[str, Any], **overrides: Any) -> dict[str, Any]:
         "semester": "1st Sem",
         "academic_year": "2026-2027",
         "sessions_per_week": 2,
-        "semester_weeks": 16,
         "schedule_days": "MWF",
         "schedule_start_time": "08:00:00",
         "schedule_end_time": "09:00:00",

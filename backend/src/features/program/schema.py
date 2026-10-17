@@ -18,6 +18,7 @@ from features.program.constants import (
     YEAR_NUMBER_MAX,
     YEAR_NUMBER_MIN,
 )
+from shared.schedule import TERM_WEEKS_MAX, TERM_WEEKS_MIN
 
 
 class ProgramCreate(BaseModel):
@@ -67,6 +68,10 @@ class ProgramUpdate(BaseModel):
 class Term(BaseModel):
     code: str = Field(min_length=1)
     label: str = Field(min_length=1)
+    # Term-scoped session weeks (D86). Optional so pre-D86 term structures
+    # (and termless years) keep validating; the resolver in
+    # `shared.schedule` falls back to `DEFAULT_TERM_WEEKS` when absent.
+    weeks: int | None = Field(default=None, ge=TERM_WEEKS_MIN, le=TERM_WEEKS_MAX)
 
     @field_validator("code", "label", mode="before")
     @classmethod

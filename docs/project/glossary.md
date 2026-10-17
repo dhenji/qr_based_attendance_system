@@ -40,7 +40,7 @@ A reusable subject template stored in `courses` with `course_code` (UK), `course
 
 ### CourseOffering
 
-A concrete instance of a `course` offered by a `program` to a `year_level` for a specific `semester`/`academic_year`. Stored in `course_offerings` with FKs to `courses`, `programs`, `year_levels`, plus scheduling metadata (`sessions_per_week`, `semester_weeks`, `schedule_days`, `schedule_start_time`, `schedule_end_time`), classroom defaults (`classroom_name`, `classroom_lat/lng`), and late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`). Unique on `(course_id, program_id, semester, academic_year)`. Enrollments, sessions, professor assignments, and risk scores reference the offering.
+A concrete instance of a `course` offered by a `program` to a `year_level` for a specific `semester`/`academic_year`. Stored in `course_offerings` with FKs to `courses`, `programs`, `year_levels`, plus scheduling metadata (`sessions_per_week`, `schedule_days`, `schedule_start_time`, `schedule_end_time`), classroom defaults (`classroom_name`, `classroom_lat/lng`), and late-policy defaults (`default_present_window_minutes`, `default_late_window_minutes`). Session weeks are **not** stored on the offering: they derive from the matching term entry in `year_levels.term_structure` (D86). Unique on `(course_id, program_id, semester, academic_year)`. Enrollments, sessions, professor assignments, and risk scores reference the offering.
 
 ### Section
 

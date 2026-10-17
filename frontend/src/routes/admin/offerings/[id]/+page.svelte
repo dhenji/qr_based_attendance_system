@@ -30,7 +30,6 @@
 	import {
 		assignmentCreateSchema,
 		componentCreateSchema,
-		offeringUpdateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
 	import { totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount, weeklyWriteBlocked } from '$lib/shared/utils/schedule';
@@ -91,8 +90,8 @@
 	let professorIndex = $state<Map<number, AdminProfessor>>(new Map());
 
 	// Settings form (offering-level only: rates and windows. Schedule and
-	// rooms live on the class meetings below).
-	let s_weeks = $state('');
+	// rooms live on the class meetings below). Session weeks are term-scoped
+	// (D86) and shown read-only here.
 	let s_present = $state('');
 	let s_late = $state('');
 	let settingsError = $state<string | null>(null);
@@ -146,8 +145,13 @@
 	// write re-syncs the stored column server-side, so this is always current.
 	const detailSessionCount = $derived(weeklySessionCount(detailRows));
 	// Term total, same product the risk batch uses as its expected session
-	// count — identical line to the Setup Wizard step 3.
-	const detailExpectedTotal = $derived(totalExpectedSessions(String(detailSessionCount), s_weeks));
+	// count. Weeks are derived from the offering's term (D86), so this is
+	// read-only.
+	const detailExpectedTotal = $derived(
+		offering
+			? totalExpectedSessions(String(detailSessionCount), String(offering.semesterWeeks))
+			: null
+	);
 	const overviewExpectedTotal = $derived(
 		offering ? totalExpectedSessions(String(offering.sessionsPerWeek), String(offering.semesterWeeks)) : null
 	);
@@ -306,7 +310,6 @@
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
 		settingsError = null;
-		s_weeks = String(o.semesterWeeks);
 		s_present = String(o.presentWindowMinutes);
 		s_late = String(o.lateWindowMinutes);
 	};
@@ -373,13 +376,6 @@
 		settingsError = null;
 		settingsBusy = true;
 		try {
-			const parsed = offeringUpdateSchema.safeParse({
-				semester_weeks: s_weeks,
-			});
-			if (!parsed.success) {
-				settingsError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-				return;
-			}
 			const present = Number(s_present);
 			const late = Number(s_late);
 			if (!Number.isInteger(present) || present < 1 || present > 480 || !Number.isInteger(late) || late < 1 || late > 480) {
@@ -391,7 +387,6 @@
 				return;
 			}
 			await updateAdminOffering(offering.id, {
-				semester_weeks: parsed.data.semester_weeks,
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
 			});
@@ -1212,13 +1207,11 @@
 				<div class="form">
 					<div class="grid2">
 						<label>Sessions / week (automatic)<input class="input" value={detailSessionCount} disabled aria-label="Sessions per week, counted automatically from the meetings" /></label>
-						<label>Semester weeks<input class="input" inputmode="numeric" bind:value={s_weeks} /></label>
+						<label>Semester weeks (from term)<input class="input" value={offering.semesterWeeks} disabled aria-label="Session weeks, set on the term in Manage Terms" /></label>
 					</div>
 					<p class="hint">Sessions per week are counted from the class meetings above — one per meeting day — and update automatically when meetings change.</p>
 					{#if detailExpectedTotal !== null}
-						<p class="hint">{detailSessionCount} sessions/week × {s_weeks.trim()} weeks = {detailExpectedTotal} expected sessions this term.</p>
-					{:else}
-						<p class="hint">Enter the semester weeks to see the expected session total.</p>
+						<p class="hint">{detailSessionCount} sessions/week × {offering.semesterWeeks} weeks = {detailExpectedTotal} expected sessions this term. Edit the term's weeks in Program Management → Year Levels → Manage Terms.</p>
 					{/if}
 					<div class="grid2">
 						<label>Present window, min<input class="input" inputmode="numeric" bind:value={s_present} /></label>

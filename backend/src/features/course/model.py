@@ -61,7 +61,6 @@ class CourseOffering(TimestampMixin, Base):
     semester: Mapped[str] = mapped_column(String(20))
     academic_year: Mapped[str] = mapped_column(String(20))
     sessions_per_week: Mapped[int] = mapped_column(Integer)
-    semester_weeks: Mapped[int] = mapped_column(Integer)
     schedule_days: Mapped[str] = mapped_column(String(10))
     schedule_start_time: Mapped[time] = mapped_column(Time)
     schedule_end_time: Mapped[time] = mapped_column(Time)

@@ -68,6 +68,7 @@ import type {
 	SessionListItemResponse,
 	SessionReadResponse,
 } from '$lib/shared/types';
+import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 
 export type ScanStatus = 'present' | 'late' | 'rejected';
 
@@ -1947,7 +1948,6 @@ interface MockOfferingPayload {
 	semester?: unknown;
 	academic_year?: unknown;
 	sessions_per_week?: unknown;
-	semester_weeks?: unknown;
 	schedule_days?: unknown;
 	schedule_start_time?: unknown;
 	schedule_end_time?: unknown;
@@ -1966,6 +1966,14 @@ const findMockOfferingRow = (suffix?: string): AdminOfferingResponse => {
 	const row = MOCK_ADMIN_OFFERINGS.find((r) => r.id === id);
 	if (!row) throw new Error('Offering not found.');
 	return row;
+};
+
+// Session weeks are term-scoped (D86): the mock derives them from its own
+// year-level term structure rather than accepting them on a payload.
+const mockTermWeeks = (yearLevelId: number, semester: string): number => {
+	const year = MOCK_YEARS.find((y) => y.id === yearLevelId);
+	const term = year?.term_structure.terms.find((t) => t.code === semester);
+	return term?.weeks ?? DEFAULT_TERM_WEEKS;
 };
 
 // D77 mock components: the offering rows above are the single source of
@@ -2096,7 +2104,9 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			semester,
 			academic_year: academicYear,
 			sessions_per_week: Number(p.sessions_per_week ?? 2),
-			semester_weeks: Number(p.semester_weeks ?? 18),
+			// Derived from the term (D86), mirroring the live read: the mock
+			// never accepts weeks on the create payload.
+			semester_weeks: mockTermWeeks(Number(p.year_level_id), semester),
 			schedule_days: String(p.schedule_days ?? 'MWF').trim().toUpperCase(),
 			schedule_start_time: String(p.schedule_start_time ?? '09:00:00'),
 			schedule_end_time: String(p.schedule_end_time ?? '10:30:00'),
@@ -2137,7 +2147,6 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 			const p = (body ?? {}) as MockOfferingPayload;
 			if (p.sessions_per_week !== undefined)
 				row.sessions_per_week = Number(p.sessions_per_week);
-			if (p.semester_weeks !== undefined) row.semester_weeks = Number(p.semester_weeks);
 			if (p.schedule_days !== undefined)
 				row.schedule_days = String(p.schedule_days).trim().toUpperCase();
 			if (p.schedule_start_time !== undefined)
@@ -2419,8 +2428,8 @@ const mockYear = (id: number, programId: number, yearNumber: number): YearLevelR
 	label: `${ordinal(yearNumber)} Year`,
 	term_structure: {
 		terms: [
-			{ code: '1st', label: '1st Semester' },
-			{ code: '2nd', label: '2nd Semester' },
+			{ code: '1st', label: '1st Semester', weeks: DEFAULT_TERM_WEEKS },
+			{ code: '2nd', label: '2nd Semester', weeks: DEFAULT_TERM_WEEKS },
 		],
 	},
 	sort_order: yearNumber,

@@ -113,10 +113,12 @@ Nightly batch job computing at-risk scores for all active enrollments.
 ### Expected Sessions Formula (D35)
 
 ```
-expected_sessions = semester_weeks × sessions_per_week
+expected_sessions = term_weeks(term for the offering's semester) × sessions_per_week
 e.g., GE101: 16 × 2 = 32 expected sessions
 e.g., CS101: 16 × 3 = 48 expected sessions
 ```
+
+Session weeks are set per term (D86); the seeds configure `1st_sem` at 16 weeks.
 
 ### Heuristic Thresholds (D35)
 

@@ -72,7 +72,6 @@ export const offeringCreateSchema = z
 		semester: z.string().trim().min(1, 'Required').max(20),
 		academic_year: z.string().trim().min(4).max(20),
 		sessions_per_week: z.coerce.number().int().min(1, 'Enter at least 1 session per week').max(7, 'At most 7 sessions per week'),
-		semester_weeks: z.coerce.number().int().min(1, 'Enter at least 1 week').max(52, 'At most 52 weeks'),
 		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10),
 		schedule_start_time: timeField,
 		schedule_end_time: timeField,
@@ -100,7 +99,6 @@ export type OfferingCreateInput = z.infer<typeof offeringCreateSchema>;
 export const offeringUpdateSchema = z
 	.object({
 		sessions_per_week: z.coerce.number().int().min(1, 'Enter at least 1 session per week').max(7, 'At most 7 sessions per week').optional(),
-		semester_weeks: z.coerce.number().int().min(1, 'Enter at least 1 week').max(52, 'At most 52 weeks').optional(),
 		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10).optional(),
 		schedule_start_time: timeField.optional(),
 		schedule_end_time: timeField.optional(),

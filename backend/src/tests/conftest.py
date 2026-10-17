@@ -76,8 +76,8 @@ SQLITE_URL = "sqlite+aiosqlite:///:memory:"
 
 DEFAULT_TERM_STRUCTURE: dict[str, Any] = {
     "terms": [
-        {"code": "1ST_SEM", "label": "First Semester"},
-        {"code": "2ND_SEM", "label": "Second Semester"},
+        {"code": "1ST_SEM", "label": "First Semester", "weeks": 16},
+        {"code": "2ND_SEM", "label": "Second Semester", "weeks": 16},
     ]
 }
 
@@ -354,7 +354,6 @@ class Factories:
             semester=overrides.pop("semester", "1ST_SEM"),
             academic_year=overrides.pop("academic_year", "2026-2027"),
             sessions_per_week=overrides.pop("sessions_per_week", 2),
-            semester_weeks=overrides.pop("semester_weeks", 16),
             schedule_days=overrides.pop("schedule_days", "MWF"),
             schedule_start_time=overrides.pop("schedule_start_time", time(8, 0)),
             schedule_end_time=overrides.pop("schedule_end_time", time(9, 0)),

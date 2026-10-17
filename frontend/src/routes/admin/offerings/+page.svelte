@@ -22,6 +22,7 @@
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+	import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 	import {
 		componentCreateSchema,
 		offeringCreateSchema,
@@ -85,7 +86,6 @@
 	let m_year_level_id = $state('');
 	let m_semester = $state('');
 	let m_academic_year = $state('');
-	let m_semester_weeks = $state('18');
 	let m_present = $state('5');
 	let m_late = $state('10');
 	let m_yearOptions = $state<YearLevel[]>([]);
@@ -260,7 +260,6 @@
 		m_year_level_id = '';
 		m_semester = '';
 		m_academic_year = defaultAcademicYear();
-		m_semester_weeks = '18';
 		meetings = [blankMeeting()];
 		m_present = '5';
 		m_late = '10';
@@ -345,9 +344,14 @@
 	const modalSessionsPerWeek = $derived(weeklySessionCount(modalScheduleRows));
 
 	// Term total, same product the risk batch uses as its expected session
-	// count — identical line to the Setup Wizard step 3.
+	// count. Weeks come from the selected term (D86) — read-only here; the
+	// fallback matches the shared default when a term has none configured.
+	const modalTerm = $derived(
+		modalSemesterOptions.find((t) => t.code === m_semester) ?? null
+	);
+	const modalTermWeeks = $derived(modalTerm?.weeks ?? DEFAULT_TERM_WEEKS);
 	const modalExpectedTotal = $derived(
-		totalExpectedSessions(String(modalSessionsPerWeek), m_semester_weeks)
+		totalExpectedSessions(String(modalSessionsPerWeek), String(modalTermWeeks))
 	);
 
 	// 409 rescue lookup, shared by both save buttons. Null when the identity
@@ -419,7 +423,6 @@
 				academic_year: m_academic_year,
 				// Sessions/week is one per meeting day (shared helper above).
 				sessions_per_week: modalSessionsPerWeek,
-				semester_weeks: m_semester_weeks,
 				schedule_days: first.days,
 				schedule_start_time: first.start,
 				schedule_end_time: first.end,
@@ -527,7 +530,6 @@
 				semester: parsed.data.semester,
 				academic_year: parsed.data.academic_year,
 				sessions_per_week: parsed.data.sessions_per_week,
-				semester_weeks: parsed.data.semester_weeks,
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
@@ -842,11 +844,13 @@
 					</select>
 				</label>
 				<p class="hint">Meetings per week: {modalSessionsPerWeek} (counted automatically — one per meeting day).</p>
-				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={m_semester_weeks} /></label>
-				{#if modalExpectedTotal !== null}
-					<p class="hint">{modalSessionsPerWeek} sessions/week × {m_semester_weeks.trim()} weeks = {modalExpectedTotal} expected sessions this term.</p>
+				{#if m_semester && modalTerm}
+					<p class="hint" data-testid="expected-sessions">
+						{modalSessionsPerWeek} sessions/week × {modalTermWeeks} weeks = {modalExpectedTotal} expected sessions this term.
+						<span class="muted">Weeks come from the term (edit in Manage Terms).</span>
+					</p>
 				{:else}
-					<p class="hint">Enter the semester weeks to see the expected session total.</p>
+					<p class="hint">Pick a semester to see the expected session total.</p>
 				{/if}
 				<p class="hint">One offering per course + program + term + academic year — the year level doesn't disambiguate, so re-offering the same course in the same term fails as a duplicate.</p>
 				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} />

@@ -76,7 +76,7 @@ from shared.csv_import import (
 from shared.enums import AuditAction, AuditEntity, SessionType
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
-from shared.schedule import distinct_day_count, meeting_minutes
+from shared.schedule import distinct_day_count, meeting_minutes, term_weeks
 from features.course.constants import (
     CODE_MAX_LENGTH,
     CODE_MIN_LENGTH,
@@ -1198,6 +1198,19 @@ class CourseService:
         if year_level is None or year_level.program_id != program_id:
             raise YearLevelNotFoundException(year_level_id, program_id)
 
+    async def _term_weeks(self, offering: CourseOffering) -> int:
+        """Session weeks for an offering's (year level, term) — derived (D86).
+
+        `semester` is free text, so an unmatched or orphaned code resolves to
+        the shared default rather than raising.
+        """
+        year_level: YearLevel | None = await self._session.get(
+            YearLevel, offering.year_level_id
+        )
+        structure = year_level.term_structure if year_level is not None else None
+
+        return term_weeks(structure, offering.semester)
+
     async def _require_no_duplicate_offering(self, payload: OfferingCreate) -> None:
         if (
             await self._offerings.get_by(
@@ -1279,7 +1292,7 @@ class CourseService:
             semester=offering.semester,
             academic_year=offering.academic_year,
             sessions_per_week=offering.sessions_per_week,
-            semester_weeks=offering.semester_weeks,
+            semester_weeks=await self._term_weeks(offering),
             schedule_days=offering.schedule_days,
             schedule_start_time=offering.schedule_start_time,
             schedule_end_time=offering.schedule_end_time,
@@ -1577,7 +1590,6 @@ class CourseService:
             "semester": offering.semester,
             "academic_year": offering.academic_year,
             "sessions_per_week": offering.sessions_per_week,
-            "semester_weeks": offering.semester_weeks,
             "schedule_days": offering.schedule_days,
             "schedule_start_time": offering.schedule_start_time.isoformat(),
             "schedule_end_time": offering.schedule_end_time.isoformat(),
