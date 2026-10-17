@@ -262,8 +262,11 @@ The other one that used to be missing is now throttled:
   (~2.2 × 10¹⁴ possibilities, which is why T7 stayed Medium rather than High), and now an
   automated probe is additionally throttled.
 
-> **Captcha.** `POST /auth/login` and `POST /auth/forgot-password` call
-> `verify_turnstile_token(...)` when a token is supplied, so Turnstile is enforced on those two.
+> **Captcha.** `POST /auth/login` and `POST /auth/forgot-password` (step 1) call
+> `verify_turnstile_token(...)`. Enforcement is key-gated (ADR-053): with
+> `TURNSTILE_SECRET_KEY` set, a missing or invalid token is `400 invalid_captcha`;
+> while it is empty the check passes through. See `production-checklist.md` §3
+> for enabling it.
 
 > **HMAC secret.** `_resolve_hmac_secret` prefers `HMAC_SECRET_KEY` and falls back to
 > `JWT_SECRET`, raising if neither is set — so code generation works on a deployment configured

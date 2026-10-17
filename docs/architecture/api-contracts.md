@@ -1502,7 +1502,9 @@ from a small preset pool in the settings UI. See
 **Captcha (ADR-053):** `LoginRequest` and `ForgotPasswordStep1Request`
 carry an optional `turnstile_token`. Server calls Cloudflare `siteverify` via
 `shared/captcha.py`; when `TURNSTILE_SECRET_KEY` is unset the check passes
-through (captcha disabled in dev/test/prod-until-key-set).
+through (captcha disabled in dev/test/prod-until-key-set); with the key set, a
+missing or invalid token is `400 invalid_captcha`. Deployment runbook:
+[production-checklist.md §3](../deployment/production-checklist.md).
 
 **MFA backup codes (ADR-054):** `POST /auth/mfa/backup-codes` returns
 `{codes: [10×, shown once], remaining: 10}` and invalidates unconsumed codes; codes

@@ -50,7 +50,7 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 | Analytics        | At-risk forecasting and recommendations for professors                                                                 |
 | Reports          | Download attendance reports (CSV/PDF/Print)                                                                            |
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                         |
-| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, planned) |
+| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (key-gated, opt-in) |
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -263,10 +263,11 @@ than by `Settings()`, and gate the load run.
 
 Frontend (`frontend/.env.example`):
 
-| Variable           | Default                 | Purpose                                              |
-| ------------------ | ----------------------- | ---------------------------------------------------- |
-| `PUBLIC_API_URL`   | `http://localhost:8000` | Backend base URL exposed to browser                  |
-| `PUBLIC_MOCK_MODE` | `false`                 | `true` serves fixtures instead of calling the API; defaults to real requests |
+| Variable                    | Default                 | Purpose                                                                      |
+| --------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PUBLIC_API_URL`            | `http://localhost:8000` | Backend base URL exposed to browser                                          |
+| `PUBLIC_MOCK_MODE`          | `false`                 | `true` serves fixtures instead of calling the API; defaults to real requests |
+| `PUBLIC_TURNSTILE_SITE_KEY` | _(empty)_               | Cloudflare Turnstile site key (optional; needs the backend secret)           |
 
 ## Verification
 
