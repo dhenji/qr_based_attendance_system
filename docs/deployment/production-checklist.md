@@ -352,9 +352,17 @@ psql "$DATABASE_URL" -c \
 
 ## 7. Email / SMTP
 
+Email carries login OTPs (mandatory for most accounts), claim-registration and
+forgot-password codes, and excuse notifications. **A broken relay blocks
+sign-in** for every non-MFA user, and the API reports success regardless — so
+verify delivery rather than assuming it. Full setup, provider guidance,
+verification steps, and the outage/rotation runbooks live in
+[email-setup.md](email-setup.md).
+
 ### Required For
 
-- OTP codes (claim registration, password reset)
+- Login OTP (mandatory second factor, except students/professors with MFA)
+- OTP codes (claim registration, forgot password)
 - Excuse notifications (request submitted, approved, rejected, bulk)
 
 ### Configuration
@@ -366,27 +374,25 @@ psql "$DATABASE_URL" -c \
 | `SMTP_USER`           | Set, unless the relay takes no credentials                                                                           |
 | `SMTP_PASSWORD`       | Set (not in git)                                                                                                     |
 | `SMTP_FROM`           | `noreply@yourdomain.com` or similar. Falls back to `SMTP_USER`, then to `noreply@localhost`                          |
-| `SMTP_START_TLS`      | `true` on port 587. Ignored when `SMTP_USE_SSL=true` — set it to `false` there or the handshake is attempted twice |
+| `SMTP_START_TLS`      | `true` on port 587. Ignored when `SMTP_USE_SSL=true` (STARTTLS is skipped automatically) — set it `false` on 465 for clarity |
 | `SMTP_USE_SSL`        | `true` for port 465 only                                                                                             |
 | `SMTP_TIMEOUT_SECONDS`| `10` is fine for most relays                                                                                         |
 
 Delivery is best-effort by design: `shared/email.py` logs and returns on any
-SMTP error rather than raising, and notifications are sent off the request
-thread, so a dead relay costs a log line and never a 5xx. A relay that silently
-rejects everything looks exactly like a working one, so verify rather than
-assume.
+SMTP error rather than raising, OTP sends run inline and notifications off the
+request thread, so a dead relay costs a log line and never a 5xx. A relay that
+silently rejects everything looks exactly like a working one — and since login
+needs an emailed OTP for most accounts, treat email as an **auth dependency**,
+not an extra.
 
 ### Verification
 
-```bash
-# Test OTP email delivery
-# (Register a test user and verify OTP arrives)
-```
+Follow [email-setup.md](email-setup.md) §6 — console smoke test, a real
+login/recovery OTP, and an `otp_codes` row check — then keep this one-liner
+handy:
 
 ```bash
-# Confirm a notification was handed to a relay: with SMTP_HOST set, submit an
-# excuse request and look for "Email sent to=" in the API logs.
-docker compose -f docker-compose.dev.yml logs api | grep "Email sent to="
+fly logs --app attendance-system-api | grep "Email sent to="
 ```
 
 ---
@@ -546,6 +552,7 @@ curl -w "@curl-timing.txt" -o /dev/null -s https://attendance-system-api.fly.dev
 
 - [Deployment Workflow](deployment-workflow.md) — step-by-step deployment guide
 - [Backup Strategy](backup-strategy.md) — backup pipeline details
+- [Email / OTP Delivery](email-setup.md) — SMTP enablement, verification, rotation & outage runbooks
 - [Runbooks](../operations/runbooks.md) — operational procedures
 - [Monitoring](../operations/monitoring.md) — post-deploy monitoring setup
 - [Incident Response](../operations/incident-response.md) — incident playbooks

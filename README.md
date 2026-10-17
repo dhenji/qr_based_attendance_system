@@ -405,6 +405,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workflow.md) — free-tier: Supabase → Fly.io → Vercel
 - [`docs/deployment/backup-strategy.md`](docs/deployment/backup-strategy.md) — full pg_dump pipeline, encryption, retention
 - [`docs/deployment/production-checklist.md`](docs/deployment/production-checklist.md) — secrets, CORS, storage, first-admin seeding
+- [`docs/deployment/email-setup.md`](docs/deployment/email-setup.md) — SMTP/OTP enablement, verification, credential rotation & outage runbook
 
 ### Design
 

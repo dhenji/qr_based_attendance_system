@@ -166,6 +166,16 @@ fly secrets set CORS_ORIGINS="https://attendance-system.vercel.app"
 # Full runbook: production-checklist.md §3.
 fly secrets set TURNSTILE_SECRET_KEY="YOUR_TURNSTILE_SECRET"
 
+# Email — required for real users: login OTPs are mailed, so a missing relay
+# blocks sign-in. Leave SMTP_HOST unset and mail is only logged instead.
+# Full runbook: docs/deployment/email-setup.md
+fly secrets set \
+  SMTP_HOST="smtp-relay.brevo.com" \
+  SMTP_PORT="587" \
+  SMTP_USER="you@example.com" \
+  SMTP_PASSWORD="YOUR_SMTP_KEY" \
+  SMTP_FROM="attendance@example.com"
+
 # Deploy
 fly deploy
 
@@ -378,6 +388,7 @@ The `API_URL` here must be the **public** value (`%PUBLIC_API_URL%`). In a Svelt
 | ------------------ | ----------------------------------------------------------------------------------- |
 | Backend accessible | Visit `https://attendance-system-api.fly.dev/docs` — should see Swagger UI          |
 | Database connected | Try creating a student via the Swagger UI or API                                    |
+| Email OTP delivers | Login with a test account; the code arrives and `fly logs` shows `Email sent to=` (see [email-setup.md](email-setup.md)) |
 | CORS working       | Open frontend URL → check browser console for no CORS errors                        |
 | PWA installable    | Open frontend in Chrome → check Lighthouse → PWA badge                              |
 | Offline mode       | Open frontend → DevTools → Network tab → toggle "Offline" → app should still load   |

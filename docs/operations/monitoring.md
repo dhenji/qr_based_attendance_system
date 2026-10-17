@@ -203,6 +203,28 @@ async def add_timing_header(request: Request, call_next):
 
 ---
 
+### 7. Email Delivery Failures (log-based)
+
+**Definition:** `WARNING Email delivery failed to=` lines from
+`shared/email.py`. Login OTPs ride this path, so sustained failures are an
+authentication incident for non-MFA users, not a cosmetic issue.
+
+```bash
+# Production (Fly.io):
+fly logs --app attendance-system-api | grep "Email delivery failed"
+
+# Local:
+docker compose -f docker-compose.dev.yml logs api | grep "Email delivery failed"
+```
+
+| Threshold (per 15 min)    | Status   | Action                                                                                  |
+| ------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| 0                         | Healthy  | —                                                                                       |
+| 1–2 isolated              | Warning  | Read the error text; credential errors (535) fail everything                            |
+| ≥ 3, or any timeout burst | Critical | Treat as an auth outage — [email-setup.md](../deployment/email-setup.md) §9             |
+
+---
+
 ## Dashboard Quick Check
 
 Run these commands for a 30-second system health check:
@@ -240,5 +262,6 @@ psql -h localhost -U postgres -d attendance_sys -t -c \
 | Sync backlog    | > 100 items for > 10 min      | Critical | Pager       |
 | Backup age      | > 48 hours since last completed backup | Critical | Slack       |
 | Risk batch      | Failed to complete            | Warning  | Slack       |
+| Email delivery  | ≥ 3 `Email delivery failed` logs / 15 min | Critical | Slack       |
 | DB connections  | > 80% pool utilization        | Warning  | Slack       |
 | API p95 latency | > 1s for > 5 min              | Warning  | Slack       |
