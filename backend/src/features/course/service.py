@@ -24,6 +24,9 @@ from features.course.exceptions import (
     OfferingNotArchivedException,
     OfferingNotFoundException,
     OfferingScheduleWindowException,
+    ScheduleMismatchException,
+    WeeklyHoursBelowUnitsException,
+    WeeklyHoursExceedUnitsException,
     WindowsExceedDurationException,
 )
 from features.course.model import Course, CourseOffering, OfferingComponent
@@ -73,6 +76,7 @@ from shared.csv_import import (
 from shared.enums import AuditAction, AuditEntity, SessionType
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
+from shared.schedule import distinct_day_count, meeting_minutes
 from features.course.constants import (
     CODE_MAX_LENGTH,
     CODE_MIN_LENGTH,
@@ -261,6 +265,56 @@ def _validate_course_row(row: _CourseRow) -> str | None:
             f"must be {DURATION_MIN}-{DURATION_MAX}"
         )
     return None
+
+
+def _check_weekly_hours(
+    course: Course, new_total_minutes: float, old_total_minutes: float | None
+) -> None:
+    """Enforce `units` as the required weekly scheduled meeting hours (D79).
+
+    Totals are compared in whole minutes: every meeting duration is
+    minute-precise and multiplied by an integer day count, so rounding here
+    only absorbs float dust, never a real deviation.
+    `new_total_minutes` is the merged active-set total after the proposed
+    write; `old_total_minutes` is the current active-set total (`None` for
+    offering creation, where there is no current set). A write landing
+    exactly on `units * 60` always passes. Off-requirement totals may only
+    converge: the new total must move strictly closer without crossing to
+    the other side (an under total cannot overshoot into over and vice
+    versa). Callers: offering creation (exact only), component add, and
+    component reactivation. Plain component edits skip this check by design
+    (D81) — multi-step reshapes pass through mismatched totals — as do
+    reads, archives, deactivations, and schedule-untouched edits.
+    """
+
+    def _as_minutes(value: float) -> int:
+        return int(round(value))
+
+    limit_minutes = int(course.units) * 60
+    new_minutes = _as_minutes(new_total_minutes)
+    if new_minutes == limit_minutes:
+        return
+    if old_total_minutes is not None:
+        old_minutes = _as_minutes(old_total_minutes)
+        same_side = (new_minutes - limit_minutes) * (old_minutes - limit_minutes) > 0
+        closer = abs(new_minutes - limit_minutes) < abs(old_minutes - limit_minutes)
+        if old_minutes != limit_minutes and same_side and closer:
+            return
+    scheduled_hours = round(new_minutes / 60, 2)
+    limit_hours = round(limit_minutes / 60, 2)
+    if new_minutes > limit_minutes:
+        raise WeeklyHoursExceedUnitsException(
+            scheduled_hours,
+            limit_hours,
+            course.course_code,
+            int(course.units),
+        )
+    raise WeeklyHoursBelowUnitsException(
+        scheduled_hours,
+        limit_hours,
+        course.course_code,
+        int(course.units),
+    )
 
 
 class CourseService:
@@ -503,6 +557,22 @@ class CourseService:
             payload.default_late_window_minutes,
         )
         await self._require_no_duplicate_offering(payload)
+        if payload.components:
+            new_total = sum(
+                meeting_minutes(
+                    component.schedule_days,
+                    component.schedule_start_time,
+                    component.schedule_end_time,
+                )
+                for component in payload.components
+            )
+        else:
+            new_total = meeting_minutes(
+                payload.schedule_days,
+                payload.schedule_start_time,
+                payload.schedule_end_time,
+            )
+        _check_weekly_hours(course, new_total, None)
 
         offering: CourseOffering = await self._offerings.create(
             **payload.model_dump(exclude={"components"})
@@ -528,6 +598,7 @@ class CourseService:
                 ),
             )
         await self._mirror_single_component(offering)
+        await self._sync_sessions_per_week(offering)
 
         await record_audit(
             self._session,
@@ -614,6 +685,14 @@ class CourseService:
 
         if start is None or end is None or end <= start:
             raise OfferingScheduleWindowException()
+
+        # Activation gate (D82): an offering whose meetings mismatch the
+        # requirement cannot go live. Only the False -> True transition is
+        # checked, before the row is dirtied — deactivation, unrelated
+        # PATCHes, and already-active rows are unaffected, including the
+        # zero-meeting case, which mismatches every positive units value.
+        if bool(changes.get("is_active", offering.is_active)) and not offering.is_active:
+            await self._require_exact_for_activation(offering)
 
         for field, value in changes.items():
             setattr(offering, field, value)
@@ -1144,6 +1223,31 @@ class CourseService:
 
         return offering
 
+    async def _require_exact_for_activation(self, offering: CourseOffering) -> None:
+        """Block activating an offering whose meetings mismatch the requirement.
+
+        Compared in whole minutes like every other weekly check. Only called
+        on the activation transition; deactivation never reaches here.
+        """
+        course: Course = await self._get_or_404(offering.course_id)
+        active: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
+        total_minutes = sum(
+            meeting_minutes(
+                row.schedule_days, row.schedule_start_time, row.schedule_end_time
+            )
+            for row in active
+        )
+        limit_minutes = int(course.units) * 60
+        if int(round(total_minutes)) != limit_minutes:
+            raise ScheduleMismatchException(
+                round(total_minutes / 60, 2),
+                round(limit_minutes / 60, 2),
+                course.course_code,
+                int(course.units),
+            )
+
     async def _enrollment_count(self, offering_id: int) -> int:
         return (
             await self._session.scalar(
@@ -1211,10 +1315,37 @@ class CourseService:
         actor_id: int | None = None,
     ) -> ComponentRead:
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        # Duplicate reports 409 even when the merged total would also exceed
+        # the weekly requirement, so check the unique key before it.
+        if (
+            await self._components.get_by(
+                offering_id=offering.id,
+                session_type=payload.session_type.value,
+                schedule_days=payload.schedule_days,
+                schedule_start_time=payload.schedule_start_time,
+            )
+            is not None
+        ):
+            raise ComponentExistsException(offering.id, payload.session_type.value)
+        course: Course = await self._get_or_404(offering.course_id)
+        existing = await self._active_components(offering_id)
+        old_total = sum(
+            meeting_minutes(
+                row.schedule_days, row.schedule_start_time, row.schedule_end_time
+            )
+            for row in existing
+        )
+        new_total = old_total + meeting_minutes(
+            payload.schedule_days,
+            payload.schedule_start_time,
+            payload.schedule_end_time,
+        )
+        _check_weekly_hours(course, new_total, old_total)
         row: OfferingComponent = await self._insert_component(
             offering=offering, payload=payload
         )
         await self._mirror_single_component(offering)
+        await self._sync_sessions_per_week(offering)
 
         await record_audit(
             self._session,
@@ -1235,7 +1366,7 @@ class CourseService:
         payload: ComponentUpdate,
         actor_id: int | None = None,
     ) -> ComponentRead:
-        await self._get_offering_or_404(offering_id)
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
         row: OfferingComponent = await self._get_component_or_404(
             offering_id, component_id
         )
@@ -1250,6 +1381,32 @@ class CourseService:
         if start is None or end is None or end <= start:
             raise OfferingScheduleWindowException()
 
+        merged_days = changes.get("schedule_days", row.schedule_days)
+        # Reshape edits on active rows are unconstrained: a multi-step
+        # schedule change (shrink one meeting, add another) necessarily passes
+        # through a mismatched total no single write could land exactly on,
+        # so per-write enforcement here would freeze exact rows and strand
+        # legacy ones (D81). Exactness is enforced where a complete schedule
+        # arrives at once (offering creation) and where the total only grows
+        # (component add); the red over/short panels stay visible until the
+        # reshape converges. Reactivating restores minutes like an add, so it
+        # is checked even when the schedule itself is unchanged; deactivating
+        # only shrinks the total and never needs the check.
+        if not row.is_active and bool(changes.get("is_active", row.is_active)):
+            course: Course = await self._get_or_404(offering.course_id)
+            existing = await self._active_components(offering_id)
+            old_total = sum(
+                meeting_minutes(
+                    active.schedule_days,
+                    active.schedule_start_time,
+                    active.schedule_end_time,
+                )
+                for active in existing
+            )
+            # The reactivated row was not in the active total.
+            new_total = old_total + meeting_minutes(merged_days, start, end)
+            _check_weekly_hours(course, new_total, old_total)
+
         for field, value in changes.items():
             setattr(row, field, value)
 
@@ -1258,6 +1415,7 @@ class CourseService:
         await self._mirror_single_component(
             await self._get_offering_or_404(offering_id)
         )
+        await self._sync_sessions_per_week(offering)
 
         await record_audit(
             self._session,
@@ -1282,6 +1440,7 @@ class CourseService:
         row.is_active = False
         await self._session.flush()
         await self._mirror_single_component(offering)
+        await self._sync_sessions_per_week(offering)
 
         await record_audit(
             self._session,
@@ -1333,6 +1492,27 @@ class CourseService:
                 .order_by(OfferingComponent.id)
             )
         ).all()
+
+    async def _sync_sessions_per_week(self, offering: CourseOffering) -> None:
+        """Keep `sessions_per_week` equal to the weekly session count (D80).
+
+        One session per meeting day: the distinct day-letter count summed over
+        the active components — the same rule as `weeklySessionCount` on the
+        frontend. Called after every component mutation so the column the
+        risk batch reads never drifts from the meetings. Zero active meetings
+        syncs to 0 (internal sync only — the API input floor of 1 still
+        applies to client payloads). Flush-only, like `_mirror_single_component`.
+        """
+        active: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
+        offering.sessions_per_week = sum(
+            distinct_day_count(row.schedule_days) for row in active
+        )
+        await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin),
+        # so it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(offering)
 
     async def _mirror_single_component(self, offering: CourseOffering) -> None:
         """Mirror the lone active component onto the offering columns.

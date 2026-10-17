@@ -11,7 +11,11 @@ Or against a specific database::
         PYTHONPATH=src python ../demo/seed_demo.py
 
 The script is idempotent: existing rows are reused, missing ones are created.
-It seeds: one super_admin user, programs + year levels, courses, and two
+Existing demo offerings are additionally reconciled to the specs below
+(schedule, meetings, session count) unless sessions were already opened for
+them — history is never rewritten. Meeting totals match their course units
+exactly (D79) so the demo opens on green weekly-requirement panels.
+It seeds: one super_admin user, programs + year levels, courses, and five
 course offerings to target with the bulk-enrollment CSV.
 """
 
@@ -85,11 +89,14 @@ COURSES = [
 ]
 
 OFFERING_SPECS = [
-    ("GE101", "BSCS", 1, "MWF", time(8, 0), time(9, 30)),
+    # Weekly totals must match the course units exactly (D79): duration x
+    # day-letter count == units. Counts below are one session per meeting
+    # day (D80) and are recomputed from the days string at seed time.
+    ("GE101", "BSCS", 1, "MWF", time(8, 0), time(9, 0)),
     ("CS101", "BSCS", 1, "TTH", time(10, 0), time(11, 30)),
-    ("CS201", "BSCS", 2, "MWF", time(10, 30), time(12, 30)),
+    ("CS201", "BSCS", 2, "MW", time(10, 30), time(12, 30)),
     ("IT101", "BSIT", 1, "TTH", time(13, 0), time(14, 30)),
-    ("ECE101", "BSECE", 1, "MWF", time(8, 0), time(10, 0)),
+    ("ECE101", "BSECE", 1, "MW", time(8, 0), time(10, 0)),
 ]
 
 
@@ -102,6 +109,11 @@ def _database_url() -> str:
 
 def ordinal(n: int) -> str:
     return {1: "1st Year", 2: "2nd Year", 3: "3rd Year"}.get(n, f"{n}th Year")
+
+
+def _day_count(days: str) -> int:
+    """Distinct day letters ("MWF" -> 3), mirroring the backend rule."""
+    return len({ch for ch in days.upper() if "A" <= ch <= "Z"})
 
 
 def label(term: str) -> str:
@@ -127,15 +139,17 @@ async def seed_demo(
     update_password: bool,
     database_url: str | None = None,
 ) -> dict[str, int]:
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from core.security import hash_password
     from features.auth.model import User
     from features.course.model import Course, CourseOffering, OfferingComponent
     from features.program.model import Program, YearLevel
+    from features.session.model import Session
 
-    counts = {"programs": 0, "year_levels": 0, "courses": 0, "offerings": 0, "super_admin": 0}
+    counts = {"programs": 0, "year_levels": 0, "courses": 0, "offerings": 0,
+              "offerings_repaired": 0, "super_admin": 0}
     engine = create_async_engine(database_url or _database_url())
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
@@ -190,7 +204,7 @@ async def seed_demo(
                     CourseOffering,
                     {
                         "year_level_id": year_of[prog][year_no].id,
-                        "sessions_per_week": 2,
+                        "sessions_per_week": _day_count(days),
                         "semester_weeks": 16,
                         "schedule_days": days,
                         "schedule_start_time": start,
@@ -205,23 +219,81 @@ async def seed_demo(
                     academic_year="2026-2027",
                 )
                 counts["offerings"] += int(created)
-                # D77: every offering gets its default lecture component so
-                # sessions have a schedule to inherit (idempotent lookup on
-                # the uq_offering_component key).
-                await _get_or_create(
-                    db,
-                    OfferingComponent,
-                    {
-                        "schedule_end_time": end,
-                        "classroom_name": "Room 301",
-                        "classroom_lat": 14.5995,
-                        "classroom_lng": 120.9842,
-                    },
-                    offering_id=offering.id,
-                    session_type=SessionType.LECTURE.value,
-                    schedule_days=days,
-                    schedule_start_time=start,
+                # Reconcile the meetings to the spec: the spec days/times may
+                # have changed since an earlier seed run, and _get_or_create
+                # above reuses the row by identity. Sessions already opened
+                # win over the spec — history is never rewritten.
+                session_count = (
+                    await db.scalar(
+                        select(func.count())
+                        .select_from(Session)
+                        .where(Session.offering_id == offering.id)
+                    )
+                    or 0
                 )
+                if session_count:
+                    print(
+                        f"  skip repair for {code}: "
+                        f"{session_count} session(s) already opened"
+                    )
+                    continue
+                actives = (
+                    await db.scalars(
+                        select(OfferingComponent).where(
+                            OfferingComponent.offering_id == offering.id,
+                            OfferingComponent.is_active.is_(True),
+                        )
+                    )
+                ).all()
+                match = next(
+                    (
+                        c
+                        for c in actives
+                        if c.session_type == SessionType.LECTURE.value
+                        and c.schedule_days == days
+                        and c.schedule_start_time == start
+                    ),
+                    None,
+                )
+                repaired = False
+                for component in actives:
+                    if component is not match and component.is_active:
+                        component.is_active = False
+                        repaired = True
+                if match is None:
+                    db.add(
+                        OfferingComponent(
+                            offering_id=offering.id,
+                            session_type=SessionType.LECTURE.value,
+                            schedule_days=days,
+                            schedule_start_time=start,
+                            schedule_end_time=end,
+                            classroom_name="Room 301",
+                            classroom_lat=14.5995,
+                            classroom_lng=120.9842,
+                            is_active=True,
+                        )
+                    )
+                    repaired = True
+                elif (
+                    match.schedule_end_time != end
+                    or match.classroom_name != "Room 301"
+                ):
+                    match.schedule_end_time = end
+                    match.classroom_name = "Room 301"
+                    match.classroom_lat = 14.5995
+                    match.classroom_lng = 120.9842
+                    repaired = True
+                # D77/D80: the lone active component mirrors onto the offering
+                # columns, and the session count follows the day letters.
+                offering.schedule_days = days
+                offering.schedule_start_time = start
+                offering.schedule_end_time = end
+                offering.classroom_name = "Room 301"
+                offering.classroom_lat = 14.5995
+                offering.classroom_lng = 120.9842
+                offering.sessions_per_week = _day_count(days)
+                counts["offerings_repaired"] += int(repaired and not created)
             await db.commit()
 
             existing = (

@@ -16,6 +16,8 @@ const DELETE_ERROR_MESSAGES: Record<string, string> = {
 		'Cannot permanently delete this professor — class sessions are still linked. Keep the record archived instead.',
 	not_archived:
 		'This record is still active. Deactivate it first, then delete from the Archive.',
+	schedule_mismatch:
+		'Cannot activate this offering — its weekly scheduled hours do not match the course units requirement. Fix the meetings on its detail page first.',
 	student_not_found: 'Student record not found. Refresh the list and try again.',
 	professor_not_found: 'Professor record not found. Refresh the list and try again.',
 	program_not_found: 'Program record not found. Refresh the list and try again.',
@@ -48,10 +50,22 @@ const ACTION_ERROR_MESSAGES: Record<string, string> = {
 	student_email_exists: 'That email is already on the roster. Try a different email.',
 	professor_email_exists: 'That email is already on the roster. Try a different email.',
 	course_code_exists: 'That course code already exists. Pick a different code.',
-	offering_exists: 'That offering already exists for this term. Adjust the schedule or term.',
+	offering_exists: "That course is already offered for this program, term, and academic year — the year level doesn't disambiguate.",
+	invalid_schedule_window: 'End time must be after start time.',
+	component_exists:
+		'That meeting duplicates an existing one for this offering. Change the type, days, or time.',
 	program_code_exists: 'That program code already exists. Pick a different code.',
 	year_number_exists: 'That year level already exists for this program.',
 };
+
+// 422 codes whose backend message is already user-facing (crafted with the
+// tailored numbers — scheduled/limit/over/short plus course code, no row
+// ids). Callers render `e.message` verbatim for these instead of the generic
+// fallback, so the numbers are never swallowed.
+export const WEEKLY_HOURS_CODES: ReadonlySet<string> = new Set([
+	'weekly_hours_exceed_units',
+	'weekly_hours_below_units',
+]);
 
 // Map a delete failure to user-facing copy. Known backend `code`s return the
 // friendly string above; unknown APIErrors fall back (raw messages can carry

@@ -27,6 +27,7 @@ from features.session.exceptions import (
     SessionExpiredException,
     SessionNotFoundException,
     LabCoordinatesRequiredException,
+    OfferingScheduleMismatchException,
 )
 from features.session.model import Session
 from features.session.schema import (
@@ -57,6 +58,7 @@ from shared.pagination import (
 )
 from shared.query import apply_if
 from shared.rates import attendance_rates
+from shared.schedule import meeting_minutes
 
 
 def _utcnow() -> datetime:
@@ -162,6 +164,7 @@ class SessionService:
             offering_id=offering.id, professor_id=professor_id
         )
         await self._require_no_active_session(offering_id=offering.id, now=now)
+        await self._require_schedule_requirement(offering)
 
         duration: int = await self._resolve_duration(payload, offering)
         windows: _SessionWindows = self._resolve_windows(payload, offering)
@@ -263,6 +266,51 @@ class SessionService:
 
         if active_id is not None:
             raise SessionAlreadyActiveException(offering_id)
+
+    async def _require_schedule_requirement(self, offering: CourseOffering) -> None:
+        """Refuse to open sessions on a mis-scheduled offering (D82).
+
+        The merged active-component total must equal the course units
+        requirement in whole minutes — the same rule as `_check_weekly_hours`,
+        recomputed here so the session feature never imports course-service
+        internals. Rows with no configured meetings are exempt (nothing to
+        judge: legacy and factory rows keep working). Close/status paths
+        never call this.
+        """
+        components: Sequence[OfferingComponent] = (
+            await self._session.scalars(
+                select(OfferingComponent)
+                .where(
+                    OfferingComponent.offering_id == offering.id,
+                    OfferingComponent.is_active.is_(True),
+                )
+                .order_by(OfferingComponent.id)
+            )
+        ).all()
+
+        if not components:
+            return
+
+        course: Course | None = await self._session.get(Course, offering.course_id)
+
+        if course is None:
+            return
+
+        total_minutes = sum(
+            meeting_minutes(
+                row.schedule_days, row.schedule_start_time, row.schedule_end_time
+            )
+            for row in components
+        )
+        limit_minutes = int(course.units) * 60
+
+        if int(round(total_minutes)) != limit_minutes:
+            raise OfferingScheduleMismatchException(
+                round(total_minutes / 60, 2),
+                round(limit_minutes / 60, 2),
+                course.course_code,
+                int(course.units),
+            )
 
     def _resolve_windows(
         self, payload: SessionCreate, offering: CourseOffering

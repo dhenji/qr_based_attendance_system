@@ -2,9 +2,10 @@
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { goToStep, setWizardProgram, wizardState } from './store.svelte';
-	import { createProgram, listPrograms } from '$lib/features/admin/programs/service';
+	import { createProgram, getProgram, listPrograms } from '$lib/features/admin/programs/service';
 	import { programCreateSchema } from '$lib/features/admin/programs/schema';
 	import type { Program } from '$lib/shared/types';
+	import { APIError } from '$lib/api/client';
 	import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
@@ -42,10 +43,30 @@
 		loadError = null;
 		try {
 			options = (await listPrograms({ page: 1, size: 50 })).items;
+			await reconcilePersistedProgram();
 		} catch (e: unknown) {
 			loadError = friendlyActionError(e, 'Could not load programs.');
 		} finally {
 			loading = false;
+		}
+	};
+
+	// A persisted program id can go stale (deleted on another tab) or sit
+	// past the first list page. Verify it instead of trusting storage: a
+	// confirmed program is merged into the picker so the summary can render.
+	// Only a true 404 clears the pick — transient failures keep it, so a
+	// network blip cannot strand the admin back at step 1.
+	const reconcilePersistedProgram = async (): Promise<void> => {
+		if (wizardState.programId === null) return;
+		if (options.some((p) => p.id === wizardState.programId)) return;
+		try {
+			const detail = await getProgram(wizardState.programId);
+			options = [detail, ...options];
+		} catch (e: unknown) {
+			if (e instanceof APIError && (e.code === 'program_not_found' || e.status === 404)) {
+				setWizardProgram(null);
+				view = 'pick';
+			}
 		}
 	};
 

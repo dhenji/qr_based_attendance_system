@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminOfferingDetailState,
 		adminOfferingsState,
@@ -32,6 +33,7 @@
 		offeringUpdateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
+	import { totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount, weeklyWriteBlocked } from '$lib/shared/utils/schedule';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type {
 		AdminBulkEnrollResult,
@@ -48,6 +50,12 @@
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
+	import { APIError } from '$lib/api/client';
+	import {
+		WEEKLY_HOURS_CODES,
+		friendlyActionError,
+	} from '$lib/shared/utils/deleteErrors';
 
 	// Offering Detail (wireframe 4.5d, admin-manual §2.4): schedule, classroom
 	// GPS, weeks, and default windows live here — the course template page
@@ -63,7 +71,19 @@
 	const offeringId = $derived(Number(page.params.id));
 	const offering = $derived(adminOfferingDetailState.offering);
 
-	let tab = $state<'overview' | 'professors' | 'enrolled' | 'settings'>('overview');
+	type OfferingTab = 'overview' | 'professors' | 'enrolled' | 'settings';
+	const OFFERING_TABS: OfferingTab[] = ['overview', 'professors', 'enrolled', 'settings'];
+
+	// Deep-linkable tabs (?tab=professors) so the Setup Wizard completion
+	// screen can point at the next step directly. Read once on entry (same
+	// convention as ?offering= on professor session create); in-page tab
+	// clicks stay local state. Unknown values fall back to overview.
+	const initialTab = (): OfferingTab => {
+		const raw = page.url.searchParams.get('tab');
+		return OFFERING_TABS.includes(raw as OfferingTab) ? (raw as OfferingTab) : 'overview';
+	};
+
+	let tab = $state<OfferingTab>(initialTab());
 
 	let course = $state<AdminCourse | null>(null);
 	let programCode = $state<string | null>(null);
@@ -72,7 +92,6 @@
 
 	// Settings form (offering-level only: rates and windows. Schedule and
 	// rooms live on the class meetings below).
-	let s_sessions = $state('');
 	let s_weeks = $state('');
 	let s_present = $state('');
 	let s_late = $state('');
@@ -93,12 +112,75 @@
 	let c_lat = $state('');
 	let c_lng = $state('');
 	let editingComp = $state<OfferingComponent | null>(null);
+	// Confirm gate (D81): an edit that leaves the total mismatched without
+	// converging needs a deliberate click — never silent persistence.
+	let editConfirmOpen = $state(false);
 	let e_days = $state('');
+	// Legacy rows may carry free-text days outside the MTWHFSU alphabet that
+	// the picker cannot represent; those edits keep a plain input so saving
+	// can never silently drop characters. Decided when the edit opens.
+	let e_customDays = $state(false);
 	let e_start = $state('');
 	let e_end = $state('');
 	let e_room = $state('');
 	let e_lat = $state('');
 	let e_lng = $state('');
+
+	// Weekly-hours requirement (D79): units are the required scheduled meeting
+	// hours per week. Existing total plus live projections for the add and
+	// edit drafts, so the total updates immediately when times change or a
+	// row is removed. Null until the course lookup resolves.
+	const detailRows = $derived(
+		(offering?.components ?? []).map((c) => ({
+			schedule_days: c.scheduleDays,
+			schedule_start_time: c.scheduleStartTime,
+			schedule_end_time: c.scheduleEndTime,
+		}))
+	);
+	const detailBreakdown = $derived(weeklyHoursBreakdown(detailRows, course?.units ?? null));
+	// Sessions per week, counted from the meetings above — one per meeting
+	// day — same helper as the Setup Wizard. Read-only here: every meeting
+	// write re-syncs the stored column server-side, so this is always current.
+	const detailSessionCount = $derived(weeklySessionCount(detailRows));
+	// Term total, same product the risk batch uses as its expected session
+	// count — identical line to the Setup Wizard step 3.
+	const detailExpectedTotal = $derived(totalExpectedSessions(String(detailSessionCount), s_weeks));
+	const overviewExpectedTotal = $derived(
+		offering ? totalExpectedSessions(String(offering.sessionsPerWeek), String(offering.semesterWeeks)) : null
+	);
+	const addProjection = $derived(
+		weeklyHoursBreakdown(
+			[
+				...detailRows,
+				{ schedule_days: c_days, schedule_start_time: c_start, schedule_end_time: c_end },
+			],
+			course?.units ?? null
+		)
+	);
+	const editProjection = $derived.by(() => {
+		const target = editingComp;
+		if (!target) return null;
+		const targetId = target.id;
+		return weeklyHoursBreakdown(
+			[
+				...detailRows.filter(
+					(_, i) => (offering?.components ?? [])[i]?.id !== targetId
+				),
+				{ schedule_days: e_days, schedule_start_time: e_start, schedule_end_time: e_end },
+			],
+			course?.units ?? null
+		);
+	});
+
+	// Grandfathered or mid-build totals off the requirement may only converge:
+	// strictly closer without crossing sides (same rule as the backend
+	// `_check_weekly_hours`). `course.units` is null until the lookup
+	// resolves, so every projection below is gated on it.
+	const addBlocked = $derived(
+		course && addProjection
+			? weeklyWriteBlocked(detailBreakdown?.scheduled ?? null, addProjection.scheduled, course.units)
+			: false
+	);
 
 	// Assign-professor form.
 	let assignOpen = $state(false);
@@ -215,22 +297,9 @@
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
 		settingsError = null;
-		s_sessions = String(o.sessionsPerWeek);
 		s_weeks = String(o.semesterWeeks);
 		s_present = String(o.presentWindowMinutes);
 		s_late = String(o.lateWindowMinutes);
-	};
-
-	const toggleActive = async () => {
-		if (!offering) return;
-		try {
-			await setOfferingActive(offering.id, !offering.isActive);
-			await refreshAdminOfferingDetail(offering.id);
-			notifyEntityChanged('offerings');
-		} catch (e: unknown) {
-			adminOfferingDetailState.actionError =
-				e instanceof Error && e.message ? e.message : 'Failed to update offering status';
-		}
 	};
 
 	const onArchive = async () => {
@@ -248,8 +317,29 @@
 		}
 	};
 
+	const confirmArchive = async () => {
+		await onArchive();
+		if (offering && !offering.isActive) archiveConfirm = false;
+	};
+
+	const onReactivate = async () => {
+		if (!offering || archiveBusy) return;
+		archiveBusy = true;
+		try {
+			await setOfferingActive(offering.id, true);
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			adminOfferingDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to reactivate offering';
+		} finally {
+			archiveBusy = false;
+		}
+	};
+
 	let deleteOpen = $state(false);
 	let deleteBusy = $state(false);
+	let archiveConfirm = $state(false);
 
 	const confirmDelete = async () => {
 		if (!offering || deleteBusy) return;
@@ -275,7 +365,6 @@
 		settingsBusy = true;
 		try {
 			const parsed = offeringUpdateSchema.safeParse({
-				sessions_per_week: s_sessions,
 				semester_weeks: s_weeks,
 			});
 			if (!parsed.success) {
@@ -293,7 +382,6 @@
 				return;
 			}
 			await updateAdminOffering(offering.id, {
-				sessions_per_week: parsed.data.sessions_per_week,
 				semester_weeks: parsed.data.semester_weeks,
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
@@ -319,6 +407,17 @@
 	// -- Scheduled components (D77) ----------------------------------------
 	// The offering row carries its active components; add/edit/archive
 	// refresh the detail and render from there.
+
+	// Curated meeting-write errors: weekly 422s render the backend message
+	// verbatim (it carries the tailored scheduled/limit/over/short numbers);
+	// every other API failure maps through the friendly copy so raw row ids
+	// never render.
+	const compFailure = (e: unknown, fallback: string): string => {
+		if (e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code)) {
+			return e.message;
+		}
+		return friendlyActionError(e, fallback);
+	};
 
 	const parseOptCoord = (raw: string, label: string, min: number, max: number): number | undefined => {
 		const trimmed = raw.trim();
@@ -356,6 +455,32 @@
 				compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
 				return;
 			}
+			// Duplicate pre-check on the backend unique key (session_type,
+			// schedule_days, schedule_start_time), naming the table row it
+			// clashes with — same idiom as the create surfaces.
+			const clashIndex = offering.components.findIndex(
+				(c) =>
+					c.sessionType === parsed.data.session_type &&
+					c.scheduleDays === parsed.data.schedule_days &&
+					c.scheduleStartTime.slice(0, 5) === parsed.data.schedule_start_time.slice(0, 5)
+			);
+			if (clashIndex >= 0) {
+				const hit = offering.components[clashIndex];
+				const hitLabel = hit.sessionType === 'lab' ? 'Laboratory' : 'Lecture';
+				compError = `Duplicates meeting ${clashIndex + 1} (${hitLabel} ${hit.scheduleDays} ${hit.scheduleStartTime.slice(0, 5)}). Change the type, days, or time.`;
+				return;
+			}
+			// Weekly-hours requirement (backend 422 weekly_hours_exceed_units /
+			// weekly_hours_below_units): the course's units are the required
+			// scheduled meeting hours per week, counting all existing meetings
+			// plus this draft. Off-requirement totals may only converge.
+			if (course && addBlocked) {
+				compError =
+					addProjection && addProjection.status === 'under'
+						? `Weekly scheduled hours (${addProjection.scheduled}h) fall short of the ${course.units}-unit requirement (${addProjection.limit}h) for ${course.courseCode} — lengthen a meeting instead.`
+						: `Weekly scheduled hours (${addProjection?.scheduled}h) exceed the ${course.units}-unit requirement (${addProjection?.limit}h) for ${course.courseCode} — shorten a meeting first.`;
+				return;
+			}
 			await createComponent(offering.id, {
 				session_type: parsed.data.session_type,
 				schedule_days: parsed.data.schedule_days,
@@ -369,7 +494,7 @@
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
-			compError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			compError = compFailure(e, 'Save failed. Please try again.');
 		} finally {
 			compBusy = false;
 		}
@@ -377,8 +502,10 @@
 
 	const openEditComponent = (c: OfferingComponent) => {
 		editingComp = c;
+		editConfirmOpen = false;
 		compError = null;
 		e_days = c.scheduleDays;
+		e_customDays = !/^[MTWHFSU]+$/.test(c.scheduleDays);
 		e_start = c.scheduleStartTime.slice(0, 5);
 		e_end = c.scheduleEndTime.slice(0, 5);
 		e_room = c.classroomName ?? '';
@@ -389,7 +516,36 @@
 	const submitEditComponent = async () => {
 		if (!offering || !editingComp) return;
 		compError = null;
+		const parsed = componentCreateSchema.safeParse({
+			session_type: editingComp.sessionType,
+			schedule_days: e_days,
+			schedule_start_time: e_start,
+			schedule_end_time: e_end,
+			classroom_name: e_room || undefined,
+		});
+		if (!parsed.success) {
+			compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
+			return;
+		}
+		// Confirm gate: a save that leaves the total mismatched without
+		// converging (the pre-D81 blocker) needs a deliberate click.
+		// Converging fixes and exact landings save straight through.
+		if (
+			course &&
+			editProjection &&
+			weeklyWriteBlocked(detailBreakdown?.scheduled ?? null, editProjection.scheduled, course.units)
+		) {
+			editConfirmOpen = true;
+			return;
+		}
+		await persistEditComponent();
+	};
+
+	const persistEditComponent = async () => {
+		if (!offering || !editingComp) return;
+		editConfirmOpen = false;
 		compBusy = true;
+		compError = null;
 		try {
 			const parsed = componentCreateSchema.safeParse({
 				session_type: editingComp.sessionType,
@@ -414,7 +570,7 @@
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
-			compError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			compError = compFailure(e, 'Save failed. Please try again.');
 		} finally {
 			compBusy = false;
 		}
@@ -427,10 +583,11 @@
 		try {
 			await archiveComponent(offering.id, c.id);
 			if (editingComp?.id === c.id) editingComp = null;
+			editConfirmOpen = false;
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
-			compError = e instanceof Error && e.message ? e.message : 'Archive failed. Please try again.';
+			compError = compFailure(e, 'Archive failed. Please try again.');
 		} finally {
 			compBusy = false;
 		}
@@ -665,7 +822,12 @@
 </script>
 
 <div class="page">
-	<button class="link back" onclick={() => goto(Routes.ADMIN_OFFERINGS)}>‹ All offerings</button>
+	<div class="page-top">
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_OFFERINGS)}>
+			← Back to Offering Management
+		</button>
+		<p class="crumb"><a href={Routes.ADMIN_OFFERINGS}>Offerings</a> / Detail</p>
+	</div>
 
 	{#if adminOfferingDetailState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
@@ -685,14 +847,9 @@
 					</span>
 				</p>
 			</div>
-			<div class="header-actions">
-				<button class="btn btn-secondary" onclick={toggleActive}>
-					{offering.isActive ? 'Deactivate' : 'Reactivate'}
-				</button>
-			</div>
 		</header>
 
-		{#if adminOfferingDetailState.actionError && !deleteOpen}
+		{#if adminOfferingDetailState.actionError && !deleteOpen && !archiveConfirm}
 			<section class="card"><p class="error" role="alert">{adminOfferingDetailState.actionError}</p></section>
 		{/if}
 
@@ -706,7 +863,9 @@
 		{#if tab === 'overview'}
 			<section class="card">
 				<dl class="facts">
-					<div><dt>Schedule</dt><dd>{offering.scheduleDays} {offering.scheduleStartTime.slice(0, 5)}–{offering.scheduleEndTime.slice(0, 5)}</dd></div>
+					{#if offering.components.length === 0}
+						<div><dt>Schedule</dt><dd>{offering.scheduleDays} {offering.scheduleStartTime.slice(0, 5)}–{offering.scheduleEndTime.slice(0, 5)}</dd></div>
+					{/if}
 					<div>
 						<dt>Meetings</dt>
 						<dd>
@@ -721,8 +880,24 @@
 							<dd>{comp.scheduleDays} {comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}{comp.classroomName ? ` · ${comp.classroomName}` : ''}</dd>
 						</div>
 					{/each}
-					<div><dt>Meetings</dt><dd>{offering.sessionsPerWeek} / week · {offering.semesterWeeks} weeks</dd></div>
-					<div><dt>Classroom</dt><dd>{offering.classroomName ?? '—'}</dd></div>
+					<div><dt>Meetings</dt><dd>{offering.sessionsPerWeek} {offering.sessionsPerWeek === 1 ? 'meeting' : 'meetings'}/week{' '}<span class="sep" aria-hidden="true">•</span>{' '}{offering.semesterWeeks} {offering.semesterWeeks === 1 ? 'week' : 'weeks'}{#if overviewExpectedTotal !== null}{' '}<span class="sep" aria-hidden="true">•</span>{' '}{overviewExpectedTotal} {overviewExpectedTotal === 1 ? 'session' : 'sessions'}{/if}</dd></div>
+					{#if detailBreakdown && course && detailBreakdown.status !== 'ok'}
+						<div>
+							<dt>Sessions</dt>
+							<dd>
+								<span
+									class="badge blocked"
+									title={`Weekly schedule ${detailBreakdown.scheduled}h does not match the ${course.units}-unit requirement`}
+								>
+									<AppIcon name="alert" size={12} />
+									Blocked — schedule mismatch
+								</span>
+							</dd>
+						</div>
+					{/if}
+					{#if offering.components.length === 0}
+						<div><dt>Classroom</dt><dd>{offering.classroomName ?? '—'}</dd></div>
+					{/if}
 					{#if offering.classroomLat !== undefined && offering.classroomLng !== undefined}
 						<div><dt>Geofence center</dt><dd>{offering.classroomLat}, {offering.classroomLng}</dd></div>
 					{/if}
@@ -731,7 +906,7 @@
 					<div><dt>Enrolled</dt><dd>{offering.enrolledCount}</dd></div>
 				</dl>
 				{#if course}
-					<p class="muted">Template: {course.courseCode} · {course.units} units · {course.sessionDurationHours}h sessions</p>
+					<p class="muted">Template: {course.courseCode} · {course.units} units · {course.sessionDurationHours}h default session</p>
 				{/if}
 			</section>
 		{:else if tab === 'professors'}
@@ -883,6 +1058,21 @@
 			<section class="card">
 				<h2 class="card-title">Class meetings</h2>
 				<p class="muted">Each row is one weekly meeting with its own days, time, and room. A course with a Monday laboratory and a Wednesday lecture is two rows — sessions inherit the room of their meeting type.</p>
+				{#if detailBreakdown && course}
+					{#if detailBreakdown.status === 'ok'}
+						<p class="hint">{detailBreakdown.scheduled}h scheduled of {detailBreakdown.limit}h weekly requirement ({course.courseCode} · exact).</p>
+					{:else if detailBreakdown.status === 'over'}
+						<p class="error" role="alert">{detailBreakdown.scheduled}h scheduled of {detailBreakdown.limit}h weekly requirement ({course.courseCode} · {-detailBreakdown.remaining}h over).</p>
+					{:else}
+						<p class="error" role="alert">{detailBreakdown.scheduled}h scheduled of {detailBreakdown.limit}h weekly requirement ({course.courseCode} · {detailBreakdown.remaining}h short).</p>
+					{/if}
+					{#if detailBreakdown.status !== 'ok'}
+						<div class="blocked-note" role="note">
+							<AppIcon name="alert" size={16} />
+							<span><strong>Sessions cannot be opened for this offering</strong> until the total matches — new sessions are refused and reactivation is disabled.</span>
+						</div>
+					{/if}
+				{/if}
 				{#if compError}
 					<p class="error" role="alert">{compError}</p>
 				{/if}
@@ -924,7 +1114,11 @@
 				{#if editingComp}
 					<div class="comp-edit">
 						<h3 class="sub-title">Edit {editingComp.sessionType === 'lab' ? 'laboratory' : 'lecture'} meeting</h3>
-						<label>Days<input class="input" bind:value={e_days} placeholder="MWF" /></label>
+						{#if e_customDays}
+							<label>Days<input class="input" bind:value={e_days} placeholder="MWF" /></label>
+						{:else}
+							<DayPicker bind:value={e_days} />
+						{/if}
 						<div class="grid2">
 							<label>Start time<input class="input" type="time" bind:value={e_start} /></label>
 							<label>End time<input class="input" type="time" bind:value={e_end} /></label>
@@ -934,8 +1128,11 @@
 							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
 							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
 						</div>
+						{#if course && editProjection}
+							<p class="hint">Saving would bring the weekly total to {editProjection.scheduled}h of {editProjection.limit}h ({editProjection.status === 'ok' ? 'exact' : editProjection.status === 'under' ? `${editProjection.remaining}h short` : `${-editProjection.remaining}h over`}). Reshapes save freely — the panel above tracks the total back to exact.</p>
+						{/if}
 						<div class="modal-actions">
-							<button class="btn btn-ghost" onclick={() => (editingComp = null)}>Cancel</button>
+							<button class="btn btn-ghost" onclick={() => { editingComp = null; editConfirmOpen = false; }}>Cancel</button>
 							<button class="btn btn-primary" disabled={compBusy} onclick={submitEditComponent}>
 								{compBusy ? 'Saving…' : 'Save'}
 							</button>
@@ -945,15 +1142,13 @@
 					<div class="comp-add">
 						<h3 class="sub-title">Add a meeting</h3>
 						<p class="hint">One row, one time: days on the same row share the time below. For a different time, add another row.</p>
-						<div class="grid2">
-							<label>Type
-								<select class="input" bind:value={c_type}>
-									<option value="lecture">Lecture</option>
-									<option value="lab">Laboratory</option>
-								</select>
-							</label>
-							<label>Days<input class="input" bind:value={c_days} placeholder="M" /></label>
-						</div>
+						<DayPicker bind:value={c_days} />
+						<label>Type
+							<select class="input" bind:value={c_type}>
+								<option value="lecture">Lecture</option>
+								<option value="lab">Laboratory</option>
+							</select>
+						</label>
 						<div class="grid2">
 							<label>Start time<input class="input" type="time" bind:value={c_start} /></label>
 							<label>End time<input class="input" type="time" bind:value={c_end} /></label>
@@ -964,6 +1159,13 @@
 							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
 						</div>
 						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence and inherit this room when the professor opens them without an override.</p>
+						{#if course && addProjection && c_days.trim() && c_start && c_end}
+							{#if addBlocked}
+								<p class="error" role="alert">Adding this meeting would bring the weekly total to {addProjection.scheduled}h of {addProjection.limit}h ({addProjection.status === 'under' ? `${addProjection.remaining}h short` : `${-addProjection.remaining}h over`}).</p>
+							{:else}
+								<p class="hint">Adding this meeting would bring the weekly total to {addProjection.scheduled}h of {addProjection.limit}h ({addProjection.status === 'ok' ? 'exact' : addProjection.status === 'under' ? `${addProjection.remaining}h short` : `${-addProjection.remaining}h over`}).</p>
+							{/if}
+						{/if}
 						<div class="modal-actions">
 							<button class="btn btn-secondary" disabled={compBusy} onclick={submitAddComponent}>
 								{compBusy ? 'Adding…' : 'Add meeting'}
@@ -981,9 +1183,15 @@
 				{/if}
 				<div class="form">
 					<div class="grid2">
-						<label>Sessions / week<input class="input" inputmode="numeric" bind:value={s_sessions} /></label>
+						<label>Sessions / week (automatic)<input class="input" value={detailSessionCount} disabled aria-label="Sessions per week, counted automatically from the meetings" /></label>
 						<label>Semester weeks<input class="input" inputmode="numeric" bind:value={s_weeks} /></label>
 					</div>
+					<p class="hint">Sessions per week are counted from the class meetings above — one per meeting day — and update automatically when meetings change.</p>
+					{#if detailExpectedTotal !== null}
+						<p class="hint">{detailSessionCount} sessions/week × {s_weeks.trim()} weeks = {detailExpectedTotal} expected sessions this term.</p>
+					{:else}
+						<p class="hint">Enter the semester weeks to see the expected session total.</p>
+					{/if}
 					<div class="grid2">
 						<label>Present window, min<input class="input" inputmode="numeric" bind:value={s_present} /></label>
 						<label>Late window, min<input class="input" inputmode="numeric" bind:value={s_late} /></label>
@@ -1000,15 +1208,32 @@
 
 			<section class="card danger">
 				<h2 class="card-title">Danger zone</h2>
-				<p class="muted">Archiving flips this offering to inactive. Sessions history is kept.</p>
+				<p class="muted">
+					Status: <strong>{offering.isActive ? 'Active' : 'Inactive'}</strong>. Archiving
+					flips this offering to inactive — sessions history is kept. Reactivating
+					restores it, but requires the weekly scheduled hours to match the course
+					units requirement. Deletion is permanent and blocked while students,
+					sessions, or professor assignments still use this offering.
+				</p>
 				<div class="danger-actions">
-					<button class="btn btn-danger" disabled={archiveBusy || !offering.isActive} onclick={onArchive}>
-						{archiveBusy ? 'Archiving…' : 'Archive offering'}
-					</button>
+					{#if offering.isActive}
+						<button class="btn btn-danger" disabled={archiveBusy} onclick={() => { adminOfferingDetailState.actionError = null; archiveConfirm = true; }}>
+							Archive offering
+						</button>
+					{:else}
+						<button
+							class="btn btn-secondary"
+							disabled={archiveBusy || (!!course && !!detailBreakdown && detailBreakdown.status !== 'ok')}
+							title={!!course && !!detailBreakdown && detailBreakdown.status !== 'ok' ? 'Weekly scheduled hours do not match the course units requirement — fix the meetings first' : undefined}
+							onclick={onReactivate}
+						>
+							{archiveBusy ? 'Reactivating…' : 'Reactivate offering'}
+						</button>
+					{/if}
 					<button
 						class="btn btn-danger"
 						disabled={deleteBusy || offering.isActive}
-						title={offering.isActive ? 'Deactivate (archive) first — only archived offerings can be deleted' : undefined}
+						title={offering.isActive ? 'Archive first — only archived offerings can be deleted' : undefined}
 						onclick={() => { adminOfferingDetailState.actionError = null; deleteOpen = true; }}
 					>
 						Delete permanently
@@ -1176,6 +1401,32 @@
 	</div>
 {/if}
 
+{#if editConfirmOpen && course && editProjection && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="edit-confirm-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (editConfirmOpen = false) }}
+		>
+			<h2 id="edit-confirm-title" class="modal-title">Save a mismatched total?</h2>
+			<p class="modal-text">
+				Saving would leave the weekly total at {editProjection.scheduled}h against the
+				{course.units}-unit requirement ({editProjection.status === 'under' ? `${editProjection.remaining}h short` : `${-editProjection.remaining}h over`}).
+				The red panels will track it until the schedule converges back to exact.
+			</p>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (editConfirmOpen = false)}>Cancel</button>
+				<button class="btn btn-primary" disabled={compBusy} onclick={() => void persistEditComponent()}>
+					{compBusy ? 'Saving…' : 'Save anyway'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if unenrollTarget && offering}
 	<div class="modal-overlay" role="presentation">
 		<div
@@ -1198,6 +1449,34 @@
 				<button class="btn btn-ghost" onclick={() => (unenrollTarget = null)}>Cancel</button>
 				<button class="btn btn-danger" disabled={unenrollBusy} onclick={confirmUnenroll}>
 					{unenrollBusy ? 'Removing…' : 'Remove'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if archiveConfirm && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="offering-archive-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (archiveConfirm = false) }}
+		>
+			<h2 id="offering-archive-title" class="modal-title">Archive this offering?</h2>
+			<p class="modal-text">
+				It will be flipped to inactive. Sessions history is kept, and you can
+				reactivate it anytime.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
 		</div>
@@ -1265,12 +1544,6 @@
 
 	.muted.small {
 		font-size: 0.75rem;
-	}
-
-	.header-actions {
-		display: flex;
-		gap: 0.75rem;
-		flex-wrap: wrap;
 	}
 
 	.card {
@@ -1371,6 +1644,11 @@
 		font-weight: 600;
 	}
 
+	.facts dd .sep {
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+
 	table {
 		width: 100%;
 		border-collapse: collapse;
@@ -1425,8 +1703,36 @@
 		background: #fef3c7;
 	}
 
+	/* Blocked-sessions callout: icon + tinted box, unmissable next to the
+	totals it explains. */
+	.badge.blocked {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		color: var(--danger);
+		background: var(--danger-bg);
+	}
+
+	.blocked-note {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		font-size: 0.8125rem;
+		color: var(--danger);
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
+		border-radius: 8px;
+		padding: 0.625rem 0.875rem;
+		margin: 0;
+	}
+
+	.blocked-note :global(svg) {
+		flex-shrink: 0;
+		margin-top: 0.125rem;
+	}
+
 	.sub-title {
-		margin: 1.25rem 0 0.75rem;
+		margin: 1rem 0 0.5rem;
 		font-size: 1rem;
 		font-weight: 700;
 		color: var(--text);
@@ -1440,6 +1746,17 @@
 		margin-top: 1.25rem;
 		padding-top: 1.25rem;
 		border-top: 1px solid var(--divider);
+	}
+
+	/* Inside the meeting forms the flex `gap` owns the vertical rhythm —
+		section-level margins would otherwise stack on top of it (e.g. a
+		2.4rem pile-up between the heading and its hint). */
+	.comp-edit > .hint,
+	.comp-add > .hint,
+	.comp-add > .error,
+	.comp-edit > .sub-title,
+	.comp-add > .sub-title {
+		margin: 0;
 	}
 
 	.comp-edit label,
@@ -1472,9 +1789,29 @@
 		text-decoration: underline;
 	}
 
-	.back {
-		align-self: flex-start;
-		font-size: 0.875rem;
+	/* Back button + breadcrumb read as one header block, so the .page flex gap
+	 * does not push them a full row apart (same pattern as Program Management). */
+	.page-top {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.crumb {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	.crumb a {
+		color: var(--accent);
+		text-decoration: none;
+		font-weight: 600;
+	}
+
+	.crumb a:hover {
+		text-decoration: underline;
 	}
 
 	.empty {
@@ -1593,6 +1930,12 @@
 		outline: 2px solid var(--accent);
 		outline-offset: 1px;
 		border-color: var(--accent);
+	}
+
+	.input:disabled {
+		background: var(--divider);
+		color: var(--text-muted);
+		cursor: not-allowed;
 	}
 
 	.form {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import { goToStep, wizardState } from './store.svelte';
+	import { goToStep, setStructureReady, wizardState } from './store.svelte';
 	import {
 		createYearLevel,
 		getProgram,
@@ -97,6 +97,12 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	const readyYears = $derived(usableYears.length > 0);
 	const readyCourses = $derived(courses.length > 0);
 	const readyAll = $derived(readyYears && readyCourses);
+
+	// Report the checklist to the wizard store so the shell can gate step
+	// 3 on it (and resume can trust the persisted flag).
+	$effect(() => {
+		setStructureReady(readyAll);
+	});
 
 	const termsText = (terms: { label: string }[]): string =>
 		terms.length > 0 ? terms.map((t) => t.label).join(' · ') : 'No terms yet';
@@ -312,7 +318,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 							<label>Units<input class="input" inputmode="numeric" bind:value={c_units} placeholder="3" /></label>
 						</div>
 						<label>Name<input class="input" bind:value={c_name} placeholder="Intro to Computing" /></label>
-						<label>Session hours<input class="input" inputmode="decimal" bind:value={c_duration} placeholder="1.5" /></label>
+						<label>Default session length, hours<input class="input" inputmode="decimal" bind:value={c_duration} placeholder="1.5" /></label>
 						<div class="form-actions">
 							<button class="btn btn-ghost" onclick={() => (courseOpen = false)}>Cancel</button>
 							<button

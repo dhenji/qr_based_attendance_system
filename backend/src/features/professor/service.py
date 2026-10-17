@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.security import hash_password, verify_password
 from features.auth.model import User
 from features.course.exceptions import OfferingNotFoundException
-from features.course.model import Course, CourseOffering
+from features.course.model import Course, CourseOffering, OfferingComponent
 from features.course_professor.exceptions import OverlappingAssignmentException
 from features.course_professor.model import CourseProfessor
 from features.course_professor.service import CourseProfessorService
@@ -52,6 +52,7 @@ from shared.csv_import import (
     strip_lower,
 )
 from shared.enums import AuditAction, AuditEntity
+from shared.schedule import meeting_minutes
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -683,6 +684,9 @@ class ProfessorService:
         offering ids, so enrichment stays constant-query regardless of page
         size. `section` is the distinct set of `students.section` across the
         offering's enrollments (derived — no stored column backs it).
+        `schedule_ok` compares the merged meeting total against the row's
+        units in whole minutes (same rule as the session-open gate); rows
+        with no configured meetings stay True.
         """
         if not items:
             return
@@ -729,6 +733,34 @@ class ProfessorService:
 
             if item is not None:
                 item.section = sections
+
+        component_rows: Sequence[OfferingComponent] = (
+            await self._session.scalars(
+                select(OfferingComponent)
+                .where(
+                    OfferingComponent.offering_id.in_(offering_ids),
+                    OfferingComponent.is_active.is_(True),
+                )
+                .order_by(OfferingComponent.id)
+            )
+        ).all()
+
+        minutes_by_offering: dict[int, float] = {}
+
+        for component in component_rows:
+            minutes_by_offering[component.offering_id] = minutes_by_offering.get(
+                component.offering_id, 0.0
+            ) + meeting_minutes(
+                component.schedule_days,
+                component.schedule_start_time,
+                component.schedule_end_time,
+            )
+
+        for offering_id, total_minutes in minutes_by_offering.items():
+            item = by_offering.get(offering_id)
+
+            if item is not None:
+                item.schedule_ok = int(round(total_minutes)) == int(item.units) * 60
 
     async def _get_offering_or_404(self, offering_id: int) -> CourseOffering:
         offering: CourseOffering | None = await self._session.get(
