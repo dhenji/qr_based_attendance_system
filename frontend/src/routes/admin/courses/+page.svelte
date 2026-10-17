@@ -316,32 +316,34 @@
 									{c.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => goto(adminCourse(c.id))}>Open</button>
-								<button class="link" onclick={() => openEdit(c)}>Edit</button>
-								{#if c.isActive}
-									<button
-										class="link"
-										onclick={() => { adminCoursesState.actionError = null; deactivateTarget = c; }}
-									>
-										Deactivate
-									</button>
-								{:else}
-									<button
-										class="link"
-										onclick={() => void toggleCourseActive(c)}
-									>
-										Reactivate
-									</button>
-								{/if}
-								{#if !c.isActive}
-									<button
-										class="link danger"
-										onclick={() => { adminCoursesState.actionError = null; deleteTarget = c; }}
-									>
-										Delete
-									</button>
-								{/if}
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => goto(adminCourse(c.id))}>Open</button>
+									<button class="link" onclick={() => openEdit(c)}>Edit</button>
+									{#if c.isActive}
+										<button
+											class="link"
+											onclick={() => { adminCoursesState.actionError = null; deactivateTarget = c; }}
+										>
+											Deactivate
+										</button>
+									{:else}
+										<button
+											class="link"
+											onclick={() => void toggleCourseActive(c)}
+										>
+											Reactivate
+										</button>
+									{/if}
+									{#if !c.isActive}
+										<button
+											class="link danger"
+											onclick={() => { adminCoursesState.actionError = null; deleteTarget = c; }}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}

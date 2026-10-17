@@ -162,8 +162,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	const apply = async () => {
 		formError = null;
 		const parsed = analyticsFilterSchema.safeParse({
-			program_id: programFilter,
-			year_level_id: yearFilter,
+			// Selects bind their raw option value (Svelte 5), so numeric ids
+			// land in state as numbers — the schema models the string form.
+			program_id: String(programFilter),
+			year_level_id: String(yearFilter),
 			semester: semesterFilter,
 			course_ids: selectedCourseIds,
 			date_from: dateFrom,
@@ -414,19 +416,25 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		>
 			<option value="">All years</option>
 			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}</option>
+				<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
 			{/each}
 		</select>
-		{#if semesterOptions.length > 0}
-			<select class="input" aria-label="Semester filter" bind:value={semesterFilter}>
-				<option value="">All semesters</option>
-				{#each semesterOptions as t (t.code)}
-					<option value={t.code}>{t.label}</option>
-				{/each}
-			</select>
-		{:else}
-			<input class="input" placeholder="Semester (e.g. 1st Sem)" aria-label="Semester filter" bind:value={semesterFilter} />
-		{/if}
+		<select
+			class="input"
+			aria-label="Semester filter"
+			bind:value={semesterFilter}
+			disabled={!yearFilter || semesterOptions.length === 0}
+			title={!yearFilter
+				? "Pick a year level first — semesters are the year level's terms"
+				: semesterOptions.length === 0
+					? 'This year level has no terms configured'
+					: undefined}
+		>
+			<option value="">All semesters</option>
+			{#each semesterOptions as t (t.code)}
+				<option value={t.code}>{t.label}</option>
+			{/each}
+		</select>
 		<select class="input" aria-label="Granularity" bind:value={granularity}>
 			<option value="daily">Daily</option>
 			<option value="weekly">Weekly</option>
@@ -1080,6 +1088,15 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		border-color: var(--brand);
 		background: var(--brand);
 		color: var(--on-brand);
+	}
+
+	/* The generic secondary hover carries :not(:disabled) (specificity 0,3,0),
+	   which outranks the selected state (0,2,0) — without this rule, hovering a
+	   selected metric button repainted it --divider (near-white) under the
+	   white text. Selected buttons hover into the darker brand shade instead. */
+	.btn-secondary.selected:hover:not(:disabled) {
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 	}
 
 	.table-wrap {

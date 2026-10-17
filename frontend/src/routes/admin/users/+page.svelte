@@ -266,21 +266,23 @@
 								</span>
 							</td>
 							<td class="mono">{formatLocalDate(u.createdAt)}</td>
-							<td class="row-actions">
-								{#if u.isActive}
-									{#if isSelf(u)}
-										<span class="hint" title="You cannot deactivate your own account">You</span>
+							<td>
+								<div class="row-actions">
+									{#if u.isActive}
+										{#if isSelf(u)}
+											<span class="hint" title="You cannot deactivate your own account">You</span>
+										{:else}
+											<button class="link danger" onclick={() => (deactivateTarget = u)}>
+												Deactivate
+											</button>
+										{/if}
 									{:else}
-										<button class="link danger" onclick={() => (deactivateTarget = u)}>
-											Deactivate
+										<button class="link" onclick={() => (reactivateTarget = u)}>
+											Reactivate
 										</button>
 									{/if}
-								{:else}
-									<button class="link" onclick={() => (reactivateTarget = u)}>
-										Reactivate
-									</button>
-								{/if}
-								<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+									<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+								</div>
 							</td>
 						</tr>
 					{/each}

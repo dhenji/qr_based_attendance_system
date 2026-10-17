@@ -351,6 +351,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | **Archive**              | `/admin/students/archive`             | View/restore/permanently delete archived students     |
 | **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged scans (GPS/face review band) |
 | **Admin Users**          | `/admin/users`                        | Manage admin accounts (Super Admin only)              |
+| **Admin Profile**        | `/admin/profile`                      | Identity (read-only), MFA, change password, device theme (Light/Dark) |
 | **Face Enrollment**      | `/admin/face-enrollment/{student_id}` | Capture 3-angle photos for _embedding_ generation     |
 
 ---

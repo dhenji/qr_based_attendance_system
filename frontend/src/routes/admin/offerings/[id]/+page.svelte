@@ -100,10 +100,13 @@
 	let archiveBusy = $state(false);
 
 	// Scheduled components (D77: per-type schedules). The offering row
-	// already carries its active components, so add/edit/archive refresh
+	// already carries its active components, so add/edit/remove refresh
 	// the detail and render from there — no separate fetch.
 	let compError = $state<string | null>(null);
 	let compBusy = $state(false);
+	// Confirm gate for the row-level Remove action (soft-archives the
+	// meeting server-side; UI keeps the endpoint wording "archive").
+	let removeCompTarget = $state<OfferingComponent | null>(null);
 	let c_type = $state<'lecture' | 'lab'>('lab');
 	let c_days = $state('');
 	let c_start = $state('');
@@ -582,8 +585,8 @@
 		}
 	};
 
-	const archiveRow = async (c: OfferingComponent) => {
-		if (!offering || compBusy) return;
+	const removeMeetingRow = async (c: OfferingComponent): Promise<boolean> => {
+		if (!offering || compBusy) return false;
 		compError = null;
 		compBusy = true;
 		try {
@@ -592,11 +595,24 @@
 			editConfirmOpen = false;
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
+			return true;
 		} catch (e: unknown) {
-			compError = compFailure(e, 'Archive failed. Please try again.');
+			compError = compFailure(e, 'Remove failed. Please try again.');
+			return false;
 		} finally {
 			compBusy = false;
 		}
+	};
+
+	const askRemoveMeeting = (c: OfferingComponent) => {
+		if (compBusy) return;
+		compError = null;
+		removeCompTarget = c;
+	};
+
+	const confirmRemoveMeeting = async () => {
+		if (!removeCompTarget) return;
+		if (await removeMeetingRow(removeCompTarget)) removeCompTarget = null;
 	};
 
 	const submitAssign = async () => {
@@ -951,12 +967,14 @@
 										</td>
 										<td>{a.effectiveFrom} → {a.effectiveTo ?? 'ongoing'}</td>
 										<td>{a.semester}</td>
-										<td class="row-actions">
-											{#if !a.effectiveTo}
-												<button class="link" onclick={() => endRow(a.professorId)}>End</button>
-											{:else}
-												<span class="muted small">ended</span>
-											{/if}
+										<td>
+											<div class="row-actions">
+												{#if !a.effectiveTo}
+													<button class="link" onclick={() => endRow(a.professorId)}>End</button>
+												{:else}
+													<span class="muted small">ended</span>
+												{/if}
+											</div>
 										</td>
 									</tr>
 								{/each}
@@ -1007,8 +1025,10 @@
 										<td>{r.name}</td>
 										<td>{r.section ?? '—'}</td>
 										<td>{r.enrolledAt.slice(0, 10)}</td>
-										<td class="row-actions">
-											<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+										<td>
+											<div class="row-actions">
+												<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+											</div>
 										</td>
 									</tr>
 								{/each}
@@ -1107,9 +1127,11 @@
 										<td>{comp.scheduleDays}</td>
 										<td>{comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}</td>
 										<td>{comp.classroomName ?? '—'}</td>
-										<td class="row-actions">
-											<button class="link" onclick={() => openEditComponent(comp)}>Edit</button>
-											<button class="link" disabled={compBusy} onclick={() => void archiveRow(comp)}>Archive</button>
+										<td>
+											<div class="row-actions">
+												<button class="link" onclick={() => openEditComponent(comp)}>Edit</button>
+												<button class="link" disabled={compBusy} onclick={() => askRemoveMeeting(comp)}>Remove</button>
+											</div>
 										</td>
 									</tr>
 								{/each}
@@ -1518,6 +1540,34 @@
 	</div>
 {/if}
 
+{#if removeCompTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="component-remove-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (removeCompTarget = null) }}
+		>
+			<h2 id="component-remove-title" class="modal-title">Remove this meeting?</h2>
+			<p class="modal-text">
+				It will be taken off this offering's active schedule. Attendance history
+				for past sessions is kept.
+			</p>
+			{#if compError}
+				<p class="error" role="alert">{compError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (removeCompTarget = null)}>Cancel</button>
+				<button class="btn btn-danger" disabled={compBusy} onclick={confirmRemoveMeeting}>
+					{compBusy ? 'Removing…' : 'Remove'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.page {
 		display: flex;
@@ -1705,8 +1755,8 @@
 	}
 
 	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	/* Blocked-sessions callout: icon + tinted box, unmissable next to the
