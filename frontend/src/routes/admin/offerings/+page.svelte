@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import DayPicker from '$lib/components/DayPicker.svelte';
 	import {
 		adminOfferingsState,
 		initAdminOfferings,
@@ -551,21 +552,19 @@
 						</select>
 					</label>
 				</div>
-				<div class="grid2">
-					<label>Semester
-						{#if modalSemesterOptions.length > 0}
-							<select class="input" bind:value={m_semester}>
-								<option value="">Pick a term…</option>
-								{#each modalSemesterOptions as t (t.code)}
-									<option value={t.code}>{t.label}</option>
-								{/each}
-							</select>
-						{:else}
-							<input class="input" bind:value={m_semester} placeholder="1st Sem" />
-						{/if}
-					</label>
-					<label>Schedule days<input class="input" bind:value={m_schedule_days} placeholder="MWF" /></label>
-				</div>
+				<DayPicker bind:value={m_schedule_days} />
+				<label>Semester
+					{#if modalSemesterOptions.length > 0}
+						<select class="input" bind:value={m_semester}>
+							<option value="">Pick a term…</option>
+							{#each modalSemesterOptions as t (t.code)}
+								<option value={t.code}>{t.label}</option>
+							{/each}
+						</select>
+					{:else}
+						<input class="input" bind:value={m_semester} placeholder="1st Sem" />
+					{/if}
+				</label>
 				<div class="grid2">
 					<label>Start time<input class="input" type="time" bind:value={m_start} /></label>
 					<label>End time<input class="input" type="time" bind:value={m_end} /></label>
