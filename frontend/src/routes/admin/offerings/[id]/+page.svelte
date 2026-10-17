@@ -2,42 +2,60 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import DayPicker from '$lib/components/DayPicker.svelte';
+	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminOfferingDetailState,
+		adminOfferingsState,
 		assignOfferingProfessor,
 		bulkEnrollOffering,
+		deleteArchivedOffering,
 		endOfferingAssignment,
 		initAdminOfferingDetail,
 		loadOfferingAssignments,
 		loadOfferingRoster,
 		refreshAdminOfferingDetail,
+		unenrollStudentFromOffering,
 		updateAdminOffering,
 	} from '$lib/features/admin/offerings/store.svelte';
 	import {
-		archiveOffering,
+		buildEnrollCsv,
+		archiveComponent,
+		createComponent,
 		setOfferingActive,
+		updateComponent,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
-	import { listProfessors } from '$lib/features/admin/service';
+	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
 		assignmentCreateSchema,
+		componentCreateSchema,
 		offeringUpdateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
+	import { totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount, weeklyWriteBlocked } from '$lib/shared/utils/schedule';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type {
 		AdminBulkEnrollResult,
 		AdminCourse,
 		AdminProfessor,
+		AdminRosterItem,
+		AdminStudent,
+		OfferingComponent,
 		Program,
 		YearLevel,
 	} from '$lib/shared/types';
+	import { sessionMixLabel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
+	import { APIError } from '$lib/api/client';
+	import {
+		WEEKLY_HOURS_CODES,
+		friendlyActionError,
+	} from '$lib/shared/utils/deleteErrors';
 
 	// Offering Detail (wireframe 4.5d, admin-manual §2.4): schedule, classroom
 	// GPS, weeks, and default windows live here — the course template page
@@ -53,28 +71,116 @@
 	const offeringId = $derived(Number(page.params.id));
 	const offering = $derived(adminOfferingDetailState.offering);
 
-	let tab = $state<'overview' | 'professors' | 'enrolled' | 'settings'>('overview');
+	type OfferingTab = 'overview' | 'professors' | 'enrolled' | 'settings';
+	const OFFERING_TABS: OfferingTab[] = ['overview', 'professors', 'enrolled', 'settings'];
+
+	// Deep-linkable tabs (?tab=professors) so the Setup Wizard completion
+	// screen can point at the next step directly. Read once on entry (same
+	// convention as ?offering= on professor session create); in-page tab
+	// clicks stay local state. Unknown values fall back to overview.
+	const initialTab = (): OfferingTab => {
+		const raw = page.url.searchParams.get('tab');
+		return OFFERING_TABS.includes(raw as OfferingTab) ? (raw as OfferingTab) : 'overview';
+	};
+
+	let tab = $state<OfferingTab>(initialTab());
 
 	let course = $state<AdminCourse | null>(null);
 	let programCode = $state<string | null>(null);
 	let yearLabel = $state<string | null>(null);
 	let professorIndex = $state<Map<number, AdminProfessor>>(new Map());
 
-	// Settings form.
-	let s_sessions = $state('');
+	// Settings form (offering-level only: rates and windows. Schedule and
+	// rooms live on the class meetings below).
 	let s_weeks = $state('');
-	let s_days = $state('');
-	let s_start = $state('');
-	let s_end = $state('');
-	let s_course_type = $state<'lecture' | 'lab'>('lecture');
-	let s_classroom = $state('');
-	let s_lat = $state('');
-	let s_lng = $state('');
 	let s_present = $state('');
 	let s_late = $state('');
 	let settingsError = $state<string | null>(null);
 	let settingsBusy = $state(false);
 	let archiveBusy = $state(false);
+
+	// Scheduled components (D77: per-type schedules). The offering row
+	// already carries its active components, so add/edit/archive refresh
+	// the detail and render from there — no separate fetch.
+	let compError = $state<string | null>(null);
+	let compBusy = $state(false);
+	let c_type = $state<'lecture' | 'lab'>('lab');
+	let c_days = $state('');
+	let c_start = $state('');
+	let c_end = $state('');
+	let c_room = $state('');
+	let c_lat = $state('');
+	let c_lng = $state('');
+	let editingComp = $state<OfferingComponent | null>(null);
+	// Confirm gate (D81): an edit that leaves the total mismatched without
+	// converging needs a deliberate click — never silent persistence.
+	let editConfirmOpen = $state(false);
+	let e_days = $state('');
+	// Legacy rows may carry free-text days outside the MTWHFSU alphabet that
+	// the picker cannot represent; those edits keep a plain input so saving
+	// can never silently drop characters. Decided when the edit opens.
+	let e_customDays = $state(false);
+	let e_start = $state('');
+	let e_end = $state('');
+	let e_room = $state('');
+	let e_lat = $state('');
+	let e_lng = $state('');
+
+	// Weekly-hours requirement (D79): units are the required scheduled meeting
+	// hours per week. Existing total plus live projections for the add and
+	// edit drafts, so the total updates immediately when times change or a
+	// row is removed. Null until the course lookup resolves.
+	const detailRows = $derived(
+		(offering?.components ?? []).map((c) => ({
+			schedule_days: c.scheduleDays,
+			schedule_start_time: c.scheduleStartTime,
+			schedule_end_time: c.scheduleEndTime,
+		}))
+	);
+	const detailBreakdown = $derived(weeklyHoursBreakdown(detailRows, course?.units ?? null));
+	// Sessions per week, counted from the meetings above — one per meeting
+	// day — same helper as the Setup Wizard. Read-only here: every meeting
+	// write re-syncs the stored column server-side, so this is always current.
+	const detailSessionCount = $derived(weeklySessionCount(detailRows));
+	// Term total, same product the risk batch uses as its expected session
+	// count — identical line to the Setup Wizard step 3.
+	const detailExpectedTotal = $derived(totalExpectedSessions(String(detailSessionCount), s_weeks));
+	const overviewExpectedTotal = $derived(
+		offering ? totalExpectedSessions(String(offering.sessionsPerWeek), String(offering.semesterWeeks)) : null
+	);
+	const addProjection = $derived(
+		weeklyHoursBreakdown(
+			[
+				...detailRows,
+				{ schedule_days: c_days, schedule_start_time: c_start, schedule_end_time: c_end },
+			],
+			course?.units ?? null
+		)
+	);
+	const editProjection = $derived.by(() => {
+		const target = editingComp;
+		if (!target) return null;
+		const targetId = target.id;
+		return weeklyHoursBreakdown(
+			[
+				...detailRows.filter(
+					(_, i) => (offering?.components ?? [])[i]?.id !== targetId
+				),
+				{ schedule_days: e_days, schedule_start_time: e_start, schedule_end_time: e_end },
+			],
+			course?.units ?? null
+		);
+	});
+
+	// Grandfathered or mid-build totals off the requirement may only converge:
+	// strictly closer without crossing sides (same rule as the backend
+	// `_check_weekly_hours`). `course.units` is null until the lookup
+	// resolves, so every projection below is gated on it.
+	const addBlocked = $derived(
+		course && addProjection
+			? weeklyWriteBlocked(detailBreakdown?.scheduled ?? null, addProjection.scheduled, course.units)
+			: false
+	);
 
 	// Assign-professor form.
 	let assignOpen = $state(false);
@@ -91,9 +197,33 @@
 	let bulkFile = $state<File | null>(null);
 	let bulkBusy = $state(false);
 	let bulkResult = $state<AdminBulkEnrollResult | null>(null);
+
+	// Add-student modal (single-row bulk upload under the hood).
+	const ADD_PAGE_SIZE = 8;
+	let addOpen = $state(false);
+	let addQuery = $state('');
+	let addResults = $state<AdminStudent[]>([]);
+	let addTotal = $state(0);
+	let addPage = $state(1);
+	let addSearching = $state(false);
+	// Reactive array of the selected rows: `$state` proxies arrays but not
+	// Map/Set, so selection lives here (house multi-select idiom — see
+	// admin/analytics and admin/professors) while insertion order gives the
+	// CSV row order and the error-line mapping for free. Objects, not ids:
+	// the list only holds the current page, so an id-only set could not
+	// rebuild rows chosen on other pages.
+	let addSelected = $state<AdminStudent[]>([]);
+	let addBusy = $state(false);
+	let addReport = $state<{ enrolled: number; skipped: number; failures: string[] } | null>(
+		null
+	);
+	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	let unenrollTarget = $state<AdminRosterItem | null>(null);
+	let unenrollBusy = $state(false);
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		if (addSearchTimer) clearTimeout(addSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -167,38 +297,18 @@
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
 		settingsError = null;
-		s_sessions = String(o.sessionsPerWeek);
 		s_weeks = String(o.semesterWeeks);
-		s_days = o.scheduleDays;
-		s_start = o.scheduleStartTime.slice(0, 5);
-		s_end = o.scheduleEndTime.slice(0, 5);
-		s_course_type = o.courseType;
-		s_classroom = o.classroomName ?? '';
-		s_lat = o.classroomLat !== undefined ? String(o.classroomLat) : '';
-		s_lng = o.classroomLng !== undefined ? String(o.classroomLng) : '';
 		s_present = String(o.presentWindowMinutes);
 		s_late = String(o.lateWindowMinutes);
-	};
-
-	const toggleActive = async () => {
-		if (!offering) return;
-		try {
-			await setOfferingActive(offering.id, !offering.isActive);
-			await refreshAdminOfferingDetail(offering.id);
-			notifyEntityChanged('offerings');
-		} catch (e: unknown) {
-			adminOfferingDetailState.actionError =
-				e instanceof Error && e.message ? e.message : 'Failed to update offering status';
-		}
 	};
 
 	const onArchive = async () => {
 		if (!offering || archiveBusy) return;
 		archiveBusy = true;
 		try {
-			await archiveOffering(offering.id);
+			await setOfferingActive(offering.id, false);
+			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
-			await goto(Routes.ADMIN_OFFERINGS);
 		} catch (e: unknown) {
 			adminOfferingDetailState.actionError =
 				e instanceof Error && e.message ? e.message : 'Failed to archive offering';
@@ -207,15 +317,46 @@
 		}
 	};
 
-	const parseCoord = (raw: string, label: string, min: number, max: number): number | null | undefined => {
-		// Empty clears the stored coordinate (nullable column); a value must
-		// parse inside range. `undefined` means "leave untouched".
-		if (!raw.trim()) return offering?.classroomLat !== undefined || offering?.classroomLng !== undefined ? null : undefined;
-		const value = Number(raw.trim());
-		if (!Number.isFinite(value) || value < min || value > max) {
-			throw new Error(`${label} must be a number between ${min} and ${max}`);
+	const confirmArchive = async () => {
+		await onArchive();
+		if (offering && !offering.isActive) archiveConfirm = false;
+	};
+
+	const onReactivate = async () => {
+		if (!offering || archiveBusy) return;
+		archiveBusy = true;
+		try {
+			await setOfferingActive(offering.id, true);
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			adminOfferingDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to reactivate offering';
+		} finally {
+			archiveBusy = false;
 		}
-		return value;
+	};
+
+	let deleteOpen = $state(false);
+	let deleteBusy = $state(false);
+	let archiveConfirm = $state(false);
+
+	const confirmDelete = async () => {
+		if (!offering || deleteBusy) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedOffering(offering.id);
+			deleteOpen = false;
+			notifyEntityChanged('offerings');
+			await goto(Routes.ADMIN_OFFERINGS);
+		} catch {
+			// The store holds the friendly guard copy; mirror it onto the
+			// detail state so the modal shows it on a direct landing.
+			adminOfferingDetailState.actionError =
+				adminOfferingsState.actionError ?? 'Failed to delete offering';
+		} finally {
+			deleteBusy = false;
+		}
 	};
 
 	const submitSettings = async () => {
@@ -223,24 +364,8 @@
 		settingsError = null;
 		settingsBusy = true;
 		try {
-			// Merge single-sided time edits against the stored half first: the
-			// schema (like the backend body validator) only sees sent fields,
-			// so a lone moved start past the stored end is caught here before
-			// the request (backend 422 invalid_schedule_window on merge).
-			const mergedStart = s_start.trim() || offering.scheduleStartTime.slice(0, 5);
-			const mergedEnd = s_end.trim() || offering.scheduleEndTime.slice(0, 5);
-			if (mergedEnd <= mergedStart) {
-				settingsError = 'End time must be after start time';
-				return;
-			}
 			const parsed = offeringUpdateSchema.safeParse({
-				sessions_per_week: s_sessions,
 				semester_weeks: s_weeks,
-				schedule_days: s_days,
-				schedule_start_time: s_start.trim() || undefined,
-				schedule_end_time: s_end.trim() || undefined,
-				course_type: s_course_type,
-				classroom_name: s_classroom,
 			});
 			if (!parsed.success) {
 				settingsError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -257,15 +382,7 @@
 				return;
 			}
 			await updateAdminOffering(offering.id, {
-				sessions_per_week: parsed.data.sessions_per_week,
 				semester_weeks: parsed.data.semester_weeks,
-				schedule_days: parsed.data.schedule_days,
-				schedule_start_time: parsed.data.schedule_start_time,
-				schedule_end_time: parsed.data.schedule_end_time,
-				course_type: parsed.data.course_type,
-				classroom_name: s_classroom.trim() ? s_classroom.trim() : null,
-				classroom_lat: parseCoord(s_lat, 'Latitude', -90, 90),
-				classroom_lng: parseCoord(s_lng, 'Longitude', -180, 180),
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
 			});
@@ -285,6 +402,195 @@
 		a_to = '';
 		a_semester = offering?.semester ?? '';
 		assignOpen = true;
+	};
+
+	// -- Scheduled components (D77) ----------------------------------------
+	// The offering row carries its active components; add/edit/archive
+	// refresh the detail and render from there.
+
+	// Curated meeting-write errors: weekly 422s render the backend message
+	// verbatim (it carries the tailored scheduled/limit/over/short numbers);
+	// every other API failure maps through the friendly copy so raw row ids
+	// never render.
+	const compFailure = (e: unknown, fallback: string): string => {
+		if (e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code)) {
+			return e.message;
+		}
+		return friendlyActionError(e, fallback);
+	};
+
+	const parseOptCoord = (raw: string, label: string, min: number, max: number): number | undefined => {
+		const trimmed = raw.trim();
+		if (!trimmed) return undefined;
+		const value = Number(trimmed);
+		if (!Number.isFinite(value) || value < min || value > max) {
+			throw new Error(`${label} must be a number between ${min} and ${max}`);
+		}
+		return value;
+	};
+
+	const resetCompForm = () => {
+		c_type = 'lab';
+		c_days = '';
+		c_start = '';
+		c_end = '';
+		c_room = '';
+		c_lat = '';
+		c_lng = '';
+	};
+
+	const submitAddComponent = async () => {
+		if (!offering) return;
+		compError = null;
+		compBusy = true;
+		try {
+			const parsed = componentCreateSchema.safeParse({
+				session_type: c_type,
+				schedule_days: c_days,
+				schedule_start_time: c_start,
+				schedule_end_time: c_end,
+				classroom_name: c_room || undefined,
+			});
+			if (!parsed.success) {
+				compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
+				return;
+			}
+			// Duplicate pre-check on the backend unique key (session_type,
+			// schedule_days, schedule_start_time), naming the table row it
+			// clashes with — same idiom as the create surfaces.
+			const clashIndex = offering.components.findIndex(
+				(c) =>
+					c.sessionType === parsed.data.session_type &&
+					c.scheduleDays === parsed.data.schedule_days &&
+					c.scheduleStartTime.slice(0, 5) === parsed.data.schedule_start_time.slice(0, 5)
+			);
+			if (clashIndex >= 0) {
+				const hit = offering.components[clashIndex];
+				const hitLabel = hit.sessionType === 'lab' ? 'Laboratory' : 'Lecture';
+				compError = `Duplicates meeting ${clashIndex + 1} (${hitLabel} ${hit.scheduleDays} ${hit.scheduleStartTime.slice(0, 5)}). Change the type, days, or time.`;
+				return;
+			}
+			// Weekly-hours requirement (backend 422 weekly_hours_exceed_units /
+			// weekly_hours_below_units): the course's units are the required
+			// scheduled meeting hours per week, counting all existing meetings
+			// plus this draft. Off-requirement totals may only converge.
+			if (course && addBlocked) {
+				compError =
+					addProjection && addProjection.status === 'under'
+						? `Weekly scheduled hours (${addProjection.scheduled}h) fall short of the ${course.units}-unit requirement (${addProjection.limit}h) for ${course.courseCode} — lengthen a meeting instead.`
+						: `Weekly scheduled hours (${addProjection?.scheduled}h) exceed the ${course.units}-unit requirement (${addProjection?.limit}h) for ${course.courseCode} — shorten a meeting first.`;
+				return;
+			}
+			await createComponent(offering.id, {
+				session_type: parsed.data.session_type,
+				schedule_days: parsed.data.schedule_days,
+				schedule_start_time: parsed.data.schedule_start_time,
+				schedule_end_time: parsed.data.schedule_end_time,
+				classroom_name: parsed.data.classroom_name || undefined,
+				classroom_lat: parseOptCoord(c_lat, 'Latitude', -90, 90),
+				classroom_lng: parseOptCoord(c_lng, 'Longitude', -180, 180),
+			});
+			resetCompForm();
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			compError = compFailure(e, 'Save failed. Please try again.');
+		} finally {
+			compBusy = false;
+		}
+	};
+
+	const openEditComponent = (c: OfferingComponent) => {
+		editingComp = c;
+		editConfirmOpen = false;
+		compError = null;
+		e_days = c.scheduleDays;
+		e_customDays = !/^[MTWHFSU]+$/.test(c.scheduleDays);
+		e_start = c.scheduleStartTime.slice(0, 5);
+		e_end = c.scheduleEndTime.slice(0, 5);
+		e_room = c.classroomName ?? '';
+		e_lat = c.classroomLat !== undefined ? String(c.classroomLat) : '';
+		e_lng = c.classroomLng !== undefined ? String(c.classroomLng) : '';
+	};
+
+	const submitEditComponent = async () => {
+		if (!offering || !editingComp) return;
+		compError = null;
+		const parsed = componentCreateSchema.safeParse({
+			session_type: editingComp.sessionType,
+			schedule_days: e_days,
+			schedule_start_time: e_start,
+			schedule_end_time: e_end,
+			classroom_name: e_room || undefined,
+		});
+		if (!parsed.success) {
+			compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
+			return;
+		}
+		// Confirm gate: a save that leaves the total mismatched without
+		// converging (the pre-D81 blocker) needs a deliberate click.
+		// Converging fixes and exact landings save straight through.
+		if (
+			course &&
+			editProjection &&
+			weeklyWriteBlocked(detailBreakdown?.scheduled ?? null, editProjection.scheduled, course.units)
+		) {
+			editConfirmOpen = true;
+			return;
+		}
+		await persistEditComponent();
+	};
+
+	const persistEditComponent = async () => {
+		if (!offering || !editingComp) return;
+		editConfirmOpen = false;
+		compBusy = true;
+		compError = null;
+		try {
+			const parsed = componentCreateSchema.safeParse({
+				session_type: editingComp.sessionType,
+				schedule_days: e_days,
+				schedule_start_time: e_start,
+				schedule_end_time: e_end,
+				classroom_name: e_room || undefined,
+			});
+			if (!parsed.success) {
+				compError = parsed.error.issues[0]?.message ?? 'Check the component and try again.';
+				return;
+			}
+			await updateComponent(offering.id, editingComp.id, {
+				schedule_days: parsed.data.schedule_days,
+				schedule_start_time: parsed.data.schedule_start_time,
+				schedule_end_time: parsed.data.schedule_end_time,
+				classroom_name: e_room.trim() ? e_room.trim() : null,
+				classroom_lat: e_lat.trim() ? parseOptCoord(e_lat, 'Latitude', -90, 90) : null,
+				classroom_lng: e_lng.trim() ? parseOptCoord(e_lng, 'Longitude', -180, 180) : null,
+			});
+			editingComp = null;
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			compError = compFailure(e, 'Save failed. Please try again.');
+		} finally {
+			compBusy = false;
+		}
+	};
+
+	const archiveRow = async (c: OfferingComponent) => {
+		if (!offering || compBusy) return;
+		compError = null;
+		compBusy = true;
+		try {
+			await archiveComponent(offering.id, c.id);
+			if (editingComp?.id === c.id) editingComp = null;
+			editConfirmOpen = false;
+			await refreshAdminOfferingDetail(offering.id);
+			notifyEntityChanged('offerings');
+		} catch (e: unknown) {
+			compError = compFailure(e, 'Archive failed. Please try again.');
+		} finally {
+			compBusy = false;
+		}
 	};
 
 	const submitAssign = async () => {
@@ -363,13 +669,165 @@
 		}
 	};
 
+	const openAdd = () => {
+		addOpen = true;
+		addQuery = '';
+		addResults = [];
+		addTotal = 0;
+		addPage = 1;
+		addReport = null;
+		addSelected = [];
+		adminOfferingDetailState.actionError = null;
+		void loadAddCandidates(1);
+	};
+
+	const onAddQuery = () => {
+		if (addSearchTimer) clearTimeout(addSearchTimer);
+		addSearchTimer = setTimeout(() => void loadAddCandidates(1), 300);
+	};
+
+	// One loader for browse, pager, and search: empty query + cohort ids is
+	// the browse list, a query narrows within it. Cohort-scoped, so only
+	// students on the offering's program + year can take this course.
+	const loadAddCandidates = async (page: number) => {
+		const q = addQuery.trim();
+		addSearching = true;
+		try {
+			const result = await listStudents({
+				search: q || undefined,
+				size: ADD_PAGE_SIZE,
+				page,
+				is_active: true,
+				program_id: offering?.programId,
+				year_level_id: offering?.yearLevelId,
+			});
+			if (q !== addQuery.trim()) return;
+			addResults = result.items;
+			addTotal = result.total;
+			addPage = result.page;
+		} catch (e: unknown) {
+			adminOfferingDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to load students';
+		} finally {
+			addSearching = false;
+		}
+	};
+
+	const addTotalPages = $derived(Math.max(1, Math.ceil(addTotal / ADD_PAGE_SIZE)));
+
+	const addCohortLabel = $derived(
+		[programCode, yearLabel].filter(Boolean).join(' ') || 'this cohort'
+	);
+
+	const addEmptyCopy = $derived(
+		addQuery.trim() ? `No matches in ${addCohortLabel}.` : `No students in ${addCohortLabel} yet.`
+	);
+
+	// The upload checks the CSV program against the offering, so a cross-
+	// program pick is blocked here instead of round-tripping the error.
+	const addProgramMismatch = $derived(
+		programCode !== null &&
+			addSelected.some((s) => s.programCode !== programCode)
+	);
+
+	// Enrollment status per candidate, read off the loaded roster page.
+	// Advisory for rosters past page 1 (submit stays authoritative via the
+	// skipped branch); membership itself never false-positives, so enrolled
+	// rows are safe to disable.
+	const enrolledIds = $derived(
+		new Set(adminOfferingDetailState.roster.map((r) => r.studentId))
+	);
+
+	// House toggle idiom (admin/analytics, admin/professors): reassign
+	// through filter/append so the reactive array invalidates.
+	const toggleAddSelection = (student: AdminStudent) => {
+		addSelected = addSelected.some((s) => s.id === student.id)
+			? addSelected.filter((s) => s.id !== student.id)
+			: [...addSelected, student];
+	};
+
+	const clearAddSelection = () => {
+		if (addBusy) return;
+		addSelected = [];
+	};
+
+	// Every eligible student on the visible page, so a cohort can be paged
+	// through without checking boxes one by one.
+	const pageEligible = $derived(
+		addResults.filter((s) => !enrolledIds.has(s.studentId))
+	);
+	const pageAllSelected = $derived(
+		pageEligible.length > 0 && pageEligible.every((s) => addSelected.some((x) => x.id === s.id))
+	);
+	const togglePageSelection = () => {
+		if (addBusy || pageEligible.length === 0) return;
+		addSelected = pageAllSelected
+			? addSelected.filter((x) => !pageEligible.some((s) => s.id === x.id))
+			: [...addSelected, ...pageEligible.filter((s) => !addSelected.some((x) => x.id === s.id))];
+	};
+
+	const submitAdd = async () => {
+		const chosen = addSelected;
+		if (!offering || chosen.length === 0 || addBusy || addProgramMismatch) return;
+		addBusy = true;
+		addReport = null;
+		try {
+			// Row order matches `chosen`, and the parser numbers data rows from
+			// line 2, so an error line maps back to its student deterministically.
+			const result = await bulkEnrollOffering(offering.id, buildEnrollCsv(chosen));
+			const failures = result.errors.map((err) => {
+				const student = chosen[err.line - 2];
+				return student ? `${student.studentId} — ${err.reason}` : err.reason;
+			});
+			if (result.errors.length === 0 && result.skipped === 0) {
+				addSelected = [];
+				addOpen = false;
+			} else {
+				// Stay open with the report: the roster reload above already
+				// flipped the newly-enrolled rows to "Already enrolled", so the
+				// badges self-correct and a re-submit is at worst a repeat skip.
+				addReport = {
+					enrolled: result.enrolled,
+					skipped: result.skipped,
+					failures,
+				};
+			}
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			addBusy = false;
+		}
+	};
+
+	const askUnenroll = (row: AdminRosterItem) => {
+		unenrollTarget = row;
+	};
+
+	const confirmUnenroll = async () => {
+		if (!offering || !unenrollTarget || unenrollBusy) return;
+		unenrollBusy = true;
+		try {
+			await unenrollStudentFromOffering(offering.id, unenrollTarget.studentId);
+			unenrollTarget = null;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			unenrollBusy = false;
+		}
+	};
+
 	const rosterTotalPages = $derived(
 		Math.max(1, Math.ceil(adminOfferingDetailState.rosterTotal / 20))
 	);
 </script>
 
 <div class="page">
-	<button class="link back" onclick={() => goto(Routes.ADMIN_OFFERINGS)}>‹ All offerings</button>
+	<div class="page-top">
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_OFFERINGS)}>
+			← Back to Offering Management
+		</button>
+		<p class="crumb"><a href={Routes.ADMIN_OFFERINGS}>Offerings</a> / Detail</p>
+	</div>
 
 	{#if adminOfferingDetailState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
@@ -389,14 +847,9 @@
 					</span>
 				</p>
 			</div>
-			<div class="header-actions">
-				<button class="btn btn-secondary" onclick={toggleActive}>
-					{offering.isActive ? 'Deactivate' : 'Reactivate'}
-				</button>
-			</div>
 		</header>
 
-		{#if adminOfferingDetailState.actionError}
+		{#if adminOfferingDetailState.actionError && !deleteOpen && !archiveConfirm}
 			<section class="card"><p class="error" role="alert">{adminOfferingDetailState.actionError}</p></section>
 		{/if}
 
@@ -410,9 +863,41 @@
 		{#if tab === 'overview'}
 			<section class="card">
 				<dl class="facts">
-					<div><dt>Schedule</dt><dd>{offering.scheduleDays} {offering.scheduleStartTime.slice(0, 5)}–{offering.scheduleEndTime.slice(0, 5)}</dd></div>
-					<div><dt>Meetings</dt><dd>{offering.sessionsPerWeek} / week · {offering.semesterWeeks} weeks</dd></div>
-					<div><dt>Classroom</dt><dd>{offering.classroomName ?? '—'}</dd></div>
+					{#if offering.components.length === 0}
+						<div><dt>Schedule</dt><dd>{offering.scheduleDays} {offering.scheduleStartTime.slice(0, 5)}–{offering.scheduleEndTime.slice(0, 5)}</dd></div>
+					{/if}
+					<div>
+						<dt>Meetings</dt>
+						<dd>
+							<span class="badge type-lab" class:type-lec={offering.sessionTypes.length === 1 && offering.sessionTypes[0] === 'lecture'}>
+								{sessionMixLabel(offering.sessionTypes)}
+							</span>
+						</dd>
+					</div>
+					{#each offering.components as comp (comp.id)}
+						<div>
+							<dt>{comp.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}</dt>
+							<dd>{comp.scheduleDays} {comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}{comp.classroomName ? ` · ${comp.classroomName}` : ''}</dd>
+						</div>
+					{/each}
+					<div><dt>Meetings</dt><dd>{offering.sessionsPerWeek} {offering.sessionsPerWeek === 1 ? 'meeting' : 'meetings'}/week{' '}<span class="sep" aria-hidden="true">•</span>{' '}{offering.semesterWeeks} {offering.semesterWeeks === 1 ? 'week' : 'weeks'}{#if overviewExpectedTotal !== null}{' '}<span class="sep" aria-hidden="true">•</span>{' '}{overviewExpectedTotal} {overviewExpectedTotal === 1 ? 'session' : 'sessions'}{/if}</dd></div>
+					{#if detailBreakdown && course && detailBreakdown.status !== 'ok'}
+						<div>
+							<dt>Sessions</dt>
+							<dd>
+								<span
+									class="badge blocked"
+									title={`Weekly schedule ${detailBreakdown.scheduled}h does not match the ${course.units}-unit requirement`}
+								>
+									<AppIcon name="alert" size={12} />
+									Blocked — schedule mismatch
+								</span>
+							</dd>
+						</div>
+					{/if}
+					{#if offering.components.length === 0}
+						<div><dt>Classroom</dt><dd>{offering.classroomName ?? '—'}</dd></div>
+					{/if}
 					{#if offering.classroomLat !== undefined && offering.classroomLng !== undefined}
 						<div><dt>Geofence center</dt><dd>{offering.classroomLat}, {offering.classroomLng}</dd></div>
 					{/if}
@@ -421,7 +906,7 @@
 					<div><dt>Enrolled</dt><dd>{offering.enrolledCount}</dd></div>
 				</dl>
 				{#if course}
-					<p class="muted">Template: {course.courseCode} · {course.units} units · {course.sessionDurationHours}h sessions</p>
+					<p class="muted">Template: {course.courseCode} · {course.units} units · {course.sessionDurationHours}h default session</p>
 				{/if}
 			</section>
 		{:else if tab === 'professors'}
@@ -479,6 +964,7 @@
 			<section class="card">
 				<div class="row-head">
 					<h2 class="card-title">Roster ({adminOfferingDetailState.rosterTotal})</h2>
+					<button class="btn btn-primary" onclick={openAdd}>Add student</button>
 				</div>
 				<div class="filters">
 					<input
@@ -505,6 +991,7 @@
 									<th>Name</th>
 									<th>Section</th>
 									<th>Enrolled</th>
+									<th><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -514,6 +1001,9 @@
 										<td>{r.name}</td>
 										<td>{r.section ?? '—'}</td>
 										<td>{r.enrolledAt.slice(0, 10)}</td>
+										<td class="row-actions">
+											<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+										</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -566,59 +1056,147 @@
 			</section>
 		{:else}
 			<section class="card">
+				<h2 class="card-title">Class meetings</h2>
+				<p class="muted">Each row is one weekly meeting with its own days, time, and room. A course with a Monday laboratory and a Wednesday lecture is two rows — sessions inherit the room of their meeting type.</p>
+				{#if detailBreakdown && course}
+					{#if detailBreakdown.status === 'ok'}
+						<p class="hint">{detailBreakdown.scheduled}h scheduled of {detailBreakdown.limit}h weekly requirement ({course.courseCode} · exact).</p>
+					{:else if detailBreakdown.status === 'over'}
+						<p class="error" role="alert">{detailBreakdown.scheduled}h scheduled of {detailBreakdown.limit}h weekly requirement ({course.courseCode} · {-detailBreakdown.remaining}h over).</p>
+					{:else}
+						<p class="error" role="alert">{detailBreakdown.scheduled}h scheduled of {detailBreakdown.limit}h weekly requirement ({course.courseCode} · {detailBreakdown.remaining}h short).</p>
+					{/if}
+					{#if detailBreakdown.status !== 'ok'}
+						<div class="blocked-note" role="note">
+							<AppIcon name="alert" size={16} />
+							<span><strong>Sessions cannot be opened for this offering</strong> until the total matches — new sessions are refused and reactivation is disabled.</span>
+						</div>
+					{/if}
+				{/if}
+				{#if compError}
+					<p class="error" role="alert">{compError}</p>
+				{/if}
+				{#if offering.components.length === 0}
+					<p class="empty">No active components. Add one below so sessions have a schedule to inherit.</p>
+				{:else}
+					<div class="table-wrap">
+						<table>
+							<thead>
+								<tr>
+									<th>Type</th>
+									<th>Days</th>
+									<th>Time</th>
+									<th>Room</th>
+									<th><span class="sr">Actions</span></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each offering.components as comp (comp.id)}
+									<tr>
+										<td>
+											<span class="badge type-lab" class:type-lec={comp.sessionType === 'lecture'}>
+												{comp.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
+											</span>
+										</td>
+										<td>{comp.scheduleDays}</td>
+										<td>{comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}</td>
+										<td>{comp.classroomName ?? '—'}</td>
+										<td class="row-actions">
+											<button class="link" onclick={() => openEditComponent(comp)}>Edit</button>
+											<button class="link" disabled={compBusy} onclick={() => void archiveRow(comp)}>Archive</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+				{#if editingComp}
+					<div class="comp-edit">
+						<h3 class="sub-title">Edit {editingComp.sessionType === 'lab' ? 'laboratory' : 'lecture'} meeting</h3>
+						{#if e_customDays}
+							<label>Days<input class="input" bind:value={e_days} placeholder="MWF" /></label>
+						{:else}
+							<DayPicker bind:value={e_days} />
+						{/if}
+						<div class="grid2">
+							<label>Start time<input class="input" type="time" bind:value={e_start} /></label>
+							<label>End time<input class="input" type="time" bind:value={e_end} /></label>
+						</div>
+						<label>Room (optional)<input class="input" bind:value={e_room} placeholder="Lab 101" /></label>
+						<div class="grid2">
+							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
+							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
+						</div>
+						{#if course && editProjection}
+							<p class="hint">Saving would bring the weekly total to {editProjection.scheduled}h of {editProjection.limit}h ({editProjection.status === 'ok' ? 'exact' : editProjection.status === 'under' ? `${editProjection.remaining}h short` : `${-editProjection.remaining}h over`}). Reshapes save freely — the panel above tracks the total back to exact.</p>
+						{/if}
+						<div class="modal-actions">
+							<button class="btn btn-ghost" onclick={() => { editingComp = null; editConfirmOpen = false; }}>Cancel</button>
+							<button class="btn btn-primary" disabled={compBusy} onclick={submitEditComponent}>
+								{compBusy ? 'Saving…' : 'Save'}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<div class="comp-add">
+						<h3 class="sub-title">Add a meeting</h3>
+						<p class="hint">One row, one time: days on the same row share the time below. For a different time, add another row.</p>
+						<DayPicker bind:value={c_days} />
+						<label>Type
+							<select class="input" bind:value={c_type}>
+								<option value="lecture">Lecture</option>
+								<option value="lab">Laboratory</option>
+							</select>
+						</label>
+						<div class="grid2">
+							<label>Start time<input class="input" type="time" bind:value={c_start} /></label>
+							<label>End time<input class="input" type="time" bind:value={c_end} /></label>
+						</div>
+						<label>Room (optional)<input class="input" bind:value={c_room} placeholder="Lab 101" /></label>
+						<div class="grid2">
+							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={c_lat} placeholder="14.5995" /></label>
+							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
+						</div>
+						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence and inherit this room when the professor opens them without an override.</p>
+						{#if course && addProjection && c_days.trim() && c_start && c_end}
+							{#if addBlocked}
+								<p class="error" role="alert">Adding this meeting would bring the weekly total to {addProjection.scheduled}h of {addProjection.limit}h ({addProjection.status === 'under' ? `${addProjection.remaining}h short` : `${-addProjection.remaining}h over`}).</p>
+							{:else}
+								<p class="hint">Adding this meeting would bring the weekly total to {addProjection.scheduled}h of {addProjection.limit}h ({addProjection.status === 'ok' ? 'exact' : addProjection.status === 'under' ? `${addProjection.remaining}h short` : `${-addProjection.remaining}h over`}).</p>
+							{/if}
+						{/if}
+						<div class="modal-actions">
+							<button class="btn btn-secondary" disabled={compBusy} onclick={submitAddComponent}>
+								{compBusy ? 'Adding…' : 'Add meeting'}
+							</button>
+						</div>
+					</div>
+				{/if}
+			</section>
+
+			<section class="card">
 				<h2 class="card-title">Offering settings</h2>
-				<p class="muted">Mutable fields only. Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
+				<p class="muted">Rates and windows only. Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
 				{#if settingsError}
 					<p class="error" role="alert">{settingsError}</p>
 				{/if}
 				<div class="form">
 					<div class="grid2">
-						<label>Sessions / week<input class="input" inputmode="numeric" bind:value={s_sessions} /></label>
+						<label>Sessions / week (automatic)<input class="input" value={detailSessionCount} disabled aria-label="Sessions per week, counted automatically from the meetings" /></label>
 						<label>Semester weeks<input class="input" inputmode="numeric" bind:value={s_weeks} /></label>
 					</div>
-					<DayPicker bind:value={s_days} />
-					<div class="grid2">
-						<label>Start time<input class="input" type="time" bind:value={s_start} /></label>
-						<label>End time<input class="input" type="time" bind:value={s_end} /></label>
-					</div>
-					<div class="field">
-						<span class="form-label">Course Type</span>
-						<div class="toggle-group" role="group" aria-label="Course type">
-							<button
-								type="button"
-								class="toggle-btn"
-								class:selected={s_course_type === 'lecture'}
-								aria-pressed={s_course_type === 'lecture'}
-								onclick={() => (s_course_type = 'lecture')}
-							>
-								Lecture
-							</button>
-							<button
-								type="button"
-								class="toggle-btn"
-								class:selected={s_course_type === 'lab'}
-								aria-pressed={s_course_type === 'lab'}
-								onclick={() => (s_course_type = 'lab')}
-							>
-								Laboratory
-							</button>
-						</div>
-						<p class="hint">
-							{s_course_type === 'lab'
-								? 'Laboratory sessions require classroom coordinates and geofence for attendance tracking.'
-								: 'Lecture sessions use offering defaults. Geofence is optional.'}
-						</p>
-					</div>
-					<label>Classroom<input class="input" bind:value={s_classroom} placeholder="Lab 101" /></label>
-					<div class="grid2">
-						<label>Latitude<input class="input" inputmode="decimal" bind:value={s_lat} /></label>
-						<label>Longitude<input class="input" inputmode="decimal" bind:value={s_lng} /></label>
-					</div>
+					<p class="hint">Sessions per week are counted from the class meetings above — one per meeting day — and update automatically when meetings change.</p>
+					{#if detailExpectedTotal !== null}
+						<p class="hint">{detailSessionCount} sessions/week × {s_weeks.trim()} weeks = {detailExpectedTotal} expected sessions this term.</p>
+					{:else}
+						<p class="hint">Enter the semester weeks to see the expected session total.</p>
+					{/if}
 					<div class="grid2">
 						<label>Present window, min<input class="input" inputmode="numeric" bind:value={s_present} /></label>
 						<label>Late window, min<input class="input" inputmode="numeric" bind:value={s_late} /></label>
 					</div>
-					<p class="hint">Clearing the classroom name removes it; clearing a coordinate clears it. Present + late windows must fit the course session duration.</p>
+					<p class="hint">Present + late windows must fit the course session duration.</p>
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" onclick={fillSettings}>Reset</button>
@@ -630,10 +1208,40 @@
 
 			<section class="card danger">
 				<h2 class="card-title">Danger zone</h2>
-				<p class="muted">Archiving flips this offering to inactive. Sessions history is kept.</p>
-				<button class="btn btn-danger" disabled={archiveBusy || !offering.isActive} onclick={onArchive}>
-					{archiveBusy ? 'Archiving…' : 'Archive offering'}
-				</button>
+				<p class="muted">
+					Status: <strong>{offering.isActive ? 'Active' : 'Inactive'}</strong>. Archiving
+					flips this offering to inactive — sessions history is kept. Reactivating
+					restores it, but requires the weekly scheduled hours to match the course
+					units requirement. Deletion is permanent and blocked while students,
+					sessions, or professor assignments still use this offering.
+				</p>
+				<div class="danger-actions">
+					{#if offering.isActive}
+						<button class="btn btn-danger" disabled={archiveBusy} onclick={() => { adminOfferingDetailState.actionError = null; archiveConfirm = true; }}>
+							Archive offering
+						</button>
+					{:else}
+						<button
+							class="btn btn-secondary"
+							disabled={archiveBusy || (!!course && !!detailBreakdown && detailBreakdown.status !== 'ok')}
+							title={!!course && !!detailBreakdown && detailBreakdown.status !== 'ok' ? 'Weekly scheduled hours do not match the course units requirement — fix the meetings first' : undefined}
+							onclick={onReactivate}
+						>
+							{archiveBusy ? 'Reactivating…' : 'Reactivate offering'}
+						</button>
+					{/if}
+					<button
+						class="btn btn-danger"
+						disabled={deleteBusy || offering.isActive}
+						title={offering.isActive ? 'Archive first — only archived offerings can be deleted' : undefined}
+						onclick={() => { adminOfferingDetailState.actionError = null; deleteOpen = true; }}
+					>
+						Delete permanently
+					</button>
+				</div>
+				{#if !offering.isActive}
+					<p class="hint">Delete is blocked while students, sessions, or professor assignments still use this offering.</p>
+				{/if}
 			</section>
 		{/if}
 	{/if}
@@ -681,6 +1289,229 @@
 	</div>
 {/if}
 
+{#if addOpen && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="add-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (addOpen = false) }}
+		>
+			<h2 id="add-title" class="modal-title">Add student</h2>
+			<div class="form">
+				<label>Find student
+					<input
+						class="input"
+						placeholder="ID, name, or email"
+						aria-label="Find student"
+						bind:value={addQuery}
+						oninput={onAddQuery}
+					/>
+				</label>
+				{#if addSearching && addResults.length === 0}
+					<p class="muted">Searching…</p>
+				{:else if addResults.length === 0}
+					<p class="empty">{addEmptyCopy}</p>
+				{:else}
+					<div class="pick-bar">
+						<label class="check pick-all">
+							<input
+								type="checkbox"
+								checked={pageAllSelected}
+								disabled={addBusy || pageEligible.length === 0}
+								onchange={togglePageSelection}
+							/>
+							<span>Select all on page</span>
+						</label>
+						{#if addSelected.length > 0}
+							<span class="muted">{addSelected.length} selected</span>
+							<button class="link" disabled={addBusy} onclick={clearAddSelection}>
+								Clear
+							</button>
+						{/if}
+					</div>
+					<ul class="pick-list">
+						{#each addResults as s (s.id)}
+							<li class="pick-row">
+								{#if enrolledIds.has(s.studentId)}
+									<span class="muted">{s.studentId} — {s.firstName} {s.lastName}</span>
+									<span class="badge inactive">Already enrolled</span>
+								{:else}
+									<label class="check">
+										<input
+											type="checkbox"
+											checked={addSelected.some((x) => x.id === s.id)}
+											disabled={addBusy}
+											aria-label={`Select ${s.studentId}`}
+											onchange={() => toggleAddSelection(s)}
+										/>
+										<span>{s.studentId} — {s.firstName} {s.lastName} ({s.programCode})</span>
+									</label>
+									<span class="badge">Can enroll</span>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+					{#if !addSearching && addTotalPages > 1}
+						<div class="pager">
+							<button
+								class="btn btn-secondary"
+								disabled={addPage <= 1 || addBusy}
+								onclick={() => void loadAddCandidates(addPage - 1)}
+							>
+								‹ Prev
+							</button>
+							<span class="muted">Page {addPage} of {addTotalPages}</span>
+							<button
+								class="btn btn-secondary"
+								disabled={addPage >= addTotalPages || addBusy}
+								onclick={() => void loadAddCandidates(addPage + 1)}
+							>
+								Next ›
+							</button>
+						</div>
+					{/if}
+				{/if}
+				{#if addReport}
+					<p class="muted" role="status">
+						Enrolled {addReport.enrolled} · skipped {addReport.skipped}
+						{#if addReport.failures.length > 0} · {addReport.failures.length} error{addReport.failures.length === 1 ? '' : 's'}:{/if}
+					</p>
+					{#each addReport.failures as failure (failure)}
+						<p class="error" role="alert">{failure}</p>
+					{/each}
+				{/if}
+				{#if adminOfferingDetailState.actionError}
+					<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+				{/if}
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (addOpen = false)}>Cancel</button>
+				<button
+					class="btn btn-primary"
+					disabled={addSelected.length === 0 || addBusy || addProgramMismatch}
+					onclick={submitAdd}
+				>
+					{addBusy ? 'Enrolling…' : addSelected.length > 1 ? `Enroll ${addSelected.length}` : 'Enroll'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if editConfirmOpen && course && editProjection && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="edit-confirm-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (editConfirmOpen = false) }}
+		>
+			<h2 id="edit-confirm-title" class="modal-title">Save a mismatched total?</h2>
+			<p class="modal-text">
+				Saving would leave the weekly total at {editProjection.scheduled}h against the
+				{course.units}-unit requirement ({editProjection.status === 'under' ? `${editProjection.remaining}h short` : `${-editProjection.remaining}h over`}).
+				The red panels will track it until the schedule converges back to exact.
+			</p>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (editConfirmOpen = false)}>Cancel</button>
+				<button class="btn btn-primary" disabled={compBusy} onclick={() => void persistEditComponent()}>
+					{compBusy ? 'Saving…' : 'Save anyway'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if unenrollTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="unenroll-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (unenrollTarget = null) }}
+		>
+			<h2 id="unenroll-title" class="modal-title">Remove student?</h2>
+			<p class="muted">
+				{unenrollTarget.name} ({unenrollTarget.studentId}) will be unenrolled from
+				this offering. Past attendance history is kept; future scans will be blocked.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (unenrollTarget = null)}>Cancel</button>
+				<button class="btn btn-danger" disabled={unenrollBusy} onclick={confirmUnenroll}>
+					{unenrollBusy ? 'Removing…' : 'Remove'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if archiveConfirm && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="offering-archive-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (archiveConfirm = false) }}
+		>
+			<h2 id="offering-archive-title" class="modal-title">Archive this offering?</h2>
+			<p class="modal-text">
+				It will be flipped to inactive. Sessions history is kept, and you can
+				reactivate it anytime.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteOpen && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="offering-delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteOpen = false) }}
+		>
+			<h2 id="offering-delete-title" class="modal-title">Permanently delete this offering?</h2>
+			<p class="modal-text">
+				The offering and its meetings will be removed for good.
+				If students, sessions, or professor assignments still use it, deletion will be blocked
+				and the offering stays archived.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (deleteOpen = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.page {
 		display: flex;
@@ -715,12 +1546,6 @@
 		font-size: 0.75rem;
 	}
 
-	.header-actions {
-		display: flex;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-	}
-
 	.card {
 		background: var(--bg-card);
 		border: 1px solid var(--border);
@@ -742,6 +1567,12 @@
 
 	.danger {
 		border-color: var(--danger-bg);
+	}
+
+	.danger-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 	}
 
 	.tabs {
@@ -813,6 +1644,11 @@
 		font-weight: 600;
 	}
 
+	.facts dd .sep {
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+
 	table {
 		width: 100%;
 		border-collapse: collapse;
@@ -857,6 +1693,82 @@
 		background: var(--divider);
 	}
 
+	.badge.type-lec {
+		color: var(--success);
+		background: var(--success-bg);
+	}
+
+	.badge.type-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
+
+	/* Blocked-sessions callout: icon + tinted box, unmissable next to the
+	totals it explains. */
+	.badge.blocked {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		color: var(--danger);
+		background: var(--danger-bg);
+	}
+
+	.blocked-note {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		font-size: 0.8125rem;
+		color: var(--danger);
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bg);
+		border-radius: 8px;
+		padding: 0.625rem 0.875rem;
+		margin: 0;
+	}
+
+	.blocked-note :global(svg) {
+		flex-shrink: 0;
+		margin-top: 0.125rem;
+	}
+
+	.sub-title {
+		margin: 1rem 0 0.5rem;
+		font-size: 1rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.comp-edit,
+	.comp-add {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+		margin-top: 1.25rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--divider);
+	}
+
+	/* Inside the meeting forms the flex `gap` owns the vertical rhythm —
+		section-level margins would otherwise stack on top of it (e.g. a
+		2.4rem pile-up between the heading and its hint). */
+	.comp-edit > .hint,
+	.comp-add > .hint,
+	.comp-add > .error,
+	.comp-edit > .sub-title,
+	.comp-add > .sub-title {
+		margin: 0;
+	}
+
+	.comp-edit label,
+	.comp-add label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+	}
+
 	.row-actions {
 		display: flex;
 		gap: 0.75rem;
@@ -877,9 +1789,29 @@
 		text-decoration: underline;
 	}
 
-	.back {
-		align-self: flex-start;
-		font-size: 0.875rem;
+	/* Back button + breadcrumb read as one header block, so the .page flex gap
+	 * does not push them a full row apart (same pattern as Program Management). */
+	.page-top {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.crumb {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	.crumb a {
+		color: var(--accent);
+		text-decoration: none;
+		font-weight: 600;
+	}
+
+	.crumb a:hover {
+		text-decoration: underline;
 	}
 
 	.empty {
@@ -974,58 +1906,6 @@
 		color: var(--text-secondary);
 	}
 
-	.toggle-group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.toggle-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.toggle-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.toggle-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.toggle-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.form-label {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		color: var(--text-secondary);
-		margin-bottom: 0.375rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-
 	.btn-danger {
 		background: var(--danger);
 		border: 1px solid var(--danger);
@@ -1052,6 +1932,12 @@
 		border-color: var(--accent);
 	}
 
+	.input:disabled {
+		background: var(--divider);
+		color: var(--text-muted);
+		cursor: not-allowed;
+	}
+
 	.form {
 		display: flex;
 		flex-direction: column;
@@ -1071,6 +1957,28 @@
 		flex-direction: row;
 		align-items: center;
 		gap: 0.5rem;
+	}
+
+	.pick-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.25rem;
+	}
+
+	.pick-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.pick-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 0.8125rem;
 	}
 
 	.grid2 {
@@ -1107,6 +2015,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.modal-actions {

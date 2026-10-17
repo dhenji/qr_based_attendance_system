@@ -35,6 +35,51 @@ class ProgramCodeExistsException(ProgramDomainException):
         super().__init__(message=f"Program code {code} already exists")
 
 
+class ProgramNotArchivedException(ProgramDomainException):
+    """409 - only archived (`is_active=false`) programs may be hard-deleted."""
+
+    status_code: int = 409
+    code: str = "not_archived"
+
+    def __init__(self, program_id: int) -> None:
+        super().__init__(
+            message=f"Program {program_id} is still active and cannot be deleted"
+        )
+
+
+class ProgramHasOfferingsException(ProgramDomainException):
+    """409 - course offerings still reference this program.
+
+    `course_offerings.program_id` is `ondelete="RESTRICT"`, so the delete is
+    rejected before the FK violation surfaces as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "program_has_offerings"
+
+    def __init__(self, program_id: int) -> None:
+        super().__init__(
+            message=f"Program {program_id} has offerings and cannot be deleted"
+        )
+
+
+class ProgramHasStudentsException(ProgramDomainException):
+    """409 - students are still enrolled under this program's year levels.
+
+    Students reference `year_levels.id` (`ondelete="RESTRICT"`) and resolve
+    their program transitively via `year_levels.program_id`, so the delete is
+    rejected before the FK violation surfaces as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "program_has_students"
+
+    def __init__(self, program_id: int) -> None:
+        super().__init__(
+            message=f"Program {program_id} has students and cannot be deleted"
+        )
+
+
 class YearLevelNotFoundException(ProgramDomainException):
     """404 - the year level does not exist under this program.
 
@@ -84,4 +129,22 @@ class YearLevelHasCoursesException(ProgramDomainException):
     def __init__(self, year_level_id: int) -> None:
         super().__init__(
             message=f"Year level {year_level_id} has courses and cannot be deleted"
+        )
+
+
+class YearLevelTermInUseException(ProgramDomainException):
+    """409 - a term code still referenced by course offerings.
+
+    `course_offerings.semester` stores the term code as text, so renaming or
+    removing a code that an offering still uses would orphan that offering.
+    The admin must add a new term (and migrate offerings) instead.
+    """
+
+    status_code: int = 409
+    code: str = "term_code_in_use"
+
+    def __init__(self, year_level_id: int, term_codes: list[str] | tuple[str, ...]) -> None:
+        joined = ", ".join(sorted(term_codes))
+        super().__init__(
+            message=f"Year level {year_level_id} term code(s) in use by offerings: {joined}"
         )

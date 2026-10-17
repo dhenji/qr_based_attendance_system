@@ -5,12 +5,15 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminProgramDetailState,
+		adminProgramsState,
+		deleteArchivedProgram,
 		deleteProgramYear,
 		initAdminProgramDetail,
 		refreshAdminProgramDetail,
 	} from '$lib/features/admin/programs/store.svelte';
 	import {
 		createYearLevel,
+		setProgramActive,
 		updateProgram,
 		updateYearLevel,
 	} from '$lib/features/admin/programs/service';
@@ -20,7 +23,8 @@
 		yearLevelUpdateSchema,
 	} from '$lib/features/admin/programs/schema';
 	import { yearLabel } from '$lib/shared/utils/format';
-	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
+	import { nextTermRow } from '$lib/shared/constants/terms';
+import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEditor.svelte';
 	import type { YearLevel } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
@@ -29,7 +33,9 @@
 
 	// Program Detail (wireframe 4.5b): header with totals + edit, year-level
 	// cards with editable term chips, add-year and manage-terms modals, year
-	// delete with its 409 has-offerings guard surfaced inline. Terms persist
+	// delete with its 409 has-offerings guard surfaced inline, and program
+	// delete (archived programs only) with its 409 has-offerings/has-students
+	// guards surfaced inline. Terms persist
 	// via PATCH {program}/years/{year} — one save per modal, and an empty term
 	// list is allowed (a termless year just can't back offerings yet).
 
@@ -43,18 +49,20 @@
 
 	let yearOpen = $state(false);
 	let y_number = $state('');
-	let y_terms = $state<{ code: string; label: string }[]>([]);
+	let y_terms = $state<{ code: string; label: string; existing?: boolean }[]>([]);
 	let yearError = $state<string | null>(null);
 	let yearBusy = $state(false);
 
 	let termsOpen = $state(false);
 	let termsTarget = $state<YearLevel | null>(null);
-	let t_rows = $state<{ code: string; label: string }[]>([]);
+	let t_rows = $state<{ code: string; label: string; existing?: boolean }[]>([]);
 	let termsError = $state<string | null>(null);
 	let termsBusy = $state(false);
 
 	let deleteTarget = $state<YearLevel | null>(null);
 	let deleteBusy = $state(false);
+	let programDeleteOpen = $state(false);
+	let programDeleteBusy = $state(false);
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
@@ -78,19 +86,6 @@
 
 	const program = $derived(adminProgramDetailState.program);
 
-	type TermRow = { code: string; label: string };
-
-	// The user picks the code and the label; this only picks sensible starting
-	// values for a new row by taking whichever are not already in use, so the
-	// default never collides. Nothing here caps how many rows can be added.
-	const nextTermRow = (rows: TermRow[]): TermRow => {
-		const usedCodes = new Set(rows.map((r) => r.code));
-		const usedLabels = new Set(rows.map((r) => r.label));
-		return {
-			code: TERM_CODES.find((c) => !usedCodes.has(c)) ?? TERM_CODES[0],
-			label: TERM_LABELS.find((l) => !usedLabels.has(l)) ?? TERM_LABELS[0],
-		};
-	};
 
 	const openEdit = () => {
 		if (!program) return;
@@ -153,10 +148,11 @@
 			const parsed = yearLevelCreateSchema.safeParse({
 				year_number: y_number,
 				label: yearLabel(Number(y_number)),
-				terms: y_terms,
+				terms: y_terms.map(({ code, label }) => ({ code, label })),
 			});
 			if (!parsed.success) {
-				yearError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				yearError =
+					parsed.error.issues.map((issue) => issue.message).join(' ') || 'Check the form and try again.';
 				return;
 			}
 			await createYearLevel(program.id, {
@@ -177,7 +173,7 @@
 	const openTerms = (year: YearLevel) => {
 		termsTarget = year;
 		termsError = null;
-		t_rows = year.terms.map((t) => ({ ...t }));
+		t_rows = year.terms.map((t) => ({ ...t, existing: true }));
 		termsOpen = true;
 	};
 
@@ -186,9 +182,13 @@
 		termsError = null;
 		termsBusy = true;
 		try {
-			const parsed = yearLevelUpdateSchema.safeParse({ terms: t_rows });
+			const parsed = yearLevelUpdateSchema.safeParse({
+				terms: t_rows.map(({ code, label }) => ({ code, label })),
+			});
 			if (!parsed.success) {
-				termsError = parsed.error.issues[0]?.message ?? 'Each term needs a code and a label.';
+				termsError =
+					parsed.error.issues.map((issue) => issue.message).join(' ') ||
+					'Each term needs a code and a label.';
 				return;
 			}
 			await updateYearLevel(program.id, termsTarget.id, {
@@ -214,6 +214,48 @@
 		} finally {
 			deleteBusy = false;
 		}
+	};
+
+	const confirmDeleteProgram = async () => {
+		if (!program) return;
+		programDeleteBusy = true;
+		try {
+			await deleteArchivedProgram(program.id);
+			programDeleteOpen = false;
+			await goto(Routes.ADMIN_PROGRAMS);
+		} finally {
+			programDeleteBusy = false;
+		}
+	};
+
+	let archiveBusy = $state(false);
+	let archiveConfirm = $state(false);
+
+	const setActive = async (active: boolean, failure: string) => {
+		if (!program || archiveBusy) return;
+		archiveBusy = true;
+		try {
+			await setProgramActive(program.id, active);
+			await refreshAdminProgramDetail(program.id);
+			notifyEntityChanged('programs');
+		} catch (e: unknown) {
+			adminProgramDetailState.actionError =
+				e instanceof Error && e.message ? e.message : failure;
+		} finally {
+			archiveBusy = false;
+		}
+	};
+
+	const onReactivate = () => void setActive(true, 'Failed to reactivate program');
+
+	const confirmArchive = async () => {
+		await setActive(false, 'Failed to archive program');
+		if (program && !program.isActive) archiveConfirm = false;
+	};
+
+	const closeProgramDelete = () => {
+		adminProgramsState.actionError = null;
+		programDeleteOpen = false;
 	};
 
 	const termsText = (year: YearLevel) =>
@@ -293,6 +335,38 @@
 				{/each}
 			</ul>
 		{/if}
+		<section class="card danger">
+			<h2 class="card-title">Danger zone</h2>
+			<p class="muted">
+				Status: <strong>{program.isActive ? 'Active' : 'Archived'}</strong>. Archiving
+				flips this program to archived — year levels stay, offerings and
+				students keep working. Reactivating restores it. Deletion is
+				permanent and blocked while course offerings or students still use
+				this program.
+			</p>
+			<div class="danger-actions">
+				{#if program.isActive}
+					<button class="btn btn-danger" disabled={archiveBusy} onclick={() => { adminProgramDetailState.actionError = null; archiveConfirm = true; }}>
+						Archive program
+					</button>
+				{:else}
+					<button class="btn btn-secondary" disabled={archiveBusy} onclick={onReactivate}>
+						{archiveBusy ? 'Reactivating…' : 'Reactivate program'}
+					</button>
+				{/if}
+				<button
+					class="btn btn-danger"
+					disabled={programDeleteBusy || program.isActive}
+					title={program.isActive ? 'Archive first — only archived programs can be deleted' : undefined}
+					onclick={() => { adminProgramsState.actionError = null; programDeleteOpen = true; }}
+				>
+					Delete permanently
+				</button>
+			</div>
+			{#if !program.isActive}
+				<p class="hint">Delete is blocked while course offerings or students still use this program.</p>
+			{/if}
+		</section>
 	{/if}
 </div>
 
@@ -351,33 +425,7 @@
 				<p class="hint">The label is generated from the year, so the two can't disagree.</p>
 				<div class="terms-edit">
 					<span class="terms-label">Terms</span>
-					{#each y_terms as term, i (i)}
-						<div class="grid2">
-							<select class="input" aria-label="Term code" bind:value={y_terms[i].code}>
-								{#each TERM_CODES as c (c)}
-									<option value={c}>{c}</option>
-								{/each}
-							</select>
-							<select class="input" aria-label="Term label" bind:value={y_terms[i].label}>
-								{#each TERM_LABELS as l (l)}
-									<option value={l}>{l}</option>
-								{/each}
-							</select>
-						</div>
-					{/each}
-					<div class="terms-row">
-						<button
-							class="btn btn-secondary"
-							onclick={() => (y_terms = [...y_terms, nextTermRow(y_terms)])}
-						>
-							Add term
-						</button>
-						{#if y_terms.length > 0}
-							<button class="btn btn-ghost" onclick={() => (y_terms = y_terms.slice(0, -1))}>
-								Remove last
-							</button>
-						{/if}
-					</div>
+					<TermRowsEditor bind:rows={y_terms} busy={yearBusy} lockCodeForExisting={false} />
 				</div>
 			</div>
 			<div class="modal-actions">
@@ -405,36 +453,16 @@
 				<p class="error" role="alert">{termsError}</p>
 			{/if}
 			<div class="form">
-				{#if t_rows.length === 0}
-					<p class="muted">No terms. Add one below, or save empty — a termless year just can't back offerings yet.</p>
-				{/if}
-				{#each t_rows as term, i (i)}
-					<div class="grid2">
-						<select class="input" aria-label="Term code" bind:value={t_rows[i].code}>
-							{#each TERM_CODES as c (c)}
-								<option value={c}>{c}</option>
-							{/each}
-						</select>
-						<select class="input" aria-label="Term label" bind:value={t_rows[i].label}>
-							{#each TERM_LABELS as l (l)}
-								<option value={l}>{l}</option>
-							{/each}
-						</select>
-					</div>
-				{/each}
-				<div class="terms-row">
-					<button
-						class="btn btn-secondary"
-						onclick={() => (t_rows = [...t_rows, nextTermRow(t_rows)])}
-					>
-						Add term
-					</button>
-					{#if t_rows.length > 0}
-						<button class="btn btn-ghost" onclick={() => (t_rows = t_rows.slice(0, -1))}>
-							Remove last
-						</button>
-					{/if}
-				</div>
+				<p class="hint">
+					The code is the value stored on offerings and enrollments; keep it stable for terms already used.
+					Only change the display name for cosmetic renames.
+				</p>
+				<TermRowsEditor
+					bind:rows={t_rows}
+					busy={termsBusy}
+					lockCodeForExisting={true}
+					emptyMessage="No terms yet. Add one below, or save empty — a termless year just can't back offerings yet."
+				/>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => { termsOpen = false; termsTarget = null; }}>Cancel</button>
@@ -468,6 +496,63 @@
 				<button class="btn btn-ghost" onclick={() => (deleteTarget = null)}>Cancel</button>
 				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDeleteYear}>
 					{deleteBusy ? 'Deleting…' : 'Delete'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if archiveConfirm && program}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="program-archive-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (archiveConfirm = false) }}
+		>
+			<h2 id="program-archive-title" class="modal-title">Archive {program.code}?</h2>
+			<p class="modal-text">
+				{program.name} will be flipped to archived. Year levels stay, offerings
+				and students keep working, and you can reactivate it anytime.
+			</p>
+			{#if adminProgramDetailState.actionError}
+				<p class="error" role="alert">{adminProgramDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if programDeleteOpen && program}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-program-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeProgramDelete }}
+		>
+			<h2 id="delete-program-title" class="modal-title">Permanently delete {program.code}?</h2>
+			<p class="modal-text">
+				{program.name} will be removed for good, along with its year levels.
+				If course offerings or students still use it, deletion will be blocked
+				and the program stays archived.
+			</p>
+			{#if adminProgramsState.actionError}
+				<p class="error" role="alert">{adminProgramsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeProgramDelete}>Cancel</button>
+				<button class="btn btn-danger" disabled={programDeleteBusy} onclick={confirmDeleteProgram}>
+					{programDeleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -564,6 +649,27 @@
 		border-radius: 8px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
+	}
+
+	.card-title {
+		margin: 0 0 0.375rem;
+		font-size: 1.125rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.card .muted {
+		margin-bottom: 1rem;
+	}
+
+	.danger {
+		border-color: var(--danger-bg);
+	}
+
+	.danger-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 	}
 
 	.year {
@@ -764,12 +870,6 @@
 		color: var(--text-secondary);
 	}
 
-	.grid2 {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.875rem;
-	}
-
 	.terms-edit {
 		display: flex;
 		flex-direction: column;
@@ -780,12 +880,6 @@
 		font-size: 0.8125rem;
 		font-weight: 600;
 		color: var(--text-secondary);
-	}
-
-	.terms-row {
-		display: flex;
-		gap: 0.75rem;
-		flex-wrap: wrap;
 	}
 
 	.hint {
@@ -804,10 +898,6 @@
 	@media (max-width: 640px) {
 		.card {
 			padding: 1.25rem;
-		}
-
-		.grid2 {
-			grid-template-columns: minmax(0, 1fr);
 		}
 	}
 </style>

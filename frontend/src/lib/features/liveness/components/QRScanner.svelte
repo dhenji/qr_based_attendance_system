@@ -1,3 +1,11 @@
+<script lang="ts" module>
+	// Mount counter backing the default reader ids below. Module state is
+	// shared by every QRScanner instance: deterministic, collision-free, and
+	// stable per mount (Math.random() here caused hydration mismatches and a
+	// new id on every remount).
+	let scannerSeq = 0;
+</script>
+
 <script lang="ts">
 	// QRScanner
 	// Show/hide of the camera view is driven by the `active` prop; every
@@ -13,9 +21,10 @@
 
 	// Unique reader id per instance so two mounted scanners never share one
 	// DOM id (Html5Qrcode binds by id). Caller may pass an explicit id.
-	const readerId = $derived(
-		idProp ?? `qr-reader-${Math.random().toString(36).slice(2, 10)}`
-	);
+	// The fallback runs once per component instance: stable across
+	// re-renders, fresh on every mount.
+	const fallbackId = `qr-reader-${(scannerSeq += 1)}`;
+	const readerId = $derived(idProp ?? fallbackId);
 
 	let scanError = $state<string | null>(null);
 	let qrCode: Html5Qrcode | null = null;

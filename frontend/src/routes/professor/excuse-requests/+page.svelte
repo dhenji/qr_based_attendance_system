@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		editExcuse,
+		EXCUSE_REASON_MIN_LENGTH,
 		listExcuseRequests,
 		quickExcuse,
 		revokeExcuse,
@@ -683,7 +684,7 @@
 			{:else}
 				{#if canModify(selected)}
 					{#if editMode}
-						<label class="form-label" for="edit-reason">Reason (min 10 chars)</label>
+						<label class="form-label" for="edit-reason">Reason (min {EXCUSE_REASON_MIN_LENGTH} chars)</label>
 						<textarea
 							id="edit-reason"
 							class="form-input area"
@@ -802,7 +803,7 @@
 			use:trapFocus={{ onEscape: closeQuick }}
 		>
 			<h2 id="quick-title">New quick-excuse (Path A)</h2>
-			<p class="modal-sub">Approves immediately — for direct-knowledge cases. Min 10-char reason.</p>
+			<p class="modal-sub">Approves immediately — for direct-knowledge cases. Min {EXCUSE_REASON_MIN_LENGTH}-char reason.</p>
 			{#if !isMockMode()}
 				<p class="modal-sub" role="note">
 					Live mode: typed numbers cannot resolve to roster records, so this submit is
@@ -859,7 +860,7 @@
 					</select>
 				</div>
 			</div>
-			<label class="form-label" for="quick-reason">Reason (min 10 chars)</label>
+			<label class="form-label" for="quick-reason">Reason (min {EXCUSE_REASON_MIN_LENGTH} chars)</label>
 			<textarea
 				id="quick-reason"
 				class="form-input area"

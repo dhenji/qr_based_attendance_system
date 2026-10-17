@@ -7,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.program.exceptions import (
     ProgramCodeExistsException,
+    ProgramHasOfferingsException,
+    ProgramHasStudentsException,
+    ProgramNotArchivedException,
     ProgramNotFoundException,
     YearLevelHasCoursesException,
     YearLevelNotFoundException,
@@ -173,13 +176,15 @@ async def test_update_missing_program_404(test_db_session: AsyncSession) -> None
         )
 
 
-async def test_archive_flips_flag_only(
+async def test_archive_via_update_flips_flag_only(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
     program = await factories.program(code="BSCS")
     year = await factories.year_level(program, year_number=1)
 
-    await ProgramService(test_db_session).archive(program_id=program.id)
+    await ProgramService(test_db_session).update(
+        program_id=program.id, payload=ProgramUpdate(is_active=False)
+    )
     await test_db_session.flush()
     assert program.is_active is False
 
@@ -188,6 +193,90 @@ async def test_archive_flips_flag_only(
     )
     assert listed.total == 1
     assert listed.items[0].id == year.id
+
+
+async def test_hard_delete_active_409(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    program = await factories.program(code="BSCS")
+
+    with pytest.raises(ProgramNotArchivedException):
+        await ProgramService(test_db_session).hard_delete(program_id=program.id)
+
+
+async def test_hard_delete_missing_program_404(
+    test_db_session: AsyncSession,
+) -> None:
+    with pytest.raises(ProgramNotFoundException):
+        await ProgramService(test_db_session).hard_delete(program_id=9999)
+
+
+async def test_hard_delete_blocked_by_offerings(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    program = await factories.program(code="BSCS")
+    year = await factories.year_level(program, year_number=1)
+    course = await factories.course()
+    await factories.offering(course, program, year)
+    await ProgramService(test_db_session).update(
+        program_id=program.id, payload=ProgramUpdate(is_active=False)
+    )
+
+    with pytest.raises(ProgramHasOfferingsException):
+        await ProgramService(test_db_session).hard_delete(program_id=program.id)
+
+
+async def test_hard_delete_blocked_by_students(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    program = await factories.program(code="BSCS")
+    year = await factories.year_level(program, year_number=1)
+    await factories.student(year)
+    await ProgramService(test_db_session).update(
+        program_id=program.id, payload=ProgramUpdate(is_active=False)
+    )
+
+    with pytest.raises(ProgramHasStudentsException):
+        await ProgramService(test_db_session).hard_delete(program_id=program.id)
+
+
+async def test_hard_delete_clean_cascades_empty_years(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    from features.system.model import AuditLog
+    from shared.enums import AuditAction, AuditEntity
+    from sqlalchemy import select
+
+    program = await factories.program(code="BSCS")
+    year = await factories.year_level(program, year_number=1)
+    await ProgramService(test_db_session).update(
+        program_id=program.id, payload=ProgramUpdate(is_active=False)
+    )
+
+    await ProgramService(test_db_session).hard_delete(program_id=program.id)
+    await test_db_session.flush()
+
+    with pytest.raises(ProgramNotFoundException):
+        await ProgramService(test_db_session).get(program_id=program.id)
+
+    # The program row is gone, so the nested year read 404s on the program
+    # scope first; the cascade itself is proven by the row being unqueryable.
+    from features.program.model import YearLevel
+
+    assert await test_db_session.get(YearLevel, year.id) is None
+
+    audit_rows = (
+        await test_db_session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.entity_type == AuditEntity.PROGRAM.value,
+                AuditLog.entity_id == program.id,
+                AuditLog.action == AuditAction.DELETE.value,
+            )
+            .order_by(AuditLog.id)
+        )
+    ).all()
+    assert len(audit_rows) == 1
 
 
 async def test_course_count_distinct_and_active_only(
@@ -399,3 +488,50 @@ async def test_program_routes_over_http(
 
     forbidden = await api_client.get("/api/admin/programs")
     assert forbidden.status_code in (401, 403)
+
+
+async def test_program_hard_delete_routes_over_http(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    headers = await auth_headers(role="admin")
+
+    create_response = await api_client.post(
+        "/api/admin/programs",
+        json={
+            "code": "DEL1",
+            "name": "Delete Me",
+            "description": None,
+            "total_years": 4,
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201
+    program_id = create_response.json()["id"]
+
+    # Active programs cannot be hard-deleted.
+    active_delete = await api_client.delete(
+        f"/api/admin/programs/{program_id}", headers=headers
+    )
+    assert active_delete.status_code == 409
+    assert active_delete.json()["detail"]["code"] == "not_archived"
+
+    # Archive via PATCH, then the hard delete succeeds.
+    archived = await api_client.patch(
+        f"/api/admin/programs/{program_id}",
+        json={"is_active": False},
+        headers=headers,
+    )
+    assert archived.status_code == 200
+
+    deleted = await api_client.delete(
+        f"/api/admin/programs/{program_id}", headers=headers
+    )
+    assert deleted.status_code == 204
+
+    fetched = await api_client.get(
+        f"/api/admin/programs/{program_id}", headers=headers
+    )
+    assert fetched.status_code == 404
+
+    missing = await api_client.delete("/api/admin/programs/9999", headers=headers)
+    assert missing.status_code == 404

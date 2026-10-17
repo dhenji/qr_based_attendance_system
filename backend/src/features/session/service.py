@@ -18,7 +18,7 @@ from features.course.exceptions import (
     WindowsExceedDurationException,
 )
 from features.excuse.exceptions import ProfessorNotAssignedException
-from features.course.model import Course, CourseOffering
+from features.course.model import Course, CourseOffering, OfferingComponent
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.program.model import Program, YearLevel
@@ -26,6 +26,8 @@ from features.session.exceptions import (
     SessionAlreadyActiveException,
     SessionExpiredException,
     SessionNotFoundException,
+    LabCoordinatesRequiredException,
+    OfferingScheduleMismatchException,
 )
 from features.session.model import Session
 from features.session.schema import (
@@ -47,7 +49,7 @@ from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.audit import record_audit
 from shared.base import BaseCRUD
-from shared.enums import AuditAction, AuditEntity, QueueStatus, ValidationStatus
+from shared.enums import AuditAction, AuditEntity, QueueStatus, SessionType, ValidationStatus
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -56,6 +58,7 @@ from shared.pagination import (
 )
 from shared.query import apply_if
 from shared.rates import attendance_rates
+from shared.schedule import meeting_minutes
 
 
 def _utcnow() -> datetime:
@@ -105,6 +108,16 @@ def _or_fallback[T](chosen: T | None, fallback: T | None) -> T | None:
     return fallback if chosen is None else chosen
 
 
+def _session_type_of(row: Session) -> SessionType:
+    """The row's lecture/lab type, defaulting to lecture when unset.
+
+    Production rows always carry a value (`NOT NULL` + server default); the
+    fallback covers hand-rolled fakes that never flush ORM column defaults,
+    and any row written before the D77 backfill.
+    """
+    return SessionType(row.session_type or SessionType.LECTURE.value)
+
+
 def _session_status(
     expires_at: datetime | None, now: datetime
 ) -> Literal["active", "closed"]:
@@ -151,6 +164,7 @@ class SessionService:
             offering_id=offering.id, professor_id=professor_id
         )
         await self._require_no_active_session(offering_id=offering.id, now=now)
+        await self._require_schedule_requirement(offering)
 
         duration: int = await self._resolve_duration(payload, offering)
         windows: _SessionWindows = self._resolve_windows(payload, offering)
@@ -161,6 +175,35 @@ class SessionService:
             or self._settings.default_geofence_radius_meters
         )
 
+        # D77: the classroom falls back payload -> matching active component
+        # -> offering. Lab sessions always enforce the geofence, so a lab
+        # open that resolves to no coordinates is rejected.
+        component: OfferingComponent | None = await self._component_for(
+            offering.id, payload.session_type
+        )
+        classroom_name: str | None = (
+            payload.classroom_name
+            or (component.classroom_name if component else None)
+            or offering.classroom_name
+        )
+        classroom_lat: float | None = _or_fallback(
+            payload.classroom_lat,
+            (component.classroom_lat if component else None),
+        )
+        if classroom_lat is None:
+            classroom_lat = offering.classroom_lat
+        classroom_lng: float | None = _or_fallback(
+            payload.classroom_lng,
+            (component.classroom_lng if component else None),
+        )
+        if classroom_lng is None:
+            classroom_lng = offering.classroom_lng
+
+        if payload.session_type == SessionType.LAB and (
+            classroom_lat is None or classroom_lng is None
+        ):
+            raise LabCoordinatesRequiredException()
+
         row: Session = await self._insert_session(
             offering=offering,
             professor_id=professor_id,
@@ -168,6 +211,9 @@ class SessionService:
             windows=windows,
             duration=duration,
             radius=radius,
+            classroom_name=classroom_name,
+            classroom_lat=classroom_lat,
+            classroom_lng=classroom_lng,
             now=now,
         )
         await self._stamp_session(row, duration, now)
@@ -199,6 +245,7 @@ class SessionService:
             id=row.id,
             session_code=row.session_code,
             offering_id=offering.id,
+            session_type=_session_type_of(row),
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_end_time=row.scheduled_end_time,
@@ -219,6 +266,51 @@ class SessionService:
 
         if active_id is not None:
             raise SessionAlreadyActiveException(offering_id)
+
+    async def _require_schedule_requirement(self, offering: CourseOffering) -> None:
+        """Refuse to open sessions on a mis-scheduled offering (D82).
+
+        The merged active-component total must equal the course units
+        requirement in whole minutes — the same rule as `_check_weekly_hours`,
+        recomputed here so the session feature never imports course-service
+        internals. Rows with no configured meetings are exempt (nothing to
+        judge: legacy and factory rows keep working). Close/status paths
+        never call this.
+        """
+        components: Sequence[OfferingComponent] = (
+            await self._session.scalars(
+                select(OfferingComponent)
+                .where(
+                    OfferingComponent.offering_id == offering.id,
+                    OfferingComponent.is_active.is_(True),
+                )
+                .order_by(OfferingComponent.id)
+            )
+        ).all()
+
+        if not components:
+            return
+
+        course: Course | None = await self._session.get(Course, offering.course_id)
+
+        if course is None:
+            return
+
+        total_minutes = sum(
+            meeting_minutes(
+                row.schedule_days, row.schedule_start_time, row.schedule_end_time
+            )
+            for row in components
+        )
+        limit_minutes = int(course.units) * 60
+
+        if int(round(total_minutes)) != limit_minutes:
+            raise OfferingScheduleMismatchException(
+                round(total_minutes / 60, 2),
+                round(limit_minutes / 60, 2),
+                course.course_code,
+                int(course.units),
+            )
 
     def _resolve_windows(
         self, payload: SessionCreate, offering: CourseOffering
@@ -253,11 +345,15 @@ class SessionService:
         windows: _SessionWindows,
         duration: int,
         radius: int,
+        classroom_name: str | None,
+        classroom_lat: float | None,
+        classroom_lng: float | None,
         now: datetime,
     ) -> Session:
         row = Session(
             offering_id=offering.id,
             professor_id=professor_id,
+            session_type=payload.session_type.value,
             session_code=secrets.token_hex(16),
             duration_minutes=duration,
             present_window_minutes=windows.present,
@@ -266,14 +362,31 @@ class SessionService:
             scheduled_end_time=now + timedelta(minutes=duration),
             expires_at=None,
             classroom_radius_meters=radius,
-            classroom_name=payload.classroom_name or offering.classroom_name,
-            classroom_lat=_or_fallback(payload.classroom_lat, offering.classroom_lat),
-            classroom_lng=_or_fallback(payload.classroom_lng, offering.classroom_lng),
+            classroom_name=classroom_name,
+            classroom_lat=classroom_lat,
+            classroom_lng=classroom_lng,
         )
         self._session.add(row)
         await self._session.flush()
 
         return row
+
+    async def _component_for(
+        self, offering_id: int, session_type: SessionType
+    ) -> OfferingComponent | None:
+        """The active component matching this session's type, if any."""
+        return (
+            await self._session.scalars(
+                select(OfferingComponent)
+                .where(
+                    OfferingComponent.offering_id == offering_id,
+                    OfferingComponent.session_type == session_type.value,
+                    OfferingComponent.is_active.is_(True),
+                )
+                .order_by(OfferingComponent.id)
+                .limit(1)
+            )
+        ).one_or_none()
 
     async def _stamp_session(
         self, row: Session, duration: int, now: datetime
@@ -304,6 +417,7 @@ class SessionService:
         return SessionActiveResponse(
             id=row.id,
             offering=row.offering_id,
+            session_type=_session_type_of(row),
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_end_time=row.scheduled_end_time,
@@ -394,6 +508,7 @@ class SessionService:
         return {
             "offering_id": row.offering_id,
             "professor_id": row.professor_id,
+            "session_type": row.session_type,
             "session_code": row.session_code,
             "scheduled_start_time": row.scheduled_start_time.isoformat(),
             "scheduled_end_time": row.scheduled_end_time.isoformat(),
@@ -443,6 +558,7 @@ class SessionService:
         return VerifyCodeResponse(
             session_id=row.id,
             offering_id=row.offering_id,
+            session_type=_session_type_of(row),
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
@@ -465,6 +581,7 @@ class SessionService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         offering_id: int | None = None,
+        session_type: SessionType | str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[SessionListItem]:
@@ -473,6 +590,7 @@ class SessionService:
         stmt: Select[tuple[Session]] = self._sessions_stmt(
             professor_id,
             offering_id=offering_id,
+            session_type=session_type,
             date_from=date_from,
             date_to=date_to,
         )
@@ -581,6 +699,7 @@ class SessionService:
         return SessionListItem(
             id=row.id,
             offering_id=row.offering_id,
+            session_type=_session_type_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -597,6 +716,7 @@ class SessionService:
         professor_id: int,
         offering_id: int | None = None,
         section: str | None = None,
+        session_type: SessionType | str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         sort_by: str | None = None,
@@ -615,6 +735,7 @@ class SessionService:
         stmt: Select[tuple[Session]] = self._sessions_stmt(
             professor_id,
             offering_id=offering_id,
+            session_type=session_type,
             date_from=date_from,
             date_to=date_to,
         )
@@ -655,6 +776,7 @@ class SessionService:
         return SessionHistoryItem(
             id=row.id,
             offering_id=row.offering_id,
+            session_type=_session_type_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -682,6 +804,7 @@ class SessionService:
         offering_id: int | None = None,
         section: str | None = None,
         session_id: int | None = None,
+        session_type: SessionType | str | None = None,
         status: ValidationStatus | str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
@@ -703,6 +826,7 @@ class SessionService:
             offering_id=offering_id,
             section=section,
             session_id=session_id,
+            session_type=session_type,
             status=status,
             date_from=date_from,
             date_to=date_to,
@@ -725,9 +849,12 @@ class SessionService:
         students: dict[int, Student] = await self._load_students(
             {r.student_id for r in records}
         )
+        session_types: dict[int, SessionType] = await self._load_session_types(
+            {r.session_id for r in records}
+        )
 
         return PaginatedResponse[ProfessorAttendanceItem](
-            items=self._attendance_items(records, students),
+            items=self._attendance_items(records, students, session_types),
             total=total,
             page=page,
             size=size,
@@ -741,6 +868,7 @@ class SessionService:
         offering_id: int | None,
         section: str | None,
         session_id: int | None,
+        session_type: SessionType | str | None,
         status: ValidationStatus | str | None,
         date_from: datetime | None,
         date_to: datetime | None,
@@ -773,6 +901,13 @@ class SessionService:
         stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, section, lambda v: Student.section == v)
         stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
+        if session_type is not None:
+            value: str = (
+                session_type.value
+                if isinstance(session_type, SessionType)
+                else str(session_type)
+            )
+            stmt = stmt.where(Session.session_type == value)
         stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
         stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
@@ -791,12 +926,29 @@ class SessionService:
 
         return {s.id: s for s in rows}
 
+    async def _load_session_types(
+        self, session_ids: set[int]
+    ) -> dict[int, SessionType]:
+        if not session_ids:
+            return {}
+
+        rows: Sequence[Session] = (
+            await self._session.scalars(
+                select(Session).where(Session.id.in_(session_ids))
+            )
+        ).all()
+
+        return {s.id: _session_type_of(s) for s in rows}
+
     @staticmethod
     def _attendance_items(
-        records: Sequence[Attendance], students: dict[int, Student]
+        records: Sequence[Attendance],
+        students: dict[int, Student],
+        session_types: dict[int, SessionType] | None = None,
     ) -> list[ProfessorAttendanceItem]:
         """Project rows onto the table; records with no student are dropped."""
         items: list[ProfessorAttendanceItem] = []
+        types: dict[int, SessionType] = session_types or {}
 
         for record in records:
             student: Student | None = students.get(record.student_id)
@@ -811,6 +963,7 @@ class SessionService:
                     student_name=f"{student.first_name} {student.last_name}",
                     section=student.section,
                     session_id=record.session_id,
+                    session_type=types.get(record.session_id, SessionType.LECTURE),
                     status=ValidationStatus(record.validation_status),
                     original_status=(
                         ValidationStatus(record.original_status)
@@ -836,6 +989,7 @@ class SessionService:
         professor_id: int,
         *,
         offering_id: int | None,
+        session_type: SessionType | str | None = None,
         date_from: datetime | None,
         date_to: datetime | None,
     ) -> Select[tuple[Session]]:
@@ -852,6 +1006,13 @@ class SessionService:
             )
         )
         stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
+        if session_type is not None:
+            value: str = (
+                session_type.value
+                if isinstance(session_type, SessionType)
+                else str(session_type)
+            )
+            stmt = stmt.where(Session.session_type == value)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
 

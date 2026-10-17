@@ -11,6 +11,7 @@
 	} from '$lib/features/auth/store.svelte';
 	import type { MeResponse } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
 
 	// Admin Profile (wireframe 4.11): identity is read-only (admins are
 	// model-less — no roster row owns the names), sourced from GET /auth/me.
@@ -32,14 +33,8 @@
 		[identity?.first_name, identity?.last_name].filter(Boolean).join(' ') || 'Admin'
 	);
 
-	const passwordReq = $derived({
-		length: newPassword.length >= 8,
-		upper: /[A-Z]/.test(newPassword),
-		lower: /[a-z]/.test(newPassword),
-		number: /\d/.test(newPassword),
-		symbol: /[^A-Za-z0-9\s]/.test(newPassword),
-	});
-	const passwordOk = $derived(Object.values(passwordReq).every(Boolean));
+	const passwordReq = $derived(evaluatePassword(newPassword));
+	const passwordOk = $derived(isPasswordStrong(passwordReq));
 	const passwordsMatch = $derived(newPassword === confirmPassword);
 
 	onMount(async () => {

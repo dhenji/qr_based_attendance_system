@@ -36,6 +36,34 @@ const endAfterStart = <T extends { schedule_start_time?: string; schedule_end_ti
 	}
 };
 
+export const componentCreateSchema = z
+	.object({
+		session_type: z.enum(['lecture', 'lab']).default('lecture'),
+		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10),
+		schedule_start_time: timeField,
+		schedule_end_time: timeField,
+		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
+		classroom_lat: z.string().trim().optional().or(z.literal('')),
+		classroom_lng: z.string().trim().optional().or(z.literal('')),
+	})
+	.superRefine(endAfterStart);
+
+export type OfferingComponentCreateInput = z.infer<typeof componentCreateSchema>;
+
+export const componentUpdateSchema = z
+	.object({
+		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10).optional(),
+		schedule_start_time: timeField.optional(),
+		schedule_end_time: timeField.optional(),
+		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
+		classroom_lat: z.string().trim().optional().or(z.literal('')),
+		classroom_lng: z.string().trim().optional().or(z.literal('')),
+		is_active: z.boolean().optional(),
+	})
+	.superRefine(endAfterStart);
+
+export type OfferingComponentUpdateInput = z.infer<typeof componentUpdateSchema>;
+
 export const offeringCreateSchema = z
 	.object({
 		course_id: z.coerce.number().int().gt(0, 'Pick a course'),
@@ -43,14 +71,14 @@ export const offeringCreateSchema = z
 		year_level_id: z.coerce.number().int().gt(0, 'Pick a year level'),
 		semester: z.string().trim().min(1, 'Required').max(20),
 		academic_year: z.string().trim().min(4).max(20),
-		sessions_per_week: z.coerce.number().int().min(1).max(7),
-		semester_weeks: z.coerce.number().int().min(1).max(52),
-		schedule_days: z.string().trim().toUpperCase().min(1).max(10),
+		sessions_per_week: z.coerce.number().int().min(1, 'Enter at least 1 session per week').max(7, 'At most 7 sessions per week'),
+		semester_weeks: z.coerce.number().int().min(1, 'Enter at least 1 week').max(52, 'At most 52 weeks'),
+		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10),
 		schedule_start_time: timeField,
 		schedule_end_time: timeField,
-		// Local-only label: optional with a lecture default so the form never
-		// blocks on a value the backend does not persist.
-		course_type: z.enum(['lecture', 'lab']).optional().default('lecture'),
+		// Per-type schedules (D77). Omitted means a single lecture component
+		// mirroring the offering schedule/classroom (same default as live).
+		components: z.array(componentCreateSchema).max(4).optional(),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()
@@ -62,8 +90,8 @@ export const offeringCreateSchema = z
 			.trim()
 			.optional()
 			.or(z.literal('')),
-		default_present_window_minutes: z.coerce.number().int().min(1).max(480).default(5),
-		default_late_window_minutes: z.coerce.number().int().min(1).max(480).default(10),
+		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').default(5),
+		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').default(10),
 	})
 	.superRefine(endAfterStart);
 
@@ -71,12 +99,11 @@ export type OfferingCreateInput = z.infer<typeof offeringCreateSchema>;
 
 export const offeringUpdateSchema = z
 	.object({
-		sessions_per_week: z.coerce.number().int().min(1).max(7).optional(),
-		semester_weeks: z.coerce.number().int().min(1).max(52).optional(),
-		schedule_days: z.string().trim().toUpperCase().min(1).max(10).optional(),
+		sessions_per_week: z.coerce.number().int().min(1, 'Enter at least 1 session per week').max(7, 'At most 7 sessions per week').optional(),
+		semester_weeks: z.coerce.number().int().min(1, 'Enter at least 1 week').max(52, 'At most 52 weeks').optional(),
+		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10).optional(),
 		schedule_start_time: timeField.optional(),
 		schedule_end_time: timeField.optional(),
-		course_type: z.enum(['lecture', 'lab']).optional(),
 		classroom_name: z.string().trim().max(100).optional().or(z.literal('')),
 		classroom_lat: z
 			.string()
@@ -88,8 +115,8 @@ export const offeringUpdateSchema = z
 			.trim()
 			.optional()
 			.or(z.literal('')),
-		default_present_window_minutes: z.coerce.number().int().min(1).max(480).optional(),
-		default_late_window_minutes: z.coerce.number().int().min(1).max(480).optional(),
+		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional(),
+		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional(),
 		is_active: z.boolean().optional(),
 	})
 	.superRefine(endAfterStart);

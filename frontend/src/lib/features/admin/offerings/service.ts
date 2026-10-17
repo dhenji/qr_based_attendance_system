@@ -39,34 +39,64 @@ import type {
 	AdminRosterFilters,
 	AdminRosterItem,
 	AdminRosterItemResponse,
+	AdminStudent,
+	OfferingComponent,
+	OfferingComponentCreatePayload,
+	OfferingComponentResponse,
+	OfferingComponentUpdatePayload,
 	Program,
 	YearLevel,
 } from '$lib/shared/types';
 
-export const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
-	id: o.id,
-	courseId: o.course_id,
-	programId: o.program_id,
-	yearLevelId: o.year_level_id,
-	semester: o.semester,
-	academicYear: o.academic_year,
-	sessionsPerWeek: o.sessions_per_week,
-	semesterWeeks: o.semester_weeks,
-	scheduleDays: o.schedule_days,
-	scheduleStartTime: o.schedule_start_time,
-	scheduleEndTime: o.schedule_end_time,
-	// Backend has no column — fall back so live rows never render undefined.
-	courseType: o.course_type ?? 'lecture',
-	classroomName: o.classroom_name ?? undefined,
-	classroomLat: o.classroom_lat ?? undefined,
-	classroomLng: o.classroom_lng ?? undefined,
-	presentWindowMinutes: o.default_present_window_minutes,
-	lateWindowMinutes: o.default_late_window_minutes,
-	isActive: o.is_active,
-	enrolledCount: o.enrolled_count ?? 0,
-	createdAt: o.created_at,
-	updatedAt: o.updated_at,
+export const toComponent = (c: OfferingComponentResponse): OfferingComponent => ({
+	id: c.id,
+	offeringId: c.offering_id,
+	sessionType: c.session_type,
+	scheduleDays: c.schedule_days,
+	scheduleStartTime: c.schedule_start_time,
+	scheduleEndTime: c.schedule_end_time,
+	classroomName: c.classroom_name ?? undefined,
+	classroomLat: c.classroom_lat ?? undefined,
+	classroomLng: c.classroom_lng ?? undefined,
+	isActive: c.is_active,
+	createdAt: c.created_at,
+	updatedAt: c.updated_at,
 });
+
+export const toOffering = (o: AdminOfferingResponse): AdminOffering => {
+	const components = (o.components ?? []).map(toComponent);
+	// Live reads carry the distinct active types; fall back to the legacy
+	// label (then lecture) for rows that predate the field.
+	const sessionTypes =
+		o.session_types && o.session_types.length > 0
+			? [...o.session_types]
+			: [o.course_type ?? 'lecture'];
+	return {
+		id: o.id,
+		courseId: o.course_id,
+		programId: o.program_id,
+		yearLevelId: o.year_level_id,
+		semester: o.semester,
+		academicYear: o.academic_year,
+		sessionsPerWeek: o.sessions_per_week,
+		semesterWeeks: o.semester_weeks,
+		scheduleDays: o.schedule_days,
+		scheduleStartTime: o.schedule_start_time,
+		scheduleEndTime: o.schedule_end_time,
+		courseType: sessionTypes[0] ?? 'lecture',
+		sessionTypes,
+		components,
+		classroomName: o.classroom_name ?? undefined,
+		classroomLat: o.classroom_lat ?? undefined,
+		classroomLng: o.classroom_lng ?? undefined,
+		presentWindowMinutes: o.default_present_window_minutes,
+		lateWindowMinutes: o.default_late_window_minutes,
+		isActive: o.is_active,
+		enrolledCount: o.enrolled_count ?? 0,
+		createdAt: o.created_at,
+		updatedAt: o.updated_at,
+	};
+};
 
 // Client-side joins for display: the OfferingRead contract carries ids only.
 // Looks up course/program/year metadata already loaded for the filter
@@ -87,6 +117,33 @@ export const enrichOfferings = (
 		programCode: programById.get(o.programId)?.code,
 		yearLevelLabel: yearById.get(o.yearLevelId)?.label,
 	}));
+};
+
+// 409 rescue for `offering_exists`: the unique key is
+// (course_id, program_id, semester, academic_year) — the year level does not
+// disambiguate — so the conflicting row may sit under a different year level
+// than the one the admin is looking at. The list endpoint has no
+// academic-year filter, so match it client-side from a narrow page.
+export interface OfferingConflictQuery {
+	course_id: number;
+	program_id: number;
+	semester: string;
+	academic_year: string;
+}
+
+export const findConflictingOffering = async (
+	query: OfferingConflictQuery
+): Promise<AdminOffering | null> => {
+	const { items } = await listOfferings({
+		course_id: query.course_id,
+		program_id: query.program_id,
+		semester: query.semester,
+		size: 50,
+	});
+	const wantYear = query.academic_year.trim().toLowerCase();
+	return (
+		items.find((o) => o.academicYear.trim().toLowerCase() === wantYear) ?? null
+	);
 };
 
 // Display title for an offering row. Prefers joined names, falls back to ids
@@ -162,9 +219,68 @@ export const updateOffering = async (
 export const setOfferingActive = async (id: number, isActive: boolean): Promise<AdminOffering> =>
 	updateOffering(id, { is_active: isActive });
 
-// Soft archive — 204, flips is_active=false server-side.
-export const archiveOffering = async (id: number): Promise<void> => {
+// Permanent delete — 409 `not_archived` when still active,
+// `offering_has_enrollments` / `offering_has_sessions` /
+// `offering_has_assignments` when dependents remain. Archive via PATCH,
+// like programs.
+export const deleteOffering = async (id: number): Promise<void> => {
 	await del<void>('adminOfferingDetail', undefined, `/${id}`);
+};
+
+// --- Offering components (D77: per-type schedules) -------------------------
+
+
+export const listComponents = async (offeringId: number): Promise<OfferingComponent[]> => {
+	const response = await get<OfferingComponentResponse[]>(
+		'adminOfferingComponents',
+		undefined,
+		`/${offeringId}/components`
+	);
+	return (response ?? []).map(toComponent);
+};
+
+export const createComponent = async (
+	offeringId: number,
+	payload: OfferingComponentCreatePayload
+): Promise<OfferingComponent> => {
+	const response = await post<OfferingComponentResponse>(
+		'adminOfferingComponentCreate',
+		{
+			...payload,
+			schedule_days: payload.schedule_days.trim().toUpperCase(),
+		},
+		undefined,
+		`/${offeringId}/components`
+	);
+	return toComponent(response);
+};
+
+export const updateComponent = async (
+	offeringId: number,
+	componentId: number,
+	payload: OfferingComponentUpdatePayload
+): Promise<OfferingComponent> => {
+	const response = await patch<OfferingComponentResponse>(
+		'adminOfferingComponentDetail',
+		payload.schedule_days !== undefined
+			? { ...payload, schedule_days: payload.schedule_days.trim().toUpperCase() }
+			: payload,
+		undefined,
+		`/${offeringId}/components/${componentId}`
+	);
+	return toComponent(response);
+};
+
+// Soft archive — 204, flips is_active=false server-side.
+export const archiveComponent = async (
+	offeringId: number,
+	componentId: number
+): Promise<void> => {
+	await del<void>(
+		'adminOfferingComponentDetail',
+		undefined,
+		`/${offeringId}/components/${componentId}`
+	);
 };
 
 // --- Professor assignments ---------------------------------------------------
@@ -257,5 +373,53 @@ export const bulkEnroll = async (
 		form,
 		undefined,
 		`/${offeringId}/enrollments/bulk`
+	);
+};
+
+// Bulk-enroll CSV built in the browser for the Add-student modal: the same
+// validated upload as a file, so manual adds inherit the email/program checks,
+// the per-row dedupe (already-enrolled → skipped), and a single audit row for
+// the whole batch. `section` stays blank on purpose — a value would overwrite
+// the student's section for every offering they are in, not just this one.
+// Rows are emitted in the caller's order so a reported error line can be mapped
+// back to the student at that index (the parser numbers data rows from line 2).
+const ENROLL_CSV_HEADER =
+	'student_id,first_name,middle_name,last_name,email,program_code,year_level,section';
+
+const csvCell = (value: string | undefined): string => {
+	const text = value ?? '';
+	return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const buildEnrollCsv = (students: AdminStudent[]): File => {
+	const rows = students.map((student) =>
+		[
+			student.studentId,
+			student.firstName,
+			student.middleName ?? '',
+			student.lastName,
+			student.email,
+			student.programCode,
+			student.yearLevelLabel,
+			'',
+		]
+			.map(csvCell)
+			.join(',')
+	);
+	return new File([`${ENROLL_CSV_HEADER}\n${rows.join('\n')}\n`], 'enroll.csv', {
+		type: 'text/csv',
+	});
+};
+
+// Unenroll one student — 204, link row only. `studentNumber` is the roster
+// string id (e.g. "24-2111"), matching the Enrolled tab row key.
+export const unenrollStudent = async (
+	offeringId: number,
+	studentNumber: string
+): Promise<void> => {
+	await del<void>(
+		'adminOfferingUnenroll',
+		undefined,
+		`/${offeringId}/students/${encodeURIComponent(studentNumber)}`
 	);
 };

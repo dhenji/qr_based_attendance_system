@@ -4,6 +4,7 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import {
 		adminCoursesState,
+		deleteArchivedCourse,
 		initAdminCourses,
 		refreshAdminCourses,
 		toggleCourseActive,
@@ -18,7 +19,7 @@
 		courseUpdateSchema,
 	} from '$lib/features/admin/courses/schema';
 	import type { AdminCourse } from '$lib/shared/types';
-	import { adminCourse } from '$lib/shared/constants/routes';
+	import { adminCourse, Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
@@ -29,8 +30,9 @@
 	// endpoint takes no search/sort params, so the search box and Code/Name
 	// header toggles filter/sort client-side over the loaded page while the
 	// status filter goes to the server (?is_active). Deactivate/Reactivate
-	// PATCHes is_active; archiving (DELETE, same soft effect) lives on the
-	// course detail page.
+	// PATCHes is_active; Delete permanently removes an archived course
+	// (DELETE /admin/courses/{id}, blocked with 409 while offerings still
+	// reference it).
 
 	let search = $state('');
 	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
@@ -40,11 +42,18 @@
 	let formError = $state<string | null>(null);
 	let formBusy = $state(false);
 
+	let deleteTarget = $state<AdminCourse | null>(null);
+	let deleteBusy = $state(false);
+
+	// Deactivate confirm (Deactivate flips to inactive; Reactivate stays
+	// immediate since it only restores).
+	let deactivateTarget = $state<AdminCourse | null>(null);
+	let deactivateBusy = $state(false);
+
 	let f_code = $state('');
 	let f_name = $state('');
 	let f_units = $state('');
 	let f_duration = $state('');
-	let f_type = $state<'lecture' | 'lab'>('lecture');
 
 	const isActiveFilter = $derived(
 		statusFilter === 'all' ? undefined : statusFilter === 'active'
@@ -134,7 +143,6 @@
 		f_name = '';
 		f_units = '';
 		f_duration = '';
-		f_type = 'lecture';
 		formOpen = true;
 	};
 
@@ -145,7 +153,6 @@
 		f_name = c.courseName;
 		f_units = String(c.units);
 		f_duration = String(c.sessionDurationHours);
-		f_type = c.courseType;
 		formOpen = true;
 	};
 
@@ -159,7 +166,6 @@
 					course_name: f_name,
 					units: f_units,
 					session_duration_hours: f_duration,
-					course_type: f_type,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -170,7 +176,6 @@
 					course_name: parsed.data.course_name,
 					units: parsed.data.units,
 					session_duration_hours: parsed.data.session_duration_hours,
-					course_type: parsed.data.course_type,
 				});
 			} else {
 				const parsed = courseCreateSchema.safeParse({
@@ -178,7 +183,6 @@
 					course_name: f_name,
 					units: f_units,
 					session_duration_hours: f_duration,
-					course_type: f_type,
 				});
 				if (!parsed.success) {
 					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -189,7 +193,6 @@
 					course_name: parsed.data.course_name,
 					units: parsed.data.units,
 					session_duration_hours: parsed.data.session_duration_hours,
-					course_type: parsed.data.course_type,
 				});
 			}
 			formOpen = false;
@@ -201,6 +204,38 @@
 			formBusy = false;
 		}
 	};
+
+	const confirmDelete = async () => {
+		if (!deleteTarget) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedCourse(deleteTarget.id);
+			deleteTarget = null;
+		} finally {
+			deleteBusy = false;
+		}
+	};
+
+	const closeDelete = () => {
+		adminCoursesState.actionError = null;
+		deleteTarget = null;
+	};
+
+	const confirmDeactivate = async () => {
+		if (!deactivateTarget || deactivateBusy) return;
+		deactivateBusy = true;
+		try {
+			await toggleCourseActive(deactivateTarget);
+			deactivateTarget = null;
+		} finally {
+			deactivateBusy = false;
+		}
+	};
+
+	const closeDeactivate = () => {
+		adminCoursesState.actionError = null;
+		deactivateTarget = null;
+	};
 </script>
 
 <div class="page">
@@ -210,6 +245,10 @@
 			<p class="muted">Reusable templates — scheduling lives on offerings · {adminCoursesState.total} total</p>
 		</div>
 		<div class="header-actions">
+			<button class="btn btn-secondary" data-testid="import" onclick={() => goto(Routes.ADMIN_COURSES_IMPORT)}>
+				<AppIcon name="file" size={18} />
+				Import
+			</button>
 			<button class="btn btn-primary" data-testid="add-course" onclick={openCreate}>
 				<AppIcon name="plus" size={18} />
 				Add Course
@@ -243,7 +282,7 @@
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminCoursesState.loading}>
-			{#if adminCoursesState.actionError}
+			{#if adminCoursesState.actionError && !deleteTarget && !deactivateTarget}
 				<p class="error" role="alert">{adminCoursesState.actionError}</p>
 			{/if}
 			<table>
@@ -260,8 +299,7 @@
 							</button>
 						</th>
 						<th>Units</th>
-						<th>Duration (h)</th>
-						<th>Type</th>
+						<th>Default session (h)</th>
 						<th>Status</th>
 						<th><span class="sr">Actions</span></th>
 					</tr>
@@ -274,11 +312,6 @@
 							<td>{c.units}</td>
 							<td>{c.sessionDurationHours}</td>
 							<td>
-								<span class="badge type-lab" class:type-lec={c.courseType === 'lecture'}>
-									{c.courseType === 'lab' ? 'Laboratory' : 'Lecture'}
-								</span>
-							</td>
-							<td>
 								<span class="badge" class:inactive={!c.isActive}>
 									{c.isActive ? 'Active' : 'Inactive'}
 								</span>
@@ -286,12 +319,29 @@
 							<td class="row-actions">
 								<button class="link" onclick={() => goto(adminCourse(c.id))}>Open</button>
 								<button class="link" onclick={() => openEdit(c)}>Edit</button>
-								<button
-									class="link"
-									onclick={() => void toggleCourseActive(c)}
-								>
-									{c.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
+								{#if c.isActive}
+									<button
+										class="link"
+										onclick={() => { adminCoursesState.actionError = null; deactivateTarget = c; }}
+									>
+										Deactivate
+									</button>
+								{:else}
+									<button
+										class="link"
+										onclick={() => void toggleCourseActive(c)}
+									>
+										Reactivate
+									</button>
+								{/if}
+								{#if !c.isActive}
+									<button
+										class="link danger"
+										onclick={() => { adminCoursesState.actionError = null; deleteTarget = c; }}
+									>
+										Delete
+									</button>
+								{/if}
 							</td>
 						</tr>
 					{/each}
@@ -338,41 +388,70 @@
 					<label>Units (1–6)<input class="input" inputmode="numeric" bind:value={f_units} placeholder="3" /></label>
 				</div>
 				<label>Name<input class="input" bind:value={f_name} placeholder="Software Engineering 1" /></label>
-				<label>Session duration, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={f_duration} placeholder="1.5" /></label>
-				<div class="field">
-					<span class="form-label">Course Type</span>
-					<div class="toggle-group" role="group" aria-label="Course type">
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={f_type === 'lecture'}
-							aria-pressed={f_type === 'lecture'}
-							onclick={() => (f_type = 'lecture')}
-						>
-							Lecture
-						</button>
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={f_type === 'lab'}
-							aria-pressed={f_type === 'lab'}
-							onclick={() => (f_type = 'lab')}
-						>
-							Laboratory
-						</button>
-					</div>
-					<p class="hint">
-						{f_type === 'lab'
-							? 'Lab sessions require classroom coordinates and geofence for attendance tracking.'
-							: 'Lecture sessions use offering defaults. Geofence is optional.'}
-					</p>
-				</div>
-				<p class="hint">Program, schedule, and classroom attach later via offerings.</p>
+				<label>Default session length, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={f_duration} placeholder="1.5" /></label>
+				<p class="hint">Attendance window budget and fallback session length — actual meeting lengths are set per offering meeting and must total within the units limit per week. Program, schedule, and classroom attach later via offerings. Lecture/laboratory sessions are scheduled per offering, so one course can mix both.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-course" disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="deactivate-course-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDeactivate }}
+		>
+			<h2 id="deactivate-course-title" class="modal-title">Deactivate {deactivateTarget.courseCode}?</h2>
+			<p class="modal-text">
+				{deactivateTarget.courseName} will be flipped to inactive. Its offerings
+				keep working, and you can reactivate it anytime.
+			</p>
+			{#if adminCoursesState.actionError}
+				<p class="error" role="alert">{adminCoursesState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDeactivate}>Cancel</button>
+				<button class="btn btn-danger" disabled={deactivateBusy} onclick={confirmDeactivate}>
+					{deactivateBusy ? 'Deactivating…' : 'Deactivate'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="delete-course-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: closeDelete }}
+		>
+			<h2 id="delete-course-title" class="modal-title">Permanently delete {deleteTarget.courseCode}?</h2>
+			<p class="modal-text">
+				{deleteTarget.courseName} will be removed for good.
+				If offerings still use it, deletion will be blocked
+				and the course stays archived.
+			</p>
+			{#if adminCoursesState.actionError}
+				<p class="error" role="alert">{adminCoursesState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={closeDelete}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -486,68 +565,6 @@
 		background: var(--divider);
 	}
 
-	.badge.type-lec {
-		color: var(--success);
-		background: var(--success-bg);
-	}
-
-	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
-	}
-
-	.toggle-group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.toggle-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.toggle-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.toggle-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.toggle-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.form-label {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		color: var(--text-secondary);
-		margin-bottom: 0.375rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-
 	.th-btn {
 		background: none;
 		border: none;
@@ -586,6 +603,10 @@
 
 	.link:hover {
 		text-decoration: underline;
+	}
+
+	.link.danger {
+		color: var(--danger);
 	}
 
 	.link.strong {
@@ -672,6 +693,12 @@
 		color: var(--text-secondary);
 	}
 
+	.btn-danger {
+		background: var(--danger);
+		border: 1px solid var(--danger);
+		color: var(--on-brand);
+	}
+
 	.modal-overlay {
 		position: fixed;
 		inset: 0;
@@ -700,6 +727,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.form {

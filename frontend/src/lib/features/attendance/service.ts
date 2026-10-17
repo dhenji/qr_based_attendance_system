@@ -4,9 +4,11 @@
 // listRecords hits the real backend (GET /professor/attendance). The contract
 // row carries no course identity, session code, or timestamps beyond
 // scanned_at, so those join client-side: session_id -> session detail via
-// listSessions, then offering_id -> course via the courses store. Rows whose
-// session falls outside the directory (older than the cached page) render
-// em dashes rather than invented values.
+// listSessions, then offering_id -> course via the courses store. The session
+// directory warms per filter scope (same date/type/offering window, up to 500
+// sessions); rows outside it set sessionKnown=false and render em dashes
+// rather than invented values, with missingCount/directoryIncomplete so the
+// page can warn instead of silently showing scanned times as session dates.
 //
 // Two wire vocabularies are normalized here: scanned_via arrives as
 // qr_camera/manual_code (mapped to qr/manual for display), and
@@ -16,7 +18,7 @@
 
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
-import type { ProfessorAttendanceItemResponse } from '$lib/shared/types';
+import type { CourseType, ProfessorAttendanceItemResponse } from '$lib/shared/types';
 import { listSessions } from '$lib/features/session/service';
 import {
 	initProfessorCourses,
@@ -34,6 +36,7 @@ export type ProfessorAttendanceStatus =
 export type ProfessorAttendanceRow = {
 	id: number;
 	session_id: number;
+	session_type: CourseType;
 	session_code: string;
 	created_at: string;
 	expires_at: string;
@@ -49,6 +52,10 @@ export type ProfessorAttendanceRow = {
 	scanned_via?: string;
 	face_match_score?: number;
 	excuse_reason?: string;
+	// True when session_id resolved via the directory; false means the
+	// session fell outside the warmed window — session_code/course fall back
+	// to placeholders and created_at falls back to scanned_at.
+	sessionKnown: boolean;
 };
 
 export type AttendanceLedgerSortBy = 'date' | 'student' | 'section' | 'status' | 'time';
@@ -59,6 +66,7 @@ export type AttendanceLedgerFilters = {
 	course?: string;
 	section?: string;
 	sessionId?: number;
+	sessionType?: CourseType;
 	status?: ProfessorAttendanceStatus;
 	from?: string;
 	to?: string;
@@ -78,35 +86,67 @@ type SessionDirectory = Map<
 	}
 >;
 
-// Session + course directory, warmed once per page load. listSessions joins
-// course names itself, so one cached page covers both lookups.
+// Session + course directory, warmed per filter scope. listSessions joins
+// course names itself, so one cached scope covers both lookups. The directory
+// pages up to DIRECTORY_MAX_PAGES so a full term fits; scopes beyond that
+// surface as directoryIncomplete rather than invented values.
+const DIRECTORY_PAGE_SIZE = 100;
+const DIRECTORY_MAX_PAGES = 5;
+
+type DirectoryScope = {
+	from?: string;
+	to?: string;
+	offeringId?: number;
+	sessionType?: CourseType;
+};
+
 let directoryReady = false;
+let directoryScopeKey = '';
 let sessionDirectory: SessionDirectory = new Map();
 
 export const invalidateAttendanceDirectory = (): void => {
 	directoryReady = false;
+	directoryScopeKey = '';
 	sessionDirectory = new Map();
 };
 
-const ensureDirectory = async (): Promise<void> => {
-	if (directoryReady) return;
-	directoryReady = true;
+const scopeKey = (scope: DirectoryScope): string =>
+	[scope.from ?? '', scope.to ?? '', scope.offeringId ?? '', scope.sessionType ?? ''].join('|');
+
+const ensureCoursesWarmed = async (): Promise<void> => {
 	if (professorState.courses.length === 0 && !professorState.coursesError) {
 		await initProfessorCourses();
 	}
+};
+
+const ensureDirectory = async (scope: DirectoryScope): Promise<void> => {
+	const key = scopeKey(scope);
+	if (directoryReady && key === directoryScopeKey) return;
+	directoryScopeKey = key;
+	directoryReady = true;
+	await ensureCoursesWarmed();
 	try {
-		const { items } = await listSessions({ size: 100 });
-		sessionDirectory = new Map(
-			items.map((session) => [
-				session.id,
-				{
+		const dir: SessionDirectory = new Map();
+		for (let page = 1; page <= DIRECTORY_MAX_PAGES; page += 1) {
+			const { items } = await listSessions({
+				from: scope.from,
+				to: scope.to,
+				offeringId: scope.offeringId,
+				sessionType: scope.sessionType,
+				page,
+				size: DIRECTORY_PAGE_SIZE
+			});
+			for (const session of items) {
+				dir.set(session.id, {
 					offeringId: session.offeringId,
 					sessionCode: session.sessionCode,
 					createdAt: session.createdAt,
-					expiresAt: session.expiresAt ?? session.createdAt,
-				},
-			])
-		);
+					expiresAt: session.expiresAt ?? session.createdAt
+				});
+			}
+			if (items.length < DIRECTORY_PAGE_SIZE) break;
+		}
+		sessionDirectory = dir;
 	} catch {
 		sessionDirectory = new Map();
 	}
@@ -141,7 +181,28 @@ const viaForDisplay = (scannedVia: string | null): string | undefined => {
 // Counts and the distinct-session total cover the returned page only (the
 // envelope carries no aggregates); `total` stays the server global.
 export const listRecords = async (params?: AttendanceLedgerFilters) => {
-	await ensureDirectory();
+	await ensureCoursesWarmed();
+
+	// Resolve the directory scope before warming: same date/type window as
+	// the ledger query, narrowed to the offering when the course filter maps
+	// to exactly one. Ambiguous codes warm unfiltered so no offering is missed.
+	let scopeOfferingId = params?.offeringId;
+	if (scopeOfferingId === undefined && params?.course !== undefined) {
+		const matches = professorState.courses.filter(
+			(course) => course.courseCode === params.course
+		);
+		if (matches.length === 1 && matches[0].courseId !== undefined) {
+			scopeOfferingId = matches[0].offeringId;
+		}
+	}
+	// A single-session view only needs that session; the directory still
+	// warms the surrounding scope so course identity resolves.
+	await ensureDirectory({
+		from: params?.from,
+		to: params?.to,
+		offeringId: scopeOfferingId,
+		sessionType: params?.sessionType
+	});
 
 	const query: Record<string, string> = {
 		sort_by: params?.sortBy ?? 'date',
@@ -162,6 +223,7 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 	}
 	if (params?.section !== undefined) query.section = params.section;
 	if (params?.sessionId !== undefined) query.session_id = String(params.sessionId);
+	if (params?.sessionType) query.session_type = params.sessionType;
 	if (params?.status !== undefined) query.status = params.status;
 	if (params?.from) query.date_from = params.from;
 	if (params?.to) query.date_to = params.to;
@@ -177,12 +239,14 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 			? courseIdentityFor(session.offeringId)
 			: { code: '—', name: '', section: item.section ?? '—' };
 		// created_at/expires_at fall back to scanned_at only for display/sort;
-		// a row whose session is outside the recent directory has no true
-		// session clock, so callers must treat these as scanned times.
+		// a row whose session is outside the warmed window has no true
+		// session clock, so callers must check sessionKnown before trusting
+		// the date/code (the page warns and the export flags these rows).
 		// excuse_reason has no contract field — always undefined by design.
 		return {
 			id: item.id,
 			session_id: item.session_id,
+			session_type: item.session_type ?? 'lecture',
 			session_code: session?.sessionCode ?? '—',
 			created_at: session?.createdAt ?? item.scanned_at,
 			expires_at: session?.expiresAt ?? item.scanned_at,
@@ -205,6 +269,7 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 						? item.face_match_score * 100
 						: item.face_match_score,
 			excuse_reason: undefined,
+			sessionKnown: session !== undefined
 		};
 	});
 
@@ -212,9 +277,11 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 	// aggregates, so summaryText must label these as page counts.
 	const counts = { present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 };
 	const sessionIds = new Set<number>();
+	let missingCount = 0;
 	for (const item of items) {
 		counts[item.status] += 1;
 		sessionIds.add(item.session_id);
+		if (!item.sessionKnown) missingCount += 1;
 	}
 
 	return {
@@ -224,5 +291,7 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 		size: response.size,
 		total_sessions: sessionIds.size,
 		counts,
+		missingCount,
+		directoryIncomplete: missingCount > 0
 	};
 };

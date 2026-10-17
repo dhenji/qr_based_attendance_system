@@ -39,6 +39,95 @@ class CourseCodeExistsException(CourseDomainException):
         super().__init__(message=f"Course code {code} already exists")
 
 
+class CourseNotArchivedException(CourseDomainException):
+    """409 - only archived (`is_active=false`) courses may be hard-deleted."""
+
+    status_code: int = 409
+    code: str = "not_archived"
+
+    def __init__(self, course_id: int) -> None:
+        super().__init__(
+            message=f"Course {course_id} is still active and cannot be deleted"
+        )
+
+
+class CourseHasOfferingsException(CourseDomainException):
+    """409 - course offerings still reference this course.
+
+    `course_offerings.course_id` is `ondelete="RESTRICT"`, so the delete is
+    rejected before the FK violation surfaces as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "course_has_offerings"
+
+    def __init__(self, course_id: int) -> None:
+        super().__init__(
+            message=f"Course {course_id} has offerings and cannot be deleted"
+        )
+
+
+class OfferingNotArchivedException(CourseDomainException):
+    """409 - only archived (`is_active=false`) offerings may be hard-deleted."""
+
+    status_code: int = 409
+    code: str = "not_archived"
+
+    def __init__(self, offering_id: int) -> None:
+        super().__init__(
+            message=f"Offering {offering_id} is still active and cannot be deleted"
+        )
+
+
+class OfferingHasEnrollmentsException(CourseDomainException):
+    """409 - students are still enrolled in this offering.
+
+    `enrollments.offering_id` is `ondelete="RESTRICT"`, so the delete is
+    rejected before the FK violation surfaces as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "offering_has_enrollments"
+
+    def __init__(self, offering_id: int) -> None:
+        super().__init__(
+            message=f"Offering {offering_id} has enrolled students and cannot be deleted"
+        )
+
+
+class OfferingHasSessionsException(CourseDomainException):
+    """409 - class sessions were already opened for this offering.
+
+    `sessions.offering_id` is `ondelete="RESTRICT"`, and sessions own
+    attendance/excuse history, so an offering with sessions is never
+    physically deleted.
+    """
+
+    status_code: int = 409
+    code: str = "offering_has_sessions"
+
+    def __init__(self, offering_id: int) -> None:
+        super().__init__(
+            message=f"Offering {offering_id} has sessions and cannot be deleted"
+        )
+
+
+class OfferingHasAssignmentsException(CourseDomainException):
+    """409 - professor assignments still reference this offering.
+
+    `course_professors.offering_id` is `ondelete="RESTRICT"` (composite PK),
+    so even ended assignments block the delete — history is never rewritten.
+    """
+
+    status_code: int = 409
+    code: str = "offering_has_assignments"
+
+    def __init__(self, offering_id: int) -> None:
+        super().__init__(
+            message=f"Offering {offering_id} has professor assignments and cannot be deleted"
+        )
+
+
 class OfferingNotFoundException(CourseDomainException):
     """404 - the target offering does not exist."""
 
@@ -91,6 +180,98 @@ class OfferingScheduleWindowException(CourseDomainException):
         )
 
 
+class WeeklyHoursExceedUnitsException(CourseDomainException):
+    """422 - weekly scheduled meeting hours exceed the course units total.
+
+    `courses.units` is the required total of scheduled meeting hours per week
+    across all active components of the offering (D79). The check runs against
+    the merged active set, so API requests cannot bypass the frontend totals.
+    """
+
+    code: str = "weekly_hours_exceed_units"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str | None = None,
+        units: int | None = None,
+    ) -> None:
+        over_hours = round(scheduled_hours - limit_hours, 2)
+        if course_code is not None and units is not None:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) exceed the "
+                f"{units}-unit requirement ({limit_hours}h) for course {course_code}; "
+                f"{over_hours}h over"
+            )
+        else:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) exceed the "
+                f"weekly requirement ({limit_hours}h); {over_hours}h over"
+            )
+        super().__init__(message=message, field="components")
+
+
+class WeeklyHoursBelowUnitsException(CourseDomainException):
+    """422 - weekly scheduled meeting hours fall short of the course units total."""
+
+    code: str = "weekly_hours_below_units"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str | None = None,
+        units: int | None = None,
+    ) -> None:
+        short_hours = round(limit_hours - scheduled_hours, 2)
+        if course_code is not None and units is not None:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) fall short of the "
+                f"{units}-unit requirement ({limit_hours}h) for course {course_code}; "
+                f"{short_hours}h short"
+            )
+        else:
+            message = (
+                f"Weekly scheduled hours ({scheduled_hours}h) fall short of the "
+                f"weekly requirement ({limit_hours}h); {short_hours}h short"
+            )
+        super().__init__(message=message, field="components")
+
+
+class ScheduleMismatchException(CourseDomainException):
+    """422 - an offering whose meetings mismatch the requirement cannot go live.
+
+    Activation (is_active False -> True) requires the merged active-component
+    total to equal `courses.units * 60` exactly (D82), including the
+    zero-meeting case. The message names the course code and both hours and
+    carries no row ids: the list/detail toggles render it verbatim.
+    """
+
+    code: str = "schedule_mismatch"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str | None = None,
+        units: int | None = None,
+    ) -> None:
+        if course_code is not None and units is not None:
+            message = (
+                f"Cannot activate: weekly scheduled hours ({scheduled_hours}h) "
+                f"do not match the {units}-unit requirement ({limit_hours}h) "
+                f"for course {course_code}. Fix the meetings first."
+            )
+        else:
+            message = (
+                f"Cannot activate: weekly scheduled hours ({scheduled_hours}h) "
+                f"do not match the weekly requirement ({limit_hours}h). "
+                "Fix the meetings first."
+            )
+        super().__init__(message=message, field="is_active")
+
+
 class WindowsExceedDurationException(CourseDomainException):
     """422 - present + late windows exceed the course session duration."""
 
@@ -115,4 +296,52 @@ class OfferingAssignmentNotFoundException(CourseDomainException):
         super().__init__(
             message=f"No assignment found for professor {professor_id} "
             f"on offering {offering_id}"
+        )
+
+
+class EnrollmentNotFoundException(CourseDomainException):
+    """404 - the student has no enrollment row on this offering.
+
+    An unknown roster id raises `StudentNotFoundException` instead, so the
+    unenroll path distinguishes "no such student" from "not enrolled here".
+    """
+
+    status_code: int = 404
+    code: str = "enrollment_not_found"
+
+    def __init__(self, offering_id: int, student_number: str) -> None:
+        super().__init__(
+            message=f"Student {student_number} is not enrolled "
+            f"in offering {offering_id}"
+        )
+
+
+class ComponentNotFoundException(CourseDomainException):
+    """404 - the target offering component does not exist."""
+
+    status_code: int = 404
+    code: str = "component_not_found"
+
+    def __init__(self, component_id: int) -> None:
+        super().__init__(message=f"Offering component {component_id} not found")
+
+
+class ComponentExistsException(CourseDomainException):
+    """409 - the offering already has this scheduled component.
+
+    `offering_components` carries the `uq_offering_component` unique
+    constraint (offering_id, session_type, schedule_days,
+    schedule_start_time), so the duplicate is rejected before the INSERT
+    instead of letting the unique violation surface as a 500.
+    """
+
+    status_code: int = 409
+    code: str = "component_exists"
+
+    def __init__(self, offering_id: int, session_type: str) -> None:
+        super().__init__(
+            message=(
+                f"Offering {offering_id} already has a {session_type} "
+                "component on that schedule"
+            )
         )

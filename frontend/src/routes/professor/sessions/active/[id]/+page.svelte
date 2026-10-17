@@ -9,6 +9,8 @@
 	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
 	import {
 		excuseAllAbsent,
+		EXCUSE_REASON_MIN_LENGTH,
+		EXCUSE_REASON_SHORT_MESSAGE,
 		quickExcuse
 	} from '$lib/features/excuse/service';
 	import {
@@ -146,8 +148,8 @@
 	const submitExcuse = async () => {
 		if (!excuseTarget || !session || excuseBusy) return;
 		const reason = excuseReason.trim();
-		if (reason.length < 10) {
-			excuseError = 'Reason must be at least 10 characters.';
+		if (reason.length < EXCUSE_REASON_MIN_LENGTH) {
+			excuseError = EXCUSE_REASON_SHORT_MESSAGE;
 			return;
 		}
 		excuseBusy = true;
@@ -183,8 +185,8 @@
 	const submitBulk = async () => {
 		if (!session || bulkBusy) return;
 		const reason = bulkReason.trim();
-		if (reason.length < 10) {
-			bulkError = 'Reason must be at least 10 characters.';
+		if (reason.length < EXCUSE_REASON_MIN_LENGTH) {
+			bulkError = EXCUSE_REASON_SHORT_MESSAGE;
 			return;
 		}
 		bulkBusy = true;
@@ -466,7 +468,10 @@
 			<div class="title">
 				<h1>Active: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offeringSections} · Code {session.sessionCode}
+					Section {session.offeringSections} · Code {session.sessionCode} ·
+					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
+						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
+					</span>
 				</p>
 			</div>
 			<button
@@ -726,7 +731,7 @@
 						<p class="error" role="alert">{excuseError}</p>
 					{/if}
 					<label class="field">
-						Reason (min 10 characters)
+						Reason (min {EXCUSE_REASON_MIN_LENGTH} characters)
 						<textarea class="form-input" rows="3" bind:value={excuseReason}></textarea>
 					</label>
 					<div class="modal-actions">
@@ -760,7 +765,7 @@
 						<p class="error" role="alert">{bulkError}</p>
 					{/if}
 					<label class="field">
-						Reason (min 10 characters)
+						Reason (min {EXCUSE_REASON_MIN_LENGTH} characters)
 						<textarea class="form-input" rows="3" bind:value={bulkReason}></textarea>
 					</label>
 					<div class="modal-actions">
@@ -1188,6 +1193,22 @@
 	.status-excused { background: var(--info-bg); color: #6d28d9; }
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
+
+	.type-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--success);
+		background: var(--success-bg);
+		white-space: nowrap;
+	}
+
+	.type-badge.is-lab {
+		color: #92400e;
+		background: #fef3c7;
+	}
 
 	.mini {
 		padding: 0.375rem 0.75rem;

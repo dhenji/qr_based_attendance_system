@@ -8,13 +8,13 @@
 // PUBLIC_MOCK_MODE=true (see api/client.ts).
 //
 // Status semantics (ADR-058): the Deactivate/Reactivate toggle PATCHes
-// is_active. DELETE /admin/programs/{id} is an equivalent soft archive that
-// stays on the backend with no UI caller — there is nothing to cascade to,
-// since year_levels has no is_active column and courses carries no program
-// FK. Year-level DELETE is a real delete that 409s when offerings reference
-// the row (`year_has_courses`).
+// is_active. DELETE /admin/programs/{id} is a permanent delete guarded
+// server-side — only archived programs with no offerings or students go
+// through (409 `not_archived` / `program_has_offerings` /
+// `program_has_students`). Year-level DELETE is a real delete that 409s when
+// offerings reference the row (`year_has_courses`).
 
-import { del, get, patch, post } from '$lib/api/client';
+import { del, get, getText, patch, post, postForm, TEXT_EXPORTS } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
 	Program,
@@ -22,6 +22,7 @@ import type {
 	ProgramDetail,
 	ProgramDetailResponse,
 	ProgramFilters,
+	ProgramImportResult,
 	ProgramResponse,
 	ProgramTerm,
 	ProgramUpdatePayload,
@@ -120,6 +121,12 @@ export const updateProgram = async (
 export const setProgramActive = async (id: number, isActive: boolean): Promise<Program> =>
 	updateProgram(id, { is_active: isActive });
 
+// Permanent delete — 409 `not_archived` when still active,
+// `program_has_offerings` / `program_has_students` when dependents remain.
+export const deleteProgram = async (id: number): Promise<void> => {
+	await del<void>('adminProgramDetail', undefined, `/${id}`);
+};
+
 export const listYearLevels = async (programId: number): Promise<YearLevel[]> => {
 	const response = await get<Paginated<YearLevelResponse>>(
 		'adminYearLevels',
@@ -159,4 +166,22 @@ export const updateYearLevel = async (
 // Hard delete — 409 `year_has_courses` when offerings still reference the row.
 export const deleteYearLevel = async (programId: number, yearId: number): Promise<void> => {
 	await del<void>('adminYearLevelDetail', undefined, `/${programId}/years/${yearId}`);
+};
+
+export const importPrograms = async (file: File): Promise<ProgramImportResult> => {
+	const form = new FormData();
+	form.append('file', file);
+	return postForm<ProgramImportResult>('adminProgramImport', form);
+};
+
+// CSV template. Server text in live mode; the static header keeps
+// mock-mode/offline imports working when the template route is unreachable.
+const PROGRAM_TEMPLATE_FALLBACK = 'code,name,description,total_years\n';
+
+export const downloadProgramTemplate = async (): Promise<string> => {
+	try {
+		return await getText(TEXT_EXPORTS.programTemplate);
+	} catch {
+		return PROGRAM_TEMPLATE_FALLBACK;
+	}
 };

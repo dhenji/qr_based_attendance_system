@@ -81,7 +81,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	const overview = $derived(adminAnalyticsState.overview);
 
 	const semesterOptions = $derived(
-		yearFilter ? (yearOptions.find((y) => String(y.id) === yearFilter)?.terms ?? []) : []
+		yearFilter ? (yearOptions.find((y) => String(y.id) === String(yearFilter))?.terms ?? []) : []
 	);
 
 	const allYears = $derived([...yearsCache.values()].flat());

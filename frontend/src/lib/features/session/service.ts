@@ -15,6 +15,7 @@
 import { get, post } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
+	CourseType,
 	LiveSession,
 	LiveStudent,
 	OpenedSession,
@@ -46,6 +47,7 @@ export type SessionHistorySortDir = 'asc' | 'desc';
 export type SessionHistoryRow = {
 	id: number;
 	offering_id: number;
+	session_type: CourseType;
 	course_code: string;
 	course_name: string;
 	section: string;
@@ -65,6 +67,7 @@ export type SessionHistoryFilters = {
 	offeringId?: number;
 	course?: string;
 	section?: string;
+	sessionType?: CourseType;
 	from?: string;
 	to?: string;
 	sortBy?: SessionHistorySortBy;
@@ -107,12 +110,13 @@ const sectionsFor = (offeringId: number): string => {
 };
 
 // listSessions
-// Recent/live sessions, optionally filtered by date range or offering.
-// Course display names join client-side; sorting stays on the page.
+// Recent/live sessions, optionally filtered by date range, offering, or
+// type. Course display names join client-side; sorting stays on the page.
 export const listSessions = async (params?: {
 	from?: string;
 	to?: string;
 	offeringId?: number;
+	sessionType?: CourseType;
 	page?: number;
 	size?: number;
 }) => {
@@ -122,6 +126,7 @@ export const listSessions = async (params?: {
 	if (params?.from) query.from = params.from;
 	if (params?.to) query.to = params.to;
 	if (params?.offeringId !== undefined) query.offering_id = String(params.offeringId);
+	if (params?.sessionType) query.session_type = params.sessionType;
 	query.page = String(params?.page ?? 1);
 	query.size = String(params?.size ?? 50);
 
@@ -130,6 +135,7 @@ export const listSessions = async (params?: {
 	const items: SessionSummary[] = (response.items ?? []).map((item) => ({
 		id: item.id,
 		offeringId: item.offering_id,
+		sessionType: item.session_type ?? 'lecture',
 		courseCode: courseCodeFor(item.offering_id),
 		courseName: courseNameFor(item.offering_id),
 		section: sectionsFor(item.offering_id),
@@ -155,6 +161,7 @@ export const listSessions = async (params?: {
 export const openSession = async (
 	offeringId: number,
 	options?: {
+		sessionType?: CourseType;
 		durationMinutes?: number;
 		presentWindowMinutes?: number;
 		lateWindowMinutes?: number;
@@ -166,6 +173,7 @@ export const openSession = async (
 	}
 ): Promise<OpenedSession> => {
 	const body: Record<string, number | string> = { offering_id: offeringId };
+	if (options?.sessionType !== undefined) body.session_type = options.sessionType;
 	if (options?.durationMinutes !== undefined) body.duration_minutes = options.durationMinutes;
 	if (options?.presentWindowMinutes !== undefined)
 		body.present_window_minutes = options.presentWindowMinutes;
@@ -182,6 +190,7 @@ export const openSession = async (
 	return {
 		id: response.id,
 		offeringId: response.offering_id,
+		sessionType: response.session_type ?? 'lecture',
 		sessionCode: response.session_code,
 		qrPayload: response.qr_payload,
 		expiresAt: response.expires_at,
@@ -224,6 +233,7 @@ export const getActiveSession = async (sessionId: number): Promise<LiveSession> 
 	return {
 		id: response.id,
 		offeringId: response.offering,
+		sessionType: response.session_type ?? 'lecture',
 		offeringCode: courseCodeFor(response.offering),
 		offeringName: courseNameFor(response.offering),
 		offeringSections: sectionsFor(response.offering),
@@ -281,6 +291,7 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 	const toRow = (item: SessionHistoryItemResponse): SessionHistoryRow => ({
 		id: item.id,
 		offering_id: item.offering_id,
+		session_type: item.session_type ?? 'lecture',
 		course_code: courseCodeFor(item.offering_id),
 		course_name: courseNameFor(item.offering_id),
 		section: sectionsFor(item.offering_id),
@@ -306,6 +317,7 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 			size: String(params?.size ?? 20),
 		};
 		if (offeringIds[0] !== undefined) query.offering_id = String(offeringIds[0]);
+		if (params?.sessionType) query.session_type = params.sessionType;
 		if (params?.section !== undefined) query.section = params.section;
 		if (params?.from) query.date_from = params.from;
 		if (params?.to) query.date_to = params.to;
@@ -324,6 +336,7 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 					? 0
 					: items.reduce((total, row) => total + row.compliance_rate, 0) / items.length,
 			total_sessions: response.total,
+			avg_scope: 'page' as const,
 		};
 	}
 
@@ -343,6 +356,7 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 				size: '100',
 			};
 			if (params?.section !== undefined) query.section = params.section;
+			if (params?.sessionType) query.session_type = params.sessionType;
 			if (params?.from) query.date_from = params.from;
 			if (params?.to) query.date_to = params.to;
 			const response = await get<Paginated<SessionHistoryItemResponse>>('sessionHistory', query);
@@ -372,5 +386,6 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 				? 0
 				: merged.reduce((total, row) => total + row.compliance_rate, 0) / merged.length,
 		total_sessions: merged.length,
+		avg_scope: 'filtered' as const,
 	};
 };

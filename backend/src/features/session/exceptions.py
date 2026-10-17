@@ -60,3 +60,50 @@ class DuplicateScanException(SessionDatabaseException):
         super().__init__(
             message=f"Student {student_id} already scanned for session {session_id}"
         )
+
+
+class LabCoordinatesRequiredException(SessionDomainException):
+    """422 - a laboratory session needs classroom coordinates.
+
+    Laboratory sessions always enforce the geofence (D77), so the resolved
+    location — payload override, matching lab component, or offering default —
+    must carry both coordinates. Lecture sessions keep the previous behavior
+    (coordinates optional).
+    """
+
+    status_code: int = 422
+    code: str = "lab_coordinates_required"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Laboratory sessions require classroom coordinates",
+            field="classroom_lat",
+        )
+
+
+class OfferingScheduleMismatchException(SessionDomainException):
+    """422 - sessions cannot open on a mis-scheduled offering (D82).
+
+    The merged active-component total must equal the course units requirement
+    exactly; rows with no configured meetings are exempt (nothing to judge).
+    The message is professor-facing and renders verbatim on the session-open
+    form: course code plus both hours, no row ids.
+    """
+
+    status_code: int = 422
+    code: str = "offering_schedule_mismatch"
+
+    def __init__(
+        self,
+        scheduled_hours: float,
+        limit_hours: float,
+        course_code: str,
+        units: int,
+    ) -> None:
+        super().__init__(
+            message=(
+                f"Sessions can't be opened for {course_code} yet — its weekly "
+                f"schedule ({scheduled_hours}h) doesn't match the {units}-unit "
+                f"requirement ({limit_hours}h). Contact your administrator."
+            )
+        )

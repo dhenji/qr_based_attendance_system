@@ -31,7 +31,9 @@ export const Routes = {
   ADMIN_PROFESSORS_IMPORT: "/admin/professors/import",
   ADMIN_PROFESSORS_ARCHIVE: "/admin/professors/archive",
   ADMIN_PROGRAMS: "/admin/programs",
+  ADMIN_PROGRAMS_IMPORT: "/admin/programs/import",
   ADMIN_COURSES: "/admin/courses",
+  ADMIN_COURSES_IMPORT: "/admin/courses/import",
   ADMIN_OFFERINGS: "/admin/offerings",
   ADMIN_SETUP_WIZARD: "/admin/setup-wizard",
   ADMIN_ANALYTICS: "/admin/analytics",
@@ -57,6 +59,9 @@ export const adminProgram = (id: number): string => `${Routes.ADMIN_PROGRAMS}/${
 
 // The admin professor profile route is parameterised by professor id.
 export const adminProfessor = (id: number): string => `${Routes.ADMIN_PROFESSORS}/${id}`;
+
+// The admin student profile route is parameterised by student id.
+export const adminStudent = (id: number): string => `${Routes.ADMIN_STUDENTS}/${id}`;
 
 // The admin course template route is parameterised by course id.
 export const adminCourse = (id: number): string => `${Routes.ADMIN_COURSES}/${id}`;

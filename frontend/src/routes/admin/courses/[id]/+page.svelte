@@ -4,11 +4,12 @@
 	import { page } from '$app/state';
 	import {
 		adminCourseDetailState,
+		adminCoursesState,
+		deleteArchivedCourse,
 		initAdminCourseDetail,
 		refreshAdminCourseDetail,
 	} from '$lib/features/admin/courses/store.svelte';
 	import {
-		archiveCourse,
 		setCourseActive,
 		updateCourse,
 	} from '$lib/features/admin/courses/service';
@@ -20,6 +21,7 @@
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import type { AdminOffering, Program, YearLevel } from '$lib/shared/types';
+import { sessionMixLabel } from '$lib/shared/types';
 	import { Routes, adminOffering } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
@@ -43,7 +45,6 @@
 	let e_name = $state('');
 	let e_units = $state('');
 	let e_duration = $state('');
-	let e_type = $state<'lecture' | 'lab'>('lecture');
 	let editError = $state<string | null>(null);
 	let editBusy = $state(false);
 
@@ -105,7 +106,6 @@
 		e_name = course.courseName;
 		e_units = String(course.units);
 		e_duration = String(course.sessionDurationHours);
-		e_type = course.courseType;
 		editOpen = true;
 	};
 
@@ -119,7 +119,6 @@
 				course_name: e_name,
 				units: e_units,
 				session_duration_hours: e_duration,
-				course_type: e_type,
 			});
 			if (!parsed.success) {
 				editError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -130,7 +129,6 @@
 				course_name: parsed.data.course_name,
 				units: parsed.data.units,
 				session_duration_hours: parsed.data.session_duration_hours,
-				course_type: parsed.data.course_type,
 			});
 			editOpen = false;
 			await refreshAdminCourseDetail(course.id);
@@ -142,25 +140,13 @@
 		}
 	};
 
-	const toggleActive = async () => {
-		if (!course) return;
-		try {
-			await setCourseActive(course.id, !course.isActive);
-			await refreshAdminCourseDetail(course.id);
-			notifyEntityChanged('courses');
-		} catch {
-			// Surface via the detail state's actionError.
-			adminCourseDetailState.actionError = 'Failed to update course status';
-		}
-	};
-
 	const onArchive = async () => {
 		if (!course || archiveBusy) return;
 		archiveBusy = true;
 		try {
-			await archiveCourse(course.id);
+			await setCourseActive(course.id, false);
+			await refreshAdminCourseDetail(course.id);
 			notifyEntityChanged('courses');
-			await goto(Routes.ADMIN_COURSES);
 		} catch (e: unknown) {
 			adminCourseDetailState.actionError =
 				e instanceof Error && e.message ? e.message : 'Failed to archive course';
@@ -168,10 +154,58 @@
 			archiveBusy = false;
 		}
 	};
+
+	const onReactivate = async () => {
+		if (!course || archiveBusy) return;
+		archiveBusy = true;
+		try {
+			await setCourseActive(course.id, true);
+			await refreshAdminCourseDetail(course.id);
+			notifyEntityChanged('courses');
+		} catch (e: unknown) {
+			adminCourseDetailState.actionError =
+				e instanceof Error && e.message ? e.message : 'Failed to reactivate course';
+		} finally {
+			archiveBusy = false;
+		}
+	};
+
+	let deleteOpen = $state(false);
+	let deleteBusy = $state(false);
+	let archiveConfirm = $state(false);
+
+	const confirmArchive = async () => {
+		await onArchive();
+		if (course && !course.isActive) archiveConfirm = false;
+	};
+
+	const confirmDelete = async () => {
+		if (!course || deleteBusy) return;
+		deleteBusy = true;
+		try {
+			await deleteArchivedCourse(course.id);
+			deleteOpen = false;
+			notifyEntityChanged('courses');
+			await goto(Routes.ADMIN_COURSES);
+		} catch {
+			// The store holds the friendly guard copy (`course_has_offerings`,
+			// …); mirror it onto the detail state so the modal shows it even
+			// on a direct landing.
+			adminCourseDetailState.actionError =
+				adminCoursesState.actionError ?? 'Failed to delete course';
+		} finally {
+			deleteBusy = false;
+		}
+	};
 </script>
 
 <div class="page">
-	<button class="link back" onclick={() => goto(Routes.ADMIN_COURSES)}>‹ All courses</button>
+	<div class="page-top">
+		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_COURSES)}>
+			← Back to Course Management
+		</button>
+		<p class="crumb"><a href={Routes.ADMIN_COURSES}>Courses</a> / Detail</p>
+	</div>
 
 	{#if adminCourseDetailState.loading}
 		<section class="card"><p class="muted">Loading…</p></section>
@@ -184,10 +218,7 @@
 			<div>
 				<h1>{course.courseCode} — {course.courseName}</h1>
 				<p class="muted">
-					Units: {course.units} · Duration: {course.sessionDurationHours}h ·
-					<span class="badge type-lab" class:type-lec={course.courseType === 'lecture'}>
-						{course.courseType === 'lab' ? 'Laboratory' : 'Lecture'}
-					</span>
+					Units: {course.units} · Default session: {course.sessionDurationHours}h ·
 					<span class="badge" class:inactive={!course.isActive}>
 						{course.isActive ? 'Active' : 'Inactive'}
 					</span>
@@ -195,13 +226,10 @@
 			</div>
 			<div class="header-actions">
 				<button class="btn btn-secondary" onclick={openEdit}>Edit</button>
-				<button class="btn btn-secondary" onclick={toggleActive}>
-					{course.isActive ? 'Deactivate' : 'Reactivate'}
-				</button>
 			</div>
 		</header>
 
-		{#if adminCourseDetailState.actionError}
+		{#if adminCourseDetailState.actionError && !deleteOpen && !archiveConfirm}
 			<section class="card"><p class="error" role="alert">{adminCourseDetailState.actionError}</p></section>
 		{/if}
 
@@ -222,6 +250,7 @@
 								<th>Cohort</th>
 								<th>Term</th>
 								<th>Schedule</th>
+								<th>Type</th>
 								<th>Enrolled</th>
 								<th>Status</th>
 								<th><span class="sr">Actions</span></th>
@@ -233,6 +262,11 @@
 									<td>{[o.programCode ?? `Program ${o.programId}`, o.yearLevelLabel ?? `Year ${o.yearLevelId}`].join(' · ')}</td>
 									<td>{o.semester} {o.academicYear}</td>
 									<td>{o.scheduleDays} {o.scheduleStartTime.slice(0, 5)}–{o.scheduleEndTime.slice(0, 5)}</td>
+									<td>
+										<span class="badge type-lab" class:type-lec={o.sessionTypes[0] === 'lecture' && o.sessionTypes.length === 1}>
+											{sessionMixLabel(o.sessionTypes)}
+										</span>
+									</td>
 									<td>{o.enrolledCount}</td>
 									<td>
 										<span class="badge" class:inactive={!o.isActive}>
@@ -252,10 +286,34 @@
 
 		<section class="card danger">
 			<h2 class="card-title">Danger zone</h2>
-			<p class="muted">Archiving flips this template to inactive. Existing offerings keep working.</p>
-			<button class="btn btn-danger" disabled={archiveBusy || !course.isActive} onclick={onArchive}>
-				{archiveBusy ? 'Archiving…' : 'Archive course'}
-			</button>
+			<p class="muted">
+				Status: <strong>{course.isActive ? 'Active' : 'Inactive'}</strong>. Archiving
+				flips this template to inactive — existing offerings keep working.
+				Reactivating restores it. Deletion is permanent and blocked while
+				offerings still use this template.
+			</p>
+			<div class="danger-actions">
+				{#if course.isActive}
+					<button class="btn btn-danger" disabled={archiveBusy} onclick={() => { adminCourseDetailState.actionError = null; archiveConfirm = true; }}>
+						Archive course
+					</button>
+				{:else}
+					<button class="btn btn-secondary" disabled={archiveBusy} onclick={onReactivate}>
+						{archiveBusy ? 'Reactivating…' : 'Reactivate course'}
+					</button>
+				{/if}
+				<button
+					class="btn btn-danger"
+					disabled={deleteBusy || course.isActive}
+					title={course.isActive ? 'Archive first — only archived courses can be deleted' : undefined}
+					onclick={() => { adminCourseDetailState.actionError = null; deleteOpen = true; }}
+				>
+					Delete permanently
+				</button>
+			</div>
+			{#if !course.isActive}
+				<p class="hint">Delete is blocked while offerings still use this template.</p>
+			{/if}
 		</section>
 	{/if}
 </div>
@@ -280,40 +338,69 @@
 					<label>Units (1–6)<input class="input" inputmode="numeric" bind:value={e_units} /></label>
 				</div>
 				<label>Name<input class="input" bind:value={e_name} /></label>
-				<label>Session duration, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={e_duration} /></label>
-				<div class="field">
-					<span class="form-label">Course Type</span>
-					<div class="toggle-group" role="group" aria-label="Course type">
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={e_type === 'lecture'}
-							aria-pressed={e_type === 'lecture'}
-							onclick={() => (e_type = 'lecture')}
-						>
-							Lecture
-						</button>
-						<button
-							type="button"
-							class="toggle-btn"
-							class:selected={e_type === 'lab'}
-							aria-pressed={e_type === 'lab'}
-							onclick={() => (e_type = 'lab')}
-						>
-							Laboratory
-						</button>
-					</div>
-					<p class="hint">
-						{e_type === 'lab'
-							? 'Lab sessions require classroom coordinates and geofence for attendance tracking.'
-							: 'Lecture sessions use offering defaults. Geofence is optional.'}
-					</p>
-				</div>
+				<label>Default session length, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={e_duration} /></label>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if archiveConfirm && course}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="course-archive-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (archiveConfirm = false) }}
+		>
+			<h2 id="course-archive-title" class="modal-title">Archive {course.courseCode}?</h2>
+			<p class="modal-text">
+				{course.courseName} will be flipped to inactive. Its offerings keep
+				working, and you can reactivate it anytime.
+			</p>
+			{#if adminCourseDetailState.actionError}
+				<p class="error" role="alert">{adminCourseDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+					{archiveBusy ? 'Archiving…' : 'Archive'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteOpen && course}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="course-delete-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (deleteOpen = false) }}
+		>
+			<h2 id="course-delete-title" class="modal-title">Permanently delete {course.courseCode}?</h2>
+			<p class="modal-text">
+				{course.courseName} will be removed for good.
+				If offerings still use it, deletion will be blocked
+				and the course stays archived.
+			</p>
+			{#if adminCourseDetailState.actionError}
+				<p class="error" role="alert">{adminCourseDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (deleteOpen = false)}>Cancel</button>
+				<button class="btn btn-danger" disabled={deleteBusy} onclick={confirmDelete}>
+					{deleteBusy ? 'Deleting…' : 'Delete'}
 				</button>
 			</div>
 		</div>
@@ -379,6 +466,12 @@
 		border-color: var(--danger-bg);
 	}
 
+	.danger-actions {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
 	table {
 		width: 100%;
 		border-collapse: collapse;
@@ -425,58 +518,6 @@
 		background: #fef3c7;
 	}
 
-	.toggle-group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.toggle-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.toggle-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.toggle-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.toggle-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.form-label {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		color: var(--text-secondary);
-		margin-bottom: 0.375rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-	}
-
 	.row-actions {
 		display: flex;
 		gap: 0.75rem;
@@ -497,9 +538,29 @@
 		text-decoration: underline;
 	}
 
-	.back {
-		align-self: flex-start;
-		font-size: 0.875rem;
+	/* Back button + breadcrumb read as one header block, so the .page flex gap
+	 * does not push them a full row apart (same pattern as Program Management). */
+	.page-top {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.crumb {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	.crumb a {
+		color: var(--accent);
+		text-decoration: none;
+		font-weight: 600;
+	}
+
+	.crumb a:hover {
+		text-decoration: underline;
 	}
 
 	.empty {
@@ -619,6 +680,12 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.modal-text {
+		margin: 0 0 1.5rem;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
 	}
 
 	.form {

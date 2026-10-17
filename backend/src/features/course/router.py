@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from api.deps import CourseServiceDep, require_role
 from features.auth.model import User
 from features.course.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from features.course.schema import CourseCreate, CourseRead, CourseUpdate
+from features.course.schema import (
+    CourseCreate,
+    CourseImportResult,
+    CourseRead,
+    CourseUpdate,
+)
+from features.course.service import COURSE_CSV_COLUMNS
+from shared.csv_import import csv_template_header
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
@@ -54,6 +61,37 @@ async def create_course(
     return await service.create(payload=payload, actor_id=user.id)
 
 
+# Static import/template routes are declared before /{course_id} so they
+# are not captured as course ids.
+@router.post(
+    "/import",
+    response_model=CourseImportResult,
+    summary="Import new course templates from a CSV upload",
+)
+async def import_courses(
+    file: Annotated[UploadFile, File(description="courses.csv")],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> CourseImportResult:
+    content: bytes = await file.read()
+
+    return await service.import_roster(content=content, actor_id=user.id)
+
+
+@router.get(
+    "/import/template",
+    summary="Download the course import CSV template",
+)
+async def download_import_template(
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+) -> Response:
+    return Response(
+        content=csv_template_header(COURSE_CSV_COLUMNS),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=courses_template.csv"},
+    )
+
+
 @router.get(
     "/{course_id}",
     response_model=CourseRead,
@@ -84,11 +122,11 @@ async def update_course(
 @router.delete(
     "/{course_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Archive a course template (is_active=false)",
+    summary="Permanently delete an archived course with no offerings",
 )
-async def archive_course(
+async def hard_delete_course(
     course_id: int,
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
 ) -> None:
-    await service.archive(course_id=course_id, actor_id=user.id)
+    await service.hard_delete(course_id=course_id, actor_id=user.id)

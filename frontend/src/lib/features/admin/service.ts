@@ -68,6 +68,7 @@ const toStudent = (s: AdminStudentResponse | AdminStudentDetailResponse): AdminS
 	yearLevelLabel: s.year_level_label,
 	section: s.section ?? undefined,
 	isActive: s.is_active,
+	claimStatus: s.claim_status,
 	faceEnrolled: s.face_enrolled,
 	createdAt: s.created_at,
 	scanCount: s.scan_count,
@@ -368,6 +369,10 @@ export const deactivateUser = async (id: number): Promise<void> => {
 	await patch<void>('adminUserDeactivate', undefined, undefined, `/${id}/deactivate`);
 };
 
+export const reactivateUser = async (id: number): Promise<void> => {
+	await patch<void>('adminUserReactivate', undefined, undefined, `/${id}/reactivate`);
+};
+
 // --- Password reset -----------------------------------------------------------
 //
 // Three routes, one backend implementation. Each sets a fresh temp password,
@@ -430,8 +435,29 @@ const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
 	scheduleDays: o.schedule_days,
 	scheduleStartTime: o.schedule_start_time,
 	scheduleEndTime: o.schedule_end_time,
-	// Backend has no column — fall back so live rows never render undefined.
-	courseType: o.course_type ?? 'lecture',
+	// Distinct active types when present; legacy label, then lecture.
+	courseType:
+		o.session_types && o.session_types.length > 0
+			? o.session_types[0]
+			: (o.course_type ?? 'lecture'),
+	sessionTypes:
+		o.session_types && o.session_types.length > 0
+			? [...o.session_types]
+			: [o.course_type ?? 'lecture'],
+	components: (o.components ?? []).map((c) => ({
+		id: c.id,
+		offeringId: c.offering_id,
+		sessionType: c.session_type,
+		scheduleDays: c.schedule_days,
+		scheduleStartTime: c.schedule_start_time,
+		scheduleEndTime: c.schedule_end_time,
+		classroomName: c.classroom_name ?? undefined,
+		classroomLat: c.classroom_lat ?? undefined,
+		classroomLng: c.classroom_lng ?? undefined,
+		isActive: c.is_active,
+		createdAt: c.created_at,
+		updatedAt: c.updated_at,
+	})),
 	classroomName: o.classroom_name ?? undefined,
 	classroomLat: o.classroom_lat ?? undefined,
 	classroomLng: o.classroom_lng ?? undefined,

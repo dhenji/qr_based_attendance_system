@@ -42,7 +42,10 @@ import type {
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
 	AuditLogItemResponse,
+	CourseImportResult,
+	OfferingComponentResponse,
 	ProfessorImportResult,
+	ProgramImportResult,
 	PromoteStagingResponse,
 	RecentScanResponse,
 	RiskRefreshResponse,
@@ -71,6 +74,7 @@ export type ScanStatus = 'present' | 'late' | 'rejected';
 export interface SessionVerificationResponse {
 	session_id: number;
 	offering_id: number;
+	session_type: 'lecture' | 'lab';
 	course_code: string;
 	course_name: string;
 	program_code: string;
@@ -114,6 +118,12 @@ export interface EndpointDef<T> {
 	) => T;
 }
 
+// Mock 204 No Content: the live client returns `undefined as T` for empty
+// responses, and callers issue these deletes as `del<void>`, so a mock
+// DELETE produces no value either. `never` is assignable to every T, which
+// keeps the single cast here instead of an `as unknown as X` at each site.
+const mockNoContent = (): never => undefined as unknown as never;
+
 // Session QR payload (D18)
 export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 	url: '/student/sessions/verify-code',
@@ -121,6 +131,7 @@ export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 	mock: () => ({
 		session_id: 1,
 		offering_id: 1,
+		session_type: 'lecture' as const,
 		course_code: 'CS101',
 		course_name: 'Software Engineering 1',
 		program_code: 'BSCS',
@@ -191,6 +202,7 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 			{
 				id: 1,
 				offering_id: 1,
+				session_type: 'lecture' as const,
 				session_code: '7X-9K2M',
 				created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
 				expires_at: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
@@ -207,25 +219,47 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 	}),
 };
 
+// Mock session registry: deterministic per mock-mode run so an opened session
+// can be inspected and closed by id. Random ids made open→close unmatchable
+// (close echoed a fixed id:0 and could collide) and the QR payload carried a
+// different code than the session itself.
+let mockSessionSeq = 1000;
+const mockSessions = new Map<number, string>();
+
+const mockSessionCode = (seq: number): string => {
+	const base = seq.toString(36).toUpperCase().padStart(6, '0').slice(-6);
+	return `${base.slice(0, 2)}-${base.slice(2)}`;
+};
+
 export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: () => ({
-		id: Math.floor(Math.random() * 1000) + 1,
-		session_code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-		offering_id: 1,
-		qr_payload: {
-			v: 1,
-			code: `A${Math.random().toString(36).substring(2, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-			offering: 1,
-			radius: 50,
-			pw: 15,
-			lw: 5,
-		},
-		expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-		created_at: new Date().toISOString(),
-	}),
+	mock: (_params, _suffix, body) => {
+		mockSessionSeq += 1;
+		const id = mockSessionSeq;
+		const sessionCode = mockSessionCode(id);
+		mockSessions.set(id, sessionCode);
+		return {
+			id,
+			session_code: sessionCode,
+			offering_id: 1,
+			session_type:
+				(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
+					? ('lab' as const)
+					: ('lecture' as const),
+			qr_payload: {
+				v: 1,
+				code: sessionCode,
+				offering: 1,
+				radius: 50,
+				pw: 15,
+				lw: 5,
+			},
+			expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+			scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+			created_at: new Date().toISOString(),
+		};
+	},
 };
 
 // Session history (professor) — wireframe 3.5, GET /professor/sessions/history.
@@ -249,19 +283,24 @@ export const SessionHistoryEndpoint: EndpointDef<Paginated<SessionHistoryItemRes
 export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 	url: '/professor/sessions/active',
 	method: 'GET',
-	mock: () => ({
-		id: 1,
-		offering: 1,
-		session_code: '7X-9K2M',
-		scan_window_remaining: 2400,
-		scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
-		status: 'active',
-		enrolled_count: 30,
-		remaining: 12,
-		pending_sync_count: 0,
-		students: [],
-		counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
-	}),
+	mock: (_params, suffix) => {
+		const match = suffix?.match(/\/(\d+)/);
+		const id = match ? parseInt(match[1], 10) : 1;
+		return {
+			id,
+			offering: 1,
+			session_type: 'lecture' as const,
+			session_code: mockSessions.get(id) ?? '7X-9K2M',
+			scan_window_remaining: 2400,
+			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+			status: 'active',
+			enrolled_count: 30,
+			remaining: 12,
+			pending_sync_count: 0,
+			students: [],
+			counts: { present: 15, late: 3, pending: 10, absent: 2, excused: 0 },
+		};
+	},
 };
 
 // Close session (professor).
@@ -270,7 +309,16 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 export const SessionCloseEndpoint: EndpointDef<SessionCloseResponse> = {
 	url: '/professor/sessions',
 	method: 'POST',
-	mock: () => ({ id: 0, status: 'closed' as const, final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 } }),
+	mock: (_params, suffix) => {
+		const match = suffix?.match(/\/(\d+)\/close/);
+		const ids = [...mockSessions.keys()];
+		const id = match ? parseInt(match[1], 10) : (ids.pop() ?? 0);
+		return {
+			id,
+			status: 'closed' as const,
+			final_counts: { present: 0, late: 0, pending: 0, absent: 0, excused: 0 },
+		};
+	},
 };
 
 // Attendance records (professor) — GET /professor/attendance.
@@ -612,10 +660,11 @@ export const StudentHistoryEndpoint: EndpointDef<StudentHistoryResponse> = {
 
 // Student excuse requests — live on features/excuse/student_router.py.
 // Submit creates a pending request (201); the professor reviews it in the
-// queue. Reason floor is 20 chars here (REASON_MIN_LENGTH_STUDENT), not the
-// professor 10. Attachments ride presigned-upload URLs (D24): the client
-// mints a URL per file, PUTs the bytes itself, then submits the returned
-// object_urls (1..5). Reason-only submits stay valid (pending without files).
+// queue. Reason floor is STUDENT_EXCUSE_REASON_MIN_LENGTH (student/service),
+// not the professor 10. Attachments ride presigned-upload URLs (D24): the
+// client mints a URL per file, PUTs the bytes itself, then submits the
+// returned object_urls (up to ATTACHMENTS_MAX_FILES). Reason-only submits
+// stay valid (pending without files).
 // List/detail read the student's own rows (a 404 doubles as not-yours).
 export interface StudentExcuseSubmitBody {
 	session_id: number;
@@ -795,7 +844,7 @@ export const StudentScheduleEndpoint: EndpointDef<ScheduleResponse> = {
 				program_code: 'BSCS',
 				year_level_label: '1st Year',
 				semester: '1st Sem 2025-2026',
-				schedule_days: 'TTh',
+				schedule_days: 'TH',
 				schedule_start_time: '13:00:00',
 				schedule_end_time: '14:30:00',
 				classroom_name: null,
@@ -948,6 +997,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-01T08:00:00.000Z',
 		scan_count: 42,
 	},
@@ -963,6 +1013,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'B',
 		is_active: true,
 		face_enrolled: false,
+		claim_status: 'Claimed',
 		created_at: '2024-06-02T08:00:00.000Z',
 		scan_count: 18,
 	},
@@ -978,6 +1029,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: false,
 		face_enrolled: false,
+		claim_status: 'Unclaimed',
 		created_at: '2024-06-03T08:00:00.000Z',
 		scan_count: 5,
 	},
@@ -993,6 +1045,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'C',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-04T08:00:00.000Z',
 		scan_count: 30,
 	},
@@ -1008,6 +1061,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'B',
 		is_active: false,
 		face_enrolled: false,
+		claim_status: 'Unclaimed',
 		created_at: '2024-06-05T08:00:00.000Z',
 		scan_count: 0,
 	},
@@ -1023,6 +1077,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-06T08:00:00.000Z',
 		scan_count: 51,
 	},
@@ -1038,6 +1093,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'C',
 		is_active: true,
 		face_enrolled: false,
+		claim_status: 'Claimed',
 		created_at: '2024-06-07T08:00:00.000Z',
 		scan_count: 12,
 	},
@@ -1053,6 +1109,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
+		claim_status: 'Claimed',
 		created_at: '2024-06-08T08:00:00.000Z',
 		scan_count: 27,
 	},
@@ -1068,6 +1125,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'B',
 		is_active: true,
 		face_enrolled: false,
+		claim_status: 'Claimed',
 		created_at: '2024-06-09T08:00:00.000Z',
 		scan_count: 9,
 	},
@@ -1083,6 +1141,7 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		section: 'A',
 		is_active: false,
 		face_enrolled: true,
+		claim_status: 'Unclaimed',
 		created_at: '2024-06-10T08:00:00.000Z',
 		scan_count: 22,
 	},
@@ -1223,6 +1282,7 @@ export const AdminStudentCreateEndpoint: EndpointDef<AdminStudentResponse> = {
 			year_level_label: mockYearLabelFor(Number(p.year_level_id)),
 			section: p.section ? String(p.section) : null,
 			is_active: true,
+			claim_status: 'Unclaimed',
 			face_enrolled: false,
 			created_at: new Date().toISOString(),
 			scan_count: 0,
@@ -1240,7 +1300,7 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 			const row = findMockStudentRow(suffix);
 			if (row.is_active) throw new Error('Only inactive students can be deleted.');
 			MOCK_ADMIN_STUDENT_ROWS.splice(MOCK_ADMIN_STUDENT_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminStudentDetailResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockStudentRow(suffix);
@@ -1260,10 +1320,54 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 	},
 };
 
+// Mock CSV import: derives counts from the uploaded file's real rows when
+// postForm forwards them (see client.ts postForm), so duplicate/error paths
+// are testable in mock mode. Without file info it keeps the legacy fixed
+// fixture. Line numbers are 1-based file lines (header is line 1); a repeat
+// first-column value counts as a duplicate, a wrong column count or a blank
+// first cell counts as an error.
+const mockCsvImport = (
+	body: unknown,
+	legacyImported: number
+): { imported: number; duplicates: number; errors: { line: number; reason: string }[] } => {
+	const fileText = (body as { fileText?: unknown } | undefined)?.fileText;
+	if (typeof fileText !== 'string')
+		return { imported: legacyImported, duplicates: 0, errors: [] };
+	const lines = fileText.split(/\r?\n/);
+	const expectedCols = (lines[0] ?? '').split(',').length;
+	let imported = 0;
+	let duplicates = 0;
+	const errors: { line: number; reason: string }[] = [];
+	const seen = new Set<string>();
+	lines.slice(1).forEach((line, index) => {
+		if (line.trim() === '') return;
+		const lineNo = index + 2;
+		const cells = line.split(',');
+		const key = (cells[0] ?? '').trim().toLowerCase();
+		if (cells.length !== expectedCols || key === '') {
+			errors.push({
+				line: lineNo,
+				reason:
+					cells.length !== expectedCols
+						? `Expected ${expectedCols} columns, found ${cells.length}.`
+						: 'Missing identifier in the first column.',
+			});
+			return;
+		}
+		if (seen.has(key)) {
+			duplicates += 1;
+			return;
+		}
+		seen.add(key);
+		imported += 1;
+	});
+	return { imported, duplicates, errors };
+};
+
 export const AdminStudentImportEndpoint: EndpointDef<StudentImportResult> = {
 	url: '/admin/students/import',
 	method: 'POST',
-	mock: () => ({ imported: 25, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 25),
 };
 
 // --- Admin face enrollment (3-photo upload, D43) --------------------------------
@@ -1476,7 +1580,7 @@ export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> =
 			const row = findMockProfessorRow(suffix);
 			if (row.is_active) throw new Error('Only inactive professors can be deleted.');
 			MOCK_ADMIN_PROFESSOR_ROWS.splice(MOCK_ADMIN_PROFESSOR_ROWS.indexOf(row), 1);
-			return undefined as unknown as AdminProfessorResponse;
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockProfessorRow(suffix);
@@ -1507,7 +1611,7 @@ export const AdminProfessorDetailEndpoint: EndpointDef<AdminProfessorResponse> =
 export const AdminProfessorImportEndpoint: EndpointDef<ProfessorImportResult> = {
 	url: '/admin/professors/import',
 	method: 'POST',
-	mock: () => ({ imported: 5, duplicates: 0, errors: [] }),
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 // --- Admin offerings (professor assignment picker) ---------------------------
@@ -1530,6 +1634,23 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_start_time: '09:00:00',
 		schedule_end_time: '10:30:00',
 		course_type: 'lecture',
+		session_types: ['lecture'],
+		components: [
+			{
+				id: 1,
+				offering_id: 1,
+				session_type: 'lecture',
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Lab 101',
+				classroom_lat: null,
+				classroom_lng: null,
+				is_active: true,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			},
+		],
 		classroom_name: 'Lab 101',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1549,10 +1670,27 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		academic_year: '2025-2026',
 		sessions_per_week: 2,
 		semester_weeks: 18,
-		schedule_days: 'TTH',
+		schedule_days: 'TH',
 		schedule_start_time: '11:00:00',
 		schedule_end_time: '12:30:00',
 		course_type: 'lecture',
+		session_types: ['lecture'],
+		components: [
+			{
+				id: 2,
+				offering_id: 2,
+				session_type: 'lecture',
+				schedule_days: 'TH',
+				schedule_start_time: '11:00:00',
+				schedule_end_time: '12:30:00',
+				classroom_name: 'Room 203',
+				classroom_lat: null,
+				classroom_lng: null,
+				is_active: true,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			},
+		],
 		classroom_name: 'Room 203',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1576,6 +1714,23 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		schedule_start_time: '09:00:00',
 		schedule_end_time: '10:30:00',
 		course_type: 'lecture',
+		session_types: ['lecture'],
+		components: [
+			{
+				id: 3,
+				offering_id: 3,
+				session_type: 'lecture',
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Lab 101',
+				classroom_lat: null,
+				classroom_lng: null,
+				is_active: true,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			},
+		],
 		classroom_name: 'Lab 101',
 		classroom_lat: null,
 		classroom_lng: null,
@@ -1627,8 +1782,9 @@ export const AdminOfferingsEndpoint: EndpointDef<Paginated<AdminOfferingResponse
 // "" on the backend (no trailing slash); detail routes pass the id via the
 // client's `suffix` option (e.g. `/3`). The list query takes only
 // ?is_active&page&size — search + Code/Name sorts run client-side over the
-// loaded page (same convention as programs). DELETE is a soft archive
-// (is_active=false, 204), toggled in the UI the same way.
+// loaded page (same convention as programs). DELETE is a permanent delete
+// guarded server-side — only archived courses with no offerings go through
+// (409 `not_archived` / `course_has_offerings`).
 
 const MOCK_ADMIN_COURSE_ROWS: AdminCourseResponse[] = [
 	{
@@ -1740,8 +1896,10 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 	method: 'GET',
 	mock: (_params, suffix, body, method) => {
 		if (method === 'DELETE') {
-			findMockCourseRow(suffix).is_active = false;
-			return undefined as unknown as AdminCourseResponse;
+			const row = findMockCourseRow(suffix);
+			if (row.is_active) throw new Error('Only inactive courses can be deleted.');
+			MOCK_ADMIN_COURSE_ROWS.splice(MOCK_ADMIN_COURSE_ROWS.indexOf(row), 1);
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockCourseRow(suffix);
@@ -1770,6 +1928,12 @@ export const AdminCourseDetailEndpoint: EndpointDef<AdminCourseResponse> = {
 	},
 };
 
+export const AdminCourseImportEndpoint: EndpointDef<CourseImportResult> = {
+	url: '/admin/courses/import',
+	method: 'POST',
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
+};
+
 // --- Admin offering detail: CRUD + professors + roster + bulk enroll ---------
 //
 // Live routes on course/offering_router.py (/api/admin/offerings). Same
@@ -1788,6 +1952,7 @@ interface MockOfferingPayload {
 	schedule_start_time?: unknown;
 	schedule_end_time?: unknown;
 	course_type?: unknown;
+	components?: unknown;
 	classroom_name?: unknown;
 	classroom_lat?: unknown;
 	classroom_lng?: unknown;
@@ -1801,6 +1966,106 @@ const findMockOfferingRow = (suffix?: string): AdminOfferingResponse => {
 	const row = MOCK_ADMIN_OFFERINGS.find((r) => r.id === id);
 	if (!row) throw new Error('Offering not found.');
 	return row;
+};
+
+// D77 mock components: the offering rows above are the single source of
+// truth (each carries its components array); these helpers build and
+// maintain them the way the live service does.
+const mockComponentId = (): number =>
+	Math.max(0, ...MOCK_ADMIN_OFFERINGS.flatMap((r) => r.components.map((c) => c.id))) + 1;
+
+const refreshMockSessionTypes = (row: AdminOfferingResponse): void => {
+	row.session_types = [
+		...new Set(
+			row.components.filter((c) => c.is_active).map((c) => c.session_type)
+		),
+	];
+	row.updated_at = new Date().toISOString();
+};
+
+interface MockComponentPayload {
+	session_type?: unknown;
+	schedule_days?: unknown;
+	schedule_start_time?: unknown;
+	schedule_end_time?: unknown;
+	classroom_name?: unknown;
+	classroom_lat?: unknown;
+	classroom_lng?: unknown;
+	is_active?: unknown;
+}
+
+const mockComponentFromPayload = (
+	offeringId: number,
+	p: MockComponentPayload,
+	fallback: { days: string; start: string; end: string; name: string | null; lat: number | null; lng: number | null }
+): OfferingComponentResponse => {
+	const session_type = p.session_type === 'lab' ? 'lab' : 'lecture';
+	const days = String(p.schedule_days ?? fallback.days).trim().toUpperCase();
+	const start = String(p.schedule_start_time ?? fallback.start);
+	const end = String(p.schedule_end_time ?? fallback.end);
+	if (end <= start) throw new Error('schedule_end_time must be after schedule_start_time');
+	return {
+		id: mockComponentId(),
+		offering_id: offeringId,
+		session_type,
+		schedule_days: days,
+		schedule_start_time: start,
+		schedule_end_time: end,
+		classroom_name:
+			p.classroom_name === undefined
+				? fallback.name
+				: p.classroom_name
+					? String(p.classroom_name)
+					: null,
+		classroom_lat:
+			p.classroom_lat === undefined || p.classroom_lat === null
+				? (p.classroom_lat === null ? null : fallback.lat)
+				: Number(p.classroom_lat),
+		classroom_lng:
+			p.classroom_lng === undefined || p.classroom_lng === null
+				? (p.classroom_lng === null ? null : fallback.lng)
+				: Number(p.classroom_lng),
+		is_active: true,
+		created_at: new Date().toISOString(),
+		updated_at: new Date().toISOString(),
+	};
+};
+
+const mockComponentsForCreate = (
+	row: AdminOfferingResponse,
+	raw: unknown
+): OfferingComponentResponse[] => {
+	const items = Array.isArray(raw) ? (raw as MockComponentPayload[]) : [];
+	const fallback = {
+		days: row.schedule_days,
+		start: row.schedule_start_time,
+		end: row.schedule_end_time,
+		name: row.classroom_name,
+		lat: row.classroom_lat,
+		lng: row.classroom_lng,
+	};
+	const list = (
+		items.length > 0
+			? items
+			: [{ session_type: 'lecture' as const }]
+	).map((p) => mockComponentFromPayload(row.id, p, fallback));
+	const seen = new Set<string>();
+	for (const c of list) {
+		const key = `${c.session_type}|${c.schedule_days}|${c.schedule_start_time}`;
+		if (seen.has(key)) throw new Error('Offering already has a component on that schedule.');
+		seen.add(key);
+	}
+	return list;
+};
+
+const findMockComponentRow = (
+	suffix?: string
+): { offering: AdminOfferingResponse; component: OfferingComponentResponse } => {
+	const offering = findMockOfferingRow(suffix);
+	const id = parseInt(suffix?.match(/\/components\/(\d+)/)?.[1] ?? '', 10);
+	const component = offering.components.find((c) => c.id === id);
+	if (!component) throw new Error('Offering component not found.');
+	return { offering, component };
 };
 
 export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
@@ -1836,6 +2101,8 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			schedule_start_time: String(p.schedule_start_time ?? '09:00:00'),
 			schedule_end_time: String(p.schedule_end_time ?? '10:30:00'),
 			course_type: p.course_type === 'lab' ? 'lab' : 'lecture',
+			session_types: ['lecture'],
+			components: [],
 			classroom_name: (p.classroom_name as string | null) ?? null,
 			classroom_lat: (p.classroom_lat as number | null) ?? null,
 			classroom_lng: (p.classroom_lng as number | null) ?? null,
@@ -1846,6 +2113,10 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString(),
 		};
+		// D77: explicit per-type schedules, else one lecture component
+		// mirroring the offering schedule/classroom (same default as live).
+		row.components = mockComponentsForCreate(row, p.components);
+		row.session_types = [...new Set(row.components.map((c) => c.session_type))];
 		MOCK_ADMIN_OFFERINGS.push(row);
 		return row;
 	},
@@ -1856,8 +2127,10 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 	method: 'GET',
 	mock: (_params, suffix, body, method) => {
 		if (method === 'DELETE') {
-			findMockOfferingRow(suffix).is_active = false;
-			return undefined as unknown as AdminOfferingResponse;
+			const row = findMockOfferingRow(suffix);
+			if (row.is_active) throw new Error('Only inactive offerings can be deleted.');
+			MOCK_ADMIN_OFFERINGS.splice(MOCK_ADMIN_OFFERINGS.indexOf(row), 1);
+			return mockNoContent();
 		}
 		if (method === 'PATCH') {
 			const row = findMockOfferingRow(suffix);
@@ -1888,6 +2161,93 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 			return row;
 		}
 		return findMockOfferingRow(suffix);
+	},
+};
+
+// Offering components (D77: per-type schedules) ---------------------------------
+//
+// Live routes on course/offering_router.py. Same suffix convention:
+// `/{oid}/components`, `/{oid}/components/{cid}`.
+
+export const AdminOfferingComponentsEndpoint: EndpointDef<OfferingComponentResponse[]> = {
+	url: '/admin/offerings',
+	method: 'GET',
+	mock: (_params, suffix) =>
+		findMockOfferingRow(suffix).components.filter((c) => c.is_active),
+};
+
+export const AdminOfferingComponentCreateEndpoint: EndpointDef<OfferingComponentResponse> = {
+	url: '/admin/offerings',
+	method: 'POST',
+	mock: (_params, suffix, body) => {
+		const row = findMockOfferingRow(suffix);
+		const p = (body ?? {}) as MockComponentPayload;
+		const created = mockComponentFromPayload(
+			row.id,
+			p,
+			{
+				days: row.schedule_days,
+				start: row.schedule_start_time,
+				end: row.schedule_end_time,
+				name: row.classroom_name,
+				lat: row.classroom_lat,
+				lng: row.classroom_lng,
+			}
+		);
+		if (
+			row.components.some(
+				(c) =>
+					c.session_type === created.session_type &&
+					c.schedule_days === created.schedule_days &&
+					c.schedule_start_time === created.schedule_start_time
+			)
+		) {
+			throw new Error('Offering already has a component on that schedule.');
+		}
+		row.components.push(created);
+		refreshMockSessionTypes(row);
+		return created;
+	},
+};
+
+export const AdminOfferingComponentDetailEndpoint: EndpointDef<OfferingComponentResponse> = {
+	url: '/admin/offerings',
+	method: 'GET',
+	mock: (_params, suffix, body, method) => {
+		const { offering, component } = findMockComponentRow(suffix);
+		if (method === 'DELETE') {
+			component.is_active = false;
+			component.updated_at = new Date().toISOString();
+			refreshMockSessionTypes(offering);
+			return mockNoContent();
+		}
+		if (method === 'PATCH') {
+			const p = (body ?? {}) as MockComponentPayload;
+			if (p.schedule_days !== undefined)
+				component.schedule_days = String(p.schedule_days).trim().toUpperCase();
+			const start =
+				p.schedule_start_time !== undefined
+					? String(p.schedule_start_time)
+					: component.schedule_start_time;
+			const end =
+				p.schedule_end_time !== undefined
+					? String(p.schedule_end_time)
+					: component.schedule_end_time;
+			if (end <= start) throw new Error('schedule_end_time must be after schedule_start_time');
+			component.schedule_start_time = start;
+			component.schedule_end_time = end;
+			if (p.classroom_name !== undefined)
+				component.classroom_name = p.classroom_name ? String(p.classroom_name) : null;
+			if (p.classroom_lat !== undefined)
+				component.classroom_lat = p.classroom_lat === null ? null : Number(p.classroom_lat);
+			if (p.classroom_lng !== undefined)
+				component.classroom_lng = p.classroom_lng === null ? null : Number(p.classroom_lng);
+			if (typeof p.is_active === 'boolean') component.is_active = p.is_active;
+			component.updated_at = new Date().toISOString();
+			refreshMockSessionTypes(offering);
+			return component;
+		}
+		return component;
 	},
 };
 
@@ -1934,7 +2294,7 @@ export const AdminOfferingProfessorsEndpoint: EndpointDef<
 			);
 			if (!row) throw new Error('Assignment not found.');
 			row.effective_to = new Date().toISOString().slice(0, 10);
-			return undefined as unknown as AdminAssignmentResponse;
+			return mockNoContent();
 		}
 		if (method === 'POST') {
 			const p = (body ?? {}) as MockAssignmentPayload;
@@ -1994,6 +2354,17 @@ export const AdminOfferingBulkEnrollEndpoint: EndpointDef<AdminBulkEnrollResult>
 	url: '/admin/offerings',
 	method: 'POST',
 	mock: () => ({ enrolled: 3, skipped: 1, errors: [] }),
+};
+
+// Unenroll one student —
+// DELETE /admin/offerings/{id}/students/{student_number} (204, no body).
+// Removes the enrollment link row only; past attendance rows keep their
+// student+session identity. No mock: the roster mock fixture is static, so a
+// mock success would leave the removed row on screen; mock mode instead
+// throws the explicit mock_mode error like other unwired mutations.
+export const AdminOfferingUnenrollEndpoint: EndpointDef<void> = {
+	url: '/admin/offerings',
+	method: 'DELETE',
 };
 
 // --- Admin programs (Phase A: 4.5a + 4.5b) ----------------------------------
@@ -2076,14 +2447,32 @@ export const AdminProgramCreateEndpoint: EndpointDef<ProgramResponse> = {
 export const AdminProgramDetailEndpoint: EndpointDef<ProgramDetailResponse> = {
 	url: '/admin/programs',
 	method: 'GET',
-	mock: (_params, suffix) => {
+	mock: (_params, suffix, _body, method) => {
 		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (method === 'DELETE') {
+			const idx = MOCK_PROGRAMS.items.findIndex((p) => p.id === id);
+			if (idx === -1) throw new Error('Program not found.');
+			if (MOCK_PROGRAMS.items[idx].is_active)
+				throw new Error('Only inactive programs can be deleted.');
+			const [removed] = MOCK_PROGRAMS.items.splice(idx, 1);
+			MOCK_PROGRAMS.total = MOCK_PROGRAMS.items.length;
+			for (let i = MOCK_YEARS.length - 1; i >= 0; i--) {
+				if (MOCK_YEARS[i].program_id === removed.id) MOCK_YEARS.splice(i, 1);
+			}
+			return mockNoContent();
+		}
 		const program = MOCK_PROGRAMS.items.find((p) => p.id === id) ?? MOCK_PROGRAMS.items[0];
 		return {
 			...program,
 			year_levels: MOCK_YEARS.filter((y) => y.program_id === program.id),
 		};
 	},
+};
+
+export const AdminProgramImportEndpoint: EndpointDef<ProgramImportResult> = {
+	url: '/admin/programs/import',
+	method: 'POST',
+	mock: (_params, _suffix, body) => mockCsvImport(body, 5),
 };
 
 export const AdminYearLevelsEndpoint: EndpointDef<Paginated<YearLevelResponse>> = {
@@ -2710,6 +3099,17 @@ const MOCK_ADMIN_USER_ROWS: AdminUserResponse[] = [
 		last_login: null,
 		created_at: '2025-09-01T08:00:00.000Z',
 	},
+	{
+		id: 4,
+		email: 'juan.delacruz@isu.edu.ph',
+		role: 'student',
+		first_name: 'Juan',
+		last_name: 'Dela Cruz',
+		is_active: false,
+		must_change_password: true,
+		last_login: null,
+		created_at: '2025-09-15T08:00:00.000Z',
+	},
 ];
 
 const mockAdminUsersList = (
@@ -2794,7 +3194,19 @@ export const AdminUserDeactivateEndpoint: EndpointDef<void> = {
 		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
 		if (!row) throw new Error('User not found.');
 		row.is_active = false;
-		return undefined as unknown as void;
+		return undefined;
+	},
+};
+
+export const AdminUserReactivateEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'PATCH',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_USER_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('User not found.');
+		row.is_active = true;
+		return undefined;
 	},
 };
 
@@ -3210,9 +3622,13 @@ export const endpoints = {
 	adminOfferings: AdminOfferingsEndpoint,
 	adminOfferingCreate: AdminOfferingCreateEndpoint,
 	adminOfferingDetail: AdminOfferingDetailEndpoint,
+	adminOfferingComponents: AdminOfferingComponentsEndpoint,
+	adminOfferingComponentCreate: AdminOfferingComponentCreateEndpoint,
+	adminOfferingComponentDetail: AdminOfferingComponentDetailEndpoint,
 	adminOfferingProfessors: AdminOfferingProfessorsEndpoint,
 	adminOfferingRoster: AdminOfferingRosterEndpoint,
 	adminOfferingBulkEnroll: AdminOfferingBulkEnrollEndpoint,
+	adminOfferingUnenroll: AdminOfferingUnenrollEndpoint,
 	// Admin analytics + attendance overview (Phase 7; backend #136/#137/#138)
 	adminAnalyticsOverview: AdminAnalyticsOverviewEndpoint,
 	adminAnalyticsComparison: AdminAnalyticsComparisonEndpoint,
@@ -3230,6 +3646,7 @@ export const endpoints = {
 	adminUsers: AdminUsersEndpoint,
 	adminUserCreate: AdminUserCreateEndpoint,
 	adminUserDeactivate: AdminUserDeactivateEndpoint,
+	adminUserReactivate: AdminUserReactivateEndpoint,
 	// Admin password reset (three rosters, one backend implementation)
 	adminUserResetPassword: AdminUserResetPasswordEndpoint,
 	adminStudentResetPassword: AdminStudentResetPasswordEndpoint,
@@ -3238,10 +3655,12 @@ export const endpoints = {
 	adminCourses: AdminCoursesEndpoint,
 	adminCourseCreate: AdminCourseCreateEndpoint,
 	adminCourseDetail: AdminCourseDetailEndpoint,
+	adminCourseImport: AdminCourseImportEndpoint,
 	// Admin programs (Phase A)
 	adminPrograms: AdminProgramsEndpoint,
 	adminProgramCreate: AdminProgramCreateEndpoint,
 	adminProgramDetail: AdminProgramDetailEndpoint,
+	adminProgramImport: AdminProgramImportEndpoint,
 	adminYearLevels: AdminYearLevelsEndpoint,
 	adminYearLevelDetail: AdminYearLevelDetailEndpoint,
 	// Dashboard summaries (three roles, three mount points)

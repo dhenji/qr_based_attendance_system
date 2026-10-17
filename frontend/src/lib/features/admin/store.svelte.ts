@@ -21,6 +21,7 @@ import {
 	listProfessors,
 	listStudents,
 	listUsers,
+	reactivateUser,
 	setProfessorActive,
 	setStudentActive,
 } from '$lib/features/admin/service';
@@ -184,8 +185,8 @@ export const deleteArchivedProfessor = async (id: number): Promise<void> => {
 };
 
 // Admin users (super_admin only): list state for /admin/users. Create returns
-// the temp password once (held by the page, not the store); deactivate is
-// one-way — the backend mounts no reactivate route.
+// the temp password once (held by the page, not the store); deactivate and
+// reactivate are symmetric PATCHes on the user's is_active flag.
 export const adminUsersState = $state({
 	items: [] as AdminUser[],
 	total: 0,
@@ -230,6 +231,18 @@ export const deactivateAdminUser = async (user: AdminUser): Promise<void> => {
 		notifyEntityChanged('users');
 	} catch (e: unknown) {
 		adminUsersState.actionError = toMessage(e, 'Failed to deactivate user');
+		throw e;
+	}
+};
+
+export const reactivateAdminUser = async (user: AdminUser): Promise<void> => {
+	adminUsersState.actionError = null;
+	try {
+		await reactivateUser(user.id);
+		await refreshAdminUsers();
+		notifyEntityChanged('users');
+	} catch (e: unknown) {
+		adminUsersState.actionError = toMessage(e, 'Failed to reactivate user');
 		throw e;
 	}
 };

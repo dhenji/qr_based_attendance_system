@@ -170,14 +170,6 @@
 			<h1>Professor Dashboard</h1>
 			<p class="muted">{today}</p>
 		</div>
-		<button
-			class="btn btn-primary"
-			data-testid="new-session-header"
-			onclick={() => goto(Routes.PROFESSOR_SESSIONS_CREATE)}
-		>
-			<AppIcon name="plus" size={18} />
-			New Session
-		</button>
 	</header>
 
 	{#if loadError}

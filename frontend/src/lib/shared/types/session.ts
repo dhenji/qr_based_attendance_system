@@ -7,21 +7,22 @@
 // (snake_case); services map them to the camelCase view-models that pages
 // render (course names join client-side from GET /professor/courses, since
 // session rows carry only offering_id).
+//
+// `session_type` (D77) records whether the session is a lecture or a
+// laboratory meeting; every read carries it and the list/history/ledger
+// endpoints accept it as a filter.
+
+import type { CourseType } from './admin';
 
 export type SessionRowStatus = 'active' | 'closed';
 
-export type AttendanceValidationStatus =
-	| 'present'
-	| 'late'
-	| 'absent'
-	| 'excused'
-	| 'pending'
-	| 'rejected';
+export type SessionTypeFilter = CourseType;
 
 // GET /professor/sessions
 export interface SessionListItemResponse {
 	id: number;
 	offering_id: number;
+	session_type: CourseType;
 	session_code: string;
 	created_at: string;
 	expires_at: string | null;
@@ -31,6 +32,14 @@ export interface SessionListItemResponse {
 	absent_count: number;
 	status: SessionRowStatus;
 }
+
+export type AttendanceValidationStatus =
+	| 'present'
+	| 'late'
+	| 'absent'
+	| 'excused'
+	| 'pending'
+	| 'rejected';
 
 // GET /professor/sessions/history
 export interface SessionHistoryItemResponse extends SessionListItemResponse {
@@ -43,6 +52,7 @@ export interface SessionReadResponse {
 	id: number;
 	session_code: string;
 	offering_id: number;
+	session_type: CourseType;
 	qr_payload: {
 		v: 1;
 		code: string;
@@ -69,6 +79,7 @@ export interface ActiveStudentItemResponse {
 export interface SessionActiveResponse {
 	id: number;
 	offering: number;
+	session_type: CourseType;
 	session_code: string;
 	scan_window_remaining: number;
 	scheduled_end_time: string;
@@ -106,6 +117,7 @@ export interface ProfessorAttendanceItemResponse {
 	student_name: string;
 	section: string | null;
 	session_id: number;
+	session_type: CourseType;
 	status: AttendanceValidationStatus;
 	original_status: AttendanceValidationStatus | null;
 	scanned_at: string;
@@ -118,6 +130,7 @@ export interface ProfessorAttendanceItemResponse {
 export interface SessionSummary {
 	id: number;
 	offeringId: number;
+	sessionType: CourseType;
 	courseCode: string;
 	courseName: string;
 	section: string;
@@ -148,6 +161,7 @@ export interface LiveStudent {
 export interface LiveSession {
 	id: number;
 	offeringId: number;
+	sessionType: CourseType;
 	offeringCode: string;
 	offeringName: string;
 	offeringSections: string;
@@ -171,6 +185,7 @@ export interface LiveSession {
 export interface OpenedSession {
 	id: number;
 	offeringId: number;
+	sessionType: CourseType;
 	sessionCode: string;
 	qrPayload: {
 		v: 1;

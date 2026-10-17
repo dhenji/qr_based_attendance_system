@@ -16,6 +16,7 @@
 		type SessionHistorySortDir
 	} from '$lib/features/session/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
+	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 	import { formatDate, formatPercentage } from '$lib/shared/utils/format';
 
 	type HistoryRow = Awaited<ReturnType<typeof listSessionHistory>>['items'][number];
@@ -30,6 +31,7 @@
 
 	let course = $state('All');
 	let section = $state('All');
+	let sessionType = $state<'All' | 'lecture' | 'lab'>('All');
 	let from = $state(initialRange.from);
 	let to = $state(initialRange.to);
 	let sortBy = $state<SessionHistorySortBy>('date');
@@ -39,10 +41,15 @@
 	let total = $state(0);
 	let avgCompliance = $state(0);
 	let totalSessions = $state(0);
+	let avgScope = $state<'page' | 'filtered'>('page');
 	let isLoading = $state(true);
 	let loadError = $state<string | null>(null);
 	let reloadToken = $state(0);
 	let exporting = $state(false);
+	let exportError = $state<string | null>(null);
+	let exportWarning = $state<string | null>(null);
+	let exportProgress = $state<string | null>(null);
+	let exportToken = $state(0);
 
 	// Course options deduped by code; sections join from the live courses
 	// store (the history rows carry no section identity of their own, and the
@@ -74,6 +81,7 @@
 		const query = {
 			course: course === 'All' ? undefined : course,
 			section: section === 'All' ? undefined : section,
+			sessionType: sessionType === 'All' ? undefined : sessionType,
 			from: from || undefined,
 			to: to || undefined,
 			sortBy,
@@ -95,6 +103,7 @@
 				total = result.total;
 				avgCompliance = result.avg_compliance;
 				totalSessions = result.total_sessions;
+				avgScope = result.avg_scope;
 				// The service clamps out-of-range pages (e.g. filters shrank the
 				// result under us); follow it so the pager never points nowhere.
 				if (result.page !== currentPage) currentPage = result.page;
@@ -116,13 +125,35 @@
 	});
 
 	const pageCount = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-	const pageNumbers = $derived(Array.from({ length: pageCount }, (_, index) => index + 1));
+	// Windowed pager: a full term can span ~100+ pages, so rendering one
+	// button per page becomes a wall of buttons. Show first + last with a
+	// ±2 window around the current page instead (ledger pattern).
+	const visiblePages = $derived.by((): Array<number | 'gap-start' | 'gap-end'> => {
+		if (pageCount <= 7)
+			return Array.from({ length: pageCount }, (_, index) => index + 1);
+		const window: Array<number | 'gap-start' | 'gap-end'> = [1];
+		const start = Math.max(2, currentPage - 2);
+		const end = Math.min(pageCount - 1, currentPage + 2);
+		if (start > 2) window.push('gap-start');
+		for (let page = start; page <= end; page += 1) window.push(page);
+		if (end < pageCount - 1) window.push('gap-end');
+		window.push(pageCount);
+		return window;
+	});
 	const rangeText = $derived.by(() => {
 		if (total === 0) return '0 of 0 sessions';
 		const start = (currentPage - 1) * PAGE_SIZE + 1;
 		const end = Math.min(currentPage * PAGE_SIZE, total);
 		return `${start}–${end} of ${total} sessions`;
 	});
+	// The service averages the page in the single-query path but the whole
+	// filtered set in the course-fanout path — label the scope so a 10-row
+	// page never reads as the term.
+	const averageText = $derived(
+		avgScope === 'page'
+			? `Page average: ${formatPercentage(avgCompliance * 100)} · ${rangeText}`
+			: `Average: ${formatPercentage(avgCompliance * 100)} across ${totalSessions} filtered ${totalSessions === 1 ? 'session' : 'sessions'}`
+	);
 
 	const setSort = (key: SessionHistorySortBy) => {
 		if (sortBy === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -152,31 +183,67 @@
 	const resetFilters = () => {
 		course = 'All';
 		section = 'All';
+		sessionType = 'All';
 		from = initialRange.from;
 		to = initialRange.to;
 		currentPage = 1;
+		exportWarning = null;
+		exportProgress = null;
 	};
 
 	const viewDetail = (id: number) => void goto(professorActiveSession(id));
 
+	// Export page size: the history endpoint caps `size` at the server max
+	// (shared/pagination.py MAX_PAGE_SIZE), so one giant page is a 422.
+	// Page to exhaustion instead; the page cap bounds the whole export at
+	// 10k rows (the old single-shot intent) so a huge scope can never loop
+	// forever.
+	const EXPORT_PAGE_SIZE = 100;
+	const EXPORT_MAX_PAGES = 100;
+	const EXPORT_MAX_ROWS = EXPORT_PAGE_SIZE * EXPORT_MAX_PAGES;
+
 	const exportCsv = async () => {
 		if (exporting) return;
+		const token = exportToken + 1;
+		exportToken = token;
 		exporting = true;
+		exportError = null;
+		exportWarning = null;
+		exportProgress = 'Starting export…';
 		try {
-			const result = await listSessionHistory({
-				course: course === 'All' ? undefined : course,
-				section: section === 'All' ? undefined : section,
-				from: from || undefined,
-				to: to || undefined,
-				sortBy,
-				sortDir,
-				page: 1,
-				size: 10000
-			});
+			const all: HistoryRow[] = [];
+			const totalPagesGuess = Math.max(1, Math.ceil(total / EXPORT_PAGE_SIZE));
+			let page = 1;
+			for (;;) {
+				if (exportToken !== token) return;
+				exportProgress = `Exporting page ${page} of ~${totalPagesGuess}…`;
+				const result = await listSessionHistory({
+					course: course === 'All' ? undefined : course,
+					section: section === 'All' ? undefined : section,
+					sessionType: sessionType === 'All' ? undefined : sessionType,
+					from: from || undefined,
+					to: to || undefined,
+					sortBy,
+					sortDir,
+					page,
+					size: EXPORT_PAGE_SIZE
+				});
+				if (exportToken !== token) return;
+				all.push(...result.items);
+				if (result.items.length === 0 || all.length >= result.total) break;
+				page += 1;
+				if (page > EXPORT_MAX_PAGES) break;
+				if (all.length >= EXPORT_MAX_ROWS) break;
+			}
+			if (exportToken !== token) return;
+			if (page >= EXPORT_MAX_PAGES && all.length >= EXPORT_MAX_ROWS)
+				exportWarning = `Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows — narrow the date range for the full set.`;
+			exportProgress = null;
 			const csv = buildCsv(
 				[
 					'Date',
 					'Session code',
+					'Type',
 					'Course',
 					'Section',
 					'Present',
@@ -186,9 +253,10 @@
 					'Compliance %',
 					'Participation %'
 				],
-				result.items.map((row) => [
+				all.map((row) => [
 					row.created_at.slice(0, 10),
 					row.session_code,
+					row.session_type,
 					row.course_code,
 					row.section,
 					row.present_count,
@@ -207,9 +275,19 @@
 			anchor.click();
 			anchor.remove();
 			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		} catch (e: unknown) {
+			if (exportToken === token)
+				exportError = friendlyActionError(e, 'Export failed. Please try again.');
 		} finally {
-			exporting = false;
+			if (exportToken === token) {
+				exporting = false;
+				exportProgress = null;
+			}
 		}
+	};
+
+	const cancelExport = () => {
+		exportToken += 1;
 	};
 
 	const print = () => window.print();
@@ -257,6 +335,19 @@
 					{#each availableSections as option (option)}
 						<option value={option}>{option}</option>
 					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="session-type">Type</label>
+				<select
+					id="session-type"
+					class="form-input"
+					bind:value={sessionType}
+					onchange={() => (currentPage = 1)}
+				>
+					<option value="All">Lecture + Lab</option>
+					<option value="lecture">Lecture</option>
+					<option value="lab">Laboratory</option>
 				</select>
 			</div>
 			<div class="field">
@@ -333,6 +424,7 @@
 								</button>
 							</th>
 						<th scope="col">Section</th>
+						<th scope="col">Type</th>
 						<th scope="col">P / L / A</th>
 							<th scope="col" aria-sort={ariaSort('rate')}>
 								<button
@@ -358,6 +450,11 @@
 								<td>
 									<div class="course-name">{row.course_code}</div>
 									<div class="course-sub">Section {row.section}</div>
+								</td>
+								<td>
+									<span class="type-badge" class:is-lab={row.session_type === 'lab'}>
+										{row.session_type === 'lab' ? 'Lab' : 'Lecture'}
+									</span>
 								</td>
 								<td class="numeric">{plaText(row)}</td>
 								<td>
@@ -386,10 +483,18 @@
 			</div>
 			<div class="table-foot">
 				<p class="average">
-					Average: {formatPercentage(avgCompliance * 100)} over {totalSessions}
-					{totalSessions === 1 ? 'session' : 'sessions'}
+					{averageText}
 				</p>
 				<nav class="pages no-print" aria-label="History pages">
+					<button
+						class="page"
+						type="button"
+						disabled={currentPage <= 1}
+						onclick={() => (currentPage = 1)}
+						aria-label="Go to first history page"
+					>
+						First
+					</button>
 					<button
 						class="page"
 						type="button"
@@ -399,18 +504,22 @@
 					>
 						Previous
 					</button>
-					{#each pageNumbers as pageNumber (pageNumber)}
-						<button
-							class="page"
-							class:current={pageNumber === currentPage}
-							type="button"
-							disabled={pageNumber === currentPage}
-							onclick={() => (currentPage = pageNumber)}
-							aria-label={`Go to history page ${pageNumber}`}
-							aria-current={pageNumber === currentPage ? 'page' : undefined}
-						>
-							{pageNumber}
-						</button>
+					{#each visiblePages as pageNumber (pageNumber)}
+						{#if typeof pageNumber === 'number'}
+							<button
+								class="page"
+								class:current={pageNumber === currentPage}
+								type="button"
+								disabled={pageNumber === currentPage}
+								onclick={() => (currentPage = pageNumber)}
+								aria-label={`Go to history page ${pageNumber}`}
+								aria-current={pageNumber === currentPage ? 'page' : undefined}
+							>
+								{pageNumber}
+							</button>
+						{:else}
+							<span class="gap" aria-hidden="true">…</span>
+						{/if}
 					{/each}
 					<button
 						class="page"
@@ -421,6 +530,16 @@
 					>
 						Next
 					</button>
+					<button
+						class="page"
+						type="button"
+						disabled={currentPage >= pageCount}
+						onclick={() => (currentPage = pageCount)}
+						aria-label="Go to last history page"
+					>
+						Last
+					</button>
+					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
 				</nav>
 				<div class="table-actions no-print">
 					<button class="btn btn-secondary" type="button" onclick={print}>
@@ -436,7 +555,21 @@
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
 					</button>
+					{#if exporting}
+						<button class="btn btn-ghost" type="button" onclick={cancelExport}>
+							Cancel
+						</button>
+					{/if}
 				</div>
+				{#if exportProgress}
+					<p class="muted" role="status" aria-live="polite">{exportProgress}</p>
+				{/if}
+				{#if exportWarning}
+					<p class="warning" role="status">{exportWarning}</p>
+				{/if}
+				{#if exportError}
+					<p class="error" role="alert">{exportError}</p>
+				{/if}
 			</div>
 		</section>
 	{/if}
@@ -483,6 +616,13 @@
 	.error {
 		margin: 0 0 1rem;
 		color: var(--danger-strong);
+		font-weight: 600;
+	}
+
+	.warning {
+		margin: 0;
+		color: var(--warning-text);
+		font-size: 0.875rem;
 		font-weight: 600;
 	}
 
@@ -540,7 +680,7 @@
 
 	table {
 		width: 100%;
-		min-width: 680px;
+		min-width: 760px;
 		border-collapse: collapse;
 		font-size: 0.9375rem;
 	}
@@ -622,6 +762,22 @@
 	.course-sub {
 		font-size: 0.8125rem;
 		color: var(--text-muted);
+	}
+
+	.type-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--success);
+		background: var(--success-bg);
+		white-space: nowrap;
+	}
+
+	.type-badge.is-lab {
+		color: #92400e;
+		background: #fef3c7;
 	}
 
 	/* D36: compliance by default; the title/aria-label reveals participation. */
@@ -709,6 +865,21 @@
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
+	}
+
+	.gap {
+		padding: 0 0.125rem;
+		color: #94a3b8;
+		font-weight: 700;
+		user-select: none;
+	}
+
+	.page-count {
+		margin-left: 0.5rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		white-space: nowrap;
 	}
 
 	.table-actions {

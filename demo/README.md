@@ -26,10 +26,15 @@ venv activation or `PYTHONPATH` is needed. It also defaults `DEBUG=true` and a d
 Default login: `super@attendly.demo` / `Demo!1234` (override with
 `--email`, `--password`, or `DEMO_SUPER_ADMIN_PASSWORD`; `--update-password`
 resets the password on an existing account). Safe to re-run — it reuses
-existing rows.
+existing rows. For a guaranteed-clean slate instead, reset the database
+first (`docker compose -f docker-compose.dev.yml down -v`, then `up` to
+recreate and re-migrate before seeding).
 
 This creates programs (BSCS/BSIT/BSECE) with year levels, demo courses, and
-course offerings for `1st_sem`, `2026-2027`.
+course offerings for `1st_sem`, `2026-2027`. Meeting schedules match their
+course units exactly and session counts follow the meeting days, so the demo
+opens with clean weekly-requirement panels. Re-running repairs previously
+seeded offerings to match (skipped for offerings with opened sessions).
 
 ## 3. Import the rosters (as super_admin or admin)
 
@@ -37,8 +42,16 @@ course offerings for `1st_sem`, `2026-2027`.
 TOKEN=<login token for superadmin>
 curl -X POST http://localhost:8000/api/admin/students/import   -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/students.csv"
 curl -X POST http://localhost:8000/api/admin/professors/import -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/professors.csv"
+curl -X POST http://localhost:8000/api/admin/programs/import   -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/programs.csv"
+curl -X POST http://localhost:8000/api/admin/courses/import    -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/courses.csv"
 curl -X POST http://localhost:8000/api/admin/offerings/{id}/enrollments/bulk -H "Authorization: Bearer $TOKEN" -F "file=@demo/rosters/enrollments.csv"
 ```
+
+The programs/courses CSVs use fresh codes on purpose: the seed already owns
+`BSCS/BSIT/BSECE` and the `GE101/CS101/…` courses, and the import counts
+existing codes as duplicates (skipped, 0 imported). Year levels for the new
+programs and offerings for the new courses attach later via the detail pages
+— the import creates the records only.
 
 Find an offering id via `GET /api/admin/offerings`. The enrollments CSV column
 order follows `docs/architecture/api-contracts.md` (bulk-enroll contract).

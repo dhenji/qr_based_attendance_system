@@ -4,9 +4,10 @@
 // Real persistence by default: failed scan submissions enqueue with their
 // device-time scanned_at and drain oldest-first through the live scan
 // endpoint with X-Idempotency-Key = queue id (the backend keys idempotency
-// on user_id:session_id:key, so replays never double-record). Server 4xx
-// rejections are terminal (rejected + last_error); only network failures
-// stay pending with exponential backoff.
+// on user_id:session_id:key, so replays never double-record). Server
+// decisions (duplicate, mismatch, validation) are terminal (rejected +
+// last_error); transient failures — network loss, 429 rate-limit, timeouts,
+// 5xx — stay pending with exponential backoff.
 //
 // Two fallbacks share one code path: PUBLIC_MOCK_MODE=true and environments
 // without IndexedDB (SSR, some private modes) use an in-memory map instead —
@@ -86,9 +87,12 @@ export const registerOutboxSync = async (): Promise<void> => {
 		).sync;
 		if (!syncManager) return;
 		await syncManager.register('attendly-outbox');
-	} catch {
+	} catch (error) {
 		// No service worker / SyncManager (Firefox, iOS): the page-driven
-		// online-event and retry-timer paths already cover the drain.
+		// online-event and retry-timer paths already cover the drain. Log at
+		// debug so a real registration failure (e.g. quota) is diagnosable
+		// instead of silent.
+		console.debug('[sync] Background Sync registration skipped:', error);
 	}
 };
 
@@ -184,10 +188,17 @@ const idbOrMemory = async <T>(fn: () => Promise<T>, fallback: () => T): Promise<
 // --- Queue -------------------------------------------------------------------
 
 const nowIso = (): string => new Date().toISOString();
-const newId = (): string =>
-	typeof crypto !== 'undefined' && 'randomUUID' in crypto
-		? crypto.randomUUID()
-		: Math.random().toString(36).substring(2, 15);
+
+// Queue/idempotency ids: crypto UUIDs when available; the fallback mixes a
+// timestamp, a per-session counter, and randomness so two rapid offline scans
+// can never share an id (bare Math.random() could collide and the second
+// scan would reuse the first scan's idempotency key on replay).
+let fallbackSeq = 0;
+export const newQueueId = (): string => {
+	if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+	fallbackSeq += 1;
+	return `q-${Date.now().toString(36)}-${fallbackSeq.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 const listRows = (): Promise<QueuedScan[]> =>
 	idbOrMemory(
@@ -227,7 +238,7 @@ export const queue = {
 		const createdAt = nowIso();
 		const row: QueuedScan = {
 			...record,
-			id: newId(),
+			id: newQueueId(),
 			status: 'pending',
 			createdAt,
 			updatedAt: createdAt,
@@ -297,10 +308,49 @@ const toScanBody = (payload: QueuedScanPayload) => ({
 	scannedAt: payload.scannedAt
 });
 
+// Transient API failures worth another attempt: offline, 429 rate-limit,
+// timeouts, cancellations, and 5xx. Everything else the server decided
+// (duplicate, mismatch, validation) is terminal. Offline (network_error)
+// stays pending the same way it always did via the non-APIError else-branch
+// — naming it here only documents the intent after the fetch wrapper started
+// emitting it as an APIError.
+const isTransientApiError = (error: APIError): boolean => {
+	if (
+		error.code === 'network_error' ||
+		error.code === 'rate_limited' ||
+		error.code === 'request_timeout' ||
+		error.code === 'request_cancelled'
+	)
+		return true;
+	if (error.status !== undefined && error.status >= 500) return true;
+	return false;
+};
+
+const markRejected = async (id: string, lastError: string): Promise<void> => {
+	const rows = await listRows();
+	const row = rows.find((entry) => entry.id === id);
+	if (row) {
+		await writeRow({ ...row, status: 'rejected', updatedAt: nowIso(), lastError });
+	}
+};
+
+const markPendingForRetry = async (id: string, lastError: string): Promise<'rejected' | 'pending'> => {
+	const rows = await listRows();
+	const row = rows.find((entry) => entry.id === id);
+	if (!row) return 'pending';
+	const attempts = row.attempts + 1;
+	if (attempts >= row.maxAttempts) {
+		await writeRow({ ...row, status: 'rejected', updatedAt: nowIso(), attempts, lastError });
+		return 'rejected';
+	}
+	await writeRow({ ...row, status: 'pending', updatedAt: nowIso(), attempts, lastError });
+	return 'pending';
+};
+
 // flushQueue
 // Drain pending items oldest-first through the live scan endpoint, one
 // idempotent replay each (X-Idempotency-Key = queue id). Stops at the first
-// network failure — the rest would fail the same way — and leaves backoff
+// transient failure — the rest would fail the same way — and leaves backoff
 // scheduling to the caller via retryDelayMs.
 export const flushQueue = async (): Promise<{ synced: number; rejected: number; failed: number }> => {
 	if (isMockMode()) return { synced: 0, rejected: 0, failed: 0 };
@@ -320,31 +370,19 @@ export const flushQueue = async (): Promise<{ synced: number; rejected: number; 
 			await queue.updateStatus(item.id, 'synced');
 			synced += 1;
 		} catch (error) {
-			if (error instanceof APIError) {
+			if (error instanceof APIError && !isTransientApiError(error)) {
 				// The server decided: terminal, with its reason code preserved
 				// for the user-facing message.
-				const rows = await listRows();
-				const row = rows.find((entry) => entry.id === item.id);
-				if (row) {
-					await writeRow({ ...row, status: 'rejected', updatedAt: nowIso(), lastError: error.code });
-				}
+				await markRejected(item.id, error.code);
 				rejected += 1;
 			} else {
-				// Still offline: back to pending with backoff; stop draining.
-				const rows = await listRows();
-				const row = rows.find((entry) => entry.id === item.id);
-				if (row) {
-					const attempts = row.attempts + 1;
-					if (attempts >= row.maxAttempts) {
-						await writeRow({ ...row, status: 'rejected', updatedAt: nowIso(), attempts, lastError: 'sync_retries_exhausted' });
-						rejected += 1;
-					} else {
-						await writeRow({ ...row, status: 'pending', updatedAt: nowIso(), attempts });
-						failed += 1;
-					}
-				} else {
-					failed += 1;
-				}
+				// Still offline — or throttled/timed-out/5xx: back to pending
+				// with backoff; stop draining. A 429 must never burn queued
+				// evidence the way a decision code does.
+				const lastError = error instanceof APIError ? error.code : 'network_error';
+				const outcome = await markPendingForRetry(item.id, lastError);
+				if (outcome === 'rejected') rejected += 1;
+				else failed += 1;
 				break;
 			}
 		}

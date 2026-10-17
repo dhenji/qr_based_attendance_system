@@ -77,3 +77,46 @@ class CourseOffering(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     course: Mapped[Course] = relationship("Course", back_populates="course_offerings")
+    components: Mapped[list["OfferingComponent"]] = relationship(
+        "OfferingComponent", back_populates="offering"
+    )
+
+
+class OfferingComponent(TimestampMixin, Base):
+    """One scheduled component of a course offering (D77).
+
+    An offering with a single component behaves exactly like the pre-D77
+    offering (one schedule + one classroom carried on `course_offerings`
+    itself). A mixed course — e.g. laboratory on Monday, lecture on
+    Wednesday — carries two components with distinct days/times/rooms.
+    Sessions reference the offering only; their `session_type` says which
+    component they belong to.
+    """
+
+    __tablename__ = "offering_components"
+    __table_args__ = (
+        UniqueConstraint(
+            "offering_id",
+            "session_type",
+            "schedule_days",
+            "schedule_start_time",
+            name="uq_offering_component",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    offering_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("course_offerings.id", ondelete="RESTRICT"), index=True
+    )
+    session_type: Mapped[str] = mapped_column(String(20))
+    schedule_days: Mapped[str] = mapped_column(String(10))
+    schedule_start_time: Mapped[time] = mapped_column(Time)
+    schedule_end_time: Mapped[time] = mapped_column(Time)
+    classroom_name: Mapped[str | None] = mapped_column(String(100))
+    classroom_lat: Mapped[float | None] = mapped_column(Float)
+    classroom_lng: Mapped[float | None] = mapped_column(Float)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
+
+    offering: Mapped[CourseOffering] = relationship(
+        "CourseOffering", back_populates="components"
+    )

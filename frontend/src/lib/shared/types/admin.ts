@@ -16,6 +16,7 @@ export interface AdminStudentResponse {
 	year_level_label: string;
 	section: string | null;
 	is_active: boolean;
+	claim_status: 'Claimed' | 'Unclaimed';
 	face_enrolled: boolean;
 	created_at: string;
 	scan_count: number;
@@ -37,6 +38,7 @@ export interface AdminStudent {
 	yearLevelLabel: string;
 	section?: string;
 	isActive: boolean;
+	claimStatus: 'Claimed' | 'Unclaimed';
 	faceEnrolled: boolean;
 	createdAt: string;
 	scanCount: number;
@@ -146,6 +148,10 @@ export interface AdminOfferingResponse {
 	// render undefined. Do not treat as persisted until a backend migration
 	// lands.
 	course_type?: CourseType;
+	// Persisted per-type schedules (D77). Present on live GETs; the read also
+	// carries the distinct `session_types` driving Lecture/Lab/Mixed badges.
+	session_types: CourseType[];
+	components: OfferingComponentResponse[];
 	classroom_name: string | null;
 	classroom_lat: number | null;
 	classroom_lng: number | null;
@@ -167,6 +173,70 @@ export interface AdminOfferingResponse {
 // sorts run client-side over the loaded page, like programs.
 
 export type CourseType = 'lecture' | 'lab';
+
+// --- Offering components (D77: per-type schedules) ---------------------------
+//
+// A component is one scheduled slice of an offering: its session type plus
+// the days/times/room that type meets on. A single-component offering behaves
+// like the pre-D77 offering; a mixed course carries e.g. a lab component on
+// Monday plus a lecture component on Wednesday.
+
+export interface OfferingComponentResponse {
+	id: number;
+	offering_id: number;
+	session_type: CourseType;
+	schedule_days: string;
+	schedule_start_time: string;
+	schedule_end_time: string;
+	classroom_name: string | null;
+	classroom_lat: number | null;
+	classroom_lng: number | null;
+	is_active: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface OfferingComponent {
+	id: number;
+	offeringId: number;
+	sessionType: CourseType;
+	scheduleDays: string;
+	scheduleStartTime: string;
+	scheduleEndTime: string;
+	classroomName?: string;
+	classroomLat?: number;
+	classroomLng?: number;
+	isActive: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface OfferingComponentCreatePayload {
+	session_type: CourseType;
+	schedule_days: string;
+	schedule_start_time: string;
+	schedule_end_time: string;
+	classroom_name?: string;
+	classroom_lat?: number;
+	classroom_lng?: number;
+}
+
+export interface OfferingComponentUpdatePayload {
+	schedule_days?: string;
+	schedule_start_time?: string;
+	schedule_end_time?: string;
+	classroom_name?: string | null;
+	classroom_lat?: number | null;
+	classroom_lng?: number | null;
+	is_active?: boolean;
+}
+
+/** Display label for an offering's type mix: Lecture / Laboratory / Mixed. */
+export const sessionMixLabel = (types: CourseType[]): string => {
+	if (types.includes('lecture') && types.includes('lab')) return 'Mixed';
+	if (types.includes('lab')) return 'Laboratory';
+	return 'Lecture';
+};
 
 export interface AdminCourseResponse {
 	id: number;
@@ -235,6 +305,10 @@ export interface AdminOffering {
 	scheduleStartTime: string;
 	scheduleEndTime: string;
 	courseType: CourseType;
+	// Distinct types across the active components (D77). Drives the
+	// Lecture / Laboratory / Mixed badge via `sessionMixLabel`.
+	sessionTypes: CourseType[];
+	components: OfferingComponent[];
 	classroomName?: string;
 	classroomLat?: number;
 	classroomLng?: number;
@@ -264,6 +338,9 @@ export interface AdminOfferingCreatePayload {
 	schedule_end_time: string;
 	// Local-only label (see AdminOfferingResponse.course_type).
 	course_type?: CourseType;
+	// Optional per-type schedules (D77). Omitted means a single lecture
+	// component mirroring the offering schedule/classroom.
+	components?: OfferingComponentCreatePayload[];
 	classroom_name?: string;
 	classroom_lat?: number;
 	classroom_lng?: number;
@@ -613,6 +690,18 @@ export interface StudentImportResult {
 }
 
 export interface ProfessorImportResult {
+	imported: number;
+	duplicates: number;
+	errors: CsvImportError[];
+}
+
+export interface ProgramImportResult {
+	imported: number;
+	duplicates: number;
+	errors: CsvImportError[];
+}
+
+export interface CourseImportResult {
 	imported: number;
 	duplicates: number;
 	errors: CsvImportError[];

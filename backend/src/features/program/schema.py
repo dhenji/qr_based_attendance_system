@@ -65,12 +65,26 @@ class ProgramUpdate(BaseModel):
 
 
 class Term(BaseModel):
-    code: str
-    label: str
+    code: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+
+    @field_validator("code", "label", mode="before")
+    @classmethod
+    def _trim(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class TermStructure(BaseModel):
     terms: list[Term] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_codes(self) -> "TermStructure":
+        codes = [term.code for term in self.terms]
+        if len(codes) != len(set(codes)):
+            raise ValueError("term codes must be unique")
+        return self
 
 
 class YearLevelRead(BaseModel):
@@ -108,3 +122,14 @@ class YearLevelUpdate(BaseModel):
 
 class ProgramDetail(ProgramRead):
     year_levels: list[YearLevelRead] = Field(default_factory=list)
+
+
+class ProgramImportError(BaseModel):
+    line: int
+    reason: str
+
+
+class ProgramImportResult(BaseModel):
+    imported: int
+    duplicates: int
+    errors: list[ProgramImportError] = Field(default_factory=list)

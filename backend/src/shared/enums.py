@@ -48,6 +48,7 @@ class AuditAction(StrEnum):
     DELETE = "delete"
     IMPORT = "import"
     ENROLL = "enroll"
+    UNENROLL = "unenroll"
     ASSIGN = "assign"
     UNASSIGN = "unassign"
     OPEN = "open"
@@ -118,6 +119,18 @@ class BackupStatus(StrEnum):
 class ScannedVia(StrEnum):
     QR_CAMERA = "qr_camera"
     MANUAL_CODE = "manual_code"
+
+
+class SessionType(StrEnum):
+    """Lecture vs laboratory session/component vocabulary (D77).
+
+    Stored as free-form `String(20)` with a CHECK constraint, mirroring how
+    `ValidationStatus` is handled: the enum is the contract, the database
+    only guards the value set.
+    """
+
+    LECTURE = "lecture"
+    LAB = "lab"
 
 
 class SyncStatus(StrEnum):

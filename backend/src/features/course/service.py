@@ -9,20 +9,37 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.course.exceptions import (
+    ComponentExistsException,
+    ComponentNotFoundException,
     CourseCodeExistsException,
+    CourseHasOfferingsException,
+    CourseNotArchivedException,
     CourseNotFoundException,
+    EnrollmentNotFoundException,
     OfferingAssignmentNotFoundException,
     OfferingExistsException,
+    OfferingHasAssignmentsException,
+    OfferingHasEnrollmentsException,
+    OfferingHasSessionsException,
+    OfferingNotArchivedException,
     OfferingNotFoundException,
     OfferingScheduleWindowException,
+    ScheduleMismatchException,
+    WeeklyHoursBelowUnitsException,
+    WeeklyHoursExceedUnitsException,
     WindowsExceedDurationException,
 )
-from features.course.model import Course, CourseOffering
+from features.course.model import Course, CourseOffering, OfferingComponent
 from features.course.schema import (
     AssignmentRead,
     BulkEnrollError,
     BulkEnrollResult,
+    ComponentCreate,
+    ComponentRead,
+    ComponentUpdate,
     CourseCreate,
+    CourseImportError,
+    CourseImportResult,
     CourseRead,
     CourseUpdate,
     OfferingCreate,
@@ -37,11 +54,13 @@ from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
 from features.professor.exceptions import ProfessorNotFoundException
 from features.professor.model import Professor
+from features.session.model import Session
 from features.program.exceptions import (
     ProgramNotFoundException,
     YearLevelNotFoundException,
 )
 from features.program.model import Program, YearLevel
+from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from shared.audit import record_audit
 from shared.base import BaseCRUD
@@ -52,10 +71,21 @@ from shared.csv_import import (
     CsvRow,
     CsvSchema,
     parse_import_csv,
+    strip_upper,
 )
-from shared.enums import AuditAction, AuditEntity
+from shared.enums import AuditAction, AuditEntity, SessionType
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
+from shared.schedule import distinct_day_count, meeting_minutes
+from features.course.constants import (
+    CODE_MAX_LENGTH,
+    CODE_MIN_LENGTH,
+    DURATION_MAX,
+    DURATION_MIN,
+    NAME_MAX_LENGTH,
+    UNITS_MAX,
+    UNITS_MIN,
+)
 
 BULK_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn("student_id", required_reason="missing student_id"),
@@ -141,11 +171,160 @@ def parse_enrollment_csv(content: bytes) -> tuple[list[_CsvRow], list[BulkEnroll
     return [_to_csv_row(row) for row in rows], errors
 
 
+COURSE_CSV_COLUMNS: tuple[CsvColumn, ...] = (
+    CsvColumn(
+        "course_code", normalize=strip_upper, required_reason="missing course_code"
+    ),
+    CsvColumn("course_name"),
+    CsvColumn("units", required_reason="missing units"),
+    CsvColumn(
+        "session_duration_hours", required_reason="missing session_duration_hours"
+    ),
+)
+
+COURSE_CSV_SCHEMA = CsvSchema(
+    columns=COURSE_CSV_COLUMNS,
+    subject="course",
+    subject_column="course_code",
+    subject_fallback="on line",
+    checks=(
+        CsvGroup(
+            columns=("course_name",),
+            reason="missing required field for {subject} {key}",
+        ),
+    ),
+)
+
+
+@dataclass(kw_only=True)
+class _CourseRow:
+    line: int
+    course_code: str
+    course_name: str
+    units: str
+    session_duration_hours: str
+
+
+def _to_course_row(raw: CsvRow) -> _CourseRow:
+    values: dict[str, str] = raw.values
+
+    return _CourseRow(
+        line=raw.line,
+        course_code=values["course_code"],
+        course_name=values["course_name"],
+        units=values["units"],
+        session_duration_hours=values["session_duration_hours"],
+    )
+
+
+def parse_course_csv(
+    content: bytes,
+) -> tuple[list[_CourseRow], list[CourseImportError]]:
+    """Parse the course-import CSV upload.
+
+    Returns (valid_rows, errors). Never raises on bad rows — every problem
+    is reported as a CourseImportError with its 1-based line number
+    (header = 1). Codes are uppercased so duplicate detection agrees with
+    single-create.
+    """
+    rows, errors = parse_import_csv(
+        content,
+        COURSE_CSV_SCHEMA,
+        error=lambda line, reason: CourseImportError(line=line, reason=reason),
+    )
+
+    return [_to_course_row(row) for row in rows], errors
+
+
+def _validate_course_row(row: _CourseRow) -> str | None:
+    """Domain validation beyond presence. Returns the reason or None."""
+    if not (CODE_MIN_LENGTH <= len(row.course_code) <= CODE_MAX_LENGTH):
+        return (
+            f"invalid course_code for course {row.course_code}: "
+            f"must be {CODE_MIN_LENGTH}-{CODE_MAX_LENGTH} characters"
+        )
+    name = row.course_name.strip()
+    if not (1 <= len(name) <= NAME_MAX_LENGTH):
+        return f"invalid course_name for course {row.course_code}"
+    try:
+        units = int(row.units.strip())
+    except ValueError:
+        return f"invalid units for course {row.course_code}"
+    if not (UNITS_MIN <= units <= UNITS_MAX):
+        return (
+            f"invalid units for course {row.course_code}: "
+            f"must be {UNITS_MIN}-{UNITS_MAX}"
+        )
+    try:
+        duration = float(row.session_duration_hours.strip())
+    except ValueError:
+        return f"invalid session_duration_hours for course {row.course_code}"
+    if not (DURATION_MIN <= duration <= DURATION_MAX):
+        return (
+            f"invalid session_duration_hours for course {row.course_code}: "
+            f"must be {DURATION_MIN}-{DURATION_MAX}"
+        )
+    return None
+
+
+def _check_weekly_hours(
+    course: Course, new_total_minutes: float, old_total_minutes: float | None
+) -> None:
+    """Enforce `units` as the required weekly scheduled meeting hours (D79).
+
+    Totals are compared in whole minutes: every meeting duration is
+    minute-precise and multiplied by an integer day count, so rounding here
+    only absorbs float dust, never a real deviation.
+    `new_total_minutes` is the merged active-set total after the proposed
+    write; `old_total_minutes` is the current active-set total (`None` for
+    offering creation, where there is no current set). A write landing
+    exactly on `units * 60` always passes. Off-requirement totals may only
+    converge: the new total must move strictly closer without crossing to
+    the other side (an under total cannot overshoot into over and vice
+    versa). Callers: offering creation (exact only), component add, and
+    component reactivation. Plain component edits skip this check by design
+    (D81) — multi-step reshapes pass through mismatched totals — as do
+    reads, archives, deactivations, and schedule-untouched edits.
+    """
+
+    def _as_minutes(value: float) -> int:
+        return int(round(value))
+
+    limit_minutes = int(course.units) * 60
+    new_minutes = _as_minutes(new_total_minutes)
+    if new_minutes == limit_minutes:
+        return
+    if old_total_minutes is not None:
+        old_minutes = _as_minutes(old_total_minutes)
+        same_side = (new_minutes - limit_minutes) * (old_minutes - limit_minutes) > 0
+        closer = abs(new_minutes - limit_minutes) < abs(old_minutes - limit_minutes)
+        if old_minutes != limit_minutes and same_side and closer:
+            return
+    scheduled_hours = round(new_minutes / 60, 2)
+    limit_hours = round(limit_minutes / 60, 2)
+    if new_minutes > limit_minutes:
+        raise WeeklyHoursExceedUnitsException(
+            scheduled_hours,
+            limit_hours,
+            course.course_code,
+            int(course.units),
+        )
+    raise WeeklyHoursBelowUnitsException(
+        scheduled_hours,
+        limit_hours,
+        course.course_code,
+        int(course.units),
+    )
+
+
 class CourseService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._courses: BaseCRUD[Course] = BaseCRUD(Course, session)
         self._offerings: BaseCRUD[CourseOffering] = BaseCRUD(CourseOffering, session)
+        self._components: BaseCRUD[OfferingComponent] = BaseCRUD(
+            OfferingComponent, session
+        )
         self._enrollments: BaseCRUD[Enrollment] = BaseCRUD(Enrollment, session)
         self._students: BaseCRUD[Student] = BaseCRUD(Student, session)
 
@@ -244,20 +423,106 @@ class CourseService:
 
         return CourseRead.model_validate(course)
 
-    async def archive(self, *, course_id: int, actor_id: int | None = None) -> None:
+    async def hard_delete(
+        self, *, course_id: int, actor_id: int | None = None
+    ) -> None:
+        """Permanently delete an archived course with no offerings."""
         course: Course = await self._get_or_404(course_id)
+
+        if course.is_active:
+            raise CourseNotArchivedException(course.id)
+
+        offering_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseOffering)
+                .where(CourseOffering.course_id == course_id)
+            )
+            or 0
+        )
+
+        if offering_count > 0:
+            raise CourseHasOfferingsException(course_id)
+
+        # Snapshot before the delete: the instance is detached once flushed.
         old_value = self._course_snapshot(course)
-        course.is_active = False
-        await self._session.flush()
 
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action=AuditAction.ARCHIVE,
+            action=AuditAction.DELETE,
             entity_type=AuditEntity.COURSE,
             entity_id=course.id,
             old_value=old_value,
-            new_value=self._course_snapshot(course),
+        )
+
+        await self._session.delete(course)
+        await self._session.flush()
+
+    async def import_roster(
+        self, *, content: bytes, actor_id: int | None
+    ) -> CourseImportResult:
+        """Create NEW course templates from a CSV upload.
+
+        Rows whose course_code already exists — in the database or earlier
+        in the same file — are counted as duplicates, not errors. Courses
+        stay standalone templates (D44): no program, schedule, or classroom
+        linkage is created here; offerings attach later.
+        """
+        rows, errors = parse_course_csv(content)
+        imported = 0
+        duplicates = 0
+        seen_codes: set[str] = set()
+
+        for row in rows:
+            if (
+                row.course_code in seen_codes
+                or await self._courses.get_by(course_code=row.course_code) is not None
+            ):
+                duplicates += 1
+                seen_codes.add(row.course_code)
+                continue
+
+            seen_codes.add(row.course_code)
+            reason = _validate_course_row(row)
+
+            if reason is not None:
+                errors.append(CourseImportError(line=row.line, reason=reason))
+                continue
+
+            self._session.add(
+                Course(
+                    course_code=row.course_code,
+                    course_name=row.course_name.strip(),
+                    units=int(row.units.strip()),
+                    session_duration_hours=float(
+                        row.session_duration_hours.strip()
+                    ),
+                )
+            )
+            imported += 1
+
+        await self._session.flush()
+
+        # One row for the upload rather than one per course, so a large
+        # file cannot bury every other action in the trail.
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.IMPORT,
+            entity_type=AuditEntity.COURSE,
+            entity_id=None,
+            new_value={
+                "imported": imported,
+                "duplicates": duplicates,
+                "errors": len(errors),
+            },
+        )
+
+        errors.sort(key=lambda e: e.line)
+
+        return CourseImportResult(
+            imported=imported, duplicates=duplicates, errors=errors
         )
 
     @staticmethod
@@ -292,8 +557,48 @@ class CourseService:
             payload.default_late_window_minutes,
         )
         await self._require_no_duplicate_offering(payload)
+        if payload.components:
+            new_total = sum(
+                meeting_minutes(
+                    component.schedule_days,
+                    component.schedule_start_time,
+                    component.schedule_end_time,
+                )
+                for component in payload.components
+            )
+        else:
+            new_total = meeting_minutes(
+                payload.schedule_days,
+                payload.schedule_start_time,
+                payload.schedule_end_time,
+            )
+        _check_weekly_hours(course, new_total, None)
 
-        offering: CourseOffering = await self._offerings.create(**payload.model_dump())
+        offering: CourseOffering = await self._offerings.create(
+            **payload.model_dump(exclude={"components"})
+        )
+
+        # D77: an offering without explicit components gets a single lecture
+        # component mirroring its schedule/classroom, so every offering —
+        # old or new — has at least one component to pre-fill sessions from.
+        if payload.components:
+            for component in payload.components:
+                await self._insert_component(offering=offering, payload=component)
+        else:
+            await self._insert_component(
+                offering=offering,
+                payload=ComponentCreate(
+                    session_type=SessionType.LECTURE,
+                    schedule_days=payload.schedule_days,
+                    schedule_start_time=payload.schedule_start_time,
+                    schedule_end_time=payload.schedule_end_time,
+                    classroom_name=payload.classroom_name,
+                    classroom_lat=payload.classroom_lat,
+                    classroom_lng=payload.classroom_lng,
+                ),
+            )
+        await self._mirror_single_component(offering)
+        await self._sync_sessions_per_week(offering)
 
         await record_audit(
             self._session,
@@ -381,6 +686,14 @@ class CourseService:
         if start is None or end is None or end <= start:
             raise OfferingScheduleWindowException()
 
+        # Activation gate (D82): an offering whose meetings mismatch the
+        # requirement cannot go live. Only the False -> True transition is
+        # checked, before the row is dirtied — deactivation, unrelated
+        # PATCHes, and already-active rows are unaffected, including the
+        # zero-meeting case, which mismatches every positive units value.
+        if bool(changes.get("is_active", offering.is_active)) and not offering.is_active:
+            await self._require_exact_for_activation(offering)
+
         for field, value in changes.items():
             setattr(offering, field, value)
 
@@ -408,23 +721,84 @@ class CourseService:
 
         return await self._to_offering_read(offering)
 
-    async def archive_offering(
+    async def hard_delete_offering(
         self, *, offering_id: int, actor_id: int | None = None
     ) -> None:
+        """Permanently delete an archived offering with no dependents.
+
+        Guards run in FK order — enrollments, sessions, assignments — before
+        the delete, so a `RESTRICT` violation can never surface as a 500.
+        Components are owned by the offering and are removed with it once the
+        guards above are proven empty.
+        """
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
+
+        if offering.is_active:
+            raise OfferingNotArchivedException(offering.id)
+
+        enrollment_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Enrollment)
+                .where(Enrollment.offering_id == offering_id)
+            )
+            or 0
+        )
+
+        if enrollment_count > 0:
+            raise OfferingHasEnrollmentsException(offering_id)
+
+        session_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Session)
+                .where(Session.offering_id == offering_id)
+            )
+            or 0
+        )
+
+        if session_count > 0:
+            raise OfferingHasSessionsException(offering_id)
+
+        assignment_count: int = (
+            await self._session.scalar(
+                select(func.count())
+                .select_from(CourseProfessor)
+                .where(CourseProfessor.offering_id == offering_id)
+            )
+            or 0
+        )
+
+        if assignment_count > 0:
+            raise OfferingHasAssignmentsException(offering_id)
+
+        # Snapshot before the delete: the instance is detached once flushed.
         old_value = self._offering_snapshot(offering)
-        offering.is_active = False
-        await self._session.flush()
 
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action=AuditAction.ARCHIVE,
+            action=AuditAction.DELETE,
             entity_type=AuditEntity.COURSE_OFFERING,
             entity_id=offering.id,
             old_value=old_value,
-            new_value=self._offering_snapshot(offering),
         )
+
+        # Components have no meaning without their offering — remove them with
+        # it now that enrollments/sessions/assignments are proven empty.
+        components: Sequence[OfferingComponent] = (
+            await self._session.scalars(
+                select(OfferingComponent).where(
+                    OfferingComponent.offering_id == offering_id
+                )
+            )
+        ).all()
+
+        for component in components:
+            await self._session.delete(component)
+
+        await self._session.delete(offering)
+        await self._session.flush()
 
     # -- professor assignments -------------------------------------------
 
@@ -686,6 +1060,56 @@ class CourseService:
             is not None
         )
 
+    async def unenroll_student(
+        self, *, offering_id: int, student_number: str, actor_id: int | None = None
+    ) -> None:
+        """Remove one enrollment link row.
+
+        The link only: past attendance, excuse, and risk rows keep their
+        student+session identity, and future scans are blocked by the live
+        enrollment check. No `is_active` gate — cleanup on an archived
+        offering must still work. Re-enrolling afterwards is a normal
+        bulk-enroll row (the dedupe no longer matches).
+        """
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+
+        student: Student | None = await self._students.get_by(
+            student_id=student_number
+        )
+
+        if student is None:
+            raise StudentNotFoundException(student_number)
+
+        enrollment: Enrollment | None = await self._enrollments.get_by(
+            student_id=student.id,
+            offering_id=offering.id,
+            academic_year=offering.academic_year,
+        )
+
+        if enrollment is None:
+            raise EnrollmentNotFoundException(offering_id, student_number)
+
+        # Snapshot before the delete: the instance is detached once flushed.
+        enrollment_id: int = enrollment.id
+        old_value: dict[str, Any] = {
+            "offering_id": offering_id,
+            "student_id": student.student_id,
+            "semester": enrollment.semester,
+            "academic_year": enrollment.academic_year,
+        }
+
+        await self._session.delete(enrollment)
+        await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UNENROLL,
+            entity_type=AuditEntity.ENROLLMENT,
+            entity_id=enrollment_id,
+            old_value=old_value,
+        )
+
     async def get_roster(
         self,
         *,
@@ -799,6 +1223,31 @@ class CourseService:
 
         return offering
 
+    async def _require_exact_for_activation(self, offering: CourseOffering) -> None:
+        """Block activating an offering whose meetings mismatch the requirement.
+
+        Compared in whole minutes like every other weekly check. Only called
+        on the activation transition; deactivation never reaches here.
+        """
+        course: Course = await self._get_or_404(offering.course_id)
+        active: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
+        total_minutes = sum(
+            meeting_minutes(
+                row.schedule_days, row.schedule_start_time, row.schedule_end_time
+            )
+            for row in active
+        )
+        limit_minutes = int(course.units) * 60
+        if int(round(total_minutes)) != limit_minutes:
+            raise ScheduleMismatchException(
+                round(total_minutes / 60, 2),
+                round(limit_minutes / 60, 2),
+                course.course_code,
+                int(course.units),
+            )
+
     async def _enrollment_count(self, offering_id: int) -> int:
         return (
             await self._session.scalar(
@@ -815,6 +1264,13 @@ class CourseService:
         `model_validate` cannot see derived aggregates (§1.7), and mutating the
         model afterwards would leave a half-filled schema behind.
         """
+        components: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
+        reads: list[ComponentRead] = [
+            ComponentRead.model_validate(row) for row in components
+        ]
+
         return OfferingRead(
             id=offering.id,
             course_id=offering.course_id,
@@ -833,10 +1289,284 @@ class CourseService:
             default_present_window_minutes=offering.default_present_window_minutes,
             default_late_window_minutes=offering.default_late_window_minutes,
             enrolled_count=await self._enrollment_count(offering.id),
+            session_types=sorted({row.session_type for row in components}),
+            components=reads,
             is_active=offering.is_active,
             created_at=offering.created_at,
             updated_at=offering.updated_at,
         )
+
+    # -- offering components (D77) --------------------------------------
+
+    async def list_components(self, *, offering_id: int) -> list[ComponentRead]:
+        """Active scheduled components of one offering, oldest first."""
+        await self._get_offering_or_404(offering_id)
+
+        return [
+            ComponentRead.model_validate(row)
+            for row in await self._active_components(offering_id)
+        ]
+
+    async def create_component(
+        self,
+        *,
+        offering_id: int,
+        payload: ComponentCreate,
+        actor_id: int | None = None,
+    ) -> ComponentRead:
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        # Duplicate reports 409 even when the merged total would also exceed
+        # the weekly requirement, so check the unique key before it.
+        if (
+            await self._components.get_by(
+                offering_id=offering.id,
+                session_type=payload.session_type.value,
+                schedule_days=payload.schedule_days,
+                schedule_start_time=payload.schedule_start_time,
+            )
+            is not None
+        ):
+            raise ComponentExistsException(offering.id, payload.session_type.value)
+        course: Course = await self._get_or_404(offering.course_id)
+        existing = await self._active_components(offering_id)
+        old_total = sum(
+            meeting_minutes(
+                row.schedule_days, row.schedule_start_time, row.schedule_end_time
+            )
+            for row in existing
+        )
+        new_total = old_total + meeting_minutes(
+            payload.schedule_days,
+            payload.schedule_start_time,
+            payload.schedule_end_time,
+        )
+        _check_weekly_hours(course, new_total, old_total)
+        row: OfferingComponent = await self._insert_component(
+            offering=offering, payload=payload
+        )
+        await self._mirror_single_component(offering)
+        await self._sync_sessions_per_week(offering)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.COURSE_OFFERING,
+            entity_id=offering.id,
+            new_value=self._component_snapshot(row),
+        )
+
+        return ComponentRead.model_validate(row)
+
+    async def update_component(
+        self,
+        *,
+        offering_id: int,
+        component_id: int,
+        payload: ComponentUpdate,
+        actor_id: int | None = None,
+    ) -> ComponentRead:
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        row: OfferingComponent = await self._get_component_or_404(
+            offering_id, component_id
+        )
+        changes: dict[str, Any] = payload.model_dump(exclude_unset=True)
+        old_value = self._component_snapshot(row)
+
+        # Validate against the merged result, before touching the ORM object —
+        # same reason `update_offering` checks the merged schedule window.
+        start = changes.get("schedule_start_time", row.schedule_start_time)
+        end = changes.get("schedule_end_time", row.schedule_end_time)
+
+        if start is None or end is None or end <= start:
+            raise OfferingScheduleWindowException()
+
+        merged_days = changes.get("schedule_days", row.schedule_days)
+        # Reshape edits on active rows are unconstrained: a multi-step
+        # schedule change (shrink one meeting, add another) necessarily passes
+        # through a mismatched total no single write could land exactly on,
+        # so per-write enforcement here would freeze exact rows and strand
+        # legacy ones (D81). Exactness is enforced where a complete schedule
+        # arrives at once (offering creation) and where the total only grows
+        # (component add); the red over/short panels stay visible until the
+        # reshape converges. Reactivating restores minutes like an add, so it
+        # is checked even when the schedule itself is unchanged; deactivating
+        # only shrinks the total and never needs the check.
+        if not row.is_active and bool(changes.get("is_active", row.is_active)):
+            course: Course = await self._get_or_404(offering.course_id)
+            existing = await self._active_components(offering_id)
+            old_total = sum(
+                meeting_minutes(
+                    active.schedule_days,
+                    active.schedule_start_time,
+                    active.schedule_end_time,
+                )
+                for active in existing
+            )
+            # The reactivated row was not in the active total.
+            new_total = old_total + meeting_minutes(merged_days, start, end)
+            _check_weekly_hours(course, new_total, old_total)
+
+        for field, value in changes.items():
+            setattr(row, field, value)
+
+        await self._session.flush()
+        await self._session.refresh(row)
+        await self._mirror_single_component(
+            await self._get_offering_or_404(offering_id)
+        )
+        await self._sync_sessions_per_week(offering)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.COURSE_OFFERING,
+            entity_id=offering_id,
+            old_value=old_value,
+            new_value=self._component_snapshot(row),
+        )
+
+        return ComponentRead.model_validate(row)
+
+    async def archive_component(
+        self, *, offering_id: int, component_id: int, actor_id: int | None = None
+    ) -> None:
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        row: OfferingComponent = await self._get_component_or_404(
+            offering_id, component_id
+        )
+        old_value = self._component_snapshot(row)
+        row.is_active = False
+        await self._session.flush()
+        await self._mirror_single_component(offering)
+        await self._sync_sessions_per_week(offering)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.ARCHIVE,
+            entity_type=AuditEntity.COURSE_OFFERING,
+            entity_id=offering_id,
+            old_value=old_value,
+            new_value=self._component_snapshot(row),
+        )
+
+    async def _insert_component(
+        self, *, offering: CourseOffering, payload: ComponentCreate
+    ) -> OfferingComponent:
+        if (
+            await self._components.get_by(
+                offering_id=offering.id,
+                session_type=payload.session_type.value,
+                schedule_days=payload.schedule_days,
+                schedule_start_time=payload.schedule_start_time,
+            )
+            is not None
+        ):
+            raise ComponentExistsException(offering.id, payload.session_type.value)
+
+        row: OfferingComponent = await self._components.create(
+            offering_id=offering.id,
+            session_type=payload.session_type.value,
+            schedule_days=payload.schedule_days,
+            schedule_start_time=payload.schedule_start_time,
+            schedule_end_time=payload.schedule_end_time,
+            classroom_name=payload.classroom_name,
+            classroom_lat=payload.classroom_lat,
+            classroom_lng=payload.classroom_lng,
+        )
+
+        return row
+
+    async def _active_components(
+        self, offering_id: int
+    ) -> Sequence[OfferingComponent]:
+        return (
+            await self._session.scalars(
+                select(OfferingComponent)
+                .where(
+                    OfferingComponent.offering_id == offering_id,
+                    OfferingComponent.is_active.is_(True),
+                )
+                .order_by(OfferingComponent.id)
+            )
+        ).all()
+
+    async def _sync_sessions_per_week(self, offering: CourseOffering) -> None:
+        """Keep `sessions_per_week` equal to the weekly session count (D80).
+
+        One session per meeting day: the distinct day-letter count summed over
+        the active components — the same rule as `weeklySessionCount` on the
+        frontend. Called after every component mutation so the column the
+        risk batch reads never drifts from the meetings. Zero active meetings
+        syncs to 0 (internal sync only — the API input floor of 1 still
+        applies to client payloads). Flush-only, like `_mirror_single_component`.
+        """
+        active: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
+        offering.sessions_per_week = sum(
+            distinct_day_count(row.schedule_days) for row in active
+        )
+        await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side (TimestampMixin),
+        # so it is expired and would raise MissingGreenlet if read synchronously.
+        await self._session.refresh(offering)
+
+    async def _mirror_single_component(self, offering: CourseOffering) -> None:
+        """Mirror the lone active component onto the offering columns.
+
+        The offering-level schedule/classroom is the legacy display default
+        and the session pre-fill fallback. With exactly one active meeting
+        it must say the same thing as that meeting, or the UI shows two
+        schedules that disagree. With zero or several active meetings there
+        is no single truth to mirror, so the columns are left untouched.
+        Flush-only, like every other mutation here.
+        """
+        active: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
+
+        if len(active) != 1:
+            return
+
+        (only,) = active
+        offering.schedule_days = only.schedule_days
+        offering.schedule_start_time = only.schedule_start_time
+        offering.schedule_end_time = only.schedule_end_time
+        offering.classroom_name = only.classroom_name
+        offering.classroom_lat = only.classroom_lat
+        offering.classroom_lng = only.classroom_lng
+        await self._session.flush()
+        # Reload after the flush: `updated_at` is server-side
+        # (TimestampMixin), so it is expired and would raise MissingGreenlet
+        # if read synchronously — same hazard `update_offering` guards.
+        await self._session.refresh(offering)
+
+    async def _get_component_or_404(
+        self, offering_id: int, component_id: int
+    ) -> OfferingComponent:
+        row: OfferingComponent | None = await self._components.get(component_id)
+
+        if row is None or row.offering_id != offering_id:
+            raise ComponentNotFoundException(component_id)
+
+        return row
+
+    @staticmethod
+    def _component_snapshot(row: OfferingComponent) -> dict[str, Any]:
+        return {
+            "offering_id": row.offering_id,
+            "session_type": row.session_type,
+            "schedule_days": row.schedule_days,
+            "schedule_start_time": row.schedule_start_time.isoformat(),
+            "schedule_end_time": row.schedule_end_time.isoformat(),
+            "classroom_name": row.classroom_name,
+            "classroom_lat": row.classroom_lat,
+            "classroom_lng": row.classroom_lng,
+            "is_active": row.is_active,
+        }
 
     @staticmethod
     def _offering_snapshot(offering: CourseOffering) -> dict[str, Any]:

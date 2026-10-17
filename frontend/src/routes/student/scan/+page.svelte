@@ -16,6 +16,7 @@
 		cacheSession,
 		flushQueue,
 		getCachedSession,
+		newQueueId,
 		queue,
 		registerOutboxSync,
 		retryDelayMs,
@@ -114,10 +115,13 @@
 		return getErrorMessage(error, fallback);
 	};
 
-	// Network failures surface as plain TypeErrors (api/client.ts); APIError
-	// means the server responded — including 4xx rejections — and must never
-	// be queued, because the server already decided those.
-	const isNetworkError = (error: unknown): boolean => !(error instanceof APIError);
+	// Only transport failures may be queued/retried as offline
+	// ('network_error' from the fetch wrapper, plus 'request_timeout' whose
+	// idempotent replay is safe via X-Idempotency-Key). Any other APIError is
+	// a server decision (4xx rejections) and must never be queued; any
+	// non-APIError is a local bug (GPS, programming error) and must surface.
+	const isNetworkError = (error: unknown): boolean =>
+		error instanceof APIError && (error.code === 'network_error' || error.code === 'request_timeout');
 
 	const refreshQueueState = async () => {
 		try {
@@ -482,9 +486,7 @@
 		}
 
 		// Generate idempotency key once per attempt (shared between live POST and offline replay)
-		const idempotencyKey = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-			? crypto.randomUUID()
-			: Math.random().toString(36).substring(2, 15);
+		const idempotencyKey = newQueueId();
 
 		livenessActive = false;
 		submitting = true;
@@ -771,7 +773,9 @@
 					Phase 2: blink once for face liveness — then the head-tilt check
 					starts automatically (left, center, right, center).
 					Your result is submitted to the attendance service for verification.
-					The face-match score is provisional while server-side matching lands.
+					The face-match score sent with your scan is a provisional client
+					value while server-side matching lands — what is verified today
+					is your liveness evidence.
 				</p>
 				{#if submitting}
 					<p class="footnote">Submitting attendance…</p>
@@ -828,6 +832,7 @@
 					<p class="result-line">{formatTime(scannedAt)}</p>
 				{/if}
 				<p class="verified">Liveness evidence accepted</p>
+				<p class="result-line">Face match provisional — liveness verified</p>
 				{#if countdown > 0}
 					<p class="auto-dismiss">Auto-dismissing in {countdown}s...</p>
 				{:else}

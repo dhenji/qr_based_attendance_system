@@ -59,6 +59,7 @@ const toCourseSummary = (item: ProfessorAssignedOffering): ProfessorCourseSummar
 	sections: item.section ?? [],
 	isPrimary: item.is_primary,
 	enrolledCount: item.enrolled_count ?? 0,
+	scheduleOk: item.schedule_ok ?? true,
 });
 
 export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {

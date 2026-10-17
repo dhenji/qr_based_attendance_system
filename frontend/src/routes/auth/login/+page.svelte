@@ -15,10 +15,12 @@
 		doMfaVerify,
 	} from '$lib/features/auth/store.svelte';
 	import { createOtpWindow } from '$lib/features/auth/store.svelte';
+	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
-	import { isMockMode } from '$lib/api/client';
+	import Turnstile from '$lib/components/Turnstile.svelte';
+	import { APIError, isMockMode } from '$lib/api/client';
 
 	// 'credentials' -> 'login-otp' (mandatory OTP) -> 'mfa' (admins with MFA
 	// enabled, chained after the OTP) -> 'change-password' (temporary password).
@@ -40,6 +42,7 @@
 	let passwordInput: HTMLInputElement | undefined = $state();
 	let mfaInput: HTMLInputElement | undefined = $state();
 	let otpInput: import('$lib/components/OtpInput.svelte').default | undefined = $state();
+	let turnstile: import('$lib/components/Turnstile.svelte').default | undefined = $state();
 
 	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
 	const win = createOtpWindow();
@@ -48,17 +51,11 @@
 		win.stop();
 	});
 
-	// Same policy the backend enforces in shared/validators.password_strength:
-	// 8+ chars with an uppercase, a lowercase, a digit and a symbol.
-	// A space is not a symbol server-side, so it is excluded here too.
-	const passwordReq = $derived({
-		length: newPassword.length >= 8,
-		upper: /[A-Z]/.test(newPassword),
-		lower: /[a-z]/.test(newPassword),
-		number: /\d/.test(newPassword),
-		symbol: /[^A-Za-z0-9\s]/.test(newPassword),
-	});
-	const passwordOk = $derived(Object.values(passwordReq).every(Boolean));
+	// Same policy the backend enforces in shared/validators.password_strength
+	// (see lib/shared/utils/password.ts) — derived here so the checklist can
+	// never drift from the other signup/recovery forms.
+	const passwordReq = $derived(evaluatePassword(newPassword));
+	const passwordOk = $derived(isPasswordStrong(passwordReq));
 	const passwordsMatch = $derived(newPassword === confirmPassword);
 
 	const describe = (e: unknown, fallback: string) => toAuthMessage(e, fallback);
@@ -79,7 +76,7 @@
 		}
 
 		try {
-			const user = await doLogin(email, password);
+			const user = await doLogin(email, password, turnstile?.getToken() ?? null);
 			if (!user) {
 				// Password accepted; continue with the step the backend asked for.
 				const otpStep = authState.otpPending;
@@ -94,6 +91,8 @@
 			await finishLogin(user);
 		} catch (e: unknown) {
 			error = describe(e, 'Login failed. Please try again.');
+			// A rejected/expired challenge needs a fresh one before retry.
+			if (e instanceof APIError && e.code === 'invalid_captcha') turnstile?.reset();
 			// Keep the email so retry is one field, not two; clear the secret
 			// and focus it so the next attempt starts in the right place.
 			password = '';
@@ -313,6 +312,8 @@
 							</button>
 						</div>
 					</div>
+
+					<Turnstile bind:this={turnstile} />
 
 					<button class="btn-primary" type="submit" disabled={authState.loading}>
 						{#if authState.loading}

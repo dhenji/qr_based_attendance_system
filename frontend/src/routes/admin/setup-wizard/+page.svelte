@@ -180,6 +180,7 @@
 
 	.step {
 		flex: 1 1 0;
+		min-width: 0;
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
