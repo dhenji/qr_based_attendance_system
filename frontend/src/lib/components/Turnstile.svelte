@@ -76,6 +76,12 @@
 		let cancelled = false;
 		void loadScript()
 			.then((loaded) => {
+				if (!loaded) {
+					// Resolved-null load (script tag finished without exposing
+					// the API): dropping the cached promise lets a later mount
+					// retry instead of inheriting the failure forever.
+					scriptPromise = null;
+				}
 				if (cancelled || !loaded || !container) {
 					if (!cancelled) loadError = true;
 					return;
@@ -96,6 +102,10 @@
 				});
 			})
 			.catch((error: unknown) => {
+				// Never cache a rejection — one CDN hiccup (brief offline,
+				// blocked network) would otherwise keep every later widget
+				// dead until a full page reload.
+				scriptPromise = null;
 				console.debug('[auth] Turnstile failed to load:', error);
 				if (!cancelled) loadError = true;
 			});

@@ -212,3 +212,16 @@ export const doSubmitScan = async (scanData: {
 		studentState.scanLoading = false;
 	}
 };
+
+// resetStudentState
+// Logout hygiene (doLogout): clear profile, dashboard, schedule, and history
+// between logins on shared devices — the next login re-inits its own data.
+export const resetStudentState = (): void => {
+	studentState.student = null;
+	studentState.dashboard = { ...EMPTY_DASHBOARD };
+	studentState.courses = [];
+	studentState.history = [];
+	studentState.loading = false;
+	studentState.error = null;
+	studentState.scanLoading = false;
+};

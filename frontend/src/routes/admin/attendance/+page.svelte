@@ -84,9 +84,14 @@
 			date_to: dateTo.trim() || undefined,
 		});
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// the lookups/first page are still loading, destroy has already run and
+	// the entity/focus subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -130,6 +135,7 @@
 		}
 		await load();
 		await loadLiveness();
+		if (!pageAlive) return;
 		autoRefreshStops.push(
 			subscribeEntity('courses', () => void reloadCourseLookups()),
 			subscribeEntity('professors', () => void reloadProfessorLookups()),

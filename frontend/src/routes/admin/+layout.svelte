@@ -76,6 +76,12 @@
 
 	const openNotifExcuses = () => void goto(Routes.ADMIN_EXCUSES);
 
+	// Guard for the async attach below: restoreSession() is awaited, and
+	// destroy can win that race. If it does, lifecycle teardown has already
+	// run — attaching the interval/listeners afterwards would leak them until
+	// the next full page unload.
+	let notifAlive = true;
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
@@ -87,6 +93,7 @@
 		} else {
 			gate = 'allowed';
 			void refreshNotif();
+			if (!notifAlive) return;
 			pollTimer = setInterval(() => {
 				if (!document.hidden) void refreshNotif();
 			}, POLL_INTERVAL_MS);
@@ -96,6 +103,7 @@
 	});
 
 	onDestroy(() => {
+		notifAlive = false;
 		// onDestroy also runs during SSR teardown, where window/document do
 		// not exist — and onMount (the only place listeners attach) never
 		// runs on the server, so there is nothing to clean up there.

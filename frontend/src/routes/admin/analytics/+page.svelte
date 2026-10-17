@@ -184,9 +184,14 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		await Promise.all([...programIds].map(cacheYears));
 	};
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// the lookups/first page are still loading, destroy has already run and
+	// the lookup subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -238,6 +243,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await apply();
+		if (!pageAlive) return;
 		autoRefreshStops.push(
 			// Lookup entities reload filter-rail options only — never the
 			// aggregates themselves (issue #221: no aggregate subscriptions).

@@ -220,9 +220,14 @@
 	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
 	let unenrollTarget = $state<AdminRosterItem | null>(null);
 	let unenrollBusy = $state(false);
+	// alive-guard for the async onMount below: if the route unmounts while
+	// the detail legs are still loading, destroy has already run and the
+	// entity/focus subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		if (addSearchTimer) clearTimeout(addSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
@@ -253,6 +258,7 @@
 			loadOfferingRoster(offeringId),
 			resolveContext(o.courseId, o.programId, o.yearLevelId),
 		]);
+		if (!pageAlive) return;
 		fillSettings();
 		autoRefreshStops.push(
 			subscribeEntity('offerings', refreshVisible),

@@ -10,6 +10,7 @@
 
 import { browser } from '$app/environment';
 import { isMockMode } from '$lib/api/client';
+import { authState } from '$lib/features/auth/store.svelte';
 import { listExcuseRequests } from '$lib/features/excuse/service';
 import { getPrefs } from '$lib/features/settings/service';
 import { listStudentExcuses } from '$lib/features/student/service';
@@ -25,10 +26,17 @@ export const truncateNotifPreview = (reason: string, max: number = NOTIF_PREVIEW
 
 const STUDENT_SEEN_KEY = 'notif_student_excuse_seen';
 
+// Per-user suffix: on a shared device, account B must not inherit account
+// A's see marks (Badge 0 with actually new rows, or forever-missed badges).
+const studentSeenKey = (): string => {
+	const id = authState.user?.id;
+	return id ? `${STUDENT_SEEN_KEY}:${id}` : STUDENT_SEEN_KEY;
+};
+
 const readSeen = (): string | null => {
 	if (!browser) return null;
 	try {
-		return localStorage.getItem(STUDENT_SEEN_KEY);
+		return localStorage.getItem(studentSeenKey());
 	} catch {
 		return null;
 	}
@@ -37,7 +45,7 @@ const readSeen = (): string | null => {
 export const markStudentSeen = (): void => {
 	if (!browser) return;
 	try {
-		localStorage.setItem(STUDENT_SEEN_KEY, new Date().toISOString());
+		localStorage.setItem(studentSeenKey(), new Date().toISOString());
 	} catch {
 		// Storage unavailable (private mode): badge just recomputes next load.
 	}

@@ -51,3 +51,17 @@ export const initProfessorCourses = async (): Promise<void> => {
 		professorState.coursesLoading = false;
 	}
 };
+
+// resetProfessorState
+// Logout hygiene (doLogout): drop the profile and course-assignment list
+// between logins. Without this, an A→B professor switch kept the previous
+// account's courses (and ensureCourses' warm-when-empty gate never re-warmed
+// them for B).
+export const resetProfessorState = (): void => {
+	professorState.professor = null;
+	professorState.loading = false;
+	professorState.error = null;
+	professorState.courses = [];
+	professorState.coursesLoading = false;
+	professorState.coursesError = null;
+};
