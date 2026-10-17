@@ -160,9 +160,14 @@
 			await Promise.all(ids.map(cacheYears));
 		});
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// the lookups/first page are still loading, destroy has already run and
+	// the entity/focus subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -210,6 +215,7 @@
 			courseOptions = [];
 		}
 		await load(1);
+		if (!pageAlive) return;
 		autoRefreshStops.push(
 			subscribeEntity('offerings', refreshVisible),
 			// Lookup entities feed the cascade pickers and the joined rows:

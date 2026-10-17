@@ -41,6 +41,24 @@ export const adminProgramDetailState = $state({
 	actionError: null as string | null,
 });
 
+// resetAdminProgramsStates
+// Logout hygiene (doLogout): drop the list and any loaded program detail.
+export const resetAdminProgramsStates = (): void => {
+	adminProgramsState.items = [];
+	adminProgramsState.total = 0;
+	adminProgramsState.page = 1;
+	adminProgramsState.filters = {};
+	adminProgramsState.sortBy = 'code';
+	adminProgramsState.sortDir = 'asc';
+	adminProgramsState.loading = false;
+	adminProgramsState.error = null;
+	adminProgramsState.actionError = null;
+	adminProgramDetailState.program = null;
+	adminProgramDetailState.loading = false;
+	adminProgramDetailState.error = null;
+	adminProgramDetailState.actionError = null;
+};
+
 const toMessage = (e: unknown, fallback: string) =>
 	friendlyActionError(e, e instanceof Error && e.message ? e.message : fallback);
 
@@ -60,10 +78,11 @@ export const initAdminPrograms = async (
 		adminProgramsState.size = result.size;
 		adminProgramsState.filters = filters;
 	} catch (e: unknown) {
-		if (e instanceof APIError && (e.code === 'request_cancelled' || e.code === 'request_timeout')) {
+		if (e instanceof APIError && e.code === 'request_cancelled') {
+			// Superseded search — a newer request is provably in flight.
 			return;
 		}
-		adminProgramsState.error = toMessage(e, 'Failed to load programs');
+		adminProgramsState.error = e instanceof APIError && e.code === 'request_timeout' ? 'The request timed out. Try again.' : toMessage(e, 'Failed to load programs');
 	} finally {
 		adminProgramsState.loading = false;
 	}

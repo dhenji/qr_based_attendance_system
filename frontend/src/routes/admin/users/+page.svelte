@@ -76,9 +76,14 @@
 			adminUsersState.size
 		);
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// restoreSession() is still in flight, destroy has already run and the
+	// entity/focus subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -92,6 +97,7 @@
 			await goto(Routes.ADMIN_DASHBOARD);
 			return;
 		}
+		if (!pageAlive) return;
 		load(1);
 		autoRefreshStops.push(
 			subscribeEntity('users', refreshVisible),

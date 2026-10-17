@@ -88,7 +88,15 @@
 		excuseReason: item.excuseReason,
 	});
 
+	// Monotonic sequence token shared by both fetch paths: control changes can
+	// fire fetches out of order, and the older response resolving last would
+	// otherwise overwrite rows/total/summary with the wrong page (sort glyph
+	// then disagreement with the data). A superseded response is dropped in
+	// both success and error paths, and only the latest run owns `loading`.
+	let loadSeq = 0;
+
 	const load = async () => {
+		const seq = ++loadSeq;
 		loading = true;
 		loadError = null;
 		try {
@@ -99,11 +107,21 @@
 				page,
 				size: PER_PAGE,
 			});
+			if (seq !== loadSeq) return;
+			// Clamp the page when the server total shrank under it — otherwise
+			// the paginator points past the last page and the table renders
+			// empty until a control changes. The effect refires on the write.
+			const pageCount = Math.max(1, Math.ceil(res.total / PER_PAGE));
+			if (page > pageCount) {
+				page = pageCount;
+				return;
+			}
 			rows = res.items.map(toRow);
 			total = res.total;
 			summary = res.summary;
 			void loadMyRequests();
 		} catch (e) {
+			if (seq !== loadSeq) return;
 			loadError =
 				e instanceof APIError
 					? e.message
@@ -112,7 +130,7 @@
 						: 'Unable to load attendance history';
 			rows = [];
 		} finally {
-			loading = false;
+			if (seq === loadSeq) loading = false;
 		}
 	};
 
@@ -199,6 +217,9 @@
 		const asc = sortAsc;
 		const status = filterStatus;
 		const p = page;
+		// Same sequence token as load() so effect-driven and Retry-driven
+		// fetches cannot interleave out of order.
+		const seq = ++loadSeq;
 		void (async () => {
 			loading = true;
 			loadError = null;
@@ -210,11 +231,20 @@
 					page: p,
 					size: PER_PAGE,
 				});
+				if (seq !== loadSeq) return;
+				// Same shrink clamp as load(): a stale page taller than the new
+				// total must step back rather than showing an empty table.
+				const pageCount = Math.max(1, Math.ceil(res.total / PER_PAGE));
+				if (page > pageCount) {
+					page = pageCount;
+					return;
+				}
 				rows = res.items.map(toRow);
 				total = res.total;
 				summary = res.summary;
 				void loadMyRequests();
 			} catch (e) {
+				if (seq !== loadSeq) return;
 				loadError =
 					e instanceof APIError
 						? e.message
@@ -223,7 +253,7 @@
 							: 'Unable to load attendance history';
 				rows = [];
 			} finally {
-				loading = false;
+				if (seq === loadSeq) loading = false;
 			}
 		})();
 	});
@@ -760,7 +790,7 @@
 				/>
 				{#if excuseFiles.length > 0}
 					<ul class="files">
-						{#each excuseFiles as file, i (file.name + file.size)}
+						{#each excuseFiles as file, i (file)}
 							<li>
 								<span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>
 								<button class="link-btn" type="button" disabled={excuseBusy} onclick={() => removeExcuseFile(i)}>

@@ -221,6 +221,31 @@ const deleteRow = (id: string): Promise<void> =>
 const byOldest = (a: QueuedScan, b: QueuedScan): number =>
 	a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt);
 
+// Single-flight guard for flushQueue: the per-page `flushing` flags don't span
+// callers (the scan page's online drain vs History's "Sync now"), and two
+// loops racing over one row is how a recorded scan got painted as a spurious
+// "Rejected · duplicate_scan" card. A concurrent second caller simply finds
+// its work already in flight.
+let draining = false;
+
+// recoverOrphanedSyncing
+// A drain stamps rows 'syncing' before its POST and only back-converts them on
+// a failure observed while the process is alive. If the tab dies mid-drain
+// (reload, crash, laptop sleep) those rows are stranded forever: the drain
+// filter reads 'pending' only, yet they keep counting as "N pending" in the
+// banner, every flush returns {0,0,0}, and enqueue treats them as
+// already-queued — silently discarding a fresh scan's payload. Normalize them
+// back to pending; rows genuinely mid-drain are protected by `draining`.
+const recoverOrphanedSyncing = async (): Promise<void> => {
+	if (draining) return;
+	const rows = await listRows();
+	for (const row of rows) {
+		if (row.status === 'syncing') {
+			await writeRow({ ...row, status: 'pending', updatedAt: nowIso() });
+		}
+	}
+};
+
 // queue
 // Offline scan outbox. Enqueue is duplicate-safe: a scan for a session that
 // already has a pending/syncing item returns the existing item instead of
@@ -268,6 +293,7 @@ export const queue = {
 
 	// All pending (or mid-sync) records, oldest first
 	getPending: async (): Promise<QueuedScan[]> => {
+		await recoverOrphanedSyncing();
 		const rows = await listRows();
 		return rows
 			.filter((row) => row.status === 'pending' || row.status === 'syncing')
@@ -278,6 +304,7 @@ export const queue = {
 	// Rejected rows have their own card with Retry/Discard, so they are
 	// excluded here to avoid double-counting the same record twice.
 	getPendingCount: async (): Promise<number> => {
+		await recoverOrphanedSyncing();
 		const rows = await listRows();
 		return rows.filter((row) => row.status === 'pending' || row.status === 'syncing').length;
 	},
@@ -354,41 +381,48 @@ const markPendingForRetry = async (id: string, lastError: string): Promise<'reje
 // scheduling to the caller via retryDelayMs.
 export const flushQueue = async (): Promise<{ synced: number; rejected: number; failed: number }> => {
 	if (isMockMode()) return { synced: 0, rejected: 0, failed: 0 };
-	const pending = (await listRows())
-		.filter((row) => row.status === 'pending')
-		.sort(byOldest);
-	let synced = 0;
-	let rejected = 0;
-	let failed = 0;
-	for (const item of pending) {
-		await queue.updateStatus(item.id, 'syncing');
-		try {
-			await submitAttendanceScan({
-				...toScanBody(item.payload),
-				idempotencyKey: item.payload.idempotencyKey || item.id
-			});
-			await queue.updateStatus(item.id, 'synced');
-			synced += 1;
-		} catch (error) {
-			if (error instanceof APIError && !isTransientApiError(error)) {
-				// The server decided: terminal, with its reason code preserved
-				// for the user-facing message.
-				await markRejected(item.id, error.code);
-				rejected += 1;
-			} else {
-				// Still offline — or throttled/timed-out/5xx: back to pending
-				// with backoff; stop draining. A 429 must never burn queued
-				// evidence the way a decision code does.
-				const lastError = error instanceof APIError ? error.code : 'network_error';
-				const outcome = await markPendingForRetry(item.id, lastError);
-				if (outcome === 'rejected') rejected += 1;
-				else failed += 1;
-				break;
+	if (draining) return { synced: 0, rejected: 0, failed: 0 };
+	draining = true;
+	try {
+		await recoverOrphanedSyncing();
+		const pending = (await listRows())
+			.filter((row) => row.status === 'pending')
+			.sort(byOldest);
+		let synced = 0;
+		let rejected = 0;
+		let failed = 0;
+		for (const item of pending) {
+			await queue.updateStatus(item.id, 'syncing');
+			try {
+				await submitAttendanceScan({
+					...toScanBody(item.payload),
+					idempotencyKey: item.payload.idempotencyKey || item.id
+				});
+				await queue.updateStatus(item.id, 'synced');
+				synced += 1;
+			} catch (error) {
+				if (error instanceof APIError && !isTransientApiError(error)) {
+					// The server decided: terminal, with its reason code preserved
+					// for the user-facing message.
+					await markRejected(item.id, error.code);
+					rejected += 1;
+				} else {
+					// Still offline — or throttled/timed-out/5xx: back to pending
+					// with backoff; stop draining. A 429 must never burn queued
+					// evidence the way a decision code does.
+					const lastError = error instanceof APIError ? error.code : 'network_error';
+					const outcome = await markPendingForRetry(item.id, lastError);
+					if (outcome === 'rejected') rejected += 1;
+					else failed += 1;
+					break;
+				}
 			}
 		}
+		await pruneSynced();
+		return { synced, rejected, failed };
+	} finally {
+		draining = false;
 	}
-	await pruneSynced();
-	return { synced, rejected, failed };
 };
 
 const pruneSynced = async (): Promise<void> => {

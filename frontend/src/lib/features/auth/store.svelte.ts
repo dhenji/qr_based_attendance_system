@@ -28,6 +28,14 @@ import {
 	hydrateTokens,
 	setTokens,
 } from '$lib/features/auth/tokens';
+import { resetStudentState } from '$lib/features/student/store.svelte';
+import { resetProfessorState } from '$lib/features/professor/store.svelte';
+import { resetAdminRosterStates } from '$lib/features/admin/store.svelte';
+import { resetAdminProgramsStates } from '$lib/features/admin/programs/store.svelte';
+import { resetAdminCoursesStates } from '$lib/features/admin/courses/store.svelte';
+import { resetAdminOfferingsStates } from '$lib/features/admin/offerings/store.svelte';
+import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
+import { invalidateExcuseDirectory } from '$lib/features/excuse/service';
 import { refreshFaceCache } from '$lib/features/student/face.svelte';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous';
@@ -382,6 +390,20 @@ export const doChangePassword = async (
 export const doLogout = async (): Promise<void> => {
 	clearTokens();
 	reset();
+	// Account data must not survive a logout on shared devices: each store
+	// re-inits for the next login, and stale caches otherwise keep (or
+	// briefly serve) the previous user's profile, rosters, and course lists
+	// — including through ensureCourses' warm-when-empty gate. The sync
+	// outbox stays deliberately untouched: queued attendance evidence is
+	// device-local, not session data.
+	resetStudentState();
+	resetProfessorState();
+	resetAdminRosterStates();
+	resetAdminProgramsStates();
+	resetAdminCoursesStates();
+	resetAdminOfferingsStates();
+	invalidateAttendanceDirectory();
+	invalidateExcuseDirectory();
 	await goto(Routes.HOME);
 };
 
@@ -460,8 +482,11 @@ export function createOtpWindow(
 
 	const restart = () => {
 		stop();
-		remaining = CODE_TTL_SECONDS;
-		resendIn = RESEND_COOLDOWN_SECONDS;
+		// Honor the constructor parameters — the module constants were the
+		// original intent but only the first window used them; a caller
+		// creating a custom-ttl window restarted onto the default values.
+		remaining = codeTtl;
+		resendIn = cooldown;
 		id = window.setInterval(() => {
 			remaining -= 1;
 			if (resendIn > 0) resendIn -= 1;

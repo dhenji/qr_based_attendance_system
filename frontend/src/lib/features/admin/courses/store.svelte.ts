@@ -39,6 +39,24 @@ export const adminCourseDetailState = $state({
 	actionError: null as string | null,
 });
 
+// resetAdminCoursesStates
+// Logout hygiene (doLogout): drop the list and any loaded course detail.
+export const resetAdminCoursesStates = (): void => {
+	adminCoursesState.items = [];
+	adminCoursesState.total = 0;
+	adminCoursesState.page = 1;
+	adminCoursesState.filters = {};
+	adminCoursesState.sortBy = 'code';
+	adminCoursesState.sortDir = 'asc';
+	adminCoursesState.loading = false;
+	adminCoursesState.error = null;
+	adminCoursesState.actionError = null;
+	adminCourseDetailState.course = null;
+	adminCourseDetailState.loading = false;
+	adminCourseDetailState.error = null;
+	adminCourseDetailState.actionError = null;
+};
+
 const toMessage = (e: unknown, fallback: string) =>
 	e instanceof Error && e.message ? e.message : fallback;
 

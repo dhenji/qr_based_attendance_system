@@ -125,8 +125,20 @@ const ensureDirectory = async (): Promise<void> => {
 			])
 		);
 	} catch {
+		// Fail permissive: reset the latch so the next call re-warms. Without
+		// this, one transient 5xx during page-open left every row's
+		// course/session columns dead until a full reload (attendance
+		// service has the same shape via invalidateAttendanceDirectory).
 		sessionDirectory = new Map();
+		directoryReady = false;
 	}
+};
+
+// invalidateExcuseDirectory
+// Clears the warm cache and re-arms the latch (logout hygiene, doLogout).
+export const invalidateExcuseDirectory = (): void => {
+	directoryReady = false;
+	sessionDirectory = new Map();
 };
 
 const courseIdentityFor = (offeringId: number): { code: string; name: string } => {
