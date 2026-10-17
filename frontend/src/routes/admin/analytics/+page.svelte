@@ -3,6 +3,8 @@
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import AttendanceSnapshot from '$lib/features/admin/analytics/components/AttendanceSnapshot.svelte';
+	import { page } from '$app/state';
 import {
 	adminAnalyticsState,
 	adminStagingState,
@@ -36,29 +38,39 @@ import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
-	// Analytics & Reports (wireframe 4.7, D33): one page, six tabs —
-	// Overview, Comparison, Trends, At-Risk, Staging, Export — over a shared
-	// cascading filter rail (Program → Year → Term → Courses multi → Date
-	// range → Granularity). Same course appears once per cohort (D6/D34).
+	// Analytics & Reports (wireframe 4.7, D33): one page, seven tabs —
+	// Overview, Comparison, Trends, At-Risk, Staging, Attendance, Export — over
+	// a shared cascading filter rail (Program → Year → Term → Courses multi →
+	// Date range → Granularity). Same course appears once per cohort (D6/D34).
+	// The Attendance tab is the per-course snapshot absorbed from the old
+	// admin attendance page and keeps its own Course/Professor/date filters.
 	// Numbers come from the live analytics backend (#136, mocks only when
 	// PUBLIC_MOCK_MODE=true); the filter rail reads live programs/courses
 	// endpoints for its options. Compliance (present/total) is the default
 	// metric; participation ((present+late+excused)/total) is a render
 	// toggle (D36).
 
-	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'export';
+	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'attendance' | 'export';
 	const TABS = [
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'comparison', label: 'Comparison' },
 		{ id: 'trends', label: 'Trends' },
 		{ id: 'atrisk', label: 'At-Risk' },
 		{ id: 'staging', label: 'Staging' },
+		{ id: 'attendance', label: 'Attendance' },
 		{ id: 'export', label: 'Export' },
 	] as const;
 
 	const initialRange = defaultAnalyticsRange();
 
-	let tab = $state<Tab>('overview');
+	// Deep link support (?tab=attendance): the dashboard's attendance strip
+	// links straight to the snapshot tab; unknown values fall back to Overview.
+	const initialTab = (): Tab => {
+		const requested = page.url.searchParams.get('tab');
+		return requested && TABS.some((t) => t.id === requested) ? (requested as Tab) : 'overview';
+	};
+
+	let tab = $state<Tab>(initialTab());
 	let programFilter = $state('');
 	let yearFilter = $state('');
 	let semesterFilter = $state('');
@@ -381,70 +393,73 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			<h1>Analytics &amp; Reports</h1>
 			<p class="muted">Aggregates from the live analytics backend</p>
 		</div>
-		<div class="header-actions" role="group" aria-label="Rate metric">
-			<button
-				class="btn btn-secondary"
-				class:selected={metric === 'compliance'}
-				onclick={() => setMetric('compliance')}
-			>
-				Compliance
-			</button>
-			<button
-				class="btn btn-secondary"
-				class:selected={metric === 'participation'}
-				onclick={() => setMetric('participation')}
-			>
-				Participation
-			</button>
-		</div>
+		{#if tab !== 'attendance'}
+			<div class="header-actions" role="group" aria-label="Rate metric">
+				<button
+					class="btn btn-secondary"
+					class:selected={metric === 'compliance'}
+					onclick={() => setMetric('compliance')}
+				>
+					Compliance
+				</button>
+				<button
+					class="btn btn-secondary"
+					class:selected={metric === 'participation'}
+					onclick={() => setMetric('participation')}
+				>
+					Participation
+				</button>
+			</div>
+		{/if}
 	</header>
 
-	<section class="card filters" aria-label="Analytics filters">
-		<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
-			<option value="">All programs</option>
-			{#each programOptions as p (p.id)}
-				<option value={p.id}>{p.code} — {p.name}</option>
-			{/each}
-		</select>
-		<select
-			class="input"
-			aria-label="Year level filter"
-			bind:value={yearFilter}
-			onchange={changeYear}
-			disabled={!programFilter}
-			title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
-		>
-			<option value="">All years</option>
-			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
-			{/each}
-		</select>
-		<select
-			class="input"
-			aria-label="Semester filter"
-			bind:value={semesterFilter}
-			disabled={!yearFilter || semesterOptions.length === 0}
-			title={!yearFilter
-				? "Pick a year level first — semesters are the year level's terms"
-				: semesterOptions.length === 0
-					? 'This year level has no terms configured'
-					: undefined}
-		>
-			<option value="">All semesters</option>
-			{#each semesterOptions as t (t.code)}
-				<option value={t.code}>{t.label}</option>
-			{/each}
-		</select>
-		<select class="input" aria-label="Granularity" bind:value={granularity}>
-			<option value="daily">Daily</option>
-			<option value="weekly">Weekly</option>
-			<option value="monthly">Monthly</option>
-		</select>
-		<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
-		<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
-		<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
-		{#if formError}
-			<p class="error" role="alert">{formError}</p>
+	{#if tab !== 'attendance'}
+		<section class="card filters" aria-label="Analytics filters">
+			<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
+				<option value="">All programs</option>
+				{#each programOptions as p (p.id)}
+					<option value={p.id}>{p.code} — {p.name}</option>
+				{/each}
+			</select>
+			<select
+				class="input"
+				aria-label="Year level filter"
+				bind:value={yearFilter}
+				onchange={changeYear}
+				disabled={!programFilter}
+				title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
+			>
+				<option value="">All years</option>
+				{#each yearOptions as y (y.id)}
+					<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
+				{/each}
+			</select>
+			<select
+				class="input"
+				aria-label="Semester filter"
+				bind:value={semesterFilter}
+				disabled={!yearFilter || semesterOptions.length === 0}
+				title={!yearFilter
+					? "Pick a year level first — semesters are the year level's terms"
+					: semesterOptions.length === 0
+						? 'This year level has no terms configured'
+						: undefined}
+			>
+				<option value="">All semesters</option>
+				{#each semesterOptions as t (t.code)}
+					<option value={t.code}>{t.label}</option>
+				{/each}
+			</select>
+			<select class="input" aria-label="Granularity" bind:value={granularity}>
+				<option value="daily">Daily</option>
+				<option value="weekly">Weekly</option>
+				<option value="monthly">Monthly</option>
+			</select>
+			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
+			<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
+			<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
+			{#if formError}
+				<p class="error" role="alert">{formError}</p>
 		{/if}
 		{#if filterNotice}
 			<p class="muted" role="status">{filterNotice}</p>
@@ -467,6 +482,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			{/if}
 		</fieldset>
 	</section>
+	{/if}
 
 	<nav class="tabs" aria-label="Analytics sections">
 		{#each TABS as t (t.id)}
@@ -474,7 +490,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		{/each}
 	</nav>
 
-	{#if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
+	{#if tab === 'attendance'}
+		<AttendanceSnapshot />
+	{:else if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminAnalyticsState.error}
 		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>

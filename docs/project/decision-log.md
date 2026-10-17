@@ -2135,3 +2135,43 @@
   tests in `tests/features/course/test_weekly_hours.py`,
   `tests/features/session/test_schedule_requirement.py`, and
   `tests/features/professor/test_schedule_flag.py`.
+
+### ADR-083: Attendance Overview Becomes the Attendance Tab of Analytics & Reports
+
+- **Decision (D83):** Consolidate the two admin attendance surfaces by
+  **purpose**, not by page. The per-course snapshot (wireframes 4.6) moves
+  from `/admin/attendance` into a seventh **Attendance** tab of
+  Analytics & Reports, keeping its own Course ▸ Professor ▸ date filter row
+  (the analytics rail's Program → Year → Term axis is a different slice) and
+  the server-first CSV export. `/admin/attendance` is retitled
+  **Attendance Review** and keeps only the flagged-scan decision queue
+  (wireframe 4.12). The admin nav gains a distinct "Attendance Review" entry
+  and icon; the dashboard's "Attendance at a glance" strip deep-links to
+  `/admin/analytics?tab=attendance`, while its "Open Analytics" button opens
+  the default Overview.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** Both surfaces already shared the frontend analytics
+  store/service and the `/admin/attendance/overview*` contract, so the split
+  was presentational. Reporting (cross-course rates, trends, comparison) and
+  workflow (approve/reject flagged scans) are different jobs: the first
+  belongs beside the other reporting tabs, the second needs a queue with
+  row actions. D33 already merged Reports into Analytics; the overview was
+  the last reporting table living outside it.
+- **Alternatives considered:**
+  (1) *Keep both pages separate.* Rejected: duplicates navigation and forces
+  admins to remember which attendance page holds which number.
+  (2) *Merge into one interface with sections.* Rejected: buries the
+  approve/reject workflow under reporting chrome and mixes two filter axes.
+  (3) *Taken:* reporting tab + review page — one route per purpose, shared
+  code where it already existed.
+- **Consequences:** No API, schema, or migration change (`alembic check`
+  stays green). Frontend-only: overview UI extracted to
+  `lib/features/admin/analytics/components/AttendanceSnapshot.svelte`; the
+  dead `adminScansState` / `initRecentScans` / `getRecentScans` path removed.
+  `AttendanceService.get_overview` now derives its compliance rate and
+  half-split trend from `shared.rates.attendance_rates`, removing the last
+  hand-rolled rate copy in the feature. The comparison tab's cohort-slicing
+  fix (live endpoint groups by course, not cohort) and its missing
+  `page`/`size` paging are tracked separately and left untouched here, so the
+  consolidation is behaviour-preserving.

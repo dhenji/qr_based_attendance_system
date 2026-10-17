@@ -703,7 +703,9 @@ List pending excuse requests.
 
 #### `GET /admin/attendance/overview`
 
-Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
+Per-course attendance overview (wireframes.md 4.6). Backs the **Attendance**
+tab of Analytics & Reports (`/admin/analytics?tab=attendance`) and the
+dashboard's "Attendance at a glance" strip. See ADR-083.
 
 |                  |                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------- |
@@ -712,7 +714,7 @@ Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
 
 #### `GET /admin/attendance/overview/export`
 
-CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview").
+CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview", Attendance tab).
 
 |                  |                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------ |

@@ -2,10 +2,11 @@
 // Admin analytics state using Svelte 5 runes ($state object store).
 //
 // One region per tab (overview, comparison, trends, at-risk, export reads the
-// same loaded rows) plus the attendance-overview table and the dashboard
-// recent-scans feed. The filter rail writes `filters`; each tab loads through
-// the service on Apply so tables never disagree with the server. Metric
-// (compliance/participation, D36) is render-only — both rates ride every row.
+// same loaded rows) plus the attendance-overview table that backs the
+// Attendance tab and the dashboard's at-a-glance strip. The filter rail writes
+// `filters`; each tab loads through the service on Apply so tables never
+// disagree with the server. Metric (compliance/participation, D36) is
+// render-only — both rates ride every row.
 
 import type {
 	AdminAnalyticsFilters,
@@ -16,7 +17,6 @@ import type {
 	AttendanceOverviewFilters,
 	AttendanceOverviewItemResponse,
 	PromoteStagingResponse,
-	RecentScanResponse,
 	RiskRefreshResponse,
 	RiskStagingFilters,
 	RiskStagingItemResponse,
@@ -27,7 +27,6 @@ import {
 	getAnalyticsTrends,
 	getAtRisk,
 	getAttendanceOverview,
-	getRecentScans,
 	listRiskStaging,
 	promoteRiskStaging,
 	refreshRiskScores,
@@ -65,12 +64,6 @@ export const adminStagingState = $state({
 	loading: false,
 	error: null as string | null,
 	lastPromote: null as PromoteStagingResponse | null,
-});
-
-export const adminScansState = $state({
-	items: [] as RecentScanResponse[],
-	loading: false,
-	error: null as string | null,
 });
 
 const toMessage = (e: unknown, fallback: string) =>
@@ -172,18 +165,6 @@ export const initAttendanceOverview = async (
 		adminAttendanceState.error = toMessage(e, 'Failed to load attendance overview');
 	} finally {
 		adminAttendanceState.loading = false;
-	}
-};
-
-export const initRecentScans = async (limit = 10): Promise<void> => {
-	adminScansState.loading = true;
-	adminScansState.error = null;
-	try {
-		adminScansState.items = await getRecentScans(limit);
-	} catch (e: unknown) {
-		adminScansState.error = toMessage(e, 'Failed to load recent scans');
-	} finally {
-		adminScansState.loading = false;
 	}
 };
 

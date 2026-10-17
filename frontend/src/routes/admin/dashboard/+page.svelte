@@ -169,7 +169,7 @@
 	<section class="card">
 		<div class="section-head">
 			<h2 class="section-title">Attendance at a glance</h2>
-			<button class="link" onclick={() => goto(Routes.ADMIN_ATTENDANCE)}>Full overview →</button>
+			<button class="link" onclick={() => goto(`${Routes.ADMIN_ANALYTICS}?tab=attendance`)}>Full overview →</button>
 		</div>
 		{#if adminAttendanceState.loading}
 			<p class="muted">Loading…</p>
