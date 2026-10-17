@@ -392,3 +392,59 @@
 - [ ] Old backups (if not re-encrypted) still decrypt with the old key
 - [ ] `backup_log` reflects correct `encryption_key_version` for new entries
 - [ ] Restore test on staging succeeds
+
+---
+
+## Runbook 7: Email Delivery Down
+
+**Purpose:** Restore outbound email (OTP codes + excuse notifications). Email
+is a hard dependency: without it, non-MFA users cannot log in, register, or
+recover passwords, and the API reports success while every send fails. Full
+setup and troubleshooting detail: [email-setup.md](../deployment/email-setup.md) §9.
+
+### Preconditions
+
+- `flyctl` authenticated (or shell access to the host) and app-log access
+- `SMTP_*` values known (`fly secrets list`)
+- A personal mailbox for test deliveries
+- Awareness that MFA-enabled students/professors can still sign in; admins and
+  everyone else cannot until the relay is fixed
+
+### Steps
+
+1. **Confirm the outage** — the API cannot tell you; the log can:
+
+   ```bash
+   fly logs --app attendance-system-api | grep -E \
+       "Email (sent to|delivery failed|dispatch failed)|SMTP_HOST unset|DEBUG email"
+   ```
+
+   `SMTP_HOST unset` and `DEBUG email` are configuration states;
+   `Email delivery failed …: <error>` is a delivery failure.
+
+2. **Separate app from relay** — run the console smoke test
+   ([email-setup.md](../deployment/email-setup.md) §6.1). It uses the deployed
+   environment and bypasses users entirely.
+
+3. **Credential failures (535 / auth)** — rotate the password/SMTP key per
+   [email-setup.md](../deployment/email-setup.md) §8.
+
+4. **Relay outage or account suspension** — check the provider's status page,
+   then switch relays if needed: create a new relay account and point the
+   deployment at it with `fly secrets set` (rolling restart; verify with §6 of
+   the guide).
+
+5. **Do not enable `DEBUG=true` to expose codes in logs** as a routine
+   workaround — it writes OTPs to the application log. If used as a declared
+   emergency measure, revert it immediately.
+
+6. **Record the incident** — window, cause, and which users were blocked (the
+   log names each recipient address).
+
+### Verification
+
+- [ ] Console smoke test prints `sent: True`.
+- [ ] A real login OTP lands in an inbox.
+- [ ] `fly logs` shows no `Email delivery failed` over five minutes of normal
+      traffic.
+- [ ] Affected users notified to retry (resending is safe).
