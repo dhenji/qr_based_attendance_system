@@ -43,6 +43,11 @@ class ReportsComparisonItem(BaseModel):
     course_code: str
     program_id: int
     year_level_id: int
+    # Server-resolved cohort identity, so the client labels a row from the row
+    # itself instead of guessing a cohort by course id (two cohorts of one
+    # course share that id). Empty only for a dangling program/year reference.
+    program_code: str = ""
+    year_level_label: str = ""
     compliance_rate: float
     participation_rate: float
     total_sessions: int

@@ -13,7 +13,7 @@
 // backend heuristic; the backend remains the source of truth.
 
 import { get, getText, post, postText, TEXT_EXPORTS, type QueryParams } from '$lib/api/client';
-import { buildCsv } from '$lib/features/report/service';
+import { buildCsv, COMPARISON_PAGE_SIZE } from '$lib/features/report/service';
 import type {
 	AdminAnalyticsFilters,
 	AdminCourse,
@@ -80,14 +80,24 @@ export const enrichComparison = (
 	}));
 };
 
+// One row per (course, program, year level) cohort, so the set grows with the
+// catalogue × cohorts. It renders as a single chart/table, so it is requested
+// in one page at the server's max page size (`COMPARISON_PAGE_SIZE`, mirroring
+// backend shared/pagination.py) and `total` lets the tab flag truncation
+// instead of silently dropping cohorts past the page.
 export const getAnalyticsComparison = async (
 	filters: AdminAnalyticsFilters = {}
-): Promise<AnalyticsComparisonItemResponse[]> => {
-	const response = await get<{ items: AnalyticsComparisonItemResponse[] }>(
-		'adminAnalyticsComparison',
-		analyticsParams(filters)
-	);
-	return response.items ?? [];
+): Promise<{ items: AnalyticsComparisonItemResponse[]; total: number }> => {
+	const response = await get<{
+		items: AnalyticsComparisonItemResponse[];
+		total?: number;
+	}>('adminAnalyticsComparison', {
+		...analyticsParams(filters),
+		page: '1',
+		size: String(COMPARISON_PAGE_SIZE),
+	});
+	const items = response.items ?? [];
+	return { items, total: response.total ?? items.length };
 };
 
 export const getAnalyticsTrends = async (

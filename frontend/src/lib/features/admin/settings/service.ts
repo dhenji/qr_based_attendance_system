@@ -134,7 +134,7 @@ export const exportAnalyticsOverview = async (): Promise<void> => {
 };
 
 export const exportAnalyticsComparison = async (): Promise<void> => {
-	const items = await getAnalyticsComparison();
+	const { items } = await getAnalyticsComparison();
 	downloadCsv(`analytics-comparison-${stamp()}.csv`, comparisonCsv(items));
 };
 

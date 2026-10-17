@@ -3,6 +3,7 @@
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import {
+		COMPARISON_PAGE_SIZE,
 		buildCsv,
 		defaultReportRange,
 		fetchProfessorReportsCsv,
@@ -566,6 +567,12 @@
 		</section>
 		<section class="card">
 			<h2 class="section-title">Per-course comparison</h2>
+			{#if comparison.serverTruncated}
+				<p class="warning" role="status">
+					Only the first {COMPARISON_PAGE_SIZE} cohorts are shown; narrow the date range or filters
+					to see the rest.
+				</p>
+			{/if}
 			<ReportBarChart
 				title="Per-course comparison report"
 				description="Attendance rate for each course cohort."

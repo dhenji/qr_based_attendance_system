@@ -39,6 +39,9 @@ export const adminAnalyticsState = $state({
 	metric: 'compliance' as AnalyticsMetric,
 	overview: null as AnalyticsOverviewResponse | null,
 	comparison: [] as AnalyticsComparisonItemResponse[],
+	// Server `total` for the comparison page: when it exceeds `comparison.length`
+	// the tab shows a truncation hint rather than dropping cohorts silently.
+	comparisonTotal: 0,
 	trends: [] as AnalyticsTrendItemResponse[],
 	atRisk: [] as AnalyticsAtRiskItemResponse[],
 	loading: false,
@@ -86,7 +89,8 @@ export const applyAnalyticsFilters = async (filters: AdminAnalyticsFilters): Pro
 			getAtRisk(filters),
 		]);
 		adminAnalyticsState.overview = overview;
-		adminAnalyticsState.comparison = comparison;
+		adminAnalyticsState.comparison = comparison.items;
+		adminAnalyticsState.comparisonTotal = comparison.total;
 		adminAnalyticsState.trends = trends;
 		adminAnalyticsState.atRisk = atRisk;
 	} catch (e: unknown) {

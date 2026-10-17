@@ -507,10 +507,14 @@ Check enrollment status.
 
 #### `GET /admin/analytics/course-comparison`
 
+One item per **(course, program, year level)** cohort: the same subject offered
+to two programs/year levels is two rows, not one blended row (D6/D34).
+Semester/dates are filter axes, not identity.
+
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                                                        |
-| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&page?&size?`                                            |
+| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 #### `GET /admin/analytics/trends`
 
@@ -1142,12 +1146,15 @@ Aggregate attendance across all assigned courses.
 
 #### `GET /professor/reports/comparison`
 
-Per-course comparison with program/year slicing.
+Per-course comparison sliced by **(course, program, year level)** cohort
+(D6/D34): the same subject taught to two cohorts is two rows, not one. Each row
+carries its own `program_code`/`year_level_label` so the client labels it
+without a course-id lookup (which cannot tell two cohorts apart).
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                                       |
-| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&page?&size?`                                                       |
+| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, program_code, year_level_label, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 (Compare rows at `:451` and `:1023` do accept `granularity=daily|weekly|monthly`; this scoped row does not.)
 
