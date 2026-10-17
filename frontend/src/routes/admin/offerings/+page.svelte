@@ -638,27 +638,26 @@
 		>
 			<option value="">All years</option>
 			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}</option>
+				<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
 			{/each}
 		</select>
-		{#if semesterOptions.length > 0}
-			<select class="input" aria-label="Semester filter" bind:value={semesterFilter} onchange={applyFilters}>
-				<option value="">All semesters</option>
-				{#each semesterOptions as t (t.code)}
-					<option value={t.code}>{t.label}</option>
-				{/each}
-			</select>
-		{:else}
-			<input
-				class="input"
-				placeholder="Semester (e.g. 1st Sem)"
-				aria-label="Semester filter"
-				bind:value={semesterFilter}
-				onkeydown={(e) => {
-					if (e.key === 'Enter') applyFilters();
-				}}
-			/>
-		{/if}
+		<select
+			class="input"
+			aria-label="Semester filter"
+			bind:value={semesterFilter}
+			onchange={applyFilters}
+			disabled={!yearFilter || semesterOptions.length === 0}
+			title={!yearFilter
+				? "Pick a year level first — semesters are the year level's terms"
+				: semesterOptions.length === 0
+					? 'This year level has no terms configured'
+					: undefined}
+		>
+			<option value="">All semesters</option>
+			{#each semesterOptions as t (t.code)}
+				<option value={t.code}>{t.label}</option>
+			{/each}
+		</select>
 		<select class="input" aria-label="Course filter" bind:value={courseFilter} onchange={applyFilters}>
 			<option value="">All courses</option>
 			{#each courseOptions as c (c.id)}
@@ -726,31 +725,33 @@
 									{o.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
-								{#if o.isActive}
-									<button
-										class="link"
-										onclick={() => { adminOfferingsState.actionError = null; deactivateTarget = o; }}
-									>
-										Deactivate
-									</button>
-								{:else}
-									<button
-										class="link"
-										onclick={() => void toggleOfferingActive(o)}
-									>
-										Reactivate
-									</button>
-								{/if}
-								{#if !o.isActive}
-									<button
-										class="link danger"
-										onclick={() => { adminOfferingsState.actionError = null; deleteTarget = o; }}
-									>
-										Delete
-									</button>
-								{/if}
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
+									{#if o.isActive}
+										<button
+											class="link"
+											onclick={() => { adminOfferingsState.actionError = null; deactivateTarget = o; }}
+										>
+											Deactivate
+										</button>
+									{:else}
+										<button
+											class="link"
+											onclick={() => void toggleOfferingActive(o)}
+										>
+											Reactivate
+										</button>
+									{/if}
+									{#if !o.isActive}
+										<button
+											class="link danger"
+											onclick={() => { adminOfferingsState.actionError = null; deleteTarget = o; }}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -1060,8 +1061,8 @@
 	}
 
 	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.th-btn {

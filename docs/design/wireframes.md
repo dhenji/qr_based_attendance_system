@@ -1171,7 +1171,7 @@ duration_minutes, scheduled_end_time)`.
 > **Read-only profile** (D32): all identity fields are admin-managed.
 > No edit button — note says "Changes handled by Admin."
 
-#### Settings Tab — `/professor/settings` (security-only per D32)
+#### Settings Tab — `/professor/settings`
 
 ```
 ┌────────────┬────────────────────────────────────────────────────┐
@@ -1194,9 +1194,10 @@ duration_minutes, scheduled_end_time)`.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> **Security-only settings** (D32): Change Password (with policy hint),
-> MFA setup, Security Question. Nothing else — no appearance, no
-> notifications, no account deletion.
+> **Settings** (D32): security (Change Password with policy hint, MFA
+> setup, Security Question) plus device-local preferences — Appearance
+> (Light/Dark theme), Notifications, and Privacy toggles. Identity stays
+> admin-managed.
 
 ---
 

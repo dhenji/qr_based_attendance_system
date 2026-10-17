@@ -392,22 +392,24 @@
 							<td>{p.department ?? '—'}</td>
 							<td>{p.assigned_courses.length}</td>
 							<td>{p.claimStatus}</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => openEdit(p)}>Edit</button>
-								<button
-									class="link"
-									onclick={() => {
-										adminProfessorsState.actionError = null;
-										toggleTarget = p;
-									}}
-								>
-									{p.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
-{#if !p.isActive}
-								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
-							{/if}
-							<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
-						</td>
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => openEdit(p)}>Edit</button>
+									<button
+										class="link"
+										onclick={() => {
+											adminProfessorsState.actionError = null;
+											toggleTarget = p;
+										}}
+									>
+										{p.isActive ? 'Deactivate' : 'Reactivate'}
+									</button>
+									{#if !p.isActive}
+										<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
+									{/if}
+									<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
+								</div>
+							</td>
 						</tr>
 					{/each}
 				</tbody>

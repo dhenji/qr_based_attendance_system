@@ -466,15 +466,15 @@
 		flex-shrink: 0;
 		padding: 0.25rem 0.625rem;
 		border-radius: 999px;
-		background: var(--bg-subtle, #f1f5f9);
+		background: var(--bg-muted);
 		color: var(--text-muted);
 		font-size: 0.75rem;
 		font-weight: 600;
 	}
 
 	.pill.on {
-		background: #dcfce7;
-		color: #15803d;
+		background: var(--success-bg);
+		color: var(--success);
 	}
 
 	.actions {
@@ -529,9 +529,10 @@
 	.qr img {
 		width: 220px;
 		height: 220px;
+		/* The quiet zone must stay white or the code stops scanning — in both themes. */
 		background: #fff;
 		padding: 8px;
-		border: 1px solid var(--border, #e2e8f0);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
 
@@ -555,8 +556,8 @@
 		flex: 1;
 		min-width: 0;
 		padding: 0.625rem 0.75rem;
-		background: var(--bg-subtle, #f1f5f9);
-		border: 1px solid var(--border, #e2e8f0);
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 		font-size: 0.875rem;
@@ -568,7 +569,7 @@
 	.input {
 		padding: 0.625rem 0.75rem;
 		background: var(--bg-card);
-		border: 1px solid var(--border, #e2e8f0);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
@@ -593,15 +594,15 @@
 	.error {
 		margin: 0 0 1rem;
 		font-size: 0.8125rem;
-		color: var(--danger, #dc2626);
+		color: var(--danger);
 	}
 
 	.codes {
 		list-style: none;
 		margin: 0 0 1rem;
 		padding: 0.75rem;
-		background: var(--bg-subtle, #f1f5f9);
-		border: 1px solid var(--border, #e2e8f0);
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 		font-size: 0.875rem;
@@ -637,7 +638,7 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid var(--primary, #2563eb);
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -647,13 +648,13 @@
 	}
 
 	.btn-primary {
-		background: var(--primary, #2563eb);
-		color: #fff;
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-secondary {
 		background: var(--bg-card);
-		border-color: var(--border, #e2e8f0);
+		border-color: var(--border);
 		color: var(--text);
 	}
 
@@ -663,7 +664,7 @@
 	}
 
 	.btn-danger {
-		background: var(--danger, #dc2626);
-		color: #fff;
+		background: var(--danger);
+		color: var(--on-brand);
 	}
 </style>

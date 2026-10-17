@@ -653,25 +653,27 @@
 							<td>{s.yearLevelLabel}</td>
 							<td>{s.faceEnrolled ? 'Yes' : '—'}</td>
 							<td>{s.claimStatus}</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => openEdit(s)}>Edit</button>
-								<button
-									class="link"
-									onclick={() => {
-										adminStudentsState.actionError = null;
-										toggleTarget = s;
-									}}
-								>
-									{s.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
-{#if !s.isActive}
-								<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
-							{/if}
-							<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
-							<button class="link" onclick={() => openFace(s)}>
-								{s.faceEnrolled ? 'Re-enroll face' : 'Enroll face'}
-							</button>
-						</td>
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => openEdit(s)}>Edit</button>
+									<button
+										class="link"
+										onclick={() => {
+											adminStudentsState.actionError = null;
+											toggleTarget = s;
+										}}
+									>
+										{s.isActive ? 'Deactivate' : 'Reactivate'}
+									</button>
+									{#if !s.isActive}
+										<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
+									{/if}
+									<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
+									<button class="link" onclick={() => openFace(s)}>
+										{s.faceEnrolled ? 'Re-enroll face' : 'Enroll face'}
+									</button>
+								</div>
+							</td>
 						</tr>
 					{/each}
 				</tbody>

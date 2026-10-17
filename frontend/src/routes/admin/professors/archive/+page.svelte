@@ -138,17 +138,19 @@
 							<td>{fullName(p)}</td>
 							<td class="mono">{p.email}</td>
 							<td>{p.department ?? '—'}</td>
-							<td class="row-actions">
-								<button
-									class="link success"
-									onclick={() => {
-										adminProfessorsState.actionError = null;
-										toggleTarget = p;
-									}}
-								>
-									Restore
-								</button>
-								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
+							<td>
+								<div class="row-actions">
+									<button
+										class="link success"
+										onclick={() => {
+											adminProfessorsState.actionError = null;
+											toggleTarget = p;
+										}}
+									>
+										Restore
+									</button>
+									<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
+								</div>
 							</td>
 						</tr>
 					{/each}

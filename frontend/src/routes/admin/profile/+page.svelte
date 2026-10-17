@@ -9,6 +9,12 @@
 		isAdmin,
 		restoreSession,
 	} from '$lib/features/auth/store.svelte';
+	import {
+		DEFAULT_PREFS,
+		getPrefs,
+		type SettingsPrefs,
+	} from '$lib/features/settings/service';
+	import { applyTheme, setTheme as persistTheme } from '$lib/features/settings/theme';
 	import type { MeResponse } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
@@ -21,6 +27,15 @@
 	let identity = $state<MeResponse | null>(null);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
+
+	// Device-local display prefs — same storage and helper as the student and
+	// professor Settings pages. Theme never leaves the browser.
+	const prefs = $state<SettingsPrefs>({ ...DEFAULT_PREFS });
+
+	function setTheme(theme: 'light' | 'dark') {
+		prefs.theme = theme;
+		persistTheme(theme);
+	}
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
@@ -38,6 +53,10 @@
 	const passwordsMatch = $derived(newPassword === confirmPassword);
 
 	onMount(async () => {
+		const loaded = getPrefs();
+		Object.assign(prefs, loaded);
+		applyTheme(loaded.theme);
+
 		const user = await restoreSession();
 		if (!user || !isAdmin()) {
 			await goto(Routes.HOME);
@@ -106,6 +125,22 @@
 					<dd>{identity.last_login ? identity.last_login.slice(0, 16).replace('T', ' ') : '—'}</dd>
 				</div>
 			</dl>
+		</section>
+
+		<section class="card">
+			<h2 class="section-title">Appearance</h2>
+			<div class="row">
+				<span class="row-label">Theme</span>
+				<div class="segmented">
+					<button class="segment" class:active={prefs.theme === 'light'} onclick={() => setTheme('light')}>
+						Light
+					</button>
+					<button class="segment" class:active={prefs.theme === 'dark'} onclick={() => setTheme('dark')}>
+						Dark
+					</button>
+				</div>
+			</div>
+			<p class="muted note">Applies instantly across the app and is remembered on this device.</p>
 		</section>
 
 		<MfaSettings />
@@ -189,6 +224,47 @@
 		font-size: 1.125rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.row-label {
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+	}
+
+	.segmented {
+		display: inline-flex;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.segment {
+		border: none;
+		background: var(--bg-card);
+		color: var(--text-muted);
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		font-family: system-ui, sans-serif;
+		cursor: pointer;
+	}
+
+	.segment.active {
+		background: var(--brand);
+		color: var(--on-brand);
+	}
+
+	.note {
+		font-size: 0.8125rem;
+		margin-top: 0.75rem;
 	}
 
 	.detail {
