@@ -141,10 +141,13 @@ export const promoteStaging = async (
 ): Promise<void> => {
 	adminAnalyticsState.actionError = null;
 	try {
-		// The POST honors semester scope only — program/year/risk/paging are
-		// list-side filters the backend ignores, so they stay out of the call.
+		// The POST honors the rail's program/year/course scope plus semester
+		// (#279); risk level / unpromoted_only / paging stay list-side.
 		adminStagingState.lastPromote = await promoteRiskStaging({
 			semester: listFilters.semester,
+			program_id: listFilters.program_id,
+			year_level_id: listFilters.year_level_id,
+			course_ids: listFilters.course_ids,
 		});
 		await Promise.all([
 			applyStagingFilters(listFilters),

@@ -21,10 +21,12 @@ import {
 	downloadCsv,
 	enrichComparison,
 	fetchAnalyticsExportCsv,
+	getCourseOptions,
 	overviewCsv,
 	stagingCsv,
 	trendsCsv,
 	type AnalyticsMetric,
+	type CourseOption,
 } from '$lib/features/admin/analytics/service';
 import { isMockMode } from '$lib/api/client';
 import {
@@ -89,6 +91,18 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let courseOptions = $state<AdminCourse[]>([]);
 	let yearsCache = $state<Map<number, YearLevel[]>>(new Map());
 
+	// Catalogue page size for the picker's unscoped fallback and the name-join
+	// lookups; mirrors the backend's MAX_PAGE_SIZE so the list is honestly
+	// bounded (with a "showing X of Y" hint) rather than silently capped.
+	const COURSE_CHOICE_LIMIT = 200;
+	// Scoped picker (#279): courses with at least one offering in the picked
+	// Program/Year/Term. An unset program falls back to the catalogue above.
+	let courseChoices = $state<CourseOption[]>([]);
+	let courseChoicesTotal = $state(0);
+	let courseChoicesLoading = $state(false);
+	let courseLookupsTotal = $state(0);
+	let courseSearch = $state('');
+
 	const metric = $derived(adminAnalyticsState.metric);
 	const overview = $derived(adminAnalyticsState.overview);
 
@@ -97,6 +111,24 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	);
 
 	const allYears = $derived([...yearsCache.values()].flat());
+
+	// Picker source: scoped options when a program is picked, else the loaded
+	// catalogue. `visibleChoices` adds the search narrowing for the catalogue
+	// path; scoped results already arrive server-filtered by `q`.
+	const pickerChoices = $derived(
+		programFilter
+			? courseChoices
+			: courseOptions.map((c) => ({ id: c.id, code: c.courseCode, name: c.courseName }))
+	);
+	const pickerTotal = $derived(programFilter ? courseChoicesTotal : courseLookupsTotal);
+	const visibleChoices = $derived.by(() => {
+		if (programFilter) return pickerChoices;
+		const needle = courseSearch.trim().toLowerCase();
+		if (!needle) return pickerChoices;
+		return pickerChoices.filter(
+			(c) => c.code.toLowerCase().includes(needle) || c.name.toLowerCase().includes(needle)
+		);
+	});
 
 	const comparison = $derived(
 		enrichComparison(adminAnalyticsState.comparison, courseOptions, programOptions, [
@@ -206,6 +238,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	onDestroy(() => {
 		pageAlive = false;
+		if (courseSearchTimer) clearTimeout(courseSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -218,10 +251,55 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	const reloadCourseLookups = async () => {
 		try {
-			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+			const page = await listCourses({ page: 1, size: COURSE_CHOICE_LIMIT });
+			courseOptions = page.items;
+			courseLookupsTotal = page.total;
 		} catch {
 			courseOptions = [];
+			courseLookupsTotal = 0;
 		}
+	};
+
+	// Scoped picker options (#279). `reconcile` drops selections no longer in
+	// scope, but only when the full in-scope set is present — a page truncated
+	// at COURSE_CHOICE_LIMIT must never discard a valid selection.
+	const loadScopedCourseChoices = async (reconcile = false) => {
+		if (!programFilter) return;
+		courseChoicesLoading = true;
+		try {
+			const { items, total } = await getCourseOptions({
+				program_id: Number(programFilter),
+				year_level_id: yearFilter ? Number(yearFilter) : undefined,
+				semester: semesterFilter.trim() || undefined,
+				q: courseSearch.trim() || undefined,
+				limit: COURSE_CHOICE_LIMIT,
+			});
+			courseChoices = items;
+			courseChoicesTotal = total;
+			if (reconcile && !courseSearch.trim() && total <= items.length) {
+				const available = new Set(items.map((c) => c.id));
+				selectedCourseIds = selectedCourseIds.filter((id) => available.has(id));
+			}
+		} catch {
+			// Best effort — the filterNotice covers lookup failures.
+		} finally {
+			courseChoicesLoading = false;
+		}
+	};
+
+	let courseSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const onCourseSearch = (value: string) => {
+		courseSearch = value;
+		// Catalogue search filters instantly via `visibleChoices`; a scoped
+		// search round-trips, so debounce it.
+		if (!programFilter) return;
+		if (courseSearchTimer) clearTimeout(courseSearchTimer);
+		courseSearchTimer = setTimeout(() => void loadScopedCourseChoices(false), 250);
+	};
+
+	const clearCourseSelection = () => {
+		selectedCourseIds = [];
 	};
 
 	const reloadProgramLookups = async () => {
@@ -251,9 +329,12 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		try {
-			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+			const page = await listCourses({ page: 1, size: COURSE_CHOICE_LIMIT });
+			courseOptions = page.items;
+			courseLookupsTotal = page.total;
 		} catch {
 			courseOptions = [];
+			courseLookupsTotal = 0;
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await apply();
@@ -271,6 +352,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		yearFilter = '';
 		semesterFilter = '';
 		yearOptions = [];
+		courseSearch = '';
 		if (programFilter) {
 			try {
 				yearOptions = await listYearLevels(Number(programFilter));
@@ -278,12 +360,25 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				yearOptions = [];
 				filterNotice = 'Some filters failed to load — lists may be incomplete.';
 			}
+			await loadScopedCourseChoices(true);
+		} else {
+			// Back to the catalogue: every course is in scope, nothing to drop.
+			courseChoices = [];
+			courseChoicesTotal = 0;
 		}
 		await apply();
 	};
 
 	const changeYear = async () => {
 		semesterFilter = '';
+		courseSearch = '';
+		await loadScopedCourseChoices(true);
+		await apply();
+	};
+
+	const changeSemester = async () => {
+		courseSearch = '';
+		await loadScopedCourseChoices(true);
 		await apply();
 	};
 
@@ -350,6 +445,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		program_id: programFilter ? Number(programFilter) : undefined,
 		year_level_id: yearFilter ? Number(yearFilter) : undefined,
 		semester: semesterFilter.trim() || undefined,
+		course_ids: selectedCourseIds,
 		risk_level: riskLevel || undefined,
 		unpromoted_only: true,
 	});
@@ -438,6 +534,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				class="input"
 				aria-label="Semester filter"
 				bind:value={semesterFilter}
+				onchange={changeSemester}
 				disabled={!yearFilter || semesterOptions.length === 0}
 				title={!yearFilter
 					? "Pick a year level first — semesters are the year level's terms"
@@ -466,19 +563,46 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		{/if}
 		<fieldset class="courses">
 			<legend>Courses (multi)</legend>
-			{#if courseOptions.length === 0}
-				<span class="muted">No courses loaded.</span>
+			<div class="course-picker">
+				<input
+					class="input"
+					type="search"
+					placeholder={programFilter ? 'Search courses in scope' : 'Search courses'}
+					aria-label="Search courses"
+					value={courseSearch}
+					oninput={(e) => onCourseSearch((e.currentTarget as HTMLInputElement).value)}
+				/>
+				<span class="muted small">
+					{selectedCourseIds.length} selected{#if selectedCourseIds.length > 0}
+						<button type="button" class="link-btn" onclick={clearCourseSelection}>Clear</button>{/if}
+				</span>
+			</div>
+			{#if courseChoicesLoading && pickerChoices.length === 0}
+				<span class="muted">Loading courses…</span>
+			{:else if pickerChoices.length === 0}
+				<span class="muted">
+					{programFilter
+						? 'No courses are offered in the selected program/year/term.'
+						: 'No courses loaded.'}
+				</span>
 			{:else}
-				{#each courseOptions as c (c.id)}
+				{#each visibleChoices as c (c.id)}
 					<label class="check">
 						<input
 							type="checkbox"
 							checked={selectedCourseIds.includes(c.id)}
 							onchange={() => toggleCourse(c.id)}
 						/>
-						{c.courseCode}
+						{c.code}
 					</label>
+				{:else}
+					<span class="muted">No courses match “{courseSearch}”.</span>
 				{/each}
+				{#if pickerChoices.length < pickerTotal}
+					<span class="muted small">
+						Showing {pickerChoices.length} of {pickerTotal} — search to narrow.
+					</span>
+				{/if}
 			{/if}
 		</fieldset>
 	</section>
@@ -675,8 +799,8 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				>
 					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'}?</p>
 					<p class="muted small">
-						Promote acts on the whole semester scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
-						and risk filters narrow this review list only. Promoted rows leave the list and appear in At-Risk.
+						Promote acts on every unpromoted row in the current scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
+						and course narrow the promoted set; risk level narrows this review list only. Promoted rows leave the list and appear in At-Risk.
 					</p>
 					<div class="confirm-actions">
 						<button class="btn btn-secondary" onclick={() => (promoteOpen = false)}>Cancel</button>
@@ -880,6 +1004,29 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		font-weight: 600;
 		color: var(--text-secondary);
 		cursor: pointer;
+	}
+
+	.course-picker {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		flex-basis: 100%;
+	}
+
+	.course-picker .input {
+		flex: 1 1 16rem;
+	}
+
+	.link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		margin-left: 0.375rem;
+		font: inherit;
+		color: var(--brand);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 
 	.tabs {

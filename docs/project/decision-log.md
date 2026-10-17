@@ -2219,3 +2219,50 @@
   single-source-of-truth helper; semester and dates stay filter axes, not key
   members.
 
+### ADR-085: The Course Filter Is Scoped to Offerings, and Every Tab Honours It
+
+- **Decision (D85):** The Analytics filter rail's Courses control lists
+  **courses with at least one offering in the picked Program/Year/Term**, not
+  the global catalogue: a new `GET /admin/analytics/course-options` derives
+  them from the same `_offerings_stmt` scope predicate every report read uses
+  (`program_id`/`year_level_id`/`semester`, optional `q` code/name search,
+  `limit` + `total` for honest truncation). `course_ids` is accepted by
+  **every** analytics read — overview, comparison, trends, at-risk, and risk
+  staging — and by `POST /admin/analytics/risk-staging/promote`, so the shared
+  rail means the same thing on every tab. Promote no longer ignores
+  program/year/course: it copies exactly the unpromoted rows the review list
+  shows. The picker reconciles on Program/Year/Term change, dropping
+  selections that fall out of scope.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** The rail was global while the data is offering-keyed
+  (`analytics/model.py` keys risk rows to `offering_id`, and both risk reads
+  already filter program/year at the offering level). An admin could therefore
+  select a course with no offering in the chosen scope and get a blank
+  Comparison with no explanation, and — worse — the same control was silently
+  ignored by Overview, At-Risk, and Staging, whose routes never accepted
+  `course_ids`. Changing Program also kept the previous course picks. Promote's
+  dialog claimed program/year/semester scope while the POST honored semester
+  only, promoting past the set it described.
+- **Alternatives considered:**
+  (1) *Keep the catalogue and disable impossible options client-side.*
+  Rejected: the client cannot know which courses have offerings in scope
+  without the scope join only the server has.
+  (2) *Add a separate `course_id` filter to each tab.* Rejected: the rail is
+  one control; one `course_ids` parameter keeps the tabs consistent.
+  (3) *Leave Promote semester-only and fix the copy.* Rejected: promoting past
+  the reviewed scope is the bug, not the wording.
+  (4) *Taken:* one scope predicate (`_offerings_stmt`) behind both the picker
+  and the report reads, and one `course_ids` parameter on every read + promote.
+- **Consequences:** No schema or migration change (`alembic check` stays
+  green). New additive endpoint and query params; existing callers that omit
+  `course_ids` are unchanged. Promote is a behaviour change for clients that
+  passed only `semester` while displaying program/year filters — the admin UI
+  did exactly that and now sends its rail scope, covered by
+  `test_risk_staging_promote_honors_course_ids`. `course-options` deliberately
+  has no `is_active` gate, mirroring `_offerings_stmt`, so an archived offering
+  that still carries attendance history stays reachable. The picker falls back
+  to the catalogue when Program is unset (every course is then in scope) and
+  only drops selections when it has seen the full in-scope set
+  (`total <= items.length`), never a page truncated at `limit`.
+

@@ -38,6 +38,7 @@ import type {
 	AdminUserResponse,
 	AnalyticsAtRiskItemResponse,
 	AnalyticsComparisonItemResponse,
+	AnalyticsCourseOptionsResponse,
 	AnalyticsOverviewResponse,
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
@@ -2645,6 +2646,36 @@ export const AdminAnalyticsOverviewEndpoint: EndpointDef<AnalyticsOverviewRespon
 	},
 };
 
+// Courses with at least one offering in the picked scope (#279): the rail's
+// course picker reads this so a course no report can show is not selectable.
+// Mirrors the backend's distinct-courses-with-an-offering scope and the `q`
+// code/name search.
+export const AdminAnalyticsCourseOptionsEndpoint: EndpointDef<AnalyticsCourseOptionsResponse> = {
+	url: '/admin/analytics/course-options',
+	method: 'GET',
+	mock: (params) => {
+		const sessions = filterMockSessions(params);
+		const byId = new Map<number, { course_id: number; course_code: string; course_name: string }>();
+		for (const s of sessions) {
+			if (!byId.has(s.courseId)) {
+				byId.set(s.courseId, {
+					course_id: s.courseId,
+					course_code: s.courseCode,
+					course_name: s.courseName,
+				});
+			}
+		}
+		let items = [...byId.values()].sort((a, b) => a.course_code.localeCompare(b.course_code));
+		const q = params?.q?.trim().toLowerCase();
+		if (q) {
+			items = items.filter(
+				(c) => c.course_code.toLowerCase().includes(q) || c.course_name.toLowerCase().includes(q)
+			);
+		}
+		return { items, total: items.length };
+	},
+};
+
 export const AdminAnalyticsComparisonEndpoint: EndpointDef<{ items: AnalyticsComparisonItemResponse[] }> = {
 	url: '/admin/analytics/course-comparison',
 	method: 'GET',
@@ -3612,6 +3643,7 @@ export const endpoints = {
 	adminOfferingUnenroll: AdminOfferingUnenrollEndpoint,
 	// Admin analytics + attendance overview (Phase 7; backend #136/#137/#138)
 	adminAnalyticsOverview: AdminAnalyticsOverviewEndpoint,
+	adminAnalyticsCourseOptions: AdminAnalyticsCourseOptionsEndpoint,
 	adminAnalyticsComparison: AdminAnalyticsComparisonEndpoint,
 	adminAnalyticsTrends: AdminAnalyticsTrendsEndpoint,
 	adminAnalyticsAtRisk: AdminAnalyticsAtRiskEndpoint,

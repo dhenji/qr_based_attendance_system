@@ -19,6 +19,7 @@ import type {
 	AdminCourse,
 	AnalyticsAtRiskItemResponse,
 	AnalyticsComparisonItemResponse,
+	AnalyticsCourseOptionsResponse,
 	AnalyticsOverviewResponse,
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewFilters,
@@ -100,6 +101,42 @@ export const getAnalyticsComparison = async (
 	return { items, total: response.total ?? items.length };
 };
 
+export interface CourseOption {
+	id: number;
+	code: string;
+	name: string;
+}
+
+// Courses with at least one offering in the picked scope (#279) — the rail's
+// picker reads this instead of the whole catalogue, so a course no report can
+// show in the current scope is not selectable.
+export const getCourseOptions = async (
+	filters: {
+		program_id?: number;
+		year_level_id?: number;
+		semester?: string;
+		q?: string;
+		limit?: number;
+	} = {}
+): Promise<{ items: CourseOption[]; total: number }> => {
+	const params: QueryParams = {};
+	if (filters.program_id !== undefined) params.program_id = String(filters.program_id);
+	if (filters.year_level_id !== undefined) params.year_level_id = String(filters.year_level_id);
+	if (filters.semester) params.semester = filters.semester;
+	if (filters.q) params.q = filters.q;
+	if (filters.limit !== undefined) params.limit = String(filters.limit);
+	const response = await get<AnalyticsCourseOptionsResponse>(
+		'adminAnalyticsCourseOptions',
+		params
+	);
+	const items = (response.items ?? []).map((o) => ({
+		id: o.course_id,
+		code: o.course_code,
+		name: o.course_name,
+	}));
+	return { items, total: response.total ?? items.length };
+};
+
 export const getAnalyticsTrends = async (
 	filters: AdminAnalyticsFilters = {}
 ): Promise<AnalyticsTrendItemResponse[]> => {
@@ -129,11 +166,13 @@ export const refreshRiskScores = async (): Promise<RiskRefreshResponse> =>
 // without touching live scores; promoteRiskStaging copies the unpromoted
 // rows in scope into the live scores. Mock mode returns the empty fixtures,
 // so the page renders the "no dry-run yet" hint instead of demo rows.
-const stagingParams = (f: RiskStagingFilters): Record<string, string> => {
-	const params: Record<string, string> = {};
+const stagingParams = (f: RiskStagingFilters): QueryParams => {
+	const params: QueryParams = {};
 	if (f.program_id !== undefined) params.program_id = String(f.program_id);
 	if (f.year_level_id !== undefined) params.year_level_id = String(f.year_level_id);
 	if (f.semester) params.semester = f.semester;
+	if (f.course_ids && f.course_ids.length > 0)
+		params.course_ids = f.course_ids.map(String);
 	if (f.risk_level) params.risk_level = f.risk_level;
 	if (f.unpromoted_only !== undefined) params.unpromoted_only = String(f.unpromoted_only);
 	params.page = String(f.page ?? 1);
@@ -146,17 +185,24 @@ export const listRiskStaging = async (
 ): Promise<RiskStagingResponse> =>
 	get<RiskStagingResponse>('adminRiskStaging', stagingParams(filters));
 
-// Promote accepts only the backend's scope keys (student_id/offering_id/
-// semester) — program, year level, risk level, paging, and unpromoted_only
-// are list-only filters the POST silently ignores, so sending them would
-// promote beyond the reviewed set while claiming otherwise.
+// Promote honors the rail's scope (#279): program/year/course narrow which
+// staged rows get copied, same as the review list they were chosen from.
+// risk_level, unpromoted_only, and paging stay list-only, so they are left
+// out of the call rather than promoted past their scope.
 export const promoteRiskStaging = async (
-	filters: Pick<RiskStagingFilters, 'student_id' | 'offering_id' | 'semester'> = {}
+	filters: Pick<
+		RiskStagingFilters,
+		'student_id' | 'offering_id' | 'semester' | 'program_id' | 'year_level_id' | 'course_ids'
+	> = {}
 ): Promise<PromoteStagingResponse> => {
-	const params: Record<string, string> = {};
+	const params: QueryParams = {};
 	if (filters.student_id !== undefined) params.student_id = String(filters.student_id);
 	if (filters.offering_id !== undefined) params.offering_id = String(filters.offering_id);
 	if (filters.semester) params.semester = filters.semester;
+	if (filters.program_id !== undefined) params.program_id = String(filters.program_id);
+	if (filters.year_level_id !== undefined) params.year_level_id = String(filters.year_level_id);
+	if (filters.course_ids && filters.course_ids.length > 0)
+		params.course_ids = filters.course_ids.map(String);
 	return post<PromoteStagingResponse>('adminRiskStagingPromote', undefined, params);
 };
 

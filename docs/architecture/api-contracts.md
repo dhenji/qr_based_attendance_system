@@ -502,8 +502,24 @@ Check enrollment status.
 |                  |                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | **Role**         | admin                                                                                            |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                      |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                          |
 | **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions }` |
+
+#### `GET /admin/analytics/course-options`
+
+Courses with **at least one offering in the selected scope** — the Analytics
+filter rail's course picker. Uses the same scope predicate as every report
+read, so a course no report can show in the picked Program/Year/Term cannot
+be offered as an option; a course with no offering can never produce a
+silently empty report. No `is_active` gate (mirrors the report reads). `q`
+matches course code or name; `total` lets the picker flag truncation
+honestly instead of silently capping.
+
+|                  |                                                               |
+| ---------------- | ------------------------------------------------------------- |
+| **Role**         | admin                                                         |
+| **Query**        | `?program_id?&year_level_id?&semester?&q?&limit?`             |
+| **Response 200** | `{ items: [{ course_id, course_code, course_name }], total }` |
 
 #### `GET /admin/analytics/course-comparison`
 
@@ -527,7 +543,7 @@ Semester/dates are filter axes, not identity.
 
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&risk_level=low                                                                                             | medium | high` |
 | **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at }], ... }` |
 
 #### `POST /admin/analytics/export`
@@ -560,7 +576,7 @@ live `student_risk_scores` are untouched until `promote`.
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | admin                                                                                                                                                         |
-| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high&unpromoted_only=false&...` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&risk_level=low                                                                                             | medium | high&unpromoted_only=false&...` |
 | **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at, promoted_at }], ... }` |
 
 #### `POST /admin/analytics/risk-staging/promote`
@@ -568,12 +584,12 @@ live `student_risk_scores` are untouched until `promote`.
 Copy unpromoted staged rows into live `student_risk_scores` (UPSERT per student/offering/semester/day)
 and stamp them `promoted_at` (admin-only). Already-promoted rows in scope are counted as `skipped`.
 
-|                  |                                                         |
-| ---------------- | ------------------------------------------------------- |
-| **Role**         | admin                                                   |
-| **Query**        | `student_id?` `offering_id?` `semester?` (all optional) |
-| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`           |
-| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
+|                  |                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| **Role**         | admin                                                                                  |
+| **Query**        | `student_id?` `offering_id?` `semester?` `program_id?` `year_level_id?` `course_ids?`   |
+| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`                                          |
+| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Program/year/course scope the promoted set to match the review list (issue #279); risk level and paging remain list-only. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
 
 ---
 
