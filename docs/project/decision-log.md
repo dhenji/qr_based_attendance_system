@@ -412,7 +412,7 @@
 - **Status:** Accepted
 - **Context:** A course can be offered by multiple programs AND taken at multiple year levels with differing schedules/classrooms per offering (e.g., CS101 in BSCS MWF 9am vs BSIT TTh 2pm). Single program_id/year_level_id FKs on courses forced 1:1 and broke sharing.
 - **Supersedes:** D1 (FK placement — program_id/year_level_id move to course_offerings), D4 (scheduling metadata — only units + session_duration_hours stay on courses; the rest move to course_offerings), D6 (sharing mechanism — via multiple offerings per course instead of cross-program enrollments), D14 (late policy defaults live on course_offerings, pre-fill sessions from offering).
-- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id.
+- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id. `semester_weeks` was later removed from `course_offerings` and moved to the term entry in `year_levels.term_structure` (ADR-086).
 
 ### ADR-045: Professor Assignments & Risk Scores Reference Course Offerings
 
@@ -2265,4 +2265,61 @@
   to the catalogue when Program is unset (every course is then in scope) and
   only drops selections when it has seen the full in-scope set
   (`total <= items.length`), never a page truncated at `limit`.
+
+### ADR-086: Session Weeks Are a Term Property, Derived Not Stored
+
+- **Decision (D86):** Session weeks move off `course_offerings` and onto the
+  academic term. Each entry in `year_levels.term_structure.terms` gains an
+  optional `weeks` (JSONB shape only, no DDL): `{"code", "label", "weeks"}`.
+  Offerings **derive** their weeks from the term they are offered in —
+  `year_level.term_structure` entry matching `offering.semester` — so the value
+  is edited in one place (Program Management → Year Levels → Manage Terms) and
+  a term's length can never disagree between sibling offerings. The resolver
+  `shared/schedule.py::term_weeks` is the single definition (bounds
+  `TERM_WEEKS_MIN=1`/`TERM_WEEKS_MAX=52`, `DEFAULT_TERM_WEEKS=18` fallback);
+  the risk batch (`analytics/batch.py::_load_expected_by_offering`) and the
+  offering read DTO both resolve through it. `OfferingCreate`/`OfferingUpdate`
+  no longer accept `semester_weeks`; `OfferingRead.semester_weeks` is kept as a
+  **derived, read-only** field so existing read contracts and clients do not
+  change shape. The column `course_offerings.semester_weeks` is dropped
+  (migration `f1a2b3c4d5e6`). `semester` remains free text with no vocabulary,
+  so an unmatched or orphaned code resolves to the default rather than raising.
+- **Date:** 2026-10-18
+- **Status:** Accepted
+- **Context:** Weeks-per-term was stored per offering, so the same term could
+  carry a different length in every offering of it: two sections of one course
+  in one term could disagree, and the nightly risk batch silently scored each
+  against its own denominator. Admins had no way to see or fix the drift — the
+  value was re-typed in each offering's create/edit form (and defaulted to a
+  hard-coded `18` in three places). The academic term is already modelled per
+  program/year (D3), which is the granularity at which a term actually has a
+  length, so the fix is to store it there once and derive it everywhere else.
+- **Alternatives considered:**
+  (1) *Keep the column and add a "sync from term" action.* Rejected: the
+  stored copy stays authoritative and can drift again the moment one offering
+  is touched; deriving removes the second source of truth.
+  (2) *A program-level or global weeks setting.* Rejected: terms legitimately
+  differ in length (a 6-week midyear, a 12-week summer), and the per-year term
+  structure is already where a term is defined.
+  (3) *Move `semester_weeks` to the term but keep it required and reject
+  offerings whose `semester` does not match a term entry.* Rejected for now:
+  `semester` is free text across the codebase and an orphan-code 422 would
+  break existing data and flows (`invalid_semester` stays unreachable).
+  (4) *Taken:* optional per-term `weeks`, one resolver, derived read field, and
+  a forward migration that backfills before dropping the column.
+- **Consequences:** No model↔migration drift beyond the dropped column
+  (`alembic check` stays green). The migration backfills each
+  `(year_level, semester)` term with the **modal** `semester_weeks` among that
+  term's existing offerings before dropping the column, so pre-existing absence
+  rates keep their denominator; the tie-break (higher count, then value) is
+  deterministic. A term with no matching entry falls back to
+  `DEFAULT_TERM_WEEKS` (18), matching the old UI default. Downgrade re-adds the
+  column NOT NULL with a temporary default and is **lossy** — per-offering
+  overrides are not restored. Three frontend surfaces lose their weeks input
+  and show the term's value read-only; Manage Terms warns (non-blocking) when
+  the same term code has different weeks across sibling year levels and offers
+  an "apply to all year levels" on save. Covered by
+  `test_shared_term_weeks.py`, the program term round-trip/bounds tests, and the
+  risk-batch expectation left at 16 × 2 = 32.
+
 

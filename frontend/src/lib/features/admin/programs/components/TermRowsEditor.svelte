@@ -1,8 +1,13 @@
 <!-- features/admin/programs/components/TermRowsEditor.svelte -->
 <script lang="ts">
-	import { TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
+	import { DEFAULT_TERM_WEEKS, TERM_CODES, TERM_LABELS } from '$lib/shared/constants/terms';
 
-	export type TermEditorRow = { code: string; label: string; existing?: boolean };
+	export type TermEditorRow = {
+		code: string;
+		label: string;
+		weeks?: number;
+		existing?: boolean;
+	};
 
 	let {
 		rows = $bindable<TermEditorRow[]>([]),
@@ -35,6 +40,7 @@
 			code: (TERM_CODES as readonly string[]).find((code) => !usedCodes.has(code)) ?? TERM_CODES[0],
 			label:
 				(TERM_LABELS as readonly string[]).find((label) => !usedLabels.has(label)) ?? TERM_LABELS[0],
+			weeks: DEFAULT_TERM_WEEKS,
 			existing: false,
 		};
 	};
@@ -121,6 +127,21 @@
 						{/each}
 					</select>
 				</label>
+
+				<label>
+					<span class="field-label">Session weeks</span>
+					<input
+						class="input"
+						type="number"
+						min="1"
+						max="52"
+						inputmode="numeric"
+						placeholder={String(DEFAULT_TERM_WEEKS)}
+						bind:value={rows[index].weeks}
+						disabled={busy}
+					/>
+					<span class="hint">How many weeks this term runs. Offerings inherit it.</span>
+				</label>
 			</div>
 		</article>
 	{/each}
@@ -181,7 +202,7 @@
 
 	.term-fields {
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.75rem;
 	}
 

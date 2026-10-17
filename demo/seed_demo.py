@@ -168,7 +168,7 @@ async def seed_demo(
                         YearLevel,
                         {
                             "label": ordinal(n),
-                            "term_structure": {"terms": [{"code": t, "label": label(t)} for t in terms]},
+                            "term_structure": {"terms": [{"code": t, "label": label(t), "weeks": 16} for t in terms]},
                             "sort_order": n,
                         },
                         program_id=program.id,
@@ -205,7 +205,6 @@ async def seed_demo(
                     {
                         "year_level_id": year_of[prog][year_no].id,
                         "sessions_per_week": _day_count(days),
-                        "semester_weeks": 16,
                         "schedule_days": days,
                         "schedule_start_time": start,
                         "schedule_end_time": end,

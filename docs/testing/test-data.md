@@ -46,10 +46,10 @@
 
 | year | label    | term_structure (JSONB)                                                                                                                 |
 | ---- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | 1st Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
-| 2    | 2nd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
-| 3    | 3rd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"},{"code":"midyear","label":"Midyear"}]}` |
-| 4    | 4th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
+| 1    | 1st Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
+| 2    | 2nd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
+| 3    | 3rd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16},{"code":"midyear","label":"Midyear","weeks":16}]}` |
+| 4    | 4th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
 
 ### Program: BSIT
 
@@ -61,10 +61,10 @@
 
 | year | label    | term_structure (JSONB)                                                                                                               |
 | ---- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 1    | 1st Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"},{"code":"summer","label":"Summer"}]}` |
-| 2    | 2nd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"},{"code":"summer","label":"Summer"}]}` |
-| 3    | 3rd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                    |
-| 4    | 4th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                    |
+| 1    | 1st Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16},{"code":"summer","label":"Summer","weeks":16}]}` |
+| 2    | 2nd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16},{"code":"summer","label":"Summer","weeks":16}]}` |
+| 3    | 3rd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                    |
+| 4    | 4th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                    |
 
 ### Program: BSECE
 
@@ -76,11 +76,11 @@
 
 | year | label    | term_structure (JSONB)                                                                                                                 |
 | ---- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | 1st Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
-| 2    | 2nd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
-| 3    | 3rd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"},{"code":"midyear","label":"Midyear"}]}` |
-| 4    | 4th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
-| 5    | 5th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester"},{"code":"2nd_sem","label":"2nd Semester"}]}`                                      |
+| 1    | 1st Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
+| 2    | 2nd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
+| 3    | 3rd Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16},{"code":"midyear","label":"Midyear","weeks":16}]}` |
+| 4    | 4th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
+| 5    | 5th Year | `{"terms":[{"code":"1st_sem","label":"1st Semester","weeks":16},{"code":"2nd_sem","label":"2nd Semester","weeks":16}]}`                                      |
 
 ---
 
@@ -96,7 +96,7 @@
 
 **Course offerings (one per program/year/semester):**
 
-| offering | course_code | program | year | semester  | academic_year | sessions_per_week | semester_weeks | schedule_days | start | end   | classroom_name | classroom_lat | classroom_lng | present_window | late_window |
+| offering | course_code | program | year | semester  | academic_year | sessions_per_week | weeks (from term) | schedule_days | start | end   | classroom_name | classroom_lat | classroom_lng | present_window | late_window |
 | -------- | ----------- | ------- | ---- | --------- | ------------- | ----------------- | -------------- | ------------- | ----- | ----- | -------------- | ------------- | ------------- | -------------- | ----------- |
 | GE101-BSCS-Y1-1st | GE101 | BSCS    | 1    | 1st_sem   | 2026-2027     | 2                 | 16             | MW            | 07:00 | 08:30 | Room 301       | 14.5995       | 120.9842      | 5              | 10          |
 | GE101-BSIT-Y1-1st | GE101 | BSIT    | 1    | 1st_sem   | 2026-2027     | 2                 | 16             | MW            | 07:00 | 08:30 | Room 301       | 14.5995       | 120.9842      | 5              | 10          |

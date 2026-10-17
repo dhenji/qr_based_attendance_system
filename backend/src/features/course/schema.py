@@ -27,8 +27,6 @@ from features.course.constants import (
     NAME_MIN_LENGTH,
     SCHEDULE_DAYS_MAX_LENGTH,
     SCHEDULE_DAYS_MIN_LENGTH,
-    SEMESTER_WEEKS_MAX,
-    SEMESTER_WEEKS_MIN,
     SESSIONS_PER_WEEK_MAX,
     SESSIONS_PER_WEEK_MIN,
     UNITS_MAX,
@@ -205,7 +203,6 @@ class OfferingCreate(BaseModel):
         min_length=ACADEMIC_YEAR_MIN_LENGTH, max_length=ACADEMIC_YEAR_MAX_LENGTH
     )
     sessions_per_week: int = Field(ge=SESSIONS_PER_WEEK_MIN, le=SESSIONS_PER_WEEK_MAX)
-    semester_weeks: int = Field(ge=SEMESTER_WEEKS_MIN, le=SEMESTER_WEEKS_MAX)
     schedule_days: str = Field(
         min_length=SCHEDULE_DAYS_MIN_LENGTH, max_length=SCHEDULE_DAYS_MAX_LENGTH
     )
@@ -261,6 +258,8 @@ class OfferingRead(BaseModel):
     semester: str
     academic_year: str
     sessions_per_week: int
+    # Derived (D86): resolved from the offering's year level + term code via
+    # `shared.schedule.term_weeks`, never stored on the offering.
     semester_weeks: int
     schedule_days: str
     schedule_start_time: time
@@ -286,9 +285,6 @@ class OfferingRead(BaseModel):
 class OfferingUpdate(BaseModel):
     sessions_per_week: int | None = Field(
         default=None, ge=SESSIONS_PER_WEEK_MIN, le=SESSIONS_PER_WEEK_MAX
-    )
-    semester_weeks: int | None = Field(
-        default=None, ge=SEMESTER_WEEKS_MIN, le=SEMESTER_WEEKS_MAX
     )
     schedule_days: str | None = Field(
         default=None,
@@ -326,7 +322,6 @@ class OfferingUpdate(BaseModel):
         # every other mutable field rejects null like CourseUpdate does.
         for field in (
             "sessions_per_week",
-            "semester_weeks",
             "schedule_days",
             "schedule_start_time",
             "schedule_end_time",

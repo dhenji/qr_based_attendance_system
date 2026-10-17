@@ -210,7 +210,7 @@ sequenceDiagram
         API->>DB: SELECT attendance rows for the cohort<br>(student_id, offering_id, status, timestamp, sync_status)
         DB-->>API: rows
 
-        API->>API: Compute features:<br>expected_sessions = offering.semester_weeks × offering.sessions_per_week<br>absence_rate = count(ABSENT) / expected_sessions<br>max_streak = longest consecutive ABSENT run<br>sync_lag = count(sync_status='pending' AND older than 24h)<br>weekly_absences = compute_weekly_absences(...)  # counts per ISO week<br>trend_slope = 4-week linear regression of weekly_absences
+        API->>API: Compute features:<br>expected_sessions = term_weeks(year_level.term_structure, offering.semester) × offering.sessions_per_week<br>absence_rate = count(ABSENT) / expected_sessions<br>max_streak = longest consecutive ABSENT run<br>sync_lag = count(sync_status='pending' AND older than 24h)<br>weekly_absences = compute_weekly_absences(...)  # counts per ISO week<br>trend_slope = 4-week linear regression of weekly_absences
 
         API->>API: Apply heuristic thresholds (D35):<br>absence_rate > 0.30 → high<br>absence_rate > 0.15 → medium<br>streak ≥ 3 → high<br>sync_lag ≥ 5 → medium<br>trend_slope < -0.05 → medium
 

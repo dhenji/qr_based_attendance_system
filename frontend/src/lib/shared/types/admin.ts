@@ -332,7 +332,6 @@ export interface AdminOfferingCreatePayload {
 	semester: string;
 	academic_year: string;
 	sessions_per_week: number;
-	semester_weeks: number;
 	schedule_days: string;
 	schedule_start_time: string;
 	schedule_end_time: string;
@@ -352,7 +351,6 @@ export interface AdminOfferingCreatePayload {
 // academic_year are identity and rejected server-side when patched.
 export interface AdminOfferingUpdatePayload {
 	sessions_per_week?: number;
-	semester_weeks?: number;
 	schedule_days?: string;
 	schedule_start_time?: string;
 	schedule_end_time?: string;

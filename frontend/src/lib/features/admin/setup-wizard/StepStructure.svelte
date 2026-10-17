@@ -28,7 +28,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	//
 	// Continue unlocks when at least one usable year and one course exist.
 
-	type TermRow = { code: string; label: string };
+	type TermRow = { code: string; label: string; weeks?: number };
 
 	let program = $state<ProgramDetail | null>(null);
 	let loading = $state(true);
