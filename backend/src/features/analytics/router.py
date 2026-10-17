@@ -11,6 +11,7 @@ from features.analytics.schema import (
     AnalyticsExportRequest,
     AtRiskResponse,
     CourseComparisonResponse,
+    CourseOptionsResponse,
     OverviewResponse,
     PromoteStagingResponse,
     RefreshRiskResponse,
@@ -32,6 +33,10 @@ AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 EXPORT_FILENAME = "analytics-course-comparison.csv"
 
+# Course search needle for the filter-rail picker; a course code or name is
+# far shorter than this, so it only bounds abusive input.
+COURSE_SEARCH_MAX_LENGTH = 100
+
 
 @router.get(
     "/overview",
@@ -44,6 +49,7 @@ async def get_overview(
     program_id: int | None = Query(default=None, gt=0),
     year_level_id: int | None = Query(default=None, gt=0),
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    course_ids: list[int] | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
 ) -> OverviewResponse:
@@ -51,6 +57,7 @@ async def get_overview(
         program_id=program_id,
         year_level_id=year_level_id,
         semester=semester,
+        course_ids=course_ids,
         date_from=date_from,
         date_to=date_to,
     )
@@ -82,6 +89,29 @@ async def get_course_comparison(
         date_to=date_to,
         page=page,
         size=size,
+    )
+
+
+@router.get(
+    "/course-options",
+    response_model=CourseOptionsResponse,
+    summary="Courses with at least one offering in the selected scope",
+)
+async def get_course_options(
+    _: AdminUser,
+    service: AnalyticsServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    q: str | None = Query(default=None, max_length=COURSE_SEARCH_MAX_LENGTH),
+    limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> CourseOptionsResponse:
+    return await service.list_course_options(
+        program_id=program_id,
+        year_level_id=year_level_id,
+        semester=semester,
+        query=q,
+        limit=limit,
     )
 
 
@@ -127,6 +157,7 @@ async def get_at_risk(
     program_id: int | None = Query(default=None, gt=0),
     year_level_id: int | None = Query(default=None, gt=0),
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    course_ids: list[int] | None = Query(default=None),
     risk_level: RiskLevel | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
@@ -135,6 +166,7 @@ async def get_at_risk(
         program_id=program_id,
         year_level_id=year_level_id,
         semester=semester,
+        course_ids=course_ids,
         risk_level=risk_level,
         page=page,
         size=size,
@@ -172,6 +204,7 @@ async def get_risk_staging(
     program_id: int | None = Query(default=None, gt=0),
     year_level_id: int | None = Query(default=None, gt=0),
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    course_ids: list[int] | None = Query(default=None),
     risk_level: RiskLevel | None = Query(default=None),
     unpromoted_only: bool = Query(default=False),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
@@ -181,6 +214,7 @@ async def get_risk_staging(
         program_id=program_id,
         year_level_id=year_level_id,
         semester=semester,
+        course_ids=course_ids,
         risk_level=risk_level,
         unpromoted_only=unpromoted_only,
         page=page,
@@ -199,11 +233,17 @@ async def promote_risk_staging(
     student_id: int | None = Query(default=None, gt=0),
     offering_id: int | None = Query(default=None, gt=0),
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    course_ids: list[int] | None = Query(default=None),
 ) -> PromoteStagingResponse:
     return await service.promote_staged(
         student_id=student_id,
         offering_id=offering_id,
         semester=semester,
+        program_id=program_id,
+        year_level_id=year_level_id,
+        course_ids=course_ids,
     )
 
 
