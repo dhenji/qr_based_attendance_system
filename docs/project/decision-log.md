@@ -2173,5 +2173,49 @@
   half-split trend from `shared.rates.attendance_rates`, removing the last
   hand-rolled rate copy in the feature. The comparison tab's cohort-slicing
   fix (live endpoint groups by course, not cohort) and its missing
-  `page`/`size` paging are tracked separately and left untouched here, so the
-  consolidation is behaviour-preserving.
+  `page`/`size` paging were tracked separately and left untouched here, so the
+  consolidation is behaviour-preserving; both are resolved in ADR-084 (#277).
+
+### ADR-084: One Cohort Definition for Per-Course Comparison
+
+- **Decision (D84):** Per-course comparison — admin
+  `GET /admin/analytics/course-comparison` and professor
+  `GET /professor/reports/comparison` — groups by the **(course, program, year
+  level)** cohort key, defined once in `shared/cohorts.py::cohort_key` (with
+  `group_by_cohort` for the shared grouping). The professor row carries
+  server-resolved `program_code` and `year_level_label`, and the client labels
+  and program/year-filters from the row instead of a course-id directory join
+  that cannot tell two cohorts of one course apart. Comparison paging is made
+  explicit rather than left to the default page: both comparison clients
+  request one page at the server's `MAX_PAGE_SIZE` and flag truncation when
+  `total` exceeds the rows they got.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** D6 and D34 always specified one row per program/year cohort
+  ("same subject across cohorts", "multiple bars per course"), and the mock
+  endpoints, TS types, and both UIs were built that way. Neither live
+  implementation matched: both grouped by `course_id` alone and labelled the
+  merged row with `rows[0]`, so a course taught to BSCS Y1 and BSIT Y1 became
+  a single blended row labelled with whichever offering the database returned
+  first. Mock mode therefore looked correct while live silently averaged
+  unrelated cohorts together. The same class of bug had already happened twice
+  in this codebase (`shared/rates.py`, four divergent copies), so the fix
+  extracts one key rather than patching two services.
+- **Alternatives considered:**
+  (1) *Fix each service separately.* Rejected: the two copies had already been
+  the failure mode; a third would start.
+  (2) *Key by offering id.* Rejected: comparison is defined across the
+  offerings of a cohort (terms/sections), not per offering.
+  (3) *Add `program_code`/`year_level_label` to the admin row too.* Rejected
+  as unnecessary: the admin tab already enriches from its loaded program/year
+  dropdown sources, which the professor surface lacks.
+- **Consequences:** No schema or migration change (`alembic check` stays
+  green). Admin comparison rows keep their shape but are now one per cohort;
+  professor rows gain two additive response fields. Row counts multiply with
+  the cohort count, so both comparison clients bound the request at
+  `MAX_PAGE_SIZE` and flag truncation when `total` is larger — comparison is
+  still rendered as one chart/table and is not paginated in the UI.
+  `shared/cohorts.py` joins `shared/rates.py` and `shared/schedule.py` as a
+  single-source-of-truth helper; semester and dates stay filter axes, not key
+  members.
+

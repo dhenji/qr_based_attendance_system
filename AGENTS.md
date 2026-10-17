@@ -93,6 +93,7 @@ npm run check          # typecheck (runs svelte-kit sync first)
 
 - 891 collected cases / 71 files (261 sync + 591 async test functions, plus parametrized expansions): sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` is covered by `src/tests/features/program/test_program_service.py`; `src/tests/features/excuse/` has all three layers (`test_service.py`, `test_routes_http.py`, `test_notifications.py`).
 - Attendance compliance/participation rates are **one** function: `shared/rates.py::attendance_rates`, keyword-only (`present`, `late`, `excused`, `enrolled`), 4-place rounding, `(0.0, 0.0)` for any non-positive denominator. It replaced four copies that had begun to diverge — `session`'s took transposed arguments. Unit-tested in `src/tests/shared/test_shared_rates.py`; **do not re-add a per-feature `_rates`**, and compliance must count `present` only.
+- Per-course comparison is cohort-keyed by **one** definition too: `shared/cohorts.py::cohort_key` is the (course, program, year level) key behind both admin `get_course_comparison` and professor `get_comparison` (ADR-084, fixes #277); **do not re-key a per-feature `by_course`**. The professor `ReportsComparisonItem` carries server-resolved `program_code`/`year_level_label` so the client labels and filters a cohort from the row, not a course-id directory join.
 - `conftest.py` SQLite shims (SQLite-only, inert on Postgres): `JSONB`→`JSON`, `BigInteger`→`INTEGER` (else every `id` insert fails `NOT NULL`), aware-UTC `DateTime` (else `SessionService.create_session` raises `TypeError`), plus `PRAGMA foreign_keys=ON` (else RESTRICT guards pass vacuously).
 - DB tests must use `api_client` (httpx + ASGITransport, `_get_db` overridden). `test_client` is sync-only and never used as a context manager (entering it runs lifespan `SELECT 1` → needs live Postgres).
 - `api_client` commits only on success, so a **failing request rolls back the seed** — commit after seeding if a test issues two failing requests. Read `server_default` values before committing (else `MissingGreenlet`).
@@ -108,5 +109,5 @@ npm run check          # typecheck (runs svelte-kit sync first)
 ## Docs (only what agents actually need)
 
 - `docs/architecture/api-contracts.md` — endpoint inventory (scan `student_number` field documented but comparison-only, see above).
-- `docs/project/decision-log.md` — authoritative (D1–D83, ADR-001–083; two entries share the D75/ADR-075 number); check before "fixing" odd-looking contracts.
+- `docs/project/decision-log.md` — authoritative (D1–D84, ADR-001–084; two entries share the D75/ADR-075 number); check before "fixing" odd-looking contracts.
 - `docs/project/roadmap.md` — 13 phases; Phase 12 is **not** a gap (it is marked `[Done]`, as are Phases 0 and 9).

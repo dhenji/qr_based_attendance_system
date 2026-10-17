@@ -11,6 +11,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
+from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -268,7 +269,12 @@ class AnalyticsService:
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> CourseComparisonResponse:
-        """Per-course rates over the filter set; one row per course."""
+        """Cohort rates over the filter set; one row per program × year level.
+
+        A course can be offered to several programs/year levels (D6); each is
+        its own row so the same subject is compared across cohorts (D34). Rows
+        are ordered by course code, then program, then year level.
+        """
         page, size = _normalize_paging(page, size)
         offerings: Sequence[CourseOffering] = (
             await self._session.scalars(
@@ -279,12 +285,8 @@ class AnalyticsService:
         if not offerings:
             return CourseComparisonResponse(items=[], total=0, page=page, size=size)
 
-        by_course: dict[int, list[CourseOffering]] = {}
-
-        for row in sorted(offerings, key=lambda item: item.id):
-            by_course.setdefault(row.course_id, []).append(row)
-
-        course_ids_sorted: list[int] = sorted(by_course)
+        cohorts: dict[CohortKey, list[CourseOffering]] = group_by_cohort(offerings)
+        course_ids_sorted: list[int] = sorted({key[0] for key in cohorts})
         course_map: dict[int, Course] = {
             row.id: row
             for row in (
@@ -295,8 +297,16 @@ class AnalyticsService:
         }
         items: list[CourseComparisonItem] = []
 
-        for course_id in course_ids_sorted:
-            rows: list[CourseOffering] = by_course[course_id]
+        for key in sorted(
+            cohorts,
+            key=lambda key: (
+                course_map[key[0]].course_code if key[0] in course_map else "",
+                key[1],
+                key[2],
+            ),
+        ):
+            course_id, cohort_program_id, cohort_year_level_id = key
+            rows: list[CourseOffering] = cohorts[key]
             offering_ids: list[int] = [row.id for row in rows]
             sessions: Sequence[Session] = await _scoped_sessions(
                 self._session, offering_ids, date_from, date_to
@@ -319,19 +329,17 @@ class AnalyticsService:
                 CourseComparisonItem(
                     course_id=course_id,
                     course_code=course.course_code if course else "",
-                    program_id=rows[0].program_id,
-                    year_level_id=rows[0].year_level_id,
+                    program_id=cohort_program_id,
+                    year_level_id=cohort_year_level_id,
                     compliance_rate=compliance,
                     participation_rate=participation,
                     total_sessions=len(sessions),
                 )
             )
 
-        total: int = len(items)
-
         return CourseComparisonResponse(
             items=items[(page - 1) * size : page * size],
-            total=total,
+            total=len(items),
             page=page,
             size=size,
         )

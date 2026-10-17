@@ -3389,6 +3389,8 @@ export interface ProfessorReportsComparisonItemResponse {
 	course_code: string;
 	program_id: number;
 	year_level_id: number;
+	program_code: string;
+	year_level_label: string;
 	compliance_rate: number;
 	participation_rate: number;
 	total_sessions: number;
@@ -3396,13 +3398,14 @@ export interface ProfessorReportsComparisonItemResponse {
 
 export const ProfessorReportsComparisonEndpoint: EndpointDef<{
 	items: ProfessorReportsComparisonItemResponse[];
+	total?: number;
 }> = {
 	url: '/professor/reports/comparison',
 	method: 'GET',
 	mock: () => ({
 		items: [
-			{ course_id: 1, course_code: 'CS101', program_id: 1, year_level_id: 1, compliance_rate: 0.84, participation_rate: 0.92, total_sessions: 12 },
-			{ course_id: 2, course_code: 'MATH101', program_id: 1, year_level_id: 1, compliance_rate: 0.71, participation_rate: 0.83, total_sessions: 9 },
+			{ course_id: 1, course_code: 'CS101', program_id: 1, year_level_id: 1, program_code: 'BSCS', year_level_label: 'Year 1', compliance_rate: 0.84, participation_rate: 0.92, total_sessions: 12 },
+			{ course_id: 2, course_code: 'MATH101', program_id: 1, year_level_id: 1, program_code: 'BSCS', year_level_label: 'Year 1', compliance_rate: 0.71, participation_rate: 0.83, total_sessions: 9 },
 		],
 	}),
 };

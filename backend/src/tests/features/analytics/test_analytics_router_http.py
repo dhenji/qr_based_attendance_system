@@ -103,6 +103,64 @@ async def test_course_comparison_shape(
     assert item["total_sessions"] == 1
 
 
+async def test_course_comparison_splits_cohorts(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    """One course offered to two programs is two rows, not one blended row.
+
+    Regression for #277: grouping by course id alone merged both cohorts and
+    labelled the merged row with whichever offering happened to come first.
+    """
+    program_a = await factories.program()
+    year_a = await factories.year_level(program_a)
+    program_b = await factories.program()
+    year_b = await factories.year_level(program_b)
+    course = await factories.course()
+    offering_a = await factories.offering(course, program_a, year_a)
+    offering_b = await factories.offering(course, program_b, year_b)
+    professor_user = await factories.user(role=UserRole.PROFESSOR.value)
+    professor = await factories.professor(professor_user)
+    session_a = await factories.session(
+        offering_a, professor, created_at=NOW, expires_at=NOW
+    )
+    session_b = await factories.session(
+        offering_b, professor, created_at=NOW, expires_at=NOW
+    )
+
+    # Cohort A: one of two enrolled students present (0.5). Cohort B: one of
+    # one (1.0). A course-id grouping would blend these to 2/3.
+    student_a1 = await factories.student(year_a, await factories.user())
+    student_a2 = await factories.student(year_a, await factories.user())
+    await factories.enrollment(student_a1, offering_a)
+    await factories.enrollment(student_a2, offering_a)
+    await factories.attendance(student_a1, session_a, timestamp=NOW)
+    student_b = await factories.student(year_b, await factories.user())
+    await factories.enrollment(student_b, offering_b)
+    await factories.attendance(student_b, session_b, timestamp=NOW)
+    admin = await factories.user(role=UserRole.ADMIN.value)
+
+    response = await api_client.get(
+        "/api/admin/analytics/course-comparison?size=200",
+        headers=await auth_headers(admin),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    by_cohort = {
+        (row["program_id"], row["year_level_id"]): row for row in body["items"]
+    }
+    assert set(by_cohort) == {(program_a.id, year_a.id), (program_b.id, year_b.id)}
+    row_a = by_cohort[(program_a.id, year_a.id)]
+    row_b = by_cohort[(program_b.id, year_b.id)]
+    assert row_a["course_id"] == course.id
+    assert row_b["course_id"] == course.id
+    assert row_a["compliance_rate"] == 0.5
+    assert row_b["compliance_rate"] == 1.0
+    assert row_a["total_sessions"] == 1
+    assert row_b["total_sessions"] == 1
+
+
 async def test_trends_buckets_by_day(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:

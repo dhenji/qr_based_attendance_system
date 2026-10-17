@@ -512,6 +512,12 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<section class="card" aria-busy={adminAnalyticsState.loading}>
 			<h2 class="card-title">Course Comparison</h2>
 			<p class="muted">Same course shown once per cohort · {metric} rate</p>
+			{#if adminAnalyticsState.comparisonTotal > comparison.length}
+				<p class="muted">
+					Showing {comparison.length} of {adminAnalyticsState.comparisonTotal} cohorts — narrow the
+					filters to see the rest.
+				</p>
+			{/if}
 			<ReportBarChart
 				title="Course comparison"
 				description="Per-cohort rate bars for the current filter set."
