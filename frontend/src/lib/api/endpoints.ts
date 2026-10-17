@@ -47,7 +47,6 @@ import type {
 	ProfessorImportResult,
 	ProgramImportResult,
 	PromoteStagingResponse,
-	RecentScanResponse,
 	RiskRefreshResponse,
 	RiskStagingResponse,
 	StructureChangeResponse,
@@ -2803,27 +2802,6 @@ export const AdminAttendanceOverviewEndpoint: EndpointDef<{ items: AttendanceOve
 	},
 };
 
-const MOCK_SCAN_STATUSES = ['present', 'late', 'present', 'present', 'excused', 'late'];
-
-export const AdminRecentScansEndpoint: EndpointDef<{ items: RecentScanResponse[] }> = {
-	url: '/admin/attendance/recent-scans',
-	method: 'GET',
-	mock: (params) => {
-		const limit = Math.min(Math.max(parseInt(params?.limit ?? '10', 10) || 10, 1), 100);
-		const sorted = [...MOCK_ANALYTICS_SESSIONS].sort((a, b) => (a.date < b.date ? 1 : -1));
-		const items: RecentScanResponse[] = sorted.slice(0, limit).map((s, i) => ({
-			id: i + 1,
-			scanned_at: `${s.date}T${String(8 + (i % 9)).padStart(2, '0')}:${String((i * 7) % 60).padStart(2, '0')}:00.000Z`,
-			student_name: MOCK_ADMIN_STUDENT_ROWS[i % MOCK_ADMIN_STUDENT_ROWS.length]
-				? [MOCK_ADMIN_STUDENT_ROWS[i % MOCK_ADMIN_STUDENT_ROWS.length].first_name, MOCK_ADMIN_STUDENT_ROWS[i % MOCK_ADMIN_STUDENT_ROWS.length].last_name].join(' ')
-				: 'Unknown',
-			course_code: s.courseCode,
-			status: MOCK_SCAN_STATUSES[i % MOCK_SCAN_STATUSES.length],
-		}));
-		return { items };
-	},
-};
-
 // --- Admin system settings (live backend) -------------------------------------
 // api-contracts.md §System Settings & Backups: GET/PATCH /admin/system/settings
 // (app_settings KV seeded from env defaults), GET/POST /admin/backups,
@@ -3638,7 +3616,6 @@ export const endpoints = {
 	adminRiskStaging: AdminRiskStagingEndpoint,
 	adminRiskStagingPromote: AdminRiskStagingPromoteEndpoint,
 	adminAttendanceOverview: AdminAttendanceOverviewEndpoint,
-	adminRecentScans: AdminRecentScansEndpoint,
 	// Admin audit logs (Phase 8 backend; designed shape)
 	adminAuditLogs: AdminAuditLogsEndpoint,
 	adminStructureChanges: AdminStructureChangesEndpoint,

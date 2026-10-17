@@ -1438,11 +1438,16 @@ assignment.
 > mid-semester; history is never rewritten. Any professor with an active
 > assignment may open sessions for the course.
 
-### 4.6 Admin Attendance Overview — `/admin/attendance/overview`
+### 4.6 Attendance Snapshot — Attendance tab of `/admin/analytics`
+
+> Relocated from the old `/admin/attendance/overview` page ([ADR-083](../project/decision-log.md)).
+> Reachable at `/admin/analytics?tab=attendance` and from the dashboard's
+> "Attendance at a glance" strip. Its Course ▸ Professor ▸ Date filters are
+> its own; the 4.7 filter rail is hidden on this tab.
 
 ```
 ┌────────────┬───────────────────────────────────────────────────┐
-│ ☰          │  Attendance Overview                             │
+│ ☰          │  Analytics & Reports › Attendance                 │
 │────────────│───────────────────────────────────────────────────│
 │            │  Filters: Course [All] Prof [All] Date [Range ▼]  │
 │            │                                                   │
@@ -1529,6 +1534,12 @@ assignment.
 > medium. Runs as daily batch job; manual refresh endpoint exists
 > (admin-only). **Compliance Rate** = present / total (default D36);
 > **Participation Rate** = (present + late + excused) / total (toggle).
+>
+> **Attendance tab** (ADR-083): the per-course snapshot (wireframe 4.6)
+> is a seventh tab, rendered inline with its own Course / Professor / date
+> filters — the rail above is hidden while it is open. The live tab set is
+> Overview · Course Comparison · Trends · At-Risk · **Staging** ·
+> **Attendance** · Export. Deep link: `/admin/analytics?tab=attendance`.
 
 ### 4.8 Admin Audit Logs — `/admin/audit-logs`
 
@@ -1623,11 +1634,11 @@ assignment.
 
 Same as Student Profile (2.10). Fields: Name (First/Middle/Last), Email, Role (Super Admin / Admin), Last Login.
 
-### 4.12 Admin Liveness Review — `/admin/attendance/liveness-review`
+### 4.12 Admin Attendance Review — `/admin/attendance`
 
 ```
 ┌────────────┬────────────────────────────────────────────────────┐
-│ ☰          │  Liveness Review                                  │
+│ ☰          │  Attendance Review                                │
 │────────────│────────────────────────────────────────────────────│
 │            │  Flagged scans awaiting manual review              │
 │            │  ┌──────┬────────────┬──────────┬──────────────┐   │
@@ -1877,13 +1888,13 @@ Partial failure:
 | 34  | Program Detail           | `/admin/programs/{id}`                      | Admin     |
 | 35  | Year-Level Courses       | `/admin/programs/{pid}/years/{yid}/courses` | Admin     |
 | 36  | Course Detail            | `/admin/courses/{cid}`                      | Admin     |
-| 37  | Attendance Overview      | `/admin/attendance/overview`                | Admin     |
+| 37  | Attendance Snapshot      | `/admin/analytics?tab=attendance`           | Admin     |
 | 38  | Analytics & Reports      | `/admin/analytics`                          | Admin     |
 | 39  | Audit Logs               | `/admin/audit-logs`                         | Admin     |
 | 40  | System Settings          | `/admin/system/settings`                    | Admin     |
 | 41  | Archive                  | `/admin/students/archive`                   | Admin     |
 | 42  | Profile                  | `/admin/profile`                            | Admin     |
-| 43  | Liveness Review          | `/admin/attendance/liveness-review`                | Admin     |
+| 43  | Attendance Review        | `/admin/attendance`                         | Admin     |
 | 44  | Admin Users              | `/admin/users`                              | Admin     |
 | 45  | Face Enrollment          | `/admin/face-enrollment/{student_id}`       | Admin     |
 | 46  | 404 Error                | `/+error`                                   | Global    |

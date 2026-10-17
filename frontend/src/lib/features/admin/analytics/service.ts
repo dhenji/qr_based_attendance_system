@@ -25,7 +25,6 @@ import type {
 	AttendanceOverviewItemResponse,
 	Program,
 	PromoteStagingResponse,
-	RecentScanResponse,
 	RiskRefreshResponse,
 	RiskStagingFilters,
 	RiskStagingItemResponse,
@@ -186,13 +185,6 @@ export const getAttendanceOverview = async (
 		'adminAttendanceOverview',
 		overviewParams(filters)
 	);
-	return response.items ?? [];
-};
-
-export const getRecentScans = async (limit = 10): Promise<RecentScanResponse[]> => {
-	const response = await get<{ items: RecentScanResponse[] }>('adminRecentScans', {
-		limit: String(limit),
-	});
 	return response.items ?? [];
 };
 
