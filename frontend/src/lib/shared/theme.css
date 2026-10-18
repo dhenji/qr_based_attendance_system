@@ -6,6 +6,14 @@
 
 :root {
 	color-scheme: light;
+
+	/* Type. Both stacks are theme-independent, so they sit beside the color
+	 * tokens: --font-ui carries human sentences, --font-data carries machine
+	 * facts (session codes, timestamps, rates, counts). Consumed via var()
+	 * so the unified stack can never drift per component again. */
+	--font-ui: 'DM Sans', system-ui, sans-serif;
+	--font-data: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
 	--bg-page: #f8fafc;
 	--bg-card: #ffffff;
 	--bg-muted: #f1f5f9;
@@ -75,9 +83,13 @@ html {
 	background-color: var(--bg-page);
 }
 
+/* One type stack for the whole app. Pages that re-declared `system-ui`
+ * on their roots were dropped so this rule actually governs; mono call
+ * sites opt into --font-data (or the .mono-data utility below). */
 body {
 	background-color: var(--bg-page);
 	color: var(--text);
+	font-family: var(--font-ui);
 }
 
 /* Global keyboard-focus fallback.
@@ -90,6 +102,17 @@ body {
 :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: 2px;
+}
+
+/* Data-as-mono utility (the "auditable ledger" treatment).
+ * Machine facts — check-in receipts, session codes, tabular numerals in
+ * rows — opt into the data stack so digits align and read as records.
+ * Existing per-component `.mono` rules keep their local styles; this is
+ * for the new call sites. */
+.mono-data {
+	font-family: var(--font-data);
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.01em;
 }
 
 /* Print.

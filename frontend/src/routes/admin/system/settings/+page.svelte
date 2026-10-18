@@ -373,7 +373,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
-		font-family: system-ui, sans-serif;
 		width: 100%;
 		min-width: 0;
 	}

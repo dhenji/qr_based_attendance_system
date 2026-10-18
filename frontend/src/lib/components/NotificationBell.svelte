@@ -170,7 +170,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 0.875rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.panel-title {
