@@ -504,6 +504,11 @@
 			}
 			video.srcObject = stream;
 			await video.play();
+			// A stop() can fire while play() is pending (component deactivation,
+			// unmount, retry press mid-boot). Bailing here keeps the rAF arm
+			// below from creating a loop stop() can no longer cancel — its
+			// cancelAnimationFrame already ran before we armed anything.
+			if (token !== startToken) return;
 
 			// Per-frame render loop: only detect when fresh frame data arrives.
 			const tick = () => {
