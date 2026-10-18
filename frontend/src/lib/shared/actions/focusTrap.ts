@@ -10,6 +10,10 @@
 //   - optionally locks body scroll while open
 //   - calls `onEscape` when Escape is pressed (omit it to make the dialog
 //     non-dismissible, which is what the shown-once dialogs want)
+//   - `update` re-reads the options, so a dialog whose meaning flips
+//     mid-life (confirm → one-time-secret view) can swap `onEscape`
+//     without remounting. Svelte actions otherwise keep mount-time
+//     options forever, which let Escape discard shown-once passwords/codes.
 //
 // Applied as an action rather than a wrapper component on purpose: the app has
 // 20+ hand-rolled modals whose class names and CSS all differ, so retrofitting
@@ -46,7 +50,13 @@ let lockCount = 0;
 let savedOverflow = '';
 
 export function trapFocus(node: HTMLElement, options: TrapFocusOptions = {}) {
-	const { onEscape, lockScroll = true } = options;
+	// Svelte 5 only re-invokes an action's `update` when it is returned — it
+	// never re-applies new options on its own — so keep a mutable holder and
+	// refresh it from `update`. lockScroll stays mount-time on purpose: the
+	// scroll-lock stack is unwound exactly once in destroy and cannot survive
+	// a mid-life change.
+	let current: TrapFocusOptions = options;
+	const lockScroll = options.lockScroll ?? true;
 
 	const previouslyFocused =
 		document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -78,9 +88,11 @@ export function trapFocus(node: HTMLElement, options: TrapFocusOptions = {}) {
 
 	const onKeydown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
-			if (onEscape) {
+			// Re-read at call time so an `update`-swapped onEscape handler
+			// takes effect (shown-once dialogs rely on this).
+			if (current.onEscape) {
 				event.preventDefault();
-				onEscape();
+				current.onEscape();
 			}
 			return;
 		}
@@ -114,6 +126,13 @@ export function trapFocus(node: HTMLElement, options: TrapFocusOptions = {}) {
 	document.addEventListener('focusin', onFocusIn);
 
 	return {
+		// Lifecycle hook: runs whenever the action's argument changes. Without
+		// this, mount-time options stick forever and a dynamic
+		// `use:trapFocus={{ onEscape: issued === null ? onclose : undefined }}`
+		// would keep the initial handler after `issued` flips.
+		update(next: TrapFocusOptions = {}) {
+			current = next;
+		},
 		destroy() {
 			node.removeEventListener('keydown', onKeydown);
 			document.removeEventListener('focusin', onFocusIn);

@@ -17,6 +17,7 @@
 		blankMeeting,
 		type MeetingDraft,
 	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
+	import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 	import {
 		findDuplicateMeetings,
 		findOverlappingMeetings,
@@ -56,7 +57,6 @@
 	let f_course_id = $state('');
 	let f_semester = $state('');
 	let f_academic_year = $state('');
-	let f_semester_weeks = $state('18');
 	let f_present = $state('5');
 	let f_late = $state('10');
 
@@ -157,7 +157,13 @@
 
 	const sessionsPerWeek = $derived(weeklySessionCount(asScheduleRows));
 
-	const expectedTotal = $derived(totalExpectedSessions(String(sessionsPerWeek), f_semester_weeks));
+	// Session weeks come from the selected term (D86) — read-only here; the
+	// fallback matches the shared default when a term has none configured.
+	const pickedTerm = $derived(semesterOptions.find((t) => t.code === f_semester) ?? null);
+	const pickedTermWeeks = $derived(pickedTerm?.weeks ?? DEFAULT_TERM_WEEKS);
+	const expectedTotal = $derived(
+		totalExpectedSessions(String(sessionsPerWeek), String(pickedTermWeeks))
+	);
 
 	// Same-day time intersections (any types). Guidance only — the backend
 	// permits overlaps, so these never block the submit.
@@ -244,7 +250,6 @@
 				semester: f_semester,
 				academic_year: f_academic_year,
 				sessions_per_week: sessionsPerWeek,
-				semester_weeks: f_semester_weeks,
 				schedule_days: first.days,
 				schedule_start_time: first.start,
 				schedule_end_time: first.end,
@@ -352,7 +357,6 @@
 				semester: parsed.data.semester,
 				academic_year: parsed.data.academic_year,
 				sessions_per_week: parsed.data.sessions_per_week,
-				semester_weeks: parsed.data.semester_weeks,
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
@@ -549,7 +553,7 @@
 					{/each}
 				{/if}
 				<p class="hint">Meetings per week: {sessionsPerWeek} (counted automatically — one per meeting day).</p>
-				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={f_semester_weeks} placeholder="How many weeks does this term run?" /></label>
+				<label>Semester weeks (from term)<input class="input" value={pickedTermWeeks} disabled aria-label="Session weeks, set on the term in Manage Terms" /></label>
 				{#if weeklyBreakdown && weeklyHours > 0}
 					{#if weeklyBreakdown.status === 'ok'}
 						<p class="hint">{weeklyBreakdown.scheduled}h scheduled of {weeklyBreakdown.limit}h weekly requirement ({selectedCourse?.courseCode} · exact) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
@@ -561,10 +565,10 @@
 				{:else if weeklyHours > 0}
 					<p class="hint">{weeklyHours} scheduled {weeklyHours === 1 ? 'hour' : 'hours'} per week across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
 				{/if}
-				{#if expectedTotal !== null}
-					<p class="hint">{sessionsPerWeek} sessions/week × {f_semester_weeks.trim()} weeks = {expectedTotal} expected sessions this term.</p>
+				{#if f_semester && pickedTerm}
+					<p class="hint">{sessionsPerWeek} sessions/week × {pickedTermWeeks} weeks = {expectedTotal} expected sessions this term. Edit the term's weeks in Program Management → Year Levels → Manage Terms.</p>
 				{:else}
-					<p class="hint">Enter the semester weeks to see the expected session total.</p>
+					<p class="hint">Pick a semester to see the expected session total.</p>
 				{/if}
 				<p class="hint">
 					One offering per course + program + term + academic year — the year level

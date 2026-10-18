@@ -37,9 +37,11 @@ export const formatTimestamp = (isoString: string): string => {
 	return date.toISOString().replace('T', ' ').slice(0, 19);
 };
 
-// Local datetime in "YYYY-MM-DD HH:MM:SS" format (user's timezone)
+// Local datetime in "YYYY-MM-DD HH:MM:SS" format (user's timezone).
+// Returns "—" for invalid input, like the other formatters.
 export const formatLocalDateTime = (isoString: string): string => {
   const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '—';
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -49,18 +51,22 @@ export const formatLocalDateTime = (isoString: string): string => {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 };
 
-// Local date in "YYYY-MM-DD" format (user's timezone)
+// Local date in "YYYY-MM-DD" format (user's timezone). Returns "—" for
+// invalid input, like the other formatters.
 export const formatLocalDate = (isoString: string): string => {
   const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '—';
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
-// UTC timestamp with explicit UTC label for admin/debugging use
+// UTC timestamp with explicit UTC label for admin/debugging use.
+// Returns "—" for invalid input (toISOString would otherwise throw).
 export const formatUTCTimestamp = (isoString: string): string => {
   const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '—';
   return `${date.toISOString().replace("T", " ").slice(0, 19)} UTC`;
 };
 

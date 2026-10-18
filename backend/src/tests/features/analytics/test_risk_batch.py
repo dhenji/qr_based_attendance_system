@@ -148,7 +148,6 @@ async def _high_absence_stack(
 ) -> dict:
     stack = await factories.full_stack()
     offering = stack["offering"]
-    offering.semester_weeks = 16
     offering.sessions_per_week = 2
     student = stack["student"]
     professor = stack["professor"]

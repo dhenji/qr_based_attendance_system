@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     smtp_use_ssl: bool = False
     smtp_timeout_seconds: int = 10
 
-    # Cloudfare Trunstile CAPTCHA (optional)
+    # Cloudflare Turnstile CAPTCHA (optional; empty = pass-through no-op)
     turnstile_secret_key: str = ""
 
     # Testing/benchmark + backup tuning

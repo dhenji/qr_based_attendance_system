@@ -38,9 +38,14 @@
 		}
 	};
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// the first await is still in flight, destroy has already run and the
+	// focus revalidate must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -56,6 +61,7 @@
 	onMount(async () => {
 		initAttendanceOverview();
 		await load();
+		if (!pageAlive) return;
 		autoRefreshStops.push(onFocusRevalidate(refreshVisible));
 	});
 
@@ -163,7 +169,7 @@
 	<section class="card">
 		<div class="section-head">
 			<h2 class="section-title">Attendance at a glance</h2>
-			<button class="link" onclick={() => goto(Routes.ADMIN_ATTENDANCE)}>Full overview →</button>
+			<button class="link" onclick={() => goto(`${Routes.ADMIN_ANALYTICS}?tab=attendance`)}>Full overview →</button>
 		</div>
 		{#if adminAttendanceState.loading}
 			<p class="muted">Loading…</p>

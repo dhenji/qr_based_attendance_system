@@ -306,31 +306,33 @@
 									{p.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
-								{#if p.isActive}
-									<button
-										class="link"
-										onclick={() => { adminProgramsState.actionError = null; deactivateTarget = p; }}
-									>
-										Deactivate
-									</button>
-								{:else}
-									<button
-										class="link"
-										onclick={() => void toggleProgramActive(p)}
-									>
-										Reactivate
-									</button>
-								{/if}
-								{#if !p.isActive}
-									<button
-										class="link danger"
-										onclick={() => { adminProgramsState.actionError = null; deleteTarget = p; }}
-									>
-										Delete
-									</button>
-								{/if}
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
+									{#if p.isActive}
+										<button
+											class="link"
+											onclick={() => { adminProgramsState.actionError = null; deactivateTarget = p; }}
+										>
+											Deactivate
+										</button>
+									{:else}
+										<button
+											class="link"
+											onclick={() => void toggleProgramActive(p)}
+										>
+											Reactivate
+										</button>
+									{/if}
+									{#if !p.isActive}
+										<button
+											class="link danger"
+											onclick={() => { adminProgramsState.actionError = null; deleteTarget = p; }}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -402,7 +404,7 @@
 		>
 			<h2 id="deactivate-program-title" class="modal-title">Deactivate {deactivateTarget.code}?</h2>
 			<p class="modal-text">
-				{deactivateTarget.name} will be flipped to archived. Year levels stay,
+				{deactivateTarget.name} will be flipped to inactive. Year levels stay,
 				offerings and students keep working, and you can reactivate it anytime.
 			</p>
 			{#if adminProgramsState.actionError}

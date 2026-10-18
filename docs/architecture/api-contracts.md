@@ -238,12 +238,12 @@ reactivate with `is_active: true`.
 
 |                  |                                                                                     |
 | ---------------- | ----------------------------------------------------------------------------------- |
-| **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label }] } }` |
+| **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label, weeks?: int }] } }` |
 | **Response 201** | Created year level                                                                  |
 
 | **Errors**       | 409 `year_number_exists` |
 
-| **Notes**        | `year_number` is unique per program, but there is deliberately no `year_number <= program.total_years` check — the `1..total_years` bound is enforced only by the Programs UI and Setup Wizard year pickers (frontend-only). Empty `terms: []` is accepted; the Setup Wizard treats termless years as unusable for offerings (frontend-only), while the API accepts an offering on a termless year with a free-text `semester`. |
+| **Notes**        | `year_number` is unique per program, but there is deliberately no `year_number <= program.total_years` check — the `1..total_years` bound is enforced only by the Programs UI and Setup Wizard year pickers (frontend-only). Empty `terms: []` is accepted; the Setup Wizard treats termless years as unusable for offerings (frontend-only), while the API accepts an offering on a termless year with a free-text `semester`. `terms[].weeks` is the term's session length (D86), optional `1..52`, stored in the JSONB `term_structure`; offerings offered in that term derive their `semester_weeks` from it (missing → 18). |
 #### `GET /admin/programs/{program_id}/years/{year_id}`
 
 |                  |                                                               |
@@ -326,18 +326,18 @@ A course offering is a specific instance of a course template for a program, yea
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?program_id?&year_level_id?&semester?&course_id?&is_active?&page=1&size=20`                                                                                                                                             |
 | **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, enrolled_count, session_types: ["lecture" \| "lab"], components: [Component], is_active, created_at, updated_at }], ... }` |
-| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. `session_types` lists the distinct types across the offering's active components and feeds the Lecture / Lab / Mixed badges. `Component = { id, offering_id, session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, is_active, created_at, updated_at }`. |
+| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. `session_types` lists the distinct types across the offering's active components and feeds the Lecture / Lab / Mixed badges. `Component = { id, offering_id, session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, is_active, created_at, updated_at }`. `semester_weeks` is **derived, read-only** (D86): resolved from the offering's year-level term entry for its `semester` via `shared/schedule.py::term_weeks`, falling back to `DEFAULT_TERM_WEEKS` (18) for an unmatched/orphaned code. It is not accepted on create/update. |
 
 #### `POST /admin/offerings`
 
 |                  |                                                                                                                                                                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int, components?: [{ session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name?, classroom_lat?, classroom_lng? }] }` |
+| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int, components?: [{ session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name?, classroom_lat?, classroom_lng? }] }` |
 | **Response 201** | Created course offering (with `components` + `session_types`)                                                                                                                                                                                                                                             |
 | **Errors**       | 409 `offering_exists` · 409 `component_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 422 `weekly_hours_exceed_units` · 422 `weekly_hours_below_units` · 404 `year_level_not_found` |
 | **Notes**        | Omitting `components` creates a single lecture component mirroring the offering schedule/classroom, so pre-existing callers keep working unchanged. |
 |                  | Uniqueness is `(course_id, program_id, semester, academic_year)` — `year_level_id` is **not** part of the key, so the same course/program/term/year on a different year level still 409s. On 409 `offering_exists` the admin UI looks the conflicting offering up and links straight to it (it may sit under a different year level than the one filtered). `semester` is free text with no vocabulary (`invalid_semester` is defined but unreachable); the year-terms dropdowns in the Offerings page and Setup Wizard are the only entry path (UI guidance only — free-text entry is not offered). The Setup Wizard builds the same meeting rows (up to 4) as the Offerings page modal; further meetings are added via `POST …/components` afterwards. A new offering still needs a professor assignment (`POST …/professors`) and enrollment before sessions can run. |
-|                  | Scheduling model: one row per meeting (type + days + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. A multi-day meeting (e.g. MWF 08:00–09:00) is stored as a single component with a day-letter string — never fanned out into one row per day — so a time change stays atomic across its days. `sessions_per_week` is derived server-side as one session per meeting day (an `MWF` row counts 3) and re-synced on every component write; the create payload value is recomputed, and the detail Settings tab shows it read-only. The term total shown is `sessions_per_week × semester_weeks` — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. Weekly scheduled hours are Σ meeting durations × day-letter counts and must equal the course's `units` (D79): a 3-unit course holds Mon 07:00–08:30 + Tue 13:00–14:30 (3.0h) but rejects Mon 07:00–08:30 + Tue 13:00–15:00 (3.5h, 422 `weekly_hours_exceed_units`) and a lone Mon 07:00–08:30 (1.5h, 422 `weekly_hours_below_units`). Creation must land exactly; adds (and reactivations) may only converge — strictly closer without crossing sides — while plain meeting edits reshape freely so multi-step changes can pass through mismatched totals (D81). |
+|                  | Scheduling model: one row per meeting (type + days + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. A multi-day meeting (e.g. MWF 08:00–09:00) is stored as a single component with a day-letter string — never fanned out into one row per day — so a time change stays atomic across its days. `sessions_per_week` is derived server-side as one session per meeting day (an `MWF` row counts 3) and re-synced on every component write; the create payload value is recomputed, and the detail Settings tab shows it read-only. The term total shown is `sessions_per_week × semester_weeks`, where `semester_weeks` is the term's value (D86) — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. Weekly scheduled hours are Σ meeting durations × day-letter counts and must equal the course's `units` (D79): a 3-unit course holds Mon 07:00–08:30 + Tue 13:00–14:30 (3.0h) but rejects Mon 07:00–08:30 + Tue 13:00–15:00 (3.5h, 422 `weekly_hours_exceed_units`) and a lone Mon 07:00–08:30 (1.5h, 422 `weekly_hours_below_units`). Creation must land exactly; adds (and reactivations) may only converge — strictly closer without crossing sides — while plain meeting edits reshape freely so multi-step changes can pass through mismatched totals (D81). |
 
 #### `GET /admin/offerings/{offering_id}`
 
@@ -502,15 +502,35 @@ Check enrollment status.
 |                  |                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | **Role**         | admin                                                                                            |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                      |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                          |
 | **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions }` |
+
+#### `GET /admin/analytics/course-options`
+
+Courses with **at least one offering in the selected scope** — the Analytics
+filter rail's course picker. Uses the same scope predicate as every report
+read, so a course no report can show in the picked Program/Year/Term cannot
+be offered as an option; a course with no offering can never produce a
+silently empty report. No `is_active` gate (mirrors the report reads). `q`
+matches course code or name; `total` lets the picker flag truncation
+honestly instead of silently capping.
+
+|                  |                                                               |
+| ---------------- | ------------------------------------------------------------- |
+| **Role**         | admin                                                         |
+| **Query**        | `?program_id?&year_level_id?&semester?&q?&limit?`             |
+| **Response 200** | `{ items: [{ course_id, course_code, course_name }], total }` |
 
 #### `GET /admin/analytics/course-comparison`
 
+One item per **(course, program, year level)** cohort: the same subject offered
+to two programs/year levels is two rows, not one blended row (D6/D34).
+Semester/dates are filter axes, not identity.
+
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                                                        |
-| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&page?&size?`                                            |
+| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 #### `GET /admin/analytics/trends`
 
@@ -523,7 +543,7 @@ Check enrollment status.
 
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&risk_level=low                                                                                             | medium | high` |
 | **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at }], ... }` |
 
 #### `POST /admin/analytics/export`
@@ -556,7 +576,7 @@ live `student_risk_scores` are untouched until `promote`.
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | admin                                                                                                                                                         |
-| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high&unpromoted_only=false&...` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&risk_level=low                                                                                             | medium | high&unpromoted_only=false&...` |
 | **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at, promoted_at }], ... }` |
 
 #### `POST /admin/analytics/risk-staging/promote`
@@ -564,12 +584,12 @@ live `student_risk_scores` are untouched until `promote`.
 Copy unpromoted staged rows into live `student_risk_scores` (UPSERT per student/offering/semester/day)
 and stamp them `promoted_at` (admin-only). Already-promoted rows in scope are counted as `skipped`.
 
-|                  |                                                         |
-| ---------------- | ------------------------------------------------------- |
-| **Role**         | admin                                                   |
-| **Query**        | `student_id?` `offering_id?` `semester?` (all optional) |
-| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`           |
-| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
+|                  |                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| **Role**         | admin                                                                                  |
+| **Query**        | `student_id?` `offering_id?` `semester?` `program_id?` `year_level_id?` `course_ids?`   |
+| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`                                          |
+| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Program/year/course scope the promoted set to match the review list (issue #279); risk level and paging remain list-only. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
 
 ---
 
@@ -703,7 +723,9 @@ List pending excuse requests.
 
 #### `GET /admin/attendance/overview`
 
-Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
+Per-course attendance overview (wireframes.md 4.6). Backs the **Attendance**
+tab of Analytics & Reports (`/admin/analytics?tab=attendance`) and the
+dashboard's "Attendance at a glance" strip. See ADR-083.
 
 |                  |                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------- |
@@ -712,7 +734,7 @@ Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
 
 #### `GET /admin/attendance/overview/export`
 
-CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview").
+CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview", Attendance tab).
 
 |                  |                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------ |
@@ -1140,12 +1162,15 @@ Aggregate attendance across all assigned courses.
 
 #### `GET /professor/reports/comparison`
 
-Per-course comparison with program/year slicing.
+Per-course comparison sliced by **(course, program, year level)** cohort
+(D6/D34): the same subject taught to two cohorts is two rows, not one. Each row
+carries its own `program_code`/`year_level_label` so the client labels it
+without a course-id lookup (which cannot tell two cohorts apart).
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                                       |
-| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&page?&size?`                                                       |
+| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, program_code, year_level_label, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 (Compare rows at `:451` and `:1023` do accept `granularity=daily|weekly|monthly`; this scoped row does not.)
 
@@ -1502,7 +1527,9 @@ from a small preset pool in the settings UI. See
 **Captcha (ADR-053):** `LoginRequest` and `ForgotPasswordStep1Request`
 carry an optional `turnstile_token`. Server calls Cloudflare `siteverify` via
 `shared/captcha.py`; when `TURNSTILE_SECRET_KEY` is unset the check passes
-through (captcha disabled in dev/test/prod-until-key-set).
+through (captcha disabled in dev/test/prod-until-key-set); with the key set, a
+missing or invalid token is `400 invalid_captcha`. Deployment runbook:
+[production-checklist.md §3](../deployment/production-checklist.md).
 
 **MFA backup codes (ADR-054):** `POST /auth/mfa/backup-codes` returns
 `{codes: [10×, shown once], remaining: 10}` and invalidates unconsumed codes; codes

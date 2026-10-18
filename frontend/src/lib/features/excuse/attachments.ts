@@ -107,6 +107,10 @@ export type AttachmentUploadResult = {
 
 export type UploadProgress = (done: number, total: number) => void;
 
+// Bounded PUT: a hung proxy connection otherwise never settles, wedging one
+// worker slot (and the excuse modal's Submit progress with it) forever.
+const UPLOAD_TIMEOUT_MS = 60_000;
+
 const uploadOne = async (file: File): Promise<string> => {
 	const extension = attachmentExtension(file.name);
 	const minted = await post<PresignedUrlResponse>('uploadPresigned', {
@@ -115,13 +119,25 @@ const uploadOne = async (file: File): Promise<string> => {
 		content_type: contentTypeFor(extension, file.type),
 	});
 	if (!isMockMode()) {
-		const response = await fetch(minted.upload_url, {
-			method: 'PUT',
-			body: file,
-			headers: { 'Content-Type': contentTypeFor(extension, file.type) },
-		});
-		if (!response.ok) {
-			throw new Error(`${file.name}: upload failed (${response.status}).`);
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+		try {
+			const response = await fetch(minted.upload_url, {
+				method: 'PUT',
+				body: file,
+				headers: { 'Content-Type': contentTypeFor(extension, file.type) },
+				signal: controller.signal,
+			});
+			if (!response.ok) {
+				throw new Error(`${file.name}: upload failed (${response.status}).`);
+			}
+		} catch (error: unknown) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				throw new Error(`${file.name}: upload timed out — try again.`);
+			}
+			throw error;
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 	return minted.object_url;

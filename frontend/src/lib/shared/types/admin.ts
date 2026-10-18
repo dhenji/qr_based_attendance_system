@@ -332,7 +332,6 @@ export interface AdminOfferingCreatePayload {
 	semester: string;
 	academic_year: string;
 	sessions_per_week: number;
-	semester_weeks: number;
 	schedule_days: string;
 	schedule_start_time: string;
 	schedule_end_time: string;
@@ -352,7 +351,6 @@ export interface AdminOfferingCreatePayload {
 // academic_year are identity and rejected server-side when patched.
 export interface AdminOfferingUpdatePayload {
 	sessions_per_week?: number;
-	semester_weeks?: number;
 	schedule_days?: string;
 	schedule_start_time?: string;
 	schedule_end_time?: string;
@@ -466,6 +464,17 @@ export interface AnalyticsComparisonItemResponse {
 	total_sessions: number;
 }
 
+export interface AnalyticsCourseOptionResponse {
+	course_id: number;
+	course_code: string;
+	course_name: string;
+}
+
+export interface AnalyticsCourseOptionsResponse {
+	items: AnalyticsCourseOptionResponse[];
+	total: number;
+}
+
 export interface AnalyticsTrendItemResponse {
 	date: string;
 	compliance_rate: number;
@@ -532,11 +541,14 @@ export interface RiskStagingFilters {
 	program_id?: number;
 	year_level_id?: number;
 	semester?: string;
+	course_ids?: number[];
 	risk_level?: AnalyticsRiskLevel;
 	unpromoted_only?: boolean;
 	page?: number;
 	size?: number;
-	// Promote-scope keys only (the POST ignores every other filter).
+	// Promote-scope keys: the POST honors these plus the rail's
+	// program/year/course scope (#279). Risk level, unpromoted_only, and
+	// paging remain list-only.
 	student_id?: number;
 	offering_id?: number;
 }

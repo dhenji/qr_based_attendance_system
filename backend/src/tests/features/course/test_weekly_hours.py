@@ -47,7 +47,6 @@ def _offering_payload(seed: dict[str, Any], components: list[dict[str, Any]]) ->
         "semester": "1st Sem",
         "academic_year": "2026-2027",
         "sessions_per_week": len(components),
-        "semester_weeks": 16,
         "schedule_days": first["schedule_days"],
         "schedule_start_time": first["schedule_start_time"],
         "schedule_end_time": first["schedule_end_time"],
@@ -687,6 +686,6 @@ async def test_deactivate_and_unrelated_patch_ignore_the_gate(
     assert down.status_code == 200
 
     untouched = await api_client.patch(
-        f"{OFFERINGS}/{offering_id}", json={"semester_weeks": 17}, headers=headers
+        f"{OFFERINGS}/{offering_id}", json={"classroom_name": "Room 202"}, headers=headers
     )
     assert untouched.status_code == 200, untouched.text

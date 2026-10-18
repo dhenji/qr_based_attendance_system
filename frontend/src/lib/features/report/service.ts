@@ -189,6 +189,14 @@ export const initReportDirectory = async (): Promise<{
 const LIVE_HISTORY_PAGE_SIZE = 100;
 const LIVE_HISTORY_MAX_SESSIONS = 500;
 
+// Comparison rows are one per (course, program, year level) cohort, so the
+// count grows with the catalogue × cohorts. Both comparison surfaces (this
+// professor report and the admin analytics tab) render the set as a single
+// chart/table, so they request one page at the server's max page size
+// (backend shared/pagination.py MAX_PAGE_SIZE) and flag truncation when the
+// server `total` exceeds the rows returned.
+export const COMPARISON_PAGE_SIZE = 200;
+
 const rangeOf = (filters: ReportFilters): { start: string; end: string } => ({
 	start: filters.from <= filters.to ? filters.from : filters.to,
 	end: filters.from <= filters.to ? filters.to : filters.from
@@ -352,9 +360,13 @@ const toComparisonRow = (
 	row: ProfessorReportsComparisonItemResponse,
 	directory: ReportCourseDir[]
 ): ComparisonRow => {
+	// Cohort identity comes from the row itself — the server slices by program
+	// × year level (D6/D34), and the directory is keyed by course id, so it
+	// cannot tell two cohorts of one course apart. The directory is still the
+	// source for the course name and the section label only.
 	const identity = directory.find((item) => item.courseId === row.course_id) ?? null;
-	const programCode = identity?.programCode ?? String(row.program_id);
-	const yearLabel = identity?.yearLevelLabel ?? String(row.year_level_id);
+	const programCode = row.program_code || String(row.program_id);
+	const yearLabel = row.year_level_label || String(row.year_level_id);
 	return {
 		course_id: row.course_id,
 		offering_id: identity?.offeringId ?? row.course_id,
@@ -374,13 +386,20 @@ const toComparisonRow = (
 const fetchLiveComparison = async (
 	filters: ReportFilters,
 	directory: ReportCourseDir[]
-): Promise<ComparisonRow[]> => {
+): Promise<{ items: ComparisonRow[]; total: number }> => {
 	const { start, end } = rangeOf(filters);
-	const response = await get<{ items: ProfessorReportsComparisonItemResponse[] }>(
-		'professorReportsComparison',
-		{ granularity: filters.granularity, date_from: start, date_to: end }
-	);
-	return (response.items ?? []).map((row) => toComparisonRow(row, directory));
+	const response = await get<{
+		items: ProfessorReportsComparisonItemResponse[];
+		total?: number;
+	}>('professorReportsComparison', {
+		granularity: filters.granularity,
+		date_from: start,
+		date_to: end,
+		page: '1',
+		size: String(COMPARISON_PAGE_SIZE)
+	});
+	const items = (response.items ?? []).map((row) => toComparisonRow(row, directory));
+	return { items, total: response.total ?? items.length };
 };
 
 const fetchLiveTrends = async (
@@ -505,15 +524,22 @@ export const getComparisonReport = async (
 ) => {
 	if (!isMockMode()) {
 		try {
-			const liveItems = await fetchLiveComparison(filters, directory);
-			// Program/year/course/section slicing still applies client-side: the
-			// comparison aggregate has no section dimension.
-			const scoped = directory.length === 0 ? liveItems : liveItems.filter((item) => {
-				const dir = directory.find((d) => d.courseId === item.course_id) ?? null;
-				if (!dir) return true;
-				if (filters.program !== 'All' && dir.programCode !== filters.program) return false;
-				if (filters.year !== 'All' && dir.yearLevelLabel !== filters.year) return false;
-				if (filters.course !== 'All' && dir.courseCode !== filters.course) return false;
+			const { items: liveItems, total: serverTotal } = await fetchLiveComparison(
+				filters,
+				directory
+			);
+			// Rows the server dropped to fit its page — the page says so. The
+			// client-side filter below can only shrink the set, so compare
+			// against the pre-filter rows.
+			const serverTruncated = serverTotal > liveItems.length;
+			// Program/year/course slicing applies client-side. Each row now
+			// carries its own cohort identity, so filter on the row rather than
+			// a course-id directory lookup that cannot tell two cohorts apart.
+			// Comparison has no section dimension.
+			const scoped = liveItems.filter((item) => {
+				if (filters.program !== 'All' && item.program_code !== filters.program) return false;
+				if (filters.year !== 'All' && item.year_level_label !== filters.year) return false;
+				if (filters.course !== 'All' && item.course_code !== filters.course) return false;
 				return true;
 			});
 			return {
@@ -524,6 +550,7 @@ export const getComparisonReport = async (
 							)
 						: a.course_code.localeCompare(b.course_code)
 				),
+				serverTruncated,
 				meta: { dataSource: 'live', truncated: false } as ReportMeta
 			};
 		} catch {
@@ -565,6 +592,8 @@ export const getComparisonReport = async (
 					)
 				: a.course_code.localeCompare(b.course_code)
 		),
+		// Derived from the session history, which carries its own `meta.truncated`.
+		serverTruncated: false,
 		meta
 	};
 };

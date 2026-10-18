@@ -273,8 +273,10 @@ import { sessionMixLabel } from '$lib/shared/types';
 											{o.isActive ? 'Active' : 'Inactive'}
 										</span>
 									</td>
-									<td class="row-actions">
-										<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
+									<td>
+										<div class="row-actions">
+											<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
+										</div>
 									</td>
 								</tr>
 							{/each}
@@ -514,8 +516,8 @@ import { sessionMixLabel } from '$lib/shared/types';
 	}
 
 	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.row-actions {

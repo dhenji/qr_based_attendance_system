@@ -16,6 +16,7 @@ from features.attendance.model import Attendance
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
+from features.program.model import Program, YearLevel
 from features.reports.schema import (
     DEFAULT_EXPORT_INCLUDE,
     AllCoursesItem,
@@ -29,6 +30,7 @@ from features.reports.schema import (
 from features.session.model import Session
 from features.session.service import SessionService
 from features.student.model import Student
+from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import ensure_aware
 from shared.enums import ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -153,7 +155,13 @@ class ReportsService:
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> ReportsComparisonResponse:
-        """Per-course rates over the union, sliced by program/year/semester."""
+        """Cohort rates over the union; one row per program × year level.
+
+        One row per (course, program, year level) so the same subject across
+        cohorts is comparable (D6/D34); semester/program/year stay filters.
+        Each row carries its own program code and year-level label so the
+        client never has to guess a cohort from a course id.
+        """
         page, size = _normalize_paging(page, size)
         offerings: Sequence[CourseOffering] = await self._scoped_offerings(
             professor_id, program_id, year_level_id, semester
@@ -162,19 +170,31 @@ class ReportsService:
         if not offerings:
             return ReportsComparisonResponse(items=[], total=0, page=page, size=size)
 
-        by_course: dict[int, list[CourseOffering]] = {}
-
-        for row in sorted(offerings, key=lambda item: item.id):
-            by_course.setdefault(row.course_id, []).append(row)
-
-        course_map: dict[int, Course] = await self._course_map(sorted(by_course))
+        cohorts: dict[CohortKey, list[CourseOffering]] = group_by_cohort(offerings)
+        course_map: dict[int, Course] = await self._course_map(
+            sorted({key[0] for key in cohorts})
+        )
+        program_map: dict[int, Program] = await self._program_map(
+            sorted({key[1] for key in cohorts})
+        )
+        year_level_map: dict[int, YearLevel] = await self._year_level_map(
+            sorted({key[2] for key in cohorts})
+        )
         enrolled_by_offering = await self._enrolled_by_offering(
             [row.id for row in offerings]
         )
         items: list[ReportsComparisonItem] = []
 
-        for course_id in sorted(by_course):
-            rows: list[CourseOffering] = by_course[course_id]
+        for key in sorted(
+            cohorts,
+            key=lambda key: (
+                course_map[key[0]].course_code if key[0] in course_map else "",
+                key[1],
+                key[2],
+            ),
+        ):
+            course_id, cohort_program_id, cohort_year_level_id = key
+            rows: list[CourseOffering] = cohorts[key]
             offering_ids: list[int] = [row.id for row in rows]
             sessions: Sequence[Session] = await self._sessions_in(
                 offering_ids, date_from, date_to
@@ -188,14 +208,19 @@ class ReportsService:
                 excused=tallies.get(ValidationStatus.EXCUSED.value, 0),
                 enrolled=_expected_for(sessions, enrolled_by_offering),
             )
-            first: CourseOffering = rows[0]
             course: Course | None = course_map.get(course_id)
+            program: Program | None = program_map.get(cohort_program_id)
+            year_level: YearLevel | None = year_level_map.get(
+                cohort_year_level_id
+            )
             items.append(
                 ReportsComparisonItem(
                     course_id=course_id,
                     course_code=course.course_code if course else "",
-                    program_id=first.program_id,
-                    year_level_id=first.year_level_id,
+                    program_id=cohort_program_id,
+                    year_level_id=cohort_year_level_id,
+                    program_code=program.code if program else "",
+                    year_level_label=year_level.label if year_level else "",
                     compliance_rate=compliance,
                     participation_rate=participation,
                     total_sessions=len(sessions),
@@ -581,6 +606,32 @@ class ReportsService:
         rows: Sequence[Course] = (
             await self._session.scalars(
                 select(Course).where(Course.id.in_(course_ids))
+            )
+        ).all()
+
+        return {row.id: row for row in rows}
+
+    async def _program_map(self, program_ids: list[int]) -> dict[int, Program]:
+        if not program_ids:
+            return {}
+
+        rows: Sequence[Program] = (
+            await self._session.scalars(
+                select(Program).where(Program.id.in_(program_ids))
+            )
+        ).all()
+
+        return {row.id: row for row in rows}
+
+    async def _year_level_map(
+        self, year_level_ids: list[int]
+    ) -> dict[int, YearLevel]:
+        if not year_level_ids:
+            return {}
+
+        rows: Sequence[YearLevel] = (
+            await self._session.scalars(
+                select(YearLevel).where(YearLevel.id.in_(year_level_ids))
             )
         ).all()
 

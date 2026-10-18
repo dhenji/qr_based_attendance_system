@@ -95,7 +95,6 @@ def _offering(**overrides: Any) -> CourseOffering:
         "semester": "1ST",
         "academic_year": "2026-2027",
         "sessions_per_week": 3,
-        "semester_weeks": 18,
         "schedule_days": "MWF",
         "schedule_start_time": time(9, 0),
         "schedule_end_time": time(10, 0),

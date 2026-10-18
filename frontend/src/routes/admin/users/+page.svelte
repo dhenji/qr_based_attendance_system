@@ -76,9 +76,14 @@
 			adminUsersState.size
 		);
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// restoreSession() is still in flight, destroy has already run and the
+	// entity/focus subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -92,6 +97,7 @@
 			await goto(Routes.ADMIN_DASHBOARD);
 			return;
 		}
+		if (!pageAlive) return;
 		load(1);
 		autoRefreshStops.push(
 			subscribeEntity('users', refreshVisible),
@@ -260,21 +266,23 @@
 								</span>
 							</td>
 							<td class="mono">{formatLocalDate(u.createdAt)}</td>
-							<td class="row-actions">
-								{#if u.isActive}
-									{#if isSelf(u)}
-										<span class="hint" title="You cannot deactivate your own account">You</span>
+							<td>
+								<div class="row-actions">
+									{#if u.isActive}
+										{#if isSelf(u)}
+											<span class="hint" title="You cannot deactivate your own account">You</span>
+										{:else}
+											<button class="link danger" onclick={() => (deactivateTarget = u)}>
+												Deactivate
+											</button>
+										{/if}
 									{:else}
-										<button class="link danger" onclick={() => (deactivateTarget = u)}>
-											Deactivate
+										<button class="link" onclick={() => (reactivateTarget = u)}>
+											Reactivate
 										</button>
 									{/if}
-								{:else}
-									<button class="link" onclick={() => (reactivateTarget = u)}>
-										Reactivate
-									</button>
-								{/if}
-								<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+									<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+								</div>
 							</td>
 						</tr>
 					{/each}

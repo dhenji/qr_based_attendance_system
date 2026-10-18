@@ -70,12 +70,15 @@ export const initAdminStudents = async (
 		adminStudentsState.size = result.size;
 		adminStudentsState.filters = filters;
 	} catch (e: unknown) {
-		if (e instanceof APIError && (e.code === 'request_cancelled' || e.code === 'request_timeout')) {
-			// Superseded search — a newer request is in flight. Leave the
-			// current rows alone rather than flashing an error.
+		if (e instanceof APIError && e.code === 'request_cancelled') {
+			// Superseded search — a newer request is provably in flight. Leave
+			// the current rows alone rather than flashing an error.
 			return;
 		}
-		adminStudentsState.error = toMessage(e, 'Failed to load students');
+		// `request_timeout` is NOT a superseded search: nothing is in flight,
+		// and swallowing it strands the previous rows with error = null — the
+		// admin reads the page as current when the query never applied.
+		adminStudentsState.error = e instanceof APIError && e.code === 'request_timeout' ? 'The request timed out. Try again.' : toMessage(e, 'Failed to load students');
 	} finally {
 		adminStudentsState.loading = false;
 	}
@@ -115,6 +118,12 @@ export const deleteArchivedStudent = async (id: number): Promise<void> => {
 	adminStudentsState.actionError = null;
 	try {
 		await hardDeleteStudent(id);
+		// Deleting the last row on a page > 1 would leave an empty page —
+		// step back first so the refresh lands on a populated one (the
+		// programs/courses/offerings stores do the same).
+		if (adminStudentsState.items.length === 1 && adminStudentsState.page > 1) {
+			adminStudentsState.page -= 1;
+		}
 		await refreshAdminStudents();
 		notifyEntityChanged('students');
 	} catch (e: unknown) {
@@ -176,6 +185,10 @@ export const deleteArchivedProfessor = async (id: number): Promise<void> => {
 	adminProfessorsState.actionError = null;
 	try {
 		await hardDeleteProfessor(id);
+		// Same last-row-on-page step-back as deleteArchivedStudent.
+		if (adminProfessorsState.items.length === 1 && adminProfessorsState.page > 1) {
+			adminProfessorsState.page -= 1;
+		}
 		await refreshAdminProfessors();
 		notifyEntityChanged('professors');
 	} catch (e: unknown) {
@@ -197,6 +210,34 @@ export const adminUsersState = $state({
 	error: null as string | null,
 	actionError: null as string | null,
 });
+
+// resetAdminRosterStates
+// Logout hygiene (doLogout): clear the roster/user lists between logins on
+// shared devices — items, filters, pagination, and any in-flight error belong
+// to the signed-out session.
+export const resetAdminRosterStates = (): void => {
+	adminStudentsState.items = [];
+	adminStudentsState.total = 0;
+	adminStudentsState.page = 1;
+	adminStudentsState.filters = {};
+	adminStudentsState.loading = false;
+	adminStudentsState.error = null;
+	adminStudentsState.actionError = null;
+	adminProfessorsState.items = [];
+	adminProfessorsState.total = 0;
+	adminProfessorsState.page = 1;
+	adminProfessorsState.filters = {};
+	adminProfessorsState.loading = false;
+	adminProfessorsState.error = null;
+	adminProfessorsState.actionError = null;
+	adminUsersState.items = [];
+	adminUsersState.total = 0;
+	adminUsersState.page = 1;
+	adminUsersState.filters = {};
+	adminUsersState.loading = false;
+	adminUsersState.error = null;
+	adminUsersState.actionError = null;
+};
 
 export const initAdminUsers = async (
 	filters: AdminUserFilters = {},

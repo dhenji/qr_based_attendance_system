@@ -76,6 +76,12 @@
 
 	const openNotifExcuses = () => void goto(Routes.ADMIN_EXCUSES);
 
+	// Guard for the async attach below: restoreSession() is awaited, and
+	// destroy can win that race. If it does, lifecycle teardown has already
+	// run — attaching the interval/listeners afterwards would leak them until
+	// the next full page unload.
+	let notifAlive = true;
+
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
@@ -87,6 +93,7 @@
 		} else {
 			gate = 'allowed';
 			void refreshNotif();
+			if (!notifAlive) return;
 			pollTimer = setInterval(() => {
 				if (!document.hidden) void refreshNotif();
 			}, POLL_INTERVAL_MS);
@@ -96,6 +103,7 @@
 	});
 
 	onDestroy(() => {
+		notifAlive = false;
 		// onDestroy also runs during SSR teardown, where window/document do
 		// not exist — and onMount (the only place listeners attach) never
 		// runs on the server, so there is nothing to clean up there.
@@ -122,7 +130,7 @@
 		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: true, icon: 'courses' },
 		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
 		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
-		{ label: 'Attendance', path: Routes.ADMIN_ATTENDANCE, enabled: true, icon: 'reports' },
+		{ label: 'Attendance Review', path: Routes.ADMIN_ATTENDANCE, enabled: true, icon: 'review' },
 		{ label: 'Excuses', path: Routes.ADMIN_EXCUSES, enabled: true, icon: 'reports' },
 		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN_SYSTEM_SETTINGS, enabled: true, icon: 'settings' },
@@ -153,6 +161,8 @@
 			'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4"/><path d="M3 10h18"/>',
 		reports:
 			'<path d="M4 20h16"/><path d="M7 20v-6"/><path d="M12 20V6"/><path d="M17 20v-9"/>',
+		review:
+			'<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
 		audit:
 			'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
 		users:

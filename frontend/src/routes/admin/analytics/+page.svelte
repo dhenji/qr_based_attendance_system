@@ -3,6 +3,8 @@
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import AttendanceSnapshot from '$lib/features/admin/analytics/components/AttendanceSnapshot.svelte';
+	import { page } from '$app/state';
 import {
 	adminAnalyticsState,
 	adminStagingState,
@@ -19,10 +21,12 @@ import {
 	downloadCsv,
 	enrichComparison,
 	fetchAnalyticsExportCsv,
+	getCourseOptions,
 	overviewCsv,
 	stagingCsv,
 	trendsCsv,
 	type AnalyticsMetric,
+	type CourseOption,
 } from '$lib/features/admin/analytics/service';
 import { isMockMode } from '$lib/api/client';
 import {
@@ -36,29 +40,39 @@ import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
-	// Analytics & Reports (wireframe 4.7, D33): one page, six tabs —
-	// Overview, Comparison, Trends, At-Risk, Staging, Export — over a shared
-	// cascading filter rail (Program → Year → Term → Courses multi → Date
-	// range → Granularity). Same course appears once per cohort (D6/D34).
+	// Analytics & Reports (wireframe 4.7, D33): one page, seven tabs —
+	// Overview, Comparison, Trends, At-Risk, Staging, Attendance, Export — over
+	// a shared cascading filter rail (Program → Year → Term → Courses multi →
+	// Date range → Granularity). Same course appears once per cohort (D6/D34).
+	// The Attendance tab is the per-course snapshot absorbed from the old
+	// admin attendance page and keeps its own Course/Professor/date filters.
 	// Numbers come from the live analytics backend (#136, mocks only when
 	// PUBLIC_MOCK_MODE=true); the filter rail reads live programs/courses
 	// endpoints for its options. Compliance (present/total) is the default
 	// metric; participation ((present+late+excused)/total) is a render
 	// toggle (D36).
 
-	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'export';
+	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'attendance' | 'export';
 	const TABS = [
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'comparison', label: 'Comparison' },
 		{ id: 'trends', label: 'Trends' },
 		{ id: 'atrisk', label: 'At-Risk' },
 		{ id: 'staging', label: 'Staging' },
+		{ id: 'attendance', label: 'Attendance' },
 		{ id: 'export', label: 'Export' },
 	] as const;
 
 	const initialRange = defaultAnalyticsRange();
 
-	let tab = $state<Tab>('overview');
+	// Deep link support (?tab=attendance): the dashboard's attendance strip
+	// links straight to the snapshot tab; unknown values fall back to Overview.
+	const initialTab = (): Tab => {
+		const requested = page.url.searchParams.get('tab');
+		return requested && TABS.some((t) => t.id === requested) ? (requested as Tab) : 'overview';
+	};
+
+	let tab = $state<Tab>(initialTab());
 	let programFilter = $state('');
 	let yearFilter = $state('');
 	let semesterFilter = $state('');
@@ -77,6 +91,18 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let courseOptions = $state<AdminCourse[]>([]);
 	let yearsCache = $state<Map<number, YearLevel[]>>(new Map());
 
+	// Catalogue page size for the picker's unscoped fallback and the name-join
+	// lookups; mirrors the backend's MAX_PAGE_SIZE so the list is honestly
+	// bounded (with a "showing X of Y" hint) rather than silently capped.
+	const COURSE_CHOICE_LIMIT = 200;
+	// Scoped picker (#279): courses with at least one offering in the picked
+	// Program/Year/Term. An unset program falls back to the catalogue above.
+	let courseChoices = $state<CourseOption[]>([]);
+	let courseChoicesTotal = $state(0);
+	let courseChoicesLoading = $state(false);
+	let courseLookupsTotal = $state(0);
+	let courseSearch = $state('');
+
 	const metric = $derived(adminAnalyticsState.metric);
 	const overview = $derived(adminAnalyticsState.overview);
 
@@ -85,6 +111,24 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	);
 
 	const allYears = $derived([...yearsCache.values()].flat());
+
+	// Picker source: scoped options when a program is picked, else the loaded
+	// catalogue. `visibleChoices` adds the search narrowing for the catalogue
+	// path; scoped results already arrive server-filtered by `q`.
+	const pickerChoices = $derived(
+		programFilter
+			? courseChoices
+			: courseOptions.map((c) => ({ id: c.id, code: c.courseCode, name: c.courseName }))
+	);
+	const pickerTotal = $derived(programFilter ? courseChoicesTotal : courseLookupsTotal);
+	const visibleChoices = $derived.by(() => {
+		if (programFilter) return pickerChoices;
+		const needle = courseSearch.trim().toLowerCase();
+		if (!needle) return pickerChoices;
+		return pickerChoices.filter(
+			(c) => c.code.toLowerCase().includes(needle) || c.name.toLowerCase().includes(needle)
+		);
+	});
 
 	const comparison = $derived(
 		enrichComparison(adminAnalyticsState.comparison, courseOptions, programOptions, [
@@ -162,8 +206,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	const apply = async () => {
 		formError = null;
 		const parsed = analyticsFilterSchema.safeParse({
-			program_id: programFilter,
-			year_level_id: yearFilter,
+			// Selects bind their raw option value (Svelte 5), so numeric ids
+			// land in state as numbers — the schema models the string form.
+			program_id: String(programFilter),
+			year_level_id: String(yearFilter),
 			semester: semesterFilter,
 			course_ids: selectedCourseIds,
 			date_from: dateFrom,
@@ -184,9 +230,15 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		await Promise.all([...programIds].map(cacheYears));
 	};
 
+	// alive-guard for the async onMount below: if the route unmounts while
+	// the lookups/first page are still loading, destroy has already run and
+	// the lookup subscriptions must never attach afterwards.
+	let pageAlive = true;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
+		pageAlive = false;
+		if (courseSearchTimer) clearTimeout(courseSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -199,10 +251,55 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	const reloadCourseLookups = async () => {
 		try {
-			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+			const page = await listCourses({ page: 1, size: COURSE_CHOICE_LIMIT });
+			courseOptions = page.items;
+			courseLookupsTotal = page.total;
 		} catch {
 			courseOptions = [];
+			courseLookupsTotal = 0;
 		}
+	};
+
+	// Scoped picker options (#279). `reconcile` drops selections no longer in
+	// scope, but only when the full in-scope set is present — a page truncated
+	// at COURSE_CHOICE_LIMIT must never discard a valid selection.
+	const loadScopedCourseChoices = async (reconcile = false) => {
+		if (!programFilter) return;
+		courseChoicesLoading = true;
+		try {
+			const { items, total } = await getCourseOptions({
+				program_id: Number(programFilter),
+				year_level_id: yearFilter ? Number(yearFilter) : undefined,
+				semester: semesterFilter.trim() || undefined,
+				q: courseSearch.trim() || undefined,
+				limit: COURSE_CHOICE_LIMIT,
+			});
+			courseChoices = items;
+			courseChoicesTotal = total;
+			if (reconcile && !courseSearch.trim() && total <= items.length) {
+				const available = new Set(items.map((c) => c.id));
+				selectedCourseIds = selectedCourseIds.filter((id) => available.has(id));
+			}
+		} catch {
+			// Best effort — the filterNotice covers lookup failures.
+		} finally {
+			courseChoicesLoading = false;
+		}
+	};
+
+	let courseSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const onCourseSearch = (value: string) => {
+		courseSearch = value;
+		// Catalogue search filters instantly via `visibleChoices`; a scoped
+		// search round-trips, so debounce it.
+		if (!programFilter) return;
+		if (courseSearchTimer) clearTimeout(courseSearchTimer);
+		courseSearchTimer = setTimeout(() => void loadScopedCourseChoices(false), 250);
+	};
+
+	const clearCourseSelection = () => {
+		selectedCourseIds = [];
 	};
 
 	const reloadProgramLookups = async () => {
@@ -232,12 +329,16 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		try {
-			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+			const page = await listCourses({ page: 1, size: COURSE_CHOICE_LIMIT });
+			courseOptions = page.items;
+			courseLookupsTotal = page.total;
 		} catch {
 			courseOptions = [];
+			courseLookupsTotal = 0;
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await apply();
+		if (!pageAlive) return;
 		autoRefreshStops.push(
 			// Lookup entities reload filter-rail options only — never the
 			// aggregates themselves (issue #221: no aggregate subscriptions).
@@ -251,6 +352,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		yearFilter = '';
 		semesterFilter = '';
 		yearOptions = [];
+		courseSearch = '';
 		if (programFilter) {
 			try {
 				yearOptions = await listYearLevels(Number(programFilter));
@@ -258,12 +360,25 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				yearOptions = [];
 				filterNotice = 'Some filters failed to load — lists may be incomplete.';
 			}
+			await loadScopedCourseChoices(true);
+		} else {
+			// Back to the catalogue: every course is in scope, nothing to drop.
+			courseChoices = [];
+			courseChoicesTotal = 0;
 		}
 		await apply();
 	};
 
 	const changeYear = async () => {
 		semesterFilter = '';
+		courseSearch = '';
+		await loadScopedCourseChoices(true);
+		await apply();
+	};
+
+	const changeSemester = async () => {
+		courseSearch = '';
+		await loadScopedCourseChoices(true);
 		await apply();
 	};
 
@@ -330,6 +445,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		program_id: programFilter ? Number(programFilter) : undefined,
 		year_level_id: yearFilter ? Number(yearFilter) : undefined,
 		semester: semesterFilter.trim() || undefined,
+		course_ids: selectedCourseIds,
 		risk_level: riskLevel || undefined,
 		unpromoted_only: true,
 	});
@@ -373,86 +489,124 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			<h1>Analytics &amp; Reports</h1>
 			<p class="muted">Aggregates from the live analytics backend</p>
 		</div>
-		<div class="header-actions" role="group" aria-label="Rate metric">
-			<button
-				class="btn btn-secondary"
-				class:selected={metric === 'compliance'}
-				onclick={() => setMetric('compliance')}
-			>
-				Compliance
-			</button>
-			<button
-				class="btn btn-secondary"
-				class:selected={metric === 'participation'}
-				onclick={() => setMetric('participation')}
-			>
-				Participation
-			</button>
-		</div>
+		{#if tab !== 'attendance'}
+			<div class="header-actions" role="group" aria-label="Rate metric">
+				<button
+					class="btn btn-secondary"
+					class:selected={metric === 'compliance'}
+					onclick={() => setMetric('compliance')}
+				>
+					Compliance
+				</button>
+				<button
+					class="btn btn-secondary"
+					class:selected={metric === 'participation'}
+					onclick={() => setMetric('participation')}
+				>
+					Participation
+				</button>
+			</div>
+		{/if}
 	</header>
 
-	<section class="card filters" aria-label="Analytics filters">
-		<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
-			<option value="">All programs</option>
-			{#each programOptions as p (p.id)}
-				<option value={p.id}>{p.code} — {p.name}</option>
-			{/each}
-		</select>
-		<select
-			class="input"
-			aria-label="Year level filter"
-			bind:value={yearFilter}
-			onchange={changeYear}
-			disabled={!programFilter}
-			title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
-		>
-			<option value="">All years</option>
-			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}</option>
-			{/each}
-		</select>
-		{#if semesterOptions.length > 0}
-			<select class="input" aria-label="Semester filter" bind:value={semesterFilter}>
+	{#if tab !== 'attendance'}
+		<section class="card filters" aria-label="Analytics filters">
+			<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
+				<option value="">All programs</option>
+				{#each programOptions as p (p.id)}
+					<option value={p.id}>{p.code} — {p.name}</option>
+				{/each}
+			</select>
+			<select
+				class="input"
+				aria-label="Year level filter"
+				bind:value={yearFilter}
+				onchange={changeYear}
+				disabled={!programFilter}
+				title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
+			>
+				<option value="">All years</option>
+				{#each yearOptions as y (y.id)}
+					<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
+				{/each}
+			</select>
+			<select
+				class="input"
+				aria-label="Semester filter"
+				bind:value={semesterFilter}
+				onchange={changeSemester}
+				disabled={!yearFilter || semesterOptions.length === 0}
+				title={!yearFilter
+					? "Pick a year level first — semesters are the year level's terms"
+					: semesterOptions.length === 0
+						? 'This year level has no terms configured'
+						: undefined}
+			>
 				<option value="">All semesters</option>
 				{#each semesterOptions as t (t.code)}
 					<option value={t.code}>{t.label}</option>
 				{/each}
 			</select>
-		{:else}
-			<input class="input" placeholder="Semester (e.g. 1st Sem)" aria-label="Semester filter" bind:value={semesterFilter} />
-		{/if}
-		<select class="input" aria-label="Granularity" bind:value={granularity}>
-			<option value="daily">Daily</option>
-			<option value="weekly">Weekly</option>
-			<option value="monthly">Monthly</option>
-		</select>
-		<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
-		<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
-		<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
-		{#if formError}
-			<p class="error" role="alert">{formError}</p>
+			<select class="input" aria-label="Granularity" bind:value={granularity}>
+				<option value="daily">Daily</option>
+				<option value="weekly">Weekly</option>
+				<option value="monthly">Monthly</option>
+			</select>
+			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
+			<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
+			<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
+			{#if formError}
+				<p class="error" role="alert">{formError}</p>
 		{/if}
 		{#if filterNotice}
 			<p class="muted" role="status">{filterNotice}</p>
 		{/if}
 		<fieldset class="courses">
 			<legend>Courses (multi)</legend>
-			{#if courseOptions.length === 0}
-				<span class="muted">No courses loaded.</span>
+			<div class="course-picker">
+				<input
+					class="input"
+					type="search"
+					placeholder={programFilter ? 'Search courses in scope' : 'Search courses'}
+					aria-label="Search courses"
+					value={courseSearch}
+					oninput={(e) => onCourseSearch((e.currentTarget as HTMLInputElement).value)}
+				/>
+				<span class="muted small">
+					{selectedCourseIds.length} selected{#if selectedCourseIds.length > 0}
+						<button type="button" class="link-btn" onclick={clearCourseSelection}>Clear</button>{/if}
+				</span>
+			</div>
+			{#if courseChoicesLoading && pickerChoices.length === 0}
+				<span class="muted">Loading courses…</span>
+			{:else if pickerChoices.length === 0}
+				<span class="muted">
+					{programFilter
+						? 'No courses are offered in the selected program/year/term.'
+						: 'No courses loaded.'}
+				</span>
 			{:else}
-				{#each courseOptions as c (c.id)}
+				{#each visibleChoices as c (c.id)}
 					<label class="check">
 						<input
 							type="checkbox"
 							checked={selectedCourseIds.includes(c.id)}
 							onchange={() => toggleCourse(c.id)}
 						/>
-						{c.courseCode}
+						{c.code}
 					</label>
+				{:else}
+					<span class="muted">No courses match “{courseSearch}”.</span>
 				{/each}
+				{#if pickerChoices.length < pickerTotal}
+					<span class="muted small">
+						Showing {pickerChoices.length} of {pickerTotal} — search to narrow.
+					</span>
+				{/if}
 			{/if}
 		</fieldset>
 	</section>
+	{/if}
 
 	<nav class="tabs" aria-label="Analytics sections">
 		{#each TABS as t (t.id)}
@@ -460,7 +614,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		{/each}
 	</nav>
 
-	{#if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
+	{#if tab === 'attendance'}
+		<AttendanceSnapshot />
+	{:else if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
 		<section class="card"><p class="muted">Loading…</p></section>
 	{:else if adminAnalyticsState.error}
 		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>
@@ -480,6 +636,12 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<section class="card" aria-busy={adminAnalyticsState.loading}>
 			<h2 class="card-title">Course Comparison</h2>
 			<p class="muted">Same course shown once per cohort · {metric} rate</p>
+			{#if adminAnalyticsState.comparisonTotal > comparison.length}
+				<p class="muted">
+					Showing {comparison.length} of {adminAnalyticsState.comparisonTotal} cohorts — narrow the
+					filters to see the rest.
+				</p>
+			{/if}
 			<ReportBarChart
 				title="Course comparison"
 				description="Per-cohort rate bars for the current filter set."
@@ -637,8 +799,8 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				>
 					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'}?</p>
 					<p class="muted small">
-						Promote acts on the whole semester scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
-						and risk filters narrow this review list only. Promoted rows leave the list and appear in At-Risk.
+						Promote acts on every unpromoted row in the current scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
+						and course narrow the promoted set; risk level narrows this review list only. Promoted rows leave the list and appear in At-Risk.
 					</p>
 					<div class="confirm-actions">
 						<button class="btn btn-secondary" onclick={() => (promoteOpen = false)}>Cancel</button>
@@ -842,6 +1004,29 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		font-weight: 600;
 		color: var(--text-secondary);
 		cursor: pointer;
+	}
+
+	.course-picker {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		flex-basis: 100%;
+	}
+
+	.course-picker .input {
+		flex: 1 1 16rem;
+	}
+
+	.link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		margin-left: 0.375rem;
+		font: inherit;
+		color: var(--brand);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 
 	.tabs {
@@ -1074,6 +1259,15 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		border-color: var(--brand);
 		background: var(--brand);
 		color: var(--on-brand);
+	}
+
+	/* The generic secondary hover carries :not(:disabled) (specificity 0,3,0),
+	   which outranks the selected state (0,2,0) — without this rule, hovering a
+	   selected metric button repainted it --divider (near-white) under the
+	   white text. Selected buttons hover into the darker brand shade instead. */
+	.btn-secondary.selected:hover:not(:disabled) {
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 	}
 
 	.table-wrap {

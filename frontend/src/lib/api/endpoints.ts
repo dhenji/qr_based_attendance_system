@@ -38,6 +38,7 @@ import type {
 	AdminUserResponse,
 	AnalyticsAtRiskItemResponse,
 	AnalyticsComparisonItemResponse,
+	AnalyticsCourseOptionsResponse,
 	AnalyticsOverviewResponse,
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
@@ -47,7 +48,6 @@ import type {
 	ProfessorImportResult,
 	ProgramImportResult,
 	PromoteStagingResponse,
-	RecentScanResponse,
 	RiskRefreshResponse,
 	RiskStagingResponse,
 	StructureChangeResponse,
@@ -68,6 +68,7 @@ import type {
 	SessionListItemResponse,
 	SessionReadResponse,
 } from '$lib/shared/types';
+import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 
 export type ScanStatus = 'present' | 'late' | 'rejected';
 
@@ -1947,7 +1948,6 @@ interface MockOfferingPayload {
 	semester?: unknown;
 	academic_year?: unknown;
 	sessions_per_week?: unknown;
-	semester_weeks?: unknown;
 	schedule_days?: unknown;
 	schedule_start_time?: unknown;
 	schedule_end_time?: unknown;
@@ -1966,6 +1966,14 @@ const findMockOfferingRow = (suffix?: string): AdminOfferingResponse => {
 	const row = MOCK_ADMIN_OFFERINGS.find((r) => r.id === id);
 	if (!row) throw new Error('Offering not found.');
 	return row;
+};
+
+// Session weeks are term-scoped (D86): the mock derives them from its own
+// year-level term structure rather than accepting them on a payload.
+const mockTermWeeks = (yearLevelId: number, semester: string): number => {
+	const year = MOCK_YEARS.find((y) => y.id === yearLevelId);
+	const term = year?.term_structure.terms.find((t) => t.code === semester);
+	return term?.weeks ?? DEFAULT_TERM_WEEKS;
 };
 
 // D77 mock components: the offering rows above are the single source of
@@ -2096,7 +2104,9 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			semester,
 			academic_year: academicYear,
 			sessions_per_week: Number(p.sessions_per_week ?? 2),
-			semester_weeks: Number(p.semester_weeks ?? 18),
+			// Derived from the term (D86), mirroring the live read: the mock
+			// never accepts weeks on the create payload.
+			semester_weeks: mockTermWeeks(Number(p.year_level_id), semester),
 			schedule_days: String(p.schedule_days ?? 'MWF').trim().toUpperCase(),
 			schedule_start_time: String(p.schedule_start_time ?? '09:00:00'),
 			schedule_end_time: String(p.schedule_end_time ?? '10:30:00'),
@@ -2137,7 +2147,6 @@ export const AdminOfferingDetailEndpoint: EndpointDef<AdminOfferingResponse> = {
 			const p = (body ?? {}) as MockOfferingPayload;
 			if (p.sessions_per_week !== undefined)
 				row.sessions_per_week = Number(p.sessions_per_week);
-			if (p.semester_weeks !== undefined) row.semester_weeks = Number(p.semester_weeks);
 			if (p.schedule_days !== undefined)
 				row.schedule_days = String(p.schedule_days).trim().toUpperCase();
 			if (p.schedule_start_time !== undefined)
@@ -2419,8 +2428,8 @@ const mockYear = (id: number, programId: number, yearNumber: number): YearLevelR
 	label: `${ordinal(yearNumber)} Year`,
 	term_structure: {
 		terms: [
-			{ code: '1st', label: '1st Semester' },
-			{ code: '2nd', label: '2nd Semester' },
+			{ code: '1st', label: '1st Semester', weeks: DEFAULT_TERM_WEEKS },
+			{ code: '2nd', label: '2nd Semester', weeks: DEFAULT_TERM_WEEKS },
 		],
 	},
 	sort_order: yearNumber,
@@ -2646,6 +2655,36 @@ export const AdminAnalyticsOverviewEndpoint: EndpointDef<AnalyticsOverviewRespon
 	},
 };
 
+// Courses with at least one offering in the picked scope (#279): the rail's
+// course picker reads this so a course no report can show is not selectable.
+// Mirrors the backend's distinct-courses-with-an-offering scope and the `q`
+// code/name search.
+export const AdminAnalyticsCourseOptionsEndpoint: EndpointDef<AnalyticsCourseOptionsResponse> = {
+	url: '/admin/analytics/course-options',
+	method: 'GET',
+	mock: (params) => {
+		const sessions = filterMockSessions(params);
+		const byId = new Map<number, { course_id: number; course_code: string; course_name: string }>();
+		for (const s of sessions) {
+			if (!byId.has(s.courseId)) {
+				byId.set(s.courseId, {
+					course_id: s.courseId,
+					course_code: s.courseCode,
+					course_name: s.courseName,
+				});
+			}
+		}
+		let items = [...byId.values()].sort((a, b) => a.course_code.localeCompare(b.course_code));
+		const q = params?.q?.trim().toLowerCase();
+		if (q) {
+			items = items.filter(
+				(c) => c.course_code.toLowerCase().includes(q) || c.course_name.toLowerCase().includes(q)
+			);
+		}
+		return { items, total: items.length };
+	},
+};
+
 export const AdminAnalyticsComparisonEndpoint: EndpointDef<{ items: AnalyticsComparisonItemResponse[] }> = {
 	url: '/admin/analytics/course-comparison',
 	method: 'GET',
@@ -2799,27 +2838,6 @@ export const AdminAttendanceOverviewEndpoint: EndpointDef<{ items: AttendanceOve
 			items = items.filter((r) => String(r.course_id) === params.course_id);
 		}
 		items.sort((a, b) => a.course_code.localeCompare(b.course_code));
-		return { items };
-	},
-};
-
-const MOCK_SCAN_STATUSES = ['present', 'late', 'present', 'present', 'excused', 'late'];
-
-export const AdminRecentScansEndpoint: EndpointDef<{ items: RecentScanResponse[] }> = {
-	url: '/admin/attendance/recent-scans',
-	method: 'GET',
-	mock: (params) => {
-		const limit = Math.min(Math.max(parseInt(params?.limit ?? '10', 10) || 10, 1), 100);
-		const sorted = [...MOCK_ANALYTICS_SESSIONS].sort((a, b) => (a.date < b.date ? 1 : -1));
-		const items: RecentScanResponse[] = sorted.slice(0, limit).map((s, i) => ({
-			id: i + 1,
-			scanned_at: `${s.date}T${String(8 + (i % 9)).padStart(2, '0')}:${String((i * 7) % 60).padStart(2, '0')}:00.000Z`,
-			student_name: MOCK_ADMIN_STUDENT_ROWS[i % MOCK_ADMIN_STUDENT_ROWS.length]
-				? [MOCK_ADMIN_STUDENT_ROWS[i % MOCK_ADMIN_STUDENT_ROWS.length].first_name, MOCK_ADMIN_STUDENT_ROWS[i % MOCK_ADMIN_STUDENT_ROWS.length].last_name].join(' ')
-				: 'Unknown',
-			course_code: s.courseCode,
-			status: MOCK_SCAN_STATUSES[i % MOCK_SCAN_STATUSES.length],
-		}));
 		return { items };
 	},
 };
@@ -3411,6 +3429,8 @@ export interface ProfessorReportsComparisonItemResponse {
 	course_code: string;
 	program_id: number;
 	year_level_id: number;
+	program_code: string;
+	year_level_label: string;
 	compliance_rate: number;
 	participation_rate: number;
 	total_sessions: number;
@@ -3418,13 +3438,14 @@ export interface ProfessorReportsComparisonItemResponse {
 
 export const ProfessorReportsComparisonEndpoint: EndpointDef<{
 	items: ProfessorReportsComparisonItemResponse[];
+	total?: number;
 }> = {
 	url: '/professor/reports/comparison',
 	method: 'GET',
 	mock: () => ({
 		items: [
-			{ course_id: 1, course_code: 'CS101', program_id: 1, year_level_id: 1, compliance_rate: 0.84, participation_rate: 0.92, total_sessions: 12 },
-			{ course_id: 2, course_code: 'MATH101', program_id: 1, year_level_id: 1, compliance_rate: 0.71, participation_rate: 0.83, total_sessions: 9 },
+			{ course_id: 1, course_code: 'CS101', program_id: 1, year_level_id: 1, program_code: 'BSCS', year_level_label: 'Year 1', compliance_rate: 0.84, participation_rate: 0.92, total_sessions: 12 },
+			{ course_id: 2, course_code: 'MATH101', program_id: 1, year_level_id: 1, program_code: 'BSCS', year_level_label: 'Year 1', compliance_rate: 0.71, participation_rate: 0.83, total_sessions: 9 },
 		],
 	}),
 };
@@ -3631,6 +3652,7 @@ export const endpoints = {
 	adminOfferingUnenroll: AdminOfferingUnenrollEndpoint,
 	// Admin analytics + attendance overview (Phase 7; backend #136/#137/#138)
 	adminAnalyticsOverview: AdminAnalyticsOverviewEndpoint,
+	adminAnalyticsCourseOptions: AdminAnalyticsCourseOptionsEndpoint,
 	adminAnalyticsComparison: AdminAnalyticsComparisonEndpoint,
 	adminAnalyticsTrends: AdminAnalyticsTrendsEndpoint,
 	adminAnalyticsAtRisk: AdminAnalyticsAtRiskEndpoint,
@@ -3638,7 +3660,6 @@ export const endpoints = {
 	adminRiskStaging: AdminRiskStagingEndpoint,
 	adminRiskStagingPromote: AdminRiskStagingPromoteEndpoint,
 	adminAttendanceOverview: AdminAttendanceOverviewEndpoint,
-	adminRecentScans: AdminRecentScansEndpoint,
 	// Admin audit logs (Phase 8 backend; designed shape)
 	adminAuditLogs: AdminAuditLogsEndpoint,
 	adminStructureChanges: AdminStructureChangesEndpoint,

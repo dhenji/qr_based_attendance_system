@@ -449,7 +449,7 @@ class ProgramService:
             program_id=program_id,
             year_number=payload.year_number,
             label=payload.label,
-            term_structure=payload.term_structure.model_dump(),
+            term_structure=payload.term_structure.model_dump(exclude_none=True),
             sort_order=(
                 payload.sort_order
                 if payload.sort_order is not None
@@ -511,7 +511,17 @@ class ProgramService:
                 if in_use_codes:
                     raise YearLevelTermInUseException(year_id, sorted(in_use_codes))
 
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        data = payload.model_dump(exclude_unset=True)
+        # A term with no weeks must omit the key, not persist `weeks: null`
+        # (the resolver treats absent and null the same, but an explicit null
+        # would reach the admin UI as a bound input value).
+        term_structure = data.get("term_structure")
+        if isinstance(term_structure, dict):
+            data["term_structure"] = payload.term_structure.model_dump(
+                exclude_none=True
+            )
+
+        for field, value in data.items():
             setattr(year_level, field, value)
 
         await self._session.flush()

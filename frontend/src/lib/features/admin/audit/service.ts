@@ -99,6 +99,27 @@ const auditParams = (f: AuditLogFilters): Record<string, string> => {
 // Live-derivable rows: record creations from roster lists. Negative ids keep
 // them distinct from backend ids. All are `create` actions by `system`, so an
 // action/entity filter that excludes creates yields no live rows.
+//
+// The scan is bounded multi-page: a single roster page (100) hides every
+// creation beyond it; three pages (~300 rows per entity) keep the live feed
+// representative without hammering the roster endpoints on every audit load.
+const MAX_ROSTER_PAGES = 3;
+const MAX_LIVE_ROWS = 300;
+
+const listPages = async <T>(
+	fetchPage: (page: number) => Promise<T[]>,
+	pageSize: number
+): Promise<T[]> => {
+	const out: T[] = [];
+	for (let pageNumber = 1; pageNumber <= MAX_ROSTER_PAGES; pageNumber += 1) {
+		const items = await fetchPage(pageNumber);
+		if (items.length === 0) break;
+		out.push(...items);
+		if (out.length >= MAX_LIVE_ROWS || items.length < pageSize) break;
+	}
+	return out;
+};
+
 const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 	if (f.action && f.action !== 'create') return [];
 	if (f.performed_by && f.performed_by.trim().toLowerCase() !== 'system') return [];
@@ -114,7 +135,10 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 		!f.entity_type || f.entity_type === entity;
 	try {
 		if (wants('student')) {
-			const students = (await listStudents({ page: 1, size: 100 })).items;
+			const students = await listPages(
+				(page) => listStudents({ page, size: 100 }).then((res) => res.items),
+				100
+			);
 			for (const s of students) {
 				if (!inRange(s.createdAt)) continue;
 				rows.push({
@@ -135,7 +159,10 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 	}
 	try {
 		if (wants('professor')) {
-			const professors = (await listProfessors({ page: 1, size: 100 })).items;
+			const professors = await listPages(
+				(page) => listProfessors({ page, size: 100 }).then((res) => res.items),
+				100
+			);
 			for (const p of professors) {
 				if (!inRange(p.createdAt)) continue;
 				rows.push({
@@ -156,7 +183,10 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 	}
 	try {
 		if (wants('program')) {
-			const programs: Program[] = (await listPrograms({ page: 1, size: 50 })).items;
+			const programs: Program[] = await listPages(
+				(page) => listPrograms({ page, size: 50 }).then((res) => res.items),
+				50
+			);
 			for (const p of programs) {
 				if (!inRange(p.createdAt)) continue;
 				rows.push({
@@ -177,7 +207,10 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 	}
 	try {
 		if (wants('course')) {
-			const courses: AdminCourse[] = (await listCourses({ page: 1, size: 100 })).items;
+			const courses: AdminCourse[] = await listPages(
+				(page) => listCourses({ page, size: 100 }).then((res) => res.items),
+				100
+			);
 			for (const c of courses) {
 				if (!inRange(c.createdAt)) continue;
 				rows.push({
@@ -208,9 +241,17 @@ export const listAuditLogs = async (
 		get<Paginated<AuditLogItemResponse>>('adminAuditLogs', auditParams(filters)),
 		liveCreationRows(filters),
 	]);
+	const trailRows: AuditLogRow[] = (trail.items ?? []).map((r) => ({
+		...r,
+		origin: 'seed' as const,
+	}));
+	// The backend trail is authoritative: when it already carries a create
+	// row for an entity, the derived live row for the same entity is a
+	// duplicate of it, not a second event feeding the feed.
+	const seen = new Set(trailRows.map((r) => `${r.action}:${r.entity_type}:${r.entity_id}`));
 	const merged: AuditLogRow[] = [
-		...(trail.items ?? []).map((r) => ({ ...r, origin: 'seed' as const })),
-		...live,
+		...trailRows,
+		...live.filter((r) => !seen.has(`${r.action}:${r.entity_type}:${r.entity_id}`)),
 	];
 	merged.sort((a, b) => (a.performed_at < b.performed_at ? 1 : -1));
 	const total = merged.length;

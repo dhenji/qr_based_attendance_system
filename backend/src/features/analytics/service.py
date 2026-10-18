@@ -7,10 +7,11 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
+from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -23,6 +24,8 @@ from features.analytics.schema import (
     AtRiskResponse,
     CourseComparisonItem,
     CourseComparisonResponse,
+    CourseOption,
+    CourseOptionsResponse,
     OverviewResponse,
     PromoteStagingResponse,
     RefreshRiskResponse,
@@ -77,6 +80,25 @@ def _offerings_stmt(
         stmt = stmt.where(CourseOffering.course_id.in_(course_ids))
 
     return stmt
+
+
+def _offering_scope_ids(
+    program_id: int | None,
+    year_level_id: int | None,
+    course_ids: Sequence[int] | None,
+) -> Select[Any] | None:
+    """Offering-id subquery for the rail's Program/Year/Course scope.
+
+    ``None`` when none of the three narrows anything, so callers append no
+    criterion and keep the whole-scope behaviour. Semester stays out of the
+    predicate: staged rows carry their own semester column, and staging reads
+    filter that column rather than the offering's.
+    """
+    if program_id is None and year_level_id is None and not course_ids:
+        return None
+    return _offerings_stmt(
+        program_id, year_level_id, None, course_ids
+    ).with_only_columns(CourseOffering.id)
 
 
 async def _scoped_sessions(
@@ -215,13 +237,14 @@ class AnalyticsService:
         program_id: int | None = None,
         year_level_id: int | None = None,
         semester: str | None = None,
+        course_ids: Sequence[int] | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> OverviewResponse:
         """Totals plus average rates over the offering filter set."""
         offerings: Sequence[CourseOffering] = (
             await self._session.scalars(
-                _offerings_stmt(program_id, year_level_id, semester)
+                _offerings_stmt(program_id, year_level_id, semester, course_ids)
             )
         ).all()
         offering_ids: list[int] = [row.id for row in offerings]
@@ -268,7 +291,12 @@ class AnalyticsService:
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> CourseComparisonResponse:
-        """Per-course rates over the filter set; one row per course."""
+        """Cohort rates over the filter set; one row per program × year level.
+
+        A course can be offered to several programs/year levels (D6); each is
+        its own row so the same subject is compared across cohorts (D34). Rows
+        are ordered by course code, then program, then year level.
+        """
         page, size = _normalize_paging(page, size)
         offerings: Sequence[CourseOffering] = (
             await self._session.scalars(
@@ -279,12 +307,8 @@ class AnalyticsService:
         if not offerings:
             return CourseComparisonResponse(items=[], total=0, page=page, size=size)
 
-        by_course: dict[int, list[CourseOffering]] = {}
-
-        for row in sorted(offerings, key=lambda item: item.id):
-            by_course.setdefault(row.course_id, []).append(row)
-
-        course_ids_sorted: list[int] = sorted(by_course)
+        cohorts: dict[CohortKey, list[CourseOffering]] = group_by_cohort(offerings)
+        course_ids_sorted: list[int] = sorted({key[0] for key in cohorts})
         course_map: dict[int, Course] = {
             row.id: row
             for row in (
@@ -295,8 +319,16 @@ class AnalyticsService:
         }
         items: list[CourseComparisonItem] = []
 
-        for course_id in course_ids_sorted:
-            rows: list[CourseOffering] = by_course[course_id]
+        for key in sorted(
+            cohorts,
+            key=lambda key: (
+                course_map[key[0]].course_code if key[0] in course_map else "",
+                key[1],
+                key[2],
+            ),
+        ):
+            course_id, cohort_program_id, cohort_year_level_id = key
+            rows: list[CourseOffering] = cohorts[key]
             offering_ids: list[int] = [row.id for row in rows]
             sessions: Sequence[Session] = await _scoped_sessions(
                 self._session, offering_ids, date_from, date_to
@@ -319,21 +351,80 @@ class AnalyticsService:
                 CourseComparisonItem(
                     course_id=course_id,
                     course_code=course.course_code if course else "",
-                    program_id=rows[0].program_id,
-                    year_level_id=rows[0].year_level_id,
+                    program_id=cohort_program_id,
+                    year_level_id=cohort_year_level_id,
                     compliance_rate=compliance,
                     participation_rate=participation,
                     total_sessions=len(sessions),
                 )
             )
 
-        total: int = len(items)
-
         return CourseComparisonResponse(
             items=items[(page - 1) * size : page * size],
-            total=total,
+            total=len(items),
             page=page,
             size=size,
+        )
+
+    async def list_course_options(
+        self,
+        *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        query: str | None = None,
+        limit: int = DEFAULT_PAGE_SIZE,
+    ) -> CourseOptionsResponse:
+        """Distinct courses with at least one offering in the selected scope.
+
+        The filter rail reads this so a course with no offering in the current
+        Program/Year/Term cannot be picked (#279). The scope predicate is
+        `_offerings_stmt` — the same one every report read uses — so the
+        options the rail offers and the rows the reports can show can never
+        disagree. No `is_active` gate, matching `_offerings_stmt`, so an
+        archived offering that still carries attendance history stays
+        reachable.
+        """
+        limit = min(max(limit, 1), MAX_PAGE_SIZE)
+        scoped = (
+            _offerings_stmt(program_id, year_level_id, semester)
+            .with_only_columns(CourseOffering.course_id)
+            .distinct()
+            .subquery()
+        )
+        stmt = select(Course).where(Course.id.in_(select(scoped.c.course_id)))
+
+        if query and query.strip():
+            needle = f"%{query.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Course.course_code.ilike(needle),
+                    Course.course_name.ilike(needle),
+                )
+            )
+
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
+        rows: Sequence[Course] = (
+            await self._session.scalars(
+                stmt.order_by(Course.course_code.asc()).limit(limit)
+            )
+        ).all()
+
+        return CourseOptionsResponse(
+            items=[
+                CourseOption(
+                    course_id=row.id,
+                    course_code=row.course_code,
+                    course_name=row.course_name,
+                )
+                for row in rows
+            ],
+            total=total,
         )
 
     async def get_trends(
@@ -443,6 +534,7 @@ class AnalyticsService:
         program_id: int | None = None,
         year_level_id: int | None = None,
         semester: str | None = None,
+        course_ids: Sequence[int] | None = None,
         risk_level: RiskLevel | str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
@@ -464,6 +556,9 @@ class AnalyticsService:
             stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
         )
         stmt = apply_if(stmt, semester, lambda v: StudentRiskScore.semester == v)
+        stmt = apply_if(
+            stmt, course_ids, lambda v: CourseOffering.course_id.in_(v)
+        )
         stmt = apply_if(
             stmt,
             RiskLevel(risk_level) if risk_level is not None else None,
@@ -579,6 +674,7 @@ class AnalyticsService:
         program_id: int | None = None,
         year_level_id: int | None = None,
         semester: str | None = None,
+        course_ids: Sequence[int] | None = None,
         risk_level: RiskLevel | str | None = None,
         unpromoted_only: bool = False,
         page: int = DEFAULT_PAGE,
@@ -610,6 +706,9 @@ class AnalyticsService:
         )
         stmt = apply_if(
             stmt, semester, lambda v: StudentRiskScoreStaging.semester == v
+        )
+        stmt = apply_if(
+            stmt, course_ids, lambda v: CourseOffering.course_id.in_(v)
         )
         stmt = apply_if(
             stmt,
@@ -649,8 +748,17 @@ class AnalyticsService:
         student_id: int | None = None,
         offering_id: int | None = None,
         semester: str | None = None,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        course_ids: Sequence[int] | None = None,
     ) -> PromoteStagingResponse:
-        """Copy unpromoted staged rows into live scores and stamp them."""
+        """Copy unpromoted staged rows into live scores and stamp them.
+
+        Honors the rail's Program/Year/Course scope as well as the explicit
+        student/offering/semester keys (#279) — the review list and the
+        promote act on the same set, so the dialog copy no longer overstates
+        what gets promoted.
+        """
         started: float = time.perf_counter()
         if offering_id is not None and semester is None:
             raise DomainException(
@@ -658,6 +766,8 @@ class AnalyticsService:
                 code="validation_error",
                 field="semester",
             )
+
+        rail_scope = _offering_scope_ids(program_id, year_level_id, course_ids)
 
         stmt = select(StudentRiskScoreStaging).where(
             StudentRiskScoreStaging.promoted_at.is_(None)
@@ -671,6 +781,11 @@ class AnalyticsService:
             stmt,
             semester if semester_scoped else None,
             lambda v: StudentRiskScoreStaging.semester == v,
+        )
+        stmt = apply_if(
+            stmt,
+            rail_scope,
+            lambda v: StudentRiskScoreStaging.offering_id.in_(v),
         )
         staged_rows: Sequence[StudentRiskScoreStaging] = (
             await self._session.scalars(stmt)
@@ -689,6 +804,11 @@ class AnalyticsService:
             skipped_stmt,
             semester if semester_scoped else None,
             lambda v: StudentRiskScoreStaging.semester == v,
+        )
+        skipped_stmt = apply_if(
+            skipped_stmt,
+            rail_scope,
+            lambda v: StudentRiskScoreStaging.offering_id.in_(v),
         )
         skipped: int = (
             await self._session.scalar(

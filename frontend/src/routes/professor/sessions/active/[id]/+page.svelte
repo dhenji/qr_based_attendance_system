@@ -13,11 +13,7 @@
 		EXCUSE_REASON_SHORT_MESSAGE,
 		quickExcuse
 	} from '$lib/features/excuse/service';
-	import {
-		buildCsv,
-		fetchProfessorReportsCsv
-	} from '$lib/features/report/service';
-	import { professorState } from '$lib/features/professor/store.svelte';
+	import { buildCsv } from '$lib/features/report/service';
 	import { isMockMode } from '$lib/api/client';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
@@ -76,8 +72,12 @@
 	let exporting = $state(false);
 
 	// Server-first export (POST /professor/reports/export) scoped to the
-	// session's course. Mock mode and unreachable backends fall back to the
-	// live feed rows on screen, so Export Current always produces a file.
+	// session's course was abandoned on purpose: the server leg always
+	// exports a whole course (no session filter exists), so the
+	// session-<id>-attendance.csv filename disagreed with the contents — and
+	// when the course lookup missed (stale profile cache), it degraded to
+	// all courses. Feed rows here carry the full session record, so building
+	// locally is the true per-session file.
 	const saveExport = (text: string, filename: string) => {
 		const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
@@ -90,21 +90,11 @@
 		// Revoke late: immediate revoke can abort large downloads on Safari.
 		setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	};
-	const exportCurrent = async () => {
+	const exportCurrent = () => {
 		const current = session;
 		if (!current || exporting) return;
 		exporting = true;
-		const filename = `session-${current.id}-attendance.csv`;
 		try {
-			const course =
-				professorState.courses.find((c) => c.offeringId === current.offeringId) ?? null;
-			saveExport(
-				await fetchProfessorReportsCsv(
-					course ? { course_id: course.courseId } : {}
-				),
-				filename
-			);
-		} catch {
 			saveExport(
 				buildCsv(
 					['student_number', 'name', 'section', 'status', 'scanned_at', 'excuse_reason'],
@@ -117,7 +107,7 @@
 						s.excuseReason ?? ''
 					])
 				),
-				filename
+				`session-${current.id}-attendance.csv`
 			);
 		} finally {
 			exporting = false;

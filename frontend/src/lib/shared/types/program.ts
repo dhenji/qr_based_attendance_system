@@ -10,6 +10,9 @@
 export interface ProgramTerm {
 	code: string;
 	label: string;
+	// Session weeks for this term (D86); absent falls back to the shared
+	// default. Offerings inherit it.
+	weeks?: number;
 }
 
 export interface ProgramTermStructure {

@@ -168,6 +168,71 @@ async def test_comparison_shape_and_pagination(
     assert item["total_sessions"] == 1
 
 
+async def test_comparison_splits_cohorts_and_labels_them(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    """A course taught to two cohorts is two labelled rows, not one (#277).
+
+    The row must also carry its own program code and year-level label so the
+    client never resolves a cohort through a course-id lookup that cannot tell
+    two cohorts of the same course apart.
+    """
+    professor_user = await factories.user(role=UserRole.PROFESSOR.value)
+    professor = await factories.professor(professor_user)
+    admin = await factories.user(role=UserRole.ADMIN.value)
+    course = await factories.course()
+    program_a = await factories.program()
+    year_a = await factories.year_level(program_a)
+    program_b = await factories.program()
+    year_b = await factories.year_level(program_b)
+    offering_a = await factories.offering(course, program_a, year_a)
+    offering_b = await factories.offering(course, program_b, year_b)
+    await factories.assignment(offering_a, professor, admin)
+    await factories.assignment(offering_b, professor, admin)
+    session_a = await factories.session(
+        offering_a, professor, created_at=NOW, expires_at=NOW
+    )
+    session_b = await factories.session(
+        offering_b, professor, created_at=NOW, expires_at=NOW
+    )
+
+    # Cohort A: one of two enrolled students present (0.5). Cohort B: one of
+    # one (1.0). A course-id grouping would blend these to 2/3.
+    student_a1 = await factories.student(year_a, await factories.user())
+    student_a2 = await factories.student(year_a, await factories.user())
+    await factories.enrollment(student_a1, offering_a)
+    await factories.enrollment(student_a2, offering_a)
+    await factories.attendance(student_a1, session_a, timestamp=NOW)
+    student_b = await factories.student(year_b, await factories.user())
+    await factories.enrollment(student_b, offering_b)
+    await factories.attendance(student_b, session_b, timestamp=NOW)
+
+    response = await api_client.get(
+        "/api/professor/reports/comparison?size=200",
+        headers=await auth_headers(professor_user),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    by_cohort = {
+        (row["program_id"], row["year_level_id"]): row for row in body["items"]
+    }
+    assert set(by_cohort) == {(program_a.id, year_a.id), (program_b.id, year_b.id)}
+    row_a = by_cohort[(program_a.id, year_a.id)]
+    row_b = by_cohort[(program_b.id, year_b.id)]
+    assert row_a["course_code"] == course.course_code
+    assert row_b["course_code"] == course.course_code
+    assert row_a["program_code"] == program_a.code
+    assert row_a["year_level_label"] == year_a.label
+    assert row_b["program_code"] == program_b.code
+    assert row_b["year_level_label"] == year_b.label
+    assert row_a["compliance_rate"] == 0.5
+    assert row_b["compliance_rate"] == 1.0
+    assert row_a["total_sessions"] == 1
+    assert row_b["total_sessions"] == 1
+
+
 async def test_trends_metric_selects_rate(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:

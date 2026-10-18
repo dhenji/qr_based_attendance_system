@@ -58,6 +58,29 @@ export const adminOfferingDetailState = $state({
 	actionError: null as string | null,
 });
 
+// resetAdminOfferingsStates
+// Logout hygiene (doLogout): drop the list and any loaded offering detail
+// (assignments + roster included).
+export const resetAdminOfferingsStates = (): void => {
+	adminOfferingsState.items = [];
+	adminOfferingsState.total = 0;
+	adminOfferingsState.page = 1;
+	adminOfferingsState.filters = {};
+	adminOfferingsState.loading = false;
+	adminOfferingsState.error = null;
+	adminOfferingsState.actionError = null;
+	adminOfferingDetailState.offering = null;
+	adminOfferingDetailState.assignments = [];
+	adminOfferingDetailState.roster = [];
+	adminOfferingDetailState.rosterTotal = 0;
+	adminOfferingDetailState.rosterPage = 1;
+	adminOfferingDetailState.loading = false;
+	adminOfferingDetailState.assignmentsLoading = false;
+	adminOfferingDetailState.rosterLoading = false;
+	adminOfferingDetailState.error = null;
+	adminOfferingDetailState.actionError = null;
+};
+
 const toMessage = (e: unknown, fallback: string) =>
 	e instanceof Error && e.message ? e.message : fallback;
 

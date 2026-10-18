@@ -412,7 +412,7 @@
 - **Status:** Accepted
 - **Context:** A course can be offered by multiple programs AND taken at multiple year levels with differing schedules/classrooms per offering (e.g., CS101 in BSCS MWF 9am vs BSIT TTh 2pm). Single program_id/year_level_id FKs on courses forced 1:1 and broke sharing.
 - **Supersedes:** D1 (FK placement — program_id/year_level_id move to course_offerings), D4 (scheduling metadata — only units + session_duration_hours stay on courses; the rest move to course_offerings), D6 (sharing mechanism — via multiple offerings per course instead of cross-program enrollments), D14 (late policy defaults live on course_offerings, pre-fill sessions from offering).
-- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id.
+- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id. `semester_weeks` was later removed from `course_offerings` and moved to the term entry in `year_levels.term_structure` (ADR-086).
 
 ### ADR-045: Professor Assignments & Risk Scores Reference Course Offerings
 
@@ -2135,3 +2135,191 @@
   tests in `tests/features/course/test_weekly_hours.py`,
   `tests/features/session/test_schedule_requirement.py`, and
   `tests/features/professor/test_schedule_flag.py`.
+
+### ADR-083: Attendance Overview Becomes the Attendance Tab of Analytics & Reports
+
+- **Decision (D83):** Consolidate the two admin attendance surfaces by
+  **purpose**, not by page. The per-course snapshot (wireframes 4.6) moves
+  from `/admin/attendance` into a seventh **Attendance** tab of
+  Analytics & Reports, keeping its own Course ▸ Professor ▸ date filter row
+  (the analytics rail's Program → Year → Term axis is a different slice) and
+  the server-first CSV export. `/admin/attendance` is retitled
+  **Attendance Review** and keeps only the flagged-scan decision queue
+  (wireframe 4.12). The admin nav gains a distinct "Attendance Review" entry
+  and icon; the dashboard's "Attendance at a glance" strip deep-links to
+  `/admin/analytics?tab=attendance`, while its "Open Analytics" button opens
+  the default Overview.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** Both surfaces already shared the frontend analytics
+  store/service and the `/admin/attendance/overview*` contract, so the split
+  was presentational. Reporting (cross-course rates, trends, comparison) and
+  workflow (approve/reject flagged scans) are different jobs: the first
+  belongs beside the other reporting tabs, the second needs a queue with
+  row actions. D33 already merged Reports into Analytics; the overview was
+  the last reporting table living outside it.
+- **Alternatives considered:**
+  (1) *Keep both pages separate.* Rejected: duplicates navigation and forces
+  admins to remember which attendance page holds which number.
+  (2) *Merge into one interface with sections.* Rejected: buries the
+  approve/reject workflow under reporting chrome and mixes two filter axes.
+  (3) *Taken:* reporting tab + review page — one route per purpose, shared
+  code where it already existed.
+- **Consequences:** No API, schema, or migration change (`alembic check`
+  stays green). Frontend-only: overview UI extracted to
+  `lib/features/admin/analytics/components/AttendanceSnapshot.svelte`; the
+  dead `adminScansState` / `initRecentScans` / `getRecentScans` path removed.
+  `AttendanceService.get_overview` now derives its compliance rate and
+  half-split trend from `shared.rates.attendance_rates`, removing the last
+  hand-rolled rate copy in the feature. The comparison tab's cohort-slicing
+  fix (live endpoint groups by course, not cohort) and its missing
+  `page`/`size` paging were tracked separately and left untouched here, so the
+  consolidation is behaviour-preserving; both are resolved in ADR-084 (#277).
+
+### ADR-084: One Cohort Definition for Per-Course Comparison
+
+- **Decision (D84):** Per-course comparison — admin
+  `GET /admin/analytics/course-comparison` and professor
+  `GET /professor/reports/comparison` — groups by the **(course, program, year
+  level)** cohort key, defined once in `shared/cohorts.py::cohort_key` (with
+  `group_by_cohort` for the shared grouping). The professor row carries
+  server-resolved `program_code` and `year_level_label`, and the client labels
+  and program/year-filters from the row instead of a course-id directory join
+  that cannot tell two cohorts of one course apart. Comparison paging is made
+  explicit rather than left to the default page: both comparison clients
+  request one page at the server's `MAX_PAGE_SIZE` and flag truncation when
+  `total` exceeds the rows they got.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** D6 and D34 always specified one row per program/year cohort
+  ("same subject across cohorts", "multiple bars per course"), and the mock
+  endpoints, TS types, and both UIs were built that way. Neither live
+  implementation matched: both grouped by `course_id` alone and labelled the
+  merged row with `rows[0]`, so a course taught to BSCS Y1 and BSIT Y1 became
+  a single blended row labelled with whichever offering the database returned
+  first. Mock mode therefore looked correct while live silently averaged
+  unrelated cohorts together. The same class of bug had already happened twice
+  in this codebase (`shared/rates.py`, four divergent copies), so the fix
+  extracts one key rather than patching two services.
+- **Alternatives considered:**
+  (1) *Fix each service separately.* Rejected: the two copies had already been
+  the failure mode; a third would start.
+  (2) *Key by offering id.* Rejected: comparison is defined across the
+  offerings of a cohort (terms/sections), not per offering.
+  (3) *Add `program_code`/`year_level_label` to the admin row too.* Rejected
+  as unnecessary: the admin tab already enriches from its loaded program/year
+  dropdown sources, which the professor surface lacks.
+- **Consequences:** No schema or migration change (`alembic check` stays
+  green). Admin comparison rows keep their shape but are now one per cohort;
+  professor rows gain two additive response fields. Row counts multiply with
+  the cohort count, so both comparison clients bound the request at
+  `MAX_PAGE_SIZE` and flag truncation when `total` is larger — comparison is
+  still rendered as one chart/table and is not paginated in the UI.
+  `shared/cohorts.py` joins `shared/rates.py` and `shared/schedule.py` as a
+  single-source-of-truth helper; semester and dates stay filter axes, not key
+  members.
+
+### ADR-085: The Course Filter Is Scoped to Offerings, and Every Tab Honours It
+
+- **Decision (D85):** The Analytics filter rail's Courses control lists
+  **courses with at least one offering in the picked Program/Year/Term**, not
+  the global catalogue: a new `GET /admin/analytics/course-options` derives
+  them from the same `_offerings_stmt` scope predicate every report read uses
+  (`program_id`/`year_level_id`/`semester`, optional `q` code/name search,
+  `limit` + `total` for honest truncation). `course_ids` is accepted by
+  **every** analytics read — overview, comparison, trends, at-risk, and risk
+  staging — and by `POST /admin/analytics/risk-staging/promote`, so the shared
+  rail means the same thing on every tab. Promote no longer ignores
+  program/year/course: it copies exactly the unpromoted rows the review list
+  shows. The picker reconciles on Program/Year/Term change, dropping
+  selections that fall out of scope.
+- **Date:** 2026-10-17
+- **Status:** Accepted
+- **Context:** The rail was global while the data is offering-keyed
+  (`analytics/model.py` keys risk rows to `offering_id`, and both risk reads
+  already filter program/year at the offering level). An admin could therefore
+  select a course with no offering in the chosen scope and get a blank
+  Comparison with no explanation, and — worse — the same control was silently
+  ignored by Overview, At-Risk, and Staging, whose routes never accepted
+  `course_ids`. Changing Program also kept the previous course picks. Promote's
+  dialog claimed program/year/semester scope while the POST honored semester
+  only, promoting past the set it described.
+- **Alternatives considered:**
+  (1) *Keep the catalogue and disable impossible options client-side.*
+  Rejected: the client cannot know which courses have offerings in scope
+  without the scope join only the server has.
+  (2) *Add a separate `course_id` filter to each tab.* Rejected: the rail is
+  one control; one `course_ids` parameter keeps the tabs consistent.
+  (3) *Leave Promote semester-only and fix the copy.* Rejected: promoting past
+  the reviewed scope is the bug, not the wording.
+  (4) *Taken:* one scope predicate (`_offerings_stmt`) behind both the picker
+  and the report reads, and one `course_ids` parameter on every read + promote.
+- **Consequences:** No schema or migration change (`alembic check` stays
+  green). New additive endpoint and query params; existing callers that omit
+  `course_ids` are unchanged. Promote is a behaviour change for clients that
+  passed only `semester` while displaying program/year filters — the admin UI
+  did exactly that and now sends its rail scope, covered by
+  `test_risk_staging_promote_honors_course_ids`. `course-options` deliberately
+  has no `is_active` gate, mirroring `_offerings_stmt`, so an archived offering
+  that still carries attendance history stays reachable. The picker falls back
+  to the catalogue when Program is unset (every course is then in scope) and
+  only drops selections when it has seen the full in-scope set
+  (`total <= items.length`), never a page truncated at `limit`.
+
+### ADR-086: Session Weeks Are a Term Property, Derived Not Stored
+
+- **Decision (D86):** Session weeks move off `course_offerings` and onto the
+  academic term. Each entry in `year_levels.term_structure.terms` gains an
+  optional `weeks` (JSONB shape only, no DDL): `{"code", "label", "weeks"}`.
+  Offerings **derive** their weeks from the term they are offered in —
+  `year_level.term_structure` entry matching `offering.semester` — so the value
+  is edited in one place (Program Management → Year Levels → Manage Terms) and
+  a term's length can never disagree between sibling offerings. The resolver
+  `shared/schedule.py::term_weeks` is the single definition (bounds
+  `TERM_WEEKS_MIN=1`/`TERM_WEEKS_MAX=52`, `DEFAULT_TERM_WEEKS=18` fallback);
+  the risk batch (`analytics/batch.py::_load_expected_by_offering`) and the
+  offering read DTO both resolve through it. `OfferingCreate`/`OfferingUpdate`
+  no longer accept `semester_weeks`; `OfferingRead.semester_weeks` is kept as a
+  **derived, read-only** field so existing read contracts and clients do not
+  change shape. The column `course_offerings.semester_weeks` is dropped
+  (migration `f1a2b3c4d5e6`). `semester` remains free text with no vocabulary,
+  so an unmatched or orphaned code resolves to the default rather than raising.
+- **Date:** 2026-10-18
+- **Status:** Accepted
+- **Context:** Weeks-per-term was stored per offering, so the same term could
+  carry a different length in every offering of it: two sections of one course
+  in one term could disagree, and the nightly risk batch silently scored each
+  against its own denominator. Admins had no way to see or fix the drift — the
+  value was re-typed in each offering's create/edit form (and defaulted to a
+  hard-coded `18` in three places). The academic term is already modelled per
+  program/year (D3), which is the granularity at which a term actually has a
+  length, so the fix is to store it there once and derive it everywhere else.
+- **Alternatives considered:**
+  (1) *Keep the column and add a "sync from term" action.* Rejected: the
+  stored copy stays authoritative and can drift again the moment one offering
+  is touched; deriving removes the second source of truth.
+  (2) *A program-level or global weeks setting.* Rejected: terms legitimately
+  differ in length (a 6-week midyear, a 12-week summer), and the per-year term
+  structure is already where a term is defined.
+  (3) *Move `semester_weeks` to the term but keep it required and reject
+  offerings whose `semester` does not match a term entry.* Rejected for now:
+  `semester` is free text across the codebase and an orphan-code 422 would
+  break existing data and flows (`invalid_semester` stays unreachable).
+  (4) *Taken:* optional per-term `weeks`, one resolver, derived read field, and
+  a forward migration that backfills before dropping the column.
+- **Consequences:** No model↔migration drift beyond the dropped column
+  (`alembic check` stays green). The migration backfills each
+  `(year_level, semester)` term with the **modal** `semester_weeks` among that
+  term's existing offerings before dropping the column, so pre-existing absence
+  rates keep their denominator; the tie-break (higher count, then value) is
+  deterministic. A term with no matching entry falls back to
+  `DEFAULT_TERM_WEEKS` (18), matching the old UI default. Downgrade re-adds the
+  column NOT NULL with a temporary default and is **lossy** — per-offering
+  overrides are not restored. Three frontend surfaces lose their weeks input
+  and show the term's value read-only; Manage Terms warns (non-blocking) when
+  the same term code has different weeks across sibling year levels and offers
+  an "apply to all year levels" on save. Covered by
+  `test_shared_term_weeks.py`, the program term round-trip/bounds tests, and the
+  risk-batch expectation left at 16 × 2 = 32.
+
+
