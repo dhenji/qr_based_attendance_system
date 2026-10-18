@@ -326,7 +326,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {

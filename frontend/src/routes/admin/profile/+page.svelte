@@ -190,7 +190,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {
@@ -253,7 +252,6 @@
 		padding: 0.5rem 1rem;
 		font-size: 0.875rem;
 		font-weight: 600;
-		font-family: system-ui, sans-serif;
 		cursor: pointer;
 	}
 

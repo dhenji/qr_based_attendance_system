@@ -495,7 +495,6 @@ let selectedOfferingId = $state<number | null>(null);
 		display: flex;
 		flex-direction: column;
 		gap: 2rem;
-		font-family: system-ui, sans-serif;
 		/* The layout's content column is 1100px, so a fixed-width form has to
 		   center itself or it hugs the left edge on wide screens. */
 		max-width: 700px;

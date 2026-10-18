@@ -284,7 +284,6 @@
 <style>
 	.shell {
 		min-height: 100vh;
-		font-family: system-ui, sans-serif;
 		background: var(--bg-page);
 		overflow-x: hidden;
 	}
@@ -492,7 +491,6 @@
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		text-align: center;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {
@@ -520,7 +518,6 @@
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-weight: 600;
-		font-family: system-ui, sans-serif;
 		cursor: pointer;
 		transition: background 0.15s ease, color 0.15s ease;
 	}

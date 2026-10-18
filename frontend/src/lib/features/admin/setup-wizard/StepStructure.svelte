@@ -368,7 +368,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		border-radius: 8px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
-		font-family: system-ui, sans-serif;
 	}
 
 	.step-title {

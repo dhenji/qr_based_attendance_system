@@ -99,7 +99,6 @@
 		border-radius: 12px;
 		padding: 0.75rem 1rem;
 		box-shadow: var(--shadow-lg);
-		font-family: system-ui, sans-serif;
 	}
 
 	.install-icon {
