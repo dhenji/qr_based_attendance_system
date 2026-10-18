@@ -40,7 +40,7 @@ const hashText = (value: string): number => {
 };
 
 const unitFromHash = (hash: number, salt: number): number =>
-	((hash + Math.imul(salt, 2654435761)) >>> 0 % 1000) / 1000;
+	(((hash + Math.imul(salt, 2654435761)) >>> 0) % 1000) / 1000;
 
 const toLocalDateKey = (date: Date): string =>
 	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
