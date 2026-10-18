@@ -20,6 +20,7 @@
 	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { goto } from '$app/navigation';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import { adminCourse } from '$lib/shared/constants/routes';
 
 	// Per-course attendance snapshot (wireframe 4.6), rendered as the
@@ -44,6 +45,14 @@
 	let professorOptions = $state<AdminProfessor[]>([]);
 	let filterNotice = $state<string | null>(null);
 	let exportNote = $state<string | null>(null);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 
 	const visibleItems = $derived.by(() => {
 		const items = [...adminAttendanceState.items];
@@ -189,7 +198,7 @@
 		</div>
 		<div class="header-actions">
 			<button class="btn btn-secondary" onclick={() => window.print()}>Print</button>
-			<button class="btn btn-primary" data-testid="export-overview" onclick={onExport}>
+			<button class="btn btn-primary" data-testid="export-overview" onclick={() => (pendingExport = { run: onExport, details: [{ label: 'Dataset', value: 'Attendance overview' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminAttendanceState.items.length) }] })}>
 				Export Overview
 			</button>
 		</div>
@@ -273,8 +282,18 @@
 			</tbody>
 		</table>
 	</section>
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
+	{/if}
 {/if}
-
 <style>
 	.card {
 		background: var(--bg-card);
