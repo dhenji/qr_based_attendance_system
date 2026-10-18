@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		closeSession,
 		getActiveSession
@@ -70,6 +71,14 @@
 	let currentPage = $state(1);
 	let tableScroller = $state<HTMLDivElement | undefined>(undefined);
 	let exporting = $state(false);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 
 	// Server-first export (POST /professor/reports/export) scoped to the
 	// session's course was abandoned on purpose: the server leg always
@@ -681,11 +690,11 @@
 				type="button"
 				disabled={exporting || session === null}
 				title="Download this session's attendance as CSV (server rows when reachable)"
-				onclick={() => void exportCurrent()}
+				onclick={() => (pendingExport = { run: exportCurrent, details: [{ label: 'Dataset', value: 'Session attendance' }, { label: 'Format', value: 'CSV' }] })}
 			>
 				{exporting ? 'Exporting…' : 'Export Current'}
 			</button>
-			<button class="btn btn-secondary" type="button" onclick={() => window.print()}>
+			<button class="btn btn-secondary" type="button" onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>
 				Print
 			</button>
 			<button class="btn btn-secondary" type="button" onclick={() => goto(Routes.PROFESSOR_SESSIONS_HISTORY)}>
@@ -769,6 +778,17 @@
 				</div>
 			</div>
 		{/if}
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 
