@@ -54,17 +54,30 @@ export const markStudentSeen = (): void => {
 // getStudentUpdateCount
 // Reviewed (approved/rejected) rows with reviewed_at newer than last-seen.
 // First run seeds last-seen to now and reports 0, so history never badges.
+//
+// The backend orders the list by id desc, NOT reviewed_at, so a decision on
+// an older request can sit pages deep while newer requests fill page 1 —
+// counting page 1 alone misses those. Instead, page through the whole list
+// up to a safety cap (5 pages × 50 rows), only fetched once `seen` exists so
+// the common case stays a single request.
 export const getStudentUpdateCount = async (): Promise<number> => {
 	if (!browser || isMockMode()) return 0;
 	try {
-		const { items } = await listStudentExcuses({ page: 1, size: 20 });
-		let seen = readSeen();
+		const seen = readSeen();
 		if (!seen) {
 			markStudentSeen();
 			return 0;
 		}
+		const PAGE_SIZE = 50;
+		const MAX_PAGES = 5;
+		const first = await listStudentExcuses({ page: 1, size: PAGE_SIZE });
+		const pageCount = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE) || 1);
+		const rows = [...first.items];
+		for (let page = 2; page <= pageCount; page += 1) {
+			rows.push(...(await listStudentExcuses({ page, size: PAGE_SIZE })).items);
+		}
 		let count = 0;
-		for (const row of items) {
+		for (const row of rows) {
 			if (row.status === 'pending') continue;
 			if (row.reviewedAt && row.reviewedAt > seen) count += 1;
 		}
