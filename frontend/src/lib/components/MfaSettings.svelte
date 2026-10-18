@@ -504,7 +504,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {
@@ -559,7 +558,7 @@
 		background: var(--bg-muted);
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-family: var(--font-data);
 		font-size: 0.875rem;
 		word-break: break-all;
 		user-select: all;
@@ -577,7 +576,7 @@
 	}
 
 	.mono {
-		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-family: var(--font-data);
 	}
 
 	.copy {
@@ -604,7 +603,7 @@
 		background: var(--bg-muted);
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-family: var(--font-data);
 		font-size: 0.875rem;
 		/* Two columns so ten codes stay readable without scrolling. */
 		columns: 2;

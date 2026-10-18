@@ -1566,7 +1566,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -2056,7 +2055,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

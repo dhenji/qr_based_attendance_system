@@ -78,7 +78,6 @@
 		flex-direction: column;
 		gap: 1.25rem;
 		max-width: 1100px;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {

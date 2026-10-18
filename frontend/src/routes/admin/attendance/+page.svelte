@@ -172,7 +172,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {

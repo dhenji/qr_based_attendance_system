@@ -357,7 +357,6 @@
 		align-items: center;
 		justify-content: center;
 		padding: 2rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.wrapper {
@@ -390,7 +389,6 @@
 	}
 
 	.brand-name {
-		font-family: system-ui, sans-serif;
 		font-size: 1.375rem;
 		font-weight: 700;
 		color: var(--brand);
@@ -452,7 +450,6 @@
 	}
 
 	h2 {
-		font-family: system-ui, sans-serif;
 		font-size: 1.375rem;
 		font-weight: 700;
 		color: var(--brand);

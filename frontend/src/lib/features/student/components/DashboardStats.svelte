@@ -41,13 +41,17 @@
 	}
 
 	.rate-value {
-		font-family: system-ui, sans-serif;
-		font-size: 3.5rem;
-		font-weight: 700;
+		font-family: var(--font-data);
+		font-variant-numeric: tabular-nums;
+		font-size: 3.75rem;
+		font-weight: 500;
+		letter-spacing: -0.01em;
 		line-height: 1;
 	}
 
+	/* "No data" is a sentence, not a number — it keeps the UI face. */
 	.rate-value.placeholder {
+		font-family: var(--font-ui);
 		font-size: 2.5rem;
 		color: color-mix(in srgb, var(--on-brand) 90%, transparent);
 	}

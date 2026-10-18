@@ -31,7 +31,6 @@
 		min-height: 100vh;
 		justify-content: center;
 		padding: 2rem 1.5rem;
-		font-family: system-ui, sans-serif;
 		text-align: center;
 		color: var(--text, #0f172a);
 		background: var(--bg-page, #f8fafc);

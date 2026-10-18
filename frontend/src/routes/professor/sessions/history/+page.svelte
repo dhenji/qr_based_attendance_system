@@ -582,7 +582,6 @@
 		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {

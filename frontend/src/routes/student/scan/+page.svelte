@@ -25,7 +25,7 @@
 	import { initStudent, studentState } from '$lib/features/student/store.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
 	import { Routes } from '$lib/shared/constants/routes';
-	import { formatTime } from '$lib/shared/utils/format';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
 	type Step = 'entry' | 'id' | 'qr' | 'liveness';
@@ -816,33 +816,57 @@
 	{#if showSuccess}
 		<div class="overlay">
 			<div
-				class="result"
+				class="result ticket"
 				role="alertdialog"
 				aria-modal="true"
 				aria-labelledby="scan-success-title"
 				tabindex="-1"
 				use:trapFocus
 			>
-				<h3 id="scan-success-title" class="result-title">Attendance {resultStatus === 'late' ? 'Recorded Late' : 'Recorded!'}</h3>
-				<p class="result-line">{studentName}</p>
-				<p class="result-line">
-					{session?.courseCode ?? 'Session'} — {session?.courseName ?? ''}
-				</p>
-				{#if scannedAt}
-					<p class="result-line">{formatTime(scannedAt)}</p>
-				{/if}
-				<p class="verified">Liveness evidence accepted</p>
-				<p class="result-line">Face match provisional — liveness verified</p>
-				{#if countdown > 0}
-					<p class="auto-dismiss">Auto-dismissing in {countdown}s...</p>
-				{:else}
-					<p class="auto-dismiss">Auto-dismiss paused — receipt stays open.</p>
-				{/if}
-				<div class="result-actions">
-					<button class="btn-primary try-again" onclick={dismissSuccess}>Done</button>
-					{#if countdown > 0}
-						<button class="btn-secondary try-again" onclick={stayOnSuccess}>Stay</button>
-					{/if}
+				<div class="ticket-main">
+					<p class="ticket-eyebrow">Attendly · Check-in record</p>
+					<span class="stamp" class:stamp-late={resultStatus === 'late'}>
+						{resultStatus === 'late' ? 'Late' : 'Present'}
+					</span>
+					<h3 id="scan-success-title" class="result-title">
+						Attendance {resultStatus === 'late' ? 'Recorded Late' : 'Recorded!'}
+					</h3>
+					<div class="ticket-lines">
+						<p class="ticket-line">
+							<span class="ticket-label">Student</span>
+							<span class="ticket-value">{studentName}</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Course</span>
+							<span class="ticket-value">
+								<span class="mono-data">{session?.courseCode ?? 'Session'}</span>
+								{session?.courseName ?? ''}
+							</span>
+						</p>
+						{#if scannedAt}
+							<p class="ticket-line">
+								<span class="ticket-label">Recorded</span>
+								<span class="ticket-value mono-data">{formatLocalDateTime(scannedAt)}</span>
+							</p>
+						{/if}
+					</div>
+					<p class="verified">Liveness evidence accepted</p>
+					<p class="verify-note">Face match provisional — liveness verified</p>
+				</div>
+				<div class="ticket-foot">
+					<p class="auto-dismiss">
+						{#if countdown > 0}
+							Auto-dismissing in <span class="mono-data">{countdown}s</span>…
+						{:else}
+							Auto-dismiss paused — receipt stays open.
+						{/if}
+					</p>
+					<div class="result-actions">
+						<button class="btn-primary try-again" onclick={dismissSuccess}>Done</button>
+						{#if countdown > 0}
+							<button class="btn-secondary try-again" onclick={stayOnSuccess}>Stay</button>
+						{/if}
+					</div>
 				</div>
 			</div>
 		</div>
@@ -862,7 +886,8 @@
 				<h3 id="scan-queued-title" class="result-title">Evidence saved</h3>
 				<p class="result-line">{studentName}</p>
 				<p class="result-line">
-					{session?.courseCode ?? queuedCode} — {session?.courseName ?? ''}
+					<span class="mono-data">{session?.courseCode ?? queuedCode}</span>
+					{session?.courseName ? ` — ${session.courseName}` : ''}
 				</p>
 				<p class="reject-desc">
 					You are offline. The scan will verify automatically after sync.
@@ -921,7 +946,6 @@
 	.scan {
 		display: flex;
 		flex-direction: column;
-		font-family: system-ui, sans-serif;
 	}
 
 	.offline-banner {
@@ -1308,47 +1332,70 @@
 		text-decoration: underline;
 	}
 
+	/* Receipt card shared by the success/queued/failure overlays. Previously
+	 * this was unstyled text (inheriting white --on-brand) floating over the
+	 * dimmed page; each overlay now gets a real card surface. */
 	.result {
 		text-align: center;
-		color: var(--on-brand);
+		color: var(--text);
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		box-shadow: var(--shadow-lg);
 		max-width: 380px;
 		width: 100%;
+		overflow: hidden;
+		padding: 1.5rem;
+	}
+
+	/* The ticket rebuilds its own ruled sections, so the card's generic
+	 * padding drops to zero — header, body, and foot span edge to edge. */
+	.result.ticket {
+		padding: 0;
 	}
 
 	.result-title {
-		font-family: 'DM Sans', system-ui, sans-serif;
-		font-size: 1.75rem;
+		font-size: 1.125rem;
 		font-weight: 700;
-		margin: 0 0 0.5rem;
+		color: var(--text);
+		margin: 0 0 0.75rem;
 	}
 
 	.result-line {
-		color: rgba(255, 255, 255, 0.8);
+		color: var(--text-secondary);
 		margin: 0 0 0.25rem;
 	}
 
 	.verified {
 		color: var(--success);
 		font-weight: 600;
+		font-size: 0.875rem;
+		margin: 1rem 0 0;
+	}
+
+	.verify-note {
+		color: var(--text-muted);
+		font-size: 0.8125rem;
+		margin: 0.25rem 0 0;
 	}
 
 	.auto-dismiss {
-		color: rgba(255, 255, 255, 0.5);
-		font-size: 0.875rem;
-		margin-top: 1rem;
+		color: var(--text-muted);
+		font-size: 0.8125rem;
+		margin: 0;
 	}
 
 	.reject-reason {
-		background: #7f1d1d;
+		background: var(--danger-bg);
 		border-radius: 8px;
 		padding: 0.75rem 1rem;
 		margin-bottom: 1rem;
 		font-size: 0.875rem;
-		color: var(--on-brand);
+		color: var(--danger);
 	}
 
 	.reject-desc {
-		color: rgba(255, 255, 255, 0.6);
+		color: var(--text-secondary);
 		font-size: 0.875rem;
 		margin-bottom: 1.5rem;
 	}
@@ -1371,8 +1418,104 @@
 		margin: 0;
 	}
 
+	/* --- Check-in receipt (success overlay only) -------------------------- */
+	/* The one showpiece: brand header, a status stamp, mono machine facts,
+	 * then a dashed tear into the action strip. Same data the old receipt
+	 * read; only the presentation changed, a11y contract untouched. */
+	.ticket-main {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 1.5rem 1.5rem 1.25rem;
+	}
+
+	.ticket-eyebrow {
+		align-self: stretch;
+		font-family: var(--font-data);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		letter-spacing: 0.22em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.stamp {
+		font-family: var(--font-data);
+		font-size: 1.375rem;
+		font-weight: 700;
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--success);
+		border: 2.5px solid currentColor;
+		border-radius: 10px;
+		padding: 0.5rem 1.25rem 0.4375rem;
+		transform: rotate(-4deg);
+		animation: stamp-in 240ms cubic-bezier(0.34, 1.4, 0.44, 1) both;
+	}
+
+	.stamp-late {
+		color: var(--warning-text);
+	}
+
+	@keyframes stamp-in {
+		from {
+			opacity: 0;
+			transform: rotate(-4deg) scale(1.6);
+		}
+		to {
+			opacity: 1;
+			transform: rotate(-4deg) scale(1);
+		}
+	}
+
+	.ticket .result-title {
+		margin: 0 0 0.25rem;
+	}
+
+	.ticket-lines {
+		display: grid;
+		gap: 0.375rem;
+		width: 100%;
+		margin: 0;
+	}
+
+	.ticket-line {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 1rem;
+		margin: 0;
+		font-size: 0.9375rem;
+	}
+
+	.ticket-label {
+		flex: none;
+		color: var(--text-muted);
+		font-size: 0.8125rem;
+	}
+
+	.ticket-value {
+		text-align: right;
+		font-weight: 600;
+		color: var(--text);
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.ticket-foot {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.625rem;
+		padding: 0.875rem 1.5rem 1.25rem;
+		background: var(--bg-muted);
+		border-top: 2px dashed var(--border-strong);
+	}
+
 	@media (prefers-reduced-motion: reduce) {
-		.scan-line {
+		.scan-line,
+		.stamp {
 			animation: none;
 		}
 	}

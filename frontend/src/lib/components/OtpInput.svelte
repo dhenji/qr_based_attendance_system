@@ -104,7 +104,7 @@
 		height: 52px;
 		text-align: center;
 		font-size: 1.25rem;
-		font-family: monospace;
+		font-family: var(--font-data);
 		font-weight: 700;
 		color: var(--brand);
 		border: 1.5px solid var(--border-strong);
