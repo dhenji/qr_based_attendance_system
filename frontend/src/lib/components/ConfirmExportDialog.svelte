@@ -30,6 +30,9 @@
 		busyLabel?: string;
 		/** The existing export flow. Only invoked when the user confirms. */
 		onconfirm: () => void | Promise<void>;
+		/** Optional abort handler for long-running exports. When provided, Cancel
+		 *  stays enabled while busy and invokes this instead of (just) closing. */
+		onabort?: () => void;
 		/** Close the dialog (Cancel / Escape / after settle). */
 		onclose: () => void;
 	}
@@ -41,31 +44,55 @@
 		confirmLabel = 'Confirm Export',
 		busyLabel = 'Exporting…',
 		onconfirm,
+		onabort,
 		onclose,
 	}: Props = $props();
 
 	let busy = $state(false);
+	let saved = $state(false);
+	let errorMsg = $state<string | null>(null);
 
 	const confirm = async () => {
 		if (busy) return;
 		busy = true;
+		saved = false;
+		errorMsg = null;
 		try {
 			await onconfirm();
+			saved = true;
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		} catch (e) {
+			errorMsg = e instanceof Error ? e.message : 'Export failed. Please try again.';
+			await new Promise((resolve) => setTimeout(resolve, 2500));
 		} finally {
 			busy = false;
+			saved = false;
+			errorMsg = null;
 			onclose();
 		}
 	};
 
 	const cancel = () => {
-		if (busy) return;
+		if (busy && !onabort) return;
+		if (busy) onabort?.();
 		onclose();
 	};
+
+	const escapeHandler = $derived(
+		busy
+			? onabort
+				? () => {
+						onabort?.();
+						onclose();
+					}
+				: undefined
+			: onclose
+	);
 </script>
 
 <Modal
 	{title}
-	onclose={busy ? undefined : onclose}
+	onclose={escapeHandler}
 	closeOnBackdrop={false}
 >
 	<p class="confirm-message">{message}</p>
@@ -81,7 +108,11 @@
 		</dl>
 	{/if}
 
-	{#if busy}
+	{#if errorMsg}
+		<p class="confirm-error" role="alert">{errorMsg}</p>
+	{:else if saved}
+		<p class="confirm-saved" role="status" aria-live="polite">Saved successfully.</p>
+	{:else if busy}
 		<p class="confirm-busy" role="status" aria-live="polite">{busyLabel}</p>
 	{/if}
 
@@ -90,7 +121,7 @@
 			class="btn btn-ghost"
 			type="button"
 			data-testid="cancel-export"
-			disabled={busy}
+			disabled={busy && !onabort}
 			onclick={cancel}
 		>
 			Cancel
@@ -103,7 +134,7 @@
 			aria-busy={busy}
 			onclick={() => void confirm()}
 		>
-			{busy ? busyLabel : confirmLabel}
+			{saved ? 'Saved' : busy ? busyLabel : confirmLabel}
 		</button>
 	{/snippet}
 </Modal>
@@ -146,6 +177,20 @@
 		margin: 0;
 		font-size: 0.8125rem;
 		color: var(--text-muted);
+	}
+
+	.confirm-saved {
+		margin: 0;
+		font-size: 0.875rem;
+		color: var(--success, #16a34a);
+		font-weight: 600;
+	}
+
+	.confirm-error {
+		margin: 0;
+		font-size: 0.875rem;
+		color: var(--danger, #dc2626);
+		font-weight: 600;
 	}
 
 	.btn {

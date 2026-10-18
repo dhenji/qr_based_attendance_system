@@ -58,6 +58,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		message?: string;
 		confirmLabel?: string;
 		busyLabel?: string;
+		onabort?: () => void;
 	}>(null);
 
 	// Course options deduped by code; sections join from the live courses
@@ -288,7 +289,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			if (exportToken === token)
 				exportError = friendlyActionError(e, 'Export failed. Please try again.');
 		} finally {
-			if (exportToken === token) {
+			if (exportToken === token || exportToken === token + 1) {
 				exporting = false;
 				exportProgress = null;
 			}
@@ -559,7 +560,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 						class="btn btn-secondary"
 						type="button"
 						disabled={exporting || total === 0}
-						onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }] })}
+						onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }], onabort: cancelExport })}
 					>
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
@@ -590,6 +591,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			busyLabel={pendingExport.busyLabel}
 			details={pendingExport.details}
 			onconfirm={pendingExport.run}
+			onabort={pendingExport.onabort}
 			onclose={() => (pendingExport = null)}
 		/>
 	{/if}
