@@ -364,7 +364,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>
 			← Back to Program Management
 		</button>
-		<p class="crumb"><a href={Routes.ADMIN_PROGRAMS}>Programs</a> / Detail</p>
 	</div>
 
 	{#if adminProgramDetailState.loading}
@@ -706,29 +705,13 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		gap: 1.5rem;
 	}
 
-	/* Back button + breadcrumb read as one header block, so the .page flex gap
-	 * (1.5rem) does not push them a full row apart. */
+	/* Back button reads as its own header block, so the .page flex gap
+	 * (1.5rem) does not push it a full row apart from the content. */
 	.page-top {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 0.75rem;
-	}
-
-	.crumb {
-		margin: 0;
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-	}
-
-	.crumb a {
-		color: var(--accent);
-		text-decoration: none;
-		font-weight: 600;
-	}
-
-	.crumb a:hover {
-		text-decoration: underline;
 	}
 
 	.header {
