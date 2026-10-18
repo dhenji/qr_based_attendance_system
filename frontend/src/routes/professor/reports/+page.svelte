@@ -371,6 +371,8 @@
 			<p class="muted">
 				{#if isLoading}
 					Loading attendance reports…
+				{:else if reportError}
+					Could not load attendance reports.
 				{:else if reportMeta.dataSource === 'live'}
 					Live attendance data from your reports.
 				{:else if isMockMode()}
@@ -379,12 +381,6 @@
 					Live reports are unavailable.
 				{/if}
 			</p>
-			{#if !isLoading && !isMockMode() && reportMeta.dataSource === 'demo'}
-				<p class="warning" role="alert">
-					Could not load live reports.
-					<button class="link-button" type="button" onclick={retry}>Try again</button>
-				</p>
-			{/if}
 			{#if reportMeta.truncated}
 				<p class="warning" role="status">
 					Showing the 500 most recent sessions in this range; narrow the dates to see older ones.
