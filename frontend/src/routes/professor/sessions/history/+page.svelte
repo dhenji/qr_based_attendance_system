@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		buildCsv,
 		defaultReportRange
@@ -50,6 +51,15 @@
 	let exportWarning = $state<string | null>(null);
 	let exportProgress = $state<string | null>(null);
 	let exportToken = $state(0);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+		onabort?: () => void;
+	}>(null);
 
 	// Course options deduped by code; sections join from the live courses
 	// store (the history rows carry no section identity of their own, and the
@@ -279,7 +289,7 @@
 			if (exportToken === token)
 				exportError = friendlyActionError(e, 'Export failed. Please try again.');
 		} finally {
-			if (exportToken === token) {
+			if (exportToken === token || exportToken === token + 1) {
 				exporting = false;
 				exportProgress = null;
 			}
@@ -542,7 +552,7 @@
 					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
 				</nav>
 				<div class="table-actions no-print">
-					<button class="btn btn-secondary" type="button" onclick={print}>
+					<button class="btn btn-secondary" type="button" onclick={() => (pendingExport = { run: print, title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>
 						<AppIcon name="file" size={18} />
 						Print
 					</button>
@@ -550,7 +560,7 @@
 						class="btn btn-secondary"
 						type="button"
 						disabled={exporting || total === 0}
-						onclick={() => void exportCsv()}
+						onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }], onabort: cancelExport })}
 					>
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
@@ -572,6 +582,18 @@
 				{/if}
 			</div>
 		</section>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onabort={pendingExport.onabort}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 

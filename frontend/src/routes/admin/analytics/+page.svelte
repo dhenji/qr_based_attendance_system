@@ -3,6 +3,7 @@
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import AttendanceSnapshot from '$lib/features/admin/analytics/components/AttendanceSnapshot.svelte';
 	import { page } from '$app/state';
 import {
@@ -411,6 +412,14 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	// rows straight from the backend for the rail's filter set. Mock mode and
 	// unreachable backends fall back to the client-side aggregate CSV.
 	let exportNote = $state<string | null>(null);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 	const exportComparison = async () => {
 		const filename = `analytics-comparison-${stamp()}.csv`;
 		exportNote = null;
@@ -871,16 +880,27 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			<h2 class="card-title">Export</h2>
 			<p class="muted">CSV downloads of the current filter set — one file per dataset.</p>
 			<div class="export-list">
-				<div><div><div class="strong">Overview KPIs</div><div class="muted small">Totals + average rates</div></div><button class="btn btn-secondary" onclick={exportOverview} disabled={!overview}>Download CSV</button></div>
-				<div><div><div class="strong">Course comparison</div><div class="muted small">{comparison.length} cohort rows</div></div><button class="btn btn-secondary" onclick={exportComparison}>Download CSV</button></div>
-				<div><div><div class="strong">Trends</div><div class="muted small">{adminAnalyticsState.trends.length} periods</div></div><button class="btn btn-secondary" onclick={exportTrends}>Download CSV</button></div>
-				<div><div><div class="strong">At-risk students</div><div class="muted small">{adminAnalyticsState.atRisk.length} rows</div></div><button class="btn btn-secondary" onclick={exportAtRisk}>Download CSV</button></div>
-				<div><div><div class="strong">Staging review</div><div class="muted small">{adminStagingState.items.length} rows</div></div><button class="btn btn-secondary" onclick={exportStaging}>Download CSV</button></div>
+				<div><div><div class="strong">Overview KPIs</div><div class="muted small">Totals + average rates</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportOverview, details: [{ label: 'Dataset', value: 'Overview KPIs' }, { label: 'Format', value: 'CSV' }] })} disabled={!overview}>Download CSV</button></div>
+				<div><div><div class="strong">Course comparison</div><div class="muted small">{comparison.length} cohort rows</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportComparison, details: [{ label: 'Dataset', value: 'Course comparison' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(comparison.length) }] })}>Download CSV</button></div>
+				<div><div><div class="strong">Trends</div><div class="muted small">{adminAnalyticsState.trends.length} periods</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportTrends, details: [{ label: 'Dataset', value: 'Trends' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminAnalyticsState.trends.length) }] })}>Download CSV</button></div>
+				<div><div><div class="strong">At-risk students</div><div class="muted small">{adminAnalyticsState.atRisk.length} rows</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportAtRisk, details: [{ label: 'Dataset', value: 'At-risk students' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminAnalyticsState.atRisk.length) }] })}>Download CSV</button></div>
+				<div><div><div class="strong">Staging review</div><div class="muted small">{adminStagingState.items.length} rows</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportStaging, details: [{ label: 'Dataset', value: 'Staging review' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminStagingState.items.length) }] })}>Download CSV</button></div>
 			</div>
 			{#if exportNote}
 				<p class="muted" role="status">{exportNote}</p>
 			{/if}
 		</section>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 
