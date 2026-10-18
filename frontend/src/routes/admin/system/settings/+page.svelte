@@ -270,8 +270,8 @@
 			<p class="muted">Full database backup · AES-256-GCM · Retention: {settings?.backup_retention_daily ?? 30}D daily + {settings?.backup_retention_monthly ?? 12} monthly</p>
 			{#if latestBackup}
 				<p class="backup-status" role="status">
-					Status: {latestBackup.status === 'completed' ? '✅' : latestBackup.status === 'started' ? '⏳' : '❌'}
-					{backupStatusText(latestBackup)} · {formatBytes(latestBackup.size_bytes)} · {latestBackup.storage_backend}
+					Status: {backupStatusText(latestBackup)}
+					· {formatBytes(latestBackup.size_bytes)} · {latestBackup.storage_backend}
 				</p>
 			{:else}
 				<p class="muted">No backups recorded yet.</p>
@@ -288,7 +288,7 @@
 								title={row.status === 'completed' ? 'Download the encrypted backup archive' : 'Only completed backups can be downloaded'}
 								onclick={() => void downloadBackup(row)}
 							>
-								{downloadBusy ? '⏳ Preparing…' : '📥 Download'}
+								{downloadBusy ? 'Preparing…' : 'Download'}
 							</button>
 						</li>
 					{/each}
@@ -302,7 +302,7 @@
 			{/if}
 			<div class="actions">
 				<button class="btn btn-secondary" type="button" disabled={backupBusy} onclick={() => void backupNow()}>
-					{backupBusy ? 'Starting…' : '💾 Backup Now'}
+					{backupBusy ? 'Starting…' : 'Backup Now'}
 				</button>
 				<button
 					class="btn btn-secondary"
@@ -311,7 +311,7 @@
 					title={latestCompleted ? 'Download the encrypted backup archive' : 'No completed backup yet'}
 					onclick={() => latestCompleted && void downloadBackup(latestCompleted)}
 				>
-					{downloadBusy ? '⏳ Preparing…' : '📥 Download'}
+					{downloadBusy ? 'Preparing…' : 'Download'}
 				</button>
 			</div>
 			<p class="muted">Backup archives are encrypted with the server key — there is no key-management UI; key rotation happens deployment-side.</p>

@@ -54,7 +54,7 @@
 				<span class="field">Claim Status</span>
 				<span>
 					<span class="badge" class:ok={professor.claimStatus === 'Claimed'}>
-						{professor.claimStatus === 'Claimed' ? '✅ Claimed' : 'Unclaimed'}
+						{professor.claimStatus === 'Claimed' ? 'Claimed' : 'Unclaimed'}
 					</span>
 				</span>
 			</div>
