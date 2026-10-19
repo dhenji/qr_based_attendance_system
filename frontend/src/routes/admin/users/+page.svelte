@@ -236,7 +236,7 @@
 		<section class="card"><p class="error">Could not load users: {adminUsersState.error}</p></section>
 	{:else if adminUsersState.items.length === 0}
 		<section class="card">
-			<p class="empty">No users match these filters.</p>
+			<p class="empty">No users match these filters. Create the first account with the + button.</p>
 		</section>
 	{:else}
 		<section class="card table-wrap">

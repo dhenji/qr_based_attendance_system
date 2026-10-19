@@ -29,7 +29,7 @@
 		{
 			label: 'Student portal',
 			desc: 'Scan, view your schedule, and track your attendance rate.',
-			path: '/student/dashboard',
+			path: Routes.DASHBOARD,
 			cta: 'Open dashboard',
 		},
 		{

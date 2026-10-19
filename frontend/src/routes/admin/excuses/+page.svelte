@@ -74,7 +74,7 @@
 			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Retry</button>
 		</section>
 	{:else if items.length === 0}
-		<section class="card"><p class="empty">No {status} excuse requests.</p></section>
+		<section class="card"><p class="empty">No {status} excuse requests. New ones appear here as students and professors submit them.</p></section>
 	{:else}
 		<section class="card table-wrap">
 			<table>

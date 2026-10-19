@@ -22,6 +22,7 @@
 	} from '$lib/features/notifications/poll';
 	import { listStudentExcuses } from '$lib/features/student/service';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { NAV_ICONS, type NavItem } from '$lib/shared/constants/navIcons';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	let { children } = $props();
@@ -139,26 +140,14 @@
 		await goto(Routes.HISTORY);
 	};
 
-	const navItems = [
+	const navItems: NavItem[] = [
 		{ label: 'Dashboard', path: Routes.DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Scan', path: Routes.SCAN, enabled: true, icon: 'scan' },
 		{ label: 'History', path: Routes.HISTORY, enabled: true, icon: 'history' },
 		{ label: 'Schedule', path: Routes.SCHEDULE, enabled: true, icon: 'schedule' },
 		{ label: 'Profile', path: Routes.PROFILE, enabled: true, icon: 'profile' },
 		{ label: 'Settings', path: Routes.SETTINGS, enabled: true, icon: 'settings' },
-	] as const;
-
-	const iconPaths: Record<string, string> = {
-		dashboard:
-			'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-		scan: '<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13.5" r="3.5"/>',
-		history: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
-		schedule:
-			'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4"/><path d="M3 10h18"/>',
-		profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
-		settings:
-			'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
-	};
+	];
 
 	let collapsed = $state(true);
 	let logoutOpen = $state(false);
@@ -244,7 +233,7 @@
 					aria-current={isActive(item.path) ? 'page' : undefined}
 				>
 					<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						{@html iconPaths[item.icon]}
+						{@html NAV_ICONS[item.icon]}
 					</svg>
 					<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
 				</a>
