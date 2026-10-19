@@ -273,7 +273,9 @@ class StudentService:
         self._programs: BaseCRUD[Program] = BaseCRUD(Program, session)
         self._years: BaseCRUD[YearLevel] = BaseCRUD(YearLevel, session)
 
-    async def create(self, *, payload: StudentCreate) -> StudentRead:
+    async def create(
+        self, *, payload: StudentCreate, actor_id: int | None = None
+    ) -> StudentRead:
         if await self._students.get_by(student_id=payload.student_id) is not None:
             raise StudentIdExistsException(payload.student_id)
 
@@ -292,6 +294,19 @@ class StudentService:
             email=payload.email,
             year_level_id=year_level.id,
             section=payload.section,
+        )
+
+        # A roster row appearing is a change to the institution, so it is
+        # audited like any other. The client used to INFER these rows from
+        # `created_at` because nothing recorded them; an inferred row is not
+        # evidence (ADR-086).
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.STUDENT,
+            entity_id=student.id,
+            new_value=self._student_snapshot(student),
         )
 
         return await self._to_read(student)

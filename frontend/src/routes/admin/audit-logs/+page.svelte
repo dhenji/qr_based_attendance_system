@@ -6,7 +6,6 @@
 	import {
 		adminAuditState,
 		adminStructureState,
-		auditLabelContext,
 		initAdminAudit,
 		initStructureChanges,
 		type AuditSortColumn,
@@ -16,12 +15,8 @@
 		AUDIT_ENTITY_TYPES,
 		downloadCsv,
 	} from '$lib/features/admin/audit/service';
-	import {
-		AUDIT_ENTITY_LABELS,
-		auditCsv,
-		buildRowView,
-		type AuditRowView,
-	} from '$lib/features/admin/audit/present';
+	import { auditCsv } from '$lib/features/admin/audit/present';
+	import { AUDIT_ACTION_TONES, subjectHref } from '$lib/features/admin/audit/present-fields';
 	import { auditFilterSchema } from '$lib/features/admin/audit/schema';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatTime, formatUTCTimestamp } from '$lib/shared/utils/format';
@@ -29,20 +24,21 @@
 
 	// Admin Audit Logs (wireframe 4.8, `/admin/audit-logs`).
 	//
-	// Two tabs over the same audit trail:
+	// Two tabs over the same trail:
 	//
 	// - "Action Log" — every recorded action, newest first. The actor is a
-	//   name, the action is a verb, the subject is a record name, and the
-	//   change is a field-level diff. The stored values stay one click away,
-	//   because an administrator investigating a change sometimes needs the
-	//   exact snapshot.
+	//   name, the action is a verb, the subject is a record's name, and the
+	//   change is a field-level diff. The stored values stay one click
+	//   away, because an administrator investigating a change sometimes
+	//   needs the exact snapshot.
 	// - "Academic Structure" — the structural slice of the same trail
-	//   (program / year level / course / offering), on its own pager.
+	//   (program / year level / course / offering / schedule component), on
+	//   its own pager.
 	//
-	// The two row sources are kept apart. The trail is what the server
-	// recorded; the roster rows are an inference from a record's creation
-	// date, which is useful but is not evidence, so they are shown in their
-	// own block under their own heading.
+	// The trail is READ on the server: the endpoint returns the stored row
+	// and its derived reading together, so the words here are the server's
+	// and the client only renders them. Filtering, paging and sorting are
+	// all server-side too, so a page is a page of the whole trail.
 
 	type Tab = 'log' | 'structure';
 	const TABS = [
@@ -55,7 +51,7 @@
 	let dateTo = $state('');
 	let entityType = $state('');
 	let action = $state('');
-	let actorId = $state('');
+	let actor = $state('');
 	let formError = $state<string | null>(null);
 	/** The row whose stored values are shown. */
 	let expanded = $state<number | null>(null);
@@ -71,71 +67,15 @@
 
 	// --- Rows ---------------------------------------------------------------
 
-	// The name lookups live in a plain resolver, so `labelVersion` is the
-	// dependency that tells a derived to recompute once they land.
-	const views = $derived.by(() => {
-		adminAuditState.labelVersion;
-		const ctx = auditLabelContext();
-		return adminAuditState.all.map((row) => buildRowView(row, ctx));
-	});
-
-	const trailViews = $derived(views.filter((v) => v.origin === 'trail'));
-	const rosterViews = $derived(views.filter((v) => v.origin === 'roster'));
-
-	// Sorting runs across everything loaded, then the page is sliced — so
-	// the ordering is not confined to one page of results.
-	const sortedTrail = $derived.by(() => {
-		const items = [...trailViews];
-		const dir = adminAuditState.sortDir === 'asc' ? 1 : -1;
-		const key =
-			adminAuditState.sortBy === 'time'
-				? (v: AuditRowView) => v.occurredAt
-				: adminAuditState.sortBy === 'user'
-					? (v: AuditRowView) => v.actor.name.toLowerCase()
-					: (v: AuditRowView) => v.action.label.toLowerCase();
-		items.sort((a, b) => key(a).localeCompare(key(b)) * dir);
-		return items;
-	});
-
-	const sortedRoster = $derived.by(() => {
-		const items = [...rosterViews];
-		items.sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1));
-		return items;
-	});
+	const trailRows = $derived(adminAuditState.items);
+	const structureRows = $derived(adminStructureState.items);
 
 	const totalPages = $derived(
-		Math.max(1, Math.ceil(sortedTrail.length / adminAuditState.size))
+		Math.max(1, Math.ceil(adminAuditState.total / adminAuditState.size))
 	);
-
-	const pagedTrail = $derived(
-		sortedTrail.slice(
-			(adminAuditState.page - 1) * adminAuditState.size,
-			adminAuditState.page * adminAuditState.size
-		)
-	);
-
-	// --- Structure rows -----------------------------------------------------
-
-	const structureViews = $derived.by(() => {
-		adminAuditState.labelVersion;
-		const ctx = auditLabelContext();
-		return adminStructureState.items.map((row) =>
-			buildRowView({ ...row, origin: 'trail' as const }, ctx)
-		);
-	});
-
 	const structurePages = $derived(
 		Math.max(1, Math.ceil(adminStructureState.total / adminStructureState.size))
 	);
-
-	// --- Actor options ------------------------------------------------------
-
-	const actorOptions = $derived.by(() => {
-		adminAuditState.labelVersion;
-		return [...auditLabelContext().users.entries()]
-			.map(([id, user]) => ({ id, ...user }))
-			.sort((a, b) => a.name.localeCompare(b.name));
-	});
 
 	// --- Day grouping -------------------------------------------------------
 
@@ -157,12 +97,12 @@
 	};
 
 	const grouped = $derived.by(() => {
-		const groups: { heading: string; rows: AuditRowView[] }[] = [];
-		for (const view of pagedTrail) {
-			const heading = dayHeading(view.occurredAt);
+		const groups: { heading: string; rows: typeof trailRows }[] = [];
+		for (const row of trailRows) {
+			const heading = dayHeading(row.performed_at);
 			const last = groups[groups.length - 1];
-			if (last && last.heading === heading) last.rows.push(view);
-			else groups.push({ heading, rows: [view] });
+			if (last && last.heading === heading) last.rows.push(row);
+			else groups.push({ heading, rows: [row] });
 		}
 		return groups;
 	});
@@ -171,17 +111,15 @@
 
 	const load = async (page = 1) => {
 		expanded = null;
-		// The backend types `performed_by` as an int, so only a real id is
-		// ever sent. A half-typed value is dropped rather than turned into a
-		// request the server would reject.
-		const actor = Number(actorId);
 		await initAdminAudit(
 			{
 				date_from: dateFrom.trim() || undefined,
 				date_to: dateTo.trim() || undefined,
 				entity_type: (entityType || undefined) as AuditEntityType | undefined,
 				action: (action || undefined) as AuditAction | undefined,
-				performed_by: actorId && Number.isFinite(actor) && actor > 0 ? actor : undefined,
+				actor: actor.trim() || undefined,
+				sort_by: adminAuditState.sortBy,
+				sort_dir: adminAuditState.sortDir,
 			},
 			page
 		);
@@ -199,7 +137,7 @@
 			date_to: dateTo,
 			entity_type: entityType,
 			action,
-			performed_by: actorId,
+			actor,
 		});
 		if (!parsed.success) {
 			formError = parsed.error.issues[0]?.message ?? 'Check the filters and try again.';
@@ -213,18 +151,19 @@
 		dateTo = '';
 		entityType = '';
 		action = '';
-		actorId = '';
+		actor = '';
 		formError = null;
 		await load(1);
 	};
 
-	const toggleSort = (column: AuditSortColumn) => {
+	const toggleSort = async (column: AuditSortColumn) => {
 		if (adminAuditState.sortBy === column) {
 			adminAuditState.sortDir = adminAuditState.sortDir === 'asc' ? 'desc' : 'asc';
 		} else {
 			adminAuditState.sortBy = column;
 			adminAuditState.sortDir = column === 'time' ? 'desc' : 'asc';
 		}
+		await load(adminAuditState.page);
 	};
 
 	const sortArrow = (column: AuditSortColumn) =>
@@ -256,7 +195,7 @@
 	const onExport = () =>
 		downloadCsv(
 			`audit-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-			auditCsv(sortedTrail)
+			auditCsv(trailRows)
 		);
 </script>
 
@@ -270,7 +209,7 @@
 		</div>
 		<div class="header-actions">
 			<button class="btn btn-secondary" onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>Print</button>
-			<button class="btn btn-primary" data-testid="export-logs" onclick={() => (pendingExport = { run: onExport, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(sortedTrail.length) }] })}>Export Logs</button>
+			<button class="btn btn-primary" data-testid="export-logs" onclick={() => (pendingExport = { run: onExport, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(trailRows.length) }] })}>Export Logs</button>
 		</div>
 	</header>
 
@@ -308,28 +247,18 @@
 					{/each}
 				</select>
 			</label>
-			{#if adminAuditState.actorNamesAvailable}
-				<label class="field">
-					<span>Actor</span>
-					<select class="input" bind:value={actorId}>
-						<option value="">All actors</option>
-						{#each actorOptions as u (u.email)}
-							<option value={String(u.id)}>{u.name} — {u.role}</option>
-						{/each}
-					</select>
-				</label>
-			{:else}
-				<label class="field">
-					<span>Actor id</span>
-					<input
-						class="input"
-						type="number"
-						min="1"
-						placeholder="User id"
-						bind:value={actorId}
-					/>
-				</label>
-			{/if}
+			<label class="field grow">
+				<span>Actor</span>
+				<input
+					class="input"
+					type="search"
+					placeholder="Name, email or user id…"
+					bind:value={actor}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') applyFilters();
+					}}
+				/>
+			</label>
 			<div class="filter-actions">
 				<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 				<button class="btn btn-secondary" onclick={clearFilters}>Clear</button>
@@ -339,24 +268,11 @@
 			{/if}
 		</section>
 
-		{#if !adminAuditState.actorNamesAvailable}
-			<p class="note">
-				Actor names are only visible to super-admins, so account changes are shown
-				by user id.
-			</p>
-		{/if}
-		{#if adminAuditState.labelsPartial}
-			<p class="note">
-				There are more records than one page can load, so some names are missing
-				and fall back to their id. Narrow the date range to see the rest.
-			</p>
-		{/if}
-
-		{#if adminAuditState.loading && adminAuditState.all.length === 0}
+		{#if adminAuditState.loading && adminAuditState.items.length === 0}
 			<section class="card"><p class="muted">Loading…</p></section>
 		{:else if adminAuditState.error}
 			<section class="card"><p class="error">Could not load audit logs: {adminAuditState.error}</p></section>
-		{:else if sortedTrail.length === 0 && sortedRoster.length === 0}
+		{:else if trailRows.length === 0}
 			<section class="card">
 				<p class="empty">No changes match these filters.</p>
 			</section>
@@ -370,9 +286,9 @@
 									When<span aria-hidden="true">{sortArrow('time')}</span>
 								</button>
 							</th>
-							<th scope="col" aria-sort={ariaSort('user')}>
-								<button class="th-btn" type="button" onclick={() => toggleSort('user')} aria-label={sortLabel('user', 'Actor')}>
-									Actor<span aria-hidden="true">{sortArrow('user')}</span>
+							<th scope="col" aria-sort={ariaSort('actor')}>
+								<button class="th-btn" type="button" onclick={() => toggleSort('actor')} aria-label={sortLabel('actor', 'Actor')}>
+									Actor<span aria-hidden="true">{sortArrow('actor')}</span>
 								</button>
 							</th>
 							<th scope="col" aria-sort={ariaSort('action')}>
@@ -390,44 +306,46 @@
 							<tr class="day-head">
 								<td colspan="6">{group.heading}</td>
 							</tr>
-							{#each group.rows as view (view.id)}
+							{#each group.rows as row (row.id)}
+								{@const href = subjectHref(row.subject.type, row.subject.id)}
 								<tr>
 									<td class="nowrap">
-										<div class="mono-data when-time">{formatTime(view.occurredAt)}</div>
-										<div class="muted small" title={formatUTCTimestamp(view.occurredAt)}>
-											{dayHeading(view.occurredAt)}
+										<div class="mono-data when-time">{formatTime(row.performed_at)}</div>
+										<div class="muted small" title={formatUTCTimestamp(row.performed_at)}>
+											{dayHeading(row.performed_at)}
 										</div>
 									</td>
 									<td>
-										<div class="strong">{view.actor.name}</div>
-										{#if view.actor.role}
-											<div class="muted small">{view.actor.role.replace(/_/g, ' ')}</div>
+										<div class="strong">{row.actor.name}</div>
+										{#if row.actor.role}
+											<div class="muted small">{row.actor.role.replace(/_/g, ' ')}</div>
 										{/if}
 									</td>
 									<td>
-										<span class="chip tone-{view.action.tone}">{view.action.label}</span>
-										<div class="muted small">{view.summary}</div>
+										<span class="chip tone-{AUDIT_ACTION_TONES[row.action] ?? 'update'}">
+											{row.action_label}
+										</span>
+										<div class="muted small">{row.summary}</div>
 									</td>
 									<td>
 										<div class="strong">
-											{#if view.entity.href}
-												<a class="link" href={view.entity.href}>{view.entity.label}</a>
+											{#if href}
+												<a class="link" {href}>{row.subject.label}</a>
 											{:else}
-												{view.entity.label}
+												{row.subject.label}
 											{/if}
 										</div>
-										{#if view.entity.sublabel}
-											<div class="muted small">{view.entity.sublabel}</div>
+										{#if row.subject.sublabel}
+											<div class="muted small">{row.subject.sublabel}</div>
 										{/if}
 										<div class="muted small mono-data" title="The stored record reference">
-											{AUDIT_ENTITY_LABELS[view.entity.type]}
-											{view.entity.id === null ? '' : ` #${view.entity.id}`}
+											{row.subject.type.replace(/_/g, ' ')}{row.subject.id === null ? '' : ` #${row.subject.id}`}
 										</div>
 									</td>
 									<td>
-										{#if view.changes.length > 0}
+										{#if row.changes.length > 0}
 											<ul class="changes">
-												{#each view.changes as change (change.field)}
+												{#each row.changes as change (change.field)}
 													<li>
 														<span class="field-label">{change.label}</span>
 														{#if change.before !== '—'}
@@ -450,30 +368,29 @@
 										<button
 											class="icon-btn"
 											type="button"
-											aria-expanded={expanded === view.id}
-											aria-label={expanded === view.id ? `Hide the stored values for this change` : `Show the stored values for this change`}
-											onclick={() => toggleDetails(view.id)}
+											aria-expanded={expanded === row.id}
+											aria-label={expanded === row.id ? 'Hide the stored values for this change' : 'Show the stored values for this change'}
+											onclick={() => toggleDetails(row.id)}
 										>
 											<AppIcon name="chevron" size={18} />
 										</button>
 									</td>
 								</tr>
-								<tr class="detail-row" class:open={expanded === view.id}>
+								<tr class="detail-row" class:open={expanded === row.id}>
 									<td colspan="6">
 										<div class="detail-grid">
 											<div>
 												<h4>Before</h4>
-												<pre class="raw">{jsonBlock(view.raw.old_value)}</pre>
+												<pre class="raw">{jsonBlock(row.old_value)}</pre>
 											</div>
 											<div>
 												<h4>After</h4>
-												<pre class="raw">{jsonBlock(view.raw.new_value)}</pre>
+												<pre class="raw">{jsonBlock(row.new_value)}</pre>
 											</div>
 										</div>
 										<p class="muted small">
-											Entry #{view.id} · recorded {formatUTCTimestamp(view.occurredAt)} ·
-											{AUDIT_ENTITY_LABELS[view.entity.type]}
-											{view.entity.id === null ? '' : ` #${view.entity.id}`}
+											Entry #{row.id} · recorded {formatUTCTimestamp(row.performed_at)} ·
+											{row.subject.type.replace(/_/g, ' ')}{row.subject.id === null ? '' : ` #${row.subject.id}`}
 										</p>
 									</td>
 								</tr>
@@ -485,82 +402,22 @@
 					<button
 						class="btn btn-secondary"
 						disabled={adminAuditState.page <= 1}
-						onclick={() => (adminAuditState.page = adminAuditState.page - 1)}
+						onclick={() => load(adminAuditState.page - 1)}
 					>
 						‹ Prev
 					</button>
 					<span class="muted">
-						Page {adminAuditState.page} of {totalPages} · {sortedTrail.length} audited change{sortedTrail.length === 1 ? '' : 's'}
+						Page {adminAuditState.page} of {totalPages} · {adminAuditState.total} change{adminAuditState.total === 1 ? '' : 's'}
 					</span>
 					<button
 						class="btn btn-secondary"
 						disabled={adminAuditState.page >= totalPages}
-						onclick={() => (adminAuditState.page = adminAuditState.page + 1)}
+						onclick={() => load(adminAuditState.page + 1)}
 					>
 						Next ›
 					</button>
 				</div>
-				{#if adminAuditState.trailTotal > adminAuditState.trailLoaded}
-					<p class="muted small">
-						Showing the {adminAuditState.trailLoaded} most recent of {adminAuditState.trailTotal} matching
-						audit entries. Narrow the date range to reach older ones.
-					</p>
-				{/if}
 			</section>
-
-			{#if sortedRoster.length > 0}
-				<section class="card table-wrap">
-					<div class="row-head">
-						<div>
-							<h2 class="card-title">Recently added records</h2>
-							<p class="muted">
-								Inferred from each record's creation date — these are not audited events.
-							</p>
-						</div>
-					</div>
-					<table>
-						<thead>
-							<tr>
-								<th scope="col">When</th>
-								<th scope="col">Action</th>
-								<th scope="col">Record</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each sortedRoster as view (view.id)}
-								<tr>
-									<td class="nowrap">
-										<div class="mono-data when-time">{formatTime(view.occurredAt)}</div>
-										<div class="muted small">{dayHeading(view.occurredAt)}</div>
-									</td>
-									<td>
-										<span class="chip tone-create">{view.action.label}</span>
-										<div class="muted small">Added</div>
-									</td>
-									<td>
-										<div class="strong">
-											{#if view.entity.href}
-												<a class="link" href={view.entity.href}>{view.entity.label}</a>
-											{:else}
-												{view.entity.label}
-											{/if}
-										</div>
-										{#if view.entity.sublabel}
-											<div class="muted small">{view.entity.sublabel}</div>
-										{/if}
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-					{#if adminAuditState.rosterTruncated}
-						<p class="muted small">
-							Only the most recent {adminAuditState.rosterCount} additions are shown — the scan is
-							capped, so older records are not listed here.
-						</p>
-					{/if}
-				</section>
-			{/if}
 		{/if}
 	{:else}
 		<section class="card">
@@ -568,8 +425,8 @@
 				<div>
 					<h2 class="card-title">Academic Structure Changes</h2>
 					<p class="muted">
-						Changes to programs, year levels, courses and offerings. Manage them in Program
-						Management.
+						Changes to programs, year levels, courses, offerings and their schedules.
+						Manage them in Program Management.
 					</p>
 				</div>
 				<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>Edit Programs →</button>
@@ -578,7 +435,7 @@
 				<p class="muted">Loading…</p>
 			{:else if adminStructureState.error}
 				<p class="error">{adminStructureState.error}</p>
-			{:else if structureViews.length === 0}
+			{:else if structureRows.length === 0}
 				<p class="empty">No structural changes recorded.</p>
 			{:else}
 				<div class="table-wrap" aria-busy={adminStructureState.loading}>
@@ -593,34 +450,37 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each structureViews as view (view.id)}
+							{#each structureRows as row (row.id)}
+								{@const href = subjectHref(row.subject.type, row.subject.id)}
 								<tr>
 									<td class="nowrap">
-										<div class="mono-data when-time">{formatTime(view.occurredAt)}</div>
-										<div class="muted small" title={formatUTCTimestamp(view.occurredAt)}>
-											{dayHeading(view.occurredAt)}
+										<div class="mono-data when-time">{formatTime(row.performed_at)}</div>
+										<div class="muted small" title={formatUTCTimestamp(row.performed_at)}>
+											{dayHeading(row.performed_at)}
 										</div>
 									</td>
 									<td>
-										<span class="chip tone-{view.action.tone}">{view.action.label}</span>
-										<div class="muted small">{view.summary}</div>
+										<span class="chip tone-{AUDIT_ACTION_TONES[row.action] ?? 'update'}">
+											{row.action_label}
+										</span>
+										<div class="muted small">{row.summary}</div>
 									</td>
 									<td>
 										<div class="strong">
-											{#if view.entity.href}
-												<a class="link" href={view.entity.href}>{view.entity.label}</a>
+											{#if href}
+												<a class="link" {href}>{row.subject.label}</a>
 											{:else}
-												{view.entity.label}
+												{row.subject.label}
 											{/if}
 										</div>
-										{#if view.entity.sublabel}
-											<div class="muted small">{view.entity.sublabel}</div>
+										{#if row.subject.sublabel}
+											<div class="muted small">{row.subject.sublabel}</div>
 										{/if}
 									</td>
 									<td>
-										{#if view.changes.length > 0}
+										{#if row.changes.length > 0}
 											<ul class="changes">
-												{#each view.changes as change (change.field)}
+												{#each row.changes as change (change.field)}
 													<li>
 														<span class="field-label">{change.label}</span>
 														{#if change.before !== '—'}
@@ -640,9 +500,9 @@
 										{/if}
 									</td>
 									<td>
-										<div class="strong">{view.actor.name}</div>
-										{#if view.actor.role}
-											<div class="muted small">{view.actor.role.replace(/_/g, ' ')}</div>
+										<div class="strong">{row.actor.name}</div>
+										{#if row.actor.role}
+											<div class="muted small">{row.actor.role.replace(/_/g, ' ')}</div>
 										{/if}
 									</td>
 								</tr>
@@ -786,6 +646,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
+	}
+
+	.field.grow {
+		flex: 1 1 220px;
 	}
 
 	.field > span {
@@ -979,11 +843,6 @@
 		color: var(--text-strong);
 	}
 
-	.icon-btn[aria-expanded='true'] {
-		background: var(--bg-hover);
-		color: var(--text-strong);
-	}
-
 	.icon-btn :global(svg) {
 		transform: rotate(-90deg);
 		transition: transform 0.15s ease;
@@ -1042,15 +901,6 @@
 		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
-	}
-
-	.note {
-		margin: 0;
-		padding: 0.625rem 0.875rem;
-		background: var(--info-bg);
-		color: var(--info-text);
-		border-radius: 8px;
-		font-size: 0.875rem;
 	}
 
 	.error {

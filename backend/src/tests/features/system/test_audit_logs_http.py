@@ -83,7 +83,12 @@ async def test_audit_logs_returns_the_stored_row_unshaped(
     factories: Factories,
     test_db_session: AsyncSession,
 ) -> None:
-    """The read model is the table, not a derived view of it."""
+    """The stored row is the evidence, and it is returned unaltered.
+
+    ADR-086 ADDS the derived reading beside it, so the stored fields are
+    still exactly what the writer recorded — the read model never rewrites
+    them, it only describes them.
+    """
     headers = await _admin_headers(auth_headers, factories)
     actor = await factories.user(role=UserRole.ADMIN.value)
     await _seed(
@@ -95,7 +100,7 @@ async def test_audit_logs_returns_the_stored_row_unshaped(
 
     (item,) = await _items(api_client, headers)
 
-    assert set(item) == {
+    assert {
         "id",
         "action",
         "entity_type",
@@ -104,12 +109,184 @@ async def test_audit_logs_returns_the_stored_row_unshaped(
         "new_value",
         "performed_by",
         "performed_at",
-    }
+    } <= set(item)
     assert item["action"] == "update"
     assert item["entity_type"] == "program"
     assert item["entity_id"] == 42
     assert item["performed_by"] == actor.id
     assert item["old_value"] == {"name": "Old"}
+    assert item["new_value"] == {"name": "New"}
+
+
+async def test_audit_logs_resolves_a_subject_through_a_join(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """A snapshot that carries ids only is named through a join.
+
+    An offering's snapshot carries `course_id`, `program_id` and
+    `year_level_id`, not the names, so the reader has to look them up. The
+    lookups are batched per page.
+    """
+    headers = await _admin_headers(auth_headers, factories)
+    program = await factories.program(code="BSCS", name="Computer Science")
+    year = await factories.year_level(program, label="2nd Year")
+    course = await factories.course(course_code="CS101", course_name="Data Structures")
+    offering = await factories.offering(course, program, year)
+    await test_db_session.commit()
+    await _seed(
+        test_db_session,
+        [
+            _row(
+                entity_type=AuditEntity.COURSE_OFFERING,
+                entity_id=offering.id,
+                old_value=None,
+                new_value={
+                    "course_id": course.id,
+                    "program_id": program.id,
+                    "year_level_id": year.id,
+                    "semester": "1st",
+                    "academic_year": "2026-2027",
+                },
+            ),
+        ],
+    )
+
+    (item,) = await _items(api_client, headers)
+
+    assert item["subject"]["label"] == "CS101 · Data Structures"
+    assert "BSCS" in item["subject"]["sublabel"]
+    assert "2nd Year" in item["subject"]["sublabel"]
+    assert "2026-2027" in item["subject"]["sublabel"]
+
+
+async def test_audit_logs_adds_the_derived_reading(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """The row is read, not just returned: who, what, and which field moved."""
+    headers = await _admin_headers(auth_headers, factories)
+    actor = await factories.user(role=UserRole.ADMIN.value)
+    await _seed(
+        test_db_session,
+        [
+            _row(
+                performed_by=actor.id,
+                entity_type=AuditEntity.PROGRAM,
+                entity_id=42,
+                old_value={"code": "BSCS", "name": "Old name"},
+                new_value={"code": "BSCS", "name": "New name"},
+            ),
+        ],
+    )
+
+    (item,) = await _items(api_client, headers)
+
+    # The actor is named, not numbered.
+    assert item["actor"]["kind"] == "user"
+    assert item["actor"]["id"] == actor.id
+    assert item["actor"]["email"] == actor.email
+    assert item["actor"]["role"] == "admin"
+
+    # The subject is named. The snapshot carries the program's own code and
+    # name, so no join is needed — and the name survives the program's
+    # deletion, which a join would not. The NEW name is the record's
+    # current state, which is the one an administrator wants to read.
+    assert item["subject"]["type"] == "program"
+    assert item["subject"]["id"] == 42
+    assert item["subject"]["label"] == "BSCS · New name"
+
+    # The change is per field, not a JSON blob.
+    assert item["changes"] == [
+        {"field": "name", "label": "Name", "before": "Old name", "after": "New name"}
+    ]
+    assert item["summary"] == "Updated BSCS · New name — Name"
+
+
+async def test_audit_logs_names_an_anonymous_actor(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """A null actor is "nobody was signed in", not a missing value."""
+    headers = await _admin_headers(auth_headers, factories)
+    await _seed(
+        test_db_session,
+        [
+            _row(performed_by=None, action=AuditAction.LOGIN_FAILED),
+        ],
+    )
+
+    (item,) = await _items(api_client, headers)
+
+    assert item["performed_by"] is None
+    assert item["actor"]["kind"] == "anonymous"
+    assert item["actor"]["id"] is None
+    assert item["actor"]["name"] == "No signed-in user"
+
+
+async def test_audit_logs_filters_by_actor_name(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """The actor filter matches a name fragment, not just an id.
+
+    The frontend used to send free text to the id filter, which is a 422.
+    A plain admin cannot list users, so a name filter has to work for them
+    too.
+    """
+    headers = await _admin_headers(auth_headers, factories)
+    actor = await factories.user(role=UserRole.ADMIN.value)
+    other = await factories.user(role=UserRole.ADMIN.value)
+    await _seed(
+        test_db_session,
+        [
+            _row(performed_by=actor.id, entity_id=1),
+            _row(performed_by=other.id, entity_id=2),
+        ],
+    )
+
+    items = await _items(api_client, headers, actor=actor.email)
+
+    assert [i["entity_id"] for i in items] == [1]
+
+    # A fragment of the email works too.
+    items = await _items(api_client, headers, actor=actor.email.split("@")[0])
+
+    assert [i["entity_id"] for i in items] == [1]
+
+
+async def test_audit_logs_sorts_in_the_database(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """`sort_by` orders the WHOLE trail, not the page a client loaded."""
+    headers = await _admin_headers(auth_headers, factories)
+    await _seed(
+        test_db_session,
+        [
+            _row(action=AuditAction.UPDATE, performed_at=_at(20, 8)),
+            _row(action=AuditAction.CREATE, performed_at=_at(19, 8)),
+            _row(action=AuditAction.ARCHIVE, performed_at=_at(18, 8)),
+        ],
+    )
+
+    items = await _items(api_client, headers, sort_by="action", sort_dir="asc")
+
+    assert [i["action"] for i in items] == ["archive", "create", "update"]
+
+    items = await _items(api_client, headers, sort_by="time", sort_dir="asc")
+
+    assert [i["action"] for i in items] == ["archive", "create", "update"]
 
 
 async def test_audit_logs_orders_newest_first_with_id_tiebreak(

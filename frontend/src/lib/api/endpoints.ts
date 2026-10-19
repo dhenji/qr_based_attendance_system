@@ -42,6 +42,7 @@ import type {
 	AnalyticsOverviewResponse,
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
+	AuditChangeResponse,
 	AuditLogItemResponse,
 	CourseImportResult,
 	OfferingComponentResponse,
@@ -3166,23 +3167,30 @@ export const SystemCleanupEndpoint: EndpointDef<{ removed: number }> = {
 
 // --- Admin audit logs (live backend, api-contracts §System Settings & Backups) --
 //
-// GET /admin/audit-logs?entity_type&action&performed_by&date_from&date_to&page&size
+// GET /admin/audit-logs?entity_type&action&performed_by&actor&date_from&date_to
+//   &sort_by&sort_dir&page&size
 // returns { items: [{ id, action, entity_type, entity_id, old_value, new_value,
-// performed_by, performed_at }] }. Mocks only when PUBLIC_MOCK_MODE=true.
+// performed_by, performed_at, actor, subject, summary, action_label, changes }],
+// total, page, size }. Mocks only when PUBLIC_MOCK_MODE=true.
 //
 // The fixtures below mirror the CONTRACT shape, not a friendlier invention
 // of it:
 //   - `performed_by` is a `users.id` in the MOCK_ADMIN_USER_ROWS id space
 //     (1 super_admin, 2 admin, 3 professor, 4 student) — never a name.
 //   - `old_value`/`new_value` are the JSON snapshots the server's
-//     `_<entity>_snapshot` methods actually take, so the field names the
-//     reader maps are the ones it will really see.
+//     `_<entity>_snapshot` methods actually take.
 //   - every `action` is a real `AuditAction`, and every `entity_type` a real
 //     `AuditEntityType`.
 //
 // The previous fixtures used readable strings for all three, which meant mock
 // mode rendered a page the real API never produces — and hid every rendering
 // bug that came with the real shape.
+//
+// The DERIVED part of the contract (actor, subject, summary, action_label,
+// changes) is produced here by `mockAuditRow`, which is this file's stand-in
+// for the server's `features/system/audit_labels.py`. A test double
+// reimplements enough of the behaviour to be useful; it is not the
+// reference — the server is.
 
 const mockAuditAt = (daysAgo: number, time: string): string => {
 	const date = new Date();
@@ -3191,8 +3199,303 @@ const mockAuditAt = (daysAgo: number, time: string): string => {
 	return `${date.toISOString().slice(0, 10)}T${time}.000Z`;
 };
 
+const MOCK_ACTORS: Record<number, { name: string; email: string; role: string }> = {
+	1: { name: 'Super Admin', email: 'superadmin@isu.edu.ph', role: 'super_admin' },
+	2: { name: 'Admin User', email: 'admin@isu.edu.ph', role: 'admin' },
+	3: {
+		name: 'Maria Dela Cruz',
+		email: 'maria.c.delacruz@isu.edu.ph',
+		role: 'professor',
+	},
+	4: { name: 'Juan Dela Cruz', email: 'juan.delacruz@isu.edu.ph', role: 'student' },
+};
+
+const MOCK_ACTION_LABELS: Record<string, string> = {
+	create: 'Created',
+	update: 'Updated',
+	archive: 'Archived',
+	delete: 'Deleted',
+	import: 'Imported',
+	enroll: 'Enrolled',
+	unenroll: 'Removed',
+	assign: 'Assigned',
+	reassign: 'Reassigned',
+	reopen: 'Reopened',
+	unassign: 'Assignment ended',
+	open: 'Opened',
+	close: 'Closed',
+	approve: 'Approved',
+	reject: 'Rejected',
+	revoke: 'Revoked',
+	lock: 'Locked',
+	unlock: 'Unlocked',
+	login_failed: 'Sign-in failed',
+	password_reset: 'Password reset',
+};
+
+const MOCK_FIELD_LABELS: Record<string, string> = {
+	code: 'Code',
+	name: 'Name',
+	description: 'Description',
+	total_years: 'Years in the program',
+	is_active: 'Status',
+	program_id: 'Program',
+	year_number: 'Year number',
+	label: 'Label',
+	term_structure: 'Terms',
+	sort_order: 'Order',
+	course_code: 'Course code',
+	course_name: 'Course name',
+	units: 'Units',
+	session_duration_hours: 'Session length (hours)',
+	course_id: 'Course',
+	year_level_id: 'Year level',
+	semester: 'Term',
+	academic_year: 'Academic year',
+	sessions_per_week: 'Sessions per week',
+	schedule_days: 'Meeting days',
+	schedule_start_time: 'Starts',
+	schedule_end_time: 'Ends',
+	classroom_name: 'Classroom',
+	offering_id: 'Offering',
+	session_type: 'Session type',
+	student_id: 'Student',
+	first_name: 'First name',
+	last_name: 'Last name',
+	email: 'Email',
+	section: 'Section',
+	face_enrolled_at: 'Face enrolled at',
+	department: 'Department',
+	professor_id: 'Professor',
+	session_code: 'Session code',
+	scheduled_start_time: 'Scheduled start',
+	scheduled_end_time: 'Scheduled end',
+	expires_at: 'Expires at',
+	failed_login_attempts: 'Failed sign-in attempts',
+	is_locked: 'Account locked',
+	locked_at: 'Locked at',
+	must_change_password: 'Must change password',
+	role: 'Role',
+	is_primary: 'Role',
+	effective_from: 'Effective from',
+	effective_to: 'Effective to',
+	initiated_by: 'Initiated by',
+	initiated_via: 'Submitted via',
+	reason: 'Reason',
+	attachment_count: 'Attachments',
+	status: 'Status',
+	reviewed_by: 'Reviewed by',
+	review_notes: 'Review notes',
+	kind: 'Backup type',
+	filename: 'File',
+	size_bytes: 'File size',
+	storage_backend: 'Storage',
+	sha256: 'Checksum',
+	imported: 'Imported',
+	duplicates: 'Skipped (already existed)',
+	errors: 'Errors',
+	enrolled: 'Enrolled',
+	skipped: 'Skipped',
+	processed: 'Processed',
+	succeeded: 'Succeeded',
+	failed: 'Failed',
+	validation_status: 'Attendance status',
+	review_note: 'Review note',
+	face_embedding_version: 'Face template version',
+};
+
+const MOCK_DAYS: Record<string, string> = {
+	M: 'Mon',
+	T: 'Tue',
+	W: 'Wed',
+	H: 'Thu',
+	F: 'Fri',
+	S: 'Sat',
+	U: 'Sun',
+};
+
+const mockValue = (field: string, value: unknown): string => {
+	if (field === 'is_active') return value === true ? 'Active' : value === false ? 'Archived' : '—';
+	if (field === 'is_locked') return value === true ? 'Locked' : value === false ? 'Not locked' : '—';
+	if (field === 'must_change_password')
+		return value === true ? 'Yes — must change at next sign-in' : value === false ? 'No' : '—';
+	if (field === 'enrolled')
+		return typeof value === 'number'
+			? String(value)
+			: value === true
+				? 'Yes'
+				: value === false
+					? 'No'
+					: '—';
+	if (field === 'is_primary') return value === true ? 'Primary' : value === false ? 'Assistant' : '—';
+	if (field === 'schedule_days' && typeof value === 'string') {
+		const days = value
+			.toUpperCase()
+			.split('')
+			.map((letter) => MOCK_DAYS[letter])
+			.filter((day): day is string => !!day);
+		return days.length > 0 ? days.join(', ') : value;
+	}
+	if (field === 'offering_id') return value === null || value === undefined ? '—' : `Offering #${String(value)}`;
+	if (field === 'professor_id') return value === null || value === undefined ? '—' : `Professor #${String(value)}`;
+	if (field === 'course_id') return value === null || value === undefined ? '—' : `Course #${String(value)}`;
+	if (field === 'program_id') return value === null || value === undefined ? '—' : `Program #${String(value)}`;
+	if (field === 'year_level_id') return value === null || value === undefined ? '—' : `Year level #${String(value)}`;
+	if (field === 'student_id' && typeof value === 'number')
+		return `Student #${String(value)}`;
+	if (field === 'term_structure' && typeof value === 'object' && value !== null) {
+		const terms = (value as { terms?: unknown }).terms;
+		if (!Array.isArray(terms)) return '—';
+		const labels = terms
+			.map((term) =>
+				typeof term === 'object' && term !== null
+					? String((term as { label?: unknown }).label ?? '')
+					: String(term)
+			)
+			.filter((label) => label.length > 0);
+		return labels.length > 0 ? `${labels.length} terms: ${labels.join(', ')}` : 'No terms';
+	}
+	if (value === null || value === undefined) return '—';
+	if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+	if (typeof value === 'object') return JSON.stringify(value);
+	return String(value);
+};
+
+const mockChanges = (
+	oldValue: Record<string, unknown> | null,
+	newValue: Record<string, unknown> | null
+): AuditChangeResponse[] => {
+	const before = oldValue ?? {};
+	const after = newValue ?? {};
+	const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+	const changes: AuditChangeResponse[] = [];
+	for (const key of keys) {
+		const from = before[key];
+		const to = after[key];
+		if (oldValue !== null && newValue !== null && JSON.stringify(from) === JSON.stringify(to))
+			continue;
+		if (oldValue === null && (to === null || to === undefined)) continue;
+		if (newValue === null && (from === null || from === undefined)) continue;
+		changes.push({
+			field: key,
+			label: MOCK_FIELD_LABELS[key] ?? key.replace(/_/g, ' '),
+			before: oldValue === null ? '—' : mockValue(key, from),
+			after: newValue === null ? '—' : mockValue(key, to),
+		});
+	}
+	return changes;
+};
+
+const mockSubject = (
+	row: Omit<AuditLogItemResponse, 'actor' | 'subject' | 'summary' | 'action_label' | 'changes'>
+): { label: string; sublabel: string | null } => {
+	const s = row.new_value ?? row.old_value ?? {};
+	const str = (v: unknown) => (typeof v === 'string' ? v : '');
+	const importCaption = () => {
+		const imported = s.imported;
+		if (typeof imported !== 'number') return null;
+		return `${imported} imported · ${Number(s.duplicates ?? 0)} already existed · ${Number(s.errors ?? 0)} errors`;
+	};
+	// A batch row has no id: it describes an import, not a record.
+	if (row.entity_id === null && s.imported !== undefined) {
+		const kind =
+			row.entity_type === 'program'
+				? 'Program'
+				: row.entity_type === 'course'
+					? 'Course'
+					: row.entity_type === 'student'
+						? 'Student'
+						: row.entity_type === 'professor'
+							? 'Professor'
+							: 'Record';
+		return { label: `${kind} import`, sublabel: importCaption() };
+	}
+	switch (row.entity_type) {
+		case 'program':
+			return { label: `${str(s.code)} · ${str(s.name)}`, sublabel: str(s.description) || null };
+		case 'course':
+			return { label: `${str(s.course_code)} · ${str(s.course_name)}`, sublabel: `${String(s.units ?? '')} units` };
+		case 'student':
+			return {
+				label: `${str(s.student_id)} · ${str(s.first_name)} ${str(s.last_name)}`,
+				sublabel: str(s.email) || null,
+			};
+		case 'professor':
+			return { label: `${str(s.first_name)} ${str(s.last_name)}`, sublabel: str(s.email) || null };
+		case 'year_level':
+			return { label: str(s.label), sublabel: null };
+		case 'session':
+			return { label: str(s.session_code), sublabel: 'Lecture' };
+		case 'excuse':
+			return { label: `Excuse request #${row.entity_id}`, sublabel: str(s.reason) || null };
+		case 'course_professor':
+			return {
+				label: `Professor #${String(s.professor_id ?? '')} → offering #${String(s.offering_id ?? '')}`,
+				sublabel: s.is_primary === true ? 'Primary' : 'Assistant',
+			};
+		case 'user':
+			return { label: str(s.email) || `User #${row.entity_id}`, sublabel: str(s.role) || null };
+		case 'backup':
+			return { label: str(s.filename), sublabel: `${str(s.kind)} · ${String(s.size_bytes ?? '')} bytes` };
+		case 'face_enrollment':
+			return { label: `Face template #${row.entity_id}`, sublabel: null };
+		case 'app_setting':
+			return { label: 'System settings', sublabel: Object.keys(s).join(', ') };
+		case 'maintenance':
+			return { label: 'Maintenance run', sublabel: null };
+		case 'enrollment':
+			return {
+				label: row.entity_id === null ? 'Bulk enrollment' : `Enrollment #${row.entity_id}`,
+				sublabel: null,
+			};
+		case 'course_offering':
+			return {
+				label: `Course #${String(s.course_id ?? '')}`,
+				sublabel: `${str(s.semester)} Sem · ${str(s.academic_year)}`,
+			};
+		case 'offering_component':
+			return {
+				label: `Schedule component of offering #${String(s.offering_id ?? '')}`,
+				sublabel: mockValue('schedule_days', s.schedule_days),
+			};
+		case 'attendance_record':
+			return { label: `Attendance record #${row.entity_id}`, sublabel: null };
+		default:
+			return { label: `${row.entity_type} #${row.entity_id}`, sublabel: null };
+	}
+};
+
+const mockAuditRow = (
+	stored: Omit<AuditLogItemResponse, 'actor' | 'subject' | 'summary' | 'action_label' | 'changes'>
+): AuditLogItemResponse => {
+	const actor = stored.performed_by === null ? undefined : MOCK_ACTORS[stored.performed_by];
+	const subject = mockSubject(stored);
+	const actionLabel = MOCK_ACTION_LABELS[stored.action] ?? stored.action.replace(/_/g, ' ');
+	return {
+		...stored,
+		actor: actor
+			? {
+					kind: 'user',
+					id: actor === MOCK_ACTORS[stored.performed_by!] ? stored.performed_by : null,
+					name: actor.name,
+					email: actor.email,
+					role: actor.role,
+				}
+			: { kind: 'anonymous', id: null, name: 'No signed-in user', email: null, role: null },
+		subject: {
+			type: stored.entity_type,
+			id: stored.entity_id,
+			label: subject.label,
+			sublabel: subject.sublabel,
+		},
+		summary: `${actionLabel} ${subject.label}`,
+		action_label: actionLabel,
+		changes: mockChanges(stored.old_value, stored.new_value),
+	};
+};
+
 const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
-	{
+	mockAuditRow({
 		id: 1,
 		action: 'open',
 		entity_type: 'session',
@@ -3209,8 +3512,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 3,
 		performed_at: mockAuditAt(0, '08:55:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 2,
 		action: 'import',
 		entity_type: 'student',
@@ -3219,8 +3522,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		new_value: { imported: 25, duplicates: 0, errors: 2 },
 		performed_by: 2,
 		performed_at: mockAuditAt(0, '08:30:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 3,
 		action: 'update',
 		entity_type: 'year_level',
@@ -3252,8 +3555,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 1,
 		performed_at: mockAuditAt(0, '08:00:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 4,
 		action: 'approve',
 		entity_type: 'excuse',
@@ -3282,8 +3585,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 3,
 		performed_at: mockAuditAt(1, '15:20:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 5,
 		action: 'assign',
 		entity_type: 'course_professor',
@@ -3298,8 +3601,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 2,
 		performed_at: mockAuditAt(1, '14:05:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 6,
 		action: 'update',
 		entity_type: 'maintenance',
@@ -3308,8 +3611,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		new_value: { processed: 90, succeeded: 88, failed: 2 },
 		performed_by: null,
 		performed_at: mockAuditAt(1, '11:47:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 7,
 		action: 'enroll',
 		entity_type: 'enrollment',
@@ -3318,17 +3621,13 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		new_value: { offering_id: 3, enrolled: 3, skipped: 1, errors: 0 },
 		performed_by: 2,
 		performed_at: mockAuditAt(2, '16:33:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 8,
 		action: 'update',
 		entity_type: 'face_enrollment',
 		entity_id: 4,
-		old_value: {
-			enrolled: false,
-			face_enrolled_at: null,
-			face_embedding_version: 0,
-		},
+		old_value: { enrolled: false, face_enrolled_at: null, face_embedding_version: 0 },
 		new_value: {
 			enrolled: true,
 			face_enrolled_at: '2026-10-18T10:12:00+00:00',
@@ -3336,8 +3635,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 4,
 		performed_at: mockAuditAt(2, '10:12:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 9,
 		action: 'create',
 		entity_type: 'backup',
@@ -3353,8 +3652,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: null,
 		performed_at: mockAuditAt(3, '03:00:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 10,
 		action: 'close',
 		entity_type: 'session',
@@ -3379,8 +3678,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 3,
 		performed_at: mockAuditAt(3, '09:44:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 11,
 		action: 'lock',
 		entity_type: 'user',
@@ -3399,8 +3698,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: null,
 		performed_at: mockAuditAt(4, '13:29:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 12,
 		action: 'login_failed',
 		entity_type: 'user',
@@ -3419,12 +3718,12 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: null,
 		performed_at: mockAuditAt(4, '13:24:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 13,
 		action: 'update',
-		entity_type: 'course_offering',
-		entity_id: 2,
+		entity_type: 'offering_component',
+		entity_id: 7,
 		old_value: {
 			offering_id: 2,
 			session_type: 'lecture',
@@ -3449,8 +3748,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 2,
 		performed_at: mockAuditAt(5, '10:02:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 14,
 		action: 'archive',
 		entity_type: 'course',
@@ -3471,8 +3770,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 1,
 		performed_at: mockAuditAt(5, '09:15:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 15,
 		action: 'create',
 		entity_type: 'excuse',
@@ -3491,8 +3790,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 3,
 		performed_at: mockAuditAt(6, '14:51:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 16,
 		action: 'create',
 		entity_type: 'course',
@@ -3507,8 +3806,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 2,
 		performed_at: mockAuditAt(7, '08:05:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 17,
 		action: 'create',
 		entity_type: 'course_offering',
@@ -3533,8 +3832,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 2,
 		performed_at: mockAuditAt(7, '08:02:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 18,
 		action: 'unassign',
 		entity_type: 'course_professor',
@@ -3555,8 +3854,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 2,
 		performed_at: mockAuditAt(9, '12:18:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 19,
 		action: 'update',
 		entity_type: 'app_setting',
@@ -3565,8 +3864,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		new_value: { present_window_default: '10' },
 		performed_by: 1,
 		performed_at: mockAuditAt(10, '09:31:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 20,
 		action: 'password_reset',
 		entity_type: 'user',
@@ -3585,8 +3884,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 1,
 		performed_at: mockAuditAt(12, '08:10:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 21,
 		action: 'create',
 		entity_type: 'program',
@@ -3601,8 +3900,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 1,
 		performed_at: mockAuditAt(12, '07:40:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 22,
 		action: 'update',
 		entity_type: 'program',
@@ -3623,8 +3922,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		},
 		performed_by: 1,
 		performed_at: mockAuditAt(12, '07:45:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 23,
 		action: 'unenroll',
 		entity_type: 'enrollment',
@@ -3638,8 +3937,8 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		new_value: null,
 		performed_by: 2,
 		performed_at: mockAuditAt(13, '10:05:00'),
-	},
-	{
+	}),
+	mockAuditRow({
 		id: 24,
 		action: 'delete',
 		entity_type: 'program',
@@ -3654,7 +3953,42 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		new_value: null,
 		performed_by: 1,
 		performed_at: mockAuditAt(15, '16:20:00'),
-	},
+	}),
+	mockAuditRow({
+		id: 25,
+		action: 'create',
+		entity_type: 'student',
+		entity_id: 12,
+		old_value: null,
+		new_value: {
+			student_id: '2024-0001',
+			first_name: 'Juan',
+			last_name: 'Dela Cruz',
+			email: 'juan.delacruz@isu.edu.ph',
+			year_level_id: 3,
+			section: 'A',
+			is_active: true,
+			face_enrolled_at: null,
+		},
+		performed_by: 2,
+		performed_at: mockAuditAt(2, '09:15:00'),
+	}),
+	mockAuditRow({
+		id: 26,
+		action: 'create',
+		entity_type: 'professor',
+		entity_id: 8,
+		old_value: null,
+		new_value: {
+			email: 'maria.garcia@isu.edu.ph',
+			first_name: 'Maria',
+			last_name: 'Garcia',
+			department: 'Computer Science',
+			is_active: true,
+		},
+		performed_by: 1,
+		performed_at: mockAuditAt(4, '10:15:00'),
+	}),
 ];
 
 export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>> = {
@@ -3675,13 +4009,38 @@ export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>
 			const wanted = Number(params.performed_by);
 			rows = rows.filter((r) => r.performed_by === wanted);
 		}
+		// `actor` matches the id, the email or the name — the same fragment
+		// match the server does.
+		if (params?.actor) {
+			const needle = params.actor.trim().toLowerCase();
+			if (needle) {
+				rows = rows.filter((r) => {
+					if (r.actor.email?.toLowerCase().includes(needle)) return true;
+					if (r.actor.name.toLowerCase().includes(needle)) return true;
+					return String(r.actor.id ?? '') === needle;
+				});
+			}
+		}
 		if (params?.date_from) {
 			rows = rows.filter((r) => r.performed_at.slice(0, 10) >= params.date_from!);
 		}
 		if (params?.date_to) {
 			rows = rows.filter((r) => r.performed_at.slice(0, 10) <= params.date_to!);
 		}
-		rows.sort((a, b) => (a.performed_at < b.performed_at ? 1 : -1));
+		// The sort is the server's: `time`, `actor` or `action`, over the
+		// WHOLE trail rather than the loaded page.
+		const sortBy = params?.sort_by ?? 'time';
+		const descending = (params?.sort_dir ?? 'desc') !== 'asc';
+		const key =
+			sortBy === 'actor'
+				? (r: AuditLogItemResponse) => r.actor.name
+				: sortBy === 'action'
+					? (r: AuditLogItemResponse) => r.action_label
+					: (r: AuditLogItemResponse) => r.performed_at;
+		rows.sort((a, b) => {
+			const compared = key(a).localeCompare(key(b));
+			return descending ? -compared : compared;
+		});
 		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
 		const total = rows.length;
 		const totalPages = Math.max(1, Math.ceil(total / size));
@@ -3699,9 +4058,15 @@ export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>
 // endpoints — so the fixtures below reuse the trail's structural rows rather
 // than inventing a parallel set.
 const MOCK_STRUCTURE_ROWS: StructureChangeResponse[] = MOCK_AUDIT_ROWS.filter((r) =>
-	(['program', 'year_level', 'course', 'course_offering'] as const).includes(
-		r.entity_type as 'program' | 'year_level' | 'course' | 'course_offering'
-	)
+	(
+		[
+			'program',
+			'year_level',
+			'course',
+			'course_offering',
+			'offering_component',
+		] as const
+	).includes(r.entity_type as 'program')
 );
 
 export const AdminStructureChangesEndpoint: EndpointDef<Paginated<StructureChangeResponse>> = {

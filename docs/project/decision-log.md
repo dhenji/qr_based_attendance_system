@@ -2379,3 +2379,123 @@
   `test_permanently_remove_primary_frees_the_slot`.
 
 
+
+### ADR-088: The Audit Trail Is Read on the Server, and Every Roster Row Appears in It
+
+- **Decision (D88):** The audit endpoints return the stored row **and** a
+  derived reading of it — who acted, what the subject is called, a one-line
+  summary and a field-level change — and the derived part is computed on the
+  server. The stored fields stay exactly as they were; the derived fields are
+  additive. Two consequences follow: **a schedule component gets its own
+  entity type** (`offering_component`, keyed by the component's own id), and
+  **creating a student or a professor writes an audit row**, so the trail
+  contains every roster row that ever appeared. The client's fabricated
+  "recently added" rows are gone.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** ADR-064 made the audit endpoints return the stored row
+  unaltered: *"Nothing is derived: no `actor_name` join, no `category`
+  mapping."* It also recorded the gap it left behind: *"The frontend still
+  mocks the audit page… Reconciling it is a frontend change and was
+  deliberately left out of a backend slice."*
+  That reconciliation was done on the client first, and it surfaced three
+  problems that a client cannot fix:
+  1. **A plain admin could not see actor names.** The client resolved them
+     from `GET /admin/users`, which is super-admin-only
+     (`features/admin/router.py:37`), while the audit endpoint is
+     admin-readable (`features/system/router.py:29`). So the same trail read
+     differently depending on the reader's role.
+  2. **A subject's name could not be resolved once the subject was gone.** A
+     hard-deleted program has no row left to join against; only its audit
+     snapshot records what it was.
+  3. **The client had to invent rows.** Student and professor creations were
+     not audited at all, so the client fabricated "record creation" rows
+     from each roster's `created_at`. They could not be filtered or paged
+     with the real ones, they were capped at 300 rows across three pages
+     per entity, and they cost four roster fetches on every audit page
+     load. An inferred row is not evidence.
+  A fourth problem was in the data model, not the reader: `entity_type =
+  'course_offering'` was written both for an offering
+  (`features/course/service.py:613`) and for one of its schedule components
+  (`:1754, :1824, :1849`) — with the OFFERING's id in both cases. One
+  entity type carried two id spaces, so "Course offering #12" could mean two
+  different things.
+- **Rationale:**
+  - **The vocabulary belongs next to the snapshots.** The `_snapshot` methods
+    produce the fields; the module that reads them
+    (`features/system/audit_labels.py`) is the only place that knows what
+    `term_structure` or `is_active` mean. Keeping the reading on the client
+    meant two copies of that knowledge, and they drifted — the client
+    rendered `is active` where the server would have rendered `Status`.
+  - **The snapshot is read BEFORE any lookup.** A program snapshot carries
+    `code` and `name`; a course snapshot carries `course_code` and
+    `course_name`; a student snapshot carries `student_id` and the names. So
+    the label comes out of the snapshot, and a database lookup is only the
+    fallback. That is not just an optimisation: the snapshot is the more
+    durable evidence, because it survives the record's deletion.
+  - **The lookups are batched.** A page of rows is resolved together — one
+    query per table, and a table only when some row needs it. The cost of a
+    page is a small constant, not a multiple of the page size.
+  - **The stored row is untouched.** The derived fields are ADDITIVE. A
+    client that reads the raw row still gets the raw row, and the trail is
+    still exactly what was recorded.
+  - **One id space per entity type.** `entity_id` points into the table the
+    entity type names, and that table is its only id space. A component has
+    an id of its own, so it gets its own member. `face_enrollment` audits a
+    STUDENT's face template, so its id space is `students` — that is stated
+    rather than left to be guessed.
+  - **Rows before the change are read, not migrated.** A component written
+    before this decision has `entity_type = 'course_offering'` and the
+    offering's id. The reader recognises it by its snapshot (a component
+    carries `session_type` and no `semester`; an offering is the other way
+    round) and reads it as what it is. A data migration would have had to
+    guess at ids, and the rows are historical either way.
+  - **Sorting and filtering moved into the database.** `sort_by` and
+    `sort_dir` order the WHOLE trail rather than the page a client happens
+    to have loaded, and `actor` matches an id, an email or a name fragment
+    — which is what an administrator actually types.
+  - **The trail now contains every roster row.** A student or a professor
+    appearing is a change to the institution, and the security model's
+    coverage table said so for every other creation. Writing the row also
+    retires the client's fabrication, which is the only thing that ever
+    made the audit page show a "recently added records" section that was
+    not evidence.
+- **Alternatives considered:**
+  (1) *Keep the derivation on the client.* Rejected: a plain admin cannot
+  resolve an actor, a deleted record cannot be named, and the vocabulary
+  lives in two places.
+  (2) *Replace the stored fields with the derived ones.* Rejected: the
+  stored row IS the evidence. A derived read model beside it costs nothing
+  and loses nothing.
+  (3) *Make `GET /admin/users` admin-readable instead of joining the actor
+  in.* Rejected: it widens who can list every account, and it still leaves
+  the client to resolve a deleted subject.
+  (4) *Backfill the old component rows into the new entity type.* Rejected:
+  the old rows' `entity_id` is the offering's, so relabelling them would
+  give the new member a second id space — the very defect being fixed. The
+  reader recognises the old shape instead.
+  (5) *Keep the client fabricating the roster rows.* Rejected: an inferred
+  row cannot be filtered, paged or trusted with the real ones.
+  (6) *Taken:* a derived read model on the server, one entity type per id
+  space, and every roster row in the trail.
+- **Consequences:** The audit response grows from eight fields to eight plus
+  `actor`, `subject`, `summary`, `action_label` and `changes` — additive, so
+  a client reading the raw row is unaffected. `GET /admin/audit-logs` gains
+  `actor`, `sort_by` and `sort_dir`. `GET /admin/system/academic-structure`
+  gains a schedule component to its scope, because a component's schedule is
+  a structural change. No new model and no migration of its own
+  (`alembic check` stays green: the entity vocabulary is a code contract, not
+  a database constraint, and the old rows are read rather than rewritten).
+  `AuditEntity` gains `OFFERING_COMPONENT`. The client's label resolver and
+  its roster scan are deleted; the client keeps only the tone map and the
+  deep links, which are presentation the server has no business knowing
+  about. `audit_logs.action` still has no index, so an action-only filter
+  and an action sort are sequential scans — unchanged, and still the first
+  thing to add if the table grows.
+- **Testing:** `test_audit_logs_adds_the_derived_reading`,
+  `test_audit_logs_names_an_anonymous_actor`,
+  `test_audit_logs_filters_by_actor_name` and
+  `test_audit_logs_sorts_in_the_database` cover the read model;
+  `test_student_create_writes_a_row`, `test_professor_create_writes_a_row`
+  and `test_component_changes_use_the_component_entity_type` cover the
+  writers.
