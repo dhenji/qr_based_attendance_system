@@ -5,17 +5,21 @@
 // GET /admin/audit-logs shape ({ id, action, entity_type, entity_id,
 // old_value, new_value, performed_by, performed_at }):
 //
-// - Trail rows straight from `adminAuditLogs`: every recorded action.
+// - Trail rows straight from `adminAuditLogs`: every recorded action. This is
+//   the audit trail proper.
 // - Record-creation rows derived client-side from roster `created_at`
 //   (students, professors, programs, courses) because the rosters expose no
 //   updater or updated-at, so creations are the only rows derivable from them.
 //
-// `origin` labels the two sources and is rendered in the feed and the CSV
-// export. The label `'seed'` on the trail rows is a legacy name from when they
-// really were deterministic fixtures — they are live contract rows now, and
-// the endpoint def's `mock` is only consulted under PUBLIC_MOCK_MODE=true.
-// Renaming it would touch the store, the page and the CSV header, so it is
-// left as-is rather than half-migrated.
+// `origin` tells the two apart, and the UI shows them as two different
+// things: the trail is what was audited, the roster rows are what a record's
+// creation date implies. They are not the same evidence, so they are not
+// presented as one list.
+//
+// The trail rows are the stored contract row, unaltered (ADR-064): the actor
+// is a `users.id`, the subject is `entity_type` + `entity_id`, and
+// `old_value`/`new_value` are the raw JSON snapshots. Turning those into
+// names and readable changes is the reader's job and lives in `present.ts`.
 //
 // The merged feed sorts by timestamp desc with one client-side pager (both
 // sources are requested at full page size and sliced locally, so they share a
@@ -23,7 +27,6 @@
 
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
-import { buildCsv } from '$lib/features/report/service';
 import { downloadCsv } from '$lib/features/admin/analytics/service';
 import type {
 	AuditAction,
@@ -39,7 +42,35 @@ import { listProfessors, listStudents } from '$lib/features/admin/service';
 import { listPrograms } from '$lib/features/admin/programs/service';
 
 export interface AuditLogRow extends AuditLogItemResponse {
-	origin: 'system' | 'seed';
+	/**
+	 * Where the row came from.
+	 *
+	 * `'trail'` — written by the server's `record_audit`; the audit trail.
+	 * `'roster'`  — derived here from a roster's `created_at`; an inference,
+	 *   not an audited event. The UI labels the two differently and never
+	 *   counts them as one.
+	 */
+	origin: 'trail' | 'roster';
+}
+
+export interface AuditFeed {
+	/**
+	 * Every merged row the feed holds, newest first.
+	 *
+	 * The whole set is returned, not a page of it, so the reader can sort
+	 * across everything it has loaded. Slicing happens in the view.
+	 */
+	all: AuditLogRow[];
+	/** Rows available across the merged feed. */
+	total: number;
+	/** The server's own count for the filtered trail — the audited rows. */
+	trailTotal: number;
+	/** Derived roster rows included in this feed. */
+	rosterCount: number;
+	/** True when the derived rows hit the scan cap, so the count is partial. */
+	rosterTruncated: boolean;
+	/** The number of trail rows actually fetched (the page size cap). */
+	trailLoaded: number;
 }
 
 export const AUDIT_ENTITY_TYPES: { id: AuditEntityType; label: string }[] = [
@@ -68,6 +99,7 @@ export const AUDIT_ACTIONS: { id: AuditAction; label: string }[] = [
 	{ id: 'delete', label: 'Delete' },
 	{ id: 'import', label: 'Import' },
 	{ id: 'enroll', label: 'Enroll' },
+	{ id: 'unenroll', label: 'Unenroll' },
 	{ id: 'assign', label: 'Assign' },
 	{ id: 'reassign', label: 'Reassign' },
 	{ id: 'reopen', label: 'Reopen' },
@@ -83,14 +115,17 @@ export const AUDIT_ACTIONS: { id: AuditAction; label: string }[] = [
 	{ id: 'password_reset', label: 'Password reset' },
 ];
 
-/** Backwards-compatible alias: the audit page's entity dropdown reads this. */
-export const AUDIT_CATEGORIES = AUDIT_ENTITY_TYPES;
-
 const auditParams = (f: AuditLogFilters): Record<string, string> => {
 	const params: Record<string, string> = {};
 	if (f.entity_type) params.entity_type = f.entity_type;
 	if (f.action) params.action = f.action;
-	if (f.performed_by) params.performed_by = f.performed_by;
+	// The backend types `performed_by` as `int | None`
+	// (`backend/src/features/system/router.py:81`), so it is sent as a number.
+	// A free-text value here is a 422, which is why the filter control is
+	// id-valued rather than a search box.
+	if (f.performed_by !== undefined && f.performed_by !== null) {
+		params.performed_by = String(f.performed_by);
+	}
 	if (f.date_from) params.date_from = f.date_from;
 	if (f.date_to) params.date_to = f.date_to;
 	params.page = '1';
@@ -99,7 +134,8 @@ const auditParams = (f: AuditLogFilters): Record<string, string> => {
 };
 
 // Live-derivable rows: record creations from roster lists. Negative ids keep
-// them distinct from backend ids. All are `create` actions by `system`, so an
+// them distinct from backend ids. All are `create` actions with no actor
+// (`performed_by` is null — nobody was recorded as making them), so an
 // action/entity filter that excludes creates yields no live rows.
 //
 // The scan is bounded multi-page: a single roster page (100) hides every
@@ -107,6 +143,11 @@ const auditParams = (f: AuditLogFilters): Record<string, string> => {
 // representative without hammering the roster endpoints on every audit load.
 const MAX_ROSTER_PAGES = 3;
 const MAX_LIVE_ROWS = 300;
+
+interface RosterScan {
+	rows: AuditLogRow[];
+	truncated: boolean;
+}
 
 const listPages = async <T>(
 	fetchPage: (page: number) => Promise<T[]>,
@@ -122,11 +163,15 @@ const listPages = async <T>(
 	return out;
 };
 
-const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
-	if (f.action && f.action !== 'create') return [];
-	if (f.performed_by && f.performed_by.trim().toLowerCase() !== 'system') return [];
+const liveCreationRows = async (f: AuditLogFilters): Promise<RosterScan> => {
+	if (f.action && f.action !== 'create') return { rows: [], truncated: false };
+	// The derived rows carry no actor, so an actor filter cannot match them.
+	if (f.performed_by !== undefined && f.performed_by !== null) {
+		return { rows: [], truncated: false };
+	}
 	const rows: AuditLogRow[] = [];
 	let cursor = -1;
+	let truncated = false;
 	const inRange = (iso: string): boolean => {
 		const day = iso.slice(0, 10);
 		if (f.date_from && day < f.date_from) return false;
@@ -149,10 +194,18 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 					entity_type: 'student',
 					entity_id: s.id,
 					old_value: null,
-					new_value: `${s.firstName} ${s.lastName} · ${s.studentId} · ${s.programCode}`,
-					performed_by: 'system',
+					// The same field names the server's own snapshot uses, so
+					// the reader renders a derived row and a real one the
+					// same way.
+					new_value: {
+						student_id: s.studentId,
+						first_name: s.firstName,
+						last_name: s.lastName,
+						program_code: s.programCode,
+					},
+					performed_by: null,
 					performed_at: s.createdAt,
-					origin: 'system',
+					origin: 'roster',
 				});
 			}
 		}
@@ -173,10 +226,14 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 					entity_type: 'professor',
 					entity_id: p.id,
 					old_value: null,
-					new_value: `${p.firstName} ${p.lastName} · ${p.email}`,
-					performed_by: 'system',
+					new_value: {
+						first_name: p.firstName,
+						last_name: p.lastName,
+						email: p.email,
+					},
+					performed_by: null,
 					performed_at: p.createdAt,
-					origin: 'system',
+					origin: 'roster',
 				});
 			}
 		}
@@ -197,10 +254,10 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 					entity_type: 'program',
 					entity_id: p.id,
 					old_value: null,
-					new_value: `${p.code} · ${p.name}`,
-					performed_by: 'system',
+					new_value: { code: p.code, name: p.name },
+					performed_by: null,
 					performed_at: p.createdAt,
-					origin: 'system',
+					origin: 'roster',
 				});
 			}
 		}
@@ -221,31 +278,30 @@ const liveCreationRows = async (f: AuditLogFilters): Promise<AuditLogRow[]> => {
 					entity_type: 'course',
 					entity_id: c.id,
 					old_value: null,
-					new_value: `${c.courseCode} · ${c.courseName}`,
-					performed_by: 'system',
+					new_value: { course_code: c.courseCode, course_name: c.courseName },
+					performed_by: null,
 					performed_at: c.createdAt,
-					origin: 'system',
+					origin: 'roster',
 				});
 			}
 		}
 	} catch {
 		// Same fallback as above.
 	}
-	return rows;
+	if (rows.length >= MAX_LIVE_ROWS) truncated = true;
+	return { rows, truncated };
 };
 
 export const listAuditLogs = async (
-	filters: AuditLogFilters = {},
-	page = 1,
-	size = 20
-): Promise<{ items: AuditLogRow[]; total: number; page: number; size: number }> => {
+	filters: AuditLogFilters = {}
+): Promise<AuditFeed> => {
 	const [trail, live] = await Promise.all([
 		get<Paginated<AuditLogItemResponse>>('adminAuditLogs', auditParams(filters)),
 		liveCreationRows(filters),
 	]);
 	const trailRows: AuditLogRow[] = (trail.items ?? []).map((r) => ({
 		...r,
-		origin: 'seed' as const,
+		origin: 'trail' as const,
 	}));
 	// The backend trail is authoritative: when it already carries a create
 	// row for an entity, the derived live row for the same entity is a
@@ -253,48 +309,38 @@ export const listAuditLogs = async (
 	const seen = new Set(trailRows.map((r) => `${r.action}:${r.entity_type}:${r.entity_id}`));
 	const merged: AuditLogRow[] = [
 		...trailRows,
-		...live.filter((r) => !seen.has(`${r.action}:${r.entity_type}:${r.entity_id}`)),
+		...live.rows.filter((r) => !seen.has(`${r.action}:${r.entity_type}:${r.entity_id}`)),
 	];
 	merged.sort((a, b) => (a.performed_at < b.performed_at ? 1 : -1));
-	const total = merged.length;
-	const totalPages = Math.max(1, Math.ceil(total / size));
-	const safePage = Math.min(Math.max(page, 1), totalPages);
 	return {
-		items: merged.slice((safePage - 1) * size, safePage * size),
-		total,
-		page: safePage,
-		size,
+		all: merged,
+		total: merged.length,
+		// The server's own count for the filtered trail. It is kept separate
+		// from `total` because the two are not the same set of events.
+		trailTotal: trail.total ?? trailRows.length,
+		rosterCount: live.rows.length,
+		rosterTruncated: live.truncated,
+		trailLoaded: trailRows.length,
 	};
 };
 
-export const listStructureChanges = async (): Promise<StructureChangeResponse[]> => {
-	const response = await get<{ items: StructureChangeResponse[] }>('adminStructureChanges');
-	return response.items ?? [];
-};
-
-const valueText = (value: unknown): string => {
-	if (value === null || value === undefined) return '';
-	if (typeof value === 'string') return value;
-	try {
-		return JSON.stringify(value);
-	} catch {
-		return String(value);
-	}
-};
-
-export const auditCsv = (rows: AuditLogRow[]): string =>
-	buildCsv(
-		['performed_at', 'performed_by', 'action', 'entity_type', 'entity_id', 'old_value', 'new_value', 'origin'],
-		rows.map((r) => [
-			r.performed_at,
-			r.performed_by === null || r.performed_by === undefined ? '' : String(r.performed_by),
-			r.action,
-			r.entity_type,
-			r.entity_id ?? '',
-			valueText(r.old_value),
-			valueText(r.new_value),
-			r.origin,
-		])
+export const listStructureChanges = async (
+	filters: { page?: number; size?: number } = {}
+): Promise<Paginated<StructureChangeResponse>> => {
+	const params: Record<string, string> = {
+		page: String(filters.page ?? 1),
+		size: String(filters.size ?? 20),
+	};
+	const response = await get<Paginated<StructureChangeResponse>>(
+		'adminStructureChanges',
+		params
 	);
+	return {
+		items: response.items ?? [],
+		total: response.total ?? 0,
+		page: response.page ?? (filters.page ?? 1),
+		size: response.size ?? (filters.size ?? 20),
+	};
+};
 
 export { downloadCsv };

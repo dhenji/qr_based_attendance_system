@@ -636,6 +636,12 @@ export interface AttendanceOverviewFilters {
 // The academic-structure shape mirrors api-contracts
 // GET /admin/system/academic-structure exactly (D38: program/year/course
 // mutations with old/new values).
+//
+// The endpoint returns the stored row unaltered (ADR-064): `performed_by` is
+// a `users.id` and `old_value`/`new_value` are the raw JSON snapshots. The
+// names an administrator needs are derived on the read side — see
+// `features/admin/audit/present.ts`, which reads the label out of the
+// snapshot first and only falls back to a roster lookup.
 
 export type AuditEntityType =
 	| 'program'
@@ -662,6 +668,7 @@ export type AuditAction =
 	| 'delete'
 	| 'import'
 	| 'enroll'
+	| 'unenroll'
 	| 'assign'
 	| 'reassign'
 	| 'reopen'
@@ -680,35 +687,47 @@ export type AuditActorRole = 'admin' | 'professor' | 'student' | 'system';
 
 export interface AuditLogItemResponse {
 	id: number;
-	action: string;
-	entity_type: string;
+	action: AuditAction;
+	entity_type: AuditEntityType;
 	entity_id: number | null;
-	old_value: unknown;
-	new_value: unknown;
-	performed_by: string | number | null;
+	/**
+	 * The JSON snapshot the writer took, verbatim.
+	 *
+	 * A dict, not a string: the backend stores `JSONB`
+	 * (`backend/src/features/system/model.py:68`), so the API returns an
+	 * object. `old_value` is null on create, `new_value` is null on delete.
+	 */
+	old_value: Record<string, unknown> | null;
+	new_value: Record<string, unknown> | null;
+	/**
+	 * `users.id` of the actor, or null when nobody was authenticated
+	 * (an anonymous lockout, or a cron run). It is a raw id, not a name —
+	 * the audit endpoint derives nothing (ADR-064), so resolving it to a
+	 * person is the reader's job.
+	 */
+	performed_by: number | null;
 	performed_at: string;
 }
 
 export interface AuditLogFilters {
 	entity_type?: AuditEntityType;
 	action?: AuditAction;
-	performed_by?: string;
+	/** `users.id`. The backend types it `int | None`, so it is a number here. */
+	performed_by?: number;
 	date_from?: string;
 	date_to?: string;
 	page?: number;
 	size?: number;
 }
 
-export interface StructureChangeResponse {
-	id: number;
-	action: string;
-	entity_type: string;
-	entity_id: number;
-	old_value: string | null;
-	new_value: string | null;
-	performed_by: string;
-	performed_at: string;
-}
+/**
+ * The academic-structure row.
+ *
+ * A subtype of the audit row rather than a copy, mirroring the backend
+ * (`AcademicStructureRead` subclasses `AuditLogRead`,
+ * `backend/src/features/system/schema.py:104-109`) so the two cannot drift.
+ */
+export interface StructureChangeResponse extends AuditLogItemResponse {}
 
 export interface CsvImportError {
 	line: number;

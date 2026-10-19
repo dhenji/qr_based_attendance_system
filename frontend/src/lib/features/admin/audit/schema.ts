@@ -39,6 +39,7 @@ export const AUDIT_ACTION_VALUES = [
 	'delete',
 	'import',
 	'enroll',
+	'unenroll',
 	'assign',
 	'reassign',
 	'reopen',
@@ -66,7 +67,16 @@ export const auditFilterSchema = z
 			.enum(AUDIT_ACTION_VALUES)
 			.optional()
 			.or(z.literal('')),
-		performed_by: z.string().trim().max(100).optional().or(z.literal('')),
+		// The backend types `performed_by` as `int | None`
+		// (`backend/src/features/system/router.py:81`), so anything but a
+		// number is a 422. The check lives here so a mistyped actor is a
+		// client-side error instead of a failed request.
+		performed_by: z
+			.string()
+			.trim()
+			.regex(/^\d*$/, 'Actor must be a user id')
+			.optional()
+			.or(z.literal('')),
 	})
 	.superRefine((value, ctx) => {
 		if (value.date_from && value.date_to && value.date_from > value.date_to) {

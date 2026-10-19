@@ -3168,10 +3168,21 @@ export const SystemCleanupEndpoint: EndpointDef<{ removed: number }> = {
 //
 // GET /admin/audit-logs?entity_type&action&performed_by&date_from&date_to&page&size
 // returns { items: [{ id, action, entity_type, entity_id, old_value, new_value,
-// performed_by, performed_at }] }. The mock rows below mirror that contract
-// shape (mapped to the legacy feed view-model in features/admin/audit/service.ts
-// until the page migrates to the native columns); mocks only when
-// PUBLIC_MOCK_MODE=true.
+// performed_by, performed_at }] }. Mocks only when PUBLIC_MOCK_MODE=true.
+//
+// The fixtures below mirror the CONTRACT shape, not a friendlier invention
+// of it:
+//   - `performed_by` is a `users.id` in the MOCK_ADMIN_USER_ROWS id space
+//     (1 super_admin, 2 admin, 3 professor, 4 student) — never a name.
+//   - `old_value`/`new_value` are the JSON snapshots the server's
+//     `_<entity>_snapshot` methods actually take, so the field names the
+//     reader maps are the ones it will really see.
+//   - every `action` is a real `AuditAction`, and every `entity_type` a real
+//     `AuditEntityType`.
+//
+// The previous fixtures used readable strings for all three, which meant mock
+// mode rendered a page the real API never produces — and hid every rendering
+// bug that came with the real shape.
 
 const mockAuditAt = (daysAgo: number, time: string): string => {
 	const date = new Date();
@@ -3181,28 +3192,469 @@ const mockAuditAt = (daysAgo: number, time: string): string => {
 };
 
 const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
-	{ id: 1, action: 'open', entity_type: 'session', entity_id: 41, old_value: null, new_value: 'offering 1 · 60 min', performed_by: 'J. Smith', performed_at: mockAuditAt(0, '08:55:00') },
-	{ id: 2, action: 'import', entity_type: 'student', entity_id: null, old_value: null, new_value: '25 imported · 0 duplicates', performed_by: 'Admin', performed_at: mockAuditAt(0, '08:30:00') },
-	{ id: 3, action: 'update', entity_type: 'year_level', entity_id: 2, old_value: '1st Semester, 2nd Semester', new_value: '1st Semester, 2nd Semester, Midyear', performed_by: 'Admin', performed_at: mockAuditAt(0, '08:00:00') },
-	{ id: 4, action: 'approve', entity_type: 'excuse', entity_id: 7, old_value: 'pending', new_value: 'approved · quick excuse · medical', performed_by: 'M. Garcia', performed_at: mockAuditAt(1, '15:20:00') },
-	{ id: 5, action: 'assign', entity_type: 'course_professor', entity_id: null, old_value: null, new_value: 'J. Smith → offering 1 · primary', performed_by: 'Admin', performed_at: mockAuditAt(1, '14:05:00') },
-	{ id: 6, action: 'update', entity_type: 'maintenance', entity_id: null, old_value: null, new_value: 'risk batch · processed 90 · high 4 · medium 11', performed_by: 'system', performed_at: mockAuditAt(1, '11:47:00') },
-	{ id: 7, action: 'enroll', entity_type: 'enrollment', entity_id: null, old_value: null, new_value: '3 enrolled · 1 skipped · offering 1', performed_by: 'Admin', performed_at: mockAuditAt(2, '16:33:00') },
-	{ id: 8, action: 'create', entity_type: 'face_enrollment', entity_id: 1, old_value: null, new_value: '3 photos · embedding v2', performed_by: 'Admin', performed_at: mockAuditAt(2, '10:12:00') },
-	{ id: 9, action: 'create', entity_type: 'backup', entity_id: 31, old_value: null, new_value: 'pg_dump · AES-256-GCM · 41 MB', performed_by: 'system', performed_at: mockAuditAt(3, '03:00:00') },
-	{ id: 10, action: 'close', entity_type: 'session', entity_id: 38, old_value: null, new_value: 'present 24 · late 3 · absent 3', performed_by: 'J. Smith', performed_at: mockAuditAt(3, '09:44:00') },
-	{ id: 11, action: 'lock', entity_type: 'user', entity_id: 19, old_value: null, new_value: '5 failed attempts', performed_by: 'system', performed_at: mockAuditAt(4, '13:29:00') },
-	{ id: 12, action: 'login_failed', entity_type: 'user', entity_id: 19, old_value: null, new_value: 'attempt 5 · wrong password', performed_by: null, performed_at: mockAuditAt(4, '13:24:00') },
-	{ id: 13, action: 'update', entity_type: 'course_offering', entity_id: 2, old_value: 'present 5 min', new_value: 'present 10 min', performed_by: 'Admin', performed_at: mockAuditAt(5, '10:02:00') },
-	{ id: 14, action: 'archive', entity_type: 'course', entity_id: 4, old_value: 'is_active=true', new_value: 'is_active=false', performed_by: 'Admin', performed_at: mockAuditAt(5, '09:15:00') },
-	{ id: 15, action: 'create', entity_type: 'excuse', entity_id: 6, old_value: null, new_value: 'pending professor review', performed_by: 'B. Cruz', performed_at: mockAuditAt(6, '14:51:00') },
-	{ id: 16, action: 'create', entity_type: 'course', entity_id: 2, old_value: null, new_value: 'CS102 Data Structures · 3 units', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:05:00') },
-	{ id: 17, action: 'create', entity_type: 'course_offering', entity_id: 3, old_value: null, new_value: 'CS101 BSIT 1st Year 1st Sem 2025-2026', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:02:00') },
-	{ id: 18, action: 'open', entity_type: 'session', entity_id: 35, old_value: null, new_value: 'offering 2 · 90 min', performed_by: 'M. Garcia', performed_at: mockAuditAt(8, '17:40:00') },
-	{ id: 19, action: 'unassign', entity_type: 'course_professor', entity_id: null, old_value: 'J. Smith → offering 3', new_value: 'effective_to today (handover)', performed_by: 'Admin', performed_at: mockAuditAt(9, '12:18:00') },
-	{ id: 20, action: 'update', entity_type: 'app_setting', entity_id: null, old_value: 'present_window 5 min', new_value: 'present_window 10 min', performed_by: 'Admin', performed_at: mockAuditAt(10, '09:31:00') },
-	{ id: 21, action: 'unlock', entity_type: 'user', entity_id: 19, old_value: 'locked', new_value: 'unlocked after verification', performed_by: 'Admin', performed_at: mockAuditAt(12, '07:58:00') },
-	{ id: 22, action: 'password_reset', entity_type: 'user', entity_id: 19, old_value: null, new_value: 'temp password issued · must_change_password', performed_by: 'Admin', performed_at: mockAuditAt(12, '08:10:00') },
+	{
+		id: 1,
+		action: 'open',
+		entity_type: 'session',
+		entity_id: 41,
+		old_value: null,
+		new_value: {
+			offering_id: 3,
+			professor_id: 3,
+			session_type: 'lecture',
+			session_code: '482913',
+			scheduled_start_time: '2026-10-20T08:00:00+00:00',
+			scheduled_end_time: '2026-10-20T09:00:00+00:00',
+			expires_at: '2026-10-20T09:15:00+00:00',
+		},
+		performed_by: 3,
+		performed_at: mockAuditAt(0, '08:55:00'),
+	},
+	{
+		id: 2,
+		action: 'import',
+		entity_type: 'student',
+		entity_id: null,
+		old_value: null,
+		new_value: { imported: 25, duplicates: 0, errors: 2 },
+		performed_by: 2,
+		performed_at: mockAuditAt(0, '08:30:00'),
+	},
+	{
+		id: 3,
+		action: 'update',
+		entity_type: 'year_level',
+		entity_id: 2,
+		old_value: {
+			program_id: 1,
+			year_number: 2,
+			label: '2nd Year',
+			term_structure: {
+				terms: [
+					{ code: '1st', label: '1st Semester' },
+					{ code: '2nd', label: '2nd Semester' },
+				],
+			},
+			sort_order: 2,
+		},
+		new_value: {
+			program_id: 1,
+			year_number: 2,
+			label: '2nd Year',
+			term_structure: {
+				terms: [
+					{ code: '1st', label: '1st Semester' },
+					{ code: '2nd', label: '2nd Semester' },
+					{ code: 'mid', label: 'Midyear' },
+				],
+			},
+			sort_order: 2,
+		},
+		performed_by: 1,
+		performed_at: mockAuditAt(0, '08:00:00'),
+	},
+	{
+		id: 4,
+		action: 'approve',
+		entity_type: 'excuse',
+		entity_id: 7,
+		old_value: {
+			student_id: 4,
+			session_id: 41,
+			initiated_by: 'student',
+			initiated_via: 'request',
+			reason: 'Medical appointment',
+			attachment_count: 1,
+			status: 'pending',
+			reviewed_by: null,
+			review_notes: null,
+		},
+		new_value: {
+			student_id: 4,
+			session_id: 41,
+			initiated_by: 'student',
+			initiated_via: 'request',
+			reason: 'Medical appointment',
+			attachment_count: 1,
+			status: 'approved',
+			reviewed_by: 3,
+			review_notes: 'Medical certificate verified.',
+		},
+		performed_by: 3,
+		performed_at: mockAuditAt(1, '15:20:00'),
+	},
+	{
+		id: 5,
+		action: 'assign',
+		entity_type: 'course_professor',
+		entity_id: null,
+		old_value: null,
+		new_value: {
+			offering_id: 3,
+			professor_id: 3,
+			is_primary: true,
+			effective_from: '2026-08-01',
+			effective_to: null,
+		},
+		performed_by: 2,
+		performed_at: mockAuditAt(1, '14:05:00'),
+	},
+	{
+		id: 6,
+		action: 'update',
+		entity_type: 'maintenance',
+		entity_id: null,
+		old_value: null,
+		new_value: { processed: 90, succeeded: 88, failed: 2 },
+		performed_by: null,
+		performed_at: mockAuditAt(1, '11:47:00'),
+	},
+	{
+		id: 7,
+		action: 'enroll',
+		entity_type: 'enrollment',
+		entity_id: null,
+		old_value: null,
+		new_value: { offering_id: 3, enrolled: 3, skipped: 1, errors: 0 },
+		performed_by: 2,
+		performed_at: mockAuditAt(2, '16:33:00'),
+	},
+	{
+		id: 8,
+		action: 'update',
+		entity_type: 'face_enrollment',
+		entity_id: 4,
+		old_value: {
+			enrolled: false,
+			face_enrolled_at: null,
+			face_embedding_version: 0,
+		},
+		new_value: {
+			enrolled: true,
+			face_enrolled_at: '2026-10-18T10:12:00+00:00',
+			face_embedding_version: 2,
+		},
+		performed_by: 4,
+		performed_at: mockAuditAt(2, '10:12:00'),
+	},
+	{
+		id: 9,
+		action: 'create',
+		entity_type: 'backup',
+		entity_id: 31,
+		old_value: null,
+		new_value: {
+			kind: 'full',
+			filename: 'attendance_2026-10-17.dump.gz',
+			status: 'completed',
+			size_bytes: 43008000,
+			storage_backend: 'local',
+			sha256: '9f2c1ab4de7056f8e3c1b0a9d4e7f2c8b5a6d1e0f3c2b9a8d7e6f5c4b3a2d1e0f9',
+		},
+		performed_by: null,
+		performed_at: mockAuditAt(3, '03:00:00'),
+	},
+	{
+		id: 10,
+		action: 'close',
+		entity_type: 'session',
+		entity_id: 38,
+		old_value: {
+			offering_id: 2,
+			professor_id: 3,
+			session_type: 'lecture',
+			session_code: '775104',
+			scheduled_start_time: '2026-10-17T08:00:00+00:00',
+			scheduled_end_time: '2026-10-17T09:00:00+00:00',
+			expires_at: '2026-10-17T09:15:00+00:00',
+		},
+		new_value: {
+			offering_id: 2,
+			professor_id: 3,
+			session_type: 'lecture',
+			session_code: '775104',
+			scheduled_start_time: '2026-10-17T08:00:00+00:00',
+			scheduled_end_time: '2026-10-17T09:00:00+00:00',
+			expires_at: '2026-10-17T09:15:00+00:00',
+		},
+		performed_by: 3,
+		performed_at: mockAuditAt(3, '09:44:00'),
+	},
+	{
+		id: 11,
+		action: 'lock',
+		entity_type: 'user',
+		entity_id: 4,
+		old_value: {
+			failed_login_attempts: 4,
+			is_locked: false,
+			locked_at: null,
+			must_change_password: true,
+		},
+		new_value: {
+			failed_login_attempts: 5,
+			is_locked: true,
+			locked_at: '2026-10-16T13:29:00+00:00',
+			must_change_password: true,
+		},
+		performed_by: null,
+		performed_at: mockAuditAt(4, '13:29:00'),
+	},
+	{
+		id: 12,
+		action: 'login_failed',
+		entity_type: 'user',
+		entity_id: 4,
+		old_value: {
+			failed_login_attempts: 4,
+			is_locked: false,
+			locked_at: null,
+			must_change_password: true,
+		},
+		new_value: {
+			failed_login_attempts: 5,
+			is_locked: false,
+			locked_at: null,
+			must_change_password: true,
+		},
+		performed_by: null,
+		performed_at: mockAuditAt(4, '13:24:00'),
+	},
+	{
+		id: 13,
+		action: 'update',
+		entity_type: 'course_offering',
+		entity_id: 2,
+		old_value: {
+			offering_id: 2,
+			session_type: 'lecture',
+			schedule_days: 'MW',
+			schedule_start_time: '08:00:00',
+			schedule_end_time: '09:00:00',
+			classroom_name: 'Room 201',
+			classroom_lat: 14.5995,
+			classroom_lng: 120.9842,
+			is_active: true,
+		},
+		new_value: {
+			offering_id: 2,
+			session_type: 'lecture',
+			schedule_days: 'MW',
+			schedule_start_time: '09:00:00',
+			schedule_end_time: '10:00:00',
+			classroom_name: 'Room 201',
+			classroom_lat: 14.5995,
+			classroom_lng: 120.9842,
+			is_active: true,
+		},
+		performed_by: 2,
+		performed_at: mockAuditAt(5, '10:02:00'),
+	},
+	{
+		id: 14,
+		action: 'archive',
+		entity_type: 'course',
+		entity_id: 4,
+		old_value: {
+			course_code: 'CS102',
+			course_name: 'Data Structures',
+			units: 3,
+			session_duration_hours: 1.5,
+			is_active: true,
+		},
+		new_value: {
+			course_code: 'CS102',
+			course_name: 'Data Structures',
+			units: 3,
+			session_duration_hours: 1.5,
+			is_active: false,
+		},
+		performed_by: 1,
+		performed_at: mockAuditAt(5, '09:15:00'),
+	},
+	{
+		id: 15,
+		action: 'create',
+		entity_type: 'excuse',
+		entity_id: 6,
+		old_value: null,
+		new_value: {
+			student_id: 4,
+			session_id: 38,
+			initiated_by: 'professor',
+			initiated_via: 'quick_excuse',
+			reason: 'Family emergency',
+			attachment_count: 0,
+			status: 'pending',
+			reviewed_by: null,
+			review_notes: null,
+		},
+		performed_by: 3,
+		performed_at: mockAuditAt(6, '14:51:00'),
+	},
+	{
+		id: 16,
+		action: 'create',
+		entity_type: 'course',
+		entity_id: 2,
+		old_value: null,
+		new_value: {
+			course_code: 'CS102',
+			course_name: 'Data Structures',
+			units: 3,
+			session_duration_hours: 1.5,
+			is_active: true,
+		},
+		performed_by: 2,
+		performed_at: mockAuditAt(7, '08:05:00'),
+	},
+	{
+		id: 17,
+		action: 'create',
+		entity_type: 'course_offering',
+		entity_id: 3,
+		old_value: null,
+		new_value: {
+			course_id: 2,
+			program_id: 2,
+			year_level_id: 3,
+			semester: '1st',
+			academic_year: '2026-2027',
+			sessions_per_week: 2,
+			schedule_days: 'MW',
+			schedule_start_time: '08:00:00',
+			schedule_end_time: '09:30:00',
+			classroom_name: 'Lab 1',
+			classroom_lat: 14.5996,
+			classroom_lng: 120.9843,
+			default_present_window_minutes: 5,
+			default_late_window_minutes: 10,
+			is_active: true,
+		},
+		performed_by: 2,
+		performed_at: mockAuditAt(7, '08:02:00'),
+	},
+	{
+		id: 18,
+		action: 'unassign',
+		entity_type: 'course_professor',
+		entity_id: null,
+		old_value: {
+			offering_id: 3,
+			professor_id: 3,
+			is_primary: true,
+			effective_from: '2026-08-01',
+			effective_to: null,
+		},
+		new_value: {
+			offering_id: 3,
+			professor_id: 3,
+			is_primary: true,
+			effective_from: '2026-08-01',
+			effective_to: '2026-10-16',
+		},
+		performed_by: 2,
+		performed_at: mockAuditAt(9, '12:18:00'),
+	},
+	{
+		id: 19,
+		action: 'update',
+		entity_type: 'app_setting',
+		entity_id: null,
+		old_value: { present_window_default: '5' },
+		new_value: { present_window_default: '10' },
+		performed_by: 1,
+		performed_at: mockAuditAt(10, '09:31:00'),
+	},
+	{
+		id: 20,
+		action: 'password_reset',
+		entity_type: 'user',
+		entity_id: 4,
+		old_value: {
+			failed_login_attempts: 5,
+			is_locked: true,
+			locked_at: '2026-10-16T13:29:00+00:00',
+			must_change_password: true,
+		},
+		new_value: {
+			failed_login_attempts: 0,
+			is_locked: false,
+			locked_at: null,
+			must_change_password: true,
+		},
+		performed_by: 1,
+		performed_at: mockAuditAt(12, '08:10:00'),
+	},
+	{
+		id: 21,
+		action: 'create',
+		entity_type: 'program',
+		entity_id: 2,
+		old_value: null,
+		new_value: {
+			code: 'BSIT',
+			name: 'Bachelor of Science in Information Technology',
+			description: 'Information Technology program',
+			total_years: 4,
+			is_active: true,
+		},
+		performed_by: 1,
+		performed_at: mockAuditAt(12, '07:40:00'),
+	},
+	{
+		id: 22,
+		action: 'update',
+		entity_type: 'program',
+		entity_id: 2,
+		old_value: {
+			code: 'BSIT',
+			name: 'BS Information Technology',
+			description: 'Information Technology program',
+			total_years: 4,
+			is_active: true,
+		},
+		new_value: {
+			code: 'BSIT',
+			name: 'Bachelor of Science in Information Technology',
+			description: 'Information Technology program',
+			total_years: 4,
+			is_active: true,
+		},
+		performed_by: 1,
+		performed_at: mockAuditAt(12, '07:45:00'),
+	},
+	{
+		id: 23,
+		action: 'unenroll',
+		entity_type: 'enrollment',
+		entity_id: 55,
+		old_value: {
+			offering_id: 3,
+			student_id: '2024-0001',
+			semester: '1st',
+			academic_year: '2026-2027',
+		},
+		new_value: null,
+		performed_by: 2,
+		performed_at: mockAuditAt(13, '10:05:00'),
+	},
+	{
+		id: 24,
+		action: 'delete',
+		entity_type: 'program',
+		entity_id: 5,
+		old_value: {
+			code: 'BSED',
+			name: 'Bachelor of Science in Education',
+			description: null,
+			total_years: 4,
+			is_active: false,
+		},
+		new_value: null,
+		performed_by: 1,
+		performed_at: mockAuditAt(15, '16:20:00'),
+	},
 ];
 
 export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>> = {
@@ -3217,11 +3669,11 @@ export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>
 		if (params?.action) {
 			rows = rows.filter((r) => r.action === params.action);
 		}
+		// `performed_by` is a `users.id` in the contract, so the mock compares
+		// ids rather than names.
 		if (params?.performed_by) {
-			const needle = params.performed_by.trim().toLowerCase();
-			if (needle) {
-				rows = rows.filter((r) => String(r.performed_by ?? '').toLowerCase().includes(needle));
-			}
+			const wanted = Number(params.performed_by);
+			rows = rows.filter((r) => r.performed_by === wanted);
 		}
 		if (params?.date_from) {
 			rows = rows.filter((r) => r.performed_at.slice(0, 10) >= params.date_from!);
@@ -3240,19 +3692,31 @@ export const AdminAuditLogsEndpoint: EndpointDef<Paginated<AuditLogItemResponse>
 
 // Academic-structure changes mirror api-contracts
 // GET /admin/system/academic-structure exactly (D38).
-const MOCK_STRUCTURE_ROWS: StructureChangeResponse[] = [
-	{ id: 1, action: 'term_added', entity_type: 'year_level', entity_id: 2, old_value: '1st Semester, 2nd Semester', new_value: '1st Semester, 2nd Semester, Midyear', performed_by: 'Admin', performed_at: mockAuditAt(0, '08:00:00') },
-	{ id: 2, action: 'course_archived', entity_type: 'course', entity_id: 4, old_value: 'is_active=true', new_value: 'is_active=false', performed_by: 'Admin', performed_at: mockAuditAt(5, '09:15:00') },
-	{ id: 3, action: 'course_created', entity_type: 'course', entity_id: 2, old_value: null, new_value: 'CS102 Data Structures · 3 units', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:05:00') },
-	{ id: 4, action: 'offering_created', entity_type: 'course_offering', entity_id: 3, old_value: null, new_value: 'CS101 BSIT 1st Year 1st Sem 2025-2026', performed_by: 'Admin', performed_at: mockAuditAt(7, '08:02:00') },
-	{ id: 5, action: 'year_level_created', entity_type: 'year_level', entity_id: 6, old_value: null, new_value: '6th Year · BSCS', performed_by: 'Admin', performed_at: mockAuditAt(9, '10:00:00') },
-	{ id: 6, action: 'program_renamed', entity_type: 'program', entity_id: 2, old_value: 'BS Information Technology', new_value: 'BS Information Technology (morning)', performed_by: 'Admin', performed_at: mockAuditAt(12, '11:30:00') },
-];
+//
+// The same contract shape as the trail: dict snapshots, a numeric actor, and
+// actions drawn from `AuditAction`. The structural rows are a subset of the
+// trail — the server returns program/year/course/offering rows on BOTH
+// endpoints — so the fixtures below reuse the trail's structural rows rather
+// than inventing a parallel set.
+const MOCK_STRUCTURE_ROWS: StructureChangeResponse[] = MOCK_AUDIT_ROWS.filter((r) =>
+	(['program', 'year_level', 'course', 'course_offering'] as const).includes(
+		r.entity_type as 'program' | 'year_level' | 'course' | 'course_offering'
+	)
+);
 
-export const AdminStructureChangesEndpoint: EndpointDef<{ items: StructureChangeResponse[] }> = {
+export const AdminStructureChangesEndpoint: EndpointDef<Paginated<StructureChangeResponse>> = {
 	url: '/admin/system/academic-structure',
 	method: 'GET',
-	mock: () => ({ items: [...MOCK_STRUCTURE_ROWS] }),
+	mock: (params) => {
+		const rows = [...MOCK_STRUCTURE_ROWS].sort((a, b) =>
+			a.performed_at < b.performed_at ? 1 : -1
+		);
+		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 200);
+		const total = rows.length;
+		const totalPages = Math.max(1, Math.ceil(total / size));
+		const page = Math.min(Math.max(parseInt(params?.page ?? '1', 10) || 1, 1), totalPages);
+		return { items: rows.slice((page - 1) * size, page * size), total, page, size };
+	},
 };
 
 // --- Admin users (super_admin only) -------------------------------------------
