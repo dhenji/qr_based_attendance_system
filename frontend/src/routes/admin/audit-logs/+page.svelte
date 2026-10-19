@@ -16,6 +16,7 @@
 		type AuditLogRow,
 	} from '$lib/features/admin/audit/service';
 	import { auditFilterSchema } from '$lib/features/admin/audit/schema';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import type { AuditAction, AuditEntityType } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
@@ -43,6 +44,15 @@
 	let action = $state('');
 	let performedBy = $state('');
 	let formError = $state<string | null>(null);
+
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 
 	const actorLabel = (row: AuditLogRow): string =>
 		row.performed_by === null || row.performed_by === undefined || row.performed_by === ''
@@ -172,8 +182,8 @@
 			<p class="muted">Audit-trail rows come from the server log · record-creation rows are derived from roster created_at</p>
 		</div>
 		<div class="header-actions">
-			<button class="btn btn-secondary" onclick={() => window.print()}>Print</button>
-			<button class="btn btn-primary" data-testid="export-logs" onclick={onExport}>Export Logs</button>
+			<button class="btn btn-secondary" onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>Print</button>
+			<button class="btn btn-primary" data-testid="export-logs" onclick={() => (pendingExport = { run: onExport, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminAuditState.items.length) }] })}>Export Logs</button>
 		</div>
 	</header>
 
@@ -327,6 +337,17 @@
 				</div>
 			{/if}
 		</section>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 

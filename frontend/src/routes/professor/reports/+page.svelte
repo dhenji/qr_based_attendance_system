@@ -21,6 +21,7 @@
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 	import { isMockMode } from '$lib/api/client';
 	import { formatPercentage } from '$lib/shared/utils/format';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	type Tab = 'all' | 'comparison' | 'trends';
 	const TABS = [
@@ -338,6 +339,14 @@
 	// fall back to the client-side aggregate CSV under a distinct filename so
 	// the two never get confused (different columns: per-scan vs aggregate).
 	let exportNote = $state<string | null>(null);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 	const downloadCsv = async () => {
 		if (csvRows.length === 0) return;
 		exportNote = null;
@@ -670,7 +679,7 @@
 					type="button"
 					disabled={csvRows.length === 0}
 					title={csvRows.length === 0 ? 'No report rows to export' : 'Download the current report as CSV'}
-					onclick={downloadCsv}
+					onclick={() => (pendingExport = { run: downloadCsv, details: [{ label: 'Report', value: tab }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(csvRows.length) }] })}
 				>
 					Download CSV
 				</button>				<button
@@ -678,7 +687,7 @@
 					type="button"
 					disabled={csvRows.length === 0}
 					title={csvRows.length === 0 ? 'No report rows to export' : 'Print the current report as PDF'}
-					onclick={() => window.print()}
+					onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this report? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Report', value: tab }, { label: 'Format', value: 'PDF (print)' }] })}
 				>
 					Download PDF
 				</button>
@@ -687,6 +696,17 @@
 				<p class="muted" role="status">{exportNote}</p>
 			{/if}
 		</section>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 

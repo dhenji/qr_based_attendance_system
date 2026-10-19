@@ -22,6 +22,7 @@
 	} from '$lib/features/excuse/attachments';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	type Status = StudentHistoryStatus;
 	type Row = {
@@ -305,6 +306,15 @@
 	let exportError: string | null = $state(null);
 	let exportNote: string | null = $state(null);
 
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
+
 	// Export is server-side (GET /student/attendance/history/export), so the
 	// file holds every matching row — the old client path paged through the list
 	// endpoint and stopped at 2000.
@@ -576,8 +586,8 @@
 		</select>
 
 		<div class="actions">
-			<button class="btn-ghost" onclick={doPrint}>Print</button>
-			<button class="btn-ghost" onclick={exportCsv} disabled={exporting}>
+			<button class="btn-ghost" onclick={() => (pendingExport = { run: doPrint, title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>Print</button>
+			<button class="btn-ghost" onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(filtered.length) }] })} disabled={exporting}>
 				{exporting ? 'Exporting…' : 'Export CSV'}
 			</button>
 		</div>
@@ -827,6 +837,17 @@
 				</div>
 			</div>
 		</div>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 

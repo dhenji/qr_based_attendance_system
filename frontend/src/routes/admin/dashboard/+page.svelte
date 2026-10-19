@@ -3,6 +3,8 @@
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { getAdminDashboard } from '$lib/features/admin/service';
+import { listCourses } from '$lib/features/admin/courses/service';
+import { listOfferings } from '$lib/features/admin/offerings/service';
 	import {
 		adminAttendanceState,
 		initAttendanceOverview,
@@ -21,14 +23,25 @@
 	// The per-course attendance strip is the one block the summary does not
 	// cover, so it keeps its own call.
 	let dashboard = $state<AdminDashboardResponse | null>(null);
+	let courseCount = $state<number | null>(null);
+	let offeringCount = $state<number | null>(null);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
 	const load = async () => {
 		loading = true;
 		loadError = null;
+		courseCount = null;
+		offeringCount = null;
 		try {
-			dashboard = await getAdminDashboard();
+			const [dash, courses, offerings] = await Promise.all([
+				getAdminDashboard(),
+				listCourses({ page: 1, size: 1 }).catch(() => null),
+				listOfferings({ page: 1, size: 1 }).catch(() => null),
+			]);
+			dashboard = dash;
+			courseCount = courses?.total ?? null;
+			offeringCount = offerings?.total ?? null;
 		} catch (e: unknown) {
 			dashboard = null;
 			loadError =
@@ -110,6 +123,54 @@
 			sub: 'Queued uploads',
 		},
 	]);
+
+	const gettingStartedSteps = $derived([
+		{
+			done: (dashboard?.program_count ?? 0) > 0,
+			title: 'Create a program',
+			description:
+				'Programs anchor year levels, courses, and offerings. The Setup Wizard walks through the whole flow.',
+			action: 'Open Setup Wizard',
+			route: Routes.ADMIN_SETUP_WIZARD,
+			testid: 'gs-setup-wizard',
+		},
+		{
+			done: (courseCount ?? 0) > 0,
+			title: 'Add course templates',
+			description: 'Define reusable subjects (code, name, units) before scheduling them.',
+			action: 'Manage Courses',
+			route: Routes.ADMIN_COURSES,
+			testid: 'gs-courses',
+		},
+		{
+			done: (offeringCount ?? 0) > 0,
+			title: 'Schedule offerings',
+			description: 'Create a dated, scheduled instance of a course for a program/year/term.',
+			action: 'Manage Offerings',
+			route: Routes.ADMIN_OFFERINGS,
+			testid: 'gs-offerings',
+		},
+		{
+			done: (dashboard?.professor_count ?? 0) > 0,
+			title: 'Add professor records',
+			description: 'Professors claim their accounts at registration using the email on file.',
+			action: 'Manage Professors',
+			route: Routes.ADMIN_PROFESSORS,
+			testid: 'gs-professors',
+		},
+		{
+			done: (dashboard?.student_count ?? 0) > 0,
+			title: 'Import or add students',
+			description: 'Bulk-import from CSV or add students one by one, then enroll them in offerings.',
+			action: 'Import Students',
+			route: Routes.ADMIN_STUDENTS_IMPORT,
+			testid: 'gs-import-students',
+		},
+	]);
+
+	const gettingStartedDone = $derived(
+		gettingStartedSteps.filter((step) => step.done).length
+	);
 </script>
 
 <div class="dashboard">
@@ -216,12 +277,32 @@
 	</section>
 
 	<section class="card">
-		<h2 class="section-title">Getting started</h2>
-		<ol class="steps">
-			<li>Import the student roster from CSV, or add students one by one.</li>
-			<li>Add professor records so they can claim their accounts at registration.</li>
-			<li>Deactivate (rather than delete) records that leave; permanent delete lives behind the archive guard.</li>
-		</ol>
+		<div class="section-head">
+			<h2 class="section-title">Getting started</h2>
+			<span class="muted">{gettingStartedDone}/{gettingStartedSteps.length} complete</span>
+		</div>
+		<ul class="checklist">
+			{#each gettingStartedSteps as step (step.title)}
+				<li class:done={step.done}>
+					<span class="check" aria-hidden="true">{step.done ? '✓' : '○'}</span>
+					<div class="step-body">
+						<p class="step-title">{step.title}</p>
+						<p class="step-desc">{step.description}</p>
+					</div>
+					<button
+						class="btn btn-secondary"
+						data-testid={step.testid}
+						onclick={() => goto(step.route)}
+					>
+						{step.action}
+					</button>
+				</li>
+			{/each}
+		</ul>
+		<p class="tip">
+			Deactivate (rather than delete) records that leave; permanent delete lives behind the
+			archive guard.
+		</p>
 	</section>
 </div>
 
@@ -401,14 +482,83 @@
 		padding-bottom: 0.625rem;
 	}
 
-	.steps {
-		margin: 0;
-		padding-left: 1.25rem;
-		color: var(--text-secondary);
-		font-size: 0.9375rem;
+	.checklist {
+		list-style: none;
+		margin: 0 0 1rem;
+		padding: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: 0.75rem;
+	}
+
+	.checklist li {
+		display: grid;
+		grid-template-columns: auto 1fr auto;
+		align-items: center;
+		gap: 0.875rem;
+		padding: 0.875rem 1rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-muted);
+	}
+
+	.checklist li.done {
+		background: var(--success-bg, var(--bg-muted));
+	}
+
+	.check {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.75rem;
+		height: 1.75rem;
+		border-radius: 999px;
+		font-size: 0.9375rem;
+		font-weight: 700;
+		color: var(--text-muted);
+		background: var(--divider);
+	}
+
+	.checklist li.done .check {
+		color: var(--success, var(--text-strong));
+		background: var(--success-bg, var(--divider));
+	}
+
+	.step-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		min-width: 0;
+	}
+
+	.step-title {
+		margin: 0;
+		font-size: 0.9375rem;
+		font-weight: 700;
+		color: var(--text-strong);
+	}
+
+	.step-desc {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	.tip {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	@media (max-width: 640px) {
+		.checklist li {
+			grid-template-columns: auto 1fr;
+		}
+
+		.checklist li .btn {
+			grid-column: 1 / -1;
+			width: 100%;
+		}
 	}
 
 	.error {

@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		cleanupSystem,
 		downloadBackupArchive,
@@ -49,6 +50,15 @@
 
 	let exporting = $state<string | null>(null);
 	let exportError = $state<string | null>(null);
+
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 
 	const load = async () => {
 		loading = true;
@@ -286,7 +296,7 @@
 								type="button"
 								disabled={downloadBusy || row.status !== 'completed'}
 								title={row.status === 'completed' ? 'Download the encrypted backup archive' : 'Only completed backups can be downloaded'}
-								onclick={() => void downloadBackup(row)}
+								onclick={() => (pendingExport = { run: () => downloadBackup(row), title: 'Confirm Download', message: 'Are you sure you want to download this backup? The encrypted archive will be downloaded after you confirm.', confirmLabel: 'Confirm Download', details: [{ label: 'Backup', value: `#${row.id}` }, { label: 'Status', value: row.status }, { label: 'Size', value: formatBytes(row.size_bytes) }] })}
 							>
 								{downloadBusy ? 'Preparing…' : 'Download'}
 							</button>
@@ -309,7 +319,7 @@
 					type="button"
 					disabled={!latestCompleted || downloadBusy}
 					title={latestCompleted ? 'Download the encrypted backup archive' : 'No completed backup yet'}
-					onclick={() => latestCompleted && void downloadBackup(latestCompleted)}
+					onclick={() => latestCompleted && (pendingExport = { run: () => downloadBackup(latestCompleted), title: 'Confirm Download', message: 'Are you sure you want to download this backup? The encrypted archive will be downloaded after you confirm.', confirmLabel: 'Confirm Download', details: [{ label: 'Backup', value: `#${latestCompleted.id}` }, { label: 'Status', value: latestCompleted.status }, { label: 'Size', value: formatBytes(latestCompleted.size_bytes) }] })}
 				>
 					{downloadBusy ? 'Preparing…' : 'Download'}
 				</button>
@@ -324,23 +334,23 @@
 				<p class="error" role="alert">{exportError}</p>
 			{/if}
 			<div class="actions">
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('overview', exportAnalyticsOverview)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('overview', exportAnalyticsOverview), details: [{ label: 'Dataset', value: 'Overview' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'overview' ? 'Exporting…' : 'Overview CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('comparison', exportAnalyticsComparison)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('comparison', exportAnalyticsComparison), details: [{ label: 'Dataset', value: 'Comparison' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'comparison' ? 'Exporting…' : 'Comparison CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('trends', exportAnalyticsTrends)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('trends', exportAnalyticsTrends), details: [{ label: 'Dataset', value: 'Trends' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'trends' ? 'Exporting…' : 'Trends CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('at-risk', exportAnalyticsAtRisk)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('at-risk', exportAnalyticsAtRisk), details: [{ label: 'Dataset', value: 'At-risk' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'at-risk' ? 'Exporting…' : 'At-risk CSV'}
 				</button>
 				<button
 					class="btn btn-secondary"
 					type="button"
 					title="Print the current page as PDF"
-					onclick={() => window.print()}
+					onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'PDF (print)' }] })}
 				>
 					Export PDF
 				</button>
@@ -365,6 +375,17 @@
 				</button>
 			</div>
 		</section>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 
