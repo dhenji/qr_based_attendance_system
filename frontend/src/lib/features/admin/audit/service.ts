@@ -69,6 +69,8 @@ export const AUDIT_ACTIONS: { id: AuditAction; label: string }[] = [
 	{ id: 'import', label: 'Import' },
 	{ id: 'enroll', label: 'Enroll' },
 	{ id: 'assign', label: 'Assign' },
+	{ id: 'reassign', label: 'Reassign' },
+	{ id: 'reopen', label: 'Reopen' },
 	{ id: 'unassign', label: 'Unassign' },
 	{ id: 'open', label: 'Open' },
 	{ id: 'close', label: 'Close' },

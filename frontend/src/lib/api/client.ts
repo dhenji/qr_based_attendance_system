@@ -135,11 +135,15 @@ const fetchWithTimeout = async (
 		// mistake a programming bug for a dropped connection — only these
 		// codes may be queued/retried as offline.
 		if (e instanceof APIError) throw e;
+		// Browsers report transport failures as "Failed to fetch", which tells
+		// the user nothing. Keep transport details in the console and surface a
+		// stable, actionable message in the UI.
+		if (e instanceof Error) {
+			console.warn('[api] request failed before a response:', e.message);
+		}
 		throw new APIError(
 			'network_error',
-			e instanceof Error && e.message
-				? e.message
-				: 'You appear to be offline. Check your connection and try again.'
+			'Unable to reach the server. Check your connection and try again.'
 		);
 	} finally {
 		clearTimeout(timer);

@@ -296,7 +296,7 @@ All sensitive operations are logged in the audit trail:
 | Action                                           | Logged | Trail row                                        |
 | ------------------------------------------------ | ------ | ------------------------------------------------ |
 | Student enrollment/unenrollment                  | Yes    | `enroll` / `enrollment`                         |
-| Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
+| Professor assignment changes                     | Yes    | `assign` / `reassign` / `reopen` / `unassign` on `course_professor` |
 | Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
 | Session open/close                               | Yes    | `open` / `close` on `session`                   |
 | Face enrollment/re-enrollment                    | Yes    | `update` on `face_enrollment`. `revoke` exists as a service method but **no route exposes it**, so the row it would write is unreachable |

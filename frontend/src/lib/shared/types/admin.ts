@@ -380,6 +380,8 @@ export interface AdminAssignmentResponse {
 	effective_from: string;
 	effective_to: string | null;
 	semester: string;
+	/** True when a session was opened under this exact effective window. */
+	has_sessions: boolean;
 	assigned_by: number;
 	assigned_at: string;
 }
@@ -391,6 +393,8 @@ export interface AdminAssignment {
 	effectiveFrom: string;
 	effectiveTo?: string;
 	semester: string;
+	/** Protected by session history; permanent removal is not available. */
+	hasSessions: boolean;
 	assignedBy: number;
 	assignedAt: string;
 	// Joined client-side for display.
@@ -403,7 +407,21 @@ export interface AdminAssignmentCreatePayload {
 	is_primary: boolean;
 	effective_from: string;
 	effective_to?: string;
-	semester: string;
+}
+
+export interface AdminAssignmentReassignPayload {
+	new_professor_id: number;
+	is_primary?: boolean;
+	/** Composite-PK discriminator for the assignment being replaced. */
+	old_effective_from?: string;
+	effective_from?: string;
+	effective_to?: string;
+}
+
+export interface AdminAssignmentReopenPayload {
+	effective_from: string;
+	/** Omit to restore the previous role; false reopens as an assistant. */
+	is_primary?: boolean;
 }
 
 export interface AdminRosterItemResponse {
@@ -645,6 +663,8 @@ export type AuditAction =
 	| 'import'
 	| 'enroll'
 	| 'assign'
+	| 'reassign'
+	| 'reopen'
 	| 'unassign'
 	| 'open'
 	| 'close'

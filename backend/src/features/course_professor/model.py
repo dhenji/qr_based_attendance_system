@@ -5,11 +5,11 @@ from datetime import date, datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
     PrimaryKeyConstraint,
-    String,
     false,
     func,
 )
@@ -23,6 +23,10 @@ class CourseProfessor(CreatedAtMixin, Base):
     __tablename__ = "course_professors"
     __table_args__ = (
         PrimaryKeyConstraint("offering_id", "professor_id", "effective_from"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_course_professors_date_order",
+        ),
     )
 
     offering_id: Mapped[int] = mapped_column(
@@ -36,7 +40,6 @@ class CourseProfessor(CreatedAtMixin, Base):
     effective_from: Mapped[date] = mapped_column(Date)
     is_primary: Mapped[bool] = mapped_column(Boolean, server_default=false())
     effective_to: Mapped[date | None] = mapped_column(Date)
-    semester: Mapped[str] = mapped_column(String(20))
     assigned_by: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("users.id", ondelete="RESTRICT"),

@@ -85,7 +85,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Multiple professors may teach the same course (primary + assistants).
-- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches.
+- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches. At most one primary assignment may cover an offering on any date (assistants may overlap); assign, reassign, and reopen reject a conflicting primary with `409 primary_assignment_conflict`.
 
 ### ADR-010: Absent Professor, Class Activities — No Special Feature
 
@@ -2321,5 +2321,61 @@
   an "apply to all year levels" on save. Covered by
   `test_shared_term_weeks.py`, the program term round-trip/bounds tests, and the
   risk-batch expectation left at 16 × 2 = 32.
+
+### ADR-087: Permanent Assignment Removal Is Guarded, Not a Replacement for End
+
+- **Decision (D87):** Add `DELETE /admin/offerings/{offering_id}/professors/
+  {professor_id}/permanent?effective_from=YYYY-MM-DD` as a **post-End** cleanup
+  for assignments created by mistake. A row with no end date or a future end
+  date is still live and is rejected with `409 assignment_not_ended`; End
+  remains the normal removal action and must run first. Once ended, the route deletes exactly one `course_professors` row and
+  is rejected with `409 assignment_has_sessions` when a session was opened
+  inside that row's effective window (`effective_to` inclusive, open-ended means
+  no upper bound). `effective_from` is required because the composite primary
+  key has no surrogate id. The audit trail records one `delete` row on
+  `course_professor` with the full old-value snapshot. The admin list exposes
+  `has_sessions`; the UI offers permanent removal only on ended rows and shows
+  the action disabled when session history protects the row.
+- **Date:** 2026-10-19
+- **Status:** Accepted
+- **Context:** End preserves history and keeps Reopen possible, but an
+  assignment created for the wrong professor or with the wrong dates before any
+  class ran leaves a bogus row in the assignment trail. The earlier
+  frontend-orchestrated workaround could not erase that row, and making the
+  existing End route destructive would silently break D8's history guarantee.
+- **Alternatives considered:**
+  (1) *Turn `DELETE /professors/{professor_id}` into a hard delete.* Rejected:
+  it would erase real teaching history for every caller and make Reopen
+  impossible.
+  (2) *Allow hard delete even when sessions exist.* Rejected: sessions reference
+  the professor directly, so the assignment trail would disagree with real
+  attendance. The row must remain as the authorization record; End is the
+  correct operation.
+  (3) *Expose a generic table-wide delete.* Rejected: the composite key makes
+  an unqualified delete ambiguous and too easy to mis-target.
+  (4) *Allow active rows to be purged in one step when they have no sessions.*
+  Rejected: a live assignment can be erased accidentally, and the End audit
+  trail is skipped. Requiring End first gives a two-step, auditable flow.
+  (5) *Taken:* one exact-row route that requires an ended assignment, a
+  session-window guard, a distinct delete audit action, and a UI availability
+  flag.
+- **Consequences:** No schema or migration change (`alembic check` stays green).
+  `AssignmentRead` gains an additive `has_sessions` boolean; existing clients
+  that ignore it are unchanged. The guard uses `Session.created_at` (the
+  authorization timestamp), not `scheduled_start_time`, and the list computes
+  the flag in one extra query rather than per row. An active row must be ended
+  first, so the End audit entry (`unassign`) remains in the trail before the
+  purge (`delete`); the admin UI exposes the action only on ended rows and
+  disables it when `has_sessions` is true. Purging an ended primary frees the
+  primary slot but does not auto-assign a replacement. A purged row cannot be
+  reopened; the UI confirmation states this. Covered by
+  `test_permanently_remove_unused_assignment_deletes_and_audits`,
+  `test_permanently_remove_assignment_with_sessions_returns_409`,
+  `test_permanently_remove_active_assignment_returns_409`,
+  `test_permanently_remove_live_assignment_with_future_end_returns_409`,
+  `test_permanently_remove_requires_the_exact_assignment_start`,
+  `test_assignment_list_flags_sessions_only_inside_the_row_window`,
+  `test_permanently_remove_ignores_sessions_outside_the_row_window`, and
+  `test_permanently_remove_primary_frees_the_slot`.
 
 

@@ -2270,6 +2270,7 @@ const MOCK_ADMIN_ASSIGNMENTS: AdminAssignmentResponse[] = [
 		effective_from: '2026-01-01',
 		effective_to: null,
 		semester: '1st Sem',
+		has_sessions: false,
 		assigned_by: 1,
 		assigned_at: new Date().toISOString(),
 	},
@@ -2277,10 +2278,11 @@ const MOCK_ADMIN_ASSIGNMENTS: AdminAssignmentResponse[] = [
 
 interface MockAssignmentPayload {
 	professor_id?: unknown;
+	new_professor_id?: unknown;
 	is_primary?: unknown;
+	old_effective_from?: unknown;
 	effective_from?: unknown;
 	effective_to?: unknown;
-	semester?: unknown;
 }
 
 // Open-ended dates compare as a far-future sentinel, mirroring the backend
@@ -2288,25 +2290,198 @@ interface MockAssignmentPayload {
 const mockDateOrOngoing = (value: string | null | undefined): string =>
 	value ?? '9999-12-31';
 
+const mockDayBefore = (iso: string): string => {
+	const date = new Date(`${iso}T00:00:00Z`);
+	date.setUTCDate(date.getUTCDate() - 1);
+	return date.toISOString().slice(0, 10);
+};
+
+// At most one primary assignment may cover an offering on any date. Mock rows
+// mirror the backend's inclusive interval check so mock mode rejects the same
+// conflicting writes instead of only the live API doing so.
+const mockPrimaryConflict = (
+	offeringId: number,
+	effectiveFrom: string,
+	effectiveTo: string | null,
+	exclude?: AdminAssignmentResponse
+): AdminAssignmentResponse | undefined =>
+	MOCK_ADMIN_ASSIGNMENTS.find(
+		(a) =>
+			a.offering_id === offeringId &&
+			a !== exclude &&
+			a.is_primary &&
+			mockDateOrOngoing(a.effective_to) >= effectiveFrom &&
+			mockDateOrOngoing(effectiveTo) >= a.effective_from
+	);
+
+const mockPrimaryConflictError = (assignment: AdminAssignmentResponse): Error =>
+	new Error(
+		`This offering already has a primary professor from ${assignment.effective_from} to ${assignment.effective_to ?? 'ongoing'}. Assign this professor as an assistant, or end/change the existing primary assignment first.`
+	);
+
 export const AdminOfferingProfessorsEndpoint: EndpointDef<
-	AdminAssignmentResponse[] | AdminAssignmentResponse
+	AdminAssignmentResponse[] | AdminAssignmentResponse | { effective_to: string }
 > = {
 	url: '/admin/offerings',
 	method: 'GET',
-	mock: (_params, suffix, body, method) => {
+	mock: (params, suffix, body, method) => {
 		const offeringId = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
 		if (!Number.isFinite(offeringId) || offeringId <= 0) throw new Error('Offering not found.');
 		if (method === 'DELETE') {
+			const permanentMatch = suffix?.match(/\/professors\/(\d+)\/permanent/);
+			if (permanentMatch) {
+				const professorId = parseInt(permanentMatch[1], 10);
+				const effectiveFrom = params?.effective_from;
+				if (!effectiveFrom) throw new Error('Assignment start date is required.');
+				const row = MOCK_ADMIN_ASSIGNMENTS.find(
+					(a) =>
+						a.offering_id === offeringId &&
+						a.professor_id === professorId &&
+						a.effective_from === effectiveFrom
+				);
+				if (!row) throw new Error('Assignment not found.');
+				const today = new Date().toISOString().slice(0, 10);
+				if (row.effective_to === null || row.effective_to > today) {
+					throw new Error(
+						'This assignment is still active. End it first, then remove it permanently.'
+					);
+				}
+				if (row.has_sessions) {
+					throw new Error(
+						'This assignment has sessions and cannot be permanently removed. End it instead.'
+					);
+				}
+				MOCK_ADMIN_ASSIGNMENTS.splice(MOCK_ADMIN_ASSIGNMENTS.indexOf(row), 1);
+				return mockNoContent();
+			}
+
 			const professorId = parseInt(suffix?.match(/\/professors\/(\d+)/)?.[1] ?? '', 10);
-			const row = MOCK_ADMIN_ASSIGNMENTS.find(
-				(a) => a.offering_id === offeringId && a.professor_id === professorId
-			);
+			const effectiveFrom = params?.effective_from;
+			const row =
+				MOCK_ADMIN_ASSIGNMENTS.find(
+					(a) =>
+						a.offering_id === offeringId &&
+						a.professor_id === professorId &&
+						(!effectiveFrom || a.effective_from === effectiveFrom) &&
+						a.effective_to === null
+				) ??
+				MOCK_ADMIN_ASSIGNMENTS.find(
+					(a) =>
+						a.offering_id === offeringId &&
+						a.professor_id === professorId &&
+						(!effectiveFrom || a.effective_from === effectiveFrom)
+				);
 			if (!row) throw new Error('Assignment not found.');
-			row.effective_to = new Date().toISOString().slice(0, 10);
-			return mockNoContent();
+			const today = new Date().toISOString().slice(0, 10);
+			if (row.effective_from > today) {
+				// A future assignment never took effect; cancel it.
+				MOCK_ADMIN_ASSIGNMENTS.splice(MOCK_ADMIN_ASSIGNMENTS.indexOf(row), 1);
+			} else {
+				row.effective_to = today;
+			}
+			return { effective_to: today };
 		}
 		if (method === 'POST') {
 			const p = (body ?? {}) as MockAssignmentPayload;
+			const offering = MOCK_ADMIN_OFFERINGS.find((o) => o.id === offeringId);
+			const semester = offering?.semester ?? '';
+			const reopenMatch = suffix?.match(/\/professors\/(\d+)\/reopen/);
+			if (reopenMatch) {
+				const professorId = parseInt(reopenMatch[1], 10);
+				const targetStart = String(p.effective_from ?? '').slice(0, 10);
+				const row = MOCK_ADMIN_ASSIGNMENTS.find(
+					(a) =>
+						a.offering_id === offeringId &&
+						a.professor_id === professorId &&
+						a.effective_from === targetStart
+				);
+				if (!row) throw new Error('Assignment not found.');
+				if (row.effective_to === null) throw new Error('This assignment is already open-ended.');
+				const later = MOCK_ADMIN_ASSIGNMENTS.find(
+					(a) =>
+						a.offering_id === offeringId &&
+						a.professor_id === professorId &&
+						a.effective_from > row.effective_from
+				);
+				if (later) throw new Error('A later assignment exists for this professor. End or change it first.');
+				const newPrimary =
+					p.is_primary === undefined ? row.is_primary : Boolean(p.is_primary);
+				if (newPrimary) {
+					const conflict = mockPrimaryConflict(
+						offeringId,
+						row.effective_from,
+						null,
+						row
+					);
+					if (conflict) throw mockPrimaryConflictError(conflict);
+				}
+				row.effective_to = null;
+				row.is_primary = newPrimary;
+				return row;
+			}
+			const reassignMatch = suffix?.match(/\/professors\/(\d+)\/reassign/);
+			if (reassignMatch) {
+				const oldProfessorId = parseInt(reassignMatch[1], 10);
+				const newProfessorId = Number(p.new_professor_id);
+				const effectiveTo = p.effective_to ? String(p.effective_to).slice(0, 10) : null;
+				const oldEffectiveFrom = p.old_effective_from
+					? String(p.old_effective_from).slice(0, 10)
+					: null;
+				const oldRow =
+					MOCK_ADMIN_ASSIGNMENTS.find(
+						(a) =>
+							a.offering_id === offeringId &&
+							a.professor_id === oldProfessorId &&
+							(!oldEffectiveFrom || a.effective_from === oldEffectiveFrom) &&
+							a.effective_to === null
+					) ??
+					MOCK_ADMIN_ASSIGNMENTS.find(
+						(a) =>
+							a.offering_id === offeringId &&
+							a.professor_id === oldProfessorId &&
+							(!oldEffectiveFrom || a.effective_from === oldEffectiveFrom)
+					);
+				if (!oldRow) throw new Error('Assignment not found.');
+				const effectiveFrom = String(p.effective_from ?? oldRow.effective_from).slice(0, 10);
+				if (newProfessorId === oldProfessorId) throw new Error('Replacement professor must differ.');
+				const overlap = MOCK_ADMIN_ASSIGNMENTS.some(
+					(a) =>
+						a.offering_id === offeringId &&
+						a.professor_id === newProfessorId &&
+						mockDateOrOngoing(a.effective_to) >= effectiveFrom &&
+						mockDateOrOngoing(effectiveTo) >= a.effective_from
+				);
+				if (overlap) throw new Error('Overlapping assignment for this professor and offering.');
+				const newPrimary = Boolean(p.is_primary ?? oldRow.is_primary);
+				if (newPrimary) {
+					const conflict = mockPrimaryConflict(
+						offeringId,
+						effectiveFrom,
+						effectiveTo,
+						oldRow
+					);
+					if (conflict) throw mockPrimaryConflictError(conflict);
+				}
+				const today = new Date().toISOString().slice(0, 10);
+				if (oldRow.effective_from > today && effectiveFrom === oldRow.effective_from) {
+					MOCK_ADMIN_ASSIGNMENTS.splice(MOCK_ADMIN_ASSIGNMENTS.indexOf(oldRow), 1);
+				} else {
+					oldRow.effective_to = mockDayBefore(effectiveFrom);
+				}
+				const row: AdminAssignmentResponse = {
+					offering_id: offeringId,
+					professor_id: newProfessorId,
+					is_primary: newPrimary,
+					effective_from: effectiveFrom,
+					effective_to: effectiveTo,
+					semester,
+					has_sessions: false,
+					assigned_by: 1,
+					assigned_at: new Date().toISOString(),
+				};
+				MOCK_ADMIN_ASSIGNMENTS.push(row);
+				return row;
+			}
 			const professorId = Number(p.professor_id);
 			const effectiveFrom = String(p.effective_from ?? '').slice(0, 10);
 			const effectiveTo = p.effective_to ? String(p.effective_to).slice(0, 10) : null;
@@ -2318,13 +2493,23 @@ export const AdminOfferingProfessorsEndpoint: EndpointDef<
 					mockDateOrOngoing(effectiveTo) >= a.effective_from
 			);
 			if (overlap) throw new Error('Overlapping assignment for this professor and offering.');
+			const isPrimary = Boolean(p.is_primary);
+			if (isPrimary) {
+				const conflict = mockPrimaryConflict(
+					offeringId,
+					effectiveFrom,
+					effectiveTo
+				);
+				if (conflict) throw mockPrimaryConflictError(conflict);
+			}
 			const row: AdminAssignmentResponse = {
 				offering_id: offeringId,
 				professor_id: professorId,
-				is_primary: Boolean(p.is_primary),
+				is_primary: isPrimary,
 				effective_from: effectiveFrom,
 				effective_to: effectiveTo,
-				semester: String(p.semester ?? '').trim(),
+				semester,
+				has_sessions: false,
 				assigned_by: 1,
 				assigned_at: new Date().toISOString(),
 			};
