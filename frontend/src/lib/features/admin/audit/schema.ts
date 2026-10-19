@@ -40,6 +40,8 @@ export const AUDIT_ACTION_VALUES = [
 	'import',
 	'enroll',
 	'assign',
+	'reassign',
+	'reopen',
 	'unassign',
 	'open',
 	'close',

@@ -127,7 +127,6 @@ export const assignmentCreateSchema = z
 		is_primary: z.boolean().default(false),
 		effective_from: dateField,
 		effective_to: dateField.optional().or(z.literal('')),
-		semester: z.string().trim().min(1, 'Required').max(20),
 	})
 	.superRefine((value, ctx) => {
 		if (value.effective_to && value.effective_to <= value.effective_from) {
@@ -140,6 +139,25 @@ export const assignmentCreateSchema = z
 	});
 
 export type AssignmentCreateInput = z.infer<typeof assignmentCreateSchema>;
+
+export const assignmentReassignSchema = z
+	.object({
+		new_professor_id: z.coerce.number().int().gt(0, 'Pick a replacement professor'),
+		is_primary: z.boolean().optional(),
+		effective_from: dateField.optional().or(z.literal('')),
+		effective_to: dateField.optional().or(z.literal('')),
+	})
+	.superRefine((value, ctx) => {
+		if (value.effective_from && value.effective_to && value.effective_to <= value.effective_from) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: 'End date must be after start date',
+				path: ['effective_to'],
+			});
+		}
+	});
+
+export type AssignmentReassignInput = z.infer<typeof assignmentReassignSchema>;
 
 // Windows-sum guard checked on the page before submit: present + late must
 // fit inside the course session duration (backend 422 windows_exceed_duration).

@@ -192,6 +192,44 @@ def test_list_assigned_offerings_shape_and_pagination() -> None:
     assert second.items[0].section == ["A"]
 
 
+DUPLICATE_OFFERING_ROWS = [
+    *ROWS,
+    (
+        11,
+        101,
+        "CS101",
+        "Intro to CS",
+        201,
+        "BSCS",
+        301,
+        "1st Year",
+        "1st Sem",
+        "2025-2026",
+        False,
+        date(2026, 1, 1),
+        date(2026, 10, 19),
+        3,
+    ),
+]
+
+
+def test_assigned_offerings_dedupe_by_offering() -> None:
+    session = _FakeSession(
+        professor=_professor(),
+        assignments=DUPLICATE_OFFERING_ROWS,
+        counts=COUNTS,
+        sections=SECTIONS,
+    )
+
+    page = _run(
+        ProfessorService(session).list_assigned_offerings(user_id=42, page=1, size=10)
+    )
+
+    assert page.total == 2
+    assert [item.offering_id for item in page.items] == [11, 12]
+    assert page.items[0].effective_to is None
+
+
 def test_get_self_profile_enrichment() -> None:
     session = _FakeSession(
         professor=_professor(),

@@ -19,6 +19,8 @@ from features.course.schema import (
     OfferingRead,
     OfferingUpdate,
     ProfessorAssignment,
+    ProfessorReassignment,
+    ProfessorReopen,
     RosterItem,
 )
 from shared.enums import UserRole
@@ -229,12 +231,87 @@ async def remove_professor(
     professor_id: int,
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
+    effective_from: Annotated[
+        date | None,
+        Query(description="Start date of the exact assignment row to end"),
+    ] = None,
 ) -> dict[str, date]:
     effective_to: date = await service.remove_professor(
-        offering_id=offering_id, professor_id=professor_id, actor_id=user.id
+        offering_id=offering_id,
+        professor_id=professor_id,
+        actor_id=user.id,
+        effective_from=effective_from,
     )
 
     return {"effective_to": effective_to}
+
+
+@router.delete(
+    "/{offering_id}/professors/{professor_id}/permanent",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Permanently remove an assignment with no sessions",
+)
+async def permanently_remove_professor(
+    offering_id: int,
+    professor_id: int,
+    effective_from: Annotated[
+        date,
+        Query(
+            description=(
+                "Start date of the exact assignment row to permanently remove"
+            )
+        ),
+    ],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> None:
+    await service.permanently_remove_professor(
+        offering_id=offering_id,
+        professor_id=professor_id,
+        effective_from=effective_from,
+        actor_id=user.id,
+    )
+
+
+@router.post(
+    "/{offering_id}/professors/{professor_id}/reassign",
+    response_model=AssignmentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Reassign a professor on an offering",
+)
+async def reassign_professor(
+    offering_id: int,
+    professor_id: int,
+    payload: ProfessorReassignment,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> AssignmentRead:
+    return await service.reassign_professor(
+        offering_id=offering_id,
+        old_professor_id=professor_id,
+        payload=payload,
+        assigned_by=user.id,
+    )
+
+
+@router.post(
+    "/{offering_id}/professors/{professor_id}/reopen",
+    response_model=AssignmentRead,
+    summary="Undo an ended professor assignment",
+)
+async def reopen_professor(
+    offering_id: int,
+    professor_id: int,
+    payload: ProfessorReopen,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: CourseServiceDep,
+) -> AssignmentRead:
+    return await service.reopen_professor(
+        offering_id=offering_id,
+        professor_id=professor_id,
+        payload=payload,
+        actor_id=user.id,
+    )
 
 
 @router.post(

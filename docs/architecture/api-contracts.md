@@ -45,16 +45,19 @@ call it. Three consequences worth knowing:
   own and inherits 409 through `SessionDatabaseException → DatabaseException`, as
   does `year_level_program_mismatch` inheriting 422 via `DomainException`.
 
-**Six codes are defined but unreachable**, so no endpoint row can list them:
+**Five codes are defined but unreachable**, so no endpoint row can list them:
 
 | Code | Why it cannot occur |
 | ---- | ------------------- |
-| `internal_error` | The default `code` on `AppException` and the fallback in `main.py`'s single handler, but no code constructs a code-less `AppException`. An unhandled non-`AppException` (a SQLAlchemy `IntegrityError`, say) escapes to FastAPI's plain-text 500 instead. |
 | `database_error` | `DatabaseException` has a 409 handler but no `raise` site anywhere. |
 | `face_not_enrolled` | `FaceNotEnrolledException` is never raised. |
 | `invalid_semester` | `InvalidSemesterException` is never raised; `semester` is a free-text column with no vocabulary. |
 | `role_mismatch` | `RoleMismatchException` is never raised; `require_role` returns an `HTTPException` with `insufficient_permissions` (403). |
 | `password_policy_violation` | `PasswordPolicyException` is never raised. New passwords *are* strength-checked, but through a Pydantic `password_strength` validator that fails as the generic 422 `validation_error` — so the custom code can never be emitted and was removed from the change-password row rather than left implying otherwise. |
+
+Unhandled non-`AppException` failures are caught by `UnhandledExceptionMiddleware`
+inside CORS and returned as a 500 `internal_error` JSON envelope, so the browser
+sees the real status instead of a transport failure.
 
 They are kept rather than deleted because each is a plausible future guard, and an
 unused exception class is not a defect. If one is ever raised, the guard test fails
@@ -409,11 +412,16 @@ reactivate with `is_active: true`.
 
 | **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `offering_has_enrollments` (students are still enrolled)<br>409 `offering_has_sessions` (sessions were already opened — history is kept)<br>409 `offering_has_assignments` (professor assignments still reference it, including ended ones)<br>404 `offering_not_found` |
 | **Notes**        | Guards run in FK order (enrollments → sessions → assignments) so a `RESTRICT` violation can never surface as a 500. Components are owned by the offering and are removed with it once the guards pass. One `delete` audit row on `course_offering` per hard delete. |
+Professor assignments are effective-dated. At most **one primary**
+assignment may cover an offering on any date; assistants may overlap freely.
+A primary succession is valid when the ranges are disjoint (one ends today and
+the next starts tomorrow).
+
 #### `GET /admin/offerings/{offering_id}/professors`
 
 |                  |                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `[{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }]` — a bare array, **not** `{ items: […] }`. The only non-paginated list in the app, so the row is outside the `?page/?size` convention. |
+| **Response 200** | `[{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, has_sessions, assigned_by, assigned_at }]` — a bare array, **not** `{ items: […] }`. The only non-paginated list in the app, so the row is outside the `?page/?size` convention. `has_sessions` is true when at least one session was opened while this exact effective window authorized the professor; the admin UI hides permanent removal for those rows. |
 
 | **Errors**       | 404 `offering_not_found` |
 #### `POST /admin/offerings/{offering_id}/professors`
@@ -422,18 +430,71 @@ Assign professor to course offering.
 
 |                  |                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| **Request**      | `{ professor_id: int, is_primary: bool, effective_from: date, effective_to?: date, semester: string }` |
+| **Request**      | `{ professor_id: int, is_primary: bool, effective_from: date, effective_to?: date }` — `semester` is deliberately absent; the assignment always inherits the offering's semester. |
 | **Response 201** | Created assignment                                                                                     |
-| **Errors**       | 409 `overlapping_assignment` · 404 `professor_not_found` · 404 `offering_not_found` |
+| **Errors**       | 409 `overlapping_assignment` · 409 `primary_assignment_conflict` · 422 `professor_not_eligible` · 404 `professor_not_found` · 404 `offering_not_found` |
+
+#### `POST /admin/offerings/{offering_id}/professors/{professor_id}/reassign`
+
+Replace a professor on an existing assignment, preserving history: the old row is
+closed at `effective_from - 1 day` and a new row is created in one transaction.
+`semester` is derived from the offering. `old_effective_from` identifies the
+exact composite-PK row to replace; omit it to target the newest open-ended row.
+A future-dated assignment may be replaced on its own start date (the old row is
+deleted because it never took effect); a started assignment requires a later date.
+
+|                  |                                                                 |
+| ---------------- | --------------------------------------------------------------- |
+| **Request**      | `{ new_professor_id: int, is_primary?: bool, old_effective_from?: date, effective_from?: date, effective_to?: date }` |
+| **Response 201** | Created replacement assignment (`AssignmentRead`)               |
+| **Errors**       | 409 `overlapping_assignment` · 409 `primary_assignment_conflict` · 409 `assignment_already_ended` · 422 `professor_not_eligible` · 422 `invalid_effective_from` · 404 `assignment_not_found` · 404 `professor_not_found` · 404 `offering_not_found` |
 
 #### `DELETE /admin/offerings/{offering_id}/professors/{professor_id}`
 
-End assignment (set `effective_to` = today).
+End assignment (set `effective_to` = today). Pass `?effective_from=YYYY-MM-DD`
+to target a specific composite-PK row; without it the newest open-ended row is
+used. A future-dated assignment is cancelled by deleting it, since it never
+took effect.
 
 |                  |                                  |
 | ---------------- | -------------------------------- |
 | **Response 200** | `{ effective_to: "YYYY-MM-DD" }` |
-| **Errors**       | 404 `assignment_not_found` · 404 `offering_not_found` |
+| **Errors**       | 409 `assignment_already_ended` · 404 `assignment_not_found` · 404 `offering_not_found` |
+
+#### `DELETE /admin/offerings/{offering_id}/professors/{professor_id}/permanent`
+
+Permanently delete one **ended** assignment row that never opened a session.
+"Ended" means `effective_to` is today or earlier; a row with no end date or a
+future end date is still live and must be ended first (`409
+assignment_not_ended`). This is a post-End correction path for an assignment
+created by mistake, not a replacement for End. `effective_from` is **required**
+because the assignment's composite primary key has no surrogate id; without the exact start
+date the wrong historical row could be deleted. Sessions are never deleted, and
+the request is rejected when any session was opened inside the row's effective
+window (the end date is inclusive). The audit trail records one `delete` row on
+`course_professor` with the full `old_value` snapshot. The row cannot be
+reopened afterwards.
+
+|                  |                                                                 |
+| ---------------- | --------------------------------------------------------------- |
+| **Query**        | `effective_from=YYYY-MM-DD` (required)                          |
+| **Response 204** | No content                                                      |
+| **Errors**       | 409 `assignment_not_ended` · 409 `assignment_has_sessions` · 404 `assignment_not_found` · 404 `offering_not_found` · 422 validation error when `effective_from` is missing |
+
+#### `POST /admin/offerings/{offering_id}/professors/{professor_id}/reopen`
+
+Undo an accidental End: clears `effective_to` on the exact row identified by
+`effective_from`. The row becomes open-ended again. Rejected when the row is
+already open-ended, or when a later assignment exists for the same professor
+and offering (clearing the end date would overlap it). `is_primary` is
+optional: omit it to restore the previous role, or pass `false` to reopen as an
+assistant when another primary already covers the dates.
+
+|                  |                                                                 |
+| ---------------- | --------------------------------------------------------------- |
+| **Request**      | `{ effective_from: date, is_primary?: bool }`                   |
+| **Response 200** | Reopened assignment (`AssignmentRead`)                          |
+| **Errors**       | 409 `assignment_not_ended` · 409 `assignment_reopen_conflict` · 409 `primary_assignment_conflict` · 404 `assignment_not_found` · 404 `offering_not_found` |
 
 #### `POST /admin/offerings/{offering_id}/enrollments/bulk`
 
@@ -635,8 +696,9 @@ The full audit trail — every sensitive mutation, not just the structural ones.
 `excuse`, `session`, `face_enrollment`, `attendance_record`, `backup`,
 `app_setting`, `user`, `maintenance` (aggregate subject of the sync-flush and
 cleanup runs, one audit row per run with counts in `new_value`). `action` is one of `create`, `update`, `archive`,
-`delete`, `import`, `enroll`, `assign`, `unassign`, `open`, `close`, `approve`,
-`reject`, `revoke`, `lock`, `unlock`, `login_failed`, `password_reset`. A value
+`delete`, `import`, `enroll`, `assign`, `reassign`, `reopen`, `unassign`, `open`,
+`close`, `approve`, `reject`, `revoke`, `lock`, `unlock`, `login_failed`,
+`password_reset`. A value
 outside either list is **422 `invalid_audit_filter`** rather than an empty page,
 so a mistyped filter can never read as "nothing happened". An inverted range is
 **422 `invalid_audit_date_range`**.

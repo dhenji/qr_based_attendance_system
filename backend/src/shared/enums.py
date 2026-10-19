@@ -50,6 +50,8 @@ class AuditAction(StrEnum):
     ENROLL = "enroll"
     UNENROLL = "unenroll"
     ASSIGN = "assign"
+    REASSIGN = "reassign"
+    REOPEN = "reopen"
     UNASSIGN = "unassign"
     OPEN = "open"
     CLOSE = "close"

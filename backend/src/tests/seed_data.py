@@ -404,7 +404,6 @@ async def seed(
                             effective_from=start,
                             is_primary=primary,
                             effective_to=end,
-                            semester="1st_sem",
                             assigned_by=admin.id,
                         )
                     )

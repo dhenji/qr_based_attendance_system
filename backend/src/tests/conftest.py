@@ -409,7 +409,6 @@ class Factories:
             ),
             effective_to=overrides.pop("effective_to", None),
             is_primary=overrides.pop("is_primary", True),
-            semester=overrides.pop("semester", "1ST_SEM"),
             assigned_by=overrides.pop("assigned_by", assigned_by.id),
             **overrides,
         )
