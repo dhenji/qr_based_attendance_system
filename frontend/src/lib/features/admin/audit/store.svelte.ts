@@ -1,11 +1,12 @@
 // features/admin/audit/store.svelte.ts
 // Admin audit-log state using Svelte 5 runes ($state object store).
 //
-// Two regions: the merged action feed (audit-trail rows from
-// GET /admin/audit-logs + record-creation rows derived from roster created_at,
-// newest first) and the academic-structure changes list (D38). The feed
-// endpoint takes no sort params, so Time/User/Action header toggles sort
-// client-side over the loaded page (same convention as courses).
+// Two regions: the action feed (GET /admin/audit-logs) and the
+// academic-structure changes list (GET /admin/system/academic-structure).
+//
+// Both are server-paged and server-sorted, so a page is a page of the
+// whole trail rather than a slice of what happens to be loaded. There is no
+// local merge and no local inference: the trail is what the server recorded.
 
 import type {
 	AuditLogFilters,
@@ -14,10 +15,11 @@ import type {
 import {
 	listAuditLogs,
 	listStructureChanges,
+	type AuditFeed,
 	type AuditLogRow,
 } from '$lib/features/admin/audit/service';
 
-export type AuditSortColumn = 'time' | 'user' | 'action';
+export type AuditSortColumn = 'time' | 'actor' | 'action';
 
 export const adminAuditState = $state({
 	items: [] as AuditLogRow[],
@@ -33,6 +35,9 @@ export const adminAuditState = $state({
 
 export const adminStructureState = $state({
 	items: [] as StructureChangeResponse[],
+	total: 0,
+	page: 1,
+	size: 20,
 	loading: false,
 	error: null as string | null,
 });
@@ -42,13 +47,16 @@ const toMessage = (e: unknown, fallback: string) =>
 
 export const initAdminAudit = async (
 	filters: AuditLogFilters = {},
-	page = 1,
-	size = 20
+	page = 1
 ): Promise<void> => {
 	adminAuditState.loading = true;
 	adminAuditState.error = null;
 	try {
-		const result = await listAuditLogs(filters, page, size);
+		const result: AuditFeed = await listAuditLogs({
+			...filters,
+			page,
+			size: adminAuditState.size,
+		});
 		adminAuditState.items = result.items;
 		adminAuditState.total = result.total;
 		adminAuditState.page = result.page;
@@ -63,17 +71,27 @@ export const initAdminAudit = async (
 
 export const refreshAdminAudit = async (): Promise<void> => {
 	await initAdminAudit(
-		adminAuditState.filters,
-		adminAuditState.page,
-		adminAuditState.size
+		{
+			...adminAuditState.filters,
+			sort_by: adminAuditState.sortBy,
+			sort_dir: adminAuditState.sortDir,
+		},
+		adminAuditState.page
 	);
 };
 
-export const initStructureChanges = async (): Promise<void> => {
+export const initStructureChanges = async (
+	page = 1,
+	size = 20
+): Promise<void> => {
 	adminStructureState.loading = true;
 	adminStructureState.error = null;
 	try {
-		adminStructureState.items = await listStructureChanges();
+		const result = await listStructureChanges({ page, size });
+		adminStructureState.items = result.items;
+		adminStructureState.total = result.total;
+		adminStructureState.page = result.page;
+		adminStructureState.size = result.size;
 	} catch (e: unknown) {
 		adminStructureState.error = toMessage(e, 'Failed to load structure changes');
 	} finally {

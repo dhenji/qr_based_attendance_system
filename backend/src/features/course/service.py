@@ -1755,8 +1755,11 @@ class CourseService:
             self._session,
             actor_id=actor_id,
             action=AuditAction.CREATE,
-            entity_type=AuditEntity.COURSE_OFFERING,
-            entity_id=offering.id,
+            # The component's own id, not the offering's: `entity_id` points
+            # into the table the entity type names, and a component has an id
+            # of its own (ADR-086).
+            entity_type=AuditEntity.OFFERING_COMPONENT,
+            entity_id=row.id,
             new_value=self._component_snapshot(row),
         )
 
@@ -1825,8 +1828,8 @@ class CourseService:
             self._session,
             actor_id=actor_id,
             action=AuditAction.UPDATE,
-            entity_type=AuditEntity.COURSE_OFFERING,
-            entity_id=offering_id,
+            entity_type=AuditEntity.OFFERING_COMPONENT,
+            entity_id=row.id,
             old_value=old_value,
             new_value=self._component_snapshot(row),
         )
@@ -1850,8 +1853,8 @@ class CourseService:
             self._session,
             actor_id=actor_id,
             action=AuditAction.ARCHIVE,
-            entity_type=AuditEntity.COURSE_OFFERING,
-            entity_id=offering_id,
+            entity_type=AuditEntity.OFFERING_COMPONENT,
+            entity_id=row.id,
             old_value=old_value,
             new_value=self._component_snapshot(row),
         )

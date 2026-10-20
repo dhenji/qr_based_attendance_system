@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Routes } from '$lib/shared/constants/routes';
-	import { formatDate, formatTime } from '$lib/shared/utils/format';
+	import { formatBytes, formatDate, formatTime } from '$lib/shared/utils/format';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		cleanupSystem,
@@ -12,7 +12,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		exportAnalyticsOverview,
 		exportAnalyticsTrends,
 		flushSync,
-		formatBytes,
 		getSettings,
 		listBackups,
 		patchSettings,

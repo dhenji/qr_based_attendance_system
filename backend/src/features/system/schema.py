@@ -80,13 +80,56 @@ class CleanupResponse(BaseModel):
     removed: int = 0
 
 
+class AuditActorRead(BaseModel):
+    """Who performed the action.
+
+    `kind` is `anonymous` when nobody was authenticated — a lockout from an
+    anonymous attempt, or an unattended run. Otherwise it is `user`, and
+    `id`/`name`/`email`/`role` name the account.
+    """
+
+    kind: Literal["user", "anonymous"]
+    id: int | None = None
+    name: str
+    email: str | None = None
+    role: str | None = None
+
+
+class AuditSubjectRead(BaseModel):
+    """What the action was about.
+
+    `label` is the record's name — "BSCS · Bachelor of Science in Computer
+    Science" — read out of the audit snapshot first and only then from a
+    join, so it survives the record's deletion. `id` remains the raw
+    reference, in the id space of `type`.
+    """
+
+    type: str
+    id: int | None = None
+    label: str
+    sublabel: str | None = None
+
+
+class AuditChangeRead(BaseModel):
+    """One field that changed."""
+
+    field: str
+    label: str
+    before: str
+    after: str
+
+
 class AuditLogRead(BaseModel):
     """One audit trail row.
 
     The stored shape, unaltered: `entity_type` + `entity_id` identify the
     subject and `old_value`/`new_value` are the JSON snapshots the writer took.
-    Nothing is derived here, so an administrator reading this endpoint sees what
-    was actually recorded.
+    That is the evidence, and it is exactly what was recorded.
+
+    Alongside it, the derived read model (ADR-086): who acted, what the
+    subject is called, a one-line summary, and the field-level change. The
+    derived fields are additive — the stored ones are still there, so nothing
+    that read the raw row stops working.
     """
 
     id: int
@@ -97,6 +140,12 @@ class AuditLogRead(BaseModel):
     new_value: dict | None = None
     performed_by: int | None = None
     performed_at: datetime
+
+    actor: AuditActorRead
+    subject: AuditSubjectRead
+    summary: str
+    action_label: str
+    changes: list[AuditChangeRead] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

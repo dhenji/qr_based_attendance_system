@@ -1,8 +1,8 @@
 // features/admin/audit/schema.ts
 // Zod schemas for the audit-log filters. All fields optional; a blank value
 // means "no filter" (the backend AND-combines them). Values outside the
-// entity/action vocabularies are 422 invalid_audit_filter server-side, so the
-// client validates against the same lists for fast errors.
+// entity/action vocabularies are 422 invalid_audit_filter server-side, so
+// the client validates against the same lists for fast errors.
 
 import { z } from 'zod';
 
@@ -18,6 +18,7 @@ export const AUDIT_ENTITY_VALUES = [
 	'year_level',
 	'course',
 	'course_offering',
+	'offering_component',
 	'student',
 	'professor',
 	'enrollment',
@@ -39,6 +40,7 @@ export const AUDIT_ACTION_VALUES = [
 	'delete',
 	'import',
 	'enroll',
+	'unenroll',
 	'assign',
 	'reassign',
 	'reopen',
@@ -66,7 +68,10 @@ export const auditFilterSchema = z
 			.enum(AUDIT_ACTION_VALUES)
 			.optional()
 			.or(z.literal('')),
-		performed_by: z.string().trim().max(100).optional().or(z.literal('')),
+		// The actor filter is matched server-side against the account's id,
+		// email and name, so it is free text — unlike `performed_by`, which
+		// the backend types as an int.
+		actor: z.string().trim().max(100).optional().or(z.literal('')),
 	})
 	.superRefine((value, ctx) => {
 		if (value.date_from && value.date_to && value.date_from > value.date_to) {

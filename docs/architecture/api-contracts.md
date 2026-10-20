@@ -677,8 +677,8 @@ List structural changes (audit log for program/year/course mutations).
 |                  |                                                                                                                                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?page=1&size=20`                                                                                                                                                                                                      |
-| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }`                                                                                                              |
-| **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at, actor, subject, summary, action_label, changes }], total, page, size }` |
+| **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`, `offering_component`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. The shape is the audit row's — see below. |
 
 | **Errors**       | 503 `storage_unconfigured` |
 #### `GET /admin/audit-logs`
@@ -687,21 +687,42 @@ The full audit trail — every sensitive mutation, not just the structural ones.
 
 |                  |                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?entity_type=&action=&performed_by=&date_from=&date_to=&page=1&size=20`                                                                 |
-| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], total, page, size }`              |
+| **Query**        | `?entity_type=&action=&performed_by=&actor=&date_from=&date_to=&sort_by=time&sort_dir=desc&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at, actor, subject, summary, action_label, changes }], total, page, size }` |
 | **Notes**        | Admin-only. Filters AND-combine and are each optional; a blank value (`?action=`) means "no filter". `date_from` is inclusive from 00:00 UTC, `date_to` inclusive to the end of that day, so `date_from == date_to` selects one day. |
 
+**The stored row, and the reading of it.** The first eight fields are the
+stored row, unaltered — that is the evidence, and it is exactly what the
+writer recorded (ADR-064). The rest is the derived read model (ADR-088), and
+it is additive, so a client that reads the raw row is unaffected:
+
+| Field               | Meaning                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `actor`             | `{ kind, id, name, email, role }`. `kind` is `anonymous` when nobody was authenticated — a lockout from an anonymous attempt, or an unattended run. |
+| `subject`           | `{ type, id, label, sublabel }`. `label` is the record's NAME — "BSCS · Bachelor of Science in Computer Science". It is read out of the audit snapshot first and only then from a join, so it survives the record's deletion. |
+| `summary`           | One sentence: "Updated BSCS · Bachelor of Science in Computer Science — Name".                                                                                 |
+| `action_label`      | The action as a verb: "Updated", "Imported", "Password reset".                                                                                                |
+| `changes`           | `[{ field, label, before, after }]` — the field-level difference, not a JSON blob. A create has no `before`, a delete has no `after`.                      |
+
 **Vocabulary.** `entity_type` is one of `program`, `year_level`, `course`,
-`course_offering`, `student`, `professor`, `enrollment`, `course_professor`,
-`excuse`, `session`, `face_enrollment`, `attendance_record`, `backup`,
-`app_setting`, `user`, `maintenance` (aggregate subject of the sync-flush and
-cleanup runs, one audit row per run with counts in `new_value`). `action` is one of `create`, `update`, `archive`,
-`delete`, `import`, `enroll`, `assign`, `reassign`, `reopen`, `unassign`, `open`,
-`close`, `approve`, `reject`, `revoke`, `lock`, `unlock`, `login_failed`,
-`password_reset`. A value
+`course_offering`, `offering_component`, `student`, `professor`,
+`enrollment`, `course_professor`, `excuse`, `session`, `face_enrollment`,
+`attendance_record`, `backup`, `app_setting`, `user`, `maintenance`
+(aggregate subject of the sync-flush and cleanup runs, one audit row per run
+with counts in `new_value`). `action` is one of `create`, `update`,
+`archive`, `delete`, `import`, `enroll`, `unenroll`, `assign`, `reassign`,
+`reopen`, `unassign`, `open`, `close`, `approve`, `reject`, `revoke`,
+`lock`, `unlock`, `login_failed`, `password_reset`. A value
 outside either list is **422 `invalid_audit_filter`** rather than an empty page,
 so a mistyped filter can never read as "nothing happened". An inverted range is
 **422 `invalid_audit_date_range`**.
+
+**One id space per entity type.** `entity_id` points into the table the
+entity type names, and that table is its only id space. `face_enrollment`
+audits a STUDENT's face template, so its id is a student id.
+`offering_component` audits a schedule component, so its id is the
+component's own — a component written before ADR-086 carries the OFFERING's
+id under `course_offering`, and the reader recognises it by its snapshot.
 
 **`entity_id` is nullable.** It is null for `course_professor` (composite
 primary key, so there is no single-column id), for the `app_setting` rows a
@@ -711,6 +732,18 @@ batch. Those rows are identified by `old_value`/`new_value` instead.
 **`performed_by` is nullable.** It is null when nobody was authenticated: a
 lockout or failed login triggered by an anonymous attempt, or the nightly cron.
 The subject is still `entity_type` + `entity_id`.
+
+**The `actor` filter** matches the acting account by id, email or name — a
+fragment, case-insensitively. The names come from the account's student or
+professor row, so "Dela Cruz" finds the professor whose account did it. It
+exists because `performed_by` is an exact id, and an administrator filtering
+by a person types a name. `performed_by` stays for a client that already
+knows the id.
+
+**Sorting** is the server's, over the WHOLE trail rather than the loaded
+page: `sort_by` is `time` (the default), `actor` or `action`, and `sort_dir`
+is `asc` or `desc`. Only `time` has an index behind it; `actor` and `action`
+are scans.
 
 #### `GET /admin/backups`
 

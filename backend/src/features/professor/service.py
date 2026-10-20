@@ -225,6 +225,19 @@ class ProfessorService:
             department=payload.department,
         )
 
+        # A roster row appearing is a change to the institution, so it is
+        # audited like any other. The client used to INFER these rows from
+        # `created_at` because nothing recorded them; an inferred row is not
+        # evidence (ADR-086).
+        await record_audit(
+            self._session,
+            actor_id=assigned_by,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.PROFESSOR,
+            entity_id=professor.id,
+            new_value=self._professor_snapshot(professor),
+        )
+
         for offering_id in dict.fromkeys(payload.courses):
             await self._assign_offering(
                 professor_id=professor.id,

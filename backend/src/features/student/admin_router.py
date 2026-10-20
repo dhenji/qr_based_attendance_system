@@ -83,10 +83,10 @@ async def list_students(
 )
 async def create_student(
     payload: StudentCreate,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: StudentServiceDep,
 ) -> StudentRead:
-    return await service.create(payload=payload)
+    return await service.create(payload=payload, actor_id=user.id)
 
 
 # Static import/template routes are declared before /{student_id} so they
