@@ -64,9 +64,16 @@ export const csvFileSchema = z
 	.refine((f) => f.size > 0, 'File is empty')
 	.refine((f) => f.size <= 5 * 1024 * 1024, 'File must be under 5 MB');
 
-// Face-enrollment photo (D43 3-photo upload: front/left/right). Mirrors the
-// backend quality gates loosely client-side (type + non-empty + size); the
-// server owns brightness/face-size/single-face/sharpness/eyes-open checks.
+// Face-enrollment photo (D43 3-photo upload: front/left/right). This validates
+// the file only: extension, non-empty, and a size cap. The server checks
+// content type, size and non-empty (face_enrollment/service.py:41-60) and
+// nothing more.
+//
+// The six biometric gates from the design (brightness, face size, single face,
+// centring, sharpness, eyes open) are NOT implemented on either side — they
+// need either a client-side camera capture flow or server-side image analysis,
+// and the contract codes no_face_detected / multiple_faces / quality_too_low
+// have no implementation that could raise them.
 export const facePhotoSchema = z
 	.instanceof(File, { message: 'Choose a photo' })
 	.refine(

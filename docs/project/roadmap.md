@@ -248,7 +248,7 @@
 - Compliance Rate (default) + Participation Rate toggle (D36)
 - At-risk heuristic scoring: daily batch job, `student_risk_scores` table (D35)
 - Manual refresh endpoint (admin-only)
-- Chart.js wrapper component (D41)
+- Chart components (hand-rolled SVG — ADR-091; D41 named Chart.js, which was never installed)
 
 ### Key Decisions
 

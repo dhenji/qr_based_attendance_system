@@ -1,6 +1,6 @@
 # CS Contributions
 
-This document states the project's contributions to computer science honestly. The framing is **systems and security-protocol engineering plus empirical evaluation** — not novel machine learning. The system uses zero trained models for anti-spoofing; liveness grading is built on open landmark tracking (MediaPipe Face Mesh) and geometric/statistical heuristics, chosen deliberately for offline capability, transparency, and auditability.
+This document states the project's contributions to computer science honestly. The framing is **systems and security-protocol engineering plus empirical evaluation** — not novel machine learning. The system uses zero trained models for anti-spoofing; liveness grading is built on open landmark tracking (MediaPipe FaceLandmarker) and geometric/statistical heuristics, chosen deliberately for offline capability, transparency, and auditability.
 
 Every claim below is written against the code that ships. Where a mechanism is designed but not built, it is labelled **Planned** and is not a claim the project can defend today.
 
@@ -59,13 +59,13 @@ The liveness gate no longer requires connectivity at capture time — the eviden
 ### What ships
 
 - **A fixed challenge sequence** — blink → head left → head right — chosen for offline operability: no server round-trip is needed to know what to ask (D31).
-- **The client tracks MediaPipe Face Mesh landmarks** (478 points) and produces an evidence transcript: an Eye Aspect Ratio time series, head-pose yaw from the facial transformation matrix with a landmark-geometry fallback, and the derived per-stage evidence (`source`, `baseline_yaw`, `yaw`, `peak_left_yaw`, `peak_right_yaw`, `yaw_samples`).
-- **The server grades the transcript** in `AttendanceService._validate_liveness_evidence`, in four checks:
+- **The client tracks MediaPipe FaceLandmarker landmarks** (478 points) and produces an evidence transcript: an Eye Aspect Ratio time series, head-pose yaw from the facial transformation matrix with a landmark-geometry fallback, and the derived per-stage evidence (`source`, `baseline_yaw`, `yaw`, `peak_left_yaw`, `peak_right_yaw`, `yaw_samples`).
+- **The server grades the transcript** in `attendance/service.py::_validate_liveness_evidence` (a module-level function, not a method on the service class), in four checks:
   1. all three challenge stages completed,
   2. an EAR series is present,
   3. the **mean** EAR falls inside `[0.05, 0.50]`,
   4. the PnP evidence is non-empty.
-- **The grade is deterministic, explainable and reproducible.** Every rejected scan keeps the evidence that produced the decision, and the liveness-review queue (`/admin/attendance`) shows that evidence to the reviewer who has to act on it.
+- **The grade is deterministic and reproducible.** Every rejected scan keeps the evidence that produced the decision, and the liveness-review queue (`/admin/attendance`) is where a reviewer acts on it. ⚠ **The queue does not yet render the evidence.** The API returns the whole bundle (`LivenessReviewItem.evidence`, `attendance/schema.py:142`), but the admin table shows only the student, the session, `face_match_score` and the timestamp (`routes/admin/attendance/+page.svelte:130-165`) — so "explainable" is a property of the data, not of the reviewer's screen yet.
 
 ### What is not built yet
 
@@ -143,7 +143,8 @@ The dashboard layers (descriptive: what happened, diagnostic: why, predictive: w
 ### What ships
 
 - **Enrollment**: `POST /admin/face-enrollment/{student_id}` takes the three photos — front, left, right (D43) — and gates each on non-empty content, a size cap and an `image/*` content type. The enrollment is audited, the server-side cache is invalidated, and `face_embedding_version` is bumped so stale device copies cannot match.
-- **Storage shape**: `students.face_embedding` (BYTEA) holds `{"mean":[128f],"angles":{"front":[128f],"left":[128f],"right":[128f]}}` (D28).
+- **Storage shape (stub)**: `students.face_embedding` (BYTEA) holds the documented 128-d shape — `{"mean":[128f],"angles":{"front":[128f],"left":[128f],"right":[128f]}}` (D28) — but every value is currently `0.0` and the payload is tagged `"stub": true`. The shape is the design; the values are placeholders.
+- **Enrollment has a UI**: the admin student page carries an enrollment modal — "Enroll face / Re-enroll face", three file inputs (front, left, right) and an upload to `POST /admin/face-enrollment/{student_id}` (`routes/admin/students/+page.svelte:872-914`). ⚠ It is a **file-upload** flow: there is no in-browser camera capture, and the client-side quality gates are not implemented (extension and size only — `admin/schema.ts:70-77`).
 - **Distribution is pull-on-login** (D29): `GET /student/me/face-embedding?current_version=N` returns the blob when the client's copy is stale, 204 when it is current, and 404 `face_embedding_not_found` when there is no enrollment. The client caches it in IndexedDB, encrypted with an AES-GCM key generated on the device and stored as a non-extractable `CryptoKey` — the ciphertext alone is not enough to decrypt it. No push or WebSocket infrastructure.
 - **Revocation**: archiving a student clears the blob and bumps the version (`StudentService.archive`), so an archived identity cannot stay matchable; re-enrollment supersedes the old vectors, and the version bump tells every device to drop its copy.
 
@@ -151,12 +152,11 @@ The dashboard layers (descriptive: what happened, diagnostic: why, predictive: w
 
 This is where the contribution is currently weakest.
 
-- **No embedding generation.** The stored blob comes from `_stub_embedding_blob`: the documented shape, filled with zeros and tagged `"stub": true`. The pretrained face-api.js model never runs, and nothing is fine-tuned — but nothing is generated either.
+- **No embedding generation.** The stored blob comes from `_stub_embedding_blob`: the documented shape, filled with zeros and tagged `"stub": true`. **No recognition model is installed at all** — the only model in the repository is MediaPipe FaceLandmarker (`face_landmarker.task`), which produces landmarks and blendshapes, not identity embeddings. Nothing is fine-tuned, but nothing is generated either.
 - **No encryption at rest on the server.** The blob is stored as plain JSON bytes. Only the *device* copy is encrypted.
 - **No similarity comparison.** `face_match_score` is a client assertion; the server band-checks the number (`≥ 0.70` pass, `0.65–0.70` review-flag into the liveness-review queue, `< 0.65` fail) but never compares it to the stored embedding, and the embedding is not read during a scan at all. The live scan path computes no score, so `submitAttendanceScan` substitutes a placeholder of `1` on every scan. Until the comparison lands, the face step is decorative and the liveness transcript is the only thing actually being checked.
 - **No offline local compare** — explicitly deferred in the client, for the same reason.
-- **The quality gates are transport-level, not biometric**: brightness, face-size and single-face checks are not implemented.
-- **No capture UI.** The admin endpoint exists, but the frontend has no enrollment screen — the admin student page shows enrollment state as read-only text.
+- **The quality gates are transport-level, not biometric**: brightness, face-size and single-face checks are not implemented. They are implemented on **neither** side — the client validates file extension and size, and the server validates content type, size and non-empty (`face_enrollment/service.py:41-60`). The contract codes `no_face_detected`, `multiple_faces` and `quality_too_low` remain unimplemented.
 
 ---
 

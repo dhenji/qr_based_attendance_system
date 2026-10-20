@@ -76,7 +76,7 @@ Circular GPS boundary centered on classroom coordinates (offering default from `
 
 ### Liveness
 
-Anti-spoofing challenge requiring the student to perform a fixed sequence: **blink → turn left → turn right**. Implemented via MediaPipe Face Mesh WASM client-side; EAR (Eye Aspect Ratio) + PnP (Perspective-n-Point) head pose graded server-side.
+Anti-spoofing challenge requiring the student to perform a fixed sequence: **blink → turn left → turn right**. Implemented via MediaPipe FaceLandmarker WASM client-side; EAR (Eye Aspect Ratio) + PnP (Perspective-n-Point) head pose graded server-side.
 
 ### EAR (Eye Aspect Ratio)
 
@@ -88,7 +88,7 @@ Head-pose estimation from facial landmarks to detect left/right turns. Part of l
 
 ### Embedding
 
-A 128-dimensional face vector (face-api.js compatible ResNet) generated from 3 enrollment photos (front, left, right). Stored encrypted in `students.face_embedding BYTEA` as JSON: `{"mean": [...], "angles": {"front": [...], "left": [...], "right": [...]}}`. Versioned via `face_embedding_version`.
+A 128-dimensional face vector generated from 3 enrollment photos (front, left, right) by a face-recognition model. ⚠ **No recognition model is installed in this project** — the server stores the documented shape zero-filled and tagged `"stub": true` (`_stub_embedding_blob`), and no vector is ever computed. The blob lives in `students.face_embedding BYTEA` as JSON: `{"mean": [...], "angles": {"front": [...], "left": [...], "right": [...]}}`, is **plaintext today** (the D28 AES-256-GCM step is not implemented), and is versioned via `face_embedding_version`.
 
 ### Evidence Bundle
 

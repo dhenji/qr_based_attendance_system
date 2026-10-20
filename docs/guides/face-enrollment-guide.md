@@ -25,7 +25,7 @@
 
 ## 1. Overview
 
-Face enrollment captures **3 photos** (front, left, right) per student ([D43](../project/decision-log.md)). The server generates a **128-dimensional face embedding** from each photo using a pretrained face-api.js ResNet model. The three vectors are stored as a single encrypted JSON blob in `students.face_embedding BYTEA` ([D28](../project/decision-log.md)):
+Face enrollment captures **3 photos** (front, left, right) per student ([D43](../project/decision-log.md)). The design has the server generate a **128-dimensional face embedding** from each photo. ⚠ **Today it does not:** no face-recognition model is installed in this project, so the server writes the documented shape zero-filled and tagged `"stub": true` (`_stub_embedding_blob`), and the blob is stored as **plaintext** JSON in `students.face_embedding BYTEA` — not encrypted ([D28](../project/decision-log.md)):
 
 ```json
 {
@@ -64,10 +64,17 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
 
 1. Navigate to **Admin Portal** → **Student Management** (`/admin/students`)
 2. Search for the student by name or ID
-3. Click the student row → **Student Detail**
-4. Click **[📷 Enroll Face]** or navigate to `/admin/face-enrollment/{student_id}`
+3. Click **[Enroll face]** (or **[Re-enroll face]** if a student already has an enrollment) on the student row
+4. The enrollment modal opens with three file inputs — front, left, right
 
-[FIG: Face Enrollment screen with student name/ID header, three capture slots (Front, Left, Right), camera preview area, quality indicators, [Capture] button, [Save Enrollment] button]
+[FIG: Face Enrollment modal — title "Enroll face — <name> (<student number>)", the enrollment status line, three file inputs (Front, Left, Right), and an [Upload enrollment] button]
+
+> ⚠ The camera-capture screen described in the design — a live preview, per-angle
+> **[Capture]** buttons, live quality indicators and a **[Save Enrollment]** step — is
+> **not built**. What ships is a file upload: the admin picks three image files and the
+> browser posts them to `POST /admin/face-enrollment/{student_id}`. The operator still
+> has to shoot the photos (any camera app works); the framing guidance below is the
+> operator's job, not the software's.
 
 ### 3.2 Capture Position 1: Front
 
@@ -76,10 +83,7 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
    - Keep eyes open, neutral expression
    - Remove glasses if possible (or keep them on — system accommodates)
    - Ensure forehead and chin are visible
-2. Click **[Capture]** when the quality gate passes:
-   - ✅ Brightness: adequate
-   - ✅ Face size: fills >30% of frame
-   - ✅ Single face detected
+2. Take the photo with any camera app (or use the **front** file input directly)
 3. The photo is stored as `front`
 
 ### 3.3 Capture Position 2: Left
@@ -88,7 +92,7 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
    - Turn head ~30–45 degrees to their **left**
    - Keep eyes open
    - Maintain same distance from camera
-2. Click **[Capture]** when quality gates pass
+2. Take the photo and select it in the **left** file input
 3. The photo is stored as `left`
 
 ### 3.4 Capture Position 3: Right
@@ -97,15 +101,15 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
    - Turn head ~30–45 degrees to their **right**
    - Keep eyes open
    - Maintain same distance from camera
-2. Click **[Capture]** when quality gates pass
+2. Take the photo and select it in the **right** file input
 3. The photo is stored as `right`
 
 ### 3.5 Review & Save
 
-1. Review all three captured photos (thumbnail previews)
-2. If any photo looks poor, click **[Retake]** for that position
-3. Click **[Save Enrollment]**
-4. Server generates embeddings → stores encrypted blob → bumps `face_embedding_version`
+1. Review all three selected photos (file names and sizes are shown)
+2. If any photo looks poor, pick a different file for that position
+3. Click **[Upload enrollment]**
+4. Server validates the three files (content type, size, non-empty) → stores the documented blob shape zero-filled → bumps `face_embedding_version`
 5. Student sees "✅ Enrolled" status on their Profile (`/student/profile`)
 
 > **Distribution**: The student's device will pull the new embedding on their next login ([D29](../project/decision-log.md) — pull-on-login, version-gated, cached encrypted in IndexedDB).
@@ -113,6 +117,13 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
 ---
 
 ## 4. Quality Gates & Common Failures
+
+> ⚠ **This whole section describes the design, not today's behavior.** The six gates
+> are not implemented on either side: the upload UI checks file extension, non-emptiness
+> and a 5 MB cap, and the server checks content type, size and non-empty. There is no
+> camera capture flow and no biometric analysis in the browser, so a photo that fails
+> every gate below is still accepted today. Implementing them is tracked as its own
+> follow-up.
 
 ### 4.1 Quality Gate Criteria
 
@@ -148,10 +159,10 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
 ### 5.1 Embedding Generation (Server-Side)
 
 1. Three photos uploaded as multipart form data
-2. Server runs each through **pretrained face-api.js ResNet** model (we train nothing — [D43](../project/decision-log.md))
-3. Generates 128-dimensional vector per photo
-4. Computes `mean` (average of three vectors)
-5. Stores encrypted JSON blob in `students.face_embedding BYTEA`
+2. ⚠ **Server inference does not run** — there is no recognition model installed, so no vector is computed (we train nothing — [D43](../project/decision-log.md))
+3. The server writes the documented 128-d shape **zero-filled**, tagged `"stub": true` (`_stub_embedding_blob`)
+4. The `mean` slot is a placeholder like the three angle vectors — nothing is averaged yet
+5. Stores the blob as **plaintext** JSON in `students.face_embedding BYTEA` (the AES-256-GCM step is not implemented)
 6. Sets `face_enrolled_at` timestamp
 7. Increments `face_embedding_version`
 
@@ -162,12 +173,12 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
 | Student logs in       | Device checks `face_embedding_version` against cached version   |
 | New version available | Device downloads embedding via `GET /student/me/face-embedding` |
 | Cached in IndexedDB   | Stored encrypted with device-specific WebCrypto key             |
-| Used in Step 4        | Local comparison for offline verification                       |
+| Used in Step 4        | ⚠ Not implemented — the client sends the placeholder score `1`; no local comparison runs |
 
 ### 5.3 Encryption
 
-- **At rest**: Stored as BYTEA in PostgreSQL (encrypted at the application level)
-- **On device**: Cached encrypted in IndexedDB (WebCrypto device key)
+- **At rest**: ⚠ **Plaintext** BYTEA in PostgreSQL — the application-level AES-256-GCM encryption is not implemented
+- **On device**: Cached encrypted in IndexedDB (WebCrypto device key) — this part is real
 - **In transit**: HTTPS only
 
 ---

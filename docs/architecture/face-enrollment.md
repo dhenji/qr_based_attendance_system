@@ -44,11 +44,14 @@ Admin picks student → Face Enrollment Modal opens
     All 3 pass
         │
         ▼
-Server generates 128-d embedding per photo (face-api.js ResNet, D28)
-        │  ⚠ NOT IMPLEMENTED — no inference runs. The server writes a zero-filled
-        │  placeholder from `_stub_embedding_blob` ("mean" and all three angle
-        │  vectors 0.0, "stub": true), matching the shape below so that swapping
-        │  in the real pipeline only changes that one builder.
+Server generates 128-d embedding per photo (recognition model — none installed, D28)
+        │  ⚠ NOT IMPLEMENTED — no inference runs, and no face-recognition model
+        │  exists in the repository. The only model the project ships is MediaPipe
+        │  FaceLandmarker (`frontend/static/models/face_landmarker.task`), which
+        │  produces landmarks and blendshapes, not identity embeddings. The server
+        │  writes a zero-filled placeholder from `_stub_embedding_blob` ("mean" and
+        │  all three angle vectors 0.0, "stub": true), matching the shape below so
+        │  that swapping in the real pipeline only changes that one builder.
         ▼
 Stores ONE JSON blob in students.face_embedding BYTEA (plaintext today)
         │
@@ -62,15 +65,19 @@ Student can now use face verification in scan sessions
 
 ### 2.1 Quality Gates
 
-⚠ **Enforcement point: client-only, today.** These six gates run in the browser (MediaPipe)
-before the frame is uploaded. **The server does not re-check any of them.** It validates
+⚠ **Enforcement point: nowhere, today.** These six gates are **specified but not
+implemented on either side**. The admin upload UI validates file extension, non-emptiness
+and a 5 MB cap (`frontend/src/lib/features/admin/schema.ts:70-77`); the server validates
 `content_type`, size, and that the bytes are non-empty
-(`face_enrollment/service.py:41-60`) — nothing more.
+(`face_enrollment/service.py:41-60`) — nothing more. There is no camera capture flow and
+no biometric analysis in the browser: the photos are uploaded as files.
 
 Consequently `no_face_detected`, `multiple_faces` and `quality_too_low` appear in
 `api-contracts.md` but have **no exception class in the tree**
-(`face_enrollment/exceptions.py` defines only `InvalidImageException`). Since the
-thresholds below live only in client code, a modified client can bypass every one.
+(`face_enrollment/exceptions.py` defines only `InvalidImageException`) and **no
+implementation that could raise them**. The thresholds below are the design; implementing
+them client-side (MediaPipe can supply face count, face size and centring) is the work
+that is still to do.
 
 Each captured photo must pass **all** of the following before the next angle is
 accepted:
@@ -100,6 +107,12 @@ with AES-256-GCM as the D28 design (§2.2):
 }
 ```
 
+- ⚠ **No producer.** The vectors above have **no generator**: no face-recognition model
+  is installed in this repository. The only model the project ships is MediaPipe
+  FaceLandmarker (`frontend/static/models/face_landmarker.task`), which yields landmarks
+  and blendshapes — not identity embeddings. Producing them means adding a recognition
+  model (e.g. an ArcFace/InsightFace ONNX model) that can also run in the browser, so the
+  offline path keeps working.
 - **`mean`** (128 floats): element-wise average of the three angle vectors. Used as
   the **primary comparison target** during verification (D28).
 - **`angles`** (3 × 128 floats): per-angle vectors, part of the D28 design for
@@ -220,7 +233,7 @@ A **fixed sequence** — no randomization:
 2. **Turn left** — user rotates head ~30° left; detected via face mesh landmark shift
 3. **Turn right** — user rotates head ~30° right
 
-All processing is **client-side** via MediaPipe Face Mesh WASM. The client
+All processing is **client-side** via MediaPipe FaceLandmarker WASM. The client
 generates:
 
 ```json
@@ -248,8 +261,11 @@ against the cached enrolled embedding using **cosine similarity**:
 score = cosine_similarity(live_embedding, enrolled_embedding)
 ```
 
-The live embedding is generated client-side using the same face-api.js ResNet
-model (128-d output).
+The live embedding is generated client-side using the same recognition model
+(128-d output). ⚠ **No recognition model ships today** — the browser only has
+MediaPipe FaceLandmarker, which produces landmarks, not embeddings. The comparison
+below therefore has nothing to run against; see §2.2 for what the server actually
+stores.
 
 ### 4.3 Score Bands & Outcomes
 
@@ -343,7 +359,7 @@ codes with no implementation anywhere.
 | ------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sibling confusion  | **Accepted** (D31)    | Siblings may have similar embeddings; treated as a known limitation per instructor guidance. Future work: PAD CNN for anti-spoofing (out of scope).                                                                        |
 | Photo/video replay | Mitigated by liveness | Fixed-sequence blink + turn challenges make static-photo replay infeasible. Video replay of a live person remains a theoretical vector (acknowledged).                                                                     |
-| Model staleness    | Version migration     | If the face-api.js model is updated (changing embedding dimensions), `FACE_EMBEDDING_VERSION` is bumped and all students must be re-enrolled. The pull-on-login handshake detects version mismatch and forces re-download. ⚠ The mismatch is detected against the **per-student** `students.face_embedding_version` column (`student/service.py:333`), not the `FACE_EMBEDDING_VERSION` env var — the env var is the format the server writes at enrollment time, and the two are compared via that column. |
+| Model staleness    | Version migration     | If the recognition model is updated (changing embedding dimensions), `FACE_EMBEDDING_VERSION` is bumped and all students must be re-enrolled. The pull-on-login handshake detects version mismatch and forces re-download. ⚠ The mismatch is detected against the **per-student** `students.face_embedding_version` column (`student/service.py:333`), not the `FACE_EMBEDDING_VERSION` env var — the env var is the format the server writes at enrollment time, and the two are compared via that column. |
 
 ---
 

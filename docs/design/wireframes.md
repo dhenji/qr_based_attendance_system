@@ -515,7 +515,7 @@ Four-step flow. Each step advances after verification.
 ```
 
 > **Liveness sequence is fixed** (blink → turn left → turn right, D31).
-> MediaPipe Face Mesh runs WASM client-side. EAR + PnP heuristics
+> MediaPipe FaceLandmarker runs WASM client-side. EAR + PnP heuristics
 > graded server-side. Sibling-confusion risk is a known limitation.
 > Embedding is pulled on login (D29) and cached encrypted in IndexedDB.
 > Offline verification compares against cached embedding locally (D30).
@@ -1906,7 +1906,7 @@ Partial failure:
 
 - **All screens** are mobile-responsive: sidebar collapses to bottom tab bar on small screens
 - **Permission prompts** (camera + GPS) appear before first scanner use (incorporated into 2.2a)
-- **Face liveness** is a fixed 3-step challenge (blink → turn left → turn right) in 2.2d; MediaPipe Face Mesh WASM client-side, EAR + PnP server-side (D31)
+- **Face liveness** is a fixed 3-step challenge (blink → turn left → turn right) in 2.2d; MediaPipe FaceLandmarker WASM client-side, EAR + PnP server-side (D31)
 - **Offline banner** appears on all authenticated screens when connection is lost; shows "N awaiting verification (face)" when offline scans include face evidence (D16/D30)
 - **Prof/Admin profile & settings** are read-only (D32); student profile also read-only (D32)
 - **CRUD screens** (students, professors) follow the same create/edit/list pattern

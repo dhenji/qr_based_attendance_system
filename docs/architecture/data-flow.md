@@ -35,7 +35,7 @@ sequenceDiagram
 
     Note over S,DB: Step 4 — Face Liveness (D27.4)
 
-    S->>S: MediaPipe Face Mesh WASM
+    S->>S: MediaPipe FaceLandmarker WASM
     S->>S: Challenge: Blink → Turn Left → Turn Right
     S->>S: EAR check (blink), PnP check (head turns)
     S->>S: Embedding comparison vs cached face_embedding

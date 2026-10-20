@@ -111,5 +111,5 @@ npm run check          # typecheck (runs svelte-kit sync first)
 ## Docs (only what agents actually need)
 
 - `docs/architecture/api-contracts.md` — endpoint inventory (scan `student_number` field documented but comparison-only, see above).
-- `docs/project/decision-log.md` — authoritative (D1–D91, ADR-001–091; two entries share the D75/ADR-075 number); check before "fixing" odd-looking contracts.
+- `docs/project/decision-log.md` — authoritative (D1–D92, ADR-001–092; two entries share the D75/ADR-075 number); check before "fixing" odd-looking contracts.
 - `docs/project/roadmap.md` — 13 phases; Phase 12 is **not** a gap (it is marked `[Done]`, as are Phases 0 and 9).

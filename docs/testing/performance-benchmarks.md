@@ -200,7 +200,7 @@ General API endpoint performance under normal load (not peak).
 | Cumulative Layout Shift (CLS)        | <0.1   | Lighthouse CI                                           |
 | Camera initialization (scanner page) | <2s    | `performance.mark('camera-start')` to first frame       |
 | IndexedDB read (cached embedding)    | <50ms  | `performance.measure()` around DB transaction           |
-| Chart.js render (analytics page)     | <500ms | `performance.measure()` from data fetch to canvas paint |
+| SVG chart render (analytics page)    | <500ms | `performance.measure()` from data fetch to paint            |
 
 ---
 

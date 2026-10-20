@@ -11,7 +11,7 @@
 | #   | Threat                                                     | Severity | Mitigation                                                                                                                                                                                                                          | Decision                                 |
 | --- | ---------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential 5-step scan: session code → student-ID QR → GPS geofence → face liveness → face match. Steps 1–3 are verified server-side; **steps 4–5 are client-asserted** and the server only range-checks them — see *Client-Asserted Biometrics*. No shortcut through steps 1–3.                                                                             | D27, D31                                 |
-| T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe Face Mesh WASM in the client. The server grades the *submitted* evidence, not a measurement — see *Client-Asserted Biometrics*. This stops an honest client from being tricked, not a determined one. | D31                                      |
+| T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe FaceLandmarker WASM in the client. The server grades the *submitted* evidence, not a measurement — see *Client-Asserted Biometrics*. This stops an honest client from being tricked, not a determined one. | D31                                      |
 | T3  | **QR relay** — student sends session QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
 | T4  | **Sibling confusion** — twin/brother scans                 | Low      | **Not implemented.** No embedding comparison exists: there is no cosine-similarity code in the backend, and `face_enrollment` stores a zero-filled placeholder blob (`_stub_embedding_blob`), so there is nothing to compare against. The 0.70 threshold in `core/config.py` is applied to the score the *client* submits. Acknowledged by instructor as accepted risk; no PAD CNN in scope. | D31, ADR-068                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
@@ -129,7 +129,8 @@ exposure; it is not a way to kick an existing session out.
 > **Status: designed, not implemented.** What the server stores today is a
 > zero-filled placeholder from `_stub_embedding_blob` — a plain JSON blob with
 > `"mean"` and all three angle vectors set to `0.0` and `"stub": true`. There is
-> no ResNet inference, no AES-GCM step and no encryption code in the feature. The
+> no embedding inference, no AES-GCM step and no encryption code in the feature,
+> and no recognition model is installed anywhere in the repository. The
 > pipeline below is the design D28 records. The blob's *shape* is already the
 > documented one so swapping the builder is the only change a real pipeline
 > needs. The audit-trail exclusion in `_face_snapshot` is implemented and holds
@@ -137,7 +138,7 @@ exposure; it is not a way to kick an existing session out.
 
 ```
 Server:
-  3 photos → face-api.js ResNet → 128-d vectors per angle
+  3 photos → a recognition model (none installed) → 128-d vectors per angle
   → JSON blob: {"mean":[128f], "angles":{"front":[128f],"left":[128f],"right":[128f]}}
   → AES-256-GCM encrypt with server key
   → Store BYTEA in students.face_embedding
@@ -174,7 +175,7 @@ right column is all the server enforces. An earlier version of this table claime
 "EAR < 0.25 for >= 3 frames" as a server-side rule, which the code has never
 enforced — see *Client-Asserted Biometrics* below.
 
-All processing client-side (MediaPipe Face Mesh WASM). Only scores/evidence
+All processing client-side (MediaPipe FaceLandmarker WASM). Only scores/evidence
 sync to server for audit. Server re-validates evidence plausibility.
 
 ### Client-Asserted Biometrics
