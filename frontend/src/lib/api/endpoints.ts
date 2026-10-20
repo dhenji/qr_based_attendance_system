@@ -4323,6 +4323,16 @@ export interface ExcuseRequestReadResponse {
 	reviewed_by: number | null;
 	reviewed_at: string | null;
 	review_notes: string | null;
+	// The display identity, resolved server-side (ADR-088). The ids above
+	// stay: the per-record paths key on them.
+	student_name: string;
+	student_number: string;
+	student_section: string;
+	session_code: string;
+	session_date: string;
+	course_code: string;
+	course_name: string;
+	reviewed_by_name: string | null;
 }
 
 export interface ExcuseReviewBody {
@@ -4500,9 +4510,55 @@ export const AdminExcusesEndpoint: EndpointDef<Paginated<ExcuseRequestReadRespon
 	method: 'GET',
 	mock: (params) => {
 		const now = new Date().toISOString();
+		// The mock mirrors the CONTRACT shape: the display fields are
+		// resolved server-side, so the mock carries them too. A mock that
+		// invents a friendlier shape is what hid the last round of defects
+		// (ADR-088).
 		const rows: ExcuseRequestReadResponse[] = [
-			{ id: 901, student_id: 1, session_id: 41, initiated_by: 'student', initiated_via: 'request', reason: 'Medical appointment with supporting documents attached for review.', attachment_urls: [], status: 'pending', requested_at: now, reviewed_by: null, reviewed_at: null, review_notes: null },
-			{ id: 902, student_id: 2, session_id: 38, initiated_by: 'student', initiated_via: 'request', reason: 'Family emergency, barangay certificate available on request.', attachment_urls: [], status: 'pending', requested_at: now, reviewed_by: null, reviewed_at: null, review_notes: null },
+			{
+				id: 901,
+				student_id: 1,
+				session_id: 41,
+				initiated_by: 'student',
+				initiated_via: 'request',
+				reason: 'Medical appointment with supporting documents attached for review.',
+				attachment_urls: [],
+				status: 'pending',
+				requested_at: now,
+				reviewed_by: null,
+				reviewed_at: null,
+				review_notes: null,
+				student_name: 'Juan Dela Cruz',
+				student_number: '2024-0001',
+				student_section: 'A1',
+				session_code: '482913',
+				session_date: now,
+				course_code: 'CS101',
+				course_name: 'Data Structures',
+				reviewed_by_name: null,
+			},
+			{
+				id: 902,
+				student_id: 2,
+				session_id: 38,
+				initiated_by: 'student',
+				initiated_via: 'request',
+				reason: 'Family emergency, barangay certificate available on request.',
+				attachment_urls: [],
+				status: 'approved',
+				requested_at: now,
+				reviewed_by: 3,
+				reviewed_at: now,
+				review_notes: 'Certificate seen.',
+				student_name: 'Maria Santos',
+				student_number: '2024-0002',
+				student_section: 'B2',
+				session_code: '775104',
+				session_date: now,
+				course_code: 'CS101',
+				course_name: 'Data Structures',
+				reviewed_by_name: 'Maria Dela Cruz',
+			},
 		];
 		const status = params?.status;
 		const filtered = status ? rows.filter((r) => r.status === status) : rows;

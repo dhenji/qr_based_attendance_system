@@ -35,7 +35,6 @@ import { resetAdminProgramsStates } from '$lib/features/admin/programs/store.sve
 import { resetAdminCoursesStates } from '$lib/features/admin/courses/store.svelte';
 import { resetAdminOfferingsStates } from '$lib/features/admin/offerings/store.svelte';
 import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
-import { invalidateExcuseDirectory } from '$lib/features/excuse/service';
 import { refreshFaceCache } from '$lib/features/student/face.svelte';
 import { resetTheme } from '$lib/features/settings/theme';
 
@@ -415,7 +414,6 @@ export const doLogout = async (): Promise<void> => {
 	resetAdminCoursesStates();
 	resetAdminOfferingsStates();
 	invalidateAttendanceDirectory();
-	invalidateExcuseDirectory();
 	await goto(Routes.HOME);
 };
 

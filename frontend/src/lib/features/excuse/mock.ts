@@ -135,6 +135,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 		originalStatus: 'absent',
 		requestedAt: '2026-09-18T12:00:00.000Z',
 		reviewedAt: '2026-09-18T12:00:00.000Z',
+		reviewedByName: 'Dr. Maria Dela Cruz',
 		attachmentNames: []
 	},
 	{
@@ -154,6 +155,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 		originalStatus: 'late',
 		requestedAt: '2026-09-18T13:30:00.000Z',
 		reviewedAt: '2026-09-18T13:30:00.000Z',
+		reviewedByName: 'Dr. Maria Dela Cruz',
 		attachmentNames: ['med-cert-henry-cruz.pdf']
 	},
 	{
@@ -173,6 +175,7 @@ export const EXCUSE_REQUESTS: ExcuseRequest[] = [
 		originalStatus: 'absent',
 		requestedAt: '2026-09-18T15:00:00.000Z',
 		reviewedAt: '2026-09-19T09:20:00.000Z',
+		reviewedByName: 'Dr. Maria Dela Cruz',
 		reviewNotes: 'Insufficient evidence — no attachment and reason too vague.',
 		attachmentNames: []
 	},

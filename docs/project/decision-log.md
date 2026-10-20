@@ -2603,3 +2603,80 @@
   `test_audit_logs_resolves_ids_inside_the_change_list`,
   `test_audit_logs_keeps_a_student_number_as_a_number` and
   `test_audit_logs_falls_back_to_an_id_for_a_deleted_row`.
+
+### ADR-090: The Excuse Queues Name Their Own Records
+
+- **Decision (D90):** The excuse read model carries its **display
+  identity** — the student's name, number and section, the session's code
+  and date, the course behind it, and the reviewer's name — resolved by the
+  excuse slice itself. The client-side session-and-courses directory join is
+  **removed** from the excuse path, and both queues render what the server
+  sends. The raw ids stay in the response, because the per-record paths key
+  on them.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** The excuse read model carried no display identity at all, so
+  every excuse screen rendered database ids: the admin queue showed
+  `Student #4` and `Session #38` with no course column and no reviewer, and
+  the professor queue showed `Student #4` and a hardcoded
+  `originalStatus: 'unknown'`. The frontend documented the fallback as a
+  design (`features/excuse/service.ts`): *"Two fields have no professor-visible
+  source at all and read as fallbacks in real mode: student identity
+  (`Student #<id>`) and originalStatus (`unknown`)."*
+  It was the same shape as the audit trail's problem, and ADR-088 had already
+  settled the rule: **the slice resolves its own names.**
+  `LivenessReviewItem` — in the same feature family — already followed it
+  (`student_name`, `course_code`). The excuse slice was the last one that
+  did not.
+- **Rationale:**
+  - **The client could not resolve half of it.** The professor's queue joined
+    a session directory and a courses directory for the class, but the
+    **student** and the **reviewer** have no client-side source at all: the
+    professor's hands hold no student directory, and the user directory is
+    super-admin-only. So the two fields that identify a *person* — the ones
+    an administrator actually asks about — were the ones that could not be
+    resolved, and they rendered as ids.
+  - **Two sources for one value is how they drifted.** The client joined the
+    session and course labels itself while the server held the same facts,
+    so the admin queue and the professor queue could disagree about a row's
+    class. One source removes the possibility.
+  - **The resolution is batched, so it is not an N+1.** `ExcuseService`
+    resolves a page in one query per kind — students, sessions, offerings,
+    courses, accounts — the same shape `features/system/audit_labels.py`
+    uses for the audit trail. The per-request cache makes the second row of
+    a mutation free.
+  - **The reviewer's name comes from the roster row.** The `users` table has
+    no name columns, so the account is outer-joined to its student or
+    professor row, exactly as `features/admin/service.py::_users_stmt` does.
+    An account with no roster row falls back to its email, which is still
+    something an administrator can read.
+  - **A reference that cannot be resolved is a labelled id**, never a blank
+    — the audit trail's rule. The foreign keys are RESTRICT, so the
+    references cannot actually go missing; the fallback is defence, and it
+    costs nothing.
+- **Alternatives considered:**
+  (1) *Keep the client-side join and add the student and reviewer to it.*
+  Rejected: the client has no source for either, so it would need a new
+  endpoint — and the admin queue would need one too.
+  (2) *Resolve the names in the frontend from the rosters it already loads.*
+  Rejected: that is what the client already does for the class, and it is
+  why the two queues could disagree. It also cannot reach the reviewer.
+  (3) *Leave the ids and tell the reader what they are.* Rejected: the ids
+  are the problem. `Student #4` tells an administrator nothing they can act
+  on.
+  (4) *Taken:* the slice resolves its own display identity, the client
+  renders it, and the excuse path loses a directory.
+- **Consequences:** `ExcuseRequestRead` gains seven display fields beside
+  the ids it already had; the response is additive, so nothing that reads
+  the raw row breaks. `features/excuse/service.ts` loses
+  `ensureDirectory`, `sessionDirectory`, `courseIdentityFor` and
+  `invalidateExcuseDirectory` — the excuse feature gets *simpler*. The
+  professor's page still warms its own course directory for the **filter
+  options** (`routes/professor/excuse-requests/+page.svelte`), which is a
+  different thing and is unaffected. `original_status` is still not on the
+  row: it is a missing *value* rather than a raw id, and it needs the
+  attendance join — a separate decision, not a naming one.
+- **Testing:** `test_excuse_queues_name_the_student_and_the_class` and
+  `test_a_reviewed_excuse_names_its_reviewer` cover the routes;
+  `test_a_read_row_names_the_student_and_the_class` and
+  `test_a_reviewed_row_names_its_reviewer` cover the service.
