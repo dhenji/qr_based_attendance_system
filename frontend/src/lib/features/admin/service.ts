@@ -223,8 +223,23 @@ export const downloadStudentTemplate = async (): Promise<string> => {
 
 // --- Professors -------------------------------------------------------------
 
+// Assignment history can contain several rows for one offering (an ended
+// assignment plus its replacement). The server now collapses these, but the
+// profile page keys by offering id, so keep a defensive dedupe here too.
+const dedupeAssignedCourses = (
+	rows: { offering_id: number; course_code: string }[]
+): { offering_id: number; course_code: string }[] => {
+	const seen = new Set<number>();
+	return rows.filter((row) => {
+		if (seen.has(row.offering_id)) return false;
+		seen.add(row.offering_id);
+		return true;
+	});
+};
+
 const toProfessor = (p: AdminProfessorResponse): AdminProfessor => ({
 	...p,
+	assigned_courses: dedupeAssignedCourses(p.assigned_courses ?? []),
 	firstName: p.first_name,
 	middleName: p.middle_name ?? undefined,
 	lastName: p.last_name,

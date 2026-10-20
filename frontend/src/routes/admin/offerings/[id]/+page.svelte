@@ -7,13 +7,16 @@
 		adminOfferingDetailState,
 		adminOfferingsState,
 		assignOfferingProfessor,
+		reassignOfferingProfessor,
 		bulkEnrollOffering,
 		deleteArchivedOffering,
 		endOfferingAssignment,
 		initAdminOfferingDetail,
 		loadOfferingAssignments,
 		loadOfferingRoster,
+		permanentlyRemoveOfferingAssignment,
 		refreshAdminOfferingDetail,
+		reopenOfferingAssignment,
 		unenrollStudentFromOffering,
 		updateAdminOffering,
 	} from '$lib/features/admin/offerings/store.svelte';
@@ -29,12 +32,15 @@
 	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
 		assignmentCreateSchema,
+		assignmentReassignSchema,
 		componentCreateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
+	import type { AssignmentCreateInput, AssignmentReassignInput } from '$lib/features/admin/offerings/schema';
 	import { totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount, weeklyWriteBlocked } from '$lib/shared/utils/schedule';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type {
+		AdminAssignment,
 		AdminBulkEnrollResult,
 		AdminCourse,
 		AdminProfessor,
@@ -72,6 +78,14 @@
 
 	type OfferingTab = 'overview' | 'professors' | 'enrolled' | 'settings';
 	const OFFERING_TABS: OfferingTab[] = ['overview', 'professors', 'enrolled', 'settings'];
+
+	const isoToday = (): string => new Date().toISOString().slice(0, 10);
+
+	const addDaysIso = (iso: string, days: number): string => {
+		const date = new Date(`${iso}T00:00:00Z`);
+		date.setUTCDate(date.getUTCDate() + days);
+		return date.toISOString().slice(0, 10);
+	};
 
 	// Deep-linkable tabs (?tab=professors) so the Setup Wizard completion
 	// screen can point at the next step directly. Read once on entry (same
@@ -195,9 +209,39 @@
 	let a_primary = $state(false);
 	let a_from = $state('');
 	let a_to = $state('');
-	let a_semester = $state('');
 	let assignError = $state<string | null>(null);
 	let assignBusy = $state(false);
+	let assignConfirmOpen = $state(false);
+	let pendingAssign = $state<AssignmentCreateInput | null>(null);
+
+	// Reassign-professor form.
+	let reassignOpen = $state(false);
+	let reassignTarget = $state<AdminAssignment | null>(null);
+	let r_new_professor_id = $state('');
+	let r_primary = $state(false);
+	let r_from = $state('');
+	let r_to = $state('');
+	let reassignError = $state<string | null>(null);
+	let reassignBusy = $state(false);
+	let reassignConfirmOpen = $state(false);
+	let pendingReassign = $state<AssignmentReassignInput | null>(null);
+
+	// End-assignment confirmation.
+	let endAssignmentTarget = $state<AdminAssignment | null>(null);
+	let endAssignmentBusy = $state(false);
+	let endAssignmentIsFuture = $derived(
+		endAssignmentTarget ? endAssignmentTarget.effectiveFrom > isoToday() : false
+	);
+
+	// Reopen-assignment confirmation (undo an accidental End).
+	let reopenTarget = $state<AdminAssignment | null>(null);
+	let reopenBusy = $state(false);
+	let reopenAsAssistant = $state(false);
+
+	// Permanent removal is a correction path for assignments that never opened
+	// a session. End remains the normal removal action.
+	let permanentRemoveTarget = $state<AdminAssignment | null>(null);
+	let permanentRemoveBusy = $state(false);
 
 	// Roster + bulk enroll.
 	let sectionFilter = $state('');
@@ -404,7 +448,6 @@
 		a_primary = false;
 		a_from = new Date().toISOString().slice(0, 10);
 		a_to = '';
-		a_semester = offering?.semester ?? '';
 		assignOpen = true;
 	};
 
@@ -610,43 +653,200 @@
 		if (await removeMeetingRow(removeCompTarget)) removeCompTarget = null;
 	};
 
-	const submitAssign = async () => {
+	const submitAssign = () => {
 		if (!offering) return;
 		assignError = null;
+		const parsed = assignmentCreateSchema.safeParse({
+			professor_id: a_professor_id,
+			is_primary: a_primary,
+			effective_from: a_from,
+			effective_to: a_to || undefined,
+		});
+		if (!parsed.success) {
+			assignError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+			return;
+		}
+		pendingAssign = parsed.data;
+		assignOpen = false;
+		assignConfirmOpen = true;
+	};
+
+	const confirmAssign = async () => {
+		if (!offering || !pendingAssign) return;
 		assignBusy = true;
 		try {
-			const parsed = assignmentCreateSchema.safeParse({
-				professor_id: a_professor_id,
-				is_primary: a_primary,
-				effective_from: a_from,
-				effective_to: a_to || undefined,
-				semester: a_semester,
-			});
-			if (!parsed.success) {
-				assignError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-				return;
-			}
 			await assignOfferingProfessor(offering.id, {
-				professor_id: parsed.data.professor_id,
-				is_primary: parsed.data.is_primary,
-				effective_from: parsed.data.effective_from,
-				effective_to: parsed.data.effective_to || undefined,
-				semester: parsed.data.semester,
+				professor_id: pendingAssign.professor_id,
+				is_primary: pendingAssign.is_primary,
+				effective_from: pendingAssign.effective_from,
+				effective_to: pendingAssign.effective_to || undefined,
 			});
-			assignOpen = false;
+			assignConfirmOpen = false;
+			pendingAssign = null;
 		} catch (e: unknown) {
 			assignError = e instanceof Error && e.message ? e.message : 'Assign failed. Please try again.';
+			assignConfirmOpen = false;
+			assignOpen = true;
 		} finally {
 			assignBusy = false;
 		}
 	};
 
-	const endRow = async (professorId: number) => {
+	const cancelAssignConfirm = () => {
+		assignConfirmOpen = false;
+		assignOpen = true;
+	};
+
+	const openReassign = (assignment: AdminAssignment) => {
 		if (!offering) return;
+		reassignError = null;
+		reassignTarget = assignment;
+		r_new_professor_id = '';
+		r_primary = assignment.isPrimary;
+		// A scheduled row may be replaced on its own start date. A started
+		// row must be replaced later; a row that started today defaults to
+		// tomorrow so the old assignment never gets an inverted range.
+		const today = isoToday();
+		r_from =
+			assignment.effectiveFrom > today
+				? assignment.effectiveFrom
+				: assignment.effectiveFrom === today
+					? addDaysIso(today, 1)
+					: today;
+		r_to = '';
+		reassignOpen = true;
+	};
+
+	const submitReassign = () => {
+		if (!offering || !reassignTarget) return;
+		reassignError = null;
+		const parsed = assignmentReassignSchema.safeParse({
+			new_professor_id: r_new_professor_id,
+			is_primary: r_primary,
+			effective_from: r_from || undefined,
+			effective_to: r_to || undefined,
+		});
+		if (!parsed.success) {
+			reassignError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+			return;
+		}
+		pendingReassign = parsed.data;
+		reassignOpen = false;
+		reassignConfirmOpen = true;
+	};
+
+	const confirmReassign = async () => {
+		if (!offering || !reassignTarget || !pendingReassign) return;
+		reassignBusy = true;
 		try {
-			await endOfferingAssignment(offering.id, professorId);
+			await reassignOfferingProfessor(offering.id, reassignTarget.professorId, {
+				new_professor_id: pendingReassign.new_professor_id,
+				is_primary: pendingReassign.is_primary,
+				old_effective_from: reassignTarget.effectiveFrom,
+				effective_from: pendingReassign.effective_from,
+				effective_to: pendingReassign.effective_to || undefined,
+			});
+			reassignConfirmOpen = false;
+			reassignTarget = null;
+			pendingReassign = null;
+		} catch (e: unknown) {
+			reassignError = e instanceof Error && e.message ? e.message : 'Reassign failed. Please try again.';
+			reassignConfirmOpen = false;
+			reassignOpen = true;
+		} finally {
+			reassignBusy = false;
+		}
+	};
+
+	const cancelReassignConfirm = () => {
+		reassignConfirmOpen = false;
+		reassignOpen = true;
+	};
+
+	const askEndAssignment = (assignment: AdminAssignment) => {
+		adminOfferingDetailState.actionError = null;
+		endAssignmentTarget = assignment;
+	};
+
+	const confirmEndAssignment = async () => {
+		if (!offering || !endAssignmentTarget) return;
+		endAssignmentBusy = true;
+		try {
+			await endOfferingAssignment(
+				offering.id,
+				endAssignmentTarget.professorId,
+				endAssignmentTarget.effectiveFrom
+			);
+			endAssignmentTarget = null;
 		} catch {
 			// Surfaced via the detail state's actionError.
+		} finally {
+			endAssignmentBusy = false;
+		}
+	};
+
+	const canReopenAssignment = (assignment: AdminAssignment): boolean =>
+		!!assignment.effectiveTo &&
+		!adminOfferingDetailState.assignments.some(
+			(other) =>
+				other.professorId === assignment.professorId &&
+				other.effectiveFrom > assignment.effectiveFrom
+		);
+
+	const openReopen = (assignment: AdminAssignment) => {
+		adminOfferingDetailState.actionError = null;
+		reopenAsAssistant = false;
+		reopenTarget = assignment;
+	};
+
+	const confirmReopen = async () => {
+		if (!offering || !reopenTarget) return;
+		reopenBusy = true;
+		try {
+			await reopenOfferingAssignment(
+				offering.id,
+				reopenTarget.professorId,
+				reopenTarget.effectiveFrom,
+				reopenTarget.isPrimary && reopenAsAssistant ? false : undefined
+			);
+			reopenTarget = null;
+			reopenAsAssistant = false;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			reopenBusy = false;
+		}
+	};
+
+	// Permanent removal is a post-End cleanup: End first, then erase a row
+	// whose end date has arrived and that never opened a session. Rows with a
+	// future end date are still live; ended rows with session history stay
+	// visible but disabled, so the reason is on screen rather than in a 409.
+	const isEndedAssignment = (assignment: AdminAssignment): boolean =>
+		assignment.effectiveTo != null && assignment.effectiveTo <= isoToday();
+
+	const canPermanentlyRemoveAssignment = (assignment: AdminAssignment): boolean =>
+		isEndedAssignment(assignment) && !assignment.hasSessions;
+
+	const askPermanentRemove = (assignment: AdminAssignment) => {
+		adminOfferingDetailState.actionError = null;
+		permanentRemoveTarget = assignment;
+	};
+
+	const confirmPermanentRemove = async () => {
+		if (!offering || !permanentRemoveTarget) return;
+		permanentRemoveBusy = true;
+		try {
+			await permanentlyRemoveOfferingAssignment(
+				offering.id,
+				permanentRemoveTarget.professorId,
+				permanentRemoveTarget.effectiveFrom
+			);
+			permanentRemoveTarget = null;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			permanentRemoveBusy = false;
 		}
 	};
 
@@ -948,7 +1148,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each adminOfferingDetailState.assignments as a (a.professorId)}
+								{#each adminOfferingDetailState.assignments as a (`${a.professorId}:${a.effectiveFrom}`)}
 									<tr>
 										<td>
 											<div class="strong">{professorName(a.professorId)}</div>
@@ -964,9 +1164,24 @@
 										<td>
 											<div class="row-actions">
 												{#if !a.effectiveTo}
-													<button class="link" onclick={() => endRow(a.professorId)}>End</button>
+													<button class="link" onclick={() => openReassign(a)}>Reassign</button>
+													<button class="link" onclick={() => askEndAssignment(a)}>End</button>
+												{:else if canReopenAssignment(a)}
+													<button class="link" onclick={() => openReopen(a)}>Reopen</button>
 												{:else}
 													<span class="muted small">ended</span>
+												{/if}
+												{#if isEndedAssignment(a)}
+													<button
+														class="link danger-link"
+														disabled={!canPermanentlyRemoveAssignment(a)}
+														title={a.hasSessions
+															? 'This assignment has sessions; its history must be kept.'
+															: 'Permanently erase this ended assignment. Only available when no sessions were opened under it.'}
+														onclick={() => askPermanentRemove(a)}
+													>
+														Remove permanently
+													</button>
 												{/if}
 											</div>
 										</td>
@@ -975,7 +1190,7 @@
 							</tbody>
 						</table>
 					</div>
-					<p class="hint">Mid-term replacement: end the old assignment, then create the new one — history is never rewritten.</p>
+					<p class="hint">Mid-term replacement: use <strong>Reassign</strong> to hand the offering to another professor in one step. Only one primary professor may cover an offering at a time; assistants may overlap. Ending an assignment keeps it active through today; use <strong>Reopen</strong> on an ended row to undo an accidental end, or assign the same professor with a start date after the ended assignment. <strong>Remove permanently</strong> appears only after an assignment is ended; ended rows that opened a session keep their history and stay disabled.</p>
 				{/if}
 			</section>
 		{:else if tab === 'enrolled'}
@@ -1293,16 +1508,51 @@
 				<label class="check">
 					<input type="checkbox" bind:checked={a_primary} /> Primary (uncheck for assistant)
 				</label>
+				<p class="hint">
+					Only one primary professor can cover an offering at a time. Leave this unchecked to add an assistant.
+				</p>
 				<div class="grid2">
 					<label>Effective from<input class="input" type="date" bind:value={a_from} /></label>
 					<label>Effective to (optional)<input class="input" type="date" bind:value={a_to} /></label>
 				</div>
-				<label>Semester<input class="input" bind:value={a_semester} placeholder="1st Sem" /></label>
+				<p class="hint">Semester: <strong>{offering.semester}</strong></p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (assignOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={assignBusy} onclick={submitAssign}>
-					{assignBusy ? 'Saving…' : 'Assign'}
+				<button class="btn btn-primary" onclick={submitAssign}>
+					Review assignment
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if assignConfirmOpen && pendingAssign && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="assign-confirm-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: cancelAssignConfirm }}
+		>
+			<h2 id="assign-confirm-title" class="modal-title">Assign this professor?</h2>
+			<p class="modal-text">
+				<strong>{professorName(pendingAssign.professor_id)}</strong> will be assigned to this offering as
+				{pendingAssign.is_primary ? 'primary' : 'assistant'} from {pendingAssign.effective_from}
+				{pendingAssign.effective_to ? ` to ${pendingAssign.effective_to}` : ''}.
+			</p>
+			<p class="muted">
+				Semester: {offering.semester} · {offering.academicYear}
+			</p>
+			{#if assignError}
+				<p class="error" role="alert">{assignError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={cancelAssignConfirm}>Back</button>
+				<button class="btn btn-primary" disabled={assignBusy} onclick={confirmAssign}>
+					{assignBusy ? 'Assigning…' : 'Confirm assign'}
 				</button>
 			</div>
 		</div>
@@ -1469,6 +1719,208 @@
 				<button class="btn btn-ghost" onclick={() => (unenrollTarget = null)}>Cancel</button>
 				<button class="btn btn-danger" disabled={unenrollBusy} onclick={confirmUnenroll}>
 					{unenrollBusy ? 'Removing…' : 'Remove'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reassignOpen && reassignTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reassign-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reassignOpen = false) }}
+		>
+			<h2 id="reassign-title" class="modal-title">Reassign professor</h2>
+			{#if reassignError}
+				<p class="error" role="alert">{reassignError}</p>
+			{/if}
+			<div class="form">
+				<p class="hint">
+					Current: <strong>{professorName(reassignTarget.professorId)}</strong> — {reassignTarget.effectiveFrom} → {reassignTarget.effectiveTo ?? 'ongoing'}
+				</p>
+				<label>Replacement professor
+					<select class="input" bind:value={r_new_professor_id}>
+						<option value="">Pick a professor…</option>
+						{#each [...professorIndex.values()] as p (p.id)}
+							<option value={p.id} disabled={p.id === reassignTarget.professorId}>
+								{p.firstName} {p.lastName} — {p.email}
+							</option>
+						{/each}
+					</select>
+				</label>
+				<label class="check">
+					<input type="checkbox" bind:checked={r_primary} /> Primary (uncheck for assistant)
+				</label>
+				<p class="hint">
+					Only one primary professor can cover an offering at a time. Leave this unchecked to reassign as an assistant.
+				</p>
+				<div class="grid2">
+					<label>Effective from<input class="input" type="date" bind:value={r_from} /></label>
+					<label>Effective to (optional)<input class="input" type="date" bind:value={r_to} /></label>
+				</div>
+				<p class="hint">Semester: <strong>{offering.semester}</strong></p>
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (reassignOpen = false)}>Cancel</button>
+				<button class="btn btn-primary" onclick={submitReassign}>
+					Review reassignment
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reassignConfirmOpen && pendingReassign && reassignTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reassign-confirm-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: cancelReassignConfirm }}
+		>
+			<h2 id="reassign-confirm-title" class="modal-title">Reassign this professor?</h2>
+			<p class="modal-text">
+				<strong>{professorName(reassignTarget.professorId)}</strong> will be replaced by
+				<strong>{professorName(pendingReassign.new_professor_id)}</strong> on this offering.
+			</p>
+			<p class="muted">
+				New effective from {pendingReassign.effective_from ?? 'today'}
+				{pendingReassign.effective_to ? ` to ${pendingReassign.effective_to}` : ''} · Semester {offering.semester}
+			</p>
+			{#if reassignError}
+				<p class="error" role="alert">{reassignError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={cancelReassignConfirm}>Back</button>
+				<button class="btn btn-primary" disabled={reassignBusy} onclick={confirmReassign}>
+					{reassignBusy ? 'Reassigning…' : 'Confirm reassign'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if endAssignmentTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="end-assignment-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (endAssignmentTarget = null) }}
+		>
+			<h2 id="end-assignment-title" class="modal-title">
+				{endAssignmentIsFuture ? 'Cancel this scheduled assignment?' : 'End this assignment?'}
+			</h2>
+			{#if endAssignmentIsFuture}
+				<p class="modal-text">
+					<strong>{professorName(endAssignmentTarget.professorId)}</strong>'s scheduled assignment starts on
+					{endAssignmentTarget.effectiveFrom} and has not begun. Cancelling removes it from the offering.
+				</p>
+			{:else}
+				<p class="modal-text">
+					<strong>{professorName(endAssignmentTarget.professorId)}</strong> will remain assigned through today
+					({isoToday()}). The assignment ends tomorrow; past sessions stay attributed to them. After ending,
+					you can use <strong>Remove permanently</strong> on the ended row if no sessions were opened under it.
+				</p>
+			{/if}
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (endAssignmentTarget = null)}>Back</button>
+				<button class="btn btn-danger" disabled={endAssignmentBusy} onclick={confirmEndAssignment}>
+					{endAssignmentBusy
+						? endAssignmentIsFuture
+							? 'Cancelling…'
+							: 'Ending…'
+						: endAssignmentIsFuture
+							? 'Cancel assignment'
+							: 'End assignment'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reopenTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reopen-assignment-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reopenTarget = null) }}
+		>
+			<h2 id="reopen-assignment-title" class="modal-title">Reopen this assignment?</h2>
+			<p class="modal-text">
+				<strong>{professorName(reopenTarget.professorId)}</strong> will become active again on this offering
+				from {reopenTarget.effectiveFrom} with no end date as
+				<strong>{reopenTarget.isPrimary && !reopenAsAssistant ? 'primary' : 'assistant'}</strong>.
+				This undoes the previous end action.
+			</p>
+			{#if reopenTarget.isPrimary}
+				<label class="check">
+					<input type="checkbox" bind:checked={reopenAsAssistant} /> Reopen as assistant
+				</label>
+				<p class="hint">
+					Choose this if another professor is already primary for these dates.
+				</p>
+			{/if}
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (reopenTarget = null)}>Back</button>
+				<button class="btn btn-primary" disabled={reopenBusy} onclick={confirmReopen}>
+					{reopenBusy ? 'Reopening…' : 'Reopen assignment'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if permanentRemoveTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="permanent-remove-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (permanentRemoveTarget = null) }}
+		>
+			<h2 id="permanent-remove-title" class="modal-title">Permanently remove this assignment?</h2>
+			<p class="modal-text">
+				<strong>{professorName(permanentRemoveTarget.professorId)}</strong>'s assignment from
+				{permanentRemoveTarget.effectiveFrom} → {permanentRemoveTarget.effectiveTo ?? 'ongoing'}
+				({offering.semester}) will be erased from history. This cannot be undone, and the
+				assignment can no longer be reopened.
+			</p>
+			<p class="hint">
+				Sessions are never deleted. If any session was opened under this assignment, the server
+				blocks removal and you must use <strong>End</strong> instead.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (permanentRemoveTarget = null)}>Back</button>
+				<button
+					class="btn btn-danger"
+					disabled={permanentRemoveBusy}
+					onclick={confirmPermanentRemove}
+				>
+					{permanentRemoveBusy ? 'Removing…' : 'Remove permanently'}
 				</button>
 			</div>
 		</div>
@@ -1834,6 +2286,19 @@
 
 	.link:hover {
 		text-decoration: underline;
+	}
+
+	.danger-link {
+		color: var(--danger);
+	}
+
+	.danger-link:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.danger-link:disabled:hover {
+		text-decoration: none;
 	}
 
 	/* Back button reads as its own header block, so the .page flex gap

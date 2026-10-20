@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -60,6 +61,15 @@ class BackupLog(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        # `action` is the one audited column that carried no index, so an
+        # action filter — and an action sort — was a sequential scan of the
+        # whole table (ADR-064). The composite serves BOTH: the filter picks
+        # the leading column, and `performed_at` is the column the read
+        # endpoint orders by, so the rows come back already in order instead
+        # of being sorted afterwards.
+        Index("ix_audit_logs_action_performed_at", "action", "performed_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     action: Mapped[str] = mapped_column(String(50))

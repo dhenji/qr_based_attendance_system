@@ -225,6 +225,19 @@ class ProfessorService:
             department=payload.department,
         )
 
+        # A roster row appearing is a change to the institution, so it is
+        # audited like any other. The client used to INFER these rows from
+        # `created_at` because nothing recorded them; an inferred row is not
+        # evidence (ADR-086).
+        await record_audit(
+            self._session,
+            actor_id=assigned_by,
+            action=AuditAction.CREATE,
+            entity_type=AuditEntity.PROFESSOR,
+            entity_id=professor.id,
+            new_value=self._professor_snapshot(professor),
+        )
+
         for offering_id in dict.fromkeys(payload.courses):
             await self._assign_offering(
                 professor_id=professor.id,
@@ -668,12 +681,37 @@ class ProfessorService:
     async def _assigned_offerings(
         self, professor_id: int
     ) -> Sequence[AssignedOfferingItem]:
-        """Active assignments ordered by offering id (base columns only)."""
+        """Active assignments, one row per offering.
+
+        The query can return more than one active row for the same offering
+        when a handover leaves an old assignment ending today and a new one
+        starting today. The UI keys course rows by offering id, so collapse
+        duplicates here and keep the most current assignment.
+        """
         rows = (
             await self._session.execute(_assignments_stmt(professor_id))
         ).all()
 
-        return [_to_assigned_offering(row) for row in rows]
+        by_offering: dict[int, AssignedOfferingItem] = {}
+        for row in rows:
+            item = _to_assigned_offering(row)
+            current = by_offering.get(item.offering_id)
+            if current is None or self._assignment_rank(item) > self._assignment_rank(
+                current
+            ):
+                by_offering[item.offering_id] = item
+
+        return list(by_offering.values())
+
+    @staticmethod
+    def _assignment_rank(item: AssignedOfferingItem) -> tuple[bool, date, bool]:
+        """Order duplicate active rows for the same offering.
+
+        Prefer an open-ended assignment, then the latest start date, then the
+        primary role. Deterministic so the page does not flicker between two
+        rows that share an offering id.
+        """
+        return (item.effective_to is None, item.effective_from, item.is_primary)
 
     async def _enrich_assigned_offerings(
         self, items: Sequence[AssignedOfferingItem]
@@ -800,7 +838,6 @@ class ProfessorService:
             is_primary=False,
             effective_from=today,
             effective_to=None,
-            semester=offering.semester,
             assigned_by=assigned_by,
         )
         self._session.add(record)
@@ -861,6 +898,7 @@ class ProfessorService:
                 .join(CourseProfessor, CourseProfessor.offering_id == CourseOffering.id)
                 .join(Course, CourseOffering.course_id == Course.id)
                 .where(CourseProfessor.professor_id == professor_id)
+                .distinct()
                 .order_by(CourseOffering.id)
             )
         ).all()

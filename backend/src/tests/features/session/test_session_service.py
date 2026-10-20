@@ -133,7 +133,6 @@ def _assignment(**overrides: Any) -> CourseProfessor:
         "effective_from": date.today() - timedelta(days=1),
         "effective_to": None,
         "is_primary": True,
-        "semester": "1ST",
         "assigned_by": 1,
         "created_at": NOW,
     }

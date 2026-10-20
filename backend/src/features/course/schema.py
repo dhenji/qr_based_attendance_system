@@ -347,13 +347,13 @@ class ProfessorAssignment(BaseModel):
     is_primary: bool = False
     effective_from: date
     effective_to: date | None = None
-    semester: str = Field(
-        min_length=SEMESTER_MIN_LENGTH, max_length=SEMESTER_MAX_LENGTH
-    )
+    semester: str | None = None
 
     @field_validator("semester")
     @classmethod
-    def _strip_semester(cls, value: str) -> str:
+    def _strip_semester(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return value.strip()
 
     @model_validator(mode="after")
@@ -364,13 +364,46 @@ class ProfessorAssignment(BaseModel):
         return self
 
 
+class ProfessorReassignment(BaseModel):
+    new_professor_id: int = Field(gt=0)
+    is_primary: bool | None = None
+    # Composite-PK discriminator: the exact old row to replace. Optional for
+    # older clients; the service falls back to the newest open-ended row.
+    old_effective_from: date | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+    @model_validator(mode="after")
+    def _dates_order(self) -> "ProfessorReassignment":
+        if self.effective_to is not None and self.effective_from is not None and self.effective_to <= self.effective_from:
+            raise ValueError("effective_to must be after effective_from")
+
+        return self
+
+
+class ProfessorReopen(BaseModel):
+    """Undo an accidental End by clearing the exact row's end date.
+
+    `is_primary` is an optional role override: omit it to restore the role the
+    row had before it was ended, or pass `false` to reopen as an assistant when
+    another primary professor already covers the dates.
+    """
+
+    effective_from: date
+    is_primary: bool | None = None
+
+
 class AssignmentRead(BaseModel):
     offering_id: int
     professor_id: int
     is_primary: bool
     effective_from: date
     effective_to: date | None = None
-    semester: str
+    semester: str = ""
+    # True when a session was opened under this exact effective window. The
+    # admin UI hides the permanent-remove action for those rows; the service
+    # enforces the same rule independently.
+    has_sessions: bool = False
     assigned_by: int
     assigned_at: datetime
 

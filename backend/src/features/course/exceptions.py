@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from core.exceptions import AppException, DatabaseException, DomainException
 
 
@@ -343,5 +345,46 @@ class ComponentExistsException(CourseDomainException):
             message=(
                 f"Offering {offering_id} already has a {session_type} "
                 "component on that schedule"
+            )
+        )
+
+
+class ProfessorNotEligibleException(CourseDomainException):
+    """422 - the selected professor is not eligible for assignment."""
+
+    status_code: int = 422
+    code: str = "professor_not_eligible"
+
+    def __init__(self, professor_id: int) -> None:
+        super().__init__(
+            message=f"Professor {professor_id} is not eligible for assignment"
+        )
+
+
+class InvalidEffectiveFromException(CourseDomainException):
+    """422 - reassignment effective date must be after the current assignment's start date."""
+
+    status_code: int = 422
+    code: str = "invalid_effective_from"
+
+    def __init__(self, offering_id: int, professor_id: int) -> None:
+        super().__init__(
+            message="Choose an effective date after the current assignment's start date."
+        )
+
+
+class AssignmentAlreadyEndedException(CourseDomainException):
+    """409 - the targeted assignment row ended before today."""
+
+    status_code: int = 409
+    code: str = "assignment_already_ended"
+
+    def __init__(
+        self, offering_id: int, professor_id: int, effective_from: date
+    ) -> None:
+        super().__init__(
+            message=(
+                f"The assignment starting {effective_from} for professor "
+                f"{professor_id} on offering {offering_id} has already ended."
             )
         )

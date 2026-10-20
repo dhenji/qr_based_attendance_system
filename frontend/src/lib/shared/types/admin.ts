@@ -380,6 +380,8 @@ export interface AdminAssignmentResponse {
 	effective_from: string;
 	effective_to: string | null;
 	semester: string;
+	/** True when a session was opened under this exact effective window. */
+	has_sessions: boolean;
 	assigned_by: number;
 	assigned_at: string;
 }
@@ -391,6 +393,8 @@ export interface AdminAssignment {
 	effectiveFrom: string;
 	effectiveTo?: string;
 	semester: string;
+	/** Protected by session history; permanent removal is not available. */
+	hasSessions: boolean;
 	assignedBy: number;
 	assignedAt: string;
 	// Joined client-side for display.
@@ -403,7 +407,21 @@ export interface AdminAssignmentCreatePayload {
 	is_primary: boolean;
 	effective_from: string;
 	effective_to?: string;
-	semester: string;
+}
+
+export interface AdminAssignmentReassignPayload {
+	new_professor_id: number;
+	is_primary?: boolean;
+	/** Composite-PK discriminator for the assignment being replaced. */
+	old_effective_from?: string;
+	effective_from?: string;
+	effective_to?: string;
+}
+
+export interface AdminAssignmentReopenPayload {
+	effective_from: string;
+	/** Omit to restore the previous role; false reopens as an assistant. */
+	is_primary?: boolean;
 }
 
 export interface AdminRosterItemResponse {
@@ -618,12 +636,19 @@ export interface AttendanceOverviewFilters {
 // The academic-structure shape mirrors api-contracts
 // GET /admin/system/academic-structure exactly (D38: program/year/course
 // mutations with old/new values).
+//
+// The endpoint returns the stored row unaltered (ADR-064): `performed_by` is
+// a `users.id` and `old_value`/`new_value` are the raw JSON snapshots. The
+// names an administrator needs are derived on the read side — see
+// `features/admin/audit/present.ts`, which reads the label out of the
+// snapshot first and only falls back to a roster lookup.
 
 export type AuditEntityType =
 	| 'program'
 	| 'year_level'
 	| 'course'
 	| 'course_offering'
+	| 'offering_component'
 	| 'student'
 	| 'professor'
 	| 'enrollment'
@@ -644,7 +669,10 @@ export type AuditAction =
 	| 'delete'
 	| 'import'
 	| 'enroll'
+	| 'unenroll'
 	| 'assign'
+	| 'reassign'
+	| 'reopen'
 	| 'unassign'
 	| 'open'
 	| 'close'
@@ -658,37 +686,93 @@ export type AuditAction =
 
 export type AuditActorRole = 'admin' | 'professor' | 'student' | 'system';
 
+/**
+ * Who performed an audited action.
+ *
+ * `kind` is `anonymous` when nobody was authenticated — a lockout from an
+ * anonymous attempt, or an unattended run. Otherwise it is `user`.
+ */
+export interface AuditActorResponse {
+	kind: 'user' | 'anonymous';
+	id: number | null;
+	name: string;
+	email: string | null;
+	role: string | null;
+}
+
+/**
+ * What an audited action was about.
+ *
+ * `label` is the record's name. It is read out of the audit snapshot first
+ * and only then from a join, so it survives the record's deletion — which
+ * a join would not.
+ */
+export interface AuditSubjectResponse {
+	type: AuditEntityType;
+	id: number | null;
+	label: string;
+	sublabel: string | null;
+}
+
+/** One field that changed. */
+export interface AuditChangeResponse {
+	field: string;
+	label: string;
+	before: string;
+	after: string;
+}
+
 export interface AuditLogItemResponse {
 	id: number;
-	action: string;
-	entity_type: string;
+	action: AuditAction;
+	entity_type: AuditEntityType;
 	entity_id: number | null;
-	old_value: unknown;
-	new_value: unknown;
-	performed_by: string | number | null;
+	/**
+	 * The JSON snapshot the writer took, verbatim.
+	 *
+	 * A dict, not a string: the backend stores `JSONB`
+	 * (`backend/src/features/system/model.py:68`), so the API returns an
+	 * object. `old_value` is null on create, `new_value` is null on delete.
+	 */
+	old_value: Record<string, unknown> | null;
+	new_value: Record<string, unknown> | null;
+	/**
+	 * `users.id` of the actor, or null when nobody was authenticated. The
+	 * derived `actor` block names them; this stays the raw reference.
+	 */
+	performed_by: number | null;
 	performed_at: string;
+	/** The derived read model (ADR-086). */
+	actor: AuditActorResponse;
+	subject: AuditSubjectResponse;
+	summary: string;
+	action_label: string;
+	changes: AuditChangeResponse[];
 }
 
 export interface AuditLogFilters {
 	entity_type?: AuditEntityType;
 	action?: AuditAction;
-	performed_by?: string;
+	/** `users.id`. The backend types it `int | None`, so it is a number here. */
+	performed_by?: number;
+	/** An account id, email or name fragment. Matched server-side. */
+	actor?: string;
 	date_from?: string;
 	date_to?: string;
+	sort_by?: 'time' | 'actor' | 'action';
+	sort_dir?: 'asc' | 'desc';
 	page?: number;
 	size?: number;
 }
 
-export interface StructureChangeResponse {
-	id: number;
-	action: string;
-	entity_type: string;
-	entity_id: number;
-	old_value: string | null;
-	new_value: string | null;
-	performed_by: string;
-	performed_at: string;
-}
+/**
+ * The academic-structure row.
+ *
+ * A subtype of the audit row rather than a copy, mirroring the backend
+ * (`AcademicStructureRead` subclasses `AuditLogRead`,
+ * `backend/src/features/system/schema.py:104-109`) so the two cannot drift.
+ */
+export interface StructureChangeResponse extends AuditLogItemResponse {}
 
 export interface CsvImportError {
 	line: number;

@@ -295,13 +295,15 @@ All sensitive operations are logged in the audit trail:
 
 | Action                                           | Logged | Trail row                                        |
 | ------------------------------------------------ | ------ | ------------------------------------------------ |
-| Student enrollment/unenrollment                  | Yes    | `enroll` / `enrollment`                         |
-| Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
+| Roster creation (student / professor)            | Yes    | `create` on `student` / `professor`              |
+| Student enrollment/unenrollment                  | Yes    | `enroll` / `unenroll` on `enrollment`           |
+| Professor assignment changes                     | Yes    | `assign` / `reassign` / `reopen` / `unassign` on `course_professor` |
 | Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
 | Session open/close                               | Yes    | `open` / `close` on `session`                   |
 | Face enrollment/re-enrollment                    | Yes    | `update` on `face_enrollment`. `revoke` exists as a service method but **no route exposes it**, so the row it would write is unreachable |
 | Backup create/restore                            | Yes    | `create` on `backup`. **Restore is not implemented** — only download |
 | Academic structure changes (program/year/course) | Yes    | `create` / `update` / `archive` / `delete`      |
+| Schedule component changes                        | Yes    | `create` / `update` / `archive` on `offering_component` |
 | System settings changes                          | Yes    | `update` on `app_setting`, with the previous value |
 | Admin account creation                           | Yes    | `create` on `user`, with the role granted       |
 | Account lockout/unlock                           | Yes    | `lock` / `unlock` on `user`. **There is no standalone admin unlock** — an admin clears a lockout by resetting the password, which is audited as `password_reset` |
@@ -321,9 +323,18 @@ password, the hash or the TOTP secret — `_account_snapshot` omits all three by
 design, and the audit assertions pin that.
 
 Read the trail through `GET /admin/audit-logs` (admin-only, filterable by
-`entity_type` / `action` / `performed_by` / date range).
-`GET /admin/system/academic-structure` reads the same table scoped to the four
+`entity_type` / `action` / `performed_by` / `actor` / date range, sortable by
+time / actor / action).
+`GET /admin/system/academic-structure` reads the same table scoped to the
 structural entity types.
+
+Each row carries the stored evidence (`action`, `entity_type`, `entity_id`,
+`old_value`, `new_value`, `performed_by`, `performed_at`) **and** a derived
+reading of it — the actor's name and role, the subject's name, a one-line
+summary and a field-level change (ADR-088). The derived names are read out
+of the audit snapshot first, so they survive the record's deletion; a plain
+admin sees them too, which a client-side lookup could not manage because
+`GET /admin/users` is super-admin-only.
 
 One row above is marked unimplemented because the surface does not exist yet:
 there is no admin account unlock route. See ADR-064.

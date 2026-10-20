@@ -85,7 +85,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Multiple professors may teach the same course (primary + assistants).
-- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches.
+- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches. At most one primary assignment may cover an offering on any date (assistants may overlap); assign, reassign, and reopen reject a conflicting primary with `409 primary_assignment_conflict`.
 
 ### ADR-010: Absent Professor, Class Activities — No Special Feature
 
@@ -2322,4 +2322,284 @@
   `test_shared_term_weeks.py`, the program term round-trip/bounds tests, and the
   risk-batch expectation left at 16 × 2 = 32.
 
+### ADR-087: Permanent Assignment Removal Is Guarded, Not a Replacement for End
 
+- **Decision (D87):** Add `DELETE /admin/offerings/{offering_id}/professors/
+  {professor_id}/permanent?effective_from=YYYY-MM-DD` as a **post-End** cleanup
+  for assignments created by mistake. A row with no end date or a future end
+  date is still live and is rejected with `409 assignment_not_ended`; End
+  remains the normal removal action and must run first. Once ended, the route deletes exactly one `course_professors` row and
+  is rejected with `409 assignment_has_sessions` when a session was opened
+  inside that row's effective window (`effective_to` inclusive, open-ended means
+  no upper bound). `effective_from` is required because the composite primary
+  key has no surrogate id. The audit trail records one `delete` row on
+  `course_professor` with the full old-value snapshot. The admin list exposes
+  `has_sessions`; the UI offers permanent removal only on ended rows and shows
+  the action disabled when session history protects the row.
+- **Date:** 2026-10-19
+- **Status:** Accepted
+- **Context:** End preserves history and keeps Reopen possible, but an
+  assignment created for the wrong professor or with the wrong dates before any
+  class ran leaves a bogus row in the assignment trail. The earlier
+  frontend-orchestrated workaround could not erase that row, and making the
+  existing End route destructive would silently break D8's history guarantee.
+- **Alternatives considered:**
+  (1) *Turn `DELETE /professors/{professor_id}` into a hard delete.* Rejected:
+  it would erase real teaching history for every caller and make Reopen
+  impossible.
+  (2) *Allow hard delete even when sessions exist.* Rejected: sessions reference
+  the professor directly, so the assignment trail would disagree with real
+  attendance. The row must remain as the authorization record; End is the
+  correct operation.
+  (3) *Expose a generic table-wide delete.* Rejected: the composite key makes
+  an unqualified delete ambiguous and too easy to mis-target.
+  (4) *Allow active rows to be purged in one step when they have no sessions.*
+  Rejected: a live assignment can be erased accidentally, and the End audit
+  trail is skipped. Requiring End first gives a two-step, auditable flow.
+  (5) *Taken:* one exact-row route that requires an ended assignment, a
+  session-window guard, a distinct delete audit action, and a UI availability
+  flag.
+- **Consequences:** No schema or migration change (`alembic check` stays green).
+  `AssignmentRead` gains an additive `has_sessions` boolean; existing clients
+  that ignore it are unchanged. The guard uses `Session.created_at` (the
+  authorization timestamp), not `scheduled_start_time`, and the list computes
+  the flag in one extra query rather than per row. An active row must be ended
+  first, so the End audit entry (`unassign`) remains in the trail before the
+  purge (`delete`); the admin UI exposes the action only on ended rows and
+  disables it when `has_sessions` is true. Purging an ended primary frees the
+  primary slot but does not auto-assign a replacement. A purged row cannot be
+  reopened; the UI confirmation states this. Covered by
+  `test_permanently_remove_unused_assignment_deletes_and_audits`,
+  `test_permanently_remove_assignment_with_sessions_returns_409`,
+  `test_permanently_remove_active_assignment_returns_409`,
+  `test_permanently_remove_live_assignment_with_future_end_returns_409`,
+  `test_permanently_remove_requires_the_exact_assignment_start`,
+  `test_assignment_list_flags_sessions_only_inside_the_row_window`,
+  `test_permanently_remove_ignores_sessions_outside_the_row_window`, and
+  `test_permanently_remove_primary_frees_the_slot`.
+
+
+
+### ADR-088: The Audit Trail Is Read on the Server, and Every Roster Row Appears in It
+
+- **Decision (D88):** The audit endpoints return the stored row **and** a
+  derived reading of it — who acted, what the subject is called, a one-line
+  summary and a field-level change — and the derived part is computed on the
+  server. The stored fields stay exactly as they were; the derived fields are
+  additive. Two consequences follow: **a schedule component gets its own
+  entity type** (`offering_component`, keyed by the component's own id), and
+  **creating a student or a professor writes an audit row**, so the trail
+  contains every roster row that ever appeared. The client's fabricated
+  "recently added" rows are gone.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** ADR-064 made the audit endpoints return the stored row
+  unaltered: *"Nothing is derived: no `actor_name` join, no `category`
+  mapping."* It also recorded the gap it left behind: *"The frontend still
+  mocks the audit page… Reconciling it is a frontend change and was
+  deliberately left out of a backend slice."*
+  That reconciliation was done on the client first, and it surfaced three
+  problems that a client cannot fix:
+  1. **A plain admin could not see actor names.** The client resolved them
+     from `GET /admin/users`, which is super-admin-only
+     (`features/admin/router.py:37`), while the audit endpoint is
+     admin-readable (`features/system/router.py:29`). So the same trail read
+     differently depending on the reader's role.
+  2. **A subject's name could not be resolved once the subject was gone.** A
+     hard-deleted program has no row left to join against; only its audit
+     snapshot records what it was.
+  3. **The client had to invent rows.** Student and professor creations were
+     not audited at all, so the client fabricated "record creation" rows
+     from each roster's `created_at`. They could not be filtered or paged
+     with the real ones, they were capped at 300 rows across three pages
+     per entity, and they cost four roster fetches on every audit page
+     load. An inferred row is not evidence.
+  A fourth problem was in the data model, not the reader: `entity_type =
+  'course_offering'` was written both for an offering
+  (`features/course/service.py:613`) and for one of its schedule components
+  (`:1754, :1824, :1849`) — with the OFFERING's id in both cases. One
+  entity type carried two id spaces, so "Course offering #12" could mean two
+  different things.
+- **Rationale:**
+  - **The vocabulary belongs next to the snapshots.** The `_snapshot` methods
+    produce the fields; the module that reads them
+    (`features/system/audit_labels.py`) is the only place that knows what
+    `term_structure` or `is_active` mean. Keeping the reading on the client
+    meant two copies of that knowledge, and they drifted — the client
+    rendered `is active` where the server would have rendered `Status`.
+  - **The snapshot is read BEFORE any lookup.** A program snapshot carries
+    `code` and `name`; a course snapshot carries `course_code` and
+    `course_name`; a student snapshot carries `student_id` and the names. So
+    the label comes out of the snapshot, and a database lookup is only the
+    fallback. That is not just an optimisation: the snapshot is the more
+    durable evidence, because it survives the record's deletion.
+  - **The lookups are batched.** A page of rows is resolved together — one
+    query per table, and a table only when some row needs it. The cost of a
+    page is a small constant, not a multiple of the page size.
+  - **The stored row is untouched.** The derived fields are ADDITIVE. A
+    client that reads the raw row still gets the raw row, and the trail is
+    still exactly what was recorded.
+  - **One id space per entity type.** `entity_id` points into the table the
+    entity type names, and that table is its only id space. A component has
+    an id of its own, so it gets its own member. `face_enrollment` audits a
+    STUDENT's face template, so its id space is `students` — that is stated
+    rather than left to be guessed.
+  - **Rows before the change are read, not migrated.** A component written
+    before this decision has `entity_type = 'course_offering'` and the
+    offering's id. The reader recognises it by its snapshot (a component
+    carries `session_type` and no `semester`; an offering is the other way
+    round) and reads it as what it is. A data migration would have had to
+    guess at ids, and the rows are historical either way.
+  - **Sorting and filtering moved into the database.** `sort_by` and
+    `sort_dir` order the WHOLE trail rather than the page a client happens
+    to have loaded, and `actor` matches an id, an email or a name fragment
+    — which is what an administrator actually types.
+  - **The trail now contains every roster row.** A student or a professor
+    appearing is a change to the institution, and the security model's
+    coverage table said so for every other creation. Writing the row also
+    retires the client's fabrication, which is the only thing that ever
+    made the audit page show a "recently added records" section that was
+    not evidence.
+- **Alternatives considered:**
+  (1) *Keep the derivation on the client.* Rejected: a plain admin cannot
+  resolve an actor, a deleted record cannot be named, and the vocabulary
+  lives in two places.
+  (2) *Replace the stored fields with the derived ones.* Rejected: the
+  stored row IS the evidence. A derived read model beside it costs nothing
+  and loses nothing.
+  (3) *Make `GET /admin/users` admin-readable instead of joining the actor
+  in.* Rejected: it widens who can list every account, and it still leaves
+  the client to resolve a deleted subject.
+  (4) *Backfill the old component rows into the new entity type.* Rejected:
+  the old rows' `entity_id` is the offering's, so relabelling them would
+  give the new member a second id space — the very defect being fixed. The
+  reader recognises the old shape instead.
+  (5) *Keep the client fabricating the roster rows.* Rejected: an inferred
+  row cannot be filtered, paged or trusted with the real ones.
+  (6) *Taken:* a derived read model on the server, one entity type per id
+  space, and every roster row in the trail.
+- **Consequences:** The audit response grows from eight fields to eight plus
+  `actor`, `subject`, `summary`, `action_label` and `changes` — additive, so
+  a client reading the raw row is unaffected. `GET /admin/audit-logs` gains
+  `actor`, `sort_by` and `sort_dir`. `GET /admin/system/academic-structure`
+  gains a schedule component to its scope, because a component's schedule is
+  a structural change. No new model and no migration of its own
+  (`alembic check` stays green: the entity vocabulary is a code contract, not
+  a database constraint, and the old rows are read rather than rewritten).
+  `AuditEntity` gains `OFFERING_COMPONENT`. The client's label resolver and
+  its roster scan are deleted; the client keeps only the tone map and the
+  deep links, which are presentation the server has no business knowing
+  about. `audit_logs.action` still has no index, so an action-only filter
+  and an action sort are sequential scans — unchanged, and still the first
+  thing to add if the table grows. *(Added by ADR-089, which is where the
+  index and the trail's retention decision are recorded.)*
+- **Testing:** `test_audit_logs_adds_the_derived_reading`,
+  `test_audit_logs_names_an_anonymous_actor`,
+  `test_audit_logs_filters_by_actor_name` and
+  `test_audit_logs_sorts_in_the_database` cover the read model;
+  `test_student_create_writes_a_row`, `test_professor_create_writes_a_row`
+  and `test_component_changes_use_the_component_entity_type` cover the
+  writers.
+
+### ADR-089: The Audit Trail Is Kept Whole; Retention Is a Decision, Not a Mechanism
+
+- **Decision (D89):** The audit trail is **not** pruned, archived or
+  deleted. `audit_logs` grows without bound, and that is accepted: the
+  trail is the evidence, and deleting it destroys the product's core
+  value. What is done instead is making the growing table cheap to read —
+  `audit_logs.action` gets the composite index it never had — and making
+  its growth **observed** rather than assumed, through a fifth monitoring
+  metric. Retention becomes a decision at **~1M rows**, or when a
+  compliance requirement names a window, and not before.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** ADR-088 made the trail record every roster creation as well
+  as every structural change, so it grows faster than it did. Nothing in
+  the codebase or the security model said what should happen to it
+  eventually: there is no retention job, no archive, and no pruning, and
+  no decision either way. `audit_logs.action` was also the one audited
+  column carrying no index, so an action filter — and an action sort —
+  was a sequential scan of the whole table (ADR-064 had named it as "the
+  first thing to add if the table grows").
+  The obvious response was a retention mechanism: a cron job, an archive
+  table, a read-path union, a setting, a migration, and their tests. The
+  question is whether the numbers justify any of it.
+- **Rationale:**
+  - **The write rate is the whole answer, so it was measured.** Not scans
+    — a student scanning is not audited. The dominant family is `session`
+    open/close: **two rows per class meeting**. For one college (≈50
+    active offerings, 18 weeks per term, 2.5 terms a year):
+
+    | Family                                     | Rows/year |
+    | ------------------------------------------ | --------- |
+    | `session` open/close                       | ~4,500    |
+    | `enrollment` / `unenroll`                  | ~1,500    |
+    | `face_enrollment` (once per student)       | ~300      |
+    | `excuse` decisions                         | ~200      |
+    | accounts, settings, maintenance, backups   | ~800      |
+    | **Total**                                  | **~8,000**|
+
+    Ten years is **80,000 rows ≈ 30 MB of data, ~70 MB with the index
+    set**. That is not a table that needs pruning.
+  - **The comparison that settles it.** `attendance_records` grows
+    **~67,000 rows/year** — one row per scan — which is **8× the audit
+    trail**, and the system already indexes, analyses and reports on that
+    table every day. The audit trail is not the volume problem; the table
+    it would be pruning is the one already in use.
+  - **The trail is the evidence.** Pruning it destroys the ability to
+    answer "who changed this, and can I prove it", which is the whole
+    point of the table. ADR-057's warning about not *"silently destroying
+    the attendance audit trail"* is the reason to be careful with it.
+  - **A mechanism would be complexity built against a guessed policy.**
+    The cron job, the archive table, the read-path union, the setting,
+    the migration and their tests would all be wrong the first time a
+    compliance requirement actually names a window — and they would rot
+    in the meantime, because nothing would exercise them at 8,000
+    rows/year.
+  - **The index is the proportionate response.** Measured on 200,000
+    rows spread over two years (the rate above), the admin's real query —
+    one action, a seven-day window, newest first — goes from a **parallel
+    sequential scan** (18.084 ms, 3,314 buffers read, 66,560 rows
+    discarded) to an **`Index Scan Backward`** on the composite
+    (0.103 ms, 4 buffers). Sorting by action goes from 34.254 ms to
+    16.428 ms. The composite rather than a bare `(action)` is deliberate:
+    the endpoint filters by action and orders by `performed_at DESC, id
+    DESC`, and the composite returns the rows already in order instead of
+    sorting them afterwards.
+  - **Growth is observed, not assumed.** A fifth monitoring metric reports
+    the trail's row count and size, so "we chose not to prune" is a
+    position that is checked rather than one that is forgotten.
+- **Alternatives considered:**
+  (1) *Prune rows older than N months.* Rejected: it destroys evidence,
+  and N would be a guess. A retention window chosen for the sake of
+  having one is worse than no window at all, because it looks deliberate.
+  (2) *Archive to a second table and union it on read.* Rejected: the
+  union complicates the read path that ADR-088 had just simplified, for a
+  table that is 30 MB after a decade. The complexity is not free and the
+  benefit is invisible.
+  (3) *Partition `audit_logs` by month.* Rejected: declarative
+  partitioning is Postgres-only, and the test schema is built from the
+  models with `Base.metadata.create_all` on SQLite (`conftest.py`), so
+  the model could not be declared both ways without a second definition
+  of the table.
+  (4) *Prune only the noisy families (`login_failed`, `maintenance`).*
+  Rejected: arbitrary, and it breaks the "five failures then locked"
+  story the lockout row exists to tell. `session` open/close is the
+  biggest family by far and the one least worth losing.
+  (5) *Taken:* keep the trail whole, index the filter, observe the growth,
+  and write down the trigger.
+- **Consequences:** One migration adds
+  `ix_audit_logs_action_performed_at` on `(action, performed_at)`; the
+  model declares the same index, so `alembic check` stays green. The
+  model change is forward-only — an applied revision is never edited
+  (ADR-065). `audit_logs` has no retention job, so its size is a number
+  someone has to look at: the monitoring metric is where that happens,
+  and the trigger is written down here rather than left in a comment. No
+  audit row is deleted, archived or pruned by any of this.
+- **Testing:** The index is a schema change, so it is verified by
+  `alembic check` and by `EXPLAIN ANALYZE` on a 200,000-row table rather
+  than by a unit test — a query plan is not a behaviour. The change-list
+  resolution that came with it is covered by
+  `test_audit_logs_resolves_ids_inside_the_change_list`,
+  `test_audit_logs_keeps_a_student_number_as_a_number` and
+  `test_audit_logs_falls_back_to_an_id_for_a_deleted_row`.

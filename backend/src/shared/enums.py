@@ -16,12 +16,23 @@ class AuditEntity(StrEnum):
     The column is free-form `String(50)`, so this enum is the contract rather
     than a database constraint: adding a member is a code change, and the
     reader endpoint rejects a filter outside it.
+
+    **One id space per member.** `entity_id` points into the table the member
+    names, and that table is the member's only id space. A member whose
+    subject is a row in another table says so in its snapshot
+    (`face_enrollment` audits a STUDENT's face template, so its id is a
+    student id).
     """
 
     PROGRAM = "program"
     YEAR_LEVEL = "year_level"
     COURSE = "course"
     COURSE_OFFERING = "course_offering"
+    # A schedule component of an offering (D77). It was previously written
+    # as `course_offering` with the OFFERING's id, which put two id spaces
+    # in one member; a component has an id of its own, so it gets its own
+    # member (ADR-086).
+    OFFERING_COMPONENT = "offering_component"
     STUDENT = "student"
     PROFESSOR = "professor"
     ENROLLMENT = "enrollment"
@@ -50,6 +61,8 @@ class AuditAction(StrEnum):
     ENROLL = "enroll"
     UNENROLL = "unenroll"
     ASSIGN = "assign"
+    REASSIGN = "reassign"
+    REOPEN = "reopen"
     UNASSIGN = "unassign"
     OPEN = "open"
     CLOSE = "close"

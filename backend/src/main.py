@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from api.router import api_router
 from core.config import Settings, get_settings
@@ -62,10 +63,60 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await database.dispose()
 
 
+class UnhandledExceptionMiddleware:
+    """Return a CORS-compatible JSON 500 for unhandled errors.
+
+    Starlette's ServerErrorMiddleware sits outside CORSMiddleware, so its
+    plain-text 500 carries no Access-Control-Allow-Origin header. The browser
+    then hides the response and reports a transport failure. Catching inside
+    CORS keeps the real status and a stable JSON envelope visible to clients.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            if response_started:
+                raise
+            logger.exception(
+                "Unhandled error on %s %s",
+                scope.get("method"),
+                scope.get("path"),
+            )
+            response = JSONResponse(
+                status_code=500,
+                content={
+                    "detail": {
+                        "code": "internal_error",
+                        "message": "Something went wrong. Please try again.",
+                    }
+                },
+            )
+            await response(scope, receive, send)
+
+
 app = FastAPI(title="QR Based Attendance System")
 
 settings: Settings = get_settings()
 
+# Added first so CORSMiddleware wraps it: the 500 response must pass through
+# CORS to carry Access-Control-Allow-Origin.
+app.add_middleware(UnhandledExceptionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),

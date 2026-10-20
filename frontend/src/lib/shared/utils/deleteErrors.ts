@@ -35,6 +35,10 @@ const DELETE_ERROR_MESSAGES: Record<string, string> = {
 		'Cannot permanently delete this offering — class sessions were already opened for it. Session history is kept, so keep the offering archived instead.',
 	offering_has_assignments:
 		'Cannot permanently delete this offering — professor assignments still reference it. End those assignments and remove the history first.',
+	assignment_not_ended:
+		'This assignment is still active. End it first, then remove it permanently.',
+	assignment_has_sessions:
+		'This assignment has attendance sessions and cannot be permanently removed. End it instead so its history stays attributed.',
 	year_level_not_found: 'Year level not found. Refresh and try again.',
 	year_has_courses:
 		'Cannot delete this year level — course offerings still use it. Move or delete those first.',

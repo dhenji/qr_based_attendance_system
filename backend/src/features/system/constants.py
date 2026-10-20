@@ -50,11 +50,15 @@ RETENTION_MONTHLY_MAX: int = 120
 
 # Entity types surfaced by GET /admin/system/academic-structure. Assignment
 # changes (course_professors) and enrollments are audited separately.
+#
+# A schedule component is part of the offering's structure, so it belongs
+# here (ADR-086) — its schedule is a structural change like any other.
 STRUCTURAL_ENTITY_TYPES: tuple[str, ...] = (
     "program",
     "year_level",
     "course",
     "course_offering",
+    "offering_component",
 )
 
 # Query-string caps for the GET /admin/audit-logs filters. Both mirror the
@@ -62,6 +66,11 @@ STRUCTURAL_ENTITY_TYPES: tuple[str, ...] = (
 # stored value, so rejecting it at the edge beats an always-empty page.
 ENTITY_TYPE_MAX_LENGTH: int = 50
 ACTION_MAX_LENGTH: int = 50
+
+# The `actor` filter matches an id, an email or a name fragment, so it is
+# longer than a value column. The cap keeps a stray paste from turning into
+# an unbounded LIKE.
+ACTOR_MAX_LENGTH: int = 100
 
 # Timestamped object name for analytics CSVs persisted through backup storage.
 EXPORT_FILENAME_PREFIX: str = "analytics_"
