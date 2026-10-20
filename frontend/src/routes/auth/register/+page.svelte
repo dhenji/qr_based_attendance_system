@@ -164,6 +164,7 @@
 	<div class="wrapper">
 		<div class="header">
 			<div class="logo-tile"><img src="/qr-attend-logo.svg" alt="Attendly" /></div>
+			<p class="kicker">Account claim</p>
 			{#if step === 'email'}
 				<h1>Create Account</h1>
 				<p class="subtitle">Use the university email on your roster record.</p>
@@ -200,7 +201,7 @@
 							that isn't on the roster.</p>
 					</div>
 
-					<button class="btn-primary" type="submit" disabled={submitting}>
+					<button class="btn-primary" type="submit" aria-busy={submitting} disabled={submitting}>
 						{submitting ? 'Sending code…' : 'Send verification code'}
 					</button>
 				</form>
@@ -210,7 +211,7 @@
 
 					<OtpCodeRow win={win} busy={submitting} onresend={resend} />
 
-					<button class="btn-primary" type="submit" disabled={submitting}>Continue</button>
+					<button class="btn-primary" type="submit" aria-busy={submitting} disabled={submitting}>Continue</button>
 					<button type="button" class="back-btn" onclick={() => back('email')}>← Back</button>
 				</form>
 			{:else}
@@ -299,7 +300,7 @@
 							password. Answers are compared case-insensitively.</p>
 					</div>
 
-					<button class="btn-primary" type="submit" disabled={submitting || authState.loading}>
+					<button class="btn-primary" type="submit" aria-busy={submitting} disabled={submitting || authState.loading}>
 						{submitting ? 'Creating account…' : 'Create account'}
 					</button>
 					<button type="button" class="back-btn" onclick={() => back('otp')}>← Back</button>
@@ -344,37 +345,44 @@
 		list-style: none;
 		padding: 0;
 		margin: 0 0 1.25rem;
-		font-size: 0.75rem;
+		font-family: var(--font-data);
+		font-size: 0.625rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
 		color: var(--text-muted);
 	}
 
 	.steps li {
-		padding: 0.1875rem 0.625rem;
+		padding: 0.25rem 0.625rem;
+		border: 1px solid var(--border);
 		border-radius: 999px;
-		background: var(--border);
+		background: transparent;
 	}
 
 	.steps li.active {
 		background: var(--brand);
+		border-color: var(--brand);
 		color: var(--on-brand);
 		font-weight: 600;
 	}
 
 	.steps li.done {
 		background: var(--success-bg);
+		border-color: transparent;
 		color: var(--success);
 	}
 
 	.logo-tile {
 		width: 52px;
 		height: 52px;
-		background: var(--brand);
+		background: linear-gradient(145deg, var(--brand), color-mix(in srgb, var(--brand) 72%, #0a1220));
 		border-radius: 14px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		margin: 0 auto 1rem;
 		color: var(--on-brand);
+		box-shadow: 0 10px 24px color-mix(in srgb, var(--brand) 26%, transparent);
 	}
 
 	.logo-tile img {
@@ -383,38 +391,65 @@
 		display: block;
 	}
 
+	.kicker {
+		margin: 0 0 0.5rem;
+		font-family: var(--font-data);
+		font-size: 0.625rem;
+		font-weight: 500;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+
 	h1 {
-		font-size: 1.625rem;
+		font-size: 1.75rem;
 		font-weight: 700;
-		color: var(--brand);
+		color: var(--text-strong);
 		margin: 0 0 0.25rem;
+		letter-spacing: -0.025em;
 	}
 
 	.subtitle {
 		color: var(--text-muted);
 		font-size: 0.875rem;
+		line-height: 1.5;
 		margin: 0;
 	}
 
 	.subtitle strong {
-		color: var(--brand);
+		color: var(--text-strong);
 	}
 
 	.card {
+		position: relative;
 		background: var(--bg-card);
 		padding: 2rem;
-		border-radius: 12px;
+		border: 1px solid var(--border);
+		border-radius: 16px;
 		box-shadow: var(--shadow-sm);
+	}
+
+	.card::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 16px;
+		right: 16px;
+		height: 3px;
+		border-radius: 0 0 3px 3px;
+		background: linear-gradient(90deg, var(--brand), var(--accent) 55%, transparent 90%);
 	}
 
 	.error-banner {
 		background: var(--danger-bg);
-		border: 1px solid var(--danger-bg);
+		border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+		border-left: 3px solid var(--danger);
 		border-radius: 8px;
 		padding: 0.625rem 0.875rem;
 		margin-bottom: 1.25rem;
 		color: var(--danger);
 		font-size: 0.8125rem;
+		line-height: 1.45;
 	}
 
 	.field {
@@ -431,17 +466,24 @@
 
 	.form-input {
 		width: 100%;
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
+		padding: 0.6875rem 0.875rem;
+		background: var(--bg-input);
+		color: var(--text);
+		border: 1px solid var(--border-strong);
+		border-radius: 10px;
 		font-size: 0.9375rem;
 		font-family: inherit;
 		outline: none;
-		transition: border-color 0.15s;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
+	}
+
+	.form-input::placeholder {
+		color: color-mix(in srgb, var(--text-muted) 75%, transparent);
 	}
 
 	.form-input:focus {
 		border-color: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 	}
 
 	.hint {
@@ -460,28 +502,29 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5rem;
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		background: var(--bg-card);
+		padding: 0.6875rem 0.875rem;
+		border: 1px solid var(--border-strong);
+		border-radius: 10px;
+		background: var(--bg-input);
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: var(--brand);
+		color: var(--text);
 		cursor: pointer;
 		outline: none;
-		transition: border-color 0.15s;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
 	}
 
 	.dropdown-toggle:hover {
-		border-color: var(--text-muted);
+		border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
 	}
 
 	.dropdown-toggle.placeholder {
-		color: var(--text-muted);
+		color: color-mix(in srgb, var(--text-muted) 85%, transparent);
 	}
 
 	.dropdown-toggle:focus-visible {
 		border-color: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 	}
 
 	.dropdown-menu {
@@ -493,9 +536,9 @@
 		margin: 0;
 		padding: 0.25rem;
 		background: var(--bg-card);
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+		border: 1px solid var(--border-strong);
+		border-radius: 10px;
+		box-shadow: var(--shadow-sm);
 		z-index: 10;
 		max-height: 16rem;
 		overflow-y: auto;
@@ -508,7 +551,7 @@
 		justify-content: space-between;
 		padding: 0.5rem 0.625rem;
 		border: none;
-		border-radius: 6px;
+		border-radius: 8px;
 		background: none;
 		font-size: 0.875rem;
 		font-family: inherit;
@@ -584,24 +627,33 @@
 
 	.btn-primary {
 		width: 100%;
-		padding: 0.75rem;
-		border: none;
-		border-radius: 8px;
-		background: var(--brand);
+		padding: 0.8125rem;
+		border: 1px solid color-mix(in srgb, var(--brand) 80%, #0a1220);
+		border-radius: 10px;
+		background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 70%, #0a1220));
 		color: var(--on-brand);
 		font-size: 1rem;
 		font-weight: 600;
 		font-family: inherit;
 		cursor: pointer;
+		box-shadow: 0 6px 16px color-mix(in srgb, var(--brand) 22%, transparent);
+		transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: var(--brand-hover);
+		transform: translateY(-1px);
+		filter: brightness(1.07);
+		box-shadow: 0 9px 22px color-mix(in srgb, var(--brand) 30%, transparent);
+	}
+
+	.btn-primary:active:not(:disabled) {
+		transform: translateY(0);
 	}
 
 	.btn-primary:disabled {
-		opacity: 0.6;
+		opacity: 0.55;
 		cursor: not-allowed;
+		box-shadow: none;
 	}
 
 	.back-btn {
@@ -640,5 +692,18 @@
 
 	.link-btn:hover {
 		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.form-input,
+		.dropdown-toggle,
+		.btn-primary {
+			transition: none;
+		}
+
+		.btn-primary:hover:not(:disabled) {
+			transform: none;
+		}
 	}
 </style>

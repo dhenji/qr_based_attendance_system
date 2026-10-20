@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -238,7 +240,7 @@
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Course Management</h1>
@@ -273,12 +275,16 @@
 	</section>
 
 	{#if adminCoursesState.loading && adminCoursesState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={6} label="Loading courses…" />
 	{:else if adminCoursesState.error}
 		<section class="card"><p class="error">Could not load courses: {adminCoursesState.error}</p></section>
 	{:else if visibleItems.length === 0}
 		<section class="card">
-			<p class="empty">No courses yet. Add the first template — offerings attach it to a program and year.</p>
+			<EmptyState
+				icon="file"
+				title="No courses yet"
+				hint="Add the first template — offerings attach it to a program and year."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminCoursesState.loading}>
@@ -395,7 +401,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-course" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-primary" data-testid="save-course" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -629,12 +635,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-top: 1rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

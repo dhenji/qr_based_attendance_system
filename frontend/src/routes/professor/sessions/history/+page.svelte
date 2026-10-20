@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -394,12 +396,14 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
-		<section class="card">
-			<p class="muted">Loading session history…</p>
-		</section>
+		<SkeletonTable rows={8} cols={6} label="Loading session history…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<p class="empty">No sessions match these filters. Try widening the date range.</p>
+			<EmptyState
+				icon="file"
+				title="No sessions match these filters"
+				hint="Try widening the date range."
+			/>
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Session history table">
@@ -626,12 +630,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		border-radius: 12px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
-	}
-
-	.empty {
-		margin: 0;
-		color: var(--text-muted);
-		font-size: 0.9375rem;
 	}
 
 	.error {

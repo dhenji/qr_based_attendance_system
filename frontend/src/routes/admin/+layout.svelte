@@ -14,6 +14,7 @@
 	import NotificationBell, {
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import { listAdminExcuses } from '$lib/features/admin/excuses/service';
 	import { POLL_INTERVAL_MS, truncateNotifPreview } from '$lib/features/notifications/poll';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -35,17 +36,29 @@
 	let pendingCount = $state(0);
 	let notifPreview = $state<NotificationBellItem[]>([]);
 	let notifLoading = $state(false);
+	let notifToast = $state<string | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let refreshing = false;
+	// False while the last poll failed. Without it, a transient error resets
+	// pendingCount to 0 and the next successful poll would announce every
+	// already-pending request as "new".
+	let pollHealthy = true;
 
 	const refreshNotif = async () => {
 		if (refreshing) return;
 		refreshing = true;
 		try {
 			const result = await listAdminExcuses({ status: 'pending', page: 1, size: 1 });
-			pendingCount = result.total ?? 0;
+			const next = result.total ?? 0;
+			if (pollHealthy && next > pendingCount) {
+				const fresh = next - pendingCount;
+				notifToast = `${fresh} new excuse request${fresh === 1 ? '' : 's'} awaiting review — tap the bell to open the queue.`;
+			}
+			pendingCount = next;
+			pollHealthy = true;
 		} catch {
 			pendingCount = 0;
+			pollHealthy = false;
 		} finally {
 			refreshing = false;
 		}
@@ -207,6 +220,10 @@
 			</svg>
 		</button>
 	</header>
+
+	{#if notifToast}
+		<Toast message={notifToast} onDismiss={() => (notifToast = null)} />
+	{/if}
 
 	<div class="body">
 		<aside class="sidebar" class:collapsed>

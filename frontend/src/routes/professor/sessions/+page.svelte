@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -117,7 +120,7 @@
 		`${session.presentCount} / ${session.lateCount} / ${session.absentCount}`;
 </script>
 
-<div class="sessions">
+<div class="sessions page-enter">
 	<header class="header">
 		<div>
 			<h1>Sessions</h1>
@@ -143,19 +146,20 @@
 			</button>
 		</section>
 	{:else if !summaries}
-		<section class="card">
-			<p class="muted">Loading sessions…</p>
-		</section>
+		<SkeletonCards count={2} label="Loading sessions…" />
+		<SkeletonTable rows={4} cols={6} label="" />
 	{:else}
 		<section aria-label="Active sessions">
 			<h2 class="section-title">Active now</h2>
 			{#if activeSessions.length === 0}
 				<div class="card">
-					<p class="empty">
-						No active session right now. Open one from
+					<EmptyState
+						icon="qr"
+						title="No active session right now"
+						hint="Open one and it will appear here with its projector code."
+					>
 						<button class="link" type="button" onclick={goCreate}>New Session</button>
-						and it will appear here with its projector code.
-					</p>
+					</EmptyState>
 				</div>
 			{:else}
 				<div class="active-grid">
@@ -226,7 +230,11 @@
 
 			{#if filtered.length === 0}
 				<div class="card">
-					<p class="empty">No sessions yet for this filter. Open one above.</p>
+					<EmptyState
+						icon="file"
+						title="No sessions yet for this filter"
+						hint="Open one above."
+					/>
 				</div>
 			{:else}
 				<div class="card table-card">

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { goToStep, setWizardYear, wizardState } from './store.svelte';
 	import { getProgram } from '$lib/features/admin/programs/service';
@@ -418,7 +419,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="muted">Loading setup data…</p>
+		<SkeletonDetail bare rows={5} label="Loading setup data…" />
 	{:else if loadError && !program}
 		<p class="error" role="alert">{loadError}</p>
 		<div class="nav-row">
@@ -597,6 +598,7 @@
 					<button
 						class="btn btn-primary"
 						data-testid="wizard-save-offering"
+						aria-busy={formBusy}
 						disabled={formBusy}
 						onclick={() => void submitForm()}
 					>

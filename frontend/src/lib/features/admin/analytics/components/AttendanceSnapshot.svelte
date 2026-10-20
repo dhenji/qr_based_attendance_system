@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import {
 		adminAttendanceState,
@@ -236,12 +238,16 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 </section>
 
 {#if adminAttendanceState.loading && adminAttendanceState.items.length === 0}
-	<section class="card"><p class="muted">Loading…</p></section>
+	<SkeletonTable rows={6} cols={6} label="Loading attendance overview…" />
 {:else if adminAttendanceState.error}
 	<section class="card"><p class="error">Could not load overview: {adminAttendanceState.error}</p></section>
 {:else if visibleItems.length === 0}
 	<section class="card">
-		<p class="empty">No courses match these filters.</p>
+		<EmptyState
+			icon="chart"
+			title="No courses match these filters"
+			hint="Adjust the program or year filter to widen the view."
+		/>
 	</section>
 {:else}
 	<section class="card table-wrap" aria-busy={adminAttendanceState.loading}>
@@ -425,12 +431,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-size: 1.125rem;
 		font-weight: 700;
 		color: var(--brand);
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

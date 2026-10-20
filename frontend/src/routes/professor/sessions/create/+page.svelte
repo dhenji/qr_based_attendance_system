@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
@@ -211,9 +212,7 @@ let selectedOfferingId = $state<number | null>(null);
 	</header>
 
 	{#if professorState.coursesLoading}
-		<section class="card">
-			<p class="empty">Loading your courses…</p>
-		</section>
+		<SkeletonDetail rows={4} label="Loading your courses…" />
 	{:else if professorState.coursesError}
 		<section class="card">
 			<p class="empty">Could not load your courses: {professorState.coursesError}</p>

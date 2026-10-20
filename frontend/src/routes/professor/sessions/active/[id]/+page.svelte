@@ -1,4 +1,6 @@
 <script lang="ts">
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -467,7 +469,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<div class="title">
 				<h1>Active: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offeringSections} · Code {session.sessionCode} ·
+					Section {session.offeringSections} · Code <span class="mono-data">{session.sessionCode}</span> ·
 					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
 						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
 					</span>
@@ -476,6 +478,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<button
 				class="btn btn-danger"
 				type="button"
+				aria-busy={closing}
 				disabled={closing || isClosed}
 				onclick={handleClose}
 			>
@@ -497,9 +500,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			{/if}
 		</section>
 	{:else if isLoading || !session || scanRemainingSeconds === null || classRemainingSeconds === null}
-		<section class="card">
-			<p class="muted">Loading live session…</p>
-		</section>
+		<SkeletonCards count={3} label="Loading live session…" />
+		<SkeletonTable rows={5} cols={5} label="" />
 	{:else}
 		{#if refreshError}
 			<p class="refresh-error" role="status">{refreshError}</p>
@@ -737,7 +739,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 						<button class="btn btn-ghost" type="button" onclick={() => (excuseTarget = null)}>
 							Cancel
 						</button>
-						<button class="btn btn-primary" type="button" disabled={excuseBusy} onclick={() => void submitExcuse()}>
+						<button class="btn btn-primary" type="button" aria-busy={excuseBusy} disabled={excuseBusy} onclick={() => void submitExcuse()}>
 							{excuseBusy ? 'Saving…' : 'Excuse'}
 						</button>
 					</div>
@@ -771,7 +773,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 						<button class="btn btn-ghost" type="button" onclick={() => (bulkOpen = false)}>
 							Cancel
 						</button>
-						<button class="btn btn-primary" type="button" disabled={bulkBusy} onclick={() => void submitBulk()}>
+						<button class="btn btn-primary" type="button" aria-busy={bulkBusy} disabled={bulkBusy} onclick={() => void submitBulk()}>
 							{bulkBusy ? 'Saving…' : 'Excuse all absent'}
 						</button>
 					</div>

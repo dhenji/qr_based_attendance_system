@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onMount } from 'svelte';
 	import {
 		listAdminExcuses,
@@ -67,14 +69,20 @@
 	</section>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading excuse requests…</p></section>
+		<SkeletonTable rows={6} cols={4} label="Loading excuse requests…" />
 	{:else if error}
 		<section class="card">
 			<p class="error">{error}</p>
 			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Retry</button>
 		</section>
 	{:else if items.length === 0}
-		<section class="card"><p class="empty">No {status} excuse requests. New ones appear here as students and professors submit them.</p></section>
+		<section class="card">
+			<EmptyState
+				icon="file"
+				title={`No ${status} excuse requests`}
+				hint="New ones appear here as students and professors submit them."
+			/>
+		</section>
 	{:else}
 		<section class="card table-wrap">
 			<table>
@@ -203,11 +211,6 @@
 
 	.reason {
 		max-width: 28rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		margin: 0;
 	}
 
 	.error {

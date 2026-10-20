@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import {
 		listLivenessReview,
@@ -110,11 +112,16 @@
 	</section>
 
 	{#if liveLoading && liveItems.length === 0}
-		<section class="card"><p class="muted">Loading review queue…</p></section>
+		<SkeletonTable rows={6} cols={5} label="Loading review queue…" />
 	{:else if liveError}
 		<section class="card"><p class="error">{liveError}</p></section>
 	{:else if liveItems.length === 0}
-		<section class="card"><p class="empty">No {liveStatus} records in the review queue.</p></section>
+		<section class="card">
+			<EmptyState
+				icon="check"
+				title={`No ${liveStatus} records in the review queue`}
+			/>
+		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={liveLoading}>
 			<table>
@@ -259,12 +266,6 @@
 	.row-actions {
 		display: flex;
 		gap: 0.5rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

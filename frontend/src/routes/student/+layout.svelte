@@ -13,6 +13,7 @@
 	import NotificationBell, {
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import {
 		getStudentUpdateCount,
 		markStudentSeen,
@@ -214,12 +215,7 @@
 	</header>
 
 	{#if notifToast}
-		<p class="toast" role="status">
-			<span>{notifToast}</span>
-			<button type="button" onclick={() => (notifToast = null)} aria-label="Dismiss notification">
-				Dismiss
-			</button>
-		</p>
+		<Toast message={notifToast} onDismiss={() => (notifToast = null)} />
 	{/if}
 
 	<div class="body">
@@ -311,30 +307,6 @@
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
 		color: var(--on-brand);
-	}
-
-	.toast {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin: 0.75rem 1.5rem 0;
-		padding: 0.625rem 0.875rem;
-		border-radius: 8px;
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		box-shadow: var(--shadow-sm);
-		font-size: 0.875rem;
-		color: var(--text-strong);
-	}
-
-	.toast button {
-		border: 0;
-		background: none;
-		padding: 0;
-		color: var(--accent);
-		font: inherit;
-		font-weight: 600;
-		cursor: pointer;
 	}
 
 	.brand {

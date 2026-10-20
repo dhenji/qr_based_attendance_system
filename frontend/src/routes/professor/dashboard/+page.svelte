@@ -1,4 +1,6 @@
 <script lang="ts">
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { formatPercentage } from '$lib/shared/utils/format';
@@ -164,7 +166,7 @@
 	};
 </script>
 
-<div class="dashboard">
+<div class="dashboard page-enter">
 	<header class="header">
 		<div>
 			<h1>Professor Dashboard</h1>
@@ -178,9 +180,8 @@
 			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Try again</button>
 		</section>
 	{:else if loading}
-		<section class="card">
-			<p class="muted">Loading today's sessions…</p>
-		</section>
+		<SkeletonCards count={3} label="Loading today's sessions…" />
+		<SkeletonTable rows={4} cols={6} label="" />
 	{:else if liveSession}
 		<section class="hero">
 			<article class="live-card">

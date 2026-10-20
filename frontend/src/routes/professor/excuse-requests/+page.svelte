@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import {
 		editExcuse,
 		EXCUSE_REASON_MIN_LENGTH,
@@ -490,12 +492,10 @@
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
-		<section class="card">
-			<p class="muted">Loading excuse requests…</p>
-		</section>
+		<SkeletonTable rows={6} cols={6} label="Loading excuse requests…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<p class="empty">No excuse requests match these filters.</p>
+			<EmptyState icon="file" title="No excuse requests match these filters" />
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Excuse requests table">
@@ -733,6 +733,7 @@
 							<button
 								class="btn btn-primary"
 								type="button"
+								aria-busy={editBusy}
 								disabled={editBusy}
 								onclick={() => void doEditExcuse()}
 							>
@@ -928,6 +929,7 @@
 				<button
 					class="btn btn-primary"
 					type="button"
+					aria-busy={quickBusy}
 					disabled={quickBusy}
 					onclick={() => void doQuickExcuse()}
 				>

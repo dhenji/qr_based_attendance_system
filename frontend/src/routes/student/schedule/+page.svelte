@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onMount } from 'svelte';
 	import { getSchedule } from '$lib/features/student/service';
 	import type { ScheduledClass } from '$lib/shared/types';
@@ -38,7 +40,7 @@
 	});
 </script>
 
-<div class="wrap">
+<div class="wrap page-enter">
 	<header class="header">
 		<div>
 			<h1>My Schedule</h1>
@@ -47,11 +49,15 @@
 	</header>
 
 	{#if loading}
-		<p class="empty">Loading…</p>
+		<SkeletonTable rows={4} cols={3} label="Loading schedule…" />
 	{:else if error}
 		<p class="empty error">Could not load schedule: {error} <button class="retry-btn" onclick={() => void load()}>Try again</button></p>
 	{:else if classes.length === 0}
-		<p class="empty">No classes scheduled yet. Your enrolled subjects will appear here.</p>
+		<EmptyState
+			icon="file"
+			title="No classes scheduled yet"
+			hint="Your enrolled subjects will appear here."
+		/>
 	{:else}
 		<ul class="list">
 			{#each classes as c (c.offeringId)}

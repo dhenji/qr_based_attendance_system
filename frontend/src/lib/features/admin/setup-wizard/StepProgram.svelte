@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { goToStep, setWizardProgram, wizardState } from './store.svelte';
@@ -133,7 +135,7 @@
 	</p>
 
 	{#if loading}
-		<p class="muted">Loading programs…</p>
+		<SkeletonDetail bare rows={4} label="Loading programs…" />
 	{:else if loadError}
 		<p class="error" role="alert">{loadError}</p>
 		<button class="btn btn-secondary" onclick={() => void load()}>Retry</button>
@@ -180,9 +182,11 @@
 
 		{#if mode === 'existing'}
 			{#if options.length === 0}
-				<p class="empty">
-					No programs yet. Switch to “Create new” to add the first one.
-				</p>
+				<EmptyState
+					icon="file"
+					title="No programs yet"
+					hint="Switch to “Create new” to add the first one."
+				/>
 			{:else}
 				{#if confirmError}
 					<p class="error" role="alert">{confirmError}</p>
@@ -229,6 +233,7 @@
 				<button
 					class="btn btn-primary"
 					data-testid="wizard-create-program"
+					aria-busy={formBusy}
 					disabled={formBusy}
 					onclick={() => void submitNew()}
 				>
@@ -269,12 +274,6 @@
 		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0 0 1.25rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 1rem 0 0;
 	}
 
 	.error {

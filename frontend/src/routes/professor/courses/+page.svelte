@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -80,7 +82,7 @@
 	);
 </script>
 
-<div class="courses">
+<div class="courses page-enter">
 	<header class="header">
 		<div>
 			<h1>My Courses</h1>
@@ -89,9 +91,7 @@
 	</header>
 
 	{#if professorState.coursesLoading}
-		<section class="card">
-			<p class="muted">Loading…</p>
-		</section>
+		<SkeletonTable rows={5} cols={4} label="Loading your courses…" />
 	{:else if professorState.coursesError}
 		<section class="card">
 			<p class="error">Could not load your courses: {professorState.coursesError}</p>
@@ -99,10 +99,11 @@
 		</section>
 	{:else if courses.length === 0}
 		<section class="card">
-			<p class="empty">
-				No course assignments yet. Offerings assigned to you will appear here, grouped
-				by program.
-			</p>
+			<EmptyState
+				icon="users"
+				title="No course assignments yet"
+				hint="Offerings assigned to you will appear here, grouped by program."
+			/>
 		</section>
 	{:else}
 		{#each groups as group (group.code)}
@@ -463,12 +464,6 @@
 		border-radius: 8px;
 		padding: 2rem;
 		box-shadow: var(--shadow-sm);
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	@media (max-width: 640px) {

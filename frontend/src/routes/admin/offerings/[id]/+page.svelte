@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -1046,7 +1049,7 @@
 	</div>
 
 	{#if adminOfferingDetailState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={7} label="Loading offering…" />
 	{:else if adminOfferingDetailState.error || !offering}
 		<section class="card">
 			<p class="error">Could not load offering: {adminOfferingDetailState.error ?? 'Not found'}</p>
@@ -1132,9 +1135,13 @@
 					<button class="btn btn-primary" onclick={openAssign}>Assign professor</button>
 				</div>
 				{#if adminOfferingDetailState.assignmentsLoading}
-					<p class="muted">Loading assignments…</p>
+					<SkeletonTable bare rows={3} cols={6} label="Loading assignments…" />
 				{:else if adminOfferingDetailState.assignments.length === 0}
-					<p class="empty">No professors assigned yet. Any professor with an active assignment may open sessions for this offering.</p>
+					<EmptyState
+						icon="users"
+						title="No professors assigned yet"
+						hint="Any professor with an active assignment may open sessions for this offering."
+					/>
 				{:else}
 					<div class="table-wrap">
 						<table>
@@ -1212,9 +1219,9 @@
 					<button class="btn btn-secondary" onclick={applySection}>Apply</button>
 				</div>
 				{#if adminOfferingDetailState.rosterLoading}
-					<p class="muted">Loading roster…</p>
+					<SkeletonTable bare rows={4} cols={6} label="Loading roster…" />
 				{:else if adminOfferingDetailState.roster.length === 0}
-					<p class="empty">No students enrolled yet.</p>
+					<EmptyState icon="users" title="No students enrolled yet" />
 				{:else}
 					<div class="table-wrap">
 						<table>
@@ -1269,7 +1276,7 @@
 				<p class="muted">CSV of EXISTING students: student_id, first_name, middle_name, last_name, email, program_code, year_level, section. Rows that fail (unknown id, email mismatch, wrong program) are reported per line, not applied.</p>
 				<div class="filters">
 					<input class="input" type="file" accept=".csv,text/csv" onchange={onBulkFile} aria-label="Roster CSV file" />
-					<button class="btn btn-primary" disabled={!bulkFile || bulkBusy} onclick={submitBulk}>
+					<button class="btn btn-primary" aria-busy={bulkBusy} disabled={!bulkFile || bulkBusy} onclick={submitBulk}>
 						{bulkBusy ? 'Uploading…' : 'Upload'}
 					</button>
 				</div>
@@ -1312,7 +1319,11 @@
 					<p class="error" role="alert">{compError}</p>
 				{/if}
 				{#if offering.components.length === 0}
-					<p class="empty">No active components. Add one below so sessions have a schedule to inherit.</p>
+					<EmptyState
+						icon="chart"
+						title="No active components"
+						hint="Add one below so sessions have a schedule to inherit."
+					/>
 				{:else}
 					<div class="table-wrap">
 						<table>
@@ -1370,7 +1381,7 @@
 						{/if}
 						<div class="modal-actions">
 							<button class="btn btn-ghost" onclick={() => { editingComp = null; editConfirmOpen = false; }}>Cancel</button>
-							<button class="btn btn-primary" disabled={compBusy} onclick={submitEditComponent}>
+							<button class="btn btn-primary" aria-busy={compBusy} disabled={compBusy} onclick={submitEditComponent}>
 								{compBusy ? 'Saving…' : 'Save'}
 							</button>
 						</div>
@@ -1435,7 +1446,7 @@
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" onclick={fillSettings}>Reset</button>
-					<button class="btn btn-primary" disabled={settingsBusy} onclick={submitSettings}>
+					<button class="btn btn-primary" aria-busy={settingsBusy} disabled={settingsBusy} onclick={submitSettings}>
 						{settingsBusy ? 'Saving…' : 'Save'}
 					</button>
 				</div>
@@ -1689,7 +1700,7 @@
 			</p>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editConfirmOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={compBusy} onclick={() => void persistEditComponent()}>
+				<button class="btn btn-primary" aria-busy={compBusy} disabled={compBusy} onclick={() => void persistEditComponent()}>
 					{compBusy ? 'Saving…' : 'Save anyway'}
 				</button>
 			</div>
@@ -1947,7 +1958,7 @@
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
-				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>

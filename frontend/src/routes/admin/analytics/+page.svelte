@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
@@ -492,7 +495,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	const trendArrow = (slope: number): string => (slope < -0.05 ? '↓' : slope > 0.05 ? '↑' : '→');
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Analytics &amp; Reports</h1>
@@ -626,7 +629,8 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	{#if tab === 'attendance'}
 		<AttendanceSnapshot />
 	{:else if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonCards count={4} label="Loading analytics…" />
+		<SkeletonTable rows={4} cols={6} label="" />
 	{:else if adminAnalyticsState.error}
 		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>
 	{:else if tab === 'overview' && overview}
@@ -739,7 +743,11 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				</select>
 			</div>
 			{#if atRiskSorted.length === 0}
-				<p class="empty">No at-risk students match these filters.</p>
+				<EmptyState
+					icon="chart"
+					title="No at-risk students match these filters"
+					hint="Adjust the filters or run a risk batch to populate scores."
+				/>
 			{:else}
 				<div class="table-wrap">
 					<table>
@@ -785,7 +793,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 					<h2 class="card-title">Staging Review</h2>
 					<p class="muted">Dry-run batch output (D35) · promoting copies unpromoted rows into the live At-Risk scores</p>
 				</div>
-				<button class="btn btn-primary" disabled={stagingBusy || stagingSorted.length === 0} onclick={() => (promoteOpen = true)}>
+				<button class="btn btn-primary" aria-busy={stagingBusy} disabled={stagingBusy || stagingSorted.length === 0} onclick={() => (promoteOpen = true)}>
 					{stagingBusy ? 'Promoting…' : 'Promote to Live'}
 				</button>
 			</div>
@@ -826,14 +834,22 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				</select>
 			</div>
 			{#if adminStagingState.loading && adminStagingState.items.length === 0}
-				<p class="muted">Loading staged scores…</p>
+				<SkeletonTable bare rows={4} cols={6} label="Loading staged scores…" />
 			{:else if adminStagingState.error}
 				<p class="error" role="alert">{adminStagingState.error}</p>
 			{:else if stagingSorted.length === 0}
 				{#if isMockMode()}
-					<p class="empty">Staging review needs a backend dry-run batch — unavailable in mock mode.</p>
+					<EmptyState
+						icon="chart"
+						title="Staging review needs a backend dry-run batch"
+						hint="Unavailable in mock mode."
+					/>
 				{:else}
-					<p class="empty">No staged scores match these filters. Run a dry-run batch, then review here before promoting.</p>
+					<EmptyState
+						icon="chart"
+						title="No staged scores match these filters"
+						hint="Run a dry-run batch, then review here before promoting."
+					/>
 				{/if}
 			{:else}
 				<div class="table-wrap">

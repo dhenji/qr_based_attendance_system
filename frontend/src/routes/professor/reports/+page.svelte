@@ -1,4 +1,6 @@
 <script lang="ts">
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { page } from '$app/state';
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
@@ -373,7 +375,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	};
 </script>
 
-<div class="reports">
+<div class="reports page-enter">
 	<header class="header">
 		<div>
 			<h1>Attendance Reports</h1>
@@ -501,9 +503,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<button class="btn btn-secondary" type="button" onclick={retry}>Try again</button>
 		</section>
 	{:else if isLoading}
-		<section class="card">
-			<p class="muted">Loading reports…</p>
-		</section>
+		<SkeletonCards count={4} label="Loading reports…" />
+		<SkeletonTable rows={5} cols={6} label="" />
 	{:else if tab === 'all' && aggregate}
 		<section class="kpis" aria-label="Aggregate report summary">
 			<article class="kpi">

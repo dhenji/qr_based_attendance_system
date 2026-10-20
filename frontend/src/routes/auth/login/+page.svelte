@@ -16,7 +16,6 @@
 	} from '$lib/features/auth/store.svelte';
 	import { createOtpWindow } from '$lib/features/auth/store.svelte';
 	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
-	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 	import Turnstile from '$lib/components/Turnstile.svelte';
@@ -253,6 +252,7 @@
 
 		<div class="header">
 			<div class="logo-tile"><img src="/qr-attend-logo.svg" alt="Attendly" /></div>
+			<p class="kicker">Secure sign-in</p>
 			{#if stage === 'credentials'}
 				<h1>Log In</h1>
 				<p class="subtitle">Enter your registered email and password.</p>
@@ -315,15 +315,8 @@
 
 					<Turnstile bind:this={turnstile} />
 
-					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{#if authState.loading}
-							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-								<LoadingSpinner size="sm" message="" />
-								<span>Signing in…</span>
-							</div>
-						{:else}
-							Login
-						{/if}
+					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
+						{authState.loading ? 'Signing in…' : 'Login'}
 					</button>
 				</form>
 			{:else if stage === 'login-otp'}
@@ -334,15 +327,8 @@
 
 					<OtpCodeRow win={win} busy={resending} onresend={handleResendOtp} />
 
-					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{#if authState.loading}
-							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-								<LoadingSpinner size="sm" message="" />
-								<span>Verifying…</span>
-							</div>
-						{:else}
-							Verify
-						{/if}
+					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
+						{authState.loading ? 'Verifying…' : 'Verify'}
 					</button>
 					<button type="button" class="link-btn block" onclick={backToCredentials}>
 						Back to sign in
@@ -361,15 +347,8 @@
 							(formatted <span class="mono">XXXX-XXXX-XX</span>).</p>
 					</div>
 
-					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{#if authState.loading}
-							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-								<LoadingSpinner size="sm" message="" />
-								<span>Verifying…</span>
-							</div>
-						{:else}
-							Verify
-						{/if}
+					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
+						{authState.loading ? 'Verifying…' : 'Verify'}
 					</button>
 					<button type="button" class="link-btn block" onclick={backToCredentials}>
 						Back to sign in
@@ -409,15 +388,8 @@
 						{/if}
 					</div>
 
-					<button class="btn-primary" type="submit" disabled={authState.loading}>
-						{#if authState.loading}
-							<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-								<LoadingSpinner size="sm" message="" />
-								<span>Saving…</span>
-							</div>
-						{:else}
-							Set password and continue
-						{/if}
+					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
+						{authState.loading ? 'Saving…' : 'Set password and continue'}
 					</button>
 				</form>
 			{/if}
@@ -459,13 +431,13 @@
 
 	.header {
 		text-align: center;
-		margin-bottom: 2rem;
+		margin-bottom: 1.75rem;
 	}
 
 	.logo-tile {
 		width: 52px;
 		height: 52px;
-		background: var(--brand);
+		background: linear-gradient(145deg, var(--brand), color-mix(in srgb, var(--brand) 72%, #0a1220));
 		border-radius: 14px;
 		display: flex;
 		align-items: center;
@@ -473,6 +445,7 @@
 		margin: 0 auto 1rem;
 		color: var(--on-brand);
 		font-size: 1.5rem;
+		box-shadow: 0 10px 24px color-mix(in srgb, var(--brand) 26%, transparent);
 	}
 
 	.logo-tile img {
@@ -481,34 +454,61 @@
 		display: block;
 	}
 
+	.kicker {
+		margin: 0 0 0.5rem;
+		font-family: var(--font-data);
+		font-size: 0.625rem;
+		font-weight: 500;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+
 	h1 {
-		font-size: 1.625rem;
+		font-size: 1.75rem;
 		font-weight: 700;
-		color: var(--brand);
+		color: var(--text-strong);
 		margin: 0 0 0.25rem;
+		letter-spacing: -0.025em;
 	}
 
 	.subtitle {
 		color: var(--text-muted);
 		font-size: 0.875rem;
+		line-height: 1.5;
 		margin: 0;
 	}
 
 	.card {
+		position: relative;
 		background: var(--bg-card);
 		padding: 2rem;
-		border-radius: 12px;
+		border: 1px solid var(--border);
+		border-radius: 16px;
 		box-shadow: var(--shadow-sm);
+	}
+
+	.card::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 16px;
+		right: 16px;
+		height: 3px;
+		border-radius: 0 0 3px 3px;
+		background: linear-gradient(90deg, var(--brand), var(--accent) 55%, transparent 90%);
 	}
 
 	.error-banner {
 		background: var(--danger-bg);
-		border: 1px solid var(--danger-bg);
+		border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+		border-left: 3px solid var(--danger);
 		border-radius: 8px;
 		padding: 0.625rem 0.875rem;
 		margin-bottom: 1.25rem;
 		color: var(--danger);
 		font-size: 0.8125rem;
+		line-height: 1.45;
 	}
 
 	.field {
@@ -525,21 +525,28 @@
 
 	.form-input {
 		width: 100%;
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
+		padding: 0.6875rem 0.875rem;
+		background: var(--bg-input);
+		color: var(--text);
+		border: 1px solid var(--border-strong);
+		border-radius: 10px;
 		font-size: 0.9375rem;
 		font-family: inherit;
 		outline: none;
-		transition: border-color 0.15s;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
+	}
+
+	.form-input::placeholder {
+		color: color-mix(in srgb, var(--text-muted) 75%, transparent);
 	}
 
 	.form-input:focus {
 		border-color: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 	}
 
 	.form-input.mono {
-		font-family: monospace;
+		font-family: var(--font-data);
 		font-size: 1.125rem;
 		letter-spacing: 0.2em;
 		text-align: center;
@@ -548,6 +555,7 @@
 	.hint {
 		color: var(--text-muted);
 		font-size: 0.75rem;
+		line-height: 1.5;
 		margin: 0.375rem 0 0;
 	}
 
@@ -560,13 +568,13 @@
 		line-height: 1.6;
 		background: var(--bg-muted);
 		border: 1px dashed var(--border-strong);
-		border-radius: 8px;
+		border-radius: 10px;
 		padding: 0.625rem 0.875rem;
 		margin: 0 0 1rem;
 	}
 
 	.mock-hint .mono {
-		font-family: monospace;
+		font-family: var(--font-data);
 		font-size: 0.75rem;
 	}
 
@@ -616,25 +624,34 @@
 
 	.btn-primary {
 		width: 100%;
-		padding: 0.75rem;
-		border: none;
-		border-radius: 8px;
-		background: var(--brand);
+		padding: 0.8125rem;
+		border: 1px solid color-mix(in srgb, var(--brand) 80%, #0a1220);
+		border-radius: 10px;
+		background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 70%, #0a1220));
 		color: var(--on-brand);
 		font-size: 1rem;
 		font-weight: 600;
 		font-family: inherit;
 		cursor: pointer;
 		margin-bottom: 1rem;
+		box-shadow: 0 6px 16px color-mix(in srgb, var(--brand) 22%, transparent);
+		transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: var(--brand-hover);
+		transform: translateY(-1px);
+		filter: brightness(1.07);
+		box-shadow: 0 9px 22px color-mix(in srgb, var(--brand) 30%, transparent);
+	}
+
+	.btn-primary:active:not(:disabled) {
+		transform: translateY(0);
 	}
 
 	.btn-primary:disabled {
-		opacity: 0.6;
+		opacity: 0.55;
 		cursor: not-allowed;
+		box-shadow: none;
 	}
 
 	.links {
@@ -684,5 +701,23 @@
 	.register-hint {
 		font-size: 0.8125rem;
 		color: var(--text-muted);
+	}
+
+	.link-btn:hover,
+	.link-btn:focus-visible {
+		color: var(--accent-hover);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.form-input,
+		.btn-primary {
+			transition: none;
+		}
+
+		.btn-primary:hover:not(:disabled) {
+			transform: none;
+		}
 	}
 </style>

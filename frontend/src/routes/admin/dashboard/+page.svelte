@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -173,7 +174,7 @@ import { listOfferings } from '$lib/features/admin/offerings/service';
 	);
 </script>
 
-<div class="dashboard">
+<div class="dashboard page-enter">
 	<header class="header">
 		<div>
 			<h1>Admin Dashboard</h1>
@@ -233,7 +234,12 @@ import { listOfferings } from '$lib/features/admin/offerings/service';
 			<button class="link" onclick={() => goto(`${Routes.ADMIN_ANALYTICS}?tab=attendance`)}>Full overview →</button>
 		</div>
 		{#if adminAttendanceState.loading}
-			<p class="muted">Loading…</p>
+			<div class="skeleton-stack" role="status" aria-busy="true">
+				<span class="sr-only">Loading attendance summary…</span>
+				<Skeleton height={14} width="45%" />
+				<Skeleton height={14} width="62%" />
+				<Skeleton height={14} width="54%" />
+			</div>
 		{:else if adminAttendanceState.error}
 			<p class="error">{adminAttendanceState.error}</p>
 		{:else if adminAttendanceState.items.length === 0}
@@ -259,7 +265,17 @@ import { listOfferings } from '$lib/features/admin/offerings/service';
 			<h2 class="section-title">Recent scans</h2>
 		</div>
 		{#if loading}
-			<p class="muted">Loading…</p>
+			<div role="status" aria-busy="true">
+				<span class="sr-only">Loading recent scans…</span>
+				<ul class="scans" aria-hidden="true">
+					{#each Array(3) as _}
+						<li>
+							<Skeleton height={12} width="38%" />
+							<Skeleton height={12} width="62%" />
+						</li>
+					{/each}
+				</ul>
+			</div>
 		{:else if loadError && !dashboard}
 			<p class="muted">The recent-scans feed is unavailable — try again above.</p>
 		{:else if !dashboard || dashboard.recent_scans.length === 0}
@@ -269,7 +285,7 @@ import { listOfferings } from '$lib/features/admin/offerings/service';
 				{#each dashboard.recent_scans as s (s.id)}
 					<li>
 						<span class="strong">{s.student_name}</span>
-						<span class="muted">{s.course_code} · {s.status} · {formatLocalDateTime(s.scanned_at)}</span>
+						<span class="muted">{s.course_code} · {s.status} · <span class="mono-data">{formatLocalDateTime(s.scanned_at)}</span></span>
 					</li>
 				{/each}
 			</ul>

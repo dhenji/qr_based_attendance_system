@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import {
@@ -529,7 +530,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<h1>Attendance History</h1>
 		<p class="subtitle">
@@ -650,7 +651,13 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				<tbody>
 					{#if loading}
 						<tr>
-							<td class="empty-row" colspan="5">Loading attendance history…</td>
+							<td class="empty-row" colspan="5">
+								<div class="skeleton-stack" role="status" aria-busy="true">
+									<span class="sr-only">Loading attendance history…</span>
+									<Skeleton height={12} width="70%" />
+									<Skeleton height={12} width="55%" />
+								</div>
+							</td>
 						</tr>
 					{:else if loadError}
 						<tr>
@@ -829,6 +836,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					<button
 						class="btn-primary"
 						type="button"
+						aria-busy={excuseBusy}
 						disabled={excuseBusy}
 						onclick={() => void submitExcuse()}
 					>
