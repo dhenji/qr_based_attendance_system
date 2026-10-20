@@ -702,7 +702,7 @@ it is additive, so a client that reads the raw row is unaffected:
 | `subject`           | `{ type, id, label, sublabel }`. `label` is the record's NAME — "BSCS · Bachelor of Science in Computer Science". It is read out of the audit snapshot first and only then from a join, so it survives the record's deletion. |
 | `summary`           | One sentence: "Updated BSCS · Bachelor of Science in Computer Science — Name".                                                                                 |
 | `action_label`      | The action as a verb: "Updated", "Imported", "Password reset".                                                                                                |
-| `changes`           | `[{ field, label, before, after }]` — the field-level difference, not a JSON blob. A create has no `before`, a delete has no `after`.                      |
+| `changes`           | `[{ field, label, before, after }]` — the field-level difference, not a JSON blob. A create has no `before`, a delete has no `after`. The id-shaped fields are resolved to names — a `professor_id` reads "Maria Dela Cruz", not "7" — and fall back to a labelled id ("Professor #7") when the referenced row no longer exists. |
 
 **Vocabulary.** `entity_type` is one of `program`, `year_level`, `course`,
 `course_offering`, `offering_component`, `student`, `professor`,

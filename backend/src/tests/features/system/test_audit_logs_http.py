@@ -162,6 +162,175 @@ async def test_audit_logs_resolves_a_subject_through_a_join(
     assert "2026-2027" in item["subject"]["sublabel"]
 
 
+async def test_audit_logs_resolves_ids_inside_the_change_list(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """The change list names what it points at, not the id it points with.
+
+    A snapshot records REFERENCES — a professor, a reviewer, an offering —
+    and a reference is only readable once it is resolved to the record it
+    points at. The lookups are the ones the page already makes.
+    """
+    headers = await _admin_headers(auth_headers, factories)
+    first = await factories.professor(
+        first_name="Maria", last_name="Garcia", email="maria.garcia@test.local"
+    )
+    second = await factories.professor(
+        first_name="Juan", last_name="Santos", email="juan.santos@test.local"
+    )
+    reviewer = await factories.user(role=UserRole.ADMIN.value)
+    await test_db_session.commit()
+    await _seed(
+        test_db_session,
+        [
+            # A handover: the assignment moves from one professor to another.
+            _row(
+                entity_type=AuditEntity.COURSE_PROFESSOR,
+                entity_id=None,
+                old_value={
+                    "offering_id": 3,
+                    "professor_id": first.id,
+                    "is_primary": True,
+                },
+                new_value={
+                    "offering_id": 3,
+                    "professor_id": second.id,
+                    "is_primary": True,
+                },
+            ),
+            # A review: the reviewer is recorded.
+            _row(
+                entity_type=AuditEntity.EXCUSE,
+                entity_id=7,
+                old_value={"reviewed_by": None, "status": "pending"},
+                new_value={"reviewed_by": reviewer.id, "status": "approved"},
+            ),
+        ],
+    )
+
+    items = await _items(api_client, headers)
+    by_type = {item["entity_type"]: item for item in items}
+
+    # The professor reads by name, on both sides of the arrow.
+    assignment = by_type["course_professor"]
+    professor_change = next(
+        change for change in assignment["changes"] if change["field"] == "professor_id"
+    )
+    assert professor_change["before"] == "Maria Garcia"
+    assert professor_change["after"] == "Juan Santos"
+
+    # The reviewer reads by name too.
+    excuse = by_type["excuse"]
+    reviewed = next(
+        change for change in excuse["changes"] if change["field"] == "reviewed_by"
+    )
+    assert reviewed["after"] != f"User #{reviewer.id}"
+    assert reviewed["after"]
+
+
+async def test_audit_logs_keeps_a_student_number_as_a_number(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """`student_id` means two things, and the field name does not say which.
+
+    The student and enrollment snapshots carry the student NUMBER (a
+    string); the excuse snapshot carries a student ROW id (a number). A
+    number is a reference and is resolved; a string is already the thing an
+    administrator reads.
+    """
+    headers = await _admin_headers(auth_headers, factories)
+    program = await factories.program()
+    year = await factories.year_level(program)
+    student = await factories.student(
+        year, student_id="2024-0001", first_name="Juan", last_name="Dela Cruz"
+    )
+    await test_db_session.commit()
+    await _seed(
+        test_db_session,
+        [
+            # The enrollment snapshot: the student NUMBER.
+            _row(
+                entity_type=AuditEntity.ENROLLMENT,
+                entity_id=None,
+                old_value=None,
+                new_value={
+                    "offering_id": 3,
+                    "student_id": "2024-0001",
+                    "semester": "1st",
+                    "academic_year": "2026-2027",
+                },
+            ),
+            # The excuse snapshot: the student ROW id.
+            _row(
+                entity_type=AuditEntity.EXCUSE,
+                entity_id=7,
+                old_value=None,
+                new_value={"student_id": student.id, "reason": "Medical"},
+            ),
+        ],
+    )
+
+    items = await _items(api_client, headers)
+    by_type = {item["entity_type"]: item for item in items}
+
+    enrollment = by_type["enrollment"]
+    student_change = next(
+        change
+        for change in enrollment["changes"]
+        if change["field"] == "student_id"
+    )
+    # A string stays a string — it is already the number.
+    assert student_change["after"] == "2024-0001"
+
+    excuse = by_type["excuse"]
+    excuse_change = next(
+        change for change in excuse["changes"] if change["field"] == "student_id"
+    )
+    # A number is a reference, so it resolves to the student.
+    assert excuse_change["after"] == "2024-0001 · Juan Dela Cruz"
+
+
+async def test_audit_logs_falls_back_to_an_id_for_a_deleted_row(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    """A reference to a row that no longer exists reads as a labelled id.
+
+    The join returns nothing, so there is no name to show. The id is shown
+    with its type, so it is still readable — and it is never silently blank.
+    """
+    headers = await _admin_headers(auth_headers, factories)
+    await test_db_session.commit()
+    await _seed(
+        test_db_session,
+        [
+            # Neither professor exists — they were both hard-deleted.
+            _row(
+                entity_type=AuditEntity.COURSE_PROFESSOR,
+                entity_id=None,
+                old_value={"professor_id": 4242, "is_primary": True},
+                new_value={"professor_id": 4243, "is_primary": True},
+            ),
+        ],
+    )
+
+    (item,) = await _items(api_client, headers)
+
+    professor_change = next(
+        change for change in item["changes"] if change["field"] == "professor_id"
+    )
+    assert professor_change["before"] == "Professor #4242"
+    assert professor_change["after"] == "Professor #4243"
+
+
 async def test_audit_logs_adds_the_derived_reading(
     api_client: Any,
     auth_headers: Any,
