@@ -384,6 +384,10 @@
 - **Status:** Accepted
 - **Context:** Lightweight, works with Svelte 5 runes, good date-axis support.
 - **Consequences:** Component `charts/ChartCanvas.svelte` wraps Chart.js.
+  > **Amended by ADR-091** — no chart library was adopted and
+  > `charts/ChartCanvas.svelte` was never built. The frontend ships two
+  > hand-rolled SVG chart components instead; the reusable-component intent
+  > survives, the library does not. Read this entry with ADR-091.
 
 ### ADR-042: Buildings/Campuses Table — Deferred to v2
 
@@ -2680,3 +2684,40 @@
   `test_a_reviewed_excuse_names_its_reviewer` cover the routes;
   `test_a_read_row_names_the_student_and_the_class` and
   `test_a_reviewed_row_names_its_reviewer` cover the service.
+
+### ADR-091: The Frontend Charts Are Hand-Rolled SVG, Not Chart.js
+
+- **Decision (D91):** The frontend ships **hand-rolled SVG chart components** —
+  `lib/features/report/components/ReportTrendChart.svelte` and
+  `ReportBarChart.svelte` — and no chart library. Chart.js is not a dependency
+  and `charts/ChartCanvas.svelte` was never built. ADR-041's intent survives
+  (one reusable component per chart shape, behind a stable prop contract, on
+  the report surface); the library it named does not.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** ADR-041 chose Chart.js (+ a date adapter) in a reusable Svelte
+  component, and named `charts/ChartCanvas.svelte` as the consequence. The
+  implementation went another way and no ADR recorded it, so the log and the
+  code disagreed. The disagreement was load-bearing in a second document:
+  `docs/proposals/contributions.md` named a `ChartCanvas.svelte` and a Chart.js
+  visualization as part of a contribution, and simultaneously listed "Chart.js
+  charting" under *Deliberately NOT Contributions* — a self-contradiction that
+  only existed because the decision it cited had never been implemented.
+- **Alternatives considered:**
+  (1) *Keep the decision and build Chart.js now.* Rejected: the two SVG
+  components already cover the whole chart surface
+  (`grep -rn "chart.js" frontend/` returns nothing, and
+  `ReportTrendChart.svelte` / `ReportBarChart.svelte` are the only chart
+  components in the tree), and a chart library for two charts is a dependency
+  with no remaining consumer.
+  (2) *Say nothing and let the code win silently.* Rejected: that is how the
+  log drifted in the first place. A reader checking ADR-041 would be sent to a
+  component that does not exist, and a document citing D41 would inherit the
+  error.
+  (3) *Taken:* the decision is amended to describe what ships, so the log and
+  the code agree and the next document that cites it inherits the truth.
+- **Consequences:** `frontend/package.json` carries no `chart.js` dependency.
+  The two chart components are the only chart entry points in the frontend.
+  `docs/proposals/contributions.md` describes the SVG charts and lists chart
+  rendering under *Deliberately NOT Contributions* (standard visualization
+  work). No code change.
