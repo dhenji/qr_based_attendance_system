@@ -191,7 +191,7 @@
 			</div>
 			{#if securityError}<p class="error">{securityError}</p>{/if}
 			<div class="action-row">
-				<button class="btn" onclick={onSaveQuestion} disabled={questionBusy}>
+				<button class="btn" aria-busy={questionBusy} onclick={onSaveQuestion} disabled={questionBusy}>
 					{questionBusy ? 'Saving…' : 'Save'}
 				</button>
 				<button class="btn ghost" onclick={() => (questionOpen = false)}>Cancel</button>

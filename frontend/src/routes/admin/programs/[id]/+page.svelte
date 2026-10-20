@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -367,7 +369,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	</div>
 
 	{#if adminProgramDetailState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={6} label="Loading program…" />
 	{:else if adminProgramDetailState.error || !program}
 		<section class="card">
 			<p class="error">Could not load program: {adminProgramDetailState.error ?? 'Not found.'}</p>
@@ -408,7 +410,11 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 
 		{#if program.yearLevels.length === 0}
 			<section class="card">
-				<p class="empty">No year levels yet — add Year 1 to start. Student imports resolve their year_level against these rows.</p>
+				<EmptyState
+					icon="file"
+					title="No year levels yet"
+					hint="Add Year 1 to start. Student imports resolve their year_level against these rows."
+				/>
 			</section>
 		{:else}
 			<ul class="years">
@@ -487,7 +493,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
+				<button class="btn btn-primary" aria-busy={editBusy} disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -526,7 +532,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (yearOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-year" disabled={yearBusy} onclick={submitYear}>
+				<button class="btn btn-primary" data-testid="save-year" aria-busy={yearBusy} disabled={yearBusy} onclick={submitYear}>
 					{yearBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -605,7 +611,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => { termsOpen = false; termsTarget = null; }}>Cancel</button>
-				<button class="btn btn-primary" disabled={termsBusy} onclick={submitTerms}>
+				<button class="btn btn-primary" aria-busy={termsBusy} disabled={termsBusy} onclick={submitTerms}>
 					{termsBusy ? 'Saving…' : 'Save terms'}
 				</button>
 			</div>
@@ -661,7 +667,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
-				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
@@ -854,12 +860,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 
 	.link.danger {
 		color: var(--danger);
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

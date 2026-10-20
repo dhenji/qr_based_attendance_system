@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { goToStep, setStructureReady, wizardState } from './store.svelte';
@@ -198,7 +201,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	{/if}
 
 	{#if loading}
-		<p class="muted">Loading structure…</p>
+		<SkeletonDetail bare rows={5} label="Loading structure…" />
 	{:else if loadError && !program}
 		<p class="error" role="alert">{loadError}</p>
 		<div class="nav-row">
@@ -232,7 +235,11 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 					</button>
 				</div>
 				{#if (program?.yearLevels ?? []).length === 0}
-					<p class="empty">No year levels yet. Add the first one — terms come with it.</p>
+					<EmptyState
+						icon="file"
+						title="No year levels yet"
+						hint="Add the first one — terms come with it."
+					/>
 				{:else}
 					<ul class="rows">
 						{#each (program?.yearLevels ?? []) as y (y.id)}
@@ -270,6 +277,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 							<button class="btn btn-ghost" onclick={() => (yearOpen = false)}>Cancel</button>
 							<button
 								class="btn btn-primary"
+								aria-busy={yearBusy}
 								disabled={yearBusy || !y_number}
 								onclick={() => void submitYear()}
 							>
@@ -289,11 +297,15 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 					</button>
 				</div>
 				{#if coursesLoading}
-					<p class="muted">Loading courses…</p>
+					<SkeletonTable bare rows={3} cols={4} label="Loading courses…" />
 				{:else if coursesError}
 					<p class="error" role="alert">{coursesError}</p>
 				{:else if courses.length === 0}
-					<p class="empty">No course templates yet. Add the first one — scheduling is set later, on the offering.</p>
+					<EmptyState
+						icon="file"
+						title="No course templates yet"
+						hint="Add the first one — scheduling is set later, on the offering."
+					/>
 				{:else}
 					<ul class="rows">
 						{#each courses.slice(0, 8) as c (c.id)}
@@ -323,6 +335,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 							<button class="btn btn-ghost" onclick={() => (courseOpen = false)}>Cancel</button>
 							<button
 								class="btn btn-primary"
+								aria-busy={courseBusy}
 								disabled={courseBusy}
 								onclick={() => void submitCourse()}
 							>
@@ -381,12 +394,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0 0 1.25rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.875rem;
-		margin: 0.5rem 0 0;
 	}
 
 	.error {

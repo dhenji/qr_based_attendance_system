@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -602,7 +604,7 @@
 	const rowTitle = (o: AdminOffering) => offeringTitle(o);
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Offering Management</h1>
@@ -675,12 +677,16 @@
 	</section>
 
 	{#if adminOfferingsState.loading && adminOfferingsState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={7} label="Loading offerings…" />
 	{:else if adminOfferingsState.error}
 		<section class="card"><p class="error">Could not load offerings: {adminOfferingsState.error}</p></section>
 	{:else if visibleItems.length === 0}
 		<section class="card">
-			<p class="empty">No offerings match these filters. Add the first one — it instances a course template for a program and year.</p>
+			<EmptyState
+				icon="file"
+				title="No offerings match these filters"
+				hint="Add the first one — it instances a course template for a program and year."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminOfferingsState.loading}>
@@ -878,10 +884,10 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-secondary" data-testid="save-open-offering" disabled={formBusy} onclick={() => void submitForm(true)}>
+				<button class="btn btn-secondary" data-testid="save-open-offering" aria-busy={formBusy} disabled={formBusy} onclick={() => void submitForm(true)}>
 					{formBusy ? 'Saving…' : 'Save & open'}
 				</button>
-				<button class="btn btn-primary" data-testid="save-offering" disabled={formBusy} onclick={() => void submitForm(false)}>
+				<button class="btn btn-primary" data-testid="save-offering" aria-busy={formBusy} disabled={formBusy} onclick={() => void submitForm(false)}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -1131,12 +1137,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-top: 1rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

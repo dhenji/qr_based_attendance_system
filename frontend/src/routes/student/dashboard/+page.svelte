@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { onMount } from 'svelte';
 	import {
 		studentState,
@@ -59,7 +61,12 @@
 	<section class="card">
 		<h2 class="section-title">Today's Schedule</h2>
 		{#if studentState.loading}
-			<p class="muted">Loading…</p>
+			<div class="skeleton-stack" role="status" aria-busy="true">
+				<span class="sr-only">Loading today's schedule…</span>
+				<Skeleton height={14} width="55%" />
+				<Skeleton height={14} width="72%" />
+				<Skeleton height={14} width="48%" />
+			</div>
 		{:else if studentState.courses.length > 0}
 			<ul>
 				{#each studentState.courses as course}
@@ -72,7 +79,11 @@
 				{/each}
 			</ul>
 		{:else}
-			<p class="empty">No classes scheduled yet. Your enrolled subjects will appear here.</p>
+			<EmptyState
+				icon="file"
+				title="No classes scheduled yet"
+				hint="Your enrolled subjects will appear here."
+			/>
 		{/if}
 	</section>
 </div>
@@ -236,12 +247,6 @@
 
 	li:last-child {
 		border-bottom: none;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

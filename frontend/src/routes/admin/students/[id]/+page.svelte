@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -70,7 +71,7 @@
 	</button>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading student…</p></section>
+		<SkeletonDetail rows={5} label="Loading student…" />
 	{:else if error || !student}
 		<section class="card">
 			<p class="error" role="alert">{error ?? 'Student not found.'}</p>

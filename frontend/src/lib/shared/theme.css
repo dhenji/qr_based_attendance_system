@@ -115,6 +115,78 @@ body {
 	letter-spacing: 0.01em;
 }
 
+/* Screen-reader-only text. Used by skeleton loading regions so a visual
+ * placeholder still announces its state (the shimmer blocks are aria-hidden). */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Vertical stack for inline skeleton blocks inside existing cards, so pages
+ * do not each re-declare the same flex/gap rules. */
+.skeleton-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+/* Busy buttons. Pages already swap labels ("Saving…"); setting
+ * aria-busy="true" on the button while the request is in flight adds the
+ * spinner and blocks a second click without touching each page's .btn rules.
+ * currentColor keeps the ring legible on primary, secondary, and danger
+ * buttons in both themes. */
+button[aria-busy='true'] {
+	pointer-events: none;
+}
+
+button[aria-busy='true']::after {
+	content: '';
+	display: inline-block;
+	width: 0.8em;
+	height: 0.8em;
+	margin-left: 0.5em;
+	vertical-align: -0.1em;
+	border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+	border-top-color: currentColor;
+	border-radius: 50%;
+	animation: btn-busy-spin 0.7s linear infinite;
+}
+
+@keyframes btn-busy-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Subtle entrance for route roots. Opacity only (no transform) so it can
+ * never become a containing block for a fixed-position modal. */
+@keyframes page-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+.page-enter {
+	animation: page-fade-in 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	button[aria-busy='true']::after,
+	.page-enter {
+		animation: none;
+	}
+}
+
 /* Print.
  * Eight pages call window.print() and only two shipped a per-page
  * `@media print` block, so the rest printed the topbar, sidebar, action

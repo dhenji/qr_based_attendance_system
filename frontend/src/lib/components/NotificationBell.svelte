@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	// NotificationBell
 	// Bell toggle + dropdown panel shared by the student, professor, and
 	// admin topbars. The bell shows the live badge count; clicking it opens a
@@ -91,7 +92,12 @@
 		<div class="panel" role="menu" aria-label={panelTitle}>
 			<p class="panel-title">{panelTitle}</p>
 			{#if loading}
-				<p class="panel-muted">Loading…</p>
+				<div class="skeleton-stack" role="status" aria-busy="true">
+					<span class="sr-only">Loading notifications…</span>
+					<Skeleton height={10} width="80%" />
+					<Skeleton height={10} width="60%" />
+					<Skeleton height={10} width="70%" />
+				</div>
 			{:else if items.length === 0}
 				<p class="panel-muted">{emptyText}</p>
 			{:else}

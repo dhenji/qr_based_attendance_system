@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -269,12 +271,12 @@
 		</section>
 
 		{#if adminAuditState.loading && adminAuditState.items.length === 0}
-			<section class="card"><p class="muted">Loading…</p></section>
+			<SkeletonTable rows={8} cols={7} label="Loading audit trail…" />
 		{:else if adminAuditState.error}
 			<section class="card"><p class="error">Could not load audit logs: {adminAuditState.error}</p></section>
 		{:else if trailRows.length === 0}
 			<section class="card">
-				<p class="empty">No changes match these filters.</p>
+				<EmptyState icon="file" title="No changes match these filters" />
 			</section>
 		{:else}
 			<section class="card table-wrap" aria-busy={adminAuditState.loading}>
@@ -432,11 +434,11 @@
 				<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>Edit Programs →</button>
 			</div>
 			{#if adminStructureState.loading && adminStructureState.items.length === 0}
-				<p class="muted">Loading…</p>
+				<SkeletonTable bare rows={3} cols={4} label="Loading structural changes…" />
 			{:else if adminStructureState.error}
 				<p class="error">{adminStructureState.error}</p>
 			{:else if structureRows.length === 0}
-				<p class="empty">No structural changes recorded.</p>
+				<EmptyState icon="file" title="No structural changes recorded" />
 			{:else}
 				<div class="table-wrap" aria-busy={adminStructureState.loading}>
 					<table>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -216,7 +217,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	</header>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading system settings…</p></section>
+		<SkeletonDetail rows={7} label="Loading system settings…" />
 	{:else if loadError}
 		<section class="card">
 			<p class="error">{loadError}</p>
@@ -253,7 +254,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			{#if saveNote}
 				<p class="note" role="status">{saveNote}</p>
 			{/if}
-			<button class="btn btn-primary" type="button" disabled={saving} onclick={() => void saveDefaults()}>
+			<button class="btn btn-primary" type="button" aria-busy={saving} disabled={saving} onclick={() => void saveDefaults()}>
 				{saving ? 'Saving…' : 'Save Changes'}
 			</button>
 		</section>

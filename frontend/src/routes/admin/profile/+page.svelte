@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { me } from '$lib/features/auth/service';
@@ -111,7 +112,7 @@
 	</header>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={5} label="Loading profile…" />
 	{:else if loadError}
 		<section class="card"><p class="error">{loadError}</p></section>
 	{:else if identity}
@@ -176,7 +177,7 @@
 					</label>
 				</div>
 				<div class="modal-actions">
-					<button class="btn btn-primary" type="submit" disabled={formBusy}>
+					<button class="btn btn-primary" type="submit" aria-busy={formBusy} disabled={formBusy}>
 						{formBusy ? 'Saving…' : 'Change password'}
 					</button>
 				</div>

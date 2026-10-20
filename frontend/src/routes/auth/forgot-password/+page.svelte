@@ -202,6 +202,8 @@
 			<span class="brand-name">Attendly</span>
 		</div>
 
+		<p class="kicker">Account recovery · 4 steps</p>
+
 		<div class="steps">
 			{#each [1, 2, 3, 4] as s}
 				<div class="step">
@@ -233,7 +235,7 @@
 
 					<Turnstile bind:this={turnstile} />
 
-					<button class="btn-primary" onclick={handleStep1} disabled={busy}>
+					<button class="btn-primary" onclick={handleStep1} disabled={busy} aria-busy={busy}>
 						{busy ? 'Checking…' : 'Continue'}
 					</button>
 					<button class="back-btn" onclick={() => goto(Routes.LOGIN)}>← Back to Login</button>
@@ -255,7 +257,7 @@
 							value={answer} oninput={(e) => { answer = (e.target as HTMLInputElement).value; }} />
 					</div>
 
-					<button class="btn-primary" onclick={handleStep2} disabled={busy}>
+					<button class="btn-primary" onclick={handleStep2} disabled={busy} aria-busy={busy}>
 						{busy ? 'Verifying…' : 'Verify'}
 					</button>
 				</div>
@@ -273,7 +275,7 @@
 
 					<OtpCodeRow win={win} busy={busy} onresend={resend} />
 
-					<button class="btn-primary" onclick={handleStep3} disabled={busy}>
+					<button class="btn-primary" onclick={handleStep3} disabled={busy} aria-busy={busy}>
 						{busy ? 'Verifying…' : 'Verify'}
 					</button>
 				</div>
@@ -340,7 +342,7 @@
 						</div>
 					{/if}
 
-					<button class="btn-primary" onclick={handleStep4} disabled={success || busy}>
+					<button class="btn-primary" aria-busy={busy} onclick={handleStep4} disabled={success || busy}>
 						{success ? 'Password updated' : busy ? 'Resetting…' : 'Reset password'}
 					</button>
 				</div>
@@ -368,18 +370,19 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.625rem;
-		margin-bottom: 1.5rem;
+		gap: 0.5rem;
+		margin-bottom: 0.625rem;
 	}
 
 	.header-logo {
 		width: 40px;
 		height: 40px;
-		background: var(--brand);
+		background: linear-gradient(145deg, var(--brand), color-mix(in srgb, var(--brand) 72%, #0a1220));
 		border-radius: 12px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		box-shadow: 0 8px 20px color-mix(in srgb, var(--brand) 26%, transparent);
 	}
 
 	.header-logo img {
@@ -389,10 +392,21 @@
 	}
 
 	.brand-name {
-		font-size: 1.375rem;
+		font-size: 1.25rem;
 		font-weight: 700;
-		color: var(--brand);
-		letter-spacing: -0.01em;
+		color: var(--text-strong);
+		letter-spacing: -0.02em;
+	}
+
+	.kicker {
+		margin: 0 0 1.25rem;
+		text-align: center;
+		font-family: var(--font-data);
+		font-size: 0.625rem;
+		font-weight: 500;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--accent);
 	}
 
 	.steps {
@@ -415,65 +429,87 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.75rem;
+		font-family: var(--font-data);
+		font-size: 0.6875rem;
 		font-weight: 700;
-		background: var(--bg-muted);
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		color: var(--text-muted);
 		flex-shrink: 0;
 	}
 
 	.step-dot.active {
 		background: var(--accent);
+		border-color: var(--accent);
 		color: var(--on-brand);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
 
 	.step-dot.done {
-		background: #0d9488;
+		background: var(--success);
+		border-color: var(--success);
 		color: var(--on-brand);
 	}
 
 	.step-line {
 		width: 24px;
 		height: 2px;
-		background: var(--border-strong);
+		background: var(--border);
 	}
 
 	.step-line.done {
-		background: #0d9488;
+		background: var(--success);
 	}
 
 	.card {
+		position: relative;
 		background: var(--bg-card);
 		padding: 2rem;
-		border-radius: 12px;
+		border: 1px solid var(--border);
+		border-radius: 16px;
 		box-shadow: var(--shadow-sm);
 	}
 
+	.card::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 16px;
+		right: 16px;
+		height: 3px;
+		border-radius: 0 0 3px 3px;
+		background: linear-gradient(90deg, var(--brand), var(--accent) 55%, transparent 90%);
+	}
+
 	h2 {
-		font-size: 1.375rem;
+		font-size: 1.5rem;
 		font-weight: 700;
-		color: var(--brand);
+		color: var(--text-strong);
 		margin: 0 0 0.25rem;
+		letter-spacing: -0.02em;
 	}
 
 	.step-sub {
 		color: var(--text-muted);
 		font-size: 0.8125rem;
+		line-height: 1.5;
 		margin: 0 0 1.5rem;
 	}
 
 	.step-sub strong {
-		color: var(--brand);
+		color: var(--text-strong);
 	}
 
 	.error-banner {
 		background: var(--danger-bg);
-		border: 1px solid var(--danger-bg);
+		border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+		border-left: 3px solid var(--danger);
 		border-radius: 8px;
 		padding: 0.625rem 0.875rem;
 		margin-bottom: 1rem;
 		color: var(--danger);
 		font-size: 0.8125rem;
+		line-height: 1.45;
 	}
 
 	.field {
@@ -490,17 +526,24 @@
 
 	.form-input {
 		width: 100%;
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
+		padding: 0.6875rem 0.875rem;
+		background: var(--bg-input);
+		color: var(--text);
+		border: 1px solid var(--border-strong);
+		border-radius: 10px;
 		font-size: 0.9375rem;
 		font-family: inherit;
 		outline: none;
-		transition: border-color 0.15s;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
+	}
+
+	.form-input::placeholder {
+		color: color-mix(in srgb, var(--text-muted) 75%, transparent);
 	}
 
 	.form-input:focus {
 		border-color: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 	}
 
 	.pwd-wrap {
@@ -526,13 +569,15 @@
 	}
 
 	.question-panel {
-		background: var(--bg-page);
-		border: 1px solid var(--border-strong);
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
+		border-left: 3px solid var(--accent);
 		border-radius: 8px;
 		padding: 0.875rem;
 		margin-bottom: 1rem;
 		font-size: 0.875rem;
-		color: var(--brand);
+		line-height: 1.5;
+		color: var(--text-secondary);
 		font-style: italic;
 		font-weight: 500;
 	}
@@ -559,7 +604,8 @@
 
 	.success-banner {
 		background: var(--success-bg);
-		border: 1px solid var(--success-bg);
+		border: 1px solid color-mix(in srgb, var(--success) 22%, transparent);
+		border-left: 3px solid var(--success);
 		border-radius: 8px;
 		padding: 0.625rem 0.875rem;
 		margin-bottom: 1rem;
@@ -577,33 +623,45 @@
 
 	.match-banner.match {
 		background: var(--success-bg);
+		border-left: 3px solid var(--success);
 		color: var(--success);
 	}
 
 	.match-banner.no-match {
 		background: var(--danger-bg);
+		border-left: 3px solid var(--danger);
 		color: var(--danger);
 	}
 
 	.btn-primary {
 		width: 100%;
-		padding: 0.75rem;
-		border: none;
-		border-radius: 8px;
-		background: var(--brand);
+		padding: 0.8125rem;
+		border: 1px solid color-mix(in srgb, var(--brand) 80%, #0a1220);
+		border-radius: 10px;
+		background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 70%, #0a1220));
 		color: var(--on-brand);
 		font-size: 1rem;
 		font-weight: 600;
 		font-family: inherit;
 		cursor: pointer;
+		box-shadow: 0 6px 16px color-mix(in srgb, var(--brand) 22%, transparent);
+		transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 	}
 
-	.btn-primary:hover {
-		background: var(--brand-hover);
+	.btn-primary:hover:not(:disabled) {
+		transform: translateY(-1px);
+		filter: brightness(1.07);
+		box-shadow: 0 9px 22px color-mix(in srgb, var(--brand) 30%, transparent);
+	}
+
+	.btn-primary:active:not(:disabled) {
+		transform: translateY(0);
 	}
 
 	.btn-primary:disabled {
 		background: var(--border-strong);
+		color: var(--text-muted);
+		box-shadow: none;
 		cursor: not-allowed;
 	}
 
@@ -621,5 +679,16 @@
 
 	.back-btn:hover {
 		color: var(--text-secondary);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.form-input,
+		.btn-primary {
+			transition: none;
+		}
+
+		.btn-primary:hover:not(:disabled) {
+			transform: none;
+		}
 	}
 </style>

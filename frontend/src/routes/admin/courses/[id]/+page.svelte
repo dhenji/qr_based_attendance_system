@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -207,7 +210,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 	</div>
 
 	{#if adminCourseDetailState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={5} label="Loading course…" />
 	{:else if adminCourseDetailState.error || !course}
 		<section class="card">
 			<p class="error">Could not load course: {adminCourseDetailState.error ?? 'Not found'}</p>
@@ -236,11 +239,15 @@ import { sessionMixLabel } from '$lib/shared/types';
 			<h2 class="card-title">Offerings ({offerings.length})</h2>
 			<p class="muted">Program/year instances of this template. Schedule, professors, and roster live on each offering.</p>
 			{#if offeringsLoading}
-				<p class="muted">Loading offerings…</p>
+				<SkeletonTable bare rows={3} cols={5} label="Loading offerings…" />
 			{:else if offeringsError}
 				<p class="error">{offeringsError}</p>
 			{:else if offerings.length === 0}
-				<p class="empty">No offerings yet. Create one from the Offerings page.</p>
+				<EmptyState
+					icon="file"
+					title="No offerings yet"
+					hint="Create one from the Offerings page."
+				/>
 			{:else}
 				<div class="table-wrap">
 					<table>
@@ -343,7 +350,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
+				<button class="btn btn-primary" aria-busy={editBusy} disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -371,7 +378,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
-				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
@@ -545,12 +552,6 @@ import { sessionMixLabel } from '$lib/shared/types';
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 0.75rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
@@ -111,12 +113,12 @@
 	</section>
 
 	{#if adminStudentsState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={6} cols={4} label="Loading archived students…" />
 	{:else if adminStudentsState.error}
 		<section class="card"><p class="error">Could not load archive: {adminStudentsState.error}</p></section>
 	{:else if adminStudentsState.items.length === 0}
 		<section class="card">
-			<p class="empty">Archive is empty. Deactivated students appear here.</p>
+			<EmptyState icon="file" title="Archive is empty" hint="Deactivated students appear here." />
 		</section>
 	{:else}
 		<section class="card table-wrap">
@@ -196,7 +198,7 @@
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
-				<button class="btn btn-success" disabled={toggleBusy} onclick={() => void confirmToggle()}>
+				<button class="btn btn-success" aria-busy={toggleBusy} disabled={toggleBusy} onclick={() => void confirmToggle()}>
 					{toggleBusy ? 'Saving…' : 'Restore'}
 				</button>
 			</div>
@@ -359,12 +361,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-top: 1rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

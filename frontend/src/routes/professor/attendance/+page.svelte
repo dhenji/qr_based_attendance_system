@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -472,7 +474,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	{#if !canQuery}
 		<section class="card">
-			<p class="empty">Select a course and a section above to view attendance records.</p>
+			<EmptyState
+				icon="chart"
+				title="Select a course and section"
+				hint="Pick both filters above to view attendance records."
+			/>
 		</section>
 	{:else if loadError}
 		<section class="card">
@@ -482,12 +488,14 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
-		<section class="card">
-			<p class="muted">Loading attendance records…</p>
-		</section>
+		<SkeletonTable rows={8} cols={6} label="Loading attendance records…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<p class="empty">No attendance records match these filters. Try widening the date range.</p>
+			<EmptyState
+				icon="file"
+				title="No attendance records match these filters"
+				hint="Try widening the date range."
+			/>
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Attendance ledger table">

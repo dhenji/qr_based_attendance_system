@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { professorState, initProfessor } from '$lib/features/professor/store.svelte';
 
@@ -40,7 +41,7 @@
 	</header>
 
 	{#if professorState.loading}
-		<p class="muted">Loading…</p>
+		<SkeletonDetail rows={4} label="Loading profile…" />
 	{:else if professor}
 		<section class="card identity">
 			<div class="avatar">{initials}</div>

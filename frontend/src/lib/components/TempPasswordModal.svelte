@@ -126,7 +126,7 @@
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={onclose}>Cancel</button>
-				<button class="btn btn-danger" disabled={busy} onclick={confirm}>
+				<button class="btn btn-danger" aria-busy={busy} disabled={busy} onclick={confirm}>
 					{busy ? 'Resetting…' : 'Reset password'}
 				</button>
 			</div>
