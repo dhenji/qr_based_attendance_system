@@ -115,54 +115,35 @@ compilerOptions: {
 
 ---
 
-## Adding Chart.js
+## Charts
 
-D41 specifies Chart.js as the chart library. Install:
+There is **no chart library**. D41 specified Chart.js, but it was never installed —
+the charts are hand-rolled SVG (ADR-091). Two reusable components cover the whole
+chart surface:
 
-```bash
-cd frontend
-npm install chart.js
-```
+| Component                                                | Shape              |
+| -------------------------------------------------------- | ------------------ |
+| `src/lib/features/report/components/ReportTrendChart.svelte` | Line / area trend  |
+| `src/lib/features/report/components/ReportBarChart.svelte`   | Bar / comparison   |
 
-For the date adapter (required for time axes):
-
-```bash
-npm install chartjs-adapter-date-fns date-fns
-```
-
-Usage in components:
-
-```svelte
-<script lang="ts">
-    import Chart from 'chart.js/auto';
-    import 'chartjs-adapter-date-fns';
-
-    let canvas: HTMLCanvasElement;
-
-    $effect(() => {
-        const chart = new Chart(canvas, {
-            type: 'bar',
-            data: { /* ... */ },
-            options: { responsive: true }
-        });
-
-        return () => chart.destroy();
-    });
-</script>
-
-<canvas bind:this={canvas}></canvas>
-```
+Both take plain arrays of `{label, value}`-style rows and draw SVG primitives —
+no canvas, no runtime, no dependency. To add a chart, follow the prop contract of
+the existing components rather than reaching for a library.
 
 ---
 
-## Service Worker (deferred)
+## Service Worker
 
-The PWA offline stack — `src/service-worker.ts` and the local queue under
-`src/lib/features/sync/` — is
-**deferred**, not planned-but-impending. See
-[frontend-architecture.md](../architecture/frontend-architecture.md) ("Deferred
-(later passes)"): `hooks.server.ts`, `service-worker.ts`, `static/icons/`,
-`vite-plugin-pwa`, `robots.txt`. If it is picked up later:
+The PWA offline stack **ships**: `src/service-worker.ts` (SvelteKit's service
+worker — SvelteKit registers it automatically in a production build, and the
+worker itself is production-only by design) and the local outbox under
+`src/lib/features/sync/`. The worker precaches the app shell and relays
+Background Sync `attendly-outbox` wake-ups to open pages; it never replays scans
+itself, because the auth token lives in `localStorage` which a worker cannot
+read.
+
+What is still deferred is the `vite-plugin-pwa` route (the install prompt and
+its manifest generation). If it is picked up later:
 
 ```bash
 npm install -D vite-plugin-pwa
@@ -309,5 +290,4 @@ npm run check:watch
 | `svelte`                   | Svelte 5 (runes)                   |
 | `html5-qrcode`             | QR code scanning                   |
 | `zod`                      | Schema validation                  |
-| `chart.js`                 | Charts (D41 — install when needed) |
-| `chartjs-adapter-date-fns` | Chart.js time axis adapter         |
+| `@mediapipe/tasks-vision`  | FaceLandmarker WASM runtime + model (the only ML model in the project) |

@@ -259,6 +259,19 @@
 ### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
 
 - **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 128-d embeddings (face-api.js-compatible), stores encrypted (`students.face_embedding BYTEA`) + `face_enrolled_at` + `face_embedding_version`.
+  > **As-built note (2026-10-21)** — the pipeline described above is **not
+  > implemented**. No face-recognition model is installed in this repository: the
+  > only model the project ships is MediaPipe FaceLandmarker
+  > (`frontend/static/models/face_landmarker.task`), which produces landmarks and
+  > blendshapes, not identity embeddings, and the named face-api.js ResNet was
+  > never a dependency of either side. The server writes the documented blob shape
+  > **zero-filled** and tagged `"stub": true` (`_stub_embedding_blob`), the blob is
+  > stored **plaintext** (the AES-256-GCM step is not implemented), and no
+  > similarity comparison runs — `face_match_score` is a client assertion the
+  > server band-checks without ever reading the stored blob. What *did* ship is
+  > the distribution half: the enrollment route, the version column, the
+  > pull-on-login handshake and the device-side encrypted cache (ADR-029). See
+  > `docs/proposals/models.md` §3 for the as-built catalog.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Privacy — biometric enrollment is admin-supervised. 3 angles improve accuracy. Encryption at rest required.
@@ -283,6 +296,13 @@
 ### ADR-031: Fixed Liveness Sequence — Blink → Left → Right
 
 - **Decision (D31):** Liveness sequence is **fixed** (blink → left → right), MediaPipe Face Mesh WASM client-side, EAR + PnP heuristics graded server-side. Sibling-confusion risk is acknowledged as a known limitation, not solved (per instructor: treated as future assignment).
+  > **As-built note (2026-10-21)** — the shipped model is MediaPipe
+  > **FaceLandmarker** (`face_landmarker.task`, 478 landmarks), the successor to
+  > the Face Mesh solver named above; the fixed sequence, the EAR + PnP protocol
+  > and the server-side grading are unchanged. The server's grade is four checks
+  > (`attendance/service.py:147-162`) — the yaw values inside `pnp_evidence` are
+  > never inspected — so "graded server-side" is thinner than the wording implies.
+  > See `docs/proposals/models.md` §2.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Deterministic sequence simplifies implementation and grading. Sibling confusion accepted as known gap.
@@ -2721,3 +2741,47 @@
   `docs/proposals/contributions.md` describes the SVG charts and lists chart
   rendering under *Deliberately NOT Contributions* (standard visualization
   work). No code change.
+
+### ADR-092: The Offering's Semester Is Free Text; the Enrollment Copies It
+
+- **Decision (D92):** `course_offerings.semester` is **free text** at the API
+  layer — `OfferingCreate.semester` is length-checked only
+  (`features/course/schema.py:199-201`) and is never validated against the year
+  level's term structure. `enrollments.semester` is **copied from the offering**
+  at creation (`features/course/service.py:1400-1404`), so an enrollment row
+  can never disagree with the offering it belongs to. The term structure's role
+  is to supply the term's session-week count
+  (`shared/schedule.py::term_weeks`), which falls back to a shared default for
+  an unmatched code rather than raising. The one hard constraint runs the other
+  way: renaming or removing a term that existing offerings reference is refused
+  (`features/program/service.py:487-512` → `YearLevelTermInUseException`).
+- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Context:** D5 reads *"Enrollment gains `semester` (term code validated
+  against the year level's term structure)"*. That validation does not exist.
+  The term structure is a JSONB document owned by the year level, and an
+  offering may legitimately carry a term code the structure no longer lists —
+  which is exactly the case the copy-on-enroll design handles. The
+  implementation moved the copy to the enrollment (so the row cannot disagree
+  with its offering) and left the offering's field free text. The log never
+  recorded that deviation, so a document citing D5 inherits a claim the code does
+  not honour — `docs/proposals/contributions.md` C8 already describes the
+  shipped behaviour correctly, which means the log and the code disagree, not
+  the docs.
+- **Alternatives considered:**
+  (1) *Validate the offering's semester against the term structure.* Rejected:
+  it would make renaming a term a breaking change for every offering that
+  referenced it, and the rename is already refused when the term is in use.
+  Free text also lets an offering exist before its term is configured.
+  (2) *Drop `enrollments.semester` and join the offering instead.* Rejected:
+  the copy is denormalised on purpose — the analytics slices filter on
+  `Enrollment.semester` directly (`features/analytics/service.py:620`,
+  `features/analytics/batch.py:256`) without joining the offering, and the copy
+  makes that filter cheap and unambiguous.
+  (3) *Taken:* record what ships. D5's wording is left alone (a decision is a
+  decision), and the deviation is recorded here so the next document that cites
+  D5 inherits the truth.
+- **Consequences:** `shared/schedule.py::term_weeks` stays the single resolver
+  for a term's session weeks, and an orphaned term code resolves to the shared
+  default instead of raising. The offering's semester remains a length-checked
+  string. No code change.

@@ -217,12 +217,11 @@
 
 3. **Capture 3 photos** (front, left, right):
    - Ensure good lighting, single face in frame
-   - Quality gates auto-validate: brightness, face-size, single-face
-   - System rejects blurry or multiple-face captures
+   - ⚠ The quality gates are **specified but not implemented** — the upload UI checks file type and size only, and the server checks content type, size and non-empty. "Quality gates auto-validate" and "system rejects blurry or multiple-face captures" describe the design, not today's behavior.
 
 4. **Server generates embeddings:**
-   - 128-d embedding per photo using face-api.js-compatible ResNet
-   - Stored as encrypted JSON blob in `students.face_embedding` (BYTEA)
+   - ⚠ No embedding is generated — there is no recognition model installed, and the server stores the documented 128-d shape zero-filled (`"stub": true`)
+   - Stored as a **plaintext** JSON blob in `students.face_embedding` (BYTEA) — the AES-256-GCM step is not implemented
    - `face_embedding_version` incremented
    - `face_enrolled_at` updated
 
