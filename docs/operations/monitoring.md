@@ -225,6 +225,34 @@ docker compose -f docker-compose.dev.yml logs api | grep "Email delivery failed"
 
 ---
 
+### 8. Audit Trail Growth
+
+**Definition:** The size of the audit trail — `audit_logs` row count and
+total table size.
+
+The trail is **never pruned, archived or deleted** (ADR-089): it is the
+evidence, and a retention window chosen for the sake of having one would
+be a guess that destroys records. So its size is a number somebody has to
+look at, and this is where that happens. The trail grows at roughly
+**8,000 rows a year** for one college (two rows per class meeting, plus
+roster creations and the rest), so the thresholds below are a decade
+away — which is exactly why they need writing down rather than leaving.
+
+```sql
+SELECT
+    COUNT(*) AS rows,
+    pg_size_pretty(pg_total_relation_size('audit_logs')) AS size
+FROM audit_logs;
+```
+
+| Threshold  | Status    | Action                                                                       |
+| ---------- | --------- | ---------------------------------------------------------------------------- |
+| < 500,000  | Healthy   | —                                                                            |
+| 500k–1M    | Warning   | The action filter starts to matter — confirm `ix_audit_logs_action_performed_at` exists |
+| > 1,000,000 | Critical | **Retention becomes a decision here — not before.** Re-derive the write rate against real usage and record a decision |
+
+---
+
 ## Dashboard Quick Check
 
 Run these commands for a 30-second system health check:
@@ -249,6 +277,11 @@ psql -h localhost -U postgres -d attendance_sys -t -c \
 # Active sessions?
 psql -h localhost -U postgres -d attendance_sys -t -c \
     "SELECT COUNT(*) FROM sessions WHERE expires_at > NOW();"
+
+# Audit trail size?
+psql -h localhost -U postgres -d attendance_sys -t -c \
+    "SELECT COUNT(*) || ' rows, ' || pg_size_pretty(pg_total_relation_size('audit_logs'))
+     FROM audit_logs;"
 ```
 
 ---
@@ -265,3 +298,4 @@ psql -h localhost -U postgres -d attendance_sys -t -c \
 | Email delivery  | ≥ 3 `Email delivery failed` logs / 15 min | Critical | Slack       |
 | DB connections  | > 80% pool utilization        | Warning  | Slack       |
 | API p95 latency | > 1s for > 5 min              | Warning  | Slack       |
+| Audit trail     | > 1M rows                     | Warning  | Slack       |

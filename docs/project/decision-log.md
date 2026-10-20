@@ -2491,7 +2491,8 @@
   deep links, which are presentation the server has no business knowing
   about. `audit_logs.action` still has no index, so an action-only filter
   and an action sort are sequential scans — unchanged, and still the first
-  thing to add if the table grows.
+  thing to add if the table grows. *(Added by ADR-089, which is where the
+  index and the trail's retention decision are recorded.)*
 - **Testing:** `test_audit_logs_adds_the_derived_reading`,
   `test_audit_logs_names_an_anonymous_actor`,
   `test_audit_logs_filters_by_actor_name` and
@@ -2499,3 +2500,106 @@
   `test_student_create_writes_a_row`, `test_professor_create_writes_a_row`
   and `test_component_changes_use_the_component_entity_type` cover the
   writers.
+
+### ADR-089: The Audit Trail Is Kept Whole; Retention Is a Decision, Not a Mechanism
+
+- **Decision (D89):** The audit trail is **not** pruned, archived or
+  deleted. `audit_logs` grows without bound, and that is accepted: the
+  trail is the evidence, and deleting it destroys the product's core
+  value. What is done instead is making the growing table cheap to read —
+  `audit_logs.action` gets the composite index it never had — and making
+  its growth **observed** rather than assumed, through a fifth monitoring
+  metric. Retention becomes a decision at **~1M rows**, or when a
+  compliance requirement names a window, and not before.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** ADR-088 made the trail record every roster creation as well
+  as every structural change, so it grows faster than it did. Nothing in
+  the codebase or the security model said what should happen to it
+  eventually: there is no retention job, no archive, and no pruning, and
+  no decision either way. `audit_logs.action` was also the one audited
+  column carrying no index, so an action filter — and an action sort —
+  was a sequential scan of the whole table (ADR-064 had named it as "the
+  first thing to add if the table grows").
+  The obvious response was a retention mechanism: a cron job, an archive
+  table, a read-path union, a setting, a migration, and their tests. The
+  question is whether the numbers justify any of it.
+- **Rationale:**
+  - **The write rate is the whole answer, so it was measured.** Not scans
+    — a student scanning is not audited. The dominant family is `session`
+    open/close: **two rows per class meeting**. For one college (≈50
+    active offerings, 18 weeks per term, 2.5 terms a year):
+
+    | Family                                     | Rows/year |
+    | ------------------------------------------ | --------- |
+    | `session` open/close                       | ~4,500    |
+    | `enrollment` / `unenroll`                  | ~1,500    |
+    | `face_enrollment` (once per student)       | ~300      |
+    | `excuse` decisions                         | ~200      |
+    | accounts, settings, maintenance, backups   | ~800      |
+    | **Total**                                  | **~8,000**|
+
+    Ten years is **80,000 rows ≈ 30 MB of data, ~70 MB with the index
+    set**. That is not a table that needs pruning.
+  - **The comparison that settles it.** `attendance_records` grows
+    **~67,000 rows/year** — one row per scan — which is **8× the audit
+    trail**, and the system already indexes, analyses and reports on that
+    table every day. The audit trail is not the volume problem; the table
+    it would be pruning is the one already in use.
+  - **The trail is the evidence.** Pruning it destroys the ability to
+    answer "who changed this, and can I prove it", which is the whole
+    point of the table. ADR-057's warning about not *"silently destroying
+    the attendance audit trail"* is the reason to be careful with it.
+  - **A mechanism would be complexity built against a guessed policy.**
+    The cron job, the archive table, the read-path union, the setting,
+    the migration and their tests would all be wrong the first time a
+    compliance requirement actually names a window — and they would rot
+    in the meantime, because nothing would exercise them at 8,000
+    rows/year.
+  - **The index is the proportionate response.** Measured on 200,000
+    rows spread over two years (the rate above), the admin's real query —
+    one action, a seven-day window, newest first — goes from a **parallel
+    sequential scan** (18.084 ms, 3,314 buffers read, 66,560 rows
+    discarded) to an **`Index Scan Backward`** on the composite
+    (0.103 ms, 4 buffers). Sorting by action goes from 34.254 ms to
+    16.428 ms. The composite rather than a bare `(action)` is deliberate:
+    the endpoint filters by action and orders by `performed_at DESC, id
+    DESC`, and the composite returns the rows already in order instead of
+    sorting them afterwards.
+  - **Growth is observed, not assumed.** A fifth monitoring metric reports
+    the trail's row count and size, so "we chose not to prune" is a
+    position that is checked rather than one that is forgotten.
+- **Alternatives considered:**
+  (1) *Prune rows older than N months.* Rejected: it destroys evidence,
+  and N would be a guess. A retention window chosen for the sake of
+  having one is worse than no window at all, because it looks deliberate.
+  (2) *Archive to a second table and union it on read.* Rejected: the
+  union complicates the read path that ADR-088 had just simplified, for a
+  table that is 30 MB after a decade. The complexity is not free and the
+  benefit is invisible.
+  (3) *Partition `audit_logs` by month.* Rejected: declarative
+  partitioning is Postgres-only, and the test schema is built from the
+  models with `Base.metadata.create_all` on SQLite (`conftest.py`), so
+  the model could not be declared both ways without a second definition
+  of the table.
+  (4) *Prune only the noisy families (`login_failed`, `maintenance`).*
+  Rejected: arbitrary, and it breaks the "five failures then locked"
+  story the lockout row exists to tell. `session` open/close is the
+  biggest family by far and the one least worth losing.
+  (5) *Taken:* keep the trail whole, index the filter, observe the growth,
+  and write down the trigger.
+- **Consequences:** One migration adds
+  `ix_audit_logs_action_performed_at` on `(action, performed_at)`; the
+  model declares the same index, so `alembic check` stays green. The
+  model change is forward-only — an applied revision is never edited
+  (ADR-065). `audit_logs` has no retention job, so its size is a number
+  someone has to look at: the monitoring metric is where that happens,
+  and the trigger is written down here rather than left in a comment. No
+  audit row is deleted, archived or pruned by any of this.
+- **Testing:** The index is a schema change, so it is verified by
+  `alembic check` and by `EXPLAIN ANALYZE` on a 200,000-row table rather
+  than by a unit test — a query plan is not a behaviour. The change-list
+  resolution that came with it is covered by
+  `test_audit_logs_resolves_ids_inside_the_change_list`,
+  `test_audit_logs_keeps_a_student_number_as_a_number` and
+  `test_audit_logs_falls_back_to_an_id_for_a_deleted_row`.
