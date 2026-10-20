@@ -177,6 +177,69 @@ async def _excuse_row(test_db_session: AsyncSession, excuse_id: int) -> ExcuseRe
     return row
 
 
+# -- the display identity -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_read_row_names_the_student_and_the_class(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """The read model carries names, not ids.
+
+    The queues used to render `Student #<id>` and `Session #<id>`, because
+    the read model carried no display identity at all. The slice resolves it
+    now, the same rule the audit trail follows (ADR-088).
+    """
+    graph = await _seed(factories)
+    excuse_id = await _student_request(test_db_session, graph)
+    excuse = await _excuse_row(test_db_session, excuse_id)
+
+    service = _service(test_db_session)
+    await service._resolve_names([excuse])
+    read = service._to_read(excuse)
+
+    assert read.student_number == graph["student"].student_id
+    assert read.student_name == "Test Student0"
+    assert "Student #" not in read.student_name
+    assert read.session_code == graph["session"].session_code
+    assert read.course_code
+    assert read.course_name
+    # Nobody has reviewed it yet.
+    assert read.reviewed_by_name is None
+
+
+@pytest.mark.asyncio
+async def test_a_reviewed_row_names_its_reviewer(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """The reviewer's name comes from their roster row, not their id."""
+    graph = await _seed(factories)
+    excuse_id = await _student_request(test_db_session, graph)
+    excuse = await _excuse_row(test_db_session, excuse_id)
+
+    service = _service(test_db_session)
+    await service._resolve_names([excuse])
+    read = service._to_read(excuse)
+
+    assert read.reviewed_by_name is None
+
+    await _service(test_db_session).review_excuse(
+        user_id=graph["professor_user"].id,
+        request_id=excuse_id,
+        payload=ExcuseReviewRequest(status=APPROVED),
+    )
+    excuse = await _excuse_row(test_db_session, excuse_id)
+
+    service = _service(test_db_session)
+    await service._resolve_names([excuse])
+    read = service._to_read(excuse)
+
+    assert read.reviewed_by_name
+    assert read.reviewed_by_name != f"User #{graph['professor_user'].id}"
+    # The raw id stays: the per-record paths key on it.
+    assert read.reviewed_by == graph["professor_user"].id
+
+
 def _stamp(record: Any) -> dict[str, Any]:
     """The excuse columns on the attendance row, for before/after comparison."""
     return {

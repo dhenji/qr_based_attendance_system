@@ -812,6 +812,14 @@ List pending excuse requests.
 | **Query**        | `?status=pending                                | approved | rejected&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
 
+> `ExcuseRequest` carries its display identity, resolved by the slice
+> (ADR-088's rule, applied in ADR-090): `student_name`, `student_number`, `student_section`,
+> `session_code`, `session_date`, `course_code`, `course_name` and
+> `reviewed_by_name`. The ids beside them (`student_id`, `session_id`,
+> `reviewed_by`) stay — the per-record paths key on them — and a reference
+> that cannot be resolved reads as a labelled id (`"Student #4"`), never a
+> blank.
+
 ---
 
 ### Attendance Overview
@@ -1207,6 +1215,9 @@ List pending excuse requests for professor's courses.
 | ---------------- | ----------------------------------------------- |
 | **Query**        | `?status=pending                                | approved | rejected&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
+
+> The same `ExcuseRequest` shape as the admin view, with the same resolved
+> display identity (ADR-090).
 
 #### `POST /professor/excuse-requests/{rid}/review`
 

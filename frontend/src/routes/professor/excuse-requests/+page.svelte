@@ -532,6 +532,9 @@
 								<td>
 									<span class="status status-{row.status}">{row.status}</span>
 									<div class="status-sub">was {originalLabel(row.originalStatus)}</div>
+									{#if row.reviewedByName}
+										<div class="status-sub">by {row.reviewedByName}</div>
+									{/if}
 								</td>
 								<td>
 									<button
@@ -640,6 +643,17 @@
 					<dt>Status</dt>
 					<dd><span class="status status-{selected.status}">{selected.status}</span></dd>
 				</div>
+				{#if selected.reviewedByName}
+					<div>
+						<dt>Reviewed by</dt>
+						<dd>
+							{selected.reviewedByName}
+							{#if selected.reviewedAt}
+								· {formatDate(selected.reviewedAt)}
+							{/if}
+						</dd>
+					</div>
+				{/if}
 				{#if selected.reviewNotes}
 					<div>
 						<dt>Review notes</dt>

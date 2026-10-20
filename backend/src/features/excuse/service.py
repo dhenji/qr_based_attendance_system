@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
@@ -70,6 +71,25 @@ def _full_name(
     return " ".join(part for part in (first_name, middle_name, last_name) if part)
 
 
+@dataclass
+class _Account:
+    """A `users` row with the name its roster carries, if any.
+
+    The `users` table has no name columns — a person's name lives on their
+    student or professor row — so the name is outer-joined in, exactly as
+    `features/admin/service.py::_users_stmt` does it.
+    """
+
+    id: int
+    email: str
+    first_name: str | None = None
+    last_name: str | None = None
+
+    @property
+    def name(self) -> str:
+        return _full_name(self.first_name, None, self.last_name) or self.email
+
+
 def _session_date(session: Session) -> str:
     """The session's calendar day, as it reads in a notification.
 
@@ -101,6 +121,14 @@ class ExcuseService:
         self._session = session
         self._excuses: BaseCRUD[ExcuseRequest] = BaseCRUD(ExcuseRequest, session)
         self._attendance: BaseCRUD[Attendance] = BaseCRUD(Attendance, session)
+        # The display identity of the records a page of excuses refers to.
+        # Resolved once per request, batched per kind — the same shape the
+        # audit trail's resolver uses (ADR-088).
+        self._students_by_id: dict[int, Student] = {}
+        self._sessions_by_id: dict[int, Session] = {}
+        self._offerings_by_id: dict[int, CourseOffering] = {}
+        self._courses_by_id: dict[int, Course] = {}
+        self._accounts_by_id: dict[int, _Account] = {}
 
     async def quick_excuse(
         self,
@@ -391,7 +419,8 @@ class ExcuseService:
         await self._session.refresh(excuse)
         await self._notify_reviewed(excuse=excuse, session=session)
 
-        return ExcuseRequestRead.model_validate(excuse)
+        await self._resolve_names([excuse])
+        return self._to_read(excuse)
 
     async def edit_excuse(
         self,
@@ -444,7 +473,8 @@ class ExcuseService:
 
         await self._session.refresh(excuse)
 
-        return ExcuseRequestRead.model_validate(excuse)
+        await self._resolve_names([excuse])
+        return self._to_read(excuse)
 
     async def revoke_excuse(
         self, *, user_id: int, student_id: int, session_id: int
@@ -588,7 +618,8 @@ class ExcuseService:
         if excuse.student_id != student.id:
             raise ExcuseNotFoundException(request_id)
 
-        return ExcuseRequestRead.model_validate(excuse)
+        await self._resolve_names([excuse])
+        return self._to_read(excuse)
 
     # -- notifications (excuse-workflow.md §8) ---------------------------
 
@@ -751,6 +782,162 @@ class ExcuseService:
 
     # -- internals --------------------------------------------------------
 
+    async def _resolve_names(self, excuses: Sequence[ExcuseRequest]) -> None:
+        """Resolve the display identity of a page of excuses.
+
+        ONE query per kind for the whole page, not one per row: the student
+        names, the session codes, the courses behind them, and the accounts
+        that reviewed them. A reference that cannot be resolved is simply
+        absent from the maps, and the caller renders it in a labelled id
+        form rather than a blank.
+        """
+        wanted_students = {
+            excuse.student_id for excuse in excuses
+        } - self._students_by_id.keys()
+        wanted_sessions = {
+            excuse.session_id for excuse in excuses
+        } - self._sessions_by_id.keys()
+        wanted_reviewers = {
+            excuse.reviewed_by for excuse in excuses if excuse.reviewed_by is not None
+        } - self._accounts_by_id.keys()
+
+        if wanted_students:
+            self._students_by_id.update(
+                {
+                    student.id: student
+                    for student in (
+                        await self._session.scalars(
+                            select(Student).where(Student.id.in_(wanted_students))
+                        )
+                    ).all()
+                }
+            )
+
+        if wanted_sessions:
+            self._sessions_by_id.update(
+                {
+                    session.id: session
+                    for session in (
+                        await self._session.scalars(
+                            select(Session).where(Session.id.in_(wanted_sessions))
+                        )
+                    ).all()
+                }
+            )
+            # The course behind a session lives on its offering, so the
+            # offerings and their courses are resolved next.
+            offering_ids = {
+                session.offering_id for session in self._sessions_by_id.values()
+            }
+            if offering_ids:
+                self._offerings_by_id.update(
+                    {
+                        offering.id: offering
+                        for offering in (
+                            await self._session.scalars(
+                                select(CourseOffering).where(
+                                    CourseOffering.id.in_(offering_ids)
+                                )
+                            )
+                        ).all()
+                    }
+                )
+            course_ids = {
+                offering.course_id for offering in self._offerings_by_id.values()
+            }
+            if course_ids:
+                self._courses_by_id.update(
+                    {
+                        course.id: course
+                        for course in (
+                            await self._session.scalars(
+                                select(Course).where(Course.id.in_(course_ids))
+                            )
+                        ).all()
+                    }
+                )
+
+        if wanted_reviewers:
+            # The reviewer's name is on their student or professor row, so
+            # the accounts are outer-joined the way
+            # `features/admin/service.py::_users_stmt` does it.
+            rows = (
+                await self._session.execute(
+                    select(
+                        User,
+                        Student.first_name,
+                        Student.last_name,
+                        Professor.first_name,
+                        Professor.last_name,
+                    )
+                    .outerjoin(Student, Student.user_id == User.id)
+                    .outerjoin(Professor, Professor.user_id == User.id)
+                    .where(User.id.in_(wanted_reviewers))
+                )
+            ).all()
+            self._accounts_by_id.update(
+                {
+                    row[0].id: _Account(
+                        id=row[0].id,
+                        email=row[0].email,
+                        first_name=row[1] or row[3],
+                        last_name=row[2] or row[4],
+                    )
+                    for row in rows
+                }
+            )
+
+    def _to_read(self, excuse: ExcuseRequest) -> ExcuseRequestRead:
+        """One excuse row, with its display identity resolved.
+
+        The caller resolves first — `_resolve_names` is the batched pass, and
+        running it per row would turn one query per kind into one per row.
+        """
+        read = ExcuseRequestRead.model_validate(excuse)
+
+        student = self._students_by_id.get(excuse.student_id)
+        if student is not None:
+            read.student_name = _full_name(
+                student.first_name, student.middle_name, student.last_name
+            )
+            read.student_number = student.student_id
+            read.student_section = student.section or ""
+        else:
+            read.student_name = f"Student #{excuse.student_id}"
+            read.student_number = f"#{excuse.student_id}"
+
+        session = self._sessions_by_id.get(excuse.session_id)
+        if session is not None:
+            read.session_code = session.session_code
+            # The class's date, as the queues date their filters. The session
+            # row's `created_at` is the column the session queries filter on
+            # (`scheduled_start_time` is a different thing).
+            read.session_date = session.created_at.isoformat()
+        if not read.session_date:
+            read.session_date = excuse.requested_at.isoformat()
+
+        course = self._course_for_session(session)
+        if course is not None:
+            read.course_code = course.course_code
+            read.course_name = course.course_name
+
+        if excuse.reviewed_by is not None:
+            account = self._accounts_by_id.get(excuse.reviewed_by)
+            read.reviewed_by_name = (
+                account.name if account is not None else f"User #{excuse.reviewed_by}"
+            )
+
+        return read
+
+    def _course_for_session(self, session: Session | None) -> Course | None:
+        """The course behind a session, through its offering."""
+        if session is None:
+            return None
+        offering = self._offerings_by_id.get(session.offering_id)
+        if offering is None:
+            return None
+        return self._courses_by_id.get(offering.course_id)
+
     async def _paginate(
         self, stmt, *, page: int, size: int
     ) -> PaginatedResponse[ExcuseRequestRead]:
@@ -770,8 +957,10 @@ class ExcuseService:
             )
         ).all()
 
+        await self._resolve_names(rows)
+
         return PaginatedResponse[ExcuseRequestRead](
-            items=[ExcuseRequestRead.model_validate(row) for row in rows],
+            items=[self._to_read(row) for row in rows],
             total=total,
             page=page,
             size=size,

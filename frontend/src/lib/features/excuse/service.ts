@@ -11,11 +11,12 @@
 // flow: the quick modal collects files and sends attachment_urls (presence
 // selects prof_with_evidence server-side); reason-only stays Path A.
 //
-// The list row is deliberately bare (ids only): session/course labels join
-// client-side from the session + courses directory, the same convention as
-// the professor attendance ledger. Two fields have no professor-visible
-// source at all and read as fallbacks in real mode: student identity
-// (`Student #<id>`) and originalStatus (`unknown`).
+// The list row carries its display identity from the server: the student by
+// name and number, the class by its course and session code, and the reviewer
+// once it has been decided (ADR-088). The client used to join a session and a
+// courses directory to recover half of that, and could not recover the other
+// half at all — the student and the reviewer have no client-side source — so
+// the queues rendered "Student #<id>" where a name belongs.
 //
 // Contract refs (docs/architecture/api-contracts.md):
 // - GET /professor/excuse-requests?status=&page=&size=
@@ -37,11 +38,6 @@ import type {
 	ExcuseReviewBody,
 	Paginated,
 } from '$lib/api/endpoints';
-import { listSessions } from '$lib/features/session/service';
-import {
-	initProfessorCourses,
-	professorState,
-} from '$lib/features/professor/store.svelte';
 import type {
 	ExcuseInitiatedVia,
 	ExcuseOriginalStatus,
@@ -93,61 +89,6 @@ let store: ExcuseRequest[] = EXCUSE_REQUESTS.map((row) => ({
 
 let nextId = Math.max(...store.map((row) => row.id)) + 1;
 
-// --- Real-mode joins ------------------------------------------------------
-// The excuse list row carries no display identity, so session/course labels
-// join client-side (attendance-ledger convention). Warmed once per page load;
-// rows whose session falls outside the directory render em dashes.
-
-type SessionDirectory = Map<
-	number,
-	{ offeringId: number; sessionCode: string; createdAt: string }
->;
-
-let directoryReady = false;
-let sessionDirectory: SessionDirectory = new Map();
-
-const ensureDirectory = async (): Promise<void> => {
-	if (directoryReady) return;
-	directoryReady = true;
-	if (professorState.courses.length === 0 && !professorState.coursesError) {
-		await initProfessorCourses();
-	}
-	try {
-		const { items } = await listSessions({ size: 100 });
-		sessionDirectory = new Map(
-			items.map((session) => [
-				session.id,
-				{
-					offeringId: session.offeringId,
-					sessionCode: session.sessionCode,
-					createdAt: session.createdAt,
-				},
-			])
-		);
-	} catch {
-		// Fail permissive: reset the latch so the next call re-warms. Without
-		// this, one transient 5xx during page-open left every row's
-		// course/session columns dead until a full reload (attendance
-		// service has the same shape via invalidateAttendanceDirectory).
-		sessionDirectory = new Map();
-		directoryReady = false;
-	}
-};
-
-// invalidateExcuseDirectory
-// Clears the warm cache and re-arms the latch (logout hygiene, doLogout).
-export const invalidateExcuseDirectory = (): void => {
-	directoryReady = false;
-	sessionDirectory = new Map();
-};
-
-const courseIdentityFor = (offeringId: number): { code: string; name: string } => {
-	const course = professorState.courses.find((item) => item.offeringId === offeringId) ?? null;
-	return {
-		code: course?.courseCode ?? `Offering ${offeringId}`,
-		name: course?.courseName ?? '',
-	};
-};
 
 const initiatedViaFor = (value: string): ExcuseInitiatedVia =>
 	value === 'quick' || value === 'prof_with_evidence' || value === 'request'
@@ -157,29 +98,31 @@ const initiatedViaFor = (value: string): ExcuseInitiatedVia =>
 const statusFor = (value: string): ExcuseStatus =>
 	value === 'pending' || value === 'approved' || value === 'rejected' ? value : 'pending';
 
-// Map one bare backend row to the queue view-model. Student identity and the
-// pre-excuse status have no professor-visible source, so they read as honest
-// fallbacks rather than joined guesses.
+// Map one backend row to the queue view-model.
+//
+// The display identity comes from the server: the student's name, number and
+// section, the session's code and date, the course behind it, and — once the
+// request has been decided — who decided it. The pre-excuse status is the
+// one field with no source on the row, so it still reads as "unknown".
 const mapReadRow = (read: ExcuseRequestReadResponse): ExcuseRequest => {
-	const session = sessionDirectory.get(read.session_id);
-	const identity = session ? courseIdentityFor(session.offeringId) : null;
 	return {
 		id: read.id,
 		studentId: read.student_id,
-		studentNumber: `#${read.student_id}`,
-		studentName: `Student #${read.student_id}`,
-		section: '—',
-		courseCode: identity?.code ?? '—',
-		courseName: identity?.name ?? '',
+		studentNumber: read.student_number || `#${read.student_id}`,
+		studentName: read.student_name || `Student #${read.student_id}`,
+		section: read.student_section || '—',
+		courseCode: read.course_code || '—',
+		courseName: read.course_name,
 		sessionId: read.session_id,
-		sessionCode: session?.sessionCode ?? '—',
-		sessionDate: session?.createdAt ?? read.requested_at,
+		sessionCode: read.session_code || '—',
+		sessionDate: read.session_date || read.requested_at,
 		initiatedVia: initiatedViaFor(read.initiated_via),
 		reason: read.reason,
 		status: statusFor(read.status),
 		originalStatus: 'unknown',
 		requestedAt: read.requested_at,
 		reviewedAt: read.reviewed_at ?? undefined,
+		reviewedByName: read.reviewed_by_name ?? undefined,
 		reviewNotes: read.review_notes ?? undefined,
 		attachmentNames: [...(read.attachment_urls ?? [])],
 	};
@@ -261,8 +204,6 @@ export const listExcuseRequests = async (filters: ExcuseFilters = {}): Promise<E
 		};
 	}
 
-	await ensureDirectory();
-
 	const query: Record<string, string> = {
 		page: String(filters.page ?? 1),
 		size: String(Math.min(Math.max(filters.size ?? 10, 1), 100)),
@@ -317,8 +258,6 @@ export const reviewExcuseRequest = async (
 		store[index] = updated;
 		return updated;
 	}
-
-	await ensureDirectory();
 
 	const body: ExcuseReviewBody = { status: input.status };
 	if (notes.length > 0) body.review_notes = notes;
@@ -489,7 +428,6 @@ export const editExcuse = async (
 	}
 
 	requireIds(row);
-	await ensureDirectory();
 	const body: ExcuseEditBody = {};
 	if (reason.length > 0) body.reason = reason;
 	if (notes.length > 0) body.review_notes = notes;

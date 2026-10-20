@@ -89,21 +89,39 @@
 				<thead>
 					<tr>
 						<th>Student</th>
-						<th>Session</th>
+						<th>Class</th>
 						<th>Reason</th>
 						<th>Requested</th>
+						<th>Reviewed</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each items as row (row.id)}
 						<tr>
 							<td>
-								<span class="strong">Student #{row.student_id}</span>
-								<div class="muted small">{humanizeInitiatedVia(row.initiated_via)} · {row.status}</div>
+								<span class="strong">{row.student_name}</span>
+								<div class="muted small">
+									{row.student_number}
+									{row.student_section ? ` · Section ${row.student_section}` : ''}
+									· {humanizeInitiatedVia(row.initiated_via)} · {row.status}
+								</div>
 							</td>
-							<td>Session #{row.session_id}</td>
+							<td>
+								<div class="strong">{row.course_code} · {row.course_name}</div>
+								<div class="muted small">Session {row.session_code}</div>
+							</td>
 							<td class="reason">{row.reason}</td>
 							<td>{formatLocalDateTime(row.requested_at)}</td>
+							<td>
+								{#if row.reviewed_by_name}
+									<div class="strong">{row.reviewed_by_name}</div>
+									<div class="muted small">
+										{row.reviewed_at ? formatLocalDateTime(row.reviewed_at) : ''}
+									</div>
+								{:else}
+									<span class="muted">—</span>
+								{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>

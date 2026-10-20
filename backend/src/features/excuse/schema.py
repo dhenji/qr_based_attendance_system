@@ -143,6 +143,16 @@ class BulkExcuseRequest(BaseModel):
 
 
 class ExcuseRequestRead(BaseModel):
+    """One excuse request, as the queues show it.
+
+    The ids stay: `student_id` and `session_id` key the per-record routes,
+    and `reviewed_by` is the raw account reference. The DISPLAY fields
+    beside them are the slice's own resolution of those ids — the same rule
+    the audit trail follows (ADR-088) and the same one
+    `LivenessReviewItem` already follows. A reference that cannot be
+    resolved falls back to a labelled id ("Student #4"), never a blank.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -157,6 +167,16 @@ class ExcuseRequestRead(BaseModel):
     reviewed_by: int | None = None
     reviewed_at: datetime | None = None
     review_notes: str | None = None
+
+    # The display identity, resolved by the service.
+    student_name: str = ""
+    student_number: str = ""
+    student_section: str = ""
+    session_code: str = ""
+    session_date: str = ""
+    course_code: str = ""
+    course_name: str = ""
+    reviewed_by_name: str | None = None
 
 
 class ExcuseActionResponse(BaseModel):
