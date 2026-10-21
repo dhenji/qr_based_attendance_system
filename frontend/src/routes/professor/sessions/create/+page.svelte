@@ -8,8 +8,13 @@
 		initProfessorCourses,
 		professorState
 	} from '$lib/features/professor/store.svelte';
-	import type { ProfessorCourseSummary } from '$lib/shared/types';
-	import { openSession, SESSION_CODE_SAMPLE } from '$lib/features/session/service';
+	import type { CourseType, ProfessorCourseSummary } from '$lib/shared/types';
+	import {
+		getSessionPlan,
+		openSession,
+		SESSION_CODE_SAMPLE
+	} from '$lib/features/session/service';
+	import type { SessionPlanResponse } from '$lib/shared/types';
 	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
 
@@ -43,67 +48,122 @@ let selectedOfferingId = $state<number | null>(null);
 		return professorState.courses.find((course) => course.offeringId === wanted) ?? null;
 	});
 
-	// Reseed the per-offering form fields whenever the resolved course changes,
-	// so switching in the selector variant never leaves another course's numbers
-	// behind.
+	// D93: the session inherits the offering's configuration — the meeting it
+	// belongs to, the next occurrence of that meeting, the attendance windows,
+	// the classroom and the geofence radius. The plan comes from the server
+	// (GET /professor/offerings/{id}/session-plan) so the form renders what
+	// will actually be stored instead of re-deriving the schedule here.
+	let plan = $state<SessionPlanResponse | null>(null);
+	let planLoading = $state(false);
+	let planError = $state<string | null>(null);
+
+	// Reseed the per-offering form fields whenever the resolved course or the
+	// session type changes, so switching in the selector variant never leaves
+	// another course's numbers behind.
 	//
-	// The assignment contract carries no schedule, classroom, or window
-	// defaults, so the form seeds sane constants instead of offering prefill:
-	// 90-minute duration with 15/5 present/late windows on a 50m geofence.
-	// Anything left at these values is sent explicitly, and the server applies
-	// the offering/app fallbacks for fields the form does not cover
-	// (classroom name/coords when no override is typed).
+	// Everything the plan carries is a *default*: the professor can still
+	// change the duration, the windows and the radius, and the form sends
+	// what they end up with. The classroom and the scheduled time are only
+	// sent when the professor explicitly overrides them, so the offering's
+	// own configuration is what lands in the row.
 	//
 	// Geofence is mandatory for every session type (lecture and lab): the
-	// professor always types classroom coordinates, which are sent as the
-	// session location. The server still falls back to the offering for the
-	// classroom *name* when no override name is typed (D17).
+	// coordinates come from the offering's plan, and the professor only types
+	// them when the offering has none.
 	let isLab = $state(false);
 	let radius = $state(50);
 	let durationMinutes = $state(90);
 	let presentWindow = $state(15);
 	let lateWindow = $state(5);
-	let classroomOverride = $state('');
+	// The plan's own values, kept as the inherited baseline (D93). A field is
+	// sent only when the professor changed it, so the server's inheritance is
+	// authoritative at open time — an administrator who retunes the offering
+	// between the page load and the open still wins, and a plan that failed
+	// to load can never smuggle a stale value into the session.
+	let inherited = $state<{
+		duration: number;
+		present: number;
+		late: number;
+		radius: number;
+	} | null>(null);
 	// D17: an override moves the geofence, so it needs coordinates as well as a
-	// name — the contract exposes no course coordinates to inherit, so both
-	// are required when the override is active. Svelte's number binding yields
-	// undefined for an empty input, which is why the validity check below uses
-	// a loose null comparison.
+	// name — both are required when the override is active and the plan has
+	// none. Svelte's number binding yields undefined for an empty input,
+	// which is why the validity check below uses a loose null comparison.
+	let classroomOverride = $state('');
 	let classroomLat = $state<number | null>(null);
 	let classroomLng = $state<number | null>(null);
+	// D17/D93: the explicit "use a different room" toggle. Off means the
+	// offering's classroom applies and nothing is sent for it.
+	let locationOverride = $state(false);
 
-	let lastSeededOfferingId = $state<number | null>(null);
+	// D93: the schedule exception — a class that starts earlier or later than
+	// planned, or one that has been moved to another day.
+	let scheduleOverride = $state(false);
+	let overrideDate = $state('');
+	let overrideStart = $state('');
+
+	let lastPlanKey = $state<string | null>(null);
+
+	const sessionType = $derived<CourseType>(isLab ? 'lab' : 'lecture');
+
+	const loadPlan = async (offeringId: number, type: CourseType) => {
+		planLoading = true;
+		planError = null;
+		try {
+			const loaded = await getSessionPlan(offeringId, type);
+			plan = loaded;
+			inherited = {
+				duration: loaded.duration_minutes,
+				present: loaded.present_window_minutes,
+				late: loaded.late_window_minutes,
+				radius: loaded.radius_meters
+			};
+			durationMinutes = loaded.duration_minutes;
+			presentWindow = loaded.present_window_minutes;
+			lateWindow = loaded.late_window_minutes;
+			radius = loaded.radius_meters;
+			if (!locationOverride) {
+				classroomOverride = loaded.classroom_name ?? '';
+				classroomLat = loaded.classroom_lat;
+				classroomLng = loaded.classroom_lng;
+			}
+			if (!scheduleOverride) {
+				overrideDate = loaded.session_date ?? '';
+				overrideStart = (loaded.start_time ?? '').slice(0, 5);
+			}
+		} catch (e: unknown) {
+			plan = null;
+			// No baseline: nothing is sent for the inherited fields, so the
+			// server resolves them from the offering.
+			inherited = null;
+			planError = e instanceof Error ? e.message : 'Could not load the session plan';
+		} finally {
+			planLoading = false;
+		}
+	};
 
 	$effect(() => {
 		const course = selected;
-		if (course === null || course.offeringId === lastSeededOfferingId) return;
+		if (course === null) return;
 
-		lastSeededOfferingId = course.offeringId;
-		radius = 50;
-		durationMinutes = 90;
-		presentWindow = 15;
-		lateWindow = 5;
-		classroomOverride = '';
-		classroomLat = null;
-		classroomLng = null;
-		isLab = false;
-		// A generated session belongs to the previous offering. Clear it so View
-		// Live Session cannot open stale projector data after switching courses.
-		generatedSessionId = null;
-		generatedCode = null;
-		generatedExpiry = null;
-		error = null;
+		const key = `${course.offeringId}:${sessionType}`;
+		if (key === lastPlanKey) return;
+
+		lastPlanKey = key;
+		void loadPlan(course.offeringId, sessionType);
 	});
 
-	// D17: a blank override name means "keep the offering defaults", and nothing
-	// is sent for the classroom.
-	const overrideActive = $derived(classroomOverride.trim() !== '');
+	// D17: an override replaces the offering's classroom for this session
+	// only. The toggle is explicit, so the offering's own classroom keeps
+	// applying until the professor says otherwise.
+	const overrideActive = $derived(locationOverride);
 
 	// What the geofence will actually use, which is what the callout displays.
-	// Without an override the server falls back to the offering classroom,
-	// whose name the contract does not expose — hence the generic label.
 	const effectiveRoom = $derived(
-		overrideActive ? classroomOverride.trim() : 'Offering default classroom'
+		overrideActive && classroomOverride.trim() !== ''
+			? classroomOverride.trim()
+			: (plan?.classroom_name ?? 'Offering default classroom')
 	);
 
 	const effectiveLat = $derived(classroomLat);
@@ -123,12 +183,51 @@ let selectedOfferingId = $state<number | null>(null);
 	const durationInvalid = $derived(durationMinutes <= 0);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
-	// The server sets scheduled_end = now + duration (no class timetable feeds
-	// it), so the scan window always closes exactly at now + duration. The
-	// preview below is exact, not an estimate.
+	// The scheduled window the session will carry: the plan's next
+	// occurrence, or the exception the professor asked for.
+	const scheduledDate = $derived(
+		scheduleOverride ? overrideDate : (plan?.session_date ?? '')
+	);
+	const scheduledStartTime = $derived(
+		scheduleOverride ? overrideStart : (plan?.start_time ?? '').slice(0, 5)
+	);
+	const scheduledEndTime = $derived((plan?.end_time ?? '').slice(0, 5));
+
+	const overrideDateValid = $derived(
+		!scheduleOverride || /^\d{4}-\d{2}-\d{2}$/.test(overrideDate)
+	);
+
+	// Which of the inherited fields the professor has moved off the plan
+	// (D93). The page shows the source of each value, so a session that
+	// departs from the offering says so.
+	const durationOverridden = $derived(
+		inherited !== null && durationMinutes !== inherited.duration
+	);
+	const presentOverridden = $derived(
+		inherited !== null && presentWindow !== inherited.present
+	);
+	const lateOverridden = $derived(inherited !== null && lateWindow !== inherited.late);
+	const radiusOverridden = $derived(inherited !== null && radius !== inherited.radius);
+	const overrideTimeValid = $derived(
+		!scheduleOverride || /^([01]\d|2[0-3]):([0-5]\d)$/.test(overrideStart)
+	);
+
+	// D12/D49: the scan window ends at `created_at + duration`, capped by the
+	// class end while the class is still ahead. The preview mirrors the
+	// server's rule so the form and the projector agree.
 	const expiryPreview = $derived.by(() => {
 		if (durationInvalid) return null;
-		return { at: new Date(Date.now() + durationMinutes * 60 * 1000) };
+		const fromNow = new Date(Date.now() + durationMinutes * 60 * 1000);
+		if (scheduleOverride) return { at: fromNow };
+		const classEnd = plan?.scheduled_end ? new Date(plan.scheduled_end) : null;
+		if (
+			classEnd !== null &&
+			classEnd.getTime() > Date.now() &&
+			classEnd.getTime() < fromNow.getTime()
+		) {
+			return { at: classEnd };
+		}
+		return { at: fromNow };
 	});
 
 	const RADII = [10, 20, 30, 50, 100] as const;
@@ -137,6 +236,8 @@ let selectedOfferingId = $state<number | null>(null);
 	let generatedSessionId = $state<number | null>(null);
 	let generatedCode = $state<string | null>(null);
 	let generatedExpiry = $state<string | null>(null);
+	let generatedScheduled = $state<string | null>(null);
+	let generatedOverridden = $state(false);
 	let error = $state<string | null>(null);
 
 	const canSubmit = $derived(
@@ -146,6 +247,13 @@ let selectedOfferingId = $state<number | null>(null);
 			!durationInvalid &&
 			!windowsInvalid &&
 			!coordsInvalid &&
+			overrideDateValid &&
+			overrideTimeValid &&
+			// A plan that failed to load leaves the inherited fields
+			// unresolved; opening now would send a guess, so the page asks
+			// for a retry instead.
+			planError === null &&
+			!planLoading &&
 			!submitting
 	);
 
@@ -157,26 +265,48 @@ let selectedOfferingId = $state<number | null>(null);
 		error = null;
 
 		try {
+			// Only what the professor actually changed is sent (D93). An
+			// untouched field stays absent, so the server resolves it from the
+			// offering's plan rather than from a copy the page happened to
+			// load.
+			const changed = inherited === null
+				? {}
+				: {
+						...(durationMinutes !== inherited.duration ? { durationMinutes } : {}),
+						...(presentWindow !== inherited.present
+							? { presentWindowMinutes: presentWindow }
+							: {}),
+						...(lateWindow !== inherited.late ? { lateWindowMinutes: lateWindow } : {}),
+						...(radius !== inherited.radius ? { geofenceRadius: radius } : {})
+				};
+
 			const created = await openSession(course.offeringId, {
 				sessionType: isLab ? 'lab' : 'lecture',
-				durationMinutes,
-				presentWindowMinutes: presentWindow,
-				lateWindowMinutes: lateWindow,
-				geofenceRadius: radius,
-				// D17: blank means "keep the offering default", so only send the
-				// override when the professor actually typed one.
-				// Coordinates are always sent: every session carries a geofence,
-// lecture and lab alike (canSubmit already blocks until both are
-// typed, so the ?? fallbacks below are type-level only).
-				classroomName: classroomOverride.trim() || undefined,
-				classroomLat: classroomLat ?? undefined,
-				classroomLng: classroomLng ?? undefined
+				...changed,
+				// D17: the classroom is only sent when the professor
+				// overrode it — the offering's own classroom is what the
+				// server resolves otherwise.
+				...(overrideActive
+					? {
+							classroomName: classroomOverride.trim() || undefined,
+							classroomLat: classroomLat ?? undefined,
+							classroomLng: classroomLng ?? undefined
+						}
+					: {}),
+				// D93: the schedule exception, in the institution's wall
+				// clock. Both fields travel together so the override is
+				// unambiguous.
+				...(scheduleOverride
+					? { sessionDate: overrideDate, startTime: overrideStart }
+					: {})
 			});
 
 			generatedSessionId = created.id;
 			generatedCode = created.qrPayload.code;
 			generatedExpiry =
 				created.expiresAt === null ? null : dateTimeText(new Date(created.expiresAt));
+			generatedScheduled = `${created.scheduledStartTime} → ${created.scheduledEndTime}`;
+			generatedOverridden = created.scheduleOverridden;
 			invalidateAttendanceDirectory();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to open session';
@@ -188,6 +318,13 @@ let selectedOfferingId = $state<number | null>(null);
 	const viewLiveSession = () => {
 		if (generatedSessionId === null) return;
 		void goto(professorActiveSession(generatedSessionId));
+	};
+
+	const retryPlan = () => {
+		const course = selected;
+		if (course === null) return;
+		lastPlanKey = null;
+		void loadPlan(course.offeringId, sessionType);
 	};
 
 	const clockText = (date: Date) =>
@@ -296,8 +433,84 @@ let selectedOfferingId = $state<number | null>(null);
 			<AppIcon name="alert" size={16} />
 			<span>
 				<strong>Geofence required:</strong> Students must be within the geofence radius to scan attendance.
-				Classroom coordinates are required for every session.
+				Classroom coordinates come from the offering; type them only if the room changed.
 			</span>
+		</div>
+
+		<div class="field">
+			<span class="form-label">Scheduled Time</span>
+			{#if planError}
+				<p class="field-error">{planError}</p>
+				<p class="hint">
+					The offering's schedule, classroom and attendance windows could not be
+					read, so the session would not know what to inherit. Retry before opening.
+				</p>
+				<button class="btn btn-secondary" type="button" onclick={retryPlan}>
+					<AppIcon name="alert" size={16} />
+					Retry
+				</button>
+			{:else if planLoading && plan === null}
+				<p class="hint">Loading the offering's schedule…</p>
+			{:else if plan !== null && plan.source !== 'none' && plan.source !== 'course_default'}
+				<div class="schedule">
+					<AppIcon name="calendar" size={16} />
+					<span>
+						{scheduledDate || 'Next meeting'}
+						{scheduledStartTime}–{scheduledEndTime}
+						{#if plan.timezone && plan.timezone !== 'UTC'}
+							<span class="muted">({plan.timezone})</span>
+						{/if}
+					</span>
+					{#if scheduleOverride}
+						<span class="location-tag">Override</span>
+					{/if}
+				</div>
+				<div class="field">
+					<label class="override-toggle">
+						<input
+							type="checkbox"
+							checked={scheduleOverride}
+							onchange={(e) => (scheduleOverride = e.currentTarget.checked)}
+						/>
+						Start at a different time
+					</label>
+				</div>
+				{#if scheduleOverride}
+					<div class="override-box">
+						<div class="field-row">
+							<div class="field">
+								<label class="form-label" for="override-date">Date</label>
+								<input
+									id="override-date"
+									class="form-input"
+									class:invalid={!overrideDateValid}
+									type="date"
+									bind:value={overrideDate}
+								/>
+							</div>
+							<div class="field">
+								<label class="form-label" for="override-start">Start time</label>
+								<input
+									id="override-start"
+									class="form-input"
+									class:invalid={!overrideTimeValid}
+									type="time"
+									bind:value={overrideStart}
+								/>
+							</div>
+						</div>
+						<p class="hint">
+							The session keeps the meeting's length and applies to this session only — the
+							offering's weekly schedule is not changed.
+						</p>
+					</div>
+				{/if}
+			{:else}
+				<div class="schedule">
+					<AppIcon name="calendar" size={16} />
+					<span>No configured meeting for this offering — the session will start now.</span>
+				</div>
+			{/if}
 		</div>
 
 		<div class="location" class:overridden={overrideActive}>
@@ -330,7 +543,15 @@ let selectedOfferingId = $state<number | null>(null);
 					</button>
 				{/each}
 			</div>
-			<p class="hint">Students must be within this distance from the classroom to scan.</p>
+			<p class="hint">
+				Students must be within this distance from the classroom to scan.
+				{#if inherited !== null}
+					{inherited.radius} m from the offering
+					{#if radiusOverridden}
+						<span class="location-tag">Override</span>
+					{/if}
+				{/if}
+			</p>
 		</div>
 
 			<div class="field">
@@ -348,6 +569,14 @@ let selectedOfferingId = $state<number | null>(null);
 						Scan window closes {dateTimeText(expiryPreview.at)} ({durationMinutes}m from now)
 					</p>
 				{/if}
+				{#if inherited !== null}
+					<p class="hint">
+						{inherited.duration} m — the length of the scheduled meeting
+						{#if durationOverridden}
+							<span class="location-tag">Override</span>
+						{/if}
+					</p>
+				{/if}
 			</div>
 
 			<div class="field-row">
@@ -361,6 +590,14 @@ let selectedOfferingId = $state<number | null>(null);
 						min="0"
 						bind:value={presentWindow}
 					/>
+					{#if inherited !== null}
+						<p class="hint">
+							{inherited.present} min from the offering
+							{#if presentOverridden}
+								<span class="location-tag">Override</span>
+							{/if}
+						</p>
+					{/if}
 				</div>
 				<div class="field">
 					<label class="form-label" for="late">Late window (min)</label>
@@ -372,6 +609,14 @@ let selectedOfferingId = $state<number | null>(null);
 						min="0"
 						bind:value={lateWindow}
 					/>
+					{#if inherited !== null}
+						<p class="hint">
+							{inherited.late} min from the offering
+							{#if lateOverridden}
+								<span class="location-tag">Override</span>
+							{/if}
+						</p>
+					{/if}
 				</div>
 			</div>
 
@@ -383,56 +628,81 @@ let selectedOfferingId = $state<number | null>(null);
 			</div>
 
 		<div class="field">
-			<label class="form-label" for="classroom">
-				Classroom name (optional)
-			</label>
-			<input
-				id="classroom"
-				class="form-input"
-				type="text"
-				placeholder="e.g. Lab 101, Room 301"
-				bind:value={classroomOverride}
-			/>
-			<p class="hint">
-				Blank uses the offering default classroom name (D17). Coordinates below always apply.
-			</p>
+			<span class="form-label">Classroom</span>
+			<div class="field">
+				<label class="override-toggle">
+					<input
+						type="checkbox"
+						checked={locationOverride}
+						onchange={(e) => (locationOverride = e.currentTarget.checked)}
+					/>
+					Use a different room
+				</label>
+			</div>
 
-			<div class="override-box">
-					<div class="field-row">
-						<div class="field">
-							<label class="form-label" for="override-lat">Latitude</label>
-							<input
-								id="override-lat"
-								class="form-input"
-								class:invalid={coordsInvalid}
-								type="number"
-								step="0.0001"
-								placeholder="e.g. 13.7563"
-								bind:value={classroomLat}
-							/>
-						</div>
-						<div class="field">
-							<label class="form-label" for="override-lng">Longitude</label>
-							<input
-								id="override-lng"
-								class="form-input"
-								class:invalid={coordsInvalid}
-								type="number"
-								step="0.0001"
-								placeholder="e.g. 100.5018"
-								bind:value={classroomLng}
-							/>
-						</div>
-					</div>
+			{#if locationOverride}
+				<div class="field">
+					<label class="form-label" for="classroom">Classroom name (optional)</label>
+					<input
+						id="classroom"
+						class="form-input"
+						type="text"
+						placeholder="e.g. Lab 101, Room 301"
+						bind:value={classroomOverride}
+					/>
 					<p class="hint">
-						The geofence centers here. Both coordinates are required for every session.
+						Blank uses the offering default classroom name (D17).
 					</p>
-					{#if coordsInvalid}
-						<p class="field-error">
-							Both coordinates are required to open a session.
-						</p>
-					{/if}
 				</div>
+
+				<div class="override-box">
+						<div class="field-row">
+							<div class="field">
+								<label class="form-label" for="override-lat">Latitude</label>
+								<input
+									id="override-lat"
+									class="form-input"
+									class:invalid={coordsInvalid}
+									type="number"
+									step="0.0001"
+									placeholder="e.g. 13.7563"
+									bind:value={classroomLat}
+								/>
+							</div>
+							<div class="field">
+								<label class="form-label" for="override-lng">Longitude</label>
+								<input
+									id="override-lng"
+									class="form-input"
+									class:invalid={coordsInvalid}
+									type="number"
+									step="0.0001"
+									placeholder="e.g. 100.5018"
+									bind:value={classroomLng}
+								/>
+							</div>
+						</div>
+						<p class="hint">
+							The geofence centers here. Both coordinates are required for every session.
+						</p>
+						{#if coordsInvalid}
+							<p class="field-error">
+								Both coordinates are required to open a session.
+							</p>
+						{/if}
+					</div>
+			{:else}
+				<p class="hint">
+					The offering's classroom and coordinates apply. Tick "Use a different room" if the
+					class moved — the change applies to this session only.
+				</p>
+				{#if coordsInvalid}
+					<p class="field-error">
+						This offering has no classroom coordinates. Tick "Use a different room" and
+						type them before opening a session.
+					</p>
+				{/if}
+			{/if}
 		</div>
 
 			<div class="preview" class:generated={generatedCode !== null}>
@@ -442,6 +712,12 @@ let selectedOfferingId = $state<number | null>(null);
 					<p class="preview-hint">
 						Scan window closes at {generatedExpiry}. Show this on the projector for
 						students to scan.
+					</p>
+					<p class="preview-hint">
+						Scheduled {generatedScheduled}
+						{#if generatedOverridden}
+							— overridden for this session.
+						{/if}
 					</p>
 				{:else}
 					<span class="preview-code pending">{SESSION_CODE_SAMPLE}</span>
@@ -613,6 +889,42 @@ let selectedOfferingId = $state<number | null>(null);
 	.locked-meta {
 		font-size: 0.8125rem;
 		color: var(--text-muted);
+	}
+
+	/* --- Schedule callout (D93) --------------------------------------------- */
+
+	.schedule {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		padding: 0.75rem;
+		background: var(--bg-page);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+	}
+
+	.schedule :global(svg) {
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+
+	/* --- Override toggle ------------------------------------------------------ */
+
+	.override-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+		cursor: pointer;
+	}
+
+	.override-toggle input {
+		accent-color: var(--brand);
 	}
 
 	/* --- Location callout ---------------------------------------------------- */

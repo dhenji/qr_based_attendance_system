@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -10,14 +10,14 @@ from shared.constants import (
     LATITUDE_MIN,
     LONGITUDE_MAX,
     LONGITUDE_MIN,
+    RADIUS_METERS_MAX,
+    RADIUS_METERS_MIN,
 )
 from shared.enums import SessionType, ValidationStatus
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
     DURATION_MINUTES_MIN,
-    RADIUS_METERS_MAX,
-    RADIUS_METERS_MIN,
     SESSION_CODE_MAX_LENGTH,
     SESSION_CODE_MIN_LENGTH,
     WINDOW_MINUTES_MAX,
@@ -63,6 +63,17 @@ class SessionCreate(BaseModel):
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
+    # Schedule exception (D93). Omitted means "use the offering's plan" —
+    # the server resolves the next occurrence of the offering's meeting and
+    # stores it as the session's scheduled start/end.
+    #
+    # These are wall clock values in the institution's timezone, not ISO
+    # instants: the offering's own `schedule_start_time` is a naive wall
+    # clock too, and the browser cannot convert an IANA zone without a
+    # timezone library. Either field alone is an override; together they
+    # re-point the session. Either one sets `schedule_overridden`.
+    session_date: date | None = None
+    start_time: time | None = None
 
     @model_validator(mode="after")
     def _windows_within_duration(self) -> "SessionCreate":
@@ -88,10 +99,47 @@ class SessionRead(BaseModel):
     session_type: SessionType = SessionType.LECTURE
     qr_payload: QRPayload
     expires_at: datetime | None = None
+    # The scheduled window (D93): the offering's plan, or the override the
+    # professor asked for. `schedule_overridden` says which.
+    scheduled_start_time: datetime
     scheduled_end_time: datetime
+    schedule_overridden: bool = False
+    plan_source: str = "none"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SessionPlanRead(BaseModel):
+    """Everything a session for an offering inherits (D93).
+
+    The resolved plan, so the open form renders what the server will store
+    rather than re-deriving it. `source` names where the meeting came from:
+    `component` (the offering's active meeting for this type), `offering_legacy`
+    (the offering's own schedule columns), `course_default` (no meeting
+    configured) or `none` (nothing at all).
+    """
+
+    offering_id: int
+    session_type: SessionType = SessionType.LECTURE
+    source: str = "none"
+    # The next occurrence, in the institution's local terms and as UTC.
+    session_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    scheduled_start: datetime | None = None
+    scheduled_end: datetime | None = None
+    timezone: str = "UTC"
+    duration_minutes: int = 0
+    present_window_minutes: int = 0
+    late_window_minutes: int = 0
+    classroom_name: str | None = None
+    classroom_lat: float | None = None
+    classroom_lng: float | None = None
+    radius_meters: int = 0
+    # Whether a professor may override the time at all — there is nothing to
+    # override when no meeting is configured.
+    override_capable: bool = False
 
 
 class SessionOfferingTile(BaseModel):

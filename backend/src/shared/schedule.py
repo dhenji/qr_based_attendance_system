@@ -10,6 +10,12 @@ features cannot diverge again.
 weeks live on the term entry in `year_levels.term_structure`; the risk batch
 and the offering read DTO both resolve through here so an orphaned
 `semester` value can never be counted two different ways.
+
+`day_weekdays` is the one definition of what a `schedule_days` string means.
+It used to live privately in `features/student/service.py`, but the session
+plan resolver (D93) reads the same string to work out which calendar day a
+meeting falls on, so the mapping lives here with the rest of the schedule
+math rather than being re-derived per feature.
 """
 
 from __future__ import annotations
@@ -67,6 +73,73 @@ def distinct_day_count(days: str) -> int:
     count. Strings with no A-Z letter count zero.
     """
     return len({ch for ch in days.upper() if "A" <= ch <= "Z"})
+
+
+# Day initials for `schedule_days`, mapped to `date.weekday()` indices
+# (Monday = 0).
+#
+# `T` is Tuesday and `H` is Thursday, because the conventional initials
+# collide: the seed data writes "TF" for Tue/Fri, while wireframes.md:1387
+# writes "TTH" where the trailing H stands in for Thursday precisely because
+# T was already taken by Tuesday. `U` is Sunday for the same reason — `S` is
+# Saturday.
+#
+# This is the mapping `features/student/service.py::_meets_on` used to own
+# privately. It is unchanged, only relocated: an unrecognised letter still
+# matches nothing rather than raising, so a typo in one offering's schedule
+# hides that one class instead of breaking a whole dashboard.
+DAY_WEEKDAYS: dict[str, int] = {
+    "M": 0,
+    "T": 1,
+    "W": 2,
+    "H": 3,
+    "F": 4,
+    "S": 5,
+    "U": 6,
+}
+
+
+def day_weekdays(days: str | None) -> set[int]:
+    """The weekday indices (`date.weekday()`) a days string names.
+
+    "MWF" -> {0, 2, 4}. Case-insensitive; unrecognised letters are ignored
+    rather than raising.
+    """
+    if not days:
+        return set()
+
+    return {
+        DAY_WEEKDAYS[letter]
+        for letter in days.strip().upper()
+        if letter in DAY_WEEKDAYS
+    }
+
+
+def meeting_length_minutes(start: time, end: time) -> int:
+    """Whole minutes from `start` to `end`; 0 when `end` is not after `start`.
+
+    The meeting length as a duration, rounded to the minute — the unit every
+    session duration, window and expiry in the system is stored in. Zero for
+    an inverted pair, so a legacy row with a nonsensical end time contributes
+    no length instead of a negative one.
+    """
+    if end <= start:
+        return 0
+
+    return int(
+        (
+            end.hour * 60
+            + end.minute
+            + end.second / 60
+            + end.microsecond / 60000000
+        )
+        - (
+            start.hour * 60
+            + start.minute
+            + start.second / 60
+            + start.microsecond / 60000000
+        )
+    )
 
 
 def meeting_minutes(schedule_days: str, start: time, end: time) -> float:

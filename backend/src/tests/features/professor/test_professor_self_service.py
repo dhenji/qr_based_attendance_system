@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 import pytest
@@ -13,6 +13,9 @@ from features.professor.service import ProfessorService
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
+# The assignment projection carries the offering's own configuration as well
+# as its identity (D93) — the schedule, the classroom and the default
+# windows a session inherits.
 ROWS = [
     (
         11,
@@ -29,6 +32,15 @@ ROWS = [
         date(2025, 8, 4),
         None,
         3,
+        "MWF",
+        time(9, 0),
+        time(10, 0),
+        "Room 101",
+        14.5,
+        121.0,
+        5,
+        10,
+        60,
     ),
     (
         12,
@@ -45,6 +57,15 @@ ROWS = [
         date(2025, 8, 4),
         None,
         4,
+        "TTH",
+        time(13, 0),
+        time(14, 30),
+        "Lab 2",
+        1.5,
+        2.5,
+        5,
+        10,
+        None,
     ),
 ]
 
@@ -209,6 +230,15 @@ DUPLICATE_OFFERING_ROWS = [
         date(2026, 1, 1),
         date(2026, 10, 19),
         3,
+        "MWF",
+        time(9, 0),
+        time(10, 0),
+        "Room 101",
+        14.5,
+        121.0,
+        5,
+        10,
+        60,
     ),
 ]
 

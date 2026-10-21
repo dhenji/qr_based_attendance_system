@@ -290,11 +290,18 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		return Math.max(0, Math.floor((scanExpiresAt - now) / 1000));
 	});
 
+	// The class end is the offering's plan (D93), so the countdown reads the
+	// real end of the scheduled class rather than "when the professor clicked".
 	const classEndsAt = $derived(session ? new Date(session.scheduledEndTime).getTime() : null);
 	const classRemainingSeconds = $derived.by(() => {
 		if (classEndsAt === null) return null;
 		return Math.max(0, Math.floor((classEndsAt - now) / 1000));
 	});
+	// A session opened after its class ended still runs, so the tile says so
+	// rather than showing a zero countdown.
+	const classEnded = $derived(
+		classRemainingSeconds !== null && classRemainingSeconds <= 0
+	);
 
 	const isClosed = $derived(session?.status === 'closed');
 	const closedSession = $derived(isClosed ? session : null);
@@ -518,8 +525,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					<span class="timer-label">Scan window</span>
 					<span class="timer-value">{formatCountdown(scanRemainingSeconds)}</span>
 				</div>
-				<div class="timer">
-					<span class="timer-label">Class ends in</span>
+				<div class="timer" class:urgent={classEnded}>
+					<span class="timer-label">{classEnded ? 'Class ended' : 'Class ends in'}</span>
 					<span class="timer-value">{formatCountdown(classRemainingSeconds)}</span>
 					<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
 				</div>

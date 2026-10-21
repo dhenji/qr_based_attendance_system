@@ -89,8 +89,20 @@ export const offeringCreateSchema = z
 			.trim()
 			.optional()
 			.or(z.literal('')),
-		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').default(5),
-		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').default(10),
+		// D93: blank means "follow the system default" (Admin -> System
+		// Settings), so a new offering is born inheriting rather than
+		// carrying a hard-coded 5/10 that nobody chose.
+		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		// D93: the geofence radius override. Blank means "inherit the app
+		// setting" (Admin -> System Settings).
+		default_classroom_radius_meters: z.coerce
+			.number()
+			.int()
+			.min(1, 'At least 1 metre')
+			.max(1000, 'At most 1000 metres')
+			.optional()
+			.or(z.literal('')),
 	})
 	.superRefine(endAfterStart);
 
@@ -113,8 +125,19 @@ export const offeringUpdateSchema = z
 			.trim()
 			.optional()
 			.or(z.literal('')),
-		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional(),
-		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional(),
+		// D93: blank clears the override and puts the offering back on the
+		// system default.
+		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		// D93: the geofence radius override. Blank clears it back to the app
+		// setting.
+		default_classroom_radius_meters: z.coerce
+			.number()
+			.int()
+			.min(1, 'At least 1 metre')
+			.max(1000, 'At most 1000 metres')
+			.optional()
+			.or(z.literal('')),
 		is_active: z.boolean().optional(),
 	})
 	.superRefine(endAfterStart);

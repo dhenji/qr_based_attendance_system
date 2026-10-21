@@ -11,6 +11,8 @@ from shared.constants import (
     LATITUDE_MIN,
     LONGITUDE_MAX,
     LONGITUDE_MIN,
+    RADIUS_METERS_MAX,
+    RADIUS_METERS_MIN,
     SEMESTER_MAX_LENGTH,
     SEMESTER_MIN_LENGTH,
 )
@@ -217,15 +219,21 @@ class OfferingCreate(BaseModel):
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
-    default_present_window_minutes: int = Field(
-        default=DEFAULT_PRESENT_WINDOW_MINUTES,
+    default_present_window_minutes: int | None = Field(
+        default=None,
         ge=WINDOW_MINUTES_MIN,
         le=WINDOW_MINUTES_MAX,
     )
-    default_late_window_minutes: int = Field(
-        default=DEFAULT_LATE_WINDOW_MINUTES,
+    default_late_window_minutes: int | None = Field(
+        default=None,
         ge=WINDOW_MINUTES_MIN,
         le=WINDOW_MINUTES_MAX,
+    )
+    # The geofence radius the offering's sessions default to (D93). NULL
+    # means "inherit" — the app setting an administrator edits in Admin ->
+    # System Settings wins, and only an explicit value overrides it.
+    default_classroom_radius_meters: int | None = Field(
+        default=None, ge=RADIUS_METERS_MIN, le=RADIUS_METERS_MAX
     )
     # Optional per-type schedules (D77). Omitted means a single lecture
     # component mirroring the offering schedule/classroom above, so
@@ -267,8 +275,14 @@ class OfferingRead(BaseModel):
     classroom_name: str | None = None
     classroom_lat: float | None = None
     classroom_lng: float | None = None
-    default_present_window_minutes: int
-    default_late_window_minutes: int
+    # NULL means "follow the system default" (D93) for both windows and the
+    # radius.
+    default_present_window_minutes: int | None = None
+    default_late_window_minutes: int | None = None
+    # The geofence radius override. NULL clears it back to the app setting.
+    default_classroom_radius_meters: int | None = Field(
+        default=None, ge=RADIUS_METERS_MIN, le=RADIUS_METERS_MAX
+    )
     enrolled_count: int = 0
     # Distinct session types across the active components (D77) — feeds the
     # Lecture / Lab / Mixed badges. Empty only when an offering has no
@@ -306,6 +320,11 @@ class OfferingUpdate(BaseModel):
     default_late_window_minutes: int | None = Field(
         default=None, ge=WINDOW_MINUTES_MIN, le=WINDOW_MINUTES_MAX
     )
+    # An explicit null clears the override and puts the offering back on the
+    # app setting (D93).
+    default_classroom_radius_meters: int | None = Field(
+        default=None, ge=RADIUS_METERS_MIN, le=RADIUS_METERS_MAX
+    )
     is_active: bool | None = None
 
     @field_validator("schedule_days")
@@ -318,15 +337,15 @@ class OfferingUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _reject_null_on_not_nullable(self) -> "OfferingUpdate":
-        # classroom_* are nullable columns, so an explicit null clears them;
-        # every other mutable field rejects null like CourseUpdate does.
+        # classroom_*, the window defaults and the radius are nullable
+        # columns, so an explicit null clears them (D93: NULL means "follow
+        # the system default"); every other mutable field rejects null like
+        # CourseUpdate does.
         for field in (
             "sessions_per_week",
             "schedule_days",
             "schedule_start_time",
             "schedule_end_time",
-            "default_present_window_minutes",
-            "default_late_window_minutes",
             "is_active",
         ):
             if field in self.model_fields_set and getattr(self, field) is None:
