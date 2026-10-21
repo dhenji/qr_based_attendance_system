@@ -243,7 +243,7 @@ When scanning offline:
    explicitly: "Client-side embedding *compare* is a separate future slice … no documented
    decrypt scheme"). Treat the steps below as the design, not the build.
 2. **GPS check** runs against cached session geofence config.
-3. **Liveness** runs client-side (MediaPipe Face Mesh WASM, EAR + PnP heuristics).
+3. **Liveness** runs client-side (MediaPipe FaceLandmarker WASM, EAR + PnP heuristics).
 4. **Status is tentative**: marked `pending` in queue. Server recomputes on sync.
 
 The student sees: "✅ Evidence saved — will verify after sync" (offline badge variant
@@ -361,7 +361,7 @@ Checks performed locally before queuing:
 | Student number format   | Free-form ID as printed on the card (3–50 chars, upper-cased; the conventional `YY-NNNN` shape is not validated) | Yes |
 | GPS within geofence     | Haversine vs cached session coords | Yes                         |
 | Liveness (blink, turns) | MediaPipe WASM                     | Yes                         |
-| Face match score        | face-api.js vs cached embedding    | Yes                         |
+| Face match score        | ⚠ Not computed — the client sends the placeholder `1` and the server band-checks that number without ever comparing it to the stored blob | No |
 | Duplicate scan          | Local queue check                  | Yes                         |
 
 Server re-validates **all** checks on sync. Client validation is UX-only

@@ -1,45 +1,126 @@
 # Models Used
 
-This document catalogs every model the system relies on. Honest summary: **zero trained models are introduced for anti-spoofing** — the security core is pretrained landmark tracking plus geometric/statistical heuristics that run fully offline and produce auditable evidence. **Zero trained models are used for analytics in the MVP** — at-risk prediction starts as heuristic thresholds (env-configurable); ML (logistic regression) is a planned upgrade using the identical feature vector. The face embedding pipeline uses pretrained models exclusively; we train nothing.
+This document catalogs every model the system relies on — **as built, not as proposed**. Honest summary: **zero trained models are introduced for anti-spoofing** — the security core is pretrained landmark tracking plus geometric/statistical heuristics that run fully offline and produce auditable evidence. **Zero trained models are used for analytics in the MVP** — at-risk prediction starts as heuristic thresholds (env-configurable); ML (logistic regression) is a planned upgrade using the identical feature vector.
 
-| Component                     | Model / Library                                          | Type                                                              | Where it runs                  | Trained by us?      |
-| ----------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------ | ------------------- |
-| Face landmark tracking        | MediaPipe Face Mesh                                      | Pretrained deep regression (468 landmarks)                        | Client browser (WASM)          | No                  |
-| Face liveness grading         | EAR + Perspective-n-Point (PnP) heuristics               | Geometric/statistical algorithm                                   | Client captures, server grades | No (designed by us) |
-| Enrolled-face matching        | face-api.js Face Recognition (ResNet-34-like embeddings) | Pretrained face embedding net                                     | Client / server                | No                  |
-| Face embedding generation     | face-api.js (pretrained ResNet-34-like)                  | Pretrained 128-d embedding from 3-angle photos (front/left/right) | Server                         | No                  |
-| At-risk forecasting (MVP)     | Heuristic thresholds (env-configurable)                  | Rule-based scoring (absence_rate, streak, sync_lag, trend_slope)  | Server (Python)                | No (rule-based)     |
-| At-risk forecasting (upgrade) | Logistic regression (scikit-learn)                       | Classical ML, interpretable                                       | Server (Python)                | Planned (future)    |
-| Analytics visualization       | Chart.js (+ date client adapter)                         | Non-ML charting library                                           | Client browser                 | No                  |
-| QR decoding                   | html5-qrcode                                             | Decoder (non-ML)                                                  | Client browser                 | No                  |
+**The system ships exactly one model.** MediaPipe FaceLandmarker, running client-side in the browser through WebAssembly. There is **no face-recognition or face-embedding model** anywhere in the repository — not face-api.js, not ResNet, not ArcFace, not InsightFace. The 128-d "face embedding" the server stores is a zero-filled placeholder (see §3).
+
+| Component                     | Model / library (as shipped)                                                                                                                                                       | Type                                                              | Where it runs                  | Status                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------ | ------------------------- |
+| Face detection + landmarks    | MediaPipe FaceLandmarker — `face_landmarker.task` (BlazeFace short-range detector + 478-landmark landmark model + canonical face geometry)                                          | Pretrained deep regression                                        | Client browser (WASM)          | **Shipped**               |
+| Face liveness grading         | EAR + Perspective-n-Point (PnP) heuristics                                                                                                                                          | Geometric/statistical algorithm                                   | Client captures, server grades | **Shipped**               |
+| Face embedding generation     | **None.** The server stores a zero-filled placeholder (`_stub_embedding_blob`)                                                                                                       | —                                                                  | —                              | **Not implemented** (D28)  |
+| Enrolled-face matching        | **None.** `face_match_score` is a client-asserted float (`FACE_MATCH_SCORE_PLACEHOLDER = 1`)                                                                                          | —                                                                  | —                              | **Not implemented**        |
+| At-risk forecasting (MVP)     | Heuristic thresholds (env-configurable)                                                                                                                                             | Rule-based scoring (absence_rate, streak, sync_lag, trend_slope)  | Server (Python)                | **Shipped**               |
+| At-risk forecasting (upgrade) | Logistic regression (scikit-learn)                                                                                                                                                  | Classical ML, interpretable                                       | Server (Python)                | **Planned** (future)      |
+| Analytics visualization       | Hand-rolled SVG components — `ReportTrendChart.svelte`, `ReportBarChart.svelte`                                                                                                      | Non-ML charting                                                   | Client browser                 | **Shipped**               |
+| QR decoding                   | html5-qrcode                                                                                                                                                                       | Decoder (non-ML)                                                  | Client browser                 | **Shipped**               |
+
+> **Note on the earlier draft of this document.** It named *face-api.js Face Recognition
+> (ResNet-34-like)* for embedding generation and matching, and *Chart.js* for visualization.
+> Neither library is a dependency of this project (`frontend/package.json`,
+> `backend/requirements.txt`), neither was ever installed, and no model file for either
+> exists in the repository. ADR-091 records the same divergence for the chart library.
 
 ---
 
-## 1. MediaPipe Face Mesh (face landmark tracking)
+## 1. MediaPipe FaceLandmarker (detection + landmarks) — the only model
 
-- **What**: pretrained neural network that regresses **468 3D facial landmarks** from a single RGB frame (proposal.md:88).
-- **Role in the system**: the only model in the anti-spoofing pipeline. It is _input to_ liveness reasoning, never the decision-maker itself.
-- **Why it**: runs fully client-side (WASM) — no network round-trip, which is mandatory for the offline-first constraint; on-device, no student video ever leaves the phone.
-- **Outputs consumed**: the 68-keypoint subset — eye contours for EAR, nose/chin anchors for head-pose.
-- **Used as-is**: no fine-tuning, no retraining on our data.
+- **What**: a pretrained bundle that regresses **478 3D facial landmarks** from a single RGB frame. The shipped asset bundles three things: a BlazeFace **short-range face detector**, the **478-landmark landmark model**, and the canonical face-geometry module that produces the facial transformation matrix.
+- **Asset inventory** — the repository contains exactly one model file:
 
-## 2. EAR + PnP Liveness Grading (the protocol, not a model)
+  | File                                                       | Size   | sha256                                                           |
+  | ---------------------------------------------------------- | ------ | ---------------------------------------------------------------- |
+  | `frontend/static/models/face_landmarker.task`              | 1.4 MB | `af23fc7c1ff21d034deaa2b7fc1d56bb670ce69a4cbdc9579b6f1afd680835f4` |
+  | `frontend/static/wasm/vision_wasm_internal.wasm` (runtime) | 12 MB  | — (the WASM runtime, not a model)                                 |
+
+  Verified by `sha256sum frontend/static/models/face_landmarker.task` and
+  `find . \( -name "*.task" -o -name "*.tflite" -o -name "*.onnx" \) -not -path "*/node_modules/*"`
+  → one hit.
+
+- **Runtime**: `@mediapipe/tasks-vision` 1.0.1, loaded through
+  `FilesetResolver.forVisionTasks('/wasm')` against the vendored WASM runtime in
+  `frontend/static/wasm/`. `frontend/src/lib/features/liveness/model.ts` holds one shared
+  instance (a module-level promise) so the ~13 MB load happens once per session, not once
+  per scan.
+- **Configuration** (`liveness/model.ts:42-51`): `runningMode: 'VIDEO'`, `numFaces: 1`,
+  `outputFacialTransformationMatrixes: true`, detection/presence/tracking confidence `0.5`,
+  and a GPU delegate with a CPU fallback when the device refuses the GPU delegate.
+  `outputFaceBlendshapes` is **not** enabled today.
+- **Role in the system**: the only model in the anti-spoofing pipeline. It is _input to_
+  liveness reasoning, never the decision-maker itself.
+- **Outputs consumed**:
+  - **EAR** — the 6-point eye contours, left `[362, 385, 387, 263, 373, 380]` and right
+    `[33, 160, 158, 133, 153, 144]` (`FaceScanner.svelte:110-111`).
+  - **Head yaw** — the facial transformation matrix (`FaceScanner.svelte:172-193`), with a
+    landmark-geometry fallback that offsets the nose tip against the outer eye corners
+    (`:195-200`).
+  - **Face-to-camera distance** — the inter-eye spread (landmarks `33` ↔ `263`) through a
+    pinhole model with an assumed IPD of 0.063 m and a 70° horizontal field of view
+    (`:52-53, 160-168`).
+- **Used as-is**: no fine-tuning, no retraining on our data. The model runs in the browser, so
+  no student video ever leaves the phone — a hard requirement for the offline-first design.
+
+## 2. EAR + PnP liveness grading (the protocol, not a model)
 
 The decision layer is deliberately **not** a presentation-attack-detection classifier. Instead, deterministic geometry:
 
-- **Eye Aspect Ratio (EAR)**: ratio of vertical to horizontal eye-contour distances per frame; a blink is a sustained EAR dropout across consecutive frames (proposal.md:187).
-- **Head-pose estimation**: Perspective-n-Point over stable landmarks (eye corners, nose tip, chin) yields yaw/pitch/roll angles per frame; a "turn head" challenge grades pose-angle excursion and return (proposal.md:87).
+- **Eye Aspect Ratio (EAR)**: ratio of vertical to horizontal eye-contour distances per frame; a blink is a sustained EAR dropout across consecutive frames.
+- **Head-pose estimation**: Perspective-n-Point over stable landmarks yields yaw per frame; a "turn head" challenge grades pose-angle excursion and return.
 
-A scan passes only if the landmark transcript correlates with the **fixed** challenge sequence (blink → left → right, chosen for offline operability per D31) — blink timing, EAR depth, pose dynamics, and inter-event timing must all be plausible.
+A scan passes only if the landmark transcript satisfies the **fixed** challenge sequence (blink → left → right, per D31) — blink timing, EAR depth, pose dynamics, and inter-event timing must all be plausible.
 
-**Why heuristics, not a CNN**: (a) determinism — the same transcript always yields the same verdict, so every decision is explainable and appealable; (b) auditability — the transcript _is_ the evidence bundle, adversarial examples don't apply; (c) offline operability and near-zero runtime cost.
+**Why heuristics, not a CNN**: (a) determinism — the same transcript always yields the same verdict, so every decision is explainable and appealable; (b) auditability — the transcript _is_ the evidence bundle; (c) offline operability and near-zero runtime cost.
 
-## 3. face-api.js (enrolled-face match + embedding generation)
+**What the server actually enforces** (`backend/src/features/attendance/service.py:147-162`): all three challenge booleans are true, `ear_samples` is non-empty, the **mean** EAR sits inside `[0.05, 0.50]`, and `pnp_evidence` is non-empty. Four checks — the yaw values inside `pnp_evidence` are never inspected, and the blob is a free-form dict, so `{"x": 1}` satisfies the last one.
 
-- **What**: face detection (SSD MobileNet) + 68-point landmarks + face recognition embeddings (ResNet-34-like) producing 128-dimensional vectors.
-- **Role**: (1) At enrollment, the admin captures **3 photos** (front, left, right) per student (D43); the server runs the pretrained model on each photo to produce three 128-d embeddings. These are stored as an encrypted JSON blob in `students.face_embedding` (BYTEA): `{"mean":[128f],"angles":{"front":[128f],"left":[128f],"right":[128f]}}` (D28). The mean vector is used for primary comparison; per-angle vectors for tie-breaking. (2) During scan verification, the student's live face embedding is compared against the stored embedding(s) using cosine similarity (threshold ≥ 0.7, configurable via `FACE_MATCH_THRESHOLD`).
-- **Scope constraint**: face matching here is an _additional anti-spoofing layer only_ — facial recognition as a standalone identity system is explicitly out of scope.
-- **Trained by us?** No. The model runs as-is; we generate embeddings from it but do not fine-tune or retrain it. The `face_embedding_version` field tracks enrollment version (bumped on every write, D28).
+## 3. Face embedding generation and matching — **not implemented**
+
+This is the honest state of the biometric identity layer.
+
+**What ships:**
+
+- The enrollment route `POST /admin/face-enrollment/{student_id}` takes three photos
+  (front, left, right — D43) and validates each for non-empty content, a size cap and an
+  `image/*` content type (`backend/src/features/face_enrollment/service.py:41-60`).
+- The enrollment is audited, the server-side cache is invalidated, and `face_embedding_version`
+  is bumped so stale device copies cannot match (`face_enrollment/service.py:121-129`).
+- The stored blob uses the documented 128-d shape —
+  `{"mean": [128f], "angles": {"front": [128f], "left": [128f], "right": [128f]}}` (D28) —
+  but every value is `0.0` and the payload is tagged `"stub": true`
+  (`_stub_embedding_blob`, `face_enrollment/service.py:21-38`). **No inference runs.**
+- Distribution is pull-on-login (D29): `GET /student/me/face-embedding?current_version=N`
+  returns the blob when the client's copy is stale, 204 when it is current, and 404
+  `face_embedding_not_found` when there is no enrollment
+  (`backend/src/features/student/service.py:330-357`). The client caches it in IndexedDB,
+  encrypted with an AES-GCM key generated on the device and stored as a non-extractable
+  `CryptoKey` (`frontend/src/lib/features/student/face.svelte.ts:46-74`).
+
+**What does not ship:**
+
+- **No recognition model.** MediaPipe FaceLandmarker produces landmarks and (optionally)
+  blendshapes — it does not produce an identity embedding. Adding one means a second model
+  family (e.g. an ArcFace/InsightFace ONNX model) that must run in the browser for the
+  offline path.
+- **No server-side inference** and **no encryption at rest**: the blob is plain JSON bytes,
+  written by `json.dumps(...).encode("utf-8")`.
+- **No similarity comparison.** `face_match_score` is a client assertion; the server
+  band-checks the number (`≥ 0.70` pass, `0.65–0.70` review flag, `< 0.65` fail — see
+  `attendance/service.py:519-526`) but never compares it to the stored blob, and the blob is
+  not read during a scan at all. The live path sends the placeholder
+  `FACE_MATCH_SCORE_PLACEHOLDER = 1` on every scan
+  (`frontend/src/lib/features/liveness/service.ts:109`).
+- **No offline local compare** — explicitly deferred in the client for the same reason
+  (`face.svelte.ts:15-17`).
+- **No client-side biometric quality gates.** The six documented gates (brightness, face
+  size, single face, centred, sharpness, eyes open) are implemented nowhere; the client
+  validates file extension and size, and the server validates content type, size and
+  non-empty.
+
+**What a real pipeline needs:** a recognition model; a documented decrypt scheme for the
+cached blob; AES-256-GCM at rest with a server-side key; and the comparison itself —
+ideally server-side, so the score is computed from a stored reference rather than asserted
+by the client. `face_embedding_version` already exists to force a re-enrollment when the
+embedding format changes.
 
 ## 4. At-Risk Forecasting
 
@@ -69,15 +150,16 @@ A scan passes only if the landmark transcript correlates with the **fixed** chal
 
 - **html5-qrcode** — QR decoding and live-detection heuristics. Not ML.
 - **HMAC-SHA256** — session-code generation/verification. Not ML.
-- **Chart.js** (+ date client adapter) — analytics dashboards (Overview, Course Comparison, Trends, At-Risk, Export). Wrapped in a reusable Svelte component (`ChartCanvas.svelte`). Non-ML charting library; produces bar, line, area, and pie charts from aggregated data. No model inference.
+- **Hand-rolled SVG charts** — analytics dashboards (Overview, Course Comparison, Trends, At-Risk, Export). Two reusable components: `frontend/src/lib/features/report/components/ReportTrendChart.svelte` and `ReportBarChart.svelte`. Non-ML; they draw `<svg>` primitives from the aggregated rows. ADR-041 specified Chart.js; ADR-091 records that the library was never adopted.
 
 ---
 
 ## What Is NOT Used
 
+- **No face recognition or embedding model.** The only model in the repository is `face_landmarker.task` (detection + landmarks). No face-api.js, no ResNet, no ArcFace, no InsightFace, no dlib, no TensorFlow.js.
 - No trained presentation-attack-detection (anti-spoofing) model — no Silent-Face-Anti-Spoofing or similar CNN; liveness is protocol-based (see section 2).
 - No trained at-risk model in the MVP — prediction uses heuristic thresholds (section 4); logistic regression is a planned upgrade, not yet implemented.
 - No deep forecasting models — accuracy-vs-interpretability tradeoff resolved in favor of the latter.
-- No models are trained on student biometric data; MediaPipe and face-api.js run as-is.
-- No ML in Chart.js — it is a pure visualization library.
-
+- No models are trained on student biometric data; MediaPipe FaceLandmarker runs as-is.
+- **No Chart.js.** The charts are hand-rolled SVG; `chart.js` is not a dependency.
+- No ML in the charts — they are a pure visualization layer.

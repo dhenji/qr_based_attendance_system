@@ -95,7 +95,12 @@ async def test_create_session_stamps_expiry_from_created_at(
     factories: Factories,
     settings: Settings,
 ) -> None:
-    """Expiry is `created_at + duration`, floored by `scheduled_end_time` (D49)."""
+    """Expiry is `created_at + duration`, floored by `scheduled_end_time` (D49).
+
+    D93 adds the clamp: the class-end cap only binds while the class is
+    still ahead, so a session opened long after its class ended is not born
+    expired.
+    """
 
     stack, service = await open_session(factories, settings)
 
@@ -106,22 +111,31 @@ async def test_create_session_stamps_expiry_from_created_at(
 
     assert read.expires_at is not None
     assert read.expires_at > datetime.now(timezone.utc)
-    # A 60-minute session opened just now: expiry lands on the schedule end.
     # Asserted with a one-second tolerance because `created_at` comes back at
     # the database clock's second resolution, while `scheduled_end_time` is
     # built in Python at microsecond resolution.
     tolerance = timedelta(seconds=1)
-    assert abs(read.expires_at - read.scheduled_end_time) < tolerance
-    assert abs(read.expires_at - (read.created_at + timedelta(minutes=60))) < tolerance
+    expected = read.created_at + timedelta(minutes=60)
+
+    if read.scheduled_end_time > read.created_at:
+        expected = min(expected, read.scheduled_end_time)
+
+    assert abs(read.expires_at - expected) < tolerance
     assert read.session_code
 
 
-async def test_create_session_resolves_duration_from_course(
+async def test_create_session_resolves_duration_from_the_meeting(
     test_db_session: AsyncSession,
     factories: Factories,
     settings: Settings,
 ) -> None:
-    """No explicit duration: fall back to `session_duration_hours * 60`."""
+    """No explicit duration: the offering's meeting length wins (D93).
+
+    The meeting is the offering's own configuration — MWF 08:00-09:00, so
+    60 minutes — and it is more specific than the course template's
+    `session_duration_hours`, which describes the course rather than this
+    offering's meeting.
+    """
 
     stack, service = await open_session(factories, settings)
     # full_stack/open_session set session_duration_hours=1.0 -> 60 minutes.
@@ -135,7 +149,32 @@ async def test_create_session_resolves_duration_from_course(
     row: Session = (
         await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
+    assert row.duration_minutes == 60
+    assert read.scheduled_end_time - read.scheduled_start_time == timedelta(minutes=60)
+
+
+async def test_create_session_falls_back_to_the_course_duration_without_a_meeting(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """No meeting to inherit: the course template's duration is the fallback."""
+
+    stack, service = await open_session(factories, settings)
+    # A days string that names no weekday: there is no occurrence to inherit.
+    stack["offering"].schedule_days = ""
+    stack["course"].session_duration_hours = 1.5
+
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(offering_id=stack["offering"].id),
+    )
+
+    row: Session = (
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
+    ).one()
     assert row.duration_minutes == 90
+    assert read.plan_source == "course_default"
 
 
 async def test_create_session_copies_offering_window_defaults(

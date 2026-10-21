@@ -16,6 +16,12 @@ LATITUDE_MAX: float = 90.0
 LONGITUDE_MIN: float = -180.0
 LONGITUDE_MAX: float = 180.0
 
+# Geofence radius bounds, in metres. The offering's default radius (course),
+# a session's own radius (session) and the admin's system setting (system)
+# are the same physical limit, so all three read it from here.
+RADIUS_METERS_MIN: int = 1
+RADIUS_METERS_MAX: int = 1000
+
 # Attendance windows, mirrored by `core.config.Settings`
 # (`default_present_window_minutes` / `default_late_window_minutes`), which
 # supplies the runtime fallback when a session omits its own value. Keep the

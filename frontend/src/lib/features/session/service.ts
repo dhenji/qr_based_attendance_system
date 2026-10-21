@@ -23,6 +23,7 @@ import type {
 	SessionCloseResponse,
 	SessionHistoryItemResponse,
 	SessionListItemResponse,
+	SessionPlanResponse,
 	SessionReadResponse,
 	SessionRowStatus,
 	SessionSummary,
@@ -152,12 +153,31 @@ export const listSessions = async (params?: {
 	return { items, total: response.total, page: response.page, size: response.size };
 };
 
+// getSessionPlan
+// What a session for this offering would inherit (D93): the meeting it
+// belongs to, the next occurrence of that meeting, the attendance windows,
+// the classroom and the geofence radius. The open form renders this instead
+// of re-deriving the schedule, so what the professor sees is what the
+// server will store.
+export const getSessionPlan = async (
+	offeringId: number,
+	sessionType: CourseType = 'lecture'
+): Promise<SessionPlanResponse> => {
+	const query: Record<string, string> = { session_type: sessionType };
+
+	return get<SessionPlanResponse>('sessionPlan', query, `/${offeringId}/session-plan`);
+};
+
 // openSession
 // Create a new attendance session against a course offering. qrPayload is what
-// gets rendered into the QR code students scan. Omitted window/classroom
-// fields fall back server-side to the offering defaults, then the app
-// defaults — but the form always sends explicit values so the projector
-// preview never disagrees with what was stored.
+// gets rendered into the QR code students scan.
+//
+// The session inherits the offering's configuration (D93), so the form sends
+// only what the professor actually changed: an omitted window, radius or
+// coordinate is resolved server-side from the offering's plan. `sessionDate`
+// and `startTime` are the schedule exception — a wall-clock date and time in
+// the institution's timezone — and either one marks the session as
+// overridden.
 export const openSession = async (
 	offeringId: number,
 	options?: {
@@ -170,6 +190,9 @@ export const openSession = async (
 		classroomName?: string;
 		classroomLat?: number;
 		classroomLng?: number;
+		// D93: the schedule exception.
+		sessionDate?: string;
+		startTime?: string;
 	}
 ): Promise<OpenedSession> => {
 	const body: Record<string, number | string> = { offering_id: offeringId };
@@ -184,6 +207,8 @@ export const openSession = async (
 		body.classroom_name = options.classroomName.trim();
 	if (options?.classroomLat !== undefined) body.classroom_lat = options.classroomLat;
 	if (options?.classroomLng !== undefined) body.classroom_lng = options.classroomLng;
+	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
+	if (options?.startTime !== undefined) body.start_time = options.startTime;
 
 	const response = await post<SessionReadResponse>('sessionCreate', body);
 
@@ -194,7 +219,9 @@ export const openSession = async (
 		sessionCode: response.session_code,
 		qrPayload: response.qr_payload,
 		expiresAt: response.expires_at,
+		scheduledStartTime: response.scheduled_start_time,
 		scheduledEndTime: response.scheduled_end_time,
+		scheduleOverridden: response.schedule_overridden ?? false,
 		createdAt: response.created_at,
 	};
 };

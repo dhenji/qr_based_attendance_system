@@ -214,9 +214,9 @@ Backend (`backend/.env.example`):
 | `FACE_MATCH_THRESHOLD`           | `0.70`                                                                 | Face-match similarity threshold                                     |
 | `FACE_REVIEW_BAND_LOW`           | `0.65`                                                                 | Lower band requiring manual review                                  |
 | `FACE_EMBEDDING_VERSION`         | `1`                                                                    | Face embedding format version                                       |
-| `DEFAULT_PRESENT_WINDOW_MINUTES` | `5`                                                                    | Default present window for sessions                                 |
-| `DEFAULT_LATE_WINDOW_MINUTES`    | `10`                                                                   | Default late window for sessions                                    |
-| `DEFAULT_GEOFENCE_RADIUS_METERS` | `50`                                                                   | Default classroom geofence radius                                   |
+| `DEFAULT_PRESENT_WINDOW_MINUTES` | `5`                                                                    | Fallback present window (an offering may override it)              |
+| `DEFAULT_LATE_WINDOW_MINUTES`    | `10`                                                                   | Fallback late window (an offering may override it)                 |
+| `DEFAULT_GEOFENCE_RADIUS_METERS` | `50`                                                                   | Fallback classroom geofence radius (an offering may override it)    |
 | `OTP_EXPIRES_MINUTES`            | `5`                                                                    | OTP code TTL                                                        |
 | `BACKUP_STORAGE_TYPE`            | `local`                                                                | Backup backend: `local` or `s3`                                     |
 | `BACKUP_LOCAL_DIR`               | `./backups`                                                            | Local backup directory                                              |
@@ -254,6 +254,7 @@ Backend (`backend/.env.example`):
 | `SCHEDULER_ENABLED`              | `true`                                                                 | Run the background cron scheduler (off = no crons)                  |
 | `SCHEDULER_TIMEZONE`             | `UTC`                                                                  | Scheduler zoneinfo name; unknown values warn and fall back to UTC    |
 | `SCHEDULER_MISFIRE_GRACE_SECONDS`| `300`                                                                  | Grace period for a missed cron fire                                 |
+| `INSTITUTION_TIMEZONE`           | `UTC`                                                                  | Zone for the offering's class times; unknown values warn and fall back to UTC |
 | `BACKUP_CRON`                    | `0 3 * * *`                                                            | Cron schedule for the nightly encrypted backup                      |
 
 `LOCUST_*` variables (`LOCUST_MIN_RPS`, `LOCUST_MAX_P95_MS`, `LOCUST_MAX_P99_MS`,

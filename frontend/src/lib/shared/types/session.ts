@@ -62,8 +62,42 @@ export interface SessionReadResponse {
 		lw: number;
 	};
 	expires_at: string | null;
+	// The scheduled window (D93): the offering's plan, or the override the
+	// professor asked for. `schedule_overridden` says which.
+	scheduled_start_time: string;
 	scheduled_end_time: string;
+	schedule_overridden: boolean;
+	plan_source: string;
 	created_at: string;
+}
+
+// GET /professor/offerings/{id}/session-plan
+//
+// Everything a session for an offering inherits (D93). The open form renders
+// this instead of re-deriving the schedule, so what the professor sees is
+// what the server will store.
+export interface SessionPlanResponse {
+	offering_id: number;
+	session_type: CourseType;
+	// 'component' (the offering's active meeting for this type),
+	// 'offering_legacy' (the offering's own schedule columns),
+	// 'course_default' (no meeting configured) or 'none'.
+	source: string;
+	// The next occurrence, in the institution's local terms and as UTC.
+	session_date: string | null;
+	start_time: string | null;
+	end_time: string | null;
+	scheduled_start: string | null;
+	scheduled_end: string | null;
+	timezone: string;
+	duration_minutes: number;
+	present_window_minutes: number;
+	late_window_minutes: number;
+	classroom_name: string | null;
+	classroom_lat: number | null;
+	classroom_lng: number | null;
+	radius_meters: number;
+	override_capable: boolean;
 }
 
 // GET /professor/sessions/active/{id}
@@ -196,7 +230,11 @@ export interface OpenedSession {
 		lw: number;
 	};
 	expiresAt: string | null;
+	// The scheduled window (D93): the offering's plan, or the override the
+	// professor asked for.
+	scheduledStartTime: string;
 	scheduledEndTime: string;
+	scheduleOverridden: boolean;
 	createdAt: string;
 }
 export interface Session {

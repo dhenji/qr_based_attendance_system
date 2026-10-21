@@ -259,6 +259,19 @@
 ### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
 
 - **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 128-d embeddings (face-api.js-compatible), stores encrypted (`students.face_embedding BYTEA`) + `face_enrolled_at` + `face_embedding_version`.
+  > **As-built note (2026-10-21)** — the pipeline described above is **not
+  > implemented**. No face-recognition model is installed in this repository: the
+  > only model the project ships is MediaPipe FaceLandmarker
+  > (`frontend/static/models/face_landmarker.task`), which produces landmarks and
+  > blendshapes, not identity embeddings, and the named face-api.js ResNet was
+  > never a dependency of either side. The server writes the documented blob shape
+  > **zero-filled** and tagged `"stub": true` (`_stub_embedding_blob`), the blob is
+  > stored **plaintext** (the AES-256-GCM step is not implemented), and no
+  > similarity comparison runs — `face_match_score` is a client assertion the
+  > server band-checks without ever reading the stored blob. What *did* ship is
+  > the distribution half: the enrollment route, the version column, the
+  > pull-on-login handshake and the device-side encrypted cache (ADR-029). See
+  > `docs/proposals/models.md` §3 for the as-built catalog.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Privacy — biometric enrollment is admin-supervised. 3 angles improve accuracy. Encryption at rest required.
@@ -283,6 +296,13 @@
 ### ADR-031: Fixed Liveness Sequence — Blink → Left → Right
 
 - **Decision (D31):** Liveness sequence is **fixed** (blink → left → right), MediaPipe Face Mesh WASM client-side, EAR + PnP heuristics graded server-side. Sibling-confusion risk is acknowledged as a known limitation, not solved (per instructor: treated as future assignment).
+  > **As-built note (2026-10-21)** — the shipped model is MediaPipe
+  > **FaceLandmarker** (`face_landmarker.task`, 478 landmarks), the successor to
+  > the Face Mesh solver named above; the fixed sequence, the EAR + PnP protocol
+  > and the server-side grading are unchanged. The server's grade is four checks
+  > (`attendance/service.py:147-162`) — the yaw values inside `pnp_evidence` are
+  > never inspected — so "graded server-side" is thinner than the wording implies.
+  > See `docs/proposals/models.md` §2.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Deterministic sequence simplifies implementation and grading. Sibling confusion accepted as known gap.
@@ -384,6 +404,10 @@
 - **Status:** Accepted
 - **Context:** Lightweight, works with Svelte 5 runes, good date-axis support.
 - **Consequences:** Component `charts/ChartCanvas.svelte` wraps Chart.js.
+  > **Amended by ADR-091** — no chart library was adopted and
+  > `charts/ChartCanvas.svelte` was never built. The frontend ships two
+  > hand-rolled SVG chart components instead; the reusable-component intent
+  > survives, the library does not. Read this entry with ADR-091.
 
 ### ADR-042: Buildings/Campuses Table — Deferred to v2
 
@@ -2680,3 +2704,187 @@
   `test_a_reviewed_excuse_names_its_reviewer` cover the routes;
   `test_a_read_row_names_the_student_and_the_class` and
   `test_a_reviewed_row_names_its_reviewer` cover the service.
+
+### ADR-091: The Frontend Charts Are Hand-Rolled SVG, Not Chart.js
+
+- **Decision (D91):** The frontend ships **hand-rolled SVG chart components** —
+  `lib/features/report/components/ReportTrendChart.svelte` and
+  `ReportBarChart.svelte` — and no chart library. Chart.js is not a dependency
+  and `charts/ChartCanvas.svelte` was never built. ADR-041's intent survives
+  (one reusable component per chart shape, behind a stable prop contract, on
+  the report surface); the library it named does not.
+- **Date:** 2026-10-20
+- **Status:** Accepted
+- **Context:** ADR-041 chose Chart.js (+ a date adapter) in a reusable Svelte
+  component, and named `charts/ChartCanvas.svelte` as the consequence. The
+  implementation went another way and no ADR recorded it, so the log and the
+  code disagreed. The disagreement was load-bearing in a second document:
+  `docs/proposals/contributions.md` named a `ChartCanvas.svelte` and a Chart.js
+  visualization as part of a contribution, and simultaneously listed "Chart.js
+  charting" under *Deliberately NOT Contributions* — a self-contradiction that
+  only existed because the decision it cited had never been implemented.
+- **Alternatives considered:**
+  (1) *Keep the decision and build Chart.js now.* Rejected: the two SVG
+  components already cover the whole chart surface
+  (`grep -rn "chart.js" frontend/` returns nothing, and
+  `ReportTrendChart.svelte` / `ReportBarChart.svelte` are the only chart
+  components in the tree), and a chart library for two charts is a dependency
+  with no remaining consumer.
+  (2) *Say nothing and let the code win silently.* Rejected: that is how the
+  log drifted in the first place. A reader checking ADR-041 would be sent to a
+  component that does not exist, and a document citing D41 would inherit the
+  error.
+  (3) *Taken:* the decision is amended to describe what ships, so the log and
+  the code agree and the next document that cites it inherits the truth.
+- **Consequences:** `frontend/package.json` carries no `chart.js` dependency.
+  The two chart components are the only chart entry points in the frontend.
+  `docs/proposals/contributions.md` describes the SVG charts and lists chart
+  rendering under *Deliberately NOT Contributions* (standard visualization
+  work). No code change.
+
+### ADR-092: The Offering's Semester Is Free Text; the Enrollment Copies It
+
+- **Decision (D92):** `course_offerings.semester` is **free text** at the API
+  layer — `OfferingCreate.semester` is length-checked only
+  (`features/course/schema.py:199-201`) and is never validated against the year
+  level's term structure. `enrollments.semester` is **copied from the offering**
+  at creation (`features/course/service.py:1400-1404`), so an enrollment row
+  can never disagree with the offering it belongs to. The term structure's role
+  is to supply the term's session-week count
+  (`shared/schedule.py::term_weeks`), which falls back to a shared default for
+  an unmatched code rather than raising. The one hard constraint runs the other
+  way: renaming or removing a term that existing offerings reference is refused
+  (`features/program/service.py:487-512` → `YearLevelTermInUseException`).
+- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Context:** D5 reads *"Enrollment gains `semester` (term code validated
+  against the year level's term structure)"*. That validation does not exist.
+  The term structure is a JSONB document owned by the year level, and an
+  offering may legitimately carry a term code the structure no longer lists —
+  which is exactly the case the copy-on-enroll design handles. The
+  implementation moved the copy to the enrollment (so the row cannot disagree
+  with its offering) and left the offering's field free text. The log never
+  recorded that deviation, so a document citing D5 inherits a claim the code does
+  not honour — `docs/proposals/contributions.md` C8 already describes the
+  shipped behaviour correctly, which means the log and the code disagree, not
+  the docs.
+- **Alternatives considered:**
+  (1) *Validate the offering's semester against the term structure.* Rejected:
+  it would make renaming a term a breaking change for every offering that
+  referenced it, and the rename is already refused when the term is in use.
+  Free text also lets an offering exist before its term is configured.
+  (2) *Drop `enrollments.semester` and join the offering instead.* Rejected:
+  the copy is denormalised on purpose — the analytics slices filter on
+  `Enrollment.semester` directly (`features/analytics/service.py:620`,
+  `features/analytics/batch.py:256`) without joining the offering, and the copy
+  makes that filter cheap and unambiguous.
+  (3) *Taken:* record what ships. D5's wording is left alone (a decision is a
+  decision), and the deviation is recorded here so the next document that cites
+  D5 inherits the truth.
+- **Consequences:** `shared/schedule.py::term_weeks` stays the single resolver
+  for a term's session weeks, and an orphaned term code resolves to the shared
+  default instead of raising. The offering's semester remains a length-checked
+  string. No code change.
+
+### ADR-093: A Session Inherits the Offering's Plan; Overrides Live on the Session
+
+- **Decision (D93):** Opening a session resolves a **plan** for the offering
+  and copies it onto the session. The plan is the offering's meeting (the
+  active component for the session's type, else the offering's own schedule
+  columns when it has no components at all), the **next occurrence** of that
+  meeting, the offering's default present/late windows, the classroom
+  (component → offering) and the geofence radius (payload → offering → the
+  `geofence_default_radius` app setting → the environment default). The
+  windows and the radius resolve the same way, and an offering's NULL value
+  for any of them means "follow the system default".
+  `sessions.scheduled_start_time` / `scheduled_end_time` carry the plan, and
+  `sessions.schedule_overridden` records whether the professor moved it.
+  A professor may override the **date** and/or the **time** for one session
+  (`session_date`, `start_time` — wall clock in `INSTITUTION_TIMEZONE`); the
+  meeting keeps its length and the offering's recurring schedule is never
+  touched. Class wall-clock times are interpreted in a new
+  `INSTITUTION_TIMEZONE` setting (default `UTC`).
+- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Context:** The plan was designed to be copied at open —
+  `docs/architecture/migration-strategy.md:287` says *"scheduled_start_time —
+  copied from course_offering at open"* — and D12's worked example ("class
+  scheduled 7:00–8:30; prof arrives 7:10 … class still ends at scheduled
+  8:30") only holds if the session carries the class's own window. The
+  implementation wrote `now` / `now + duration` instead, which made D12's
+  `min(created_at + duration, scheduled_end_time)` cap inert, left the
+  projector's "class ends at" timer showing an arbitrary time, and made
+  `features/excuse/service.py::_session_date` read the moment of the click
+  as "the day the session was scheduled for".
+  The professor form was the other half: it seeded hard-coded constants
+  (radius 50, duration 90, present 15, late 5) and made the classroom
+  coordinates **mandatory on every open**, so the offering's configured
+  coordinates were never used even though the backend already resolved
+  `payload → component → offering`. The radius was worse than unused: the
+  admin's System Settings row was never read — `SessionService` took the
+  environment default — so changing the radius in Admin → System Settings
+  did nothing for new sessions.
+- **Alternatives considered:**
+  (1) *Keep the session's clock at "now" and only prefill the form.* Rejected:
+  it fixes the redundant typing but leaves `scheduled_start_time` meaning
+  "when the professor clicked", which is the half that D12 and the excuse
+  notifications depend on.
+  (2) *A separate "rescheduled class" record.* Rejected: a reschedule is an
+  attribute of one session, not a new entity, and a separate table would
+  need its own lifecycle for something the session row already carries.
+  (3) *Let the browser resolve the next meeting date.* Rejected: the day
+  letters are a compact encoding with a non-obvious mapping (`T` = Tuesday,
+  `H` = Thursday, `U` = Sunday), the timezone is a server-side setting, and
+  two implementations of "the next meeting day" is exactly the drift this
+  repo keeps paying to avoid (`shared/rates.py`, `shared/cohorts.py`,
+  `shared/schedule.py`).
+  (4) *Taken:* one server-side resolver, three call sites — the course list,
+  a new `GET /professor/offerings/{id}/session-plan`, and the open itself.
+  The form renders the plan; it never re-derives it.
+- **Consequences:**
+  - `shared/schedule.py` gains the day-letter map (moved out of the student
+    slice, which now delegates) and the meeting-length helper.
+  - `INSTITUTION_TIMEZONE` (default `UTC`) interprets the naive class times.
+    An unknown zone warns and falls back to UTC, like `SCHEDULER_TIMEZONE`.
+  - **D12/D49 are amended:** the class-end cap binds only while the class is
+    still ahead. A professor opening a 09:00–10:30 class at 11:00 would
+    otherwise get a session born expired; the scan window now runs for the
+    full duration instead.
+  - **ADR-078 is narrowed:** `session_duration_hours` is still the fallback
+    duration, but the offering's **meeting length** wins when there is a
+    meeting, because the meeting is the offering's own configuration. The
+    window budget follows it, so the admin-side check now also requires the
+    windows to fit the offering's shortest meeting — an offering can no
+    longer be configured into a state where every session open fails.
+  - The three session defaults — the two windows and the radius — resolve
+    the same way: payload → offering → app setting → env, and the
+    offering's columns are **nullable** (NULL = inherit). A NOT NULL default
+    would be indistinguishable from "the administrator set 50" and would keep
+    the app setting dead: the `app_settings` rows an administrator edits in
+    Admin → System Settings were previously read by nobody on the session
+    path. The plan now reads all three keys in one query.
+  - The offering's window columns are nullable, and so the server defaults
+    go with them: a column whose NULL means *inherit* must not also carry a
+    hidden default for a direct INSERT, or it has two meanings and only one
+    of them is reachable through the API. **Existing offerings keep their
+    current windows** — the column has always been NOT NULL, so "the
+    administrator deliberately set 5" and "the column defaulted to 5" are
+    indistinguishable, and silently re-pointing an offering at the system
+    default could break a window budget somebody tuned. Inheriting is
+    opt-in: an administrator blanks the field, and a new offering inherits
+    by default.
+  - The professor's form sends a window (and the duration and the radius)
+    **only when the professor changed it**. An untouched field stays absent
+    from the payload, so the server's inheritance is authoritative at open
+    time — an administrator who retunes the offering between the page load
+    and the open still wins, and a plan request that failed to load cannot
+    smuggle a stale value into the session (that path blocks the submit and
+    asks for a retry instead).
+  - The override is validated: a date before today is `session_date_in_past`,
+    a start more than an hour gone is `scheduled_start_in_past`, and a
+    non-positive window is `invalid_session_time`.
+  - `schedule_days` is read by three slices now, so its interpretation lives
+    in `shared/schedule.py` rather than privately in the student slice.
+  - Covered by `tests/features/session/test_session_plan.py`,
+    `tests/features/session/test_session_override.py`, the rewritten expiry
+    cases in `test_session_expiry.py`, and the professor-course shape tests.

@@ -478,6 +478,8 @@ const toOffering = (o: AdminOfferingResponse): AdminOffering => ({
 	classroomLng: o.classroom_lng ?? undefined,
 	presentWindowMinutes: o.default_present_window_minutes,
 	lateWindowMinutes: o.default_late_window_minutes,
+	// D93: null means "inherit the app setting".
+	defaultClassroomRadiusMeters: o.default_classroom_radius_meters ?? null,
 	isActive: o.is_active,
 	enrolledCount: o.enrolled_count ?? 0,
 	createdAt: o.created_at,

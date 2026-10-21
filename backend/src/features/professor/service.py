@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Row, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import get_settings
 from core.security import hash_password, verify_password
+from core.timezones import resolve_timezone
 from features.auth.model import User
 from features.course.exceptions import OfferingNotFoundException
 from features.course.model import Course, CourseOffering, OfferingComponent
@@ -28,6 +30,7 @@ from features.professor.exceptions import (
 from features.professor.model import Professor
 from features.professor.schema import (
     AssignedCourse,
+    AssignedOfferingComponent,
     AssignedOfferingItem,
     ProfessorCreate,
     ProfessorDetail,
@@ -39,6 +42,7 @@ from features.professor.schema import (
 )
 from features.program.model import Program, YearLevel
 from features.session.model import Session
+from features.session.plan import next_meeting
 from features.student.model import Student
 from shared.audit import record_audit
 from shared.base import BaseCRUD
@@ -51,7 +55,7 @@ from shared.csv_import import (
     parse_import_csv,
     strip_lower,
 )
-from shared.enums import AuditAction, AuditEntity
+from shared.enums import AuditAction, AuditEntity, SessionType
 from shared.schedule import meeting_minutes
 from shared.pagination import (
     DEFAULT_PAGE,
@@ -133,6 +137,16 @@ def _assignments_stmt(professor_id: int) -> Select[tuple[Any, ...]]:
             CourseProfessor.effective_from,
             CourseProfessor.effective_to,
             Course.units,
+            # The configuration a session inherits (D93).
+            CourseOffering.schedule_days,
+            CourseOffering.schedule_start_time,
+            CourseOffering.schedule_end_time,
+            CourseOffering.classroom_name,
+            CourseOffering.classroom_lat,
+            CourseOffering.classroom_lng,
+            CourseOffering.default_present_window_minutes,
+            CourseOffering.default_late_window_minutes,
+            CourseOffering.default_classroom_radius_meters,
         )
         .join(CourseProfessor, CourseProfessor.offering_id == CourseOffering.id)
         .join(Course, Course.id == CourseOffering.course_id)
@@ -167,6 +181,15 @@ def _to_assigned_offering(row: Sequence[Any]) -> AssignedOfferingItem:
         effective_from,
         effective_to,
         units,
+        schedule_days,
+        schedule_start_time,
+        schedule_end_time,
+        classroom_name,
+        classroom_lat,
+        classroom_lng,
+        default_present_window_minutes,
+        default_late_window_minutes,
+        default_classroom_radius_meters,
     ) = row
 
     return AssignedOfferingItem(
@@ -184,6 +207,15 @@ def _to_assigned_offering(row: Sequence[Any]) -> AssignedOfferingItem:
         effective_from=effective_from,
         effective_to=effective_to,
         units=int(units),
+        schedule_days=schedule_days or "",
+        schedule_start_time=schedule_start_time,
+        schedule_end_time=schedule_end_time,
+        classroom_name=classroom_name,
+        classroom_lat=classroom_lat,
+        classroom_lng=classroom_lng,
+        default_present_window_minutes=int(default_present_window_minutes or 0),
+        default_late_window_minutes=int(default_late_window_minutes or 0),
+        default_classroom_radius_meters=default_classroom_radius_meters,
     )
 
 
@@ -784,6 +816,7 @@ class ProfessorService:
         ).all()
 
         minutes_by_offering: dict[int, float] = {}
+        components_by_offering: dict[int, list[OfferingComponent]] = {}
 
         for component in component_rows:
             minutes_by_offering[component.offering_id] = minutes_by_offering.get(
@@ -793,12 +826,63 @@ class ProfessorService:
                 component.schedule_start_time,
                 component.schedule_end_time,
             )
+            components_by_offering.setdefault(component.offering_id, []).append(
+                component
+            )
 
         for offering_id, total_minutes in minutes_by_offering.items():
             item = by_offering.get(offering_id)
 
             if item is not None:
                 item.schedule_ok = int(round(total_minutes)) == int(item.units) * 60
+
+        # D93: the meetings a session inherits, and the next occurrence of the
+        # first one. The occurrence is resolved with the shared pure helper —
+        # no query per offering — so the list stays a constant number of
+        # round trips however many assignments a professor holds.
+        zone = resolve_timezone(
+            get_settings().institution_timezone, label="institution timezone"
+        )
+        now = datetime.now(timezone.utc)
+
+        for offering_id, components in components_by_offering.items():
+            item = by_offering.get(offering_id)
+
+            if item is None:
+                continue
+
+            item.components = [
+                AssignedOfferingComponent(
+                    id=component.id,
+                    session_type=SessionType(component.session_type),
+                    schedule_days=component.schedule_days,
+                    schedule_start_time=component.schedule_start_time,
+                    schedule_end_time=component.schedule_end_time,
+                    classroom_name=component.classroom_name,
+                    classroom_lat=component.classroom_lat,
+                    classroom_lng=component.classroom_lng,
+                )
+                for component in components
+            ]
+            item.session_types = sorted(
+                {SessionType(component.session_type) for component in components},
+                key=lambda value: value.value,
+            )
+
+            first = components[0]
+            found = next_meeting(
+                days=first.schedule_days,
+                start=first.schedule_start_time,
+                end=first.schedule_end_time,
+                now=now,
+                zone=zone,
+            )
+
+            if found is not None:
+                day, _start, _end = found
+                item.next_session_date = day
+                item.next_session_start = first.schedule_start_time
+                item.next_session_end = first.schedule_end_time
 
     async def _get_offering_or_404(self, offering_id: int) -> CourseOffering:
         offering: CourseOffering | None = await self._session.get(

@@ -85,6 +85,22 @@ const toCourseSummary = (item: ProfessorAssignedOffering): ProfessorCourseSummar
 	isPrimary: item.is_primary,
 	enrolledCount: item.enrolled_count ?? 0,
 	scheduleOk: item.schedule_ok ?? true,
+	// The offering's own configuration (D93) — what a session for this
+	// offering inherits.
+	scheduleDays: item.schedule_days ?? '',
+	scheduleStartTime: item.schedule_start_time ?? null,
+	scheduleEndTime: item.schedule_end_time ?? null,
+	classroomName: item.classroom_name ?? null,
+	classroomLat: item.classroom_lat ?? null,
+	classroomLng: item.classroom_lng ?? null,
+	defaultPresentWindowMinutes: item.default_present_window_minutes ?? 0,
+	defaultLateWindowMinutes: item.default_late_window_minutes ?? 0,
+	defaultClassroomRadiusMeters: item.default_classroom_radius_meters ?? null,
+	sessionTypes: item.session_types ?? [],
+	components: item.components ?? [],
+	nextSessionDate: item.next_session_date ?? null,
+	nextSessionStart: item.next_session_start ?? null,
+	nextSessionEnd: item.next_session_end ?? null,
 });
 
 export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {

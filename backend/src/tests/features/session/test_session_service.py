@@ -212,12 +212,18 @@ def test_create_session_copies_offering_defaults() -> None:
     assert read.qr_payload.radius == 50
     assert read.qr_payload.pw == 5
     assert read.qr_payload.lw == 10
-    # The fake stamps created_at at insert time (~service now, never stale),
-    # so base + duration >= scheduled end and expiry is the scheduled end.
-    assert read.expires_at == read.scheduled_end_time
-    assert abs((read.scheduled_end_time - before) - timedelta(minutes=120)) < timedelta(
-        seconds=60
-    )
+    # D93: the offering's own meeting (09:00-10:00) is the plan, so the
+    # session carries that window rather than "now" and "now + duration".
+    assert read.plan_source == "offering_legacy"
+    assert read.scheduled_end_time - read.scheduled_start_time == timedelta(minutes=60)
+    assert not read.schedule_overridden
+    # The fake stamps created_at at insert time (~service now, never stale).
+    expected = read.created_at + timedelta(minutes=60)
+
+    if read.scheduled_end_time > read.created_at:
+        expected = min(expected, read.scheduled_end_time)
+
+    assert abs(read.expires_at - expected) < timedelta(seconds=1)
 
 
 def test_create_session_rejects_second_active() -> None:

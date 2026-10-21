@@ -107,3 +107,60 @@ class OfferingScheduleMismatchException(SessionDomainException):
                 f"requirement ({limit_hours}h). Contact your administrator."
             )
         )
+
+
+class SessionDateInPastException(SessionDomainException):
+    """422 - an overridden session date is in the past (D93).
+
+    A class can move earlier or later than planned, but it cannot be opened
+    for a day that has already gone by.
+    """
+
+    status_code: int = 422
+    code: str = "session_date_in_past"
+    field: str = "session_date"
+
+    def __init__(self, session_date: str) -> None:
+        super().__init__(
+            message=(
+                f"A session date of {session_date} is in the past — pick today "
+                "or a later day."
+            )
+        )
+
+
+class ScheduledStartInPastException(SessionDomainException):
+    """422 - an overridden start time has already gone by (D93).
+
+    The default (unoverridden) start may legitimately be in the past — a
+    class that began an hour ago and is being opened now. Only an explicit
+    override is checked, and only against a short grace.
+    """
+
+    status_code: int = 422
+    code: str = "scheduled_start_in_past"
+    field: str = "start_time"
+
+    def __init__(self, start_time: str) -> None:
+        super().__init__(
+            message=(
+                f"A start time of {start_time} is already in the past — pick a "
+                "later time or today's date."
+            )
+        )
+
+
+class InvalidSessionTimeException(SessionDomainException):
+    """422 - the resolved session window is not a valid interval (D93)."""
+
+    status_code: int = 422
+    code: str = "invalid_session_time"
+    field: str = "start_time"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message=(
+                "The session must end after it starts — check the scheduled "
+                "time."
+            )
+        )
