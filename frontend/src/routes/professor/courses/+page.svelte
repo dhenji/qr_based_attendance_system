@@ -7,6 +7,7 @@
 	import { professorState, initProfessorCourses } from '$lib/features/professor/store.svelte';
 	import type { ProfessorCourseSummary } from '$lib/shared/types';
 	import { professorReport, professorSessionCreate } from '$lib/shared/constants/routes';
+	import { dayLabels, formatWallClock } from '$lib/shared/utils/schedule';
 
 	onMount(() => {
 		initProfessorCourses();
@@ -72,6 +73,52 @@
 
 	const termText = (course: ProfessorCourseSummary) => `${course.academicYear} · ${course.semester}`;
 
+	// One scheduled meeting of an offering, as the card shows it.
+	type ScheduleEntry = {
+		key: string;
+		typeLabel: string;
+		days: string;
+		timeRange: string;
+		room: string;
+	};
+
+	// The offering's scheduled meetings. The active components are the
+	// meetings a session inherits (D77); an offering with no components falls
+	// back to its own schedule columns — the same precedence the session plan
+	// uses (`plan.py::_meeting_for`), so the card cannot disagree with the
+	// session form. Everything here comes off the course list the page
+	// already loads; nothing is derived from a hardcoded table.
+	const scheduleEntries = (course: ProfessorCourseSummary): ScheduleEntry[] => {
+		if (course.components.length > 0) {
+			return course.components.map((component) => ({
+				key: `c-${component.id}`,
+				typeLabel: component.session_type === 'lab' ? 'Laboratory' : 'Lecture',
+				days: dayLabels(component.schedule_days).join(', ') || 'Days not set',
+				timeRange: `${formatWallClock(component.schedule_start_time)} – ${formatWallClock(component.schedule_end_time)}`,
+				room: component.classroom_name?.trim() || 'Room TBA'
+			}));
+		}
+
+		if (!course.scheduleDays.trim() || !course.scheduleStartTime || !course.scheduleEndTime) {
+			return [];
+		}
+
+		return [
+			{
+				key: 'offering',
+				typeLabel:
+					course.sessionTypes.length === 1
+						? course.sessionTypes[0] === 'lab'
+							? 'Laboratory'
+							: 'Lecture'
+						: 'Schedule',
+				days: dayLabels(course.scheduleDays).join(', ') || 'Days not set',
+				timeRange: `${formatWallClock(course.scheduleStartTime)} – ${formatWallClock(course.scheduleEndTime)}`,
+				room: course.classroomName?.trim() || 'Room TBA'
+			}
+		];
+	};
+
 	const today = $derived(
 		new Date().toLocaleDateString(undefined, {
 			weekday: 'long',
@@ -128,6 +175,7 @@
 
 				<ul class="course-list" id="group-{group.code}" hidden={isCollapsed(group.code)}>
 					{#each group.courses as course (course.offeringId)}
+						{@const entries = scheduleEntries(course)}
 						<li>
 							<h2 class="course-title">
 								{course.courseCode} — {course.courseName}
@@ -154,8 +202,23 @@
 						</div>
 
 						<p class="course-meta">
-							{enrollmentText(course)} · Room TBA
+							{enrollmentText(course)}
 						</p>
+
+						<div class="course-schedule">
+							{#if entries.length === 0}
+								<span class="schedule-missing">Schedule not set</span>
+							{:else}
+								{#each entries as entry (entry.key)}
+									<div class="schedule-row">
+										<span class="schedule-type">{entry.typeLabel}</span>
+										<span class="schedule-when">{entry.days} · {entry.timeRange}</span>
+										<span class="schedule-room">{entry.room}</span>
+									</div>
+								{/each}
+							{/if}
+						</div>
+
 						<p class="course-term">{termText(course)} · {sectionText(course)}</p>
 
 							<div class="course-actions">
@@ -378,6 +441,56 @@
 		margin: 0.25rem 0 0;
 		font-size: 0.875rem;
 		color: var(--text-strong);
+	}
+
+	/* --- Schedule rows -------------------------------------------------------- */
+
+	.course-schedule {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3125rem;
+		margin-top: 0.25rem;
+	}
+
+	.schedule-row {
+		display: flex;
+		align-items: baseline;
+		/* The day/time and the room can exceed a narrow viewport. */
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+	}
+
+	/* The session type of the meeting, so a mixed course reads at a glance. */
+	.schedule-type {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 6px;
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
+		color: var(--text-secondary);
+		font-size: 0.6875rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		flex-shrink: 0;
+	}
+
+	.schedule-when {
+		font-weight: 600;
+		color: var(--text-strong);
+	}
+
+	.schedule-room {
+		color: var(--text-muted);
+	}
+
+	/* An offering with no configured meeting says so rather than going blank. */
+	.schedule-missing {
+		font-size: 0.8125rem;
+		font-style: italic;
+		color: var(--text-muted);
 	}
 
 	.course-term {
