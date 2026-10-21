@@ -33,13 +33,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import tzinfo
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from core.config import Settings, get_settings
+from core.timezones import resolve_timezone as resolve_zone
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +64,11 @@ def resolve_timezone(name: str) -> tzinfo:
     A slim container image may ship without the tz database, and a cron that
     never fires is a silent data-loss bug. An unknown zone is therefore a
     warning, not a boot failure: the job still runs, on UTC.
+
+    The rule itself lives in `core.timezones` so the session-plan resolver can
+    share it without importing APScheduler (D93).
     """
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError, KeyError):
-        logger.warning("Unknown scheduler timezone %r; falling back to UTC", name)
-        return ZoneInfo("UTC")
+    return resolve_zone(name, label="scheduler timezone")
 
 
 @asynccontextmanager

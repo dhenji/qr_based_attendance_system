@@ -288,6 +288,31 @@ def test_create_offering_ok() -> None:
     assert audit.entity_id == read.id
 
 
+def test_create_offering_carries_the_radius_override() -> None:
+    """D93: the offering may override the app setting's geofence radius."""
+    session = _FakeSession(objs=(_course(), _program(), _year()), counts=[0])
+
+    read = _run(
+        CourseService(session).create_offering(
+            payload=_payload(default_classroom_radius_meters=75)
+        )
+    )
+
+    assert read.default_classroom_radius_meters == 75
+    offering = session.added[0]
+    assert offering.default_classroom_radius_meters == 75
+
+
+def test_create_offering_without_a_radius_inherits() -> None:
+    """D93: NULL means "inherit the app setting", not "50"."""
+    session = _FakeSession(objs=(_course(), _program(), _year()), counts=[0])
+
+    read = _run(CourseService(session).create_offering(payload=_payload()))
+
+    assert read.default_classroom_radius_meters is None
+    assert session.added[0].default_classroom_radius_meters is None
+
+
 def test_create_offering_duplicate_409() -> None:
     session = _FakeSession(
         objs=(_course(), _program(), _year()),

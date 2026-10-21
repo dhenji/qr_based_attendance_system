@@ -86,7 +86,12 @@ from shared.csv_import import (
 from shared.enums import AuditAction, AuditEntity, SessionType
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
-from shared.schedule import distinct_day_count, meeting_minutes, term_weeks
+from shared.schedule import (
+    distinct_day_count,
+    meeting_length_minutes,
+    meeting_minutes,
+    term_weeks,
+)
 from features.course.constants import (
     CODE_MAX_LENGTH,
     CODE_MIN_LENGTH,
@@ -565,6 +570,13 @@ class CourseService:
             course,
             payload.default_present_window_minutes,
             payload.default_late_window_minutes,
+            meeting_minutes=self._shortest_meeting_minutes(
+                [
+                    (component.schedule_start_time, component.schedule_end_time)
+                    for component in payload.components or []
+                ]
+                or [(payload.schedule_start_time, payload.schedule_end_time)]
+            ),
         )
         await self._require_no_duplicate_offering(payload)
         if payload.components:
@@ -708,10 +720,24 @@ class CourseService:
             setattr(offering, field, value)
 
         course: Course = await self._get_or_404(offering.course_id)
+        # The session inherits its duration from the meeting it belongs to
+        # (D93), so the windows are budgeted against that meeting's length —
+        # the components when there are any, the offering's own schedule when
+        # there are none.
+        components: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
         self._check_windows(
             course,
             offering.default_present_window_minutes,
             offering.default_late_window_minutes,
+            meeting_minutes=self._shortest_meeting_minutes(
+                [
+                    (component.schedule_start_time, component.schedule_end_time)
+                    for component in components
+                ]
+                or [(start, end)]
+            ),
         )
 
         await self._session.flush()
@@ -1692,6 +1718,7 @@ class CourseService:
             classroom_lng=offering.classroom_lng,
             default_present_window_minutes=offering.default_present_window_minutes,
             default_late_window_minutes=offering.default_late_window_minutes,
+            default_classroom_radius_meters=offering.default_classroom_radius_meters,
             enrolled_count=await self._enrollment_count(offering.id),
             session_types=sorted({row.session_type for row in components}),
             components=reads,
@@ -1992,12 +2019,53 @@ class CourseService:
             "classroom_lng": offering.classroom_lng,
             "default_present_window_minutes": offering.default_present_window_minutes,
             "default_late_window_minutes": offering.default_late_window_minutes,
+            "default_classroom_radius_meters": offering.default_classroom_radius_meters,
             "is_active": offering.is_active,
         }
 
     @staticmethod
-    def _check_windows(course: Course, present_minutes: int, late_minutes: int) -> None:
+    def _shortest_meeting_minutes(rows: Sequence[tuple[time, time]]) -> int:
+        """The shortest meeting length in `rows`; 0 when there are none.
+
+        A session inherits its duration from one meeting, so the windows have
+        to fit inside the *shortest* one — a mixed offering with a 90-minute
+        lecture and a 45-minute lab budgets against the lab (D93).
+        """
+        lengths = [
+            meeting_length_minutes(start, end) for start, end in rows
+        ]
+
+        return min(lengths) if lengths else 0
+
+    @staticmethod
+    def _check_windows(
+        course: Course,
+        present_minutes: int | None,
+        late_minutes: int | None,
+        *,
+        meeting_minutes: int | None = None,
+    ) -> None:
+        """The windows must fit inside the session they are opened against.
+
+        The budget is the course template's `session_duration_hours`, and —
+        since D93 — the offering's own meeting length when it is shorter. A
+        session inherits its duration from the meeting it belongs to, so
+        windows that do not fit inside that meeting could never open one:
+        the session-open path would refuse with `windows_exceed_duration`
+        long after the administrator had configured them. Catching it here
+        is what keeps an offering openable.
+
+        NULL windows are skipped: they mean "follow the system default"
+        (D93), so the offering has no window of its own to judge — the
+        effective value is checked when a session is opened.
+        """
+        if present_minutes is None or late_minutes is None:
+            return
+
         duration_minutes: float = float(course.session_duration_hours) * 60
+
+        if meeting_minutes:
+            duration_minutes = min(duration_minutes, float(meeting_minutes))
 
         if present_minutes + late_minutes > duration_minutes:
             raise WindowsExceedDurationException(

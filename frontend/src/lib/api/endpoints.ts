@@ -67,6 +67,7 @@ import type {
 	SessionCloseResponse,
 	SessionHistoryItemResponse,
 	SessionListItemResponse,
+	SessionPlanResponse,
 	SessionReadResponse,
 } from '$lib/shared/types';
 import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
@@ -258,7 +259,11 @@ export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 				lw: 5,
 			},
 			expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-			scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+			scheduled_start_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+			scheduled_end_time: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+			schedule_overridden:
+				(body as { session_date?: unknown } | undefined)?.session_date !== undefined,
+			plan_source: 'component',
 			created_at: new Date().toISOString(),
 		};
 	},
@@ -921,10 +926,39 @@ export const ProfessorProfileEndpoint: EndpointDef<ProfessorProfileResponse> = {
 	}),
 };
 
-// GET /professor/courses — own active assignments, paginated. The wire rows
-// carry no schedule clock-times, classroom, or window defaults (those columns
-// live on courses/offerings per D44, not on the assignment), so cards render
-// those slots as TBA until the contract grows them.
+// GET /professor/offerings/{id}/session-plan — what a session for this
+// offering would inherit (D93): the meeting it belongs to, the next
+// occurrence of that meeting, the attendance windows, the classroom and the
+// geofence radius. The open form renders this instead of re-deriving the
+// schedule.
+export const SessionPlanEndpoint: EndpointDef<SessionPlanResponse> = {
+	url: '/professor/offerings',
+	method: 'GET',
+	mock: () => ({
+		offering_id: 1,
+		session_type: 'lecture',
+		source: 'component',
+		session_date: null,
+		start_time: '09:00:00',
+		end_time: '10:30:00',
+		scheduled_start: null,
+		scheduled_end: null,
+		timezone: 'UTC',
+		duration_minutes: 90,
+		present_window_minutes: 5,
+		late_window_minutes: 10,
+		classroom_name: 'Room 101',
+		classroom_lat: 13.7563,
+		classroom_lng: 100.5018,
+		radius_meters: 50,
+		override_capable: true,
+	}),
+};
+
+// GET /professor/courses — own active assignments, paginated. Since D93 the
+// wire rows also carry the configuration a session inherits: the offering's
+// schedule and classroom, its default windows and radius, its scheduled
+// meetings, and the next occurrence of the first one.
 export const ProfessorCoursesEndpoint: EndpointDef<Paginated<ProfessorAssignedOffering>> = {
 	url: '/professor/courses',
 	method: 'GET',
@@ -943,6 +977,31 @@ export const ProfessorCoursesEndpoint: EndpointDef<Paginated<ProfessorAssignedOf
 				is_primary: true,
 				enrolled_count: 30,
 				units: 3,
+				schedule_days: 'MWF',
+				schedule_start_time: '09:00:00',
+				schedule_end_time: '10:30:00',
+				classroom_name: 'Room 101',
+				classroom_lat: 13.7563,
+				classroom_lng: 100.5018,
+				default_present_window_minutes: 5,
+				default_late_window_minutes: 10,
+				default_classroom_radius_meters: null,
+				session_types: ['lecture'],
+				components: [
+					{
+						id: 1,
+						session_type: 'lecture',
+						schedule_days: 'MWF',
+						schedule_start_time: '09:00:00',
+						schedule_end_time: '10:30:00',
+						classroom_name: 'Room 101',
+						classroom_lat: 13.7563,
+						classroom_lng: 100.5018,
+					},
+				],
+				next_session_date: null,
+				next_session_start: '09:00:00',
+				next_session_end: '10:30:00',
 			},
 			{
 				offering_id: 2,
@@ -1658,6 +1717,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		classroom_lng: null,
 		default_present_window_minutes: 5,
 		default_late_window_minutes: 10,
+		default_classroom_radius_meters: null,
 		enrolled_count: 30,
 		is_active: true,
 		created_at: new Date().toISOString(),
@@ -1698,6 +1758,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		classroom_lng: null,
 		default_present_window_minutes: 5,
 		default_late_window_minutes: 10,
+		default_classroom_radius_meters: null,
 		enrolled_count: 35,
 		is_active: true,
 		created_at: new Date().toISOString(),
@@ -1738,6 +1799,7 @@ const MOCK_ADMIN_OFFERINGS: AdminOfferingResponse[] = [
 		classroom_lng: null,
 		default_present_window_minutes: 5,
 		default_late_window_minutes: 10,
+		default_classroom_radius_meters: null,
 		enrolled_count: 25,
 		is_active: true,
 		created_at: new Date().toISOString(),
@@ -1959,6 +2021,7 @@ interface MockOfferingPayload {
 	classroom_lng?: unknown;
 	default_present_window_minutes?: unknown;
 	default_late_window_minutes?: unknown;
+	default_classroom_radius_meters?: unknown;
 	is_active?: unknown;
 }
 
@@ -2119,6 +2182,10 @@ export const AdminOfferingCreateEndpoint: EndpointDef<AdminOfferingResponse> = {
 			classroom_lng: (p.classroom_lng as number | null) ?? null,
 			default_present_window_minutes: Number(p.default_present_window_minutes ?? 5),
 			default_late_window_minutes: Number(p.default_late_window_minutes ?? 10),
+			default_classroom_radius_meters:
+				typeof p.default_classroom_radius_meters === 'number'
+					? p.default_classroom_radius_meters
+					: null,
 			enrolled_count: 0,
 			is_active: true,
 			created_at: new Date().toISOString(),
@@ -3828,6 +3895,7 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 			classroom_lng: 120.9843,
 			default_present_window_minutes: 5,
 			default_late_window_minutes: 10,
+			default_classroom_radius_meters: null,
 			is_active: true,
 		},
 		performed_by: 2,
@@ -4638,6 +4706,7 @@ export const endpoints = {
 	sessionHistory: SessionHistoryEndpoint,
 	sessionActive: SessionActiveEndpoint,
 	sessionClose: SessionCloseEndpoint,
+	sessionPlan: SessionPlanEndpoint,
 	// Attendance
 	attendanceList: AttendanceListEndpoint,
 	// Auth

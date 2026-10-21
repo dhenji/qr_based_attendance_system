@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -54,6 +55,13 @@ class Session(CreatedAtMixin, Base):
     late_window_minutes: Mapped[int] = mapped_column(Integer)
     scheduled_start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     scheduled_end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # D93: the scheduled start/end above carry the offering's plan, so a
+    # session that was rescheduled differs from the plan it departed from.
+    # This flag keeps the two distinguishable — in the read DTO, in the audit
+    # trail, and in the professor's form.
+    schedule_overridden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )

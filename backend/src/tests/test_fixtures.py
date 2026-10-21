@@ -541,11 +541,13 @@ async def test_factories_default_to_the_server_defaults(factories: Factories) ->
     assert stack["course"].is_active is True
     assert stack["student"].is_active is True
     assert stack["offering"].is_active is True
-    # `sessions.classroom_radius_meters` and the offering window defaults
-    # are server defaults, not Python-side ones.
+    # `sessions.classroom_radius_meters` is a server default, not a
+    # Python-side one. The offering's window defaults are the opposite since
+    # D93: they are NULL, which means "follow the system default" — the
+    # effective value is resolved when a session is opened.
     assert stack["session"].classroom_radius_meters == 50
-    assert stack["offering"].default_present_window_minutes == 5
-    assert stack["offering"].default_late_window_minutes == 10
+    assert stack["offering"].default_present_window_minutes is None
+    assert stack["offering"].default_late_window_minutes is None
     assert stack["student"].face_embedding_version == 0
 
 

@@ -24,6 +24,7 @@
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+	import { getSettings } from '$lib/features/admin/settings/service';
 	import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 	import {
 		componentCreateSchema,
@@ -88,8 +89,12 @@
 	let m_year_level_id = $state('');
 	let m_semester = $state('');
 	let m_academic_year = $state('');
-	let m_present = $state('5');
-	let m_late = $state('10');
+	// D93: blank means "follow the system default" (Admin -> System
+	// Settings), so a new offering is born inheriting rather than carrying a
+	// hard-coded 5/10 that nobody chose.
+	let m_present = $state('');
+	let m_late = $state('');
+	let systemDefaults = $state<{ present: number; late: number } | null>(null);
 	let m_yearOptions = $state<YearLevel[]>([]);
 
 	const isActiveFilter = $derived(
@@ -183,6 +188,17 @@
 		} catch {
 			courseOptions = [];
 		}
+		// The system-wide window defaults, for the "inherit" placeholders
+		// (D93). Read once; they only change in Admin -> System Settings.
+		try {
+			const settings = await getSettings();
+			systemDefaults = {
+				present: settings.present_window_default,
+				late: settings.late_window_default
+			};
+		} catch {
+			systemDefaults = null;
+		}
 	};
 
 	const reloadProgramLookups = async () => {
@@ -253,6 +269,15 @@
 		load(1);
 	};
 
+	// D93: a window field is either a whole number of minutes or "inherit
+	// the system default" (blank). The schema passes the blank through as
+	// an empty string; this turns it into null so the payload omits it.
+	const windowNumber = (raw: unknown): number | null => {
+		if (raw === undefined || raw === null || raw === '') return null;
+		const value = Number(raw);
+		return Number.isInteger(value) ? value : null;
+	};
+
 	const openCreate = async () => {
 		formError = null;
 		conflictOffering = null;
@@ -263,8 +288,8 @@
 		m_semester = '';
 		m_academic_year = defaultAcademicYear();
 		meetings = [blankMeeting()];
-		m_present = '5';
-		m_late = '10';
+		m_present = '';
+		m_late = '';
 		m_yearOptions = [];
 		if (courseOptions.length === 0) {
 			try {
@@ -436,16 +461,19 @@
 				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
 				return;
 			}
+			// D93: a blank field means "follow the system default", so the
+			// offering stores NULL and the session resolves the value from
+			// Admin -> System Settings. Only an explicit value is sent.
+			const present = windowNumber(parsed.data.default_present_window_minutes);
+			const late = windowNumber(parsed.data.default_late_window_minutes);
 			// Windows-sum guard (backend 422 windows_exceed_duration): present
 			// + late must fit inside the selected course's session duration.
 			const course = courseOptions.find((c) => c.id === parsed.data.course_id);
 			if (
 				course &&
-				!windowsWithinDuration(
-					parsed.data.default_present_window_minutes,
-					parsed.data.default_late_window_minutes,
-					course.sessionDurationHours
-				)
+				present !== null &&
+				late !== null &&
+				!windowsWithinDuration(present, late, course.sessionDurationHours)
 			) {
 				formError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
@@ -539,8 +567,8 @@
 				classroom_name: parsed.data.classroom_name || undefined,
 				classroom_lat: head?.classroom_lat,
 				classroom_lng: head?.classroom_lng,
-				default_present_window_minutes: parsed.data.default_present_window_minutes,
-				default_late_window_minutes: parsed.data.default_late_window_minutes,
+				...(present !== null ? { default_present_window_minutes: present } : {}),
+				...(late !== null ? { default_late_window_minutes: late } : {}),
 			});
 			formOpen = false;
 			await refreshAdminOfferings();
@@ -877,8 +905,8 @@
 					{/if}
 				{/if}
 				<div class="grid2">
-					<label>Present window, min<input class="input" inputmode="numeric" bind:value={m_present} /></label>
-					<label>Late window, min<input class="input" inputmode="numeric" bind:value={m_late} /></label>
+					<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={m_present} /></label>
+					<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={m_late} /></label>
 				</div>
 				<p class="hint">Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
 			</div>

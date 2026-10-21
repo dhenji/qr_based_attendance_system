@@ -31,6 +31,7 @@
 		updateComponent,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
+	import { getSettings } from '$lib/features/admin/settings/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
@@ -111,6 +112,14 @@
 	// (D86) and shown read-only here.
 	let s_present = $state('');
 	let s_late = $state('');
+	// D93: the geofence radius override. Blank means "inherit the app setting".
+	let s_radius = $state('');
+	// The system-wide defaults, for the "inherit" placeholders and the
+	// effective-value hints. Read once; they only change in Admin -> System
+	// Settings.
+	let systemDefaults = $state<{ present: number; late: number; radius: number } | null>(
+		null
+	);
 	let settingsError = $state<string | null>(null);
 	let settingsBusy = $state(false);
 	let archiveBusy = $state(false);
@@ -307,6 +316,17 @@
 		await initAdminOfferingDetail(offeringId);
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
+		// The system-wide defaults, for the "inherit" placeholders (D93).
+		try {
+			const settings = await getSettings();
+			systemDefaults = {
+				present: settings.present_window_default,
+				late: settings.late_window_default,
+				radius: settings.geofence_default_radius
+			};
+		} catch {
+			systemDefaults = null;
+		}
 		await Promise.all([
 			loadOfferingAssignments(offeringId),
 			loadOfferingRoster(offeringId),
@@ -357,8 +377,15 @@
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
 		settingsError = null;
-		s_present = String(o.presentWindowMinutes);
-		s_late = String(o.lateWindowMinutes);
+		// A blank field means "follow the system default" (D93), so a NULL
+		// on the offering reads as an empty input rather than the text
+		// "null".
+		s_present = o.presentWindowMinutes === null ? '' : String(o.presentWindowMinutes);
+		s_late = o.lateWindowMinutes === null ? '' : String(o.lateWindowMinutes);
+		s_radius =
+			o.defaultClassroomRadiusMeters === null || o.defaultClassroomRadiusMeters === undefined
+			? ''
+			: String(o.defaultClassroomRadiusMeters);
 	};
 
 	const onArchive = async () => {
@@ -423,19 +450,36 @@
 		settingsError = null;
 		settingsBusy = true;
 		try {
-			const present = Number(s_present);
-			const late = Number(s_late);
-			if (!Number.isInteger(present) || present < 1 || present > 480 || !Number.isInteger(late) || late < 1 || late > 480) {
+			// A blank field means "follow the system default" (D93): the
+			// offering stores NULL and the session resolves the value from
+			// Admin -> System Settings.
+			const present = s_present.trim() === '' ? null : Number(s_present);
+			const late = s_late.trim() === '' ? null : Number(s_late);
+			if (
+				(present !== null && (!Number.isInteger(present) || present < 1 || present > 480)) ||
+				(late !== null && (!Number.isInteger(late) || late < 1 || late > 480))
+			) {
 				settingsError = 'Windows must be whole minutes between 1 and 480';
 				return;
 			}
-			if (course && !windowsWithinDuration(present, late, course.sessionDurationHours)) {
+			if (
+				course &&
+				present !== null &&
+				late !== null &&
+				!windowsWithinDuration(present, late, course.sessionDurationHours)
+			) {
 				settingsError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
+				return;
+			}
+			const radius = s_radius.trim() === '' ? null : Number(s_radius);
+			if (radius !== null && (!Number.isInteger(radius) || radius < 1 || radius > 1000)) {
+				settingsError = 'The geofence radius must be a whole number of metres between 1 and 1000';
 				return;
 			}
 			await updateAdminOffering(offering.id, {
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
+				default_classroom_radius_meters: radius,
 			});
 			fillSettings();
 		} catch (e: unknown) {
@@ -1120,8 +1164,8 @@
 					{#if offering.classroomLat !== undefined && offering.classroomLng !== undefined}
 						<div><dt>Geofence center</dt><dd>{offering.classroomLat}, {offering.classroomLng}</dd></div>
 					{/if}
-					<div><dt>Present window</dt><dd>{offering.presentWindowMinutes} min</dd></div>
-					<div><dt>Late window</dt><dd>{offering.lateWindowMinutes} min</dd></div>
+					<div><dt>Present window</dt><dd>{offering.presentWindowMinutes === null ? 'System default' : `${offering.presentWindowMinutes} min`}</dd></div>
+					<div><dt>Late window</dt><dd>{offering.lateWindowMinutes === null ? 'System default' : `${offering.lateWindowMinutes} min`}</dd></div>
 					<div><dt>Enrolled</dt><dd>{offering.enrolledCount}</dd></div>
 				</dl>
 				{#if course}
@@ -1439,10 +1483,20 @@
 						<p class="hint">{detailSessionCount} sessions/week × {offering.semesterWeeks} weeks = {detailExpectedTotal} expected sessions this term. Edit the term's weeks in Program Management → Year Levels → Manage Terms.</p>
 					{/if}
 					<div class="grid2">
-						<label>Present window, min<input class="input" inputmode="numeric" bind:value={s_present} /></label>
-						<label>Late window, min<input class="input" inputmode="numeric" bind:value={s_late} /></label>
+						<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={s_present} /></label>
+						<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={s_late} /></label>
 					</div>
-					<p class="hint">Present + late windows must fit the course session duration.</p>
+					<p class="hint">
+						Present + late windows must fit the course session duration. Leave a field
+						blank to follow the system default.
+					</p>
+					<div class="grid2">
+						<label>Geofence radius, m<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.radius})` : 'System default'} bind:value={s_radius} /></label>
+					</div>
+					<p class="hint">
+						Blank inherits the value set in System Settings. A value here applies to this
+						offering's sessions only.
+					</p>
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" onclick={fillSettings}>Reset</button>

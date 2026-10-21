@@ -65,6 +65,18 @@ class Settings(BaseSettings):
     default_geofence_radius_meters: int = 50
     otp_expires_minutes: int = 5
 
+    # Wall-clock class times (`course_offerings.schedule_start_time` /
+    # `schedule_end_time`) are naive local times: "09:00" means nine in the
+    # morning wherever the class is held. This zone says where. The session
+    # plan resolver (D93) interprets them here and converts to UTC on write,
+    # so "today's meeting" is a local-calendar concept and every stored
+    # timestamp stays UTC.
+    #
+    # UTC by default, matching the rest of the system's UTC-day semantics.
+    # An unknown zone name warns and falls back to UTC (see
+    # `core.timezones.resolve_timezone`) rather than failing the boot.
+    institution_timezone: str = "UTC"
+
     # Risk scoring (D35)
     risk_absence_rate_high: float = 0.30
     risk_absence_rate_medium: float = 0.15

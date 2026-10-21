@@ -4,6 +4,7 @@
 	import { goToStep, setWizardYear, wizardState } from './store.svelte';
 	import { getProgram } from '$lib/features/admin/programs/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
+	import { getSettings } from '$lib/features/admin/settings/service';
 	import {
 		createOffering,
 		findConflictingOffering,
@@ -58,8 +59,21 @@
 	let f_course_id = $state('');
 	let f_semester = $state('');
 	let f_academic_year = $state('');
-	let f_present = $state('5');
-	let f_late = $state('10');
+	// D93: blank means "follow the system default" (Admin -> System
+	// Settings), so a new offering is born inheriting rather than carrying a
+	// hard-coded 5/10 that nobody chose.
+	// D93: a window field is either a whole number of minutes or "inherit
+	// the system default" (blank). The schema passes the blank through as
+	// an empty string; this turns it into null so the payload omits it.
+	const windowNumber = (raw: unknown): number | null => {
+		if (raw === undefined || raw === null || raw === '') return null;
+		const value = Number(raw);
+		return Number.isInteger(value) ? value : null;
+	};
+
+	let f_present = $state('');
+	let f_late = $state('');
+	let systemDefaults = $state<{ present: number; late: number } | null>(null);
 
 	// Class meetings (D77): one row per weekly meeting, starting with a
 	// single lecture. Row 1 also feeds the offering's own schedule/room
@@ -180,6 +194,18 @@
 			loading = false;
 			return;
 		}
+		// The system-wide window defaults, for the "inherit" placeholders
+		// (D93). Read alongside the rest; a failure only costs the hint.
+		void getSettings()
+			.then((settings) => {
+				systemDefaults = {
+					present: settings.present_window_default,
+					late: settings.late_window_default
+				};
+			})
+			.catch(() => {
+				systemDefaults = null;
+			});
 		try {
 			const [detail, courseList] = await Promise.all([
 				getProgram(wizardState.programId),
@@ -265,13 +291,16 @@
 			// Windows-sum guard (backend 422 windows_exceed_duration): present
 			// + late must fit inside the selected course's session duration.
 			const course = courses.find((c) => c.id === parsed.data.course_id);
+			// D93: a blank field means "follow the system default", so the
+			// offering stores NULL and the session resolves the value from
+			// Admin -> System Settings. Only an explicit value is sent.
+			const present = windowNumber(parsed.data.default_present_window_minutes);
+			const late = windowNumber(parsed.data.default_late_window_minutes);
 			if (
 				course &&
-				!windowsWithinDuration(
-					parsed.data.default_present_window_minutes,
-					parsed.data.default_late_window_minutes,
-					course.sessionDurationHours
-				)
+				present !== null &&
+				late !== null &&
+				!windowsWithinDuration(present, late, course.sessionDurationHours)
 			) {
 				formError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
@@ -364,8 +393,8 @@
 				classroom_name: parsed.data.classroom_name || undefined,
 				classroom_lat: head?.classroom_lat,
 				classroom_lng: head?.classroom_lng,
-				default_present_window_minutes: parsed.data.default_present_window_minutes,
-				default_late_window_minutes: parsed.data.default_late_window_minutes,
+				...(present !== null ? { default_present_window_minutes: present } : {}),
+				...(late !== null ? { default_late_window_minutes: late } : {}),
 				components,
 			});
 			lastSaved = saved;
@@ -577,8 +606,8 @@
 					as a duplicate.
 				</p>
 				<div class="grid2">
-					<label>Present window, min<input class="input" inputmode="numeric" bind:value={f_present} /></label>
-					<label>Late window, min<input class="input" inputmode="numeric" bind:value={f_late} /></label>
+					<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={f_present} /></label>
+					<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={f_late} /></label>
 				</div>
 				{#if windowBudget !== null}
 					<p class="hint">

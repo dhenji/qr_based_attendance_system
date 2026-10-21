@@ -155,8 +155,12 @@ export interface AdminOfferingResponse {
 	classroom_name: string | null;
 	classroom_lat: number | null;
 	classroom_lng: number | null;
-	default_present_window_minutes: number;
-	default_late_window_minutes: number;
+	// D93: null means "follow the system default" (Admin -> System Settings).
+	default_present_window_minutes: number | null;
+	default_late_window_minutes: number | null;
+	// D93: null means "inherit the app setting" (Admin -> System Settings ->
+	// Geofence radius).
+	default_classroom_radius_meters: number | null;
 	enrolled_count: number;
 	is_active: boolean;
 	created_at: string;
@@ -312,8 +316,12 @@ export interface AdminOffering {
 	classroomName?: string;
 	classroomLat?: number;
 	classroomLng?: number;
-	presentWindowMinutes: number;
-	lateWindowMinutes: number;
+	// D93: null means "follow the system default" (Admin -> System Settings).
+	presentWindowMinutes: number | null;
+	lateWindowMinutes: number | null;
+	// D93: the geofence radius the offering's sessions default to. Null
+	// means "inherit" — the app setting in Admin -> System Settings wins.
+	defaultClassroomRadiusMeters: number | null;
 	isActive: boolean;
 	enrolledCount: number;
 	createdAt: string;
@@ -343,8 +351,13 @@ export interface AdminOfferingCreatePayload {
 	classroom_name?: string;
 	classroom_lat?: number;
 	classroom_lng?: number;
-	default_present_window_minutes?: number;
-	default_late_window_minutes?: number;
+	// D93: null clears the override and puts the offering back on the
+	// system default.
+	default_present_window_minutes?: number | null;
+	default_late_window_minutes?: number | null;
+	// D93: the geofence radius override. Null clears it back to the app
+	// setting.
+	default_classroom_radius_meters?: number | null;
 }
 
 // Mutable subset only: course_id/program_id/year_level_id/semester/
@@ -358,8 +371,11 @@ export interface AdminOfferingUpdatePayload {
 	classroom_name?: string | null;
 	classroom_lat?: number | null;
 	classroom_lng?: number | null;
-	default_present_window_minutes?: number;
-	default_late_window_minutes?: number;
+	// D93: null clears the override and puts the offering back on the
+	// system default.
+	default_present_window_minutes?: number | null;
+	default_late_window_minutes?: number | null;
+	default_classroom_radius_meters?: number | null;
 	is_active?: boolean;
 }
 
