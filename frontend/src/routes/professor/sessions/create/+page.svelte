@@ -1296,7 +1296,7 @@ let selectedOfferingId = $state<number | null>(null);
 
 	/* The placeholder is a shape preview only, so it stays visibly inert. */
 	.preview-code.pending {
-		color: #94a3b8;
+		color: var(--text-muted);
 	}
 
 	.preview-hint {
@@ -1366,7 +1366,7 @@ let selectedOfferingId = $state<number | null>(null);
 	}
 
 	.btn:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;

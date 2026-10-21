@@ -918,7 +918,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	.form-input {
 		padding: 0.625rem 0.875rem;
-		border: 1.5px solid #d1d5db;
+		border: 1.5px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
@@ -1055,9 +1055,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.badge.rejected {
-		color: #6b7280;
-		background: #f3f4f6;
-		border: 1px solid #e5e7eb;
+		color: var(--text-muted);
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
 	}
 
 	.retry-btn {
@@ -1067,7 +1067,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.export-error {
 		flex-basis: 100%;
 		margin: 0;
-		color: #b91c1c;
+		color: var(--danger);
 		font-size: 0.875rem;
 	}
 
@@ -1094,12 +1094,12 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.section-title {
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text-strong);
 		margin: 0;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0.5rem 0 0;
 	}
@@ -1123,7 +1123,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.error {
-		color: #b91c1c;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0.5rem 0 0;
 	}
@@ -1139,7 +1139,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.requests-title {
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text-strong);
 		margin: 0;
 	}
 
@@ -1158,11 +1158,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #f1f5f9;
+		border: 1px solid var(--divider);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: var(--bg-muted);
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.request-text {
@@ -1270,8 +1270,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-size: 0.875rem;
 		font-weight: 600;
 		font-family: inherit;
-		color: #fff;
-		cursor: pointer;
+color: var(--on-brand);
 	}
 
 	.btn-primary:disabled {
@@ -1294,11 +1293,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #f1f5f9;
+		border: 1px solid var(--divider);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: var(--bg-muted);
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.queue-actions {
@@ -1349,7 +1348,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.page-btn:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 

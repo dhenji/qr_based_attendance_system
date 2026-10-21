@@ -270,8 +270,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #94a3b8;
-		font-size: 0.875rem;
+color: var(--text-muted);
 		font-weight: 700;
 	}
 

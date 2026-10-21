@@ -466,7 +466,7 @@
 	.modal-text {
 		margin: 0 0 1.5rem;
 		font-size: 0.9375rem;
-		color: #475569;
+		color: var(--text-secondary);
 	}
 
 	.modal-actions {
