@@ -452,7 +452,7 @@
 	.metric-of {
 		font-size: 1rem;
 		font-weight: 600;
-		color: #94a3b8;
+		color: var(--text-muted);
 	}
 
 	.metric-label {
@@ -516,7 +516,7 @@
 
 	.kpi-sub {
 		font-size: 0.75rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 	}
 
 	/* --- Quick actions ------------------------------------------------------- */
@@ -573,7 +573,7 @@
 	}
 
 	.btn-secondary:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		cursor: not-allowed;
 	}
@@ -666,7 +666,7 @@
 		font-weight: 600;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
-		color: #94a3b8;
+		color: var(--text-muted);
 		flex-shrink: 0;
 	}
 

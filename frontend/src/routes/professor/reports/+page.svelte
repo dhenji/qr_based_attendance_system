@@ -963,7 +963,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.btn:disabled {
 		background: var(--bg-page);
 		border-color: var(--border);
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 

@@ -383,7 +383,7 @@
 	.course-term {
 		margin: 0;
 		font-size: 0.8125rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 	}
 
 	.course-actions {
@@ -435,7 +435,7 @@
 
 	/* Reports deep-links to the offering-prefiltered reports page. */
 	.btn:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;

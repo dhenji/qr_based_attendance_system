@@ -1079,7 +1079,7 @@
 	.form-input {
 		width: 100%;
 		padding: 0.625rem 0.875rem;
-		border: 1.5px solid #d1d5db;
+		border: 1.5px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
@@ -1201,7 +1201,7 @@
 		position: absolute;
 		width: 22px;
 		height: 22px;
-		border: 0 solid #94a3b8;
+		border: 0 solid var(--border);
 		z-index: 2;
 	}
 
