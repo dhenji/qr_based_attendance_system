@@ -8,6 +8,12 @@
 // Counting rule (also documented in api-contracts.md): one session per
 // meeting day. A Monday lecture plus a Wednesday lab counts 2 sessions/week,
 // and one MWF row counts 3. Weekly hours are Σ duration × day count.
+//
+// The two display helpers at the bottom turn the same wire values into
+// readable text (day names, a 12-hour clock) for surfaces that show a
+// schedule rather than edit one.
+
+import { DAY_OPTIONS } from '$lib/shared/constants/days';
 
 export interface ScheduleMeetingLike {
 	schedule_days: string;
@@ -194,4 +200,32 @@ export const findDuplicateMeetings = (
 		}
 	});
 	return duplicates;
+};
+
+// --- Display helpers --------------------------------------------------------
+
+// Day letters -> day names, in the canonical week order, using the one
+// shared list in `shared/constants/days.ts`. Those are the same single-letter
+// codes the backend reads (`shared/schedule.py::DAY_WEEKDAYS`, where T is
+// Tuesday and H is Thursday because T was taken), so the names here match
+// what the server stored without a second mapping.
+//
+// Unknown letters are ignored, and the result follows the calendar rather
+// than the raw string, so "FMW" reads Monday, Wednesday, Friday.
+export const dayLabels = (days: string): string[] => {
+	const wanted = new Set(days.toUpperCase().match(DAY_LETTERS) ?? []);
+	return DAY_OPTIONS.filter((day) => wanted.has(day.code)).map((day) => day.label);
+};
+
+// Institution wall clock ("09:00:00") -> a readable 12-hour clock ("9:00 AM").
+// Class times are naive wall clock in `INSTITUTION_TIMEZONE`, not instants,
+// so they are formatted and never converted. An unparsable value is returned
+// unchanged rather than replaced by a guess.
+export const formatWallClock = (value: string): string => {
+	const match = TIME_RE.exec(value.trim());
+	if (!match) return value.trim();
+	const hour = Number(match[1]);
+	const suffix = hour >= 12 ? 'PM' : 'AM';
+	const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+	return `${hour12}:${match[2]} ${suffix}`;
 };

@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import {
 		initProfessorCourses,
 		professorState
@@ -16,7 +17,7 @@
 	} from '$lib/features/session/service';
 	import type { SessionPlanResponse } from '$lib/shared/types';
 	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
-	import { professorActiveSession } from '$lib/shared/constants/routes';
+	import { professorActiveSession, Routes } from '$lib/shared/constants/routes';
 
 	// D11: two entry points, one page. Arriving from a My Courses card carries
 	// ?offering=, which locks the course and hides the selector. Arriving from
@@ -232,6 +233,55 @@ let selectedOfferingId = $state<number | null>(null);
 
 	const RADII = [10, 20, 30, 50, 100] as const;
 
+	// The radius the session would inherit if the professor changes nothing:
+	// the server-resolved default for this offering (offering override ->
+	// app setting -> env). The "Default" chip restores exactly this value,
+	// so the professor can always get back to the configured radius.
+	const defaultRadius = $derived(inherited === null ? null : inherited.radius);
+
+	// The chips on offer: the standard radii plus the effective default, so a
+	// default that is not one of the standard numbers (an administrator may
+	// set any value in 10..1000) is still visible and selectable instead of
+	// leaving every chip unselected.
+	const radiusOptions = $derived.by(() => {
+		const options = new Set<number>(RADII);
+		if (defaultRadius !== null) options.add(defaultRadius);
+		return [...options].sort((a, b) => a - b);
+	});
+
+	// Whether the professor has moved anything off the inherited plan (D93).
+	// The back control asks before discarding these, so a half-configured
+	// session is not lost to a stray click. Switching the session type counts:
+	// it reloads the plan, which re-seeds the fields.
+	const isDirty = $derived(
+		(inherited !== null &&
+			(durationOverridden ||
+				presentOverridden ||
+				lateOverridden ||
+				radiusOverridden)) ||
+			locationOverride ||
+			scheduleOverride ||
+			isLab
+	);
+
+	let confirmLeave = $state(false);
+
+	// Leaving the form. The destination is fixed rather than history-based:
+	// this page is also reachable from the dashboard, where "back" would land
+	// somewhere unrelated. Unsaved changes are confirmed first.
+	const requestLeave = () => {
+		if (isDirty) {
+			confirmLeave = true;
+			return;
+		}
+		void goto(Routes.PROFESSOR_COURSES);
+	};
+
+	const leave = () => {
+		confirmLeave = false;
+		void goto(Routes.PROFESSOR_COURSES);
+	};
+
 	let submitting = $state(false);
 	let generatedSessionId = $state<number | null>(null);
 	let generatedCode = $state<string | null>(null);
@@ -342,6 +392,10 @@ let selectedOfferingId = $state<number | null>(null);
 
 <div class="create">
 	<header class="header">
+		<button class="btn btn-ghost back-btn" type="button" onclick={requestLeave}>
+			<AppIcon name="arrow-left" size={16} />
+			Back to My Courses
+		</button>
 		<div>
 			<h1>Open New Session</h1>
 			<p class="muted">Configure and generate a session code for attendance</p>
@@ -532,11 +586,25 @@ let selectedOfferingId = $state<number | null>(null);
 				<span class="required-tag">Required</span>
 			</span>
 			<div class="radius-group" role="group" aria-label="Geofence radius">
-				{#each RADII as option (option)}
+				<button
+					class="radius-btn radius-default"
+					class:selected={defaultRadius !== null && radius === defaultRadius}
+					aria-pressed={defaultRadius !== null && radius === defaultRadius}
+					disabled={defaultRadius === null}
+					title={defaultRadius === null
+						? 'Unavailable — the offering’s session plan could not be read'
+						: `Use the configured default (${defaultRadius} m)`}
+					onclick={() => {
+						if (defaultRadius !== null) radius = defaultRadius;
+					}}
+				>
+					Default{defaultRadius !== null ? ` · ${defaultRadius} m` : ''}
+				</button>
+				{#each radiusOptions as option (option)}
 					<button
 						class="radius-btn"
-						class:selected={radius === option}
-						aria-pressed={radius === option}
+						class:selected={radius === option && option !== defaultRadius}
+						aria-pressed={radius === option && option !== defaultRadius}
 						onclick={() => (radius = option)}
 					>
 						{option}m
@@ -546,10 +614,12 @@ let selectedOfferingId = $state<number | null>(null);
 			<p class="hint">
 				Students must be within this distance from the classroom to scan.
 				{#if inherited !== null}
-					{inherited.radius} m from the offering
+					{inherited.radius} m is the configured default
 					{#if radiusOverridden}
 						<span class="location-tag">Override</span>
 					{/if}
+				{:else}
+					The offering’s default radius is unavailable — retry loading the plan.
 				{/if}
 			</p>
 		</div>
@@ -765,6 +835,27 @@ let selectedOfferingId = $state<number | null>(null);
 	{/if}
 </div>
 
+{#if confirmLeave}
+	<Modal
+		title="Discard session details?"
+		onclose={() => (confirmLeave = false)}
+		closeOnBackdrop={false}
+	>
+		<p class="leave-message">
+			You changed this session's settings and they have not been saved. Leaving now
+			discards them.
+		</p>
+		{#snippet footer()}
+			<button class="leave-btn" type="button" onclick={() => (confirmLeave = false)}>
+				Keep editing
+			</button>
+			<button class="leave-btn leave-primary" type="button" onclick={leave}>
+				Leave
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
 <style>
 	.create {
 		display: flex;
@@ -776,12 +867,26 @@ let selectedOfferingId = $state<number | null>(null);
 		margin: 0 auto;
 	}
 
+	.header {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
 	.header h1 {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
 		color: var(--text);
 		margin: 0 0 0.25rem;
+	}
+
+	/* The back control is a navigation affordance, not a competing action,
+	   so it sits above the title at a smaller size than the buttons below. */
+	.back-btn {
+		padding: 0.5rem 0.875rem;
+		font-size: 0.875rem;
 	}
 
 	.muted {
@@ -1014,6 +1119,30 @@ let selectedOfferingId = $state<number | null>(null);
 		color: var(--on-brand);
 	}
 
+	/* The Default chip restores the offering's configured radius, so it is
+	   styled apart from the numeric chips: a dashed border marks it as "the
+	   configured value" rather than as one of the offered numbers, and the
+	   dashed edge survives the selected state so the two never read alike. */
+	.radius-default {
+		border-style: dashed;
+		color: var(--text-secondary);
+	}
+
+	.radius-default:hover:not(:disabled) {
+		color: var(--text-strong);
+	}
+
+	.radius-default.selected {
+		border-style: dashed;
+	}
+
+	.radius-btn:disabled {
+		color: #94a3b8;
+		background: var(--bg-page);
+		border-color: var(--border);
+		cursor: not-allowed;
+	}
+
 	/* --- Session type toggle -------------------------------------------------- */
 
 	.toggle-group {
@@ -1224,6 +1353,18 @@ let selectedOfferingId = $state<number | null>(null);
 		color: var(--text-strong);
 	}
 
+	/* The ghost variant is the professor portal's back-control treatment
+	   (see professor/sessions/active/[id]). */
+	.btn-ghost {
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
+	}
+
+	.btn-ghost:hover {
+		background: var(--bg-hover);
+	}
+
 	.btn:disabled {
 		color: #94a3b8;
 		background: var(--bg-page);
@@ -1261,6 +1402,43 @@ let selectedOfferingId = $state<number | null>(null);
 		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
+	}
+
+	/* --- Leave confirmation --------------------------------------------------- */
+
+	.leave-message {
+		margin: 0;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+	}
+
+	/* Its own button styles rather than the page's `.btn`: the page's primary
+	   button flexes to fill its row, which is wrong inside the dialog's
+	   right-aligned action row. */
+	.leave-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem 1rem;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
+		font-family: inherit;
+		font-size: 0.875rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.leave-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.leave-primary {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	@media (max-width: 640px) {
