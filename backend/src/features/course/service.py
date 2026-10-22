@@ -90,6 +90,7 @@ from shared.schedule import (
     distinct_day_count,
     meeting_length_minutes,
     meeting_minutes,
+    openable_session_types,
     term_weeks,
 )
 from features.course.constants import (
@@ -1720,7 +1721,12 @@ class CourseService:
             default_late_window_minutes=offering.default_late_window_minutes,
             default_classroom_radius_meters=offering.default_classroom_radius_meters,
             enrolled_count=await self._enrollment_count(offering.id),
-            session_types=sorted({row.session_type for row in components}),
+            # D95: the types this offering can open. The shared helper owns
+            # the rule, so the badge here and the professor's course list
+            # cannot disagree.
+            session_types=openable_session_types(
+                row.session_type for row in components
+            ),
             components=reads,
             is_active=offering.is_active,
             created_at=offering.created_at,

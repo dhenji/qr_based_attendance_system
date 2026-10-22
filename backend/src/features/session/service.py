@@ -32,6 +32,7 @@ from features.session.exceptions import (
     SessionExpiredException,
     SessionNotFoundException,
     SessionOutsideScheduledTimeException,
+    SessionTypeNotConfiguredException,
     LabCoordinatesRequiredException,
     OfferingScheduleMismatchException,
 )
@@ -71,7 +72,7 @@ from shared.pagination import (
 )
 from shared.query import apply_if
 from shared.rates import attendance_rates
-from shared.schedule import meeting_minutes
+from shared.schedule import meeting_minutes, openable_session_types
 
 
 def _utcnow() -> datetime:
@@ -194,11 +195,19 @@ class SessionService:
         await self._require_no_active_session(offering_id=offering.id, now=moment)
 
         # One read of the offering's active meetings, shared by the
-        # weekly-hours gate and the session plan.
+        # weekly-hours gate, the type gate and the session plan.
         components: Sequence[OfferingComponent] = await active_components(
             self._session, offering.id
         )
         await self._require_schedule_requirement(offering, components)
+
+        # D95: the offering declares what it meets. A session of a type it
+        # does not configure would inherit the lecture's room and the course
+        # template's duration, so it is refused — before the lab-coordinates
+        # check, which is about a different mistake.
+        self._require_configured_type(
+            components=components, session_type=payload.session_type
+        )
 
         course: Course | None = await self._session.get(Course, offering.course_id)
         plan: SessionPlan = await resolve_session_plan(
@@ -311,6 +320,28 @@ class SessionService:
             override_reason=row.override_reason,
             created_at=row.created_at or moment,
         )
+
+    @staticmethod
+    def _require_configured_type(
+        *,
+        components: Sequence[OfferingComponent],
+        session_type: SessionType,
+    ) -> None:
+        """Refuse a session of a type the offering does not meet (D95).
+
+        The offering's active meetings are what it meets (D77), and the
+        list is resolved by the shared helper so the course read, the
+        professor's course list, the plan and the open all say the same
+        thing. An offering with no active meeting is a lecture offering.
+        """
+        configured = openable_session_types(
+            component.session_type for component in components
+        )
+
+        if session_type not in configured:
+            raise SessionTypeNotConfiguredException(
+                session_type.value, [value.value for value in configured]
+            )
 
     @staticmethod
     def _original_start(*, plan: SessionPlan, overridden: bool) -> datetime | None:
@@ -1297,6 +1328,10 @@ class SessionService:
         what the professor sees is what the server will store. Authorization
         is the same rule the open itself uses: a current teaching assignment
         on the offering.
+
+        A type the offering does not meet is refused with the same error the
+        open would raise (D95): a plan for it would be a plan the professor
+        may not use, and a stale form has to learn that.
         """
         moment: datetime = now or _utcnow()
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
@@ -1307,6 +1342,10 @@ class SessionService:
         components: Sequence[OfferingComponent] = await active_components(
             self._session, offering.id
         )
+        self._require_configured_type(
+            components=components, session_type=session_type
+        )
+
         course: Course | None = await self._session.get(Course, offering.course_id)
         plan: SessionPlan = await resolve_session_plan(
             self._session,

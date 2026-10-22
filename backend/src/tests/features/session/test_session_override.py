@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from features.course.model import CourseOffering
+from features.course.model import CourseOffering, OfferingComponent
 from features.session.exceptions import (
     ScheduledStartInPastException,
     SessionDateInPastException,
@@ -251,10 +251,29 @@ async def test_a_lab_session_without_coordinates_is_refused(
     test_db_session: AsyncSession,
     factories: Factories,
     settings: Settings,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
 ) -> None:
+    """A laboratory session needs a laboratory meeting (D95) and a room."""
+
     from features.session.exceptions import LabCoordinatesRequiredException
 
     stack, service = await _offering(factories, settings)
+
+    # D95: the offering meets a laboratory, so the type is openable and the
+    # refusal is about the missing coordinates. The one laboratory meeting is
+    # the course's one unit (D82) and it covers the suite's pinned clock
+    # (D94).
+    stack["course"].units = 1
+    await factories.db.flush()
+    await db_factory(
+        OfferingComponent,
+        offering_id=stack["offering"].id,
+        session_type="lab",
+        schedule_days="W",
+        schedule_start_time=time(8, 0),
+        schedule_end_time=time(9, 0),
+        is_active=True,
+    )
 
     with pytest.raises(LabCoordinatesRequiredException):
         await service.create_session(

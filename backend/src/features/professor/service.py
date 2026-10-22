@@ -56,7 +56,7 @@ from shared.csv_import import (
     strip_lower,
 )
 from shared.enums import AuditAction, AuditEntity, SessionType
-from shared.schedule import meeting_minutes
+from shared.schedule import meeting_minutes, openable_session_types
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -845,6 +845,16 @@ class ProfessorService:
         )
         now = datetime.now(timezone.utc)
 
+        # D95: every assignment reports the types it can open — the ones it
+        # configures as active meetings, or a lecture when it has none. The
+        # shared helper owns the rule, so this list and the admin's badge
+        # cannot disagree.
+        for offering_id, item in by_offering.items():
+            item.session_types = openable_session_types(
+                component.session_type
+                for component in components_by_offering.get(offering_id, [])
+            )
+
         for offering_id, components in components_by_offering.items():
             item = by_offering.get(offering_id)
 
@@ -864,10 +874,6 @@ class ProfessorService:
                 )
                 for component in components
             ]
-            item.session_types = sorted(
-                {SessionType(component.session_type) for component in components},
-                key=lambda value: value.value,
-            )
 
             first = components[0]
             found = next_meeting(

@@ -75,3 +75,22 @@ Roster rows (from the CSVs) have no login until claimed:
 
 For a real deployment, configure `SMTP_*` in `backend/.env` so codes are
 delivered by email instead of logged.
+
+## 5. Open a session (as the professor)
+
+Most demo offerings meet **lectures only**, so the professor's session form
+offers "Lecture" and nothing else. **CS201** is the mixed one: it meets a
+lecture (Monday & Wednesday, 10:30–12:00, Room 301) *and* a laboratory
+(Wednesday, 13:00–14:00, Lab 201), so its form offers both types and its
+admin badge reads "Mixed" (D95: an offering declares what it meets through
+its active meetings, and a session of a type it does not meet is refused).
+
+A session may also only be opened **while its class is running** (D94). When
+the demo is presented outside the offering's scheduled hours, the form says so
+and offers two ways forward:
+
+- **Wait for Scheduled Time** — returns to My Courses; the session opens
+  during the class.
+- **Select Different Start Time** — opens the date/time picker, prefilled
+  with the current time. Confirm it and the session opens with that start,
+  recorded on the session as an override with the reason you gave.
