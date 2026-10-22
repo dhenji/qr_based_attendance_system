@@ -97,6 +97,12 @@ class Session(CreatedAtMixin, Base):
     session_type: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'lecture'")
     )
+    # Whether this session is remote/online. Remote sessions skip the
+    # geofence (no classroom coordinates required) and are recorded as such
+    # so the anti-spoofing posture stays auditable.
+    is_remote: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
     @property
     def computed_expires_at(self) -> datetime:

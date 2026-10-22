@@ -43,6 +43,9 @@ class SessionCreate(BaseModel):
     # resolve classroom coordinates or creation fails with
     # `lab_coordinates_required`.
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     duration_minutes: int | None = Field(
         default=None, ge=DURATION_MINUTES_MIN, le=DURATION_MINUTES_MAX
     )
@@ -101,6 +104,9 @@ class SessionRead(BaseModel):
     session_code: str
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     qr_payload: QRPayload
     expires_at: datetime | None = None
     # The scheduled window (D93): the offering's plan, or the override the
@@ -156,6 +162,9 @@ class SessionPlanRead(BaseModel):
 
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     source: str = "none"
     # The next occurrence, in the institution's local terms and as UTC.
     session_date: date | None = None
@@ -205,6 +214,9 @@ class SessionListItem(BaseModel):
     id: int
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     session_code: str
     created_at: datetime
     expires_at: datetime | None = None
@@ -245,6 +257,9 @@ class SessionActiveResponse(BaseModel):
     id: int
     offering: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     session_code: str
     scan_window_remaining: int = Field(
         description=(
@@ -277,6 +292,9 @@ class ProfessorAttendanceItem(BaseModel):
     section: str | None = None
     session_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     status: ValidationStatus
     original_status: ValidationStatus | None = None
     scanned_at: datetime
@@ -314,6 +332,9 @@ class VerifyCodeResponse(BaseModel):
     session_id: int
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
     course_code: str
     course_name: str
     program_code: str

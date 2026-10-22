@@ -42,3 +42,46 @@ export const isWithinGeofence = (
 	const distanceMetres = distanceKm * 1000;
 	return distanceMetres <= radiusMetres;
 };
+
+// A single search result returned by the Photon (Komoot) geocoder.
+export interface LocationSearchResult {
+	label: string;
+	lat: number;
+	lng: number;
+}
+
+// Search for a place by free-text query. Returns up to `limit` results.
+// Uses Photon (https://photon.komoot.io), which supports CORS and needs no
+// API key. Returns an empty list on network/parse failure so callers can
+// degrade gracefully.
+export const searchLocation = async (
+	query: string,
+	limit: number = 5
+): Promise<LocationSearchResult[]> => {
+	const trimmed = query.trim();
+	if (trimmed.length < 3) return [];
+	try {
+		const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
+		const response = await fetch(url, { headers: { Accept: 'application/json' } });
+		if (!response.ok) return [];
+		const data = (await response.json()) as {
+			features?: Array<{
+				geometry?: { coordinates?: [number, number] };
+				properties?: { name?: string; street?: string; city?: string; country?: string };
+			}>;
+		};
+		const out: LocationSearchResult[] = [];
+		for (const feature of data.features ?? []) {
+			const coords = feature.geometry?.coordinates;
+			if (!coords || coords.length < 2) continue;
+			const [lng, lat] = coords;
+			if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+			const p = feature.properties ?? {};
+			const label = [p.name, p.street, p.city, p.country].filter(Boolean).join(', ');
+			out.push({ label: label || `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng });
+		}
+		return out;
+	} catch {
+		return [];
+	}
+};

@@ -53,6 +53,7 @@ export interface SessionReadResponse {
 	session_code: string;
 	offering_id: number;
 	session_type: CourseType;
+	is_remote: boolean;
 	qr_payload: {
 		v: 1;
 		code: string;
@@ -145,6 +146,7 @@ export interface SessionActiveResponse {
 	id: number;
 	offering: number;
 	session_type: CourseType;
+	is_remote?: boolean;
 	session_code: string;
 	scan_window_remaining: number;
 	scheduled_end_time: string;
@@ -196,6 +198,7 @@ export interface SessionSummary {
 	id: number;
 	offeringId: number;
 	sessionType: CourseType;
+	isRemote?: boolean;
 	courseCode: string;
 	courseName: string;
 	section: string;
@@ -227,6 +230,7 @@ export interface LiveSession {
 	id: number;
 	offeringId: number;
 	sessionType: CourseType;
+	isRemote?: boolean;
 	offeringCode: string;
 	offeringName: string;
 	offeringSections: string;
@@ -251,6 +255,7 @@ export interface OpenedSession {
 	id: number;
 	offeringId: number;
 	sessionType: CourseType;
+	isRemote?: boolean;
 	sessionCode: string;
 	qrPayload: {
 		v: 1;

@@ -272,6 +272,8 @@ async def test_component_changes_use_the_component_entity_type(
             "schedule_start_time": "10:00",
             "schedule_end_time": "12:00",
             "classroom_name": "Lab 2",
+            "classroom_lat": 14.0,
+            "classroom_lng": 121.0,
         },
         headers=headers,
     )

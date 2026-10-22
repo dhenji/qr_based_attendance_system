@@ -60,6 +60,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
+	import ClassroomMapPicker from '$lib/components/ClassroomMapPicker.svelte';
 	import { APIError } from '$lib/api/client';
 	import {
 		WEEKLY_HOURS_CODES,
@@ -114,7 +115,9 @@
 	let s_late = $state('');
 	// D93: the geofence radius override. Blank means "inherit the app setting".
 	let s_radius = $state('');
-	// The system-wide defaults, for the "inherit" placeholders and the
+	let s_room = $state('');
+	let s_lat = $state('');
+	let s_lng = $state('');	// The system-wide defaults, for the "inherit" placeholders and the
 	// effective-value hints. Read once; they only change in Admin -> System
 	// Settings.
 	let systemDefaults = $state<{ present: number; late: number; radius: number } | null>(
@@ -132,6 +135,7 @@
 	// Confirm gate for the row-level Remove action (soft-archives the
 	// meeting server-side; UI keeps the endpoint wording "archive").
 	let removeCompTarget = $state<OfferingComponent | null>(null);
+	let addMeetingOpen = $state(false);
 	let c_type = $state<'lecture' | 'lab'>('lab');
 	let c_days = $state('');
 	let c_start = $state('');
@@ -386,6 +390,9 @@
 			o.defaultClassroomRadiusMeters === null || o.defaultClassroomRadiusMeters === undefined
 			? ''
 			: String(o.defaultClassroomRadiusMeters);
+		s_room = o.classroomName ?? '';
+		s_lat = o.classroomLat === undefined || o.classroomLat === null ? '' : String(o.classroomLat);
+		s_lng = o.classroomLng === undefined || o.classroomLng === null ? '' : String(o.classroomLng);
 	};
 
 	const onArchive = async () => {
@@ -476,7 +483,25 @@
 				settingsError = 'The geofence radius must be a whole number of metres between 1 and 1000';
 				return;
 			}
+			let lat: number | null = null;
+			let lng: number | null = null;
+			if (s_lat.trim() !== '' || s_lng.trim() !== '') {
+				try {
+					lat = parseOptCoord(s_lat, 'Latitude', -90, 90) ?? null;
+					lng = parseOptCoord(s_lng, 'Longitude', -180, 180) ?? null;
+				} catch (e: unknown) {
+					settingsError = e instanceof Error ? e.message : 'Invalid coordinates';
+					return;
+				}
+				if (lat === null || lng === null) {
+					settingsError = 'Both latitude and longitude are required to pin a classroom';
+					return;
+				}
+			}
 			await updateAdminOffering(offering.id, {
+				classroom_name: s_room.trim() ? s_room.trim() : null,
+				classroom_lat: lat,
+				classroom_lng: lng,
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
 				default_classroom_radius_meters: radius,
@@ -575,6 +600,10 @@
 						: `Weekly scheduled hours (${addProjection?.scheduled}h) exceed the ${course.units}-unit requirement (${addProjection?.limit}h) for ${course.courseCode} — shorten a meeting first.`;
 				return;
 			}
+			if (c_type === 'lab' && (!c_lat.trim() || !c_lng.trim())) {
+				compError = 'Laboratory meetings require both latitude and longitude.';
+				return;
+			}
 			await createComponent(offering.id, {
 				session_type: parsed.data.session_type,
 				schedule_days: parsed.data.schedule_days,
@@ -588,7 +617,11 @@
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
-			compError = compFailure(e, 'Save failed. Please try again.');
+			// The inline weekly-hours status already reports these, so setting
+			// compError too would duplicate the same failure message.
+			if (!(e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code))) {
+				compError = compFailure(e, 'Save failed. Please try again.');
+			}
 		} finally {
 			compBusy = false;
 		}
@@ -641,6 +674,10 @@
 		compBusy = true;
 		compError = null;
 		try {
+			if (editingComp.sessionType === 'lab' && (!e_lat.trim() || !e_lng.trim())) {
+				compError = 'Laboratory meetings require both latitude and longitude.';
+				return;
+			}
 			const parsed = componentCreateSchema.safeParse({
 				session_type: editingComp.sessionType,
 				schedule_days: e_days,
@@ -1359,9 +1396,6 @@
 						</div>
 					{/if}
 				{/if}
-				{#if compError}
-					<p class="error" role="alert">{compError}</p>
-				{/if}
 				{#if offering.components.length === 0}
 					<EmptyState
 						icon="chart"
@@ -1417,11 +1451,21 @@
 						</div>
 						<label>Room (optional)<input class="input" bind:value={e_room} placeholder="Lab 101" /></label>
 						<div class="grid2">
-							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
-							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
+							<label>Latitude {editingComp?.sessionType === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
+							<label>Longitude {editingComp?.sessionType === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
 						</div>
+						<ClassroomMapPicker
+							lat={e_lat.trim() === '' ? null : Number(e_lat)}
+							lng={e_lng.trim() === '' ? null : Number(e_lng)}
+							onChange={(la, lo) => { e_lat = String(la); e_lng = String(lo); }}
+							onClear={() => { e_lat = ''; e_lng = ''; }}
+							height="320px"
+						/>
 						{#if course && editProjection}
 							<p class="hint">Saving would bring the weekly total to {editProjection.scheduled}h of {editProjection.limit}h ({editProjection.status === 'ok' ? 'exact' : editProjection.status === 'under' ? `${editProjection.remaining}h short` : `${-editProjection.remaining}h over`}). Reshapes save freely — the panel above tracks the total back to exact.</p>
+						{/if}
+						{#if compError}
+							<p class="error" role="alert">{compError}</p>
 						{/if}
 						<div class="modal-actions">
 							<button class="btn btn-ghost" onclick={() => { editingComp = null; editConfirmOpen = false; }}>Cancel</button>
@@ -1431,9 +1475,18 @@
 						</div>
 					</div>
 				{:else}
+					<div class="comp-add-trigger">
+						<button class="btn btn-primary" onclick={() => { if (!addMeetingOpen) resetCompForm(); addMeetingOpen = !addMeetingOpen; }}>
+							{addMeetingOpen ? 'Hide form' : 'Add meeting'}
+						</button>
+					</div>
+					{#if addMeetingOpen}
 					<div class="comp-add">
 						<h3 class="sub-title">Add a meeting</h3>
 						<p class="hint">One row, one time: days on the same row share the time below. For a different time, add another row.</p>
+						{#if compError}
+							<p class="error" role="alert">{compError}</p>
+						{/if}
 						<DayPicker bind:value={c_days} />
 						<label>Type
 							<select class="input" bind:value={c_type}>
@@ -1447,10 +1500,17 @@
 						</div>
 						<label>Room (optional)<input class="input" bind:value={c_room} placeholder="Lab 101" /></label>
 						<div class="grid2">
-							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={c_lat} placeholder="14.5995" /></label>
-							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
+							<label>Latitude {c_type === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={c_lat} placeholder="14.5995" /></label>
+							<label>Longitude {c_type === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
 						</div>
-						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence and inherit this room when the professor opens them without an override.</p>
+						<ClassroomMapPicker
+							lat={c_lat.trim() === '' ? null : Number(c_lat)}
+							lng={c_lng.trim() === '' ? null : Number(c_lng)}
+							onChange={(la, lo) => { c_lat = String(la); c_lng = String(lo); }}
+							onClear={() => { c_lat = ''; c_lng = ''; }}
+							height="320px"
+						/>
+						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence. Leave the coordinates blank to inherit the offering default.</p>
 						{#if course && addProjection && c_days.trim() && c_start && c_end}
 							{#if addBlocked}
 								<p class="error" role="alert">Adding this meeting would bring the weekly total to {addProjection.scheduled}h of {addProjection.limit}h ({addProjection.status === 'under' ? `${addProjection.remaining}h short` : `${-addProjection.remaining}h over`}).</p>
@@ -1459,11 +1519,13 @@
 							{/if}
 						{/if}
 						<div class="modal-actions">
-							<button class="btn btn-secondary" disabled={compBusy} onclick={submitAddComponent}>
+							<button class="btn btn-ghost" onclick={() => (addMeetingOpen = false)}>Cancel</button>
+							<button class="btn btn-primary" aria-busy={compBusy} disabled={compBusy} onclick={async () => { await submitAddComponent(); if (!compError) addMeetingOpen = false; }}>
 								{compBusy ? 'Adding…' : 'Add meeting'}
 							</button>
 						</div>
 					</div>
+					{/if}
 				{/if}
 			</section>
 
@@ -1490,6 +1552,18 @@
 						Present + late windows must fit the course session duration. Leave a field
 						blank to follow the system default.
 					</p>
+					<label>Default classroom (optional)<input class="input" bind:value={s_room} placeholder="Room 301" /></label>
+					<p class="hint">Used when a class meeting has no classroom of its own. Meetings can override this per row.</p>
+					<div class="grid2">
+						<label>Default latitude (optional)<input class="input" inputmode="decimal" bind:value={s_lat} placeholder="14.5995" /></label>
+						<label>Default longitude (optional)<input class="input" inputmode="decimal" bind:value={s_lng} placeholder="120.9842" /></label>
+					</div>
+					<ClassroomMapPicker
+						lat={s_lat.trim() === '' ? null : Number(s_lat)}
+						lng={s_lng.trim() === '' ? null : Number(s_lng)}
+						onChange={(la, lo) => { s_lat = String(la); s_lng = String(lo); }}
+						onClear={() => { s_lat = ''; s_lng = ''; }}
+					/>
 					<div class="grid2">
 						<label>Geofence radius, m<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.radius})` : 'System default'} bind:value={s_radius} /></label>
 					</div>
@@ -2302,8 +2376,26 @@
 		color: var(--text);
 	}
 
-	.comp-edit,
+	.comp-add-trigger {
+		margin-top: 1.25rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--divider);
+		display: flex;
+		justify-content: flex-end;
+	}
+
 	.comp-add {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+		margin-top: 1rem;
+		padding: 1.25rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-page);
+	}
+
+	.comp-edit {
 		display: flex;
 		flex-direction: column;
 		gap: 0.875rem;
@@ -2316,10 +2408,7 @@
 		section-level margins would otherwise stack on top of it (e.g. a
 		2.4rem pile-up between the heading and its hint). */
 	.comp-edit > .hint,
-	.comp-add > .hint,
-	.comp-add > .error,
-	.comp-edit > .sub-title,
-	.comp-add > .sub-title {
+	.comp-edit > .sub-title {
 		margin: 0;
 	}
 
@@ -2327,7 +2416,7 @@
 	.comp-add label {
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: 0.5rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
 		color: var(--text-secondary);

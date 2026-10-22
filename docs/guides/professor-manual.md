@@ -372,3 +372,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 _For technical details on the scan flow, offline-first sync, or face verification, see the [Architecture Docs](../architecture/)._
 
+
+## Remote / online sessions
+
+When opening a session, tick "Remote / online session" for classes with no physical classroom. This disables geofencing and removes the classroom coordinate fields; the session is recorded as remote for audit and reporting. In-person sessions still require classroom coordinates for labs and apply the geofence when coordinates are present.

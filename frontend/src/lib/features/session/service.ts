@@ -190,6 +190,8 @@ export const openSession = async (
 		classroomName?: string;
 		classroomLat?: number;
 		classroomLng?: number;
+		// Remote/online session: skips the geofence.
+		isRemote?: boolean;
 		// D93: the schedule exception.
 		sessionDate?: string;
 		startTime?: string;
@@ -197,7 +199,7 @@ export const openSession = async (
 		overrideReason?: string;
 	}
 ): Promise<OpenedSession> => {
-	const body: Record<string, number | string> = { offering_id: offeringId };
+	const body: Record<string, number | string | boolean> = { offering_id: offeringId };
 	if (options?.sessionType !== undefined) body.session_type = options.sessionType;
 	if (options?.durationMinutes !== undefined) body.duration_minutes = options.durationMinutes;
 	if (options?.presentWindowMinutes !== undefined)
@@ -209,6 +211,7 @@ export const openSession = async (
 		body.classroom_name = options.classroomName.trim();
 	if (options?.classroomLat !== undefined) body.classroom_lat = options.classroomLat;
 	if (options?.classroomLng !== undefined) body.classroom_lng = options.classroomLng;
+	if (options?.isRemote !== undefined) body.is_remote = options.isRemote;
 	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
 	if (options?.startTime !== undefined) body.start_time = options.startTime;
 	if (options?.overrideReason !== undefined && options.overrideReason.trim() !== '')
@@ -220,6 +223,7 @@ export const openSession = async (
 		id: response.id,
 		offeringId: response.offering_id,
 		sessionType: response.session_type ?? 'lecture',
+		isRemote: response.is_remote ?? false,
 		sessionCode: response.session_code,
 		qrPayload: response.qr_payload,
 		expiresAt: response.expires_at,
@@ -268,6 +272,7 @@ export const getActiveSession = async (sessionId: number): Promise<LiveSession> 
 		id: response.id,
 		offeringId: response.offering,
 		sessionType: response.session_type ?? 'lecture',
+		isRemote: response.is_remote ?? false,
 		offeringCode: courseCodeFor(response.offering),
 		offeringName: courseNameFor(response.offering),
 		offeringSections: sectionsFor(response.offering),

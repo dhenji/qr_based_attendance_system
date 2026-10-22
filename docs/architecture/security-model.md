@@ -379,3 +379,7 @@ These are **explicitly out of scope** for this system:
 | D31      | Liveness protocol (fixed sequence, EAR + PnP)       |
 | D32      | Profile read-only (identity admin-managed)          |
 | D39      | Backup encryption (AES-256-GCM)                     |
+
+## Remote sessions (D96)
+
+Remote/online sessions are an explicit, auditable mode (`sessions.is_remote`). A remote session skips the geofence and does not require classroom coordinates, even for labs. The flag is recorded and reportable, so the anti-spoofing posture (T3/T5) stays visible rather than being silently weakened by null coordinates.

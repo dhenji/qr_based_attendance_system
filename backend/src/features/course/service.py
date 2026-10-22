@@ -64,6 +64,7 @@ from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
 from features.professor.exceptions import ProfessorNotFoundException
 from features.professor.model import Professor
+from features.session.exceptions import LabCoordinatesRequiredException
 from features.session.model import Session
 from features.program.exceptions import (
     ProgramNotFoundException,
@@ -1778,6 +1779,10 @@ class CourseService:
             payload.schedule_end_time,
         )
         _check_weekly_hours(course, new_total, old_total)
+        if payload.session_type == SessionType.LAB and (
+            payload.classroom_lat is None or payload.classroom_lng is None
+        ):
+            raise LabCoordinatesRequiredException()
         row: OfferingComponent = await self._insert_component(
             offering=offering, payload=payload
         )
@@ -1822,6 +1827,13 @@ class CourseService:
             raise OfferingScheduleWindowException()
 
         merged_days = changes.get("schedule_days", row.schedule_days)
+        # Laboratory meetings must carry coordinates (D77): the geofence is
+        # mandatory for labs, so clearing them on a lab row is refused.
+        if row.session_type == SessionType.LAB.value:
+            merged_lat = changes.get("classroom_lat", row.classroom_lat)
+            merged_lng = changes.get("classroom_lng", row.classroom_lng)
+            if merged_lat is None or merged_lng is None:
+                raise LabCoordinatesRequiredException()
         # Reshape edits on active rows are unconstrained: a multi-step
         # schedule change (shrink one meeting, add another) necessarily passes
         # through a mismatched total no single write could land exactly on,
