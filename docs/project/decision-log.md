@@ -3013,3 +3013,13 @@
   - **No schema change.** The components already carry the types; this is a
     rule over them.
   - Covered by `tests/features/session/test_session_type_gate.py`.
+
+## D96 — Explicit remote/online session mode
+
+- **Context:** Geofencing is a core anti-spoofing layer, but some lectures are remote/online and have no classroom. Previously the only way to skip geofencing was to leave `classroom_lat`/`classroom_lng` null, which is ambiguous (remote vs. misconfigured) and unauditable.
+- **Decision:** Add an explicit `is_remote` flag on `sessions` (default `false`). A remote session skips the geofence and does not require classroom coordinates, even for labs. The flag is stored and surfaced in read DTOs so the anti-spoofing posture is auditable and reportable. The frontend exposes it as a "Remote / online session" toggle on the open-session form, which clears coordinates and hides the classroom fields.
+- **Consequences:**
+  - `sessions.is_remote` is a non-null boolean with server default `false`.
+  - `lab_coordinates_required` is bypassed when `is_remote` is true.
+  - Remote sessions are recorded and can be reported; null coordinates on a non-remote session remain a potential misconfiguration.
+  - Covered by the session service tests and the frontend typecheck.

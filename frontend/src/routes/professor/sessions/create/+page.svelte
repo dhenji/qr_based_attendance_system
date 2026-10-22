@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
+	import ClassroomMapPicker from '$lib/components/ClassroomMapPicker.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
@@ -111,6 +112,11 @@ let selectedOfferingId = $state<number | null>(null);
 	// D17/D93: the explicit "use a different room" toggle. Off means the
 	// offering's classroom applies and nothing is sent for it.
 	let locationOverride = $state(false);
+	let remoteSession = $state(false);
+
+	$effect(() => {
+		if (sessionType === 'lab' && remoteSession) remoteSession = false;
+	});
 
 	// D93: the schedule exception — a class that starts earlier or later than
 	// planned, or one that has been moved to another day.
@@ -217,10 +223,16 @@ let selectedOfferingId = $state<number | null>(null);
 
 	const effectiveLng = $derived(classroomLng);
 
-	// Coordinates are required for every session: without them the scan
-	// gate has nothing to enforce against.
+	// Coordinates are required only for laboratory sessions (the backend
+	// rejects a lab open without them). Lectures may legitimately have no
+	// coordinates, in which case the geofence is skipped for that session.
 	const coordsInvalid = $derived(
-		classroomLat == null || classroomLng == null || Number.isNaN(classroomLat) || Number.isNaN(classroomLng)
+		sessionType === 'lab' &&
+			!remoteSession &&
+			(classroomLat == null ||
+				classroomLng == null ||
+				Number.isNaN(classroomLat) ||
+				Number.isNaN(classroomLng))
 	);
 
 	// D13: present + late must fit inside the duration. The backend answers
@@ -522,6 +534,7 @@ let selectedOfferingId = $state<number | null>(null);
 							classroomLng: classroomLng ?? undefined
 						}
 					: {}),
+				...(remoteSession ? { isRemote: true } : {}),
 				// D93: the schedule exception, in the institution's wall
 				// clock. Both fields travel together so the override is
 				// unambiguous. D94 adds the professor's own reason.
@@ -677,13 +690,30 @@ let selectedOfferingId = $state<number | null>(null);
 			</p>
 		</div>
 
-		<div class="lab-banner">
-			<AppIcon name="alert" size={16} />
-			<span>
-				<strong>Geofence required:</strong> Students must be within the geofence radius to scan attendance.
-				Classroom coordinates come from the offering; type them only if the room changed.
-			</span>
-		</div>
+		{#if remoteSession}
+			<div class="lab-banner">
+				<AppIcon name="alert" size={16} />
+				<span>
+					<strong>Remote session:</strong> geofencing is disabled and no classroom coordinates are required.
+				</span>
+			</div>
+		{:else if sessionType === 'lab'}
+			<div class="lab-banner">
+				<AppIcon name="alert" size={16} />
+				<span>
+					<strong>Geofence required:</strong> students must be within the geofence radius to scan attendance.
+					Classroom coordinates come from the offering; type them only if the room changed.
+				</span>
+			</div>
+		{:else}
+			<div class="lab-banner">
+				<AppIcon name="alert" size={16} />
+				<span>
+					<strong>Geofence applies when coordinates are set:</strong> students must be within the radius to scan.
+					Leave the coordinates blank to skip geofencing for this lecture.
+				</span>
+			</div>
+		{/if}
 
 		<div class="field">
 			<span class="form-label">Scheduled Time</span>
@@ -839,6 +869,30 @@ let selectedOfferingId = $state<number | null>(null);
 			{/if}
 		</div>
 
+		{#if sessionType !== 'lab'}
+		<div class="field">
+			<label class="override-toggle">
+				<input
+					type="checkbox"
+					checked={remoteSession}
+					onchange={(e) => {
+						remoteSession = e.currentTarget.checked;
+						if (remoteSession) {
+							locationOverride = false;
+							classroomLat = null;
+							classroomLng = null;
+						}
+					}}
+				/>
+				Remote / online session (skips geofencing)
+			</label>
+			{#if remoteSession}
+				<p class="hint">No classroom coordinates required; geofence is disabled for this session.</p>
+			{/if}
+		</div>
+		{/if}
+
+		{#if !remoteSession}
 		<div class="location" class:overridden={overrideActive}>
 				<AppIcon name="pin" size={16} />
 				<span>
@@ -851,7 +905,9 @@ let selectedOfferingId = $state<number | null>(null);
 					<span class="location-tag">Override</span>
 				{/if}
 			</div>
+		{/if}
 
+		{#if !remoteSession}
 		<div class="field">
 			<span class="form-label">
 				Geofence Radius
@@ -895,6 +951,9 @@ let selectedOfferingId = $state<number | null>(null);
 				{/if}
 			</p>
 		</div>
+		{:else}
+			<p class="hint">Geofence disabled for this remote session.</p>
+		{/if}
 
 			<div class="field">
 				<label class="form-label" for="duration">Duration (minutes)</label>
@@ -969,6 +1028,7 @@ let selectedOfferingId = $state<number | null>(null);
 				<AppIcon name={windowsFit ? 'check' : 'alert'} size={18} />
 			</div>
 
+		{#if !remoteSession}
 		<div class="field">
 			<span class="form-label">Classroom</span>
 			<div class="field">
@@ -1024,8 +1084,17 @@ let selectedOfferingId = $state<number | null>(null);
 								/>
 							</div>
 						</div>
+						<ClassroomMapPicker
+							lat={classroomLat}
+							lng={classroomLng}
+							onChange={(la, lo) => { classroomLat = la; classroomLng = lo; }}
+							onClear={() => { classroomLat = null; classroomLng = null; }}
+							height="320px"
+						/>
 						<p class="hint">
-							The geofence centers here. Both coordinates are required for every session.
+							The geofence centers here. {sessionType === 'lab'
+								? 'Both coordinates are required for a laboratory session.'
+								: 'Coordinates are optional for a lecture — leave them blank to skip geofencing.'}
 						</p>
 						{#if coordsInvalid}
 							<p class="field-error">
@@ -1038,14 +1107,15 @@ let selectedOfferingId = $state<number | null>(null);
 					The offering's classroom and coordinates apply. Tick "Use a different room" if the
 					class moved — the change applies to this session only.
 				</p>
-				{#if coordsInvalid}
+				{#if sessionType === 'lab' && coordsInvalid}
 					<p class="field-error">
 						This offering has no classroom coordinates. Tick "Use a different room" and
-						type them before opening a session.
+						type them before opening a laboratory session.
 					</p>
 				{/if}
 			{/if}
 		</div>
+		{/if}
 
 			<div class="preview" class:generated={generatedCode !== null}>
 				<span class="preview-label">HMAC Preview · Session Code</span>
@@ -1183,7 +1253,7 @@ let selectedOfferingId = $state<number | null>(null);
 	.field {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4375rem;
+		gap: 0.625rem;
 	}
 
 	.field-row {

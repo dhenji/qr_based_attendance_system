@@ -34,6 +34,7 @@ from features.session.exceptions import (
     SessionOutsideScheduledTimeException,
     SessionTypeNotConfiguredException,
     LabCoordinatesRequiredException,
+    RemoteNotAllowedForLabException,
     OfferingScheduleMismatchException,
 )
 from features.session.model import Session
@@ -130,6 +131,12 @@ def _session_type_of(row: Session) -> SessionType:
     and any row written before the D77 backfill.
     """
     return SessionType(row.session_type or SessionType.LECTURE.value)
+
+
+def _is_remote_of(row: Session) -> bool:
+    """Remote flag, defaulting to False for hand-rolled fakes."""
+    value = getattr(row, "is_remote", False)
+    return bool(value) if value is not None else False
 
 
 def _session_status(
@@ -239,6 +246,11 @@ class SessionService:
             payload.classroom_lng, plan.classroom_lng
         )
 
+        # Remote / online mode is only available for lectures: labs always
+        # enforce the geofence, so a remote lab would bypass it.
+        if payload.session_type == SessionType.LAB and payload.is_remote:
+            raise RemoteNotAllowedForLabException()
+
         # D77: laboratory sessions always enforce the geofence, so a lab open
         # that resolves to no coordinates is rejected.
         if payload.session_type == SessionType.LAB and (
@@ -309,6 +321,7 @@ class SessionService:
             session_code=row.session_code,
             offering_id=offering.id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_start_time=row.scheduled_start_time,
@@ -556,6 +569,7 @@ class SessionService:
             classroom_name=classroom_name,
             classroom_lat=classroom_lat,
             classroom_lng=classroom_lng,
+            is_remote=payload.is_remote,
         )
         self._session.add(row)
         await self._session.flush()
@@ -604,6 +618,7 @@ class SessionService:
             id=row.id,
             offering=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_end_time=row.scheduled_end_time,
@@ -763,6 +778,7 @@ class SessionService:
             session_id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
@@ -904,6 +920,7 @@ class SessionService:
             id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -981,6 +998,7 @@ class SessionService:
             id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,

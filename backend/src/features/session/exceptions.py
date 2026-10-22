@@ -225,3 +225,16 @@ class SessionOutsideScheduledTimeException(SessionDomainException):
             )
 
         super().__init__(message=message)
+
+
+class RemoteNotAllowedForLabException(SessionDomainException):
+    """422 - remote/online mode is only available for lectures."""
+
+    status_code: int = 422
+    code: str = "remote_not_allowed_for_lab"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Remote / online mode is only available for lecture sessions",
+            field="is_remote",
+        )

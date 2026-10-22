@@ -464,6 +464,8 @@ async def test_reactivating_a_component_revalidates_the_total(    api_client: An
             "schedule_days": "W",
             "schedule_start_time": "13:00:00",
             "schedule_end_time": "14:30:00",
+            "classroom_lat": 14.0,
+            "classroom_lng": 121.0,
         },
         headers=headers,
     )

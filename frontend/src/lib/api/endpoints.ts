@@ -250,6 +250,7 @@ export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 				(body as { session_type?: unknown } | undefined)?.session_type === 'lab'
 					? ('lab' as const)
 					: ('lecture' as const),
+			is_remote: (body as { is_remote?: unknown } | undefined)?.is_remote === true,
 			qr_payload: {
 				v: 1,
 				code: sessionCode,
