@@ -893,7 +893,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.btn:disabled {
 		background: var(--bg-page);
 		border-color: var(--border);
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 		box-shadow: none;
 	}
@@ -1058,7 +1058,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.dot-present { background: var(--success); }
 	.dot-late { background: #f59e0b; }
 	.dot-excused { background: #8b5cf6; }
-	.dot-pending { background: #94a3b8; }
+	.dot-pending { background: var(--text-muted); }
 	.dot-absent { background: var(--danger); }
 
 	.feed-head {
@@ -1132,7 +1132,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.sort-arrow {
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-size: 0.6875rem;
 	}
 
@@ -1177,7 +1177,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.page:disabled:not(.current) {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
@@ -1240,7 +1240,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.mini:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;

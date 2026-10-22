@@ -126,6 +126,11 @@ let selectedOfferingId = $state<number | null>(null);
 	const loadPlan = async (offeringId: number, type: CourseType) => {
 		planLoading = true;
 		planError = null;
+		// A plan reload (new offering or session type) is a fresh attempt: drop
+		// any verdict left over from a previously refused open so the form does
+		// not stay blocked after the server would now permit it.
+		windowRefused = false;
+		error = null;
 		try {
 			const loaded = await getSessionPlan(offeringId, type);
 			plan = loaded;
@@ -291,6 +296,25 @@ let selectedOfferingId = $state<number | null>(null);
 		return `${dayText} ${formatWallClock(start)}–${formatWallClock(end)}`.trim();
 	});
 
+	// The institution-wall-clock window during which an open is permitted
+	// (early-open grace … late-open grace around the class). Shown in the
+	// blocked panel so the professor sees exactly when they can try again.
+	const openWindowLabel = $derived.by(() => {
+		const window = startWindow;
+		if (window === null || window.opens_at === null || window.closes_at === null)
+			return '';
+		const zone = window.timezone === '' ? 'UTC' : window.timezone;
+		const open = formatInZone(window.opens_at, zone, {
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+		const close = formatInZone(window.closes_at, zone, {
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+		return `${open} – ${close}`;
+	});
+
 	const windowCurrentLabel = $derived.by(() => {
 		const window = startWindow;
 		if (window === null || window.current_time === null) return '';
@@ -425,6 +449,10 @@ let selectedOfferingId = $state<number | null>(null);
 			}
 		}
 		scheduleOverride = true;
+		// An explicit override is the sanctioned way past the open window, so a
+		// prior "outside window" refusal no longer applies.
+		windowRefused = false;
+		error = null;
 		confirmedStart = '';
 	};
 
@@ -670,6 +698,11 @@ let selectedOfferingId = $state<number | null>(null);
 							{#if windowCurrentLabel !== ''}
 								<p class="window-note-line">
 									<span class="muted">Current time</span> {windowCurrentLabel}
+								</p>
+							{/if}
+							{#if openWindowLabel !== ''}
+								<p class="window-note-line">
+									<span class="muted">Open window</span> {openWindowLabel}
 								</p>
 							{/if}
 							<p class="window-note-line">
@@ -1347,7 +1380,7 @@ let selectedOfferingId = $state<number | null>(null);
 	}
 
 	.radius-btn:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;

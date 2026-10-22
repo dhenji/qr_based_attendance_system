@@ -157,7 +157,7 @@
 		padding: 0 5px;
 		border-radius: 999px;
 		background: var(--danger);
-		color: #fff;
+		color: var(--on-brand);
 		font-size: 0.6875rem;
 		font-weight: 700;
 		display: flex;

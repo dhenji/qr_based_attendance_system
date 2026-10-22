@@ -42,7 +42,7 @@
 	// Status colours follow the wireframe status palette (docs/design/wireframes.md).
 	const STATUS_COLORS: Record<SessionStatus, string> = {
 		active: '#16a34a',
-		closed: '#94a3b8'
+		closed: 'var(--text-muted)'
 	};
 
 	// "Today" is UTC on both endpoints — the dashboard summary anchors on
