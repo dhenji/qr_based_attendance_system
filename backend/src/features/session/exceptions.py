@@ -164,3 +164,35 @@ class InvalidSessionTimeException(SessionDomainException):
                 "time."
             )
         )
+
+
+class SessionOutsideScheduledTimeException(SessionDomainException):
+    """422 - the session is outside its scheduled time (D94).
+
+    A session may only be opened while its class is running. Outside that
+    window the professor has two choices — wait for the scheduled time, or
+    open the session at a different date and time — so the message names
+    both, and the form renders the same panel the plan endpoint does.
+    """
+
+    status_code: int = 422
+    code: str = "session_outside_scheduled_time"
+
+    def __init__(
+        self, *, reason: str, scheduled: str | None, current: str
+    ) -> None:
+        if reason == "not_scheduled_today":
+            message: str = (
+                "This session is outside its scheduled time — this course has "
+                f"no class today and it is now {current}. Please wait until "
+                "the next class or select a different start time to continue."
+            )
+        else:
+            message = (
+                "This session is outside its scheduled time — the class is "
+                f"scheduled for {scheduled} and it is now {current}. Please "
+                "wait until the scheduled time or select a different start "
+                "time to continue."
+            )
+
+        super().__init__(message=message)

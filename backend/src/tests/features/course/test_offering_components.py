@@ -358,7 +358,9 @@ async def test_lab_session_prefills_component_classroom(
 ) -> None:
     seed = await _seed_offering(factories)
     # The lone lab meeting is 2h, so the template needs exactly 2 units for
-    # the session-open requirement gate (D82).
+    # the session-open requirement gate (D82). It is scheduled on the day the
+    # suite's pinned clock falls on, and it covers that hour, so the open is
+    # inside its scheduled window (D94).
     seed["course"].units = 2
     await factories.db.flush()
     admin_headers = await _admin_headers(auth_headers, factories)
@@ -367,9 +369,9 @@ async def test_lab_session_prefills_component_classroom(
         f"{OFFERINGS}/{seed['offering'].id}/components",
         json={
             "session_type": "lab",
-            "schedule_days": "M",
-            "schedule_start_time": "13:00:00",
-            "schedule_end_time": "15:00:00",
+            "schedule_days": "W",
+            "schedule_start_time": "08:00:00",
+            "schedule_end_time": "10:00:00",
             "classroom_name": "Lab 101",
             "classroom_lat": 14.5,
             "classroom_lng": 121.0,

@@ -229,3 +229,90 @@ export const formatWallClock = (value: string): string => {
 	const hour12 = hour % 12 === 0 ? 12 : hour % 12;
 	return `${hour12}:${match[2]} ${suffix}`;
 };
+
+// A calendar date ("2026-10-21") as a local Date. The string is a day, not an
+// instant: `new Date("2026-10-21")` is midnight UTC and would read as the
+// previous day west of Greenwich, so the parts are read and built locally.
+export const parseDateOnly = (value: string): Date | null => {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+	if (!match) return null;
+	const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+	return Number.isNaN(date.getTime()) ? null : date;
+};
+
+// An instant rendered in a named zone. The browser's own zone is not the
+// institution's (D94), so the zone comes from the server and the instant is
+// formatted in it — never converted by hand. An unknown zone falls back to
+// the browser's, and an unparsable instant reads as an empty string.
+export const formatInZone = (
+	iso: string | null,
+	timeZone: string,
+	options: Intl.DateTimeFormatOptions
+): string => {
+	if (iso === null) return '';
+	const instant = new Date(iso);
+	if (Number.isNaN(instant.getTime())) return '';
+
+	try {
+		return new Intl.DateTimeFormat(undefined, { ...options, timeZone }).format(instant);
+	} catch {
+		return new Intl.DateTimeFormat(undefined, options).format(instant);
+	}
+};
+
+// The parts of an instant in a named zone, or null when it cannot be read.
+// The parts are what a date or time input needs: the browser formats a
+// locale string, but an input wants "2026-10-21" and "08:30" whatever the
+// user's locale is.
+const zonedParts = (
+	iso: string | null,
+	timeZone: string,
+	options: Intl.DateTimeFormatOptions
+): Record<string, string> | null => {
+	if (iso === null) return null;
+	const instant = new Date(iso);
+	if (Number.isNaN(instant.getTime())) return null;
+
+	let formatted: Intl.DateTimeFormatPart[];
+	try {
+		formatted = new Intl.DateTimeFormat('en-CA', { ...options, timeZone }).formatToParts(
+			instant
+		);
+	} catch {
+		formatted = new Intl.DateTimeFormat('en-CA', options).formatToParts(instant);
+	}
+
+	const parts: Record<string, string> = {};
+	for (const part of formatted) {
+		if (part.type !== 'literal') parts[part.type] = part.value;
+	}
+
+	return parts;
+};
+
+// An instant as the "YYYY-MM-DD" a date input takes, in a named zone.
+export const zonedDateInputValue = (iso: string | null, timeZone: string): string => {
+	const parts = zonedParts(iso, timeZone, {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit'
+	});
+	if (parts === null) return '';
+	const { year, month, day } = parts;
+	if (!year || !month || !day) return '';
+	return `${year}-${month}-${day}`;
+};
+
+// An instant as the "HH:MM" a time input takes, in a named zone. The hour
+// cycle is h23, so midnight reads "00:30" and not "24:30".
+export const zonedTimeInputValue = (iso: string | null, timeZone: string): string => {
+	const parts = zonedParts(iso, timeZone, {
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23'
+	});
+	if (parts === null) return '';
+	const { hour, minute } = parts;
+	if (!hour || !minute) return '';
+	return `${hour}:${minute}`;
+};

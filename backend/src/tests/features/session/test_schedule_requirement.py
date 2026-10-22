@@ -64,10 +64,13 @@ async def test_open_on_exact_schedule_is_201(
     db_factory: Callable[..., Coroutine[Any, Any, Any]],
     test_db_session: Any,
 ) -> None:
+    # The two meetings total the course's 3 units (90 + 90 minutes), and the
+    # first one covers the package's pinned clock (D94) so the open is inside
+    # its scheduled window.
     offering = await _seed_offering_with(
         factories,
         db_factory,
-        [("M", time(7, 0), time(8, 30)), ("T", time(13, 0), time(14, 30))],
+        [("W", time(8, 0), time(9, 30)), ("T", time(13, 0), time(14, 30))],
     )
     headers = await _professor_headers(auth_headers, factories, offering)
     await test_db_session.commit()
@@ -88,11 +91,11 @@ async def test_open_on_mismatched_schedule_is_422(
     over = await _seed_offering_with(
         factories,
         db_factory,
-        [("M", time(7, 0), time(8, 30)), ("T", time(13, 0), time(15, 0))],
+        [("W", time(8, 0), time(9, 30)), ("T", time(13, 0), time(15, 0))],
     )
     over_headers = await _professor_headers(auth_headers, factories, over)
     under = await _seed_offering_with(
-        factories, db_factory, [("M", time(7, 0), time(8, 30))]
+        factories, db_factory, [("W", time(8, 0), time(9, 30))]
     )
     under_headers = await _professor_headers(auth_headers, factories, under)
     await test_db_session.commit()

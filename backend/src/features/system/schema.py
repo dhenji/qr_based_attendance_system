@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from features.system.constants import (
     GEOFENCE_RADIUS_MAX,
     GEOFENCE_RADIUS_MIN,
+    OPEN_GRACE_MAX_MINUTES,
+    OPEN_GRACE_MIN_MINUTES,
     RETENTION_DAILY_MAX,
     RETENTION_DAILY_MIN,
     RETENTION_MONTHLY_MAX,
@@ -22,6 +24,10 @@ class SystemSettingsRead(BaseModel):
     geofence_default_radius: int
     present_window_default: int
     late_window_default: int
+    # The open-window grace (D94): how early and how late a session may be
+    # opened around its scheduled class.
+    session_early_open_minutes: int
+    session_late_open_minutes: int
     backup_retention_daily: int
     backup_retention_monthly: int
     pending_sync_count: int
@@ -36,6 +42,12 @@ class SystemSettingsUpdate(BaseModel):
     )
     late_window_default: int | None = Field(
         default=None, ge=WINDOW_MIN_MINUTES, le=WINDOW_MAX_MINUTES
+    )
+    session_early_open_minutes: int | None = Field(
+        default=None, ge=OPEN_GRACE_MIN_MINUTES, le=OPEN_GRACE_MAX_MINUTES
+    )
+    session_late_open_minutes: int | None = Field(
+        default=None, ge=OPEN_GRACE_MIN_MINUTES, le=OPEN_GRACE_MAX_MINUTES
     )
     backup_retention_daily: int | None = Field(
         default=None, ge=RETENTION_DAILY_MIN, le=RETENTION_DAILY_MAX

@@ -37,6 +37,7 @@ from features.system.model import AppSetting
 from features.session.schema import SessionCreate
 from features.session.service import SessionService
 from tests.conftest import Factories
+from tests.features.session.conftest import SESSION_NOW
 
 
 async def _offering(
@@ -66,7 +67,9 @@ async def _offering(
 
 
 def _tomorrow() -> date:
-    return datetime.now(timezone.utc).date() + timedelta(days=1)
+    """The day after the package's pinned clock (D94)."""
+
+    return SESSION_NOW.date() + timedelta(days=1)
 
 
 async def test_an_override_is_stored_on_the_session(
@@ -150,7 +153,7 @@ async def test_a_date_in_the_past_is_refused(
             professor_id=stack["professor"].id,
             payload=SessionCreate(
                 offering_id=stack["offering"].id,
-                session_date=datetime.now(timezone.utc).date() - timedelta(days=1),
+                session_date=SESSION_NOW.date() - timedelta(days=1),
             ),
         )
 
@@ -164,7 +167,7 @@ async def test_a_start_time_already_gone_by_is_refused(
     settings: Settings,
 ) -> None:
     stack, service = await _offering(factories, settings)
-    now = datetime.now(timezone.utc)
+    now = SESSION_NOW
     # Three hours ago, on today's date: past the grace window.
     gone = (now - timedelta(hours=3)).time()
 

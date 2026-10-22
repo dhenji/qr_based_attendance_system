@@ -31,6 +31,7 @@ from features.session.exceptions import (
     SessionDateInPastException,
     SessionExpiredException,
     SessionNotFoundException,
+    SessionOutsideScheduledTimeException,
     LabCoordinatesRequiredException,
     OfferingScheduleMismatchException,
 )
@@ -53,6 +54,7 @@ from features.session.schema import (
     SessionOfferingTile,
     SessionPlanRead,
     SessionRead,
+    StartWindowRead,
     VerifyCodeResponse,
     VerifyGeofence,
 )
@@ -160,7 +162,12 @@ class SessionService:
         self._offerings: BaseCRUD[CourseOffering] = BaseCRUD(CourseOffering, session)
 
     async def create_session(
-        self, *, professor_id: int, payload: SessionCreate, actor_id: int | None = None
+        self,
+        *,
+        professor_id: int,
+        payload: SessionCreate,
+        actor_id: int | None = None,
+        now: datetime | None = None,
     ) -> SessionRead:
         """Open a new attendance session for an offering.
 
@@ -170,16 +177,21 @@ class SessionService:
         override the scheduled time — and the date — for one session, which is
         recorded on the session and never written back to the offering.
 
+        A session may only be opened while its class is running (D94). The
+        plan resolves the open window, and an un-overridden open outside it
+        is refused; an explicit override is the professor's way past the
+        window, and it carries its own validation.
+
         The session code derives from the assigned row id, so the row is
         written in two flushes: insert with a random placeholder, then stamp
         the code and expiry.
         """
-        now: datetime = _utcnow()
+        moment: datetime = now or _utcnow()
         offering: CourseOffering = await self._get_offering_or_404(payload.offering_id)
         await self._require_assignment(
             offering_id=offering.id, professor_id=professor_id
         )
-        await self._require_no_active_session(offering_id=offering.id, now=now)
+        await self._require_no_active_session(offering_id=offering.id, now=moment)
 
         # One read of the offering's active meetings, shared by the
         # weekly-hours gate and the session plan.
@@ -195,7 +207,7 @@ class SessionService:
             course=course,
             components=components,
             session_type=payload.session_type,
-            now=now,
+            now=moment,
             settings=self._settings,
         )
 
@@ -225,11 +237,17 @@ class SessionService:
         ):
             raise LabCoordinatesRequiredException()
 
+        # D94: the class has to be running. An override is the professor's
+        # explicit way past the window, so the check applies only when the
+        # payload carries none.
+        if payload.session_date is None and payload.start_time is None:
+            self._require_within_start_window(plan=plan, now=moment)
+
         scheduled_start, scheduled_end, overridden = self._apply_override(
             plan=plan,
             session_date=payload.session_date,
             start_time=payload.start_time,
-            now=now,
+            now=moment,
             duration_minutes=duration,
         )
 
@@ -246,9 +264,13 @@ class SessionService:
             scheduled_start=scheduled_start,
             scheduled_end=scheduled_end,
             schedule_overridden=overridden,
-            now=now,
+            original_scheduled_start=self._original_start(
+                plan=plan, overridden=overridden
+            ),
+            now=moment,
+            created_by=actor_id,
         )
-        await self._stamp_session(row, duration, now)
+        await self._stamp_session(row, duration, moment)
 
         # After the stamp, not before: `session_code` is still the random
         # placeholder until `_stamp_session` derives it from the assigned id.
@@ -284,7 +306,61 @@ class SessionService:
             scheduled_end_time=row.scheduled_end_time,
             schedule_overridden=row.schedule_overridden,
             plan_source=plan.source,
-            created_at=row.created_at or now,
+            actual_start_time=row.actual_start_time,
+            original_scheduled_start_time=row.original_scheduled_start_time,
+            override_reason=row.override_reason,
+            created_at=row.created_at or moment,
+        )
+
+    @staticmethod
+    def _original_start(*, plan: SessionPlan, overridden: bool) -> datetime | None:
+        """The start of the class an overridden session belongs to (D94).
+
+        When today is one of the meeting's days, that class is today's
+        occurrence — the one the open window was resolved against, and the
+        one the professor meant to run. When today is not one of them there
+        is no such class, and the plan's next occurrence is the nearest one.
+
+        Null for a session that follows the plan: there,
+        `scheduled_start_time` already is that start.
+        """
+        if not overridden:
+            return None
+
+        return plan.start_window.scheduled_start or plan.scheduled_start
+
+    def _require_within_start_window(self, *, plan: SessionPlan, now: datetime) -> None:
+        """Refuse an open that falls outside the class's scheduled time (D94).
+
+        The window is today's occurrence of the meeting plus the early-open
+        and late-open grace, resolved by the plan — so this check and the
+        plan the professor was shown can never disagree.
+
+        The message names the scheduled time and the current one, because
+        the professor's next two options are "wait" and "start at a
+        different time".
+        """
+        window = plan.start_window
+
+        if window.permitted:
+            return
+
+        zone = resolve_timezone(
+            self._settings.institution_timezone, label="institution timezone"
+        )
+        current: str = now.astimezone(zone).strftime("%Y-%m-%d %H:%M")
+        scheduled: str | None = None
+
+        if window.scheduled_start is not None and window.scheduled_end is not None:
+            scheduled = (
+                f"{window.scheduled_start.astimezone(zone).strftime('%Y-%m-%d %H:%M')}"
+                f"–{window.scheduled_end.astimezone(zone).strftime('%H:%M')}"
+            )
+
+        raise SessionOutsideScheduledTimeException(
+            reason=window.reason or "after_window",
+            scheduled=scheduled,
+            current=current,
         )
 
     def _apply_override(
@@ -423,7 +499,9 @@ class SessionService:
         scheduled_start: datetime,
         scheduled_end: datetime,
         schedule_overridden: bool,
+        original_scheduled_start: datetime | None,
         now: datetime,
+        created_by: int | None,
     ) -> Session:
         row = Session(
             offering_id=offering.id,
@@ -436,6 +514,12 @@ class SessionService:
             scheduled_start_time=scheduled_start,
             scheduled_end_time=scheduled_end,
             schedule_overridden=schedule_overridden,
+            # D94: when the session was really opened, and — for an override —
+            # the start it would have carried without one.
+            actual_start_time=now,
+            original_scheduled_start_time=original_scheduled_start,
+            override_reason=payload.override_reason,
+            created_by=created_by,
             expires_at=None,
             classroom_radius_meters=radius,
             classroom_name=classroom_name,
@@ -578,6 +662,11 @@ class SessionService:
         `schedule_overridden` is included because a rescheduled session is
         not the offering's plan, and the trail is where that difference has
         to be visible (D93).
+
+        The open-window columns come with it (D94): `actual_start_time` is
+        when the session really opened, and `original_scheduled_start_time`
+        is the start of the class it belongs to — so the trail shows how far
+        the class moved.
         """
         return {
             "offering_id": row.offering_id,
@@ -587,6 +676,15 @@ class SessionService:
             "scheduled_start_time": row.scheduled_start_time.isoformat(),
             "scheduled_end_time": row.scheduled_end_time.isoformat(),
             "schedule_overridden": row.schedule_overridden,
+            "actual_start_time": (
+                row.actual_start_time.isoformat() if row.actual_start_time else None
+            ),
+            "original_scheduled_start_time": (
+                row.original_scheduled_start_time.isoformat()
+                if row.original_scheduled_start_time
+                else None
+            ),
+            "override_reason": row.override_reason,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None,
         }
 
@@ -1238,6 +1336,23 @@ class SessionService:
             classroom_lng=plan.classroom_lng,
             radius_meters=plan.radius_meters,
             override_capable=plan.has_meeting,
+            # D94: whether the session may be opened right now, and why not.
+            # The open form renders this instead of re-deriving the window.
+            start_window=StartWindowRead(
+                permitted=plan.start_window.permitted,
+                reason=plan.start_window.reason,
+                scheduled_date=plan.start_window.session_date,
+                start_time=plan.start_window.start_time,
+                end_time=plan.start_window.end_time,
+                scheduled_start=plan.start_window.scheduled_start,
+                scheduled_end=plan.start_window.scheduled_end,
+                opens_at=plan.start_window.opens_at,
+                closes_at=plan.start_window.closes_at,
+                current_time=moment,
+                timezone=self._settings.institution_timezone,
+                early_open_minutes=plan.start_window.early_open_minutes,
+                late_open_minutes=plan.start_window.late_open_minutes,
+            ),
         )
 
     async def _enrolled_students(self, offering_id: int) -> Sequence[Student]:

@@ -261,9 +261,18 @@ export const SessionCreateEndpoint: EndpointDef<SessionReadResponse> = {
 			expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 			scheduled_start_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
 			scheduled_end_time: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+			// D93/D94: either schedule field marks the session as overridden.
 			schedule_overridden:
-				(body as { session_date?: unknown } | undefined)?.session_date !== undefined,
+				(body as { session_date?: unknown; start_time?: unknown } | undefined)
+					?.session_date !== undefined ||
+				(body as { start_time?: unknown } | undefined)?.start_time !== undefined,
 			plan_source: 'component',
+			actual_start_time: new Date().toISOString(),
+			original_scheduled_start_time: null,
+			override_reason:
+				((body as { override_reason?: unknown } | undefined)?.override_reason as
+					| string
+					| null) ?? null,
 			created_at: new Date().toISOString(),
 		};
 	},
@@ -931,6 +940,9 @@ export const ProfessorProfileEndpoint: EndpointDef<ProfessorProfileResponse> = {
 // occurrence of that meeting, the attendance windows, the classroom and the
 // geofence radius. The open form renders this instead of re-deriving the
 // schedule.
+//
+// D94 adds the open window: whether the session may be opened at this very
+// moment, and why not when it may not.
 export const SessionPlanEndpoint: EndpointDef<SessionPlanResponse> = {
 	url: '/professor/offerings',
 	method: 'GET',
@@ -952,6 +964,21 @@ export const SessionPlanEndpoint: EndpointDef<SessionPlanResponse> = {
 		classroom_lng: 100.5018,
 		radius_meters: 50,
 		override_capable: true,
+		start_window: {
+			permitted: true,
+			reason: null,
+			scheduled_date: null,
+			start_time: '09:00:00',
+			end_time: '10:30:00',
+			scheduled_start: null,
+			scheduled_end: null,
+			opens_at: null,
+			closes_at: null,
+			current_time: new Date().toISOString(),
+			timezone: 'UTC',
+			early_open_minutes: 30,
+			late_open_minutes: 0,
+		},
 	}),
 };
 
@@ -3107,6 +3134,10 @@ export interface SystemSettingsResponse {
 	geofence_default_radius: number;
 	present_window_default: number;
 	late_window_default: number;
+	// D94: the open-window grace — how early and how late a session may be
+	// opened around its scheduled class.
+	session_early_open_minutes: number;
+	session_late_open_minutes: number;
 	backup_retention_daily: number;
 	backup_retention_monthly: number;
 	pending_sync_count: number;
@@ -3127,6 +3158,8 @@ const MOCK_SYSTEM_SETTINGS: SystemSettingsResponse = {
 	geofence_default_radius: 50,
 	present_window_default: 5,
 	late_window_default: 10,
+	session_early_open_minutes: 30,
+	session_late_open_minutes: 0,
 	backup_retention_daily: 30,
 	backup_retention_monthly: 12,
 	pending_sync_count: 3
@@ -3177,6 +3210,8 @@ export const SystemSettingsPatchEndpoint: EndpointDef<SystemSettingsResponse> = 
 			'geofence_default_radius',
 			'present_window_default',
 			'late_window_default',
+			'session_early_open_minutes',
+			'session_late_open_minutes',
 			'backup_retention_daily',
 			'backup_retention_monthly'
 		] as const;

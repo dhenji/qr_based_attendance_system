@@ -24,3 +24,6 @@ SESSION_CODE_MIN_LENGTH: int = 1
 SESSION_CODE_MAX_LENGTH: int = 50
 
 CLASSROOM_NAME_MAX_LENGTH: int = 100
+
+# D94: the professor's own note on why the class was moved. Optional.
+OVERRIDE_REASON_MAX_LENGTH: int = 255
