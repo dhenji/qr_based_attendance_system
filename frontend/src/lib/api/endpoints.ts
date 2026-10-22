@@ -2074,11 +2074,15 @@ const mockComponentId = (): number =>
 	Math.max(0, ...MOCK_ADMIN_OFFERINGS.flatMap((r) => r.components.map((c) => c.id))) + 1;
 
 const refreshMockSessionTypes = (row: AdminOfferingResponse): void => {
-	row.session_types = [
+	// D95: the types the offering can open — the ones it configures as
+	// active meetings, or a lecture when it has none. The server owns the
+	// rule; the mock follows it.
+	const types = [
 		...new Set(
 			row.components.filter((c) => c.is_active).map((c) => c.session_type)
-		),
+		)
 	];
+	row.session_types = types.length > 0 ? types : ['lecture'];
 	row.updated_at = new Date().toISOString();
 };
 
