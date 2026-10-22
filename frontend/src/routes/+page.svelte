@@ -25,27 +25,6 @@
 		},
 	] as const;
 
-	const portals = [
-		{
-			label: 'Student portal',
-			desc: 'Scan, view your schedule, and track your attendance rate.',
-			path: Routes.DASHBOARD,
-			cta: 'Open dashboard',
-		},
-		{
-			label: 'Professor portal',
-			desc: 'Create sessions and review attendance for every meeting.',
-			path: Routes.PROFESSOR_DASHBOARD,
-			cta: 'Open dashboard',
-		},
-		{
-			label: 'Admin portal',
-			desc: 'Manage rosters, courses, and attendance records.',
-			path: Routes.ADMIN_DASHBOARD,
-			cta: 'Open dashboard',
-		},
-	];
-
 	const navLinks = [
 		{ label: 'About', path: Routes.ABOUT },
 		{ label: 'Privacy Policy', path: Routes.PRIVACY_POLICY },
@@ -187,31 +166,14 @@
 		</div>
 	</section>
 
-	<section class="portals">
-		<div class="portal-panel">
-			<div class="portal-head">
-				<p class="section-eyebrow on-dark">03 / Pick your portal</p>
-				<h2>One system, three front doors.</h2>
-				<p class="portal-sub">
-					Students scan. Professors open sessions. Admins keep the record straight.
-				</p>
-			</div>
-			<div class="portal-grid">
-				{#each portals as portal, i}
-					<a class="portal-card" href={portal.path}>
-						<span class="portal-index mono-data">0{i + 1}</span>
-						<h3>{portal.label}</h3>
-						<p>{portal.desc}</p>
-						<span class="portal-cta">
-							{portal.cta}
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M5 12h14" />
-								<path d="m13 6 6 6-6 6" />
-							</svg>
-						</span>
-					</a>
-				{/each}
-			</div>
+	<section class="get-started">
+		<div class="get-started-panel">
+			<p class="section-eyebrow">03 / Get started</p>
+			<h2>Ready when you are.</h2>
+			<p class="get-started-sub">
+				Sign in with your school account to open your portal - student, professor, or admin.
+			</p>
+			<a class="btn-primary" href={Routes.LOGIN}>Get started</a>
 		</div>
 	</section>
 </main>
@@ -454,6 +416,31 @@
 
 	.btn-primary:active {
 		transform: translateY(0);
+	}
+
+	.get-started {
+		padding: 3rem 1.5rem;
+	}
+
+	.get-started-panel {
+		max-width: 720px;
+		margin: 0 auto;
+		text-align: center;
+		padding: 2.5rem 2rem;
+		border-radius: 16px;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		box-shadow: var(--shadow-sm);
+	}
+
+	.get-started-panel h2 {
+		margin: 0.5rem 0 0.75rem;
+		color: var(--text-strong);
+	}
+
+	.get-started-sub {
+		color: var(--text-muted);
+		margin: 0 0 1.5rem;
 	}
 
 	.btn-ghost {
@@ -728,8 +715,7 @@
 	}
 
 	.how,
-	.features,
-	.portals {
+	.features {
 		max-width: 1080px;
 		margin: 0 auto;
 		padding: 5.5rem 2rem;
@@ -908,133 +894,6 @@
 		padding-top: 0.25rem;
 	}
 
-	.portal-panel {
-		position: relative;
-		isolation: isolate;
-		overflow: hidden;
-		padding: 3rem;
-		border-radius: 24px;
-		background: linear-gradient(145deg, color-mix(in srgb, var(--brand) 45%, #0a1220), color-mix(in srgb, var(--brand) 22%, #060d16));
-		color: var(--on-brand);
-		box-shadow: 0 24px 60px color-mix(in srgb, #0f172a 28%, transparent);
-	}
-
-	.portal-panel::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		z-index: 0;
-		background-image:
-			linear-gradient(to right, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
-			linear-gradient(to bottom, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
-		background-size: 40px 40px;
-		mask-image: radial-gradient(ellipse 80% 90% at 85% 10%, #000, transparent 72%);
-		-webkit-mask-image: radial-gradient(ellipse 80% 90% at 85% 10%, #000, transparent 72%);
-		pointer-events: none;
-	}
-
-	.portal-panel::after {
-		content: '';
-		position: absolute;
-		top: -30%;
-		right: -10%;
-		width: 60%;
-		height: 90%;
-		z-index: 0;
-		background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 24%, transparent), transparent 72%);
-		pointer-events: none;
-	}
-
-	.portal-head {
-		position: relative;
-		z-index: 1;
-		max-width: 620px;
-		margin-bottom: 2.5rem;
-	}
-
-	.section-eyebrow.on-dark {
-		color: color-mix(in srgb, var(--accent) 55%, var(--on-brand));
-	}
-
-	.portal-head h2 {
-		color: var(--on-brand);
-		margin-bottom: 0.75rem;
-		max-width: 18ch;
-	}
-
-	.portal-sub {
-		margin: 0;
-		max-width: 48ch;
-		font-size: 0.9375rem;
-		line-height: 1.6;
-		color: color-mix(in srgb, var(--on-brand) 68%, transparent);
-	}
-
-	.portal-grid {
-		position: relative;
-		z-index: 1;
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 1rem;
-	}
-
-	.portal-card {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		padding: 1.5rem;
-		border-radius: 16px;
-		background: color-mix(in srgb, var(--on-brand) 6%, transparent);
-		border: 1px solid color-mix(in srgb, var(--on-brand) 12%, transparent);
-		color: var(--on-brand);
-		text-decoration: none;
-		transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
-	}
-
-	.portal-card:hover {
-		transform: translateY(-3px);
-		background: color-mix(in srgb, var(--on-brand) 10%, transparent);
-		border-color: color-mix(in srgb, var(--on-brand) 26%, transparent);
-	}
-
-	.portal-index {
-		font-size: 0.5625rem;
-		letter-spacing: 0.14em;
-		color: color-mix(in srgb, var(--on-brand) 48%, transparent);
-	}
-
-	.portal-card h3 {
-		font-size: 1.125rem;
-		font-weight: 700;
-		margin: 0;
-	}
-
-	.portal-card p {
-		font-size: 0.9375rem;
-		line-height: 1.55;
-		color: color-mix(in srgb, var(--on-brand) 68%, transparent);
-		margin: 0;
-	}
-
-	.portal-cta {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.375rem;
-		margin-top: auto;
-		padding-top: 1rem;
-		font-weight: 600;
-		font-size: 0.8125rem;
-		color: color-mix(in srgb, var(--accent) 55%, var(--on-brand));
-	}
-
-	.portal-cta svg {
-		transition: transform 0.15s ease;
-	}
-
-	.portal-card:hover .portal-cta svg {
-		transform: translateX(4px);
-	}
-
 	.footer {
 		max-width: 1080px;
 		margin: 0 auto;
@@ -1164,8 +1023,7 @@
 		}
 
 		.how,
-		.features,
-		.portals {
+		.features {
 			padding: 4rem 1.5rem;
 		}
 
@@ -1175,8 +1033,7 @@
 		}
 
 		.steps,
-		.feature-grid,
-		.portal-grid {
+		.feature-grid {
 			grid-template-columns: 1fr;
 		}
 
@@ -1190,10 +1047,6 @@
 
 		.record-card {
 			margin-left: 24px;
-		}
-
-		.portal-panel {
-			padding: 2rem;
 		}
 
 		h1 {
@@ -1247,15 +1100,6 @@
 			gap: 1rem;
 		}
 
-		.portal-panel {
-			padding: 1.5rem;
-			border-radius: 18px;
-		}
-
-		.portal-card {
-			padding: 1.25rem;
-		}
-
 		h1 {
 			font-size: 2rem;
 		}
@@ -1284,16 +1128,13 @@
 
 		.btn-primary,
 		.btn-ghost,
-		.step-card,
-		.portal-card,
-		.portal-cta svg {
+		.step-card {
 			transition: none;
 		}
 
 		.btn-primary:hover,
 		.btn-ghost:hover,
-		.step-card:hover,
-		.portal-card:hover {
+		.step-card:hover {
 			transform: none;
 		}
 	}
