@@ -74,6 +74,15 @@ from shared.enums import SyncStatus, UserRole, ValidationStatus  # noqa: E402
 
 SQLITE_URL = "sqlite+aiosqlite:///:memory:"
 
+# The instant the session service's clock is pinned to for the whole suite
+# (D94). A session may only be opened while its class is running, and the
+# default offering meets `MWF 08:00-09:00`, so the clock has to sit inside
+# that window on one of those days — otherwise every test that opens a
+# session would pass or fail depending on when the suite ran.
+#
+# A Wednesday 08:30 UTC: a meeting day, and inside the window.
+SESSION_TEST_NOW: datetime = datetime(2026, 10, 21, 8, 30, tzinfo=timezone.utc)
+
 DEFAULT_TERM_STRUCTURE: dict[str, Any] = {
     "terms": [
         {"code": "1ST_SEM", "label": "First Semester", "weeks": 16},
@@ -657,6 +666,29 @@ def reset_process_globals() -> Any:
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture(autouse=True)
+def pinned_session_clock(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Freeze the session service's clock for the whole suite (D94).
+
+    A session may only be opened while its class is running, so the open
+    compares the current time against the offering's schedule. Left to the
+    wall clock, the default offering (`MWF 08:00-09:00`) would only be
+    inside its window for three hours a week, and every test that opens a
+    session would pass or fail depending on when the suite ran.
+
+    The pinned instant is a Wednesday 08:30 UTC — a meeting day of the
+    default offering, inside its window. The session package's own
+    `conftest.py` overrides the `now` fixture with the same instant, so the
+    factories and the assertions agree with it.
+    """
+
+    from features.session import service as session_service
+
+    monkeypatch.setattr(
+        session_service, "_utcnow", lambda: SESSION_TEST_NOW
+    )
 
 
 @pytest.fixture(autouse=True)

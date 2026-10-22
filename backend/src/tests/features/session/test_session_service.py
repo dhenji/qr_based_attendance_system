@@ -96,8 +96,10 @@ def _offering(**overrides: Any) -> CourseOffering:
         "academic_year": "2026-2027",
         "sessions_per_week": 3,
         "schedule_days": "MWF",
-        "schedule_start_time": time(9, 0),
-        "schedule_end_time": time(10, 0),
+        # The same window the factory offering uses, so the pinned clock of
+        # this package falls inside it (D94).
+        "schedule_start_time": time(8, 0),
+        "schedule_end_time": time(9, 0),
         "classroom_name": "Room 101",
         "classroom_lat": 14.5,
         "classroom_lng": 121.0,

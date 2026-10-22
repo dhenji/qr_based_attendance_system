@@ -68,6 +68,11 @@ export interface SessionReadResponse {
 	scheduled_end_time: string;
 	schedule_overridden: boolean;
 	plan_source: string;
+	// D94: when the session was actually opened, and — for an override — the
+	// start it would have carried without one.
+	actual_start_time: string | null;
+	original_scheduled_start_time: string | null;
+	override_reason: string | null;
 	created_at: string;
 }
 
@@ -98,6 +103,32 @@ export interface SessionPlanResponse {
 	classroom_lng: number | null;
 	radius_meters: number;
 	override_capable: boolean;
+	// D94: whether the session may be opened right now. The server's own
+	// answer — the form never re-derives the window.
+	start_window: SessionStartWindow | null;
+}
+
+// D94: the open window.
+//
+// `permitted` says whether a session may be opened at this very moment.
+// `scheduled_date` / `start_time` / `end_time` are today's occurrence of the
+// meeting in the institution's local terms, and are null when today is not
+// one of the meeting's days.
+export interface SessionStartWindow {
+	permitted: boolean;
+	// 'not_scheduled_today' | 'before_window' | 'after_window' | null
+	reason: string | null;
+	scheduled_date: string | null;
+	start_time: string | null;
+	end_time: string | null;
+	scheduled_start: string | null;
+	scheduled_end: string | null;
+	opens_at: string | null;
+	closes_at: string | null;
+	current_time: string | null;
+	timezone: string;
+	early_open_minutes: number;
+	late_open_minutes: number;
 }
 
 // GET /professor/sessions/active/{id}
@@ -235,6 +266,11 @@ export interface OpenedSession {
 	scheduledStartTime: string;
 	scheduledEndTime: string;
 	scheduleOverridden: boolean;
+	// D94: when the session was really opened, and — for an override — the
+	// start it would have carried without one.
+	actualStartTime: string | null;
+	originalScheduledStartTime: string | null;
+	overrideReason: string | null;
 	createdAt: string;
 }
 export interface Session {

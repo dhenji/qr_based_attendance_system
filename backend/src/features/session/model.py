@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -61,6 +62,28 @@ class Session(CreatedAtMixin, Base):
     # trail, and in the professor's form.
     schedule_overridden: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    # D94: the start the professor actually opened the session at. It differs
+    # from `scheduled_start_time` whenever the class was rescheduled, and it
+    # is what "how late was the class" is measured against. The default only
+    # covers rows written straight to the table (the demo seed); the service
+    # always stamps it with its own clock.
+    actual_start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # D94: the start the session would have carried if the professor had not
+    # overridden it. Null when the session follows the plan — there
+    # `scheduled_start_time` already is that start — so the column only
+    # holds something when an override moved the class.
+    original_scheduled_start_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    # D94: why the professor moved the class, in their own words. Optional.
+    override_reason: Mapped[str | None] = mapped_column(String(255))
+    # D94: the account that opened the session. `professor_id` is the
+    # professor; this is the login behind it.
+    created_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

@@ -77,6 +77,18 @@ class Settings(BaseSettings):
     # `core.timezones.resolve_timezone`) rather than failing the boot.
     institution_timezone: str = "UTC"
 
+    # How early and how late a session may be opened (D94). A session may
+    # only be opened while its class is running, so these two values are the
+    # grace around that window: a professor who arrives before the class
+    # starts, or who opens a class that is still running a few minutes past
+    # its end, is let in.
+    #
+    # Both are the environment fallback for the `app_settings` rows an
+    # administrator edits in Admin -> System Settings, exactly like the two
+    # attendance windows and the geofence radius (D93).
+    session_early_open_minutes: int = 30
+    session_late_open_minutes: int = 0
+
     # Risk scoring (D35)
     risk_absence_rate_high: float = 0.30
     risk_absence_rate_medium: float = 0.15

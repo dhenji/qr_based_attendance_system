@@ -193,6 +193,8 @@ export const openSession = async (
 		// D93: the schedule exception.
 		sessionDate?: string;
 		startTime?: string;
+		// D94: why the professor moved the class, in their own words.
+		overrideReason?: string;
 	}
 ): Promise<OpenedSession> => {
 	const body: Record<string, number | string> = { offering_id: offeringId };
@@ -209,6 +211,8 @@ export const openSession = async (
 	if (options?.classroomLng !== undefined) body.classroom_lng = options.classroomLng;
 	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
 	if (options?.startTime !== undefined) body.start_time = options.startTime;
+	if (options?.overrideReason !== undefined && options.overrideReason.trim() !== '')
+		body.override_reason = options.overrideReason.trim();
 
 	const response = await post<SessionReadResponse>('sessionCreate', body);
 
@@ -222,6 +226,9 @@ export const openSession = async (
 		scheduledStartTime: response.scheduled_start_time,
 		scheduledEndTime: response.scheduled_end_time,
 		scheduleOverridden: response.schedule_overridden ?? false,
+		actualStartTime: response.actual_start_time ?? null,
+		originalScheduledStartTime: response.original_scheduled_start_time ?? null,
+		overrideReason: response.override_reason ?? null,
 		createdAt: response.created_at,
 	};
 };
