@@ -1,7 +1,8 @@
 <script lang="ts">
 	// AppIcon
 	// Inline SVG icon set (Lucide-style paths): camera, QR, shield, offline,
-	// users, chart, plus, file, chevron, lock, pin, check, alert, calendar.
+	// users, chart, plus, file, chevron, lock, pin, check, alert, calendar,
+	// arrow-left.
 	// Renders whichever icon is named by the `name` prop at the given `size`.
 	type IconName =
 		| 'camera'
@@ -17,7 +18,8 @@
 		| 'pin'
 		| 'check'
 		| 'alert'
-		| 'calendar';
+		| 'calendar'
+		| 'arrow-left';
 
 	let { name, size = 24 }: { name: IconName; size?: number } = $props();
 </script>
@@ -81,6 +83,9 @@
 		<path d="M12 4 2.5 20.5h19L12 4Z" />
 		<path d="M12 10v4" />
 		<path d="M12 17.5h.01" />
+	{:else if name === 'arrow-left'}
+		<path d="M19 12H5" />
+		<path d="m12 19-7-7 7-7" />
 	{:else}
 		<circle cx="12" cy="12" r="8.5" />
 		<path d="M3.5 12h17" />

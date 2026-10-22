@@ -46,16 +46,21 @@ from features.professor.model import Professor
 from features.session.service import SessionService
 from shared.enums import ValidationStatus
 from tests.conftest import Factories
+from tests.features.session.conftest import SESSION_NOW
 
 UNKNOWN_SESSION_ID = 2**31
 
 
 def past(minutes: int = 1) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    """An instant before the package's pinned clock (D94)."""
+
+    return SESSION_NOW - timedelta(minutes=minutes)
 
 
 def future(minutes: int = 1) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    """An instant after the package's pinned clock (D94)."""
+
+    return SESSION_NOW + timedelta(minutes=minutes)
 
 
 async def open_session(
@@ -110,7 +115,9 @@ async def test_create_session_stamps_expiry_from_created_at(
     )
 
     assert read.expires_at is not None
-    assert read.expires_at > datetime.now(timezone.utc)
+    # The expiry is the row's own `created_at` plus the duration, so it is
+    # anchored on the database clock rather than on the pinned one.
+    assert read.expires_at > read.created_at
     # Asserted with a one-second tolerance because `created_at` comes back at
     # the database clock's second resolution, while `scheduled_end_time` is
     # built in Python at microsecond resolution.
@@ -379,7 +386,7 @@ async def test_close_session_stamps_expiry_with_now(
         professor_id=stack["professor"].id,
         payload=SessionCreate(offering_id=stack["offering"].id),
     )
-    before = datetime.now(timezone.utc)
+    before = SESSION_NOW
 
     await service.close_session(
         session_id=read.id, professor_id=stack["professor"].id
@@ -389,7 +396,7 @@ async def test_close_session_stamps_expiry_with_now(
         await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.expires_at is not None
-    assert before <= row.expires_at <= datetime.now(timezone.utc)
+    assert before <= row.expires_at <= SESSION_NOW
 
 
 async def test_close_session_is_idempotent(
@@ -481,7 +488,7 @@ async def test_a_coteacher_can_close_a_shared_session(
     row = await test_db_session.get(Session, opened.id)
     assert row.professor_id == stack["professor"].id
     assert row.expires_at is not None
-    assert row.expires_at <= datetime.now(timezone.utc)
+    assert row.expires_at <= SESSION_NOW
 
 
 async def test_a_lapsed_assignment_cannot_close_a_session(
@@ -565,9 +572,12 @@ async def test_scan_window_remaining_counts_down(
         session_id=read.id, professor_id=stack["professor"].id
     )
 
-    # A 60-minute session opened seconds ago: under an hour left, and not
-    # yet expired.
-    assert 0 < active.scan_window_remaining <= 3600
+    row: Session = await test_db_session.get(Session, read.id)
+    assert row.expires_at is not None
+    # A 60-minute session lasts an hour from the moment it was written, and
+    # the countdown is still running.
+    assert 0 < (row.expires_at - row.created_at).total_seconds() <= 3600
+    assert active.scan_window_remaining > 0
 
 
 async def test_scan_window_remaining_is_zero_when_unstamped(
@@ -608,7 +618,7 @@ async def test_computed_expiry_is_created_at_plus_duration(
         duration_minutes=45, scheduled_end_time=future(600)
     )
     session = stack["session"]
-    session.created_at = datetime.now(timezone.utc).replace(microsecond=0)
+    session.created_at = SESSION_NOW
 
     assert session.computed_expires_at == session.created_at + timedelta(minutes=45)
 
@@ -622,9 +632,9 @@ async def test_computed_expiry_floors_at_scheduled_end(
 
     stack = await factories.full_stack(duration_minutes=30)
     session = stack["session"]
-    end = datetime.now(timezone.utc) + timedelta(minutes=10)
+    end = SESSION_NOW + timedelta(minutes=10)
     session.scheduled_end_time = end
-    session.created_at = datetime.now(timezone.utc).replace(microsecond=0)
+    session.created_at = SESSION_NOW
 
     assert session.computed_expires_at == end
 
@@ -1136,7 +1146,7 @@ async def test_student_and_session_rows_stay_consistent_after_close(
     # The closed stamp is on the row itself, so the student scan path reads
     # the same expiry the professor view just reported.
     assert row.expires_at is not None
-    assert row.expires_at <= datetime.now(timezone.utc)
+    assert row.expires_at <= SESSION_NOW
     assert stack["student"].id is not None
     assert await test_db_session.scalar(
         select(Attendance.id).where(Attendance.session_id == read.id)

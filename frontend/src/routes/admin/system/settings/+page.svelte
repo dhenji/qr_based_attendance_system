@@ -32,6 +32,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	let geofence = $state('50');
 	let presentWin = $state('5');
 	let lateWin = $state('10');
+	let earlyOpen = $state('30');
+	let lateOpen = $state('0');
 	let retentionDaily = $state('30');
 	let retentionMonthly = $state('12');
 	let saving = $state(false);
@@ -70,6 +72,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			geofence = String(fetched.geofence_default_radius);
 			presentWin = String(fetched.present_window_default);
 			lateWin = String(fetched.late_window_default);
+			earlyOpen = String(fetched.session_early_open_minutes ?? 30);
+			lateOpen = String(fetched.session_late_open_minutes ?? 0);
 			retentionDaily = String(fetched.backup_retention_daily ?? 30);
 			retentionMonthly = String(fetched.backup_retention_monthly ?? 12);
 		} catch (e) {
@@ -92,6 +96,13 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		return parsed >= 1 ? parsed : null;
 	};
 
+	// The open-window grace (D94) accepts 0: "no early opening" and "no late
+	// opening" are exactly what a strict institution wants.
+	const parseNonNegativeInt = (value: string): number | null => {
+		if (!/^\d+$/.test(value.trim())) return null;
+		return parseInt(value.trim(), 10);
+	};
+
 	const saveDefaults = async () => {
 		if (saving) return;
 		saveError = null;
@@ -99,10 +110,16 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		const radius = parsePositiveInt(geofence);
 		const present = parsePositiveInt(presentWin);
 		const late = parsePositiveInt(lateWin);
+		const early = parseNonNegativeInt(earlyOpen);
+		const lateGrace = parseNonNegativeInt(lateOpen);
 		const daily = parsePositiveInt(retentionDaily);
 		const monthly = parsePositiveInt(retentionMonthly);
 		if (radius === null || present === null || late === null || daily === null || monthly === null) {
 			saveError = 'Geofence, windows, and retention must all be whole numbers of at least 1.';
+			return;
+		}
+		if (early === null || lateGrace === null) {
+			saveError = 'The open-window grace must be a whole number of minutes (0 or more).';
 			return;
 		}
 		saving = true;
@@ -111,6 +128,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				geofence_default_radius: radius,
 				present_window_default: present,
 				late_window_default: late,
+				session_early_open_minutes: early,
+				session_late_open_minutes: lateGrace,
 				backup_retention_daily: daily,
 				backup_retention_monthly: monthly
 			});
@@ -238,6 +257,16 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				<div class="field">
 					<label class="form-label" for="set-late">Default late window (min)</label>
 					<input id="set-late" class="form-input" inputmode="numeric" bind:value={lateWin} />
+				</div>
+				<div class="field">
+					<label class="form-label" for="set-early-open">Session open grace, early (min)</label>
+					<input id="set-early-open" class="form-input" inputmode="numeric" bind:value={earlyOpen} />
+					<p class="hint">How early a session may be opened before its class starts.</p>
+				</div>
+				<div class="field">
+					<label class="form-label" for="set-late-open">Session open grace, late (min)</label>
+					<input id="set-late-open" class="form-input" inputmode="numeric" bind:value={lateOpen} />
+					<p class="hint">How long after its class ends a session may still be opened.</p>
 				</div>
 				<div class="field">
 					<label class="form-label" for="set-retention-daily">Backup retention daily (days)</label>

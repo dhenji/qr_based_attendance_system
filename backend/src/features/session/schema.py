@@ -18,6 +18,7 @@ from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
     DURATION_MINUTES_MIN,
+    OVERRIDE_REASON_MAX_LENGTH,
     SESSION_CODE_MAX_LENGTH,
     SESSION_CODE_MIN_LENGTH,
     WINDOW_MINUTES_MAX,
@@ -74,6 +75,9 @@ class SessionCreate(BaseModel):
     # re-point the session. Either one sets `schedule_overridden`.
     session_date: date | None = None
     start_time: time | None = None
+    # D94: why the professor moved the class, in their own words. Optional,
+    # and only meaningful with an override.
+    override_reason: str | None = Field(default=None, max_length=OVERRIDE_REASON_MAX_LENGTH)
 
     @model_validator(mode="after")
     def _windows_within_duration(self) -> "SessionCreate":
@@ -105,9 +109,39 @@ class SessionRead(BaseModel):
     scheduled_end_time: datetime
     schedule_overridden: bool = False
     plan_source: str = "none"
+    # D94: when the session was actually opened, and — for an override — the
+    # start it would have carried.
+    actual_start_time: datetime | None = None
+    original_scheduled_start_time: datetime | None = None
+    override_reason: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StartWindowRead(BaseModel):
+    """Whether the session may be opened right now, and why not (D94).
+
+    The server's own answer, so the open form renders the window instead of
+    re-deriving it. `scheduled_date` / `start_time` / `end_time` are today's
+    occurrence of the meeting in the institution's local terms, and are null
+    when today is not one of the meeting's days — the plan's *next*
+    occurrence is what the session would carry then.
+    """
+
+    permitted: bool = True
+    reason: str | None = None
+    scheduled_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    scheduled_start: datetime | None = None
+    scheduled_end: datetime | None = None
+    opens_at: datetime | None = None
+    closes_at: datetime | None = None
+    current_time: datetime
+    timezone: str = "UTC"
+    early_open_minutes: int = 0
+    late_open_minutes: int = 0
 
 
 class SessionPlanRead(BaseModel):
@@ -140,6 +174,8 @@ class SessionPlanRead(BaseModel):
     # Whether a professor may override the time at all — there is nothing to
     # override when no meeting is configured.
     override_capable: bool = False
+    # Whether the session may be opened right now (D94).
+    start_window: StartWindowRead | None = None
 
 
 class SessionOfferingTile(BaseModel):

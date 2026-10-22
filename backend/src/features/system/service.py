@@ -57,6 +57,8 @@ from features.system.constants import (
     SETTING_PRESENT_WINDOW,
     SETTING_RETENTION_DAILY,
     SETTING_RETENTION_MONTHLY,
+    SETTING_SESSION_EARLY_OPEN,
+    SETTING_SESSION_LATE_OPEN,
     S3_PREFIX_FALLBACK,
     SIDECAR_SUFFIX,
     STDERR_TAIL_CHARS,
@@ -618,6 +620,10 @@ class SystemService:
                 return int(settings.default_present_window_minutes)
             case _ if key == SETTING_LATE_WINDOW:
                 return int(settings.default_late_window_minutes)
+            case _ if key == SETTING_SESSION_EARLY_OPEN:
+                return int(settings.session_early_open_minutes)
+            case _ if key == SETTING_SESSION_LATE_OPEN:
+                return int(settings.session_late_open_minutes)
             case _ if key == SETTING_RETENTION_DAILY:
                 return int(settings.backup_retention_daily)
             case _:
@@ -629,6 +635,8 @@ class SystemService:
             SETTING_GEOFENCE_RADIUS,
             SETTING_PRESENT_WINDOW,
             SETTING_LATE_WINDOW,
+            SETTING_SESSION_EARLY_OPEN,
+            SETTING_SESSION_LATE_OPEN,
             SETTING_RETENTION_DAILY,
             SETTING_RETENTION_MONTHLY,
         )
@@ -675,6 +683,8 @@ class SystemService:
             geofence_default_radius=values[SETTING_GEOFENCE_RADIUS],
             present_window_default=values[SETTING_PRESENT_WINDOW],
             late_window_default=values[SETTING_LATE_WINDOW],
+            session_early_open_minutes=values[SETTING_SESSION_EARLY_OPEN],
+            session_late_open_minutes=values[SETTING_SESSION_LATE_OPEN],
             backup_retention_daily=values[SETTING_RETENTION_DAILY],
             backup_retention_monthly=values[SETTING_RETENTION_MONTHLY],
             pending_sync_count=await self.pending_sync_total(),
@@ -697,6 +707,8 @@ class SystemService:
             (SETTING_GEOFENCE_RADIUS, "geofence_default_radius"),
             (SETTING_PRESENT_WINDOW, "present_window_default"),
             (SETTING_LATE_WINDOW, "late_window_default"),
+            (SETTING_SESSION_EARLY_OPEN, "session_early_open_minutes"),
+            (SETTING_SESSION_LATE_OPEN, "session_late_open_minutes"),
             (SETTING_RETENTION_DAILY, "backup_retention_daily"),
             (SETTING_RETENTION_MONTHLY, "backup_retention_monthly"),
         ):

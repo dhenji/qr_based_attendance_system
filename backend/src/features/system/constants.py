@@ -32,6 +32,8 @@ LOCAL_FILE_MODE: int = 0o600
 SETTING_GEOFENCE_RADIUS: str = "geofence_default_radius"
 SETTING_PRESENT_WINDOW: str = "present_window_default"
 SETTING_LATE_WINDOW: str = "late_window_default"
+SETTING_SESSION_EARLY_OPEN: str = "session_early_open_minutes"
+SETTING_SESSION_LATE_OPEN: str = "session_late_open_minutes"
 SETTING_RETENTION_DAILY: str = "backup_retention_daily"
 SETTING_RETENTION_MONTHLY: str = "backup_retention_monthly"
 
@@ -43,6 +45,11 @@ GEOFENCE_RADIUS_MIN: int = 10
 GEOFENCE_RADIUS_MAX: int = 1000
 WINDOW_MIN_MINUTES: int = 1
 WINDOW_MAX_MINUTES: int = 120
+# The open-window grace (D94). Zero is a legal value on both sides — "no
+# early opening" and "no late opening" are exactly what a strict
+# institution wants — so the lower bound is 0 and not 1.
+OPEN_GRACE_MIN_MINUTES: int = 0
+OPEN_GRACE_MAX_MINUTES: int = 240
 RETENTION_DAILY_MIN: int = 1
 RETENTION_DAILY_MAX: int = 365
 RETENTION_MONTHLY_MIN: int = 1

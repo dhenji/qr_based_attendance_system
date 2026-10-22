@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import {
 		initProfessorCourses,
 		professorState
@@ -16,7 +17,16 @@
 	} from '$lib/features/session/service';
 	import type { SessionPlanResponse } from '$lib/shared/types';
 	import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
-	import { professorActiveSession } from '$lib/shared/constants/routes';
+	import { professorActiveSession, Routes } from '$lib/shared/constants/routes';
+	import { APIError } from '$lib/api/client';
+	import {
+		formatInZone,
+		formatWallClock,
+		parseDateOnly,
+		parseTimeToMinutes,
+		zonedDateInputValue,
+		zonedTimeInputValue
+	} from '$lib/shared/utils/schedule';
 
 	// D11: two entry points, one page. Arriving from a My Courses card carries
 	// ?offering=, which locks the course and hides the selector. Arriving from
@@ -102,6 +112,12 @@ let selectedOfferingId = $state<number | null>(null);
 	let scheduleOverride = $state(false);
 	let overrideDate = $state('');
 	let overrideStart = $state('');
+	// D94: why the professor moved the class, in their own words.
+	let overrideReason = $state('');
+	// D94: the start time the professor confirmed. It is kept as the value
+	// they confirmed rather than as a flag, so editing the date or the time
+	// takes the confirmation with it.
+	let confirmedStart = $state('');
 
 	let lastPlanKey = $state<string | null>(null);
 
@@ -184,14 +200,24 @@ let selectedOfferingId = $state<number | null>(null);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
 	// The scheduled window the session will carry: the plan's next
-	// occurrence, or the exception the professor asked for.
+	// occurrence, or the exception the professor asked for. An override keeps
+	// the meeting's length, so its end is the chosen start plus the
+	// duration — the plan's own end belongs to the plan.
 	const scheduledDate = $derived(
 		scheduleOverride ? overrideDate : (plan?.session_date ?? '')
 	);
 	const scheduledStartTime = $derived(
 		scheduleOverride ? overrideStart : (plan?.start_time ?? '').slice(0, 5)
 	);
-	const scheduledEndTime = $derived((plan?.end_time ?? '').slice(0, 5));
+	const scheduledEndTime = $derived.by(() => {
+		if (!scheduleOverride) return (plan?.end_time ?? '').slice(0, 5);
+		const start = parseTimeToMinutes(overrideStart);
+		if (start === null) return '';
+		const minutes = (start + durationMinutes) % (24 * 60);
+		const hours = String(Math.floor(minutes / 60)).padStart(2, '0');
+		const rest = String(minutes % 60).padStart(2, '0');
+		return `${hours}:${rest}`;
+	});
 
 	const overrideDateValid = $derived(
 		!scheduleOverride || /^\d{4}-\d{2}-\d{2}$/.test(overrideDate)
@@ -211,6 +237,75 @@ let selectedOfferingId = $state<number | null>(null);
 	const overrideTimeValid = $derived(
 		!scheduleOverride || /^([01]\d|2[0-3]):([0-5]\d)$/.test(overrideStart)
 	);
+
+	// D94: the server's verdict on whether the session may be opened right
+	// now. The page never re-derives the window — it renders what
+	// `GET /professor/offerings/{id}/session-plan` resolved, and the backend
+	// refuses the open either way.
+	const startWindow = $derived(plan?.start_window ?? null);
+	const outsideWindow = $derived(startWindow !== null && !startWindow.permitted);
+	// Set when the backend refuses an open that the plan had permitted — a
+	// plan loaded a while ago, or a class that ended while the form was up.
+	let windowRefused = $state(false);
+	const blocked = $derived(outsideWindow || windowRefused);
+
+	// The professor confirms the alternative start time they picked; editing
+	// it takes the confirmation with it.
+	const overrideConfirmed = $derived(
+		confirmedStart !== '' && confirmedStart === `${overrideDate} ${overrideStart}`
+	);
+
+	const windowHeadline = $derived.by(() => {
+		const window = startWindow;
+		if (window === null) return 'This session is outside its scheduled time.';
+		if (window.reason === 'not_scheduled_today')
+			return 'This course has no class scheduled today.';
+		if (window.reason === 'before_window' && window.start_time !== null)
+			return `The class starts at ${formatWallClock(window.start_time)}.`;
+		if (window.reason === 'after_window' && window.start_time !== null)
+			return `The class was scheduled for ${formatWallClock(window.start_time)}–${formatWallClock(
+				window.end_time ?? ''
+			)}.`;
+		return 'This session is outside its scheduled time.';
+	});
+
+	// The scheduled time and the current time, side by side. Both come from
+	// the server: the class time is the institution's wall clock, and the
+	// current time is an instant rendered in the institution's zone.
+	const windowScheduleLabel = $derived.by(() => {
+		const window = startWindow;
+		if (window === null) return '';
+		const date = window.scheduled_date ?? plan?.session_date ?? '';
+		const start = window.start_time ?? plan?.start_time ?? '';
+		const end = window.end_time ?? plan?.end_time ?? '';
+		if (start === '') return '';
+		const day = parseDateOnly(date);
+		const dayText =
+			day === null
+				? ''
+				: day.toLocaleDateString(undefined, {
+						weekday: 'short',
+						month: 'short',
+						day: 'numeric'
+					});
+		return `${dayText} ${formatWallClock(start)}–${formatWallClock(end)}`.trim();
+	});
+
+	const windowCurrentLabel = $derived.by(() => {
+		const window = startWindow;
+		if (window === null || window.current_time === null) return '';
+		const zone = window.timezone === '' ? 'UTC' : window.timezone;
+		const day = formatInZone(window.current_time, zone, {
+			weekday: 'short',
+			month: 'short',
+			day: 'numeric'
+		});
+		const time = formatInZone(window.current_time, zone, {
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+		return `${day} ${time}`.trim();
+	});
 
 	// D12/D49: the scan window ends at `created_at + duration`, capped by the
 	// class end while the class is still ahead. The preview mirrors the
@@ -232,6 +327,55 @@ let selectedOfferingId = $state<number | null>(null);
 
 	const RADII = [10, 20, 30, 50, 100] as const;
 
+	// The radius the session would inherit if the professor changes nothing:
+	// the server-resolved default for this offering (offering override ->
+	// app setting -> env). The "Default" chip restores exactly this value,
+	// so the professor can always get back to the configured radius.
+	const defaultRadius = $derived(inherited === null ? null : inherited.radius);
+
+	// The chips on offer: the standard radii plus the effective default, so a
+	// default that is not one of the standard numbers (an administrator may
+	// set any value in 10..1000) is still visible and selectable instead of
+	// leaving every chip unselected.
+	const radiusOptions = $derived.by(() => {
+		const options = new Set<number>(RADII);
+		if (defaultRadius !== null) options.add(defaultRadius);
+		return [...options].sort((a, b) => a - b);
+	});
+
+	// Whether the professor has moved anything off the inherited plan (D93).
+	// The back control asks before discarding these, so a half-configured
+	// session is not lost to a stray click. Switching the session type counts:
+	// it reloads the plan, which re-seeds the fields.
+	const isDirty = $derived(
+		(inherited !== null &&
+			(durationOverridden ||
+				presentOverridden ||
+				lateOverridden ||
+				radiusOverridden)) ||
+			locationOverride ||
+			scheduleOverride ||
+			isLab
+	);
+
+	let confirmLeave = $state(false);
+
+	// Leaving the form. The destination is fixed rather than history-based:
+	// this page is also reachable from the dashboard, where "back" would land
+	// somewhere unrelated. Unsaved changes are confirmed first.
+	const requestLeave = () => {
+		if (isDirty) {
+			confirmLeave = true;
+			return;
+		}
+		void goto(Routes.PROFESSOR_COURSES);
+	};
+
+	const leave = () => {
+		confirmLeave = false;
+		void goto(Routes.PROFESSOR_COURSES);
+	};
+
 	let submitting = $state(false);
 	let generatedSessionId = $state<number | null>(null);
 	let generatedCode = $state<string | null>(null);
@@ -249,6 +393,10 @@ let selectedOfferingId = $state<number | null>(null);
 			!coordsInvalid &&
 			overrideDateValid &&
 			overrideTimeValid &&
+			// D94: outside the class's scheduled time the professor has to
+			// pick a different start time and confirm it. Inside it, the
+			// normal flow is unchanged.
+			(!blocked || (scheduleOverride && overrideConfirmed)) &&
 			// A plan that failed to load leaves the inherited fields
 			// unresolved; opening now would send a guess, so the page asks
 			// for a retry instead.
@@ -256,6 +404,33 @@ let selectedOfferingId = $state<number | null>(null);
 			!planLoading &&
 			!submitting
 	);
+
+	// D94: the two ways out of a window the professor is not inside. Waiting
+	// returns to the course list; starting elsewhere opens the picker.
+	const waitForScheduledTime = () => {
+		void goto(Routes.PROFESSOR_COURSES);
+	};
+
+	const selectDifferentStartTime = () => {
+		// The picker opens on the server's clock, read in the institution's
+		// zone: a professor who is late means "now", not the next class.
+		const window = startWindow;
+		if (window !== null && window.current_time !== null) {
+			const zone = window.timezone === '' ? 'UTC' : window.timezone;
+			const day = zonedDateInputValue(window.current_time, zone);
+			const time = zonedTimeInputValue(window.current_time, zone);
+			if (day !== '' && time !== '') {
+				overrideDate = day;
+				overrideStart = time;
+			}
+		}
+		scheduleOverride = true;
+		confirmedStart = '';
+	};
+
+	const confirmStartTime = () => {
+		confirmedStart = `${overrideDate} ${overrideStart}`;
+	};
 
 	const handleGenerate = async () => {
 		const course = selected;
@@ -295,9 +470,13 @@ let selectedOfferingId = $state<number | null>(null);
 					: {}),
 				// D93: the schedule exception, in the institution's wall
 				// clock. Both fields travel together so the override is
-				// unambiguous.
+				// unambiguous. D94 adds the professor's own reason.
 				...(scheduleOverride
-					? { sessionDate: overrideDate, startTime: overrideStart }
+					? {
+							sessionDate: overrideDate,
+							startTime: overrideStart,
+							overrideReason: overrideReason.trim() || undefined
+						}
 					: {})
 			});
 
@@ -309,6 +488,14 @@ let selectedOfferingId = $state<number | null>(null);
 			generatedOverridden = created.scheduleOverridden;
 			invalidateAttendanceDirectory();
 		} catch (e) {
+			// D94: the backend refuses an open outside the class's scheduled
+			// time. That is not a failure to report — it is the window the
+			// form asks about, so the same panel is shown.
+			if (e instanceof APIError && e.code === 'session_outside_scheduled_time') {
+				windowRefused = true;
+				error = e.message;
+				return;
+			}
 			error = e instanceof Error ? e.message : 'Failed to open session';
 		} finally {
 			submitting = false;
@@ -342,6 +529,10 @@ let selectedOfferingId = $state<number | null>(null);
 
 <div class="create">
 	<header class="header">
+		<button class="btn btn-ghost back-btn" type="button" onclick={requestLeave}>
+			<AppIcon name="arrow-left" size={16} />
+			Back to My Courses
+		</button>
 		<div>
 			<h1>Open New Session</h1>
 			<p class="muted">Configure and generate a session code for attendance</p>
@@ -465,12 +656,58 @@ let selectedOfferingId = $state<number | null>(null);
 						<span class="location-tag">Override</span>
 					{/if}
 				</div>
+
+				{#if blocked}
+					<div class="window-note" role="alert">
+						<AppIcon name="alert" size={18} />
+						<div class="window-note-body">
+							<p class="window-note-title">{windowHeadline}</p>
+							{#if windowScheduleLabel !== ''}
+								<p class="window-note-line">
+									<span class="muted">Scheduled</span> {windowScheduleLabel}
+								</p>
+							{/if}
+							{#if windowCurrentLabel !== ''}
+								<p class="window-note-line">
+									<span class="muted">Current time</span> {windowCurrentLabel}
+								</p>
+							{/if}
+							<p class="window-note-line">
+								Please wait until the scheduled time or select a different start time to
+								continue.
+							</p>
+							<div class="window-note-actions">
+								<button
+									class="btn btn-secondary"
+									type="button"
+									onclick={waitForScheduledTime}
+								>
+									<AppIcon name="calendar" size={16} />
+									Wait for Scheduled Time
+								</button>
+								{#if !scheduleOverride}
+									<button
+										class="btn btn-primary"
+										type="button"
+										onclick={selectDifferentStartTime}
+									>
+										Select Different Start Time
+									</button>
+								{/if}
+							</div>
+						</div>
+					</div>
+				{/if}
+
 				<div class="field">
 					<label class="override-toggle">
 						<input
 							type="checkbox"
 							checked={scheduleOverride}
-							onchange={(e) => (scheduleOverride = e.currentTarget.checked)}
+							onchange={(e) => {
+								scheduleOverride = e.currentTarget.checked;
+								confirmedStart = '';
+							}}
 						/>
 						Start at a different time
 					</label>
@@ -499,6 +736,33 @@ let selectedOfferingId = $state<number | null>(null);
 								/>
 							</div>
 						</div>
+						<div class="field">
+							<label class="form-label" for="override-reason">Reason (optional)</label>
+							<input
+								id="override-reason"
+								class="form-input"
+								type="text"
+								maxlength="255"
+								placeholder="Why is the class starting at a different time?"
+								bind:value={overrideReason}
+							/>
+						</div>
+						{#if blocked}
+							<div class="field">
+								<button
+									class="btn btn-secondary"
+									type="button"
+									disabled={!overrideDateValid || !overrideTimeValid}
+									onclick={confirmStartTime}
+								>
+									<AppIcon name="check" size={16} />
+									{overrideConfirmed ? 'Start time confirmed' : 'Use this start time'}
+								</button>
+								{#if overrideConfirmed}
+									<span class="hint">The session will start at {overrideDate} {overrideStart}.</span>
+								{/if}
+							</div>
+						{/if}
 						<p class="hint">
 							The session keeps the meeting's length and applies to this session only — the
 							offering's weekly schedule is not changed.
@@ -532,11 +796,25 @@ let selectedOfferingId = $state<number | null>(null);
 				<span class="required-tag">Required</span>
 			</span>
 			<div class="radius-group" role="group" aria-label="Geofence radius">
-				{#each RADII as option (option)}
+				<button
+					class="radius-btn radius-default"
+					class:selected={defaultRadius !== null && radius === defaultRadius}
+					aria-pressed={defaultRadius !== null && radius === defaultRadius}
+					disabled={defaultRadius === null}
+					title={defaultRadius === null
+						? 'Unavailable — the offering’s session plan could not be read'
+						: `Use the configured default (${defaultRadius} m)`}
+					onclick={() => {
+						if (defaultRadius !== null) radius = defaultRadius;
+					}}
+				>
+					Default{defaultRadius !== null ? ` · ${defaultRadius} m` : ''}
+				</button>
+				{#each radiusOptions as option (option)}
 					<button
 						class="radius-btn"
-						class:selected={radius === option}
-						aria-pressed={radius === option}
+						class:selected={radius === option && option !== defaultRadius}
+						aria-pressed={radius === option && option !== defaultRadius}
 						onclick={() => (radius = option)}
 					>
 						{option}m
@@ -546,10 +824,12 @@ let selectedOfferingId = $state<number | null>(null);
 			<p class="hint">
 				Students must be within this distance from the classroom to scan.
 				{#if inherited !== null}
-					{inherited.radius} m from the offering
+					{inherited.radius} m is the configured default
 					{#if radiusOverridden}
 						<span class="location-tag">Override</span>
 					{/if}
+				{:else}
+					The offering’s default radius is unavailable — retry loading the plan.
 				{/if}
 			</p>
 		</div>
@@ -765,6 +1045,27 @@ let selectedOfferingId = $state<number | null>(null);
 	{/if}
 </div>
 
+{#if confirmLeave}
+	<Modal
+		title="Discard session details?"
+		onclose={() => (confirmLeave = false)}
+		closeOnBackdrop={false}
+	>
+		<p class="leave-message">
+			You changed this session's settings and they have not been saved. Leaving now
+			discards them.
+		</p>
+		{#snippet footer()}
+			<button class="leave-btn" type="button" onclick={() => (confirmLeave = false)}>
+				Keep editing
+			</button>
+			<button class="leave-btn leave-primary" type="button" onclick={leave}>
+				Leave
+			</button>
+		{/snippet}
+	</Modal>
+{/if}
+
 <style>
 	.create {
 		display: flex;
@@ -776,12 +1077,26 @@ let selectedOfferingId = $state<number | null>(null);
 		margin: 0 auto;
 	}
 
+	.header {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
 	.header h1 {
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
 		color: var(--text);
 		margin: 0 0 0.25rem;
+	}
+
+	/* The back control is a navigation affordance, not a competing action,
+	   so it sits above the title at a smaller size than the buttons below. */
+	.back-btn {
+		padding: 0.5rem 0.875rem;
+		font-size: 0.875rem;
 	}
 
 	.muted {
@@ -1014,6 +1329,30 @@ let selectedOfferingId = $state<number | null>(null);
 		color: var(--on-brand);
 	}
 
+	/* The Default chip restores the offering's configured radius, so it is
+	   styled apart from the numeric chips: a dashed border marks it as "the
+	   configured value" rather than as one of the offered numbers, and the
+	   dashed edge survives the selected state so the two never read alike. */
+	.radius-default {
+		border-style: dashed;
+		color: var(--text-secondary);
+	}
+
+	.radius-default:hover:not(:disabled) {
+		color: var(--text-strong);
+	}
+
+	.radius-default.selected {
+		border-style: dashed;
+	}
+
+	.radius-btn:disabled {
+		color: #94a3b8;
+		background: var(--bg-page);
+		border-color: var(--border);
+		cursor: not-allowed;
+	}
+
 	/* --- Session type toggle -------------------------------------------------- */
 
 	.toggle-group {
@@ -1224,6 +1563,18 @@ let selectedOfferingId = $state<number | null>(null);
 		color: var(--text-strong);
 	}
 
+	/* The ghost variant is the professor portal's back-control treatment
+	   (see professor/sessions/active/[id]). */
+	.btn-ghost {
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
+	}
+
+	.btn-ghost:hover {
+		background: var(--bg-hover);
+	}
+
 	.btn:disabled {
 		color: var(--text-muted);
 		background: var(--bg-page);
@@ -1257,10 +1608,93 @@ let selectedOfferingId = $state<number | null>(null);
 		margin-top: 0.125rem;
 	}
 
+	/* D94: the session is outside its class's scheduled time. The professor
+	   has two ways out, so the panel states both of them and the scheduled
+	   time next to the current one. */
+	.window-note {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.625rem;
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-bg);
+		border-radius: 8px;
+		padding: 0.875rem 1rem;
+	}
+
+	.window-note :global(svg) {
+		flex-shrink: 0;
+		margin-top: 0.125rem;
+		color: var(--warning-text);
+	}
+
+	.window-note-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		min-width: 0;
+	}
+
+	.window-note-title {
+		margin: 0;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		color: var(--warning-text);
+	}
+
+	.window-note-line {
+		margin: 0;
+		font-size: 0.875rem;
+		color: var(--text-secondary);
+	}
+
+	.window-note-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
 	.empty {
 		color: var(--text-muted);
 		font-size: 0.9375rem;
 		margin: 0;
+	}
+
+	/* --- Leave confirmation --------------------------------------------------- */
+
+	.leave-message {
+		margin: 0;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+	}
+
+	/* Its own button styles rather than the page's `.btn`: the page's primary
+	   button flexes to fill its row, which is wrong inside the dialog's
+	   right-aligned action row. */
+	.leave-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem 1rem;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-strong);
+		font-family: inherit;
+		font-size: 0.875rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.leave-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.leave-primary {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	@media (max-width: 640px) {

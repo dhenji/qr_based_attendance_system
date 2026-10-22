@@ -40,6 +40,8 @@ export type SettingsPatch = Partial<
 		| 'geofence_default_radius'
 		| 'present_window_default'
 		| 'late_window_default'
+		| 'session_early_open_minutes'
+		| 'session_late_open_minutes'
 		| 'backup_retention_daily'
 		| 'backup_retention_monthly'
 	>

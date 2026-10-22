@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity, UserRole
-from tests.conftest import Factories
+from tests.conftest import SESSION_TEST_NOW, Factories
 
 AUDIT_ENDPOINT = "/api/admin/audit-logs"
 
@@ -43,9 +43,10 @@ async def _assigned_professor(
     row is unclaimed and unassigned.
     """
     # `full_stack` seeds an active session, which would make the create a 409.
-    stack = await factories.full_stack(
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=1)
-    )
+    # The expiry is on the session service's clock — the suite pins it, so the
+    # open-window check (D94) and the "is a session already live" check read
+    # the same instant.
+    stack = await factories.full_stack(expires_at=SESSION_TEST_NOW - timedelta(hours=1))
     professor_user = await factories.user(role=UserRole.PROFESSOR.value)
     stack["professor"].user_id = professor_user.id
     assigner = await factories.user(role=UserRole.ADMIN.value)

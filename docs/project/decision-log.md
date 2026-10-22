@@ -2888,3 +2888,76 @@
   - Covered by `tests/features/session/test_session_plan.py`,
     `tests/features/session/test_session_override.py`, the rewritten expiry
     cases in `test_session_expiry.py`, and the professor-course shape tests.
+
+### ADR-094: A Session May Only Be Opened While Its Class Is Running
+
+- **Decision (D94):** Opening a session is gated by the offering's own
+  schedule. A session may be opened **without an override** only while
+  *today's* occurrence of the meeting is running, extended by an
+  **early-open grace** before it and a **late-open grace** after it.
+  Outside that window the open is refused with
+  `422 session_outside_scheduled_time`, and the professor's way past it is
+  the schedule exception D93 already had: a request that carries
+  `session_date` and/or `start_time` is an explicit choice and is not
+  gated — it keeps its own validation (`session_date_in_past`,
+  `scheduled_start_in_past`, `invalid_session_time`).
+  An offering with no meeting for that session type is **never** gated:
+  there is nothing to be outside of, so the session starts now exactly as
+  it always did.
+- **Date:** 2026-10-21
+- **Status:** Accepted
+- **Context:** D93 made the session inherit the offering's plan, and the
+  open form renders that plan — but the server still accepted an open at
+  any hour of any day. A professor could open a session at 23:00 for a class
+  that met at 08:00, and the row would carry the plan's window: a session
+  for a class that is not running, with a scan window that starts in the
+  past. The professor's own words in the issue that asked for this feature
+  were "prevent professors from starting a session outside its scheduled
+  time by default", with an explicit override as the escape hatch.
+- **Alternatives considered:**
+  (1) *Leave the server alone and warn in the browser.* Rejected: the
+      browser's clock is not the server's, and a check only in the form is
+      not a check — a scripted request would still open a session at any
+      hour. The server enforces it; the form renders the server's answer.
+  (2) *Compare against the plan's next occurrence instead of today's.*
+      Rejected: the plan deliberately points at the *next* meeting once
+      today's has ended (D93), so the message would have said "wait until
+      Friday 08:00" for a professor who wanted to open today's class late.
+      Today's occurrence is what the professor means, and it is also what
+      the window is about.
+  (3) *Compare the time of day only, ignoring the weekday.* Rejected: it
+      would let a professor open a Monday class on a Saturday, which is the
+      case the feature exists to stop.
+  (4) *Taken:* one resolver, two call sites — the plan endpoint and the
+      open itself — so the form and the server cannot disagree about
+      whether it is class time.
+- **Consequences:**
+  - `features/session/plan.py` gains `meeting_on_date()` (the occurrence on
+    a given local date — the inverse of `next_meeting`) and
+    `resolve_start_window()`, and `SessionPlan` carries the verdict. The
+    plan endpoint answers with it as `start_window`, so the browser renders
+    the window instead of re-deriving it (the same rule D93 set for the
+    schedule).
+  - The grace is `session_early_open_minutes` / `session_late_open_minutes`:
+    an `app_settings` row an administrator edits in Admin → System
+    Settings, falling back to the environment default — the same chain as
+    the two attendance windows and the geofence radius. Both accept `0`,
+    because "no early opening" and "no late opening" are exactly what a
+    strict institution wants; the app-settings read ignores non-positive
+    values for the other keys, so it is now per-key.
+  - `sessions` gains `actual_start_time` (when the session was really
+    opened), `original_scheduled_start_time` (the start of the class it
+    belongs to, kept only for an override), `override_reason` (the
+    professor's own note) and `created_by` (the account behind
+    `professor_id`). `start_time_override` is **not** a column:
+    `schedule_overridden` already says whether the professor moved the
+    class (D93), and a second flag for the same fact is a second thing to
+    keep in step.
+  - The audit trail carries the same facts, so "the class started two hours
+    late" is readable from Admin → Audit Logs.
+  - The window is evaluated in `INSTITUTION_TIMEZONE`, like every other
+    class time, and "today" is a local-calendar concept.
+  - The open path is now clock-sensitive, so the suite pins the session
+    service's clock: the default offering meets `MWF 08:00-09:00`, which
+    the wall clock is inside for three hours a week.
+  - Covered by `tests/features/session/test_session_start_window.py`.

@@ -14,6 +14,7 @@ from typing import Any, Callable, Coroutine
 from features.course.model import OfferingComponent
 from shared.enums import UserRole
 from tests.conftest import Factories
+from tests.features.session.conftest import SESSION_NOW
 
 PLAN = "/api/professor/offerings/{offering_id}/session-plan"
 SESSIONS = "/api/professor/sessions"
@@ -131,7 +132,7 @@ async def test_opening_with_a_schedule_exception_is_201(
     headers = await _professor_headers(auth_headers, factories, offering)
     await test_db_session.commit()
 
-    day = (date.today() + timedelta(days=1)).isoformat()
+    day = (SESSION_NOW.date() + timedelta(days=1)).isoformat()
     response = await api_client.post(
         SESSIONS,
         json={
@@ -159,7 +160,10 @@ async def test_opening_with_a_date_in_the_past_is_422(
     headers = await _professor_headers(auth_headers, factories, offering)
     await test_db_session.commit()
 
-    day = (date.today() - timedelta(days=1)).isoformat()
+    # The pinned clock, not `date.today()`: the server compares the date
+    # against its own UTC day, and the machine's local date can be a day
+    # ahead of it.
+    day = (SESSION_NOW.date() - timedelta(days=1)).isoformat()
     response = await api_client.post(
         SESSIONS,
         json={"offering_id": offering.id, "session_date": day},

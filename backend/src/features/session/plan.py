@@ -23,12 +23,17 @@ What a session inherits from its offering:
 What a session *cannot* inherit is the decision to move. A rescheduled class
 is an explicit override carried on the session itself (D93); the offering's
 recurring schedule is never touched by an open.
+
+The plan also answers whether the session may be opened **now** (D94): a
+session may only be opened while its class is running, so the resolver also
+resolves the open window — today's occurrence of the meeting, extended by the
+early-open and late-open grace — and says why an open is not permitted.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Literal
 
@@ -42,6 +47,8 @@ from features.system.constants import (
     SETTING_GEOFENCE_RADIUS,
     SETTING_LATE_WINDOW,
     SETTING_PRESENT_WINDOW,
+    SETTING_SESSION_EARLY_OPEN,
+    SETTING_SESSION_LATE_OPEN,
 )
 from features.system.model import AppSetting
 from shared.enums import SessionType
@@ -56,6 +63,14 @@ from shared.schedule import day_weekdays, meeting_length_minutes
 # - "none": no meeting and no course duration either.
 PlanSource = Literal["component", "offering_legacy", "course_default", "none"]
 
+# Why a session may not be opened right now (D94).
+# - "not_scheduled_today": today is not one of the meeting's days.
+# - "before_window": today is a meeting day, but the class has not started yet
+#   and the early-open grace does not reach this far.
+# - "after_window": today's class has ended and the late-open grace does not
+#   reach this far.
+StartWindowReason = Literal["not_scheduled_today", "before_window", "after_window"]
+
 # How far ahead the resolver looks for the next meeting day. Seven days covers
 # every weekday set, so a meeting always falls inside the window.
 LOOKAHEAD_DAYS: int = 8
@@ -63,6 +78,33 @@ LOOKAHEAD_DAYS: int = 8
 # The duration a session runs for when nothing else says. The last resort
 # behind the course template's `session_duration_hours`.
 FALLBACK_DURATION_MINUTES: int = 60
+
+
+@dataclass(frozen=True)
+class StartWindow:
+    """Whether a session may be opened right now, and why not (D94).
+
+    A session may only be opened while its class is running: today's
+    occurrence of the meeting, extended by the early-open and late-open
+    grace. The window is computed from the offering's own schedule, in the
+    institution's timezone, so the answer is the same everywhere.
+    """
+
+    permitted: bool = True
+    reason: StartWindowReason | None = None
+    # Today's occurrence, in the institution's local terms and as UTC
+    # instants. Both are null when today is not one of the meeting's days —
+    # the plan's *next* occurrence is what the session would carry then.
+    session_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    scheduled_start: datetime | None = None
+    scheduled_end: datetime | None = None
+    # The interval the professor may open in.
+    opens_at: datetime | None = None
+    closes_at: datetime | None = None
+    early_open_minutes: int = 0
+    late_open_minutes: int = 0
 
 
 @dataclass(frozen=True)
@@ -87,6 +129,8 @@ class SessionPlan:
     classroom_lat: float | None = None
     classroom_lng: float | None = None
     radius_meters: int = 50
+    # Whether the session may be opened at this very moment (D94).
+    start_window: StartWindow = field(default_factory=StartWindow)
 
     @property
     def has_meeting(self) -> bool:
@@ -192,6 +236,129 @@ def next_meeting(
     return None
 
 
+def meeting_on_date(
+    *,
+    days: str,
+    start: time,
+    end: time,
+    day: date,
+    zone: tzinfo,
+) -> tuple[datetime, datetime] | None:
+    """The occurrence of a meeting on one local date, as (UTC start, UTC end).
+
+    The inverse of `next_meeting`: instead of the next occurrence from now,
+    the occurrence on a given day. `None` when that day is not one of the
+    meeting's days, or when the meeting's end is not after its start — there
+    is no occurrence to speak of.
+
+    The day is a *local* date: a class that starts at 23:00 belongs to the
+    day it starts on, wherever the institution is.
+    """
+    if day.weekday() not in day_weekdays(days):
+        return None
+
+    if meeting_length_minutes(start, end) <= 0:
+        return None
+
+    scheduled_start = datetime.combine(day, start, tzinfo=zone)
+    scheduled_end = datetime.combine(day, end, tzinfo=zone)
+
+    return (
+        scheduled_start.astimezone(timezone.utc),
+        scheduled_end.astimezone(timezone.utc),
+    )
+
+
+def resolve_start_window(
+    *,
+    meeting: tuple[str, str, time, time] | None,
+    now: datetime,
+    zone: tzinfo,
+    early_open_minutes: int,
+    late_open_minutes: int,
+) -> StartWindow:
+    """Whether a session for this meeting may be opened right now (D94).
+
+    A session may only be opened while its class is running: today's
+    occurrence of the meeting, extended by the early-open grace before it and
+    the late-open grace after it. A professor who arrives early is let in; a
+    professor who opens the class after it ended is not, unless the late-open
+    grace reaches that far.
+
+    Three cases, and they are the only ones:
+
+    * today is one of the meeting's days and the clock is inside the window —
+      permitted;
+    * today is one of the meeting's days but the clock is outside it — the
+      class has not started yet, or it has ended;
+    * today is not one of the meeting's days — there is no class today.
+
+    An offering with no usable meeting has nothing to be outside of, so it is
+    never gated: the session starts now, exactly as it always did.
+    """
+    if meeting is None:
+        return StartWindow(
+            permitted=True,
+            early_open_minutes=early_open_minutes,
+            late_open_minutes=late_open_minutes,
+        )
+
+    _source, days, start, end = meeting
+
+    # A meeting whose days name no weekday, or whose end is not after its
+    # start, is legacy free text the offering validators would have
+    # rejected. There is no window to compare against.
+    if not day_weekdays(days) or meeting_length_minutes(start, end) <= 0:
+        return StartWindow(
+            permitted=True,
+            early_open_minutes=early_open_minutes,
+            late_open_minutes=late_open_minutes,
+        )
+
+    local_now: datetime = now.astimezone(zone)
+    occurrence = meeting_on_date(
+        days=days,
+        start=start,
+        end=end,
+        day=local_now.date(),
+        zone=zone,
+    )
+
+    if occurrence is None:
+        # Today is not one of the meeting's days: there is no class today.
+        return StartWindow(
+            permitted=False,
+            reason="not_scheduled_today",
+            early_open_minutes=early_open_minutes,
+            late_open_minutes=late_open_minutes,
+        )
+
+    scheduled_start, scheduled_end = occurrence
+    opens_at = scheduled_start - timedelta(minutes=early_open_minutes)
+    closes_at = scheduled_end + timedelta(minutes=late_open_minutes)
+
+    if now < opens_at:
+        reason: StartWindowReason | None = "before_window"
+    elif now >= closes_at:
+        reason = "after_window"
+    else:
+        reason = None
+
+    return StartWindow(
+        permitted=reason is None,
+        reason=reason,
+        session_date=local_now.date(),
+        start_time=start,
+        end_time=end,
+        scheduled_start=scheduled_start,
+        scheduled_end=scheduled_end,
+        opens_at=opens_at,
+        closes_at=closes_at,
+        early_open_minutes=early_open_minutes,
+        late_open_minutes=late_open_minutes,
+    )
+
+
 async def _app_defaults(
     session: AsyncSession,
     settings: Settings,
@@ -199,10 +366,11 @@ async def _app_defaults(
     """The system-wide defaults, read from the `app_settings` table.
 
     These are the values an administrator edits in Admin -> System Settings:
-    the geofence radius and the two attendance windows. The environment
-    defaults are the fallback for a key that has no row.
+    the geofence radius, the two attendance windows and the open-window grace
+    (D94). The environment defaults are the fallback for a key that has no
+    row.
 
-    One query for all three keys. The rows used to be ignored entirely by the
+    One query for every key. The rows used to be ignored entirely by the
     session path — `SessionService` read the environment default and never
     the `app_settings` row — so changing the radius in System Settings did
     nothing for new sessions, and the same was true of the window defaults.
@@ -215,6 +383,8 @@ async def _app_defaults(
                         SETTING_GEOFENCE_RADIUS,
                         SETTING_PRESENT_WINDOW,
                         SETTING_LATE_WINDOW,
+                        SETTING_SESSION_EARLY_OPEN,
+                        SETTING_SESSION_LATE_OPEN,
                     )
                 )
             )
@@ -225,6 +395,19 @@ async def _app_defaults(
         SETTING_GEOFENCE_RADIUS: int(settings.default_geofence_radius_meters),
         SETTING_PRESENT_WINDOW: int(settings.default_present_window_minutes),
         SETTING_LATE_WINDOW: int(settings.default_late_window_minutes),
+        SETTING_SESSION_EARLY_OPEN: int(settings.session_early_open_minutes),
+        SETTING_SESSION_LATE_OPEN: int(settings.session_late_open_minutes),
+    }
+
+    # The smallest value a key accepts. The open-window grace accepts 0 —
+    # "no early opening" and "no late opening" are exactly what a strict
+    # institution wants — while the radius and the windows do not.
+    minimums: dict[str, int] = {
+        SETTING_GEOFENCE_RADIUS: 1,
+        SETTING_PRESENT_WINDOW: 1,
+        SETTING_LATE_WINDOW: 1,
+        SETTING_SESSION_EARLY_OPEN: 0,
+        SETTING_SESSION_LATE_OPEN: 0,
     }
 
     for row in rows:
@@ -233,7 +416,7 @@ async def _app_defaults(
         except (TypeError, ValueError):
             continue
 
-        if value > 0:
+        if value >= minimums.get(row.key, 1):
             defaults[row.key] = value
 
     return defaults
@@ -274,6 +457,13 @@ async def resolve_session_plan(
     scheduled_end: datetime | None = None
     meeting_minutes = 0
 
+    # The system-wide defaults resolve the same way as the offering's own
+    # values: the app setting an administrator edits in Admin -> System
+    # Settings, then the environment default. Read once here, so the
+    # open-window grace (D94) and the two windows and the radius all come
+    # from the same query.
+    defaults: dict[str, int] = await _app_defaults(session, settings)
+
     if meeting is not None:
         _source, days, start, end = meeting
         meeting_minutes = meeting_length_minutes(start, end)
@@ -285,6 +475,17 @@ async def resolve_session_plan(
             session_date, scheduled_start, scheduled_end = found
             start_time = start
             end_time = end
+
+    # Whether the session may be opened right now (D94). The window is
+    # resolved from the same meeting the plan is, so the two can never
+    # disagree about when the class is.
+    start_window: StartWindow = resolve_start_window(
+        meeting=meeting,
+        now=now,
+        zone=zone,
+        early_open_minutes=defaults[SETTING_SESSION_EARLY_OPEN],
+        late_open_minutes=defaults[SETTING_SESSION_LATE_OPEN],
+    )
 
     # The source describes what the professor is being scheduled against, so
     # it is only "component"/"offering_legacy" when an actual occurrence was
@@ -315,8 +516,6 @@ async def resolve_session_plan(
     # System Settings, then the environment default. A NULL on the offering
     # means "follow the system default" — the offering-level columns are
     # nullable for exactly that reason.
-    defaults: dict[str, int] = await _app_defaults(session, settings)
-
     present_window = (
         offering.default_present_window_minutes
         or defaults[SETTING_PRESENT_WINDOW]
@@ -359,4 +558,5 @@ async def resolve_session_plan(
         classroom_lat=classroom_lat,
         classroom_lng=classroom_lng,
         radius_meters=int(radius),
+        start_window=start_window,
     )
