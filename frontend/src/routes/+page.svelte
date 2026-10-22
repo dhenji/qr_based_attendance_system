@@ -166,16 +166,7 @@
 		</div>
 	</section>
 
-	<section class="get-started">
-		<div class="get-started-panel">
-			<p class="section-eyebrow">03 / Get started</p>
-			<h2>Ready when you are.</h2>
-			<p class="get-started-sub">
-				Sign in with your school account to open your portal - student, professor, or admin.
-			</p>
-			<a class="btn-primary" href={Routes.LOGIN}>Get started</a>
-		</div>
-	</section>
+
 </main>
 
 <footer class="footer" id="site-footer">
@@ -416,31 +407,6 @@
 
 	.btn-primary:active {
 		transform: translateY(0);
-	}
-
-	.get-started {
-		padding: 3rem 1.5rem;
-	}
-
-	.get-started-panel {
-		max-width: 720px;
-		margin: 0 auto;
-		text-align: center;
-		padding: 2.5rem 2rem;
-		border-radius: 16px;
-		background: var(--bg-card);
-		border: 1px solid var(--border);
-		box-shadow: var(--shadow-sm);
-	}
-
-	.get-started-panel h2 {
-		margin: 0.5rem 0 0.75rem;
-		color: var(--text-strong);
-	}
-
-	.get-started-sub {
-		color: var(--text-muted);
-		margin: 0 0 1.5rem;
 	}
 
 	.btn-ghost {
