@@ -141,6 +141,7 @@
 	];
 
 	let collapsed = $state(true);
+	let mobileOpen = $state(false);
 	let logoutOpen = $state(false);
 
 	const isActive = (path: string) => page.url.pathname === path;
@@ -164,8 +165,11 @@
 		<button
 			class="menu-btn"
 			aria-label="Toggle sidebar"
-			aria-expanded={!collapsed}
-			onclick={() => (collapsed = !collapsed)}
+			aria-expanded={mobileOpen || !collapsed}
+			onclick={() => {
+				if (window.matchMedia('(max-width: 640px)').matches) mobileOpen = !mobileOpen;
+				else collapsed = !collapsed;
+			}}
 		>
 			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
 				<path d="M4 6h16M4 12h16M4 18h16" />
@@ -209,7 +213,10 @@
 	{/if}
 
 	<div class="body">
-		<aside class="sidebar" class:collapsed>
+		{#if mobileOpen}
+			<button type="button" class="drawer-backdrop" aria-label="Close sidebar" onclick={() => (mobileOpen = false)}></button>
+		{/if}
+		<aside class="sidebar" class:collapsed class:mobile-open={mobileOpen}>
 			{#each navItems as item (item.label)}
 				<a
 					class="nav-link"
@@ -217,6 +224,7 @@
 					href={item.path}
 					title={item.label}
 					aria-current={isActive(item.path) ? 'page' : undefined}
+					onclick={() => (mobileOpen = false)}
 				>
 					<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						{@html NAV_ICONS[item.icon]}
@@ -236,7 +244,7 @@
 	</div>
 </div>
 
-<svelte:window onkeydown={(e) => { if (logoutOpen && e.key === 'Escape') logoutOpen = false; }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') { mobileOpen = false; if (logoutOpen) logoutOpen = false; } }} />
 
 {#if logoutOpen}
 	<div class="modal-overlay" role="presentation">
@@ -339,6 +347,10 @@
 
 	.logout:hover {
 		background: rgba(220, 38, 38, 0.25);
+	}
+
+	.drawer-backdrop {
+		display: none;
 	}
 
 	.body {
@@ -501,6 +513,52 @@
 
 		.content {
 			padding: 1.25rem 1.25rem 2.5rem;
+		}
+
+		.drawer-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			background: var(--overlay);
+			z-index: 50;
+			border: 0;
+			padding: 0;
+			cursor: pointer;
+		}
+
+		.topbar {
+			min-height: 56px;
+		}
+
+		.sidebar {
+			position: fixed;
+			top: 56px;
+			left: 0;
+			bottom: 0;
+			z-index: 60;
+			transform: translateX(-100%);
+			transition: transform 0.2s ease;
+			box-shadow: var(--shadow-lg);
+		}
+
+		.sidebar,
+		.sidebar.collapsed {
+			width: 220px;
+		}
+
+		.sidebar .nav-label,
+		.sidebar .nav-label.hidden {
+			display: inline;
+			opacity: 1;
+		}
+
+		.sidebar .nav-link {
+			justify-content: flex-start;
+			padding: 0.625rem 0.75rem;
+		}
+
+		.sidebar.mobile-open {
+			transform: translateX(0);
 		}
 	}
 

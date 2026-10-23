@@ -630,7 +630,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<AttendanceSnapshot />
 	{:else if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
 		<SkeletonCards count={4} label="Loading analytics…" />
-		<SkeletonTable rows={4} cols={6} label="" />
+		<SkeletonTable rows={4} cols={6} />
 	{:else if adminAnalyticsState.error}
 		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>
 	{:else if tab === 'overview' && overview}
@@ -666,7 +666,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				<div class="table-wrap">
 					<table>
 						<thead>
-							<tr><th>Course</th><th>Cohort</th><th>Sessions</th><th>Compliance</th><th>Participation</th></tr>
+							<tr><th scope="col">Course</th><th scope="col">Cohort</th><th scope="col">Sessions</th><th scope="col">Compliance</th><th scope="col">Participation</th></tr>
 						</thead>
 						<tbody>
 							{#each comparison as r (`${r.course_id}-${r.program_id}-${r.year_level_id}`)}
@@ -697,7 +697,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				<div class="table-wrap">
 					<table>
 						<thead>
-							<tr><th>Period</th><th>Sessions</th><th>Compliance</th><th>Participation</th></tr>
+							<tr><th scope="col">Period</th><th scope="col">Sessions</th><th scope="col">Compliance</th><th scope="col">Participation</th></tr>
 						</thead>
 						<tbody>
 							{#each adminAnalyticsState.trends as t (t.date)}

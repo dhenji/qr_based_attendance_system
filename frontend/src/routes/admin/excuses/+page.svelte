@@ -88,11 +88,11 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Student</th>
-						<th>Class</th>
-						<th>Reason</th>
-						<th>Requested</th>
-						<th>Reviewed</th>
+						<th scope="col">Student</th>
+						<th scope="col">Class</th>
+						<th scope="col">Reason</th>
+						<th scope="col">Requested</th>
+						<th scope="col">Reviewed</th>
 					</tr>
 				</thead>
 				<tbody>

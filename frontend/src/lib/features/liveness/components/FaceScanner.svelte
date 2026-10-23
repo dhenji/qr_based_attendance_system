@@ -960,7 +960,7 @@
 
 	.hold-fill {
 		height: 100%;
-		background: #22c55e;
+		background: var(--success);
 		border-radius: 99px;
 		transition: width 0.1s linear;
 	}

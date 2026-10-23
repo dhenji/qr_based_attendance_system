@@ -641,11 +641,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<table>
 				<thead>
 					<tr>
-						<th><button class="th-btn" onclick={() => handleSort('date')}>Date<span class="sort-glyph">{sortGlyph('date')}</span></button></th>
-						<th><button class="th-btn" onclick={() => handleSort('course')}>Course<span class="sort-glyph">{sortGlyph('course')}</span></button></th>
-						<th><button class="th-btn" onclick={() => handleSort('status')}>Status<span class="sort-glyph">{sortGlyph('status')}</span></button></th>
-						<th><button class="th-btn" onclick={() => handleSort('time')}>Time<span class="sort-glyph">{sortGlyph('time')}</span></button></th>
-						<th><span class="sr-only">Actions</span></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('date')}>Date<span class="sort-glyph">{sortGlyph('date')}</span></button></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('course')}>Course<span class="sort-glyph">{sortGlyph('course')}</span></button></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('status')}>Status<span class="sort-glyph">{sortGlyph('status')}</span></button></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('time')}>Time<span class="sort-glyph">{sortGlyph('time')}</span></button></th>
+						<th scope="col"><span class="sr-only">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>

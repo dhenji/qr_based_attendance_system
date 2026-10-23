@@ -936,10 +936,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	.status-present { background: var(--success-bg); color: var(--success); }
 	.status-late { background: var(--warning-bg); color: var(--warning-text); }
-	.status-excused { background: var(--info-bg); color: #6d28d9; }
+	.status-excused { background: var(--info-bg); color: var(--info-text); }
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
-	.status-rejected { background: var(--danger-bg); color: #7f1d1d; }
+	.status-rejected { background: var(--danger-bg); color: var(--danger-strong); }
 
 	.type-badge {
 		display: inline-block;
@@ -953,8 +953,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.mini {

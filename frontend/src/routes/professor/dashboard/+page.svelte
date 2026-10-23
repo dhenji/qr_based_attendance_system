@@ -181,7 +181,7 @@
 		</section>
 	{:else if loading}
 		<SkeletonCards count={3} label="Loading today's sessions…" />
-		<SkeletonTable rows={4} cols={6} label="" />
+		<SkeletonTable rows={4} cols={6} />
 	{:else if liveSession}
 		<section class="hero">
 			<article class="live-card">

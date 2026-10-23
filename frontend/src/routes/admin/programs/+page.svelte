@@ -292,11 +292,11 @@
 								Name<span aria-hidden="true">{sortArrow('name')}</span>
 							</button>
 						</th>
-						<th>Years</th>
-						<th>Terms</th>
-						<th>Courses</th>
-						<th>Status</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Years</th>
+						<th scope="col">Terms</th>
+						<th scope="col">Courses</th>
+						<th scope="col">Status</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
