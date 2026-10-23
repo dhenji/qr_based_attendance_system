@@ -75,36 +75,35 @@ The scan flow is **strictly sequential** per [D27](../project/decision-log.md). 
 
 **Route**: `/student/scan/step/[1-5]` — screens advance automatically on success.
 
-### Step 1: Session Entry — `/student/scan/step/1`
+### Step 1: Session Entry — `/student/scan`
 
-[FIG: Two equal options — [Type code] input + Verify button OR [Scan Session QR] camera tile; verifying spinner; error states]
+[FIG: QR scanner (primary) with Start/Stop Camera + Upload QR image; manual session-code entry card below; verifying spinner; error states]
 
 **Two ways to join**:
 
-#### Option A: Type Session Code
+#### Option A: Scan Session QR
+
+1. Click **Start Camera** and point it at the QR code projected on screen (or use **Upload QR image**)
+2. The app reads the QR payload automatically
+
+#### Option B: Type Session Code
 
 1. Look at the projector in your classroom — the _session code_ is displayed (e.g., `A7X-9K2M`)
-2. Enter the code in the text field
+2. Enter the code in the manual-entry field
 3. Click **Verify Code**
-
-#### Option B: Scan Session QR
-
-1. Click the camera tile
-2. Point your camera at the QR code projected on screen
-3. The app reads the QR payload automatically
 
 > **Session QR payload** ([D18](../project/decision-log.md)): `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}` — versioned for future migration.
 
 **What happens**: Server verifies the code, fetches the _session_ config (windows, duration, _geofence_ radius, classroom). On failure, a generic "Invalid code" message is shown (no detail leak about wrong program or expired _session_).
 
-### Step 2: Student ID Scan — `/student/scan/step/2`
+### Step 2: Session Confirmation — `/student/scan`
 
-[FIG: Verified session card showing course name, cohort badge, scan window times, expiry; camera preview for scanning student ID QR; "Fetching your record…" spinner]
+[FIG: Session details card (course, session type, session/class end times, location/map) with your Student ID shown; Confirm button]
 
-1. **Header** shows the verified _course_ info (name, _program·year_, windows, expiry)
-2. Scan the QR on your **student ID card**
-3. The QR contains your _student number only_ ([D19](../project/decision-log.md))
-4. Server resolves your number → fetches your record (enrollment check + duplicate-scan check)
+1. **Header** shows "Session Confirmation" with the verified _course_ name
+2. Review the session details (course, type, times, location; remote sessions show no map)
+3. Your **Student ID** is shown read-only (prefilled from your profile)
+4. Click **Confirm** — server runs the enrollment + duplicate-scan check
 
 **Possible Failures**:
 

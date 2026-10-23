@@ -90,6 +90,8 @@ export interface SessionVerificationResponse {
 	geofence: { radius: number; lat: number | null; lng: number | null };
 	present_window_minutes: number;
 	late_window_minutes: number;
+	classroom_name?: string | null;
+	is_remote?: boolean;
 }
 
 export interface AttendanceScanResponse {
