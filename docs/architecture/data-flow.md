@@ -18,7 +18,7 @@ sequenceDiagram
     S->>API: POST /student/sessions/verify-code {code: "A7X9K2M4"}
     API->>DB: SELECT sessions.id, sessions.session_code, sessions.expires_at,<br>course_offerings.id, course_offerings.classroom_lat, course_offerings.classroom_lng<br>WHERE session_code = 'A7X9K2M4' AND expires_at > now()
     DB-->>API: Session row + offering context
-    API-->>S: 200 {session_id, offering_id, course_code, course_name, program_code, year_level_label,<br>expires_at, scheduled_end_time, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
+    API-->>S: 200 {session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label,<br>expires_at, scheduled_end_time, classroom_name, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
 
     Note over S,DB: Step 2 — Student-ID QR Scan (D27.2)
 
