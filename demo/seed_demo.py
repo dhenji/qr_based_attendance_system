@@ -89,15 +89,37 @@ COURSES = [
 ]
 
 OFFERING_SPECS = [
-    # Weekly totals must match the course units exactly (D79): duration x
-    # day-letter count == units. Counts below are one session per meeting
-    # day (D80) and are recomputed from the days string at seed time.
-    ("GE101", "BSCS", 1, "MWF", time(8, 0), time(9, 0)),
-    ("CS101", "BSCS", 1, "TTH", time(10, 0), time(11, 30)),
-    ("CS201", "BSCS", 2, "MW", time(10, 30), time(12, 30)),
-    ("IT101", "BSIT", 1, "TTH", time(13, 0), time(14, 30)),
-    ("ECE101", "BSECE", 1, "MW", time(8, 0), time(10, 0)),
+    # Each offering meets one or more meetings: (session_type, days, start,
+    # end). Weekly totals must match the course units exactly (D79): duration
+    # x day-letter count, summed over the offering's meetings. Counts below
+    # are one session per meeting day (D80) and are recomputed from the days
+    # strings at seed time.
+    #
+    # CS201 mixes a lecture and a laboratory, so the demo shows an offering
+    # that meets both (D95): the professor's session form offers the two
+    # types, and the laboratory sits in a room of its own.
+    ("GE101", "BSCS", 1, [("lecture", "MWF", time(8, 0), time(9, 0))]),
+    ("CS101", "BSCS", 1, [("lecture", "TTH", time(10, 0), time(11, 30))]),
+    (
+        "CS201",
+        "BSCS",
+        2,
+        [
+            ("lecture", "MW", time(10, 30), time(12, 0)),
+            ("lab", "W", time(13, 0), time(14, 0)),
+        ],
+    ),
+    ("IT101", "BSIT", 1, [("lecture", "TTH", time(13, 0), time(14, 30))]),
+    ("ECE101", "BSECE", 1, [("lecture", "MW", time(8, 0), time(10, 0))]),
 ]
+
+# The room a meeting of each type sits in. A laboratory has a room of its
+# own, and both carry coordinates — a laboratory session always enforces the
+# geofence (D77).
+ROOMS: dict[str, tuple[str, float, float]] = {
+    SessionType.LECTURE.value: ("Room 301", 14.5995, 120.9842),
+    SessionType.LAB.value: ("Lab 201", 14.6001, 120.9838),
+}
 
 
 def _database_url() -> str:
@@ -198,19 +220,26 @@ async def seed_demo(
                 ).scalars().all()
                 year_of[code] = {y.year_number: y for y in rows}
 
-            for code, prog, year_no, days, start, end in OFFERING_SPECS:
+            for code, prog, year_no, meetings in OFFERING_SPECS:
+                # The legacy columns follow the offering's first meeting. With
+                # several meetings they are a stale mirror and the components
+                # are the truth (D93).
+                first_type, first_days, first_start, first_end = meetings[0]
+                first_room, first_lat, first_lng = ROOMS[first_type]
                 offering, created = await _get_or_create(
                     db,
                     CourseOffering,
                     {
                         "year_level_id": year_of[prog][year_no].id,
-                        "sessions_per_week": _day_count(days),
-                        "schedule_days": days,
-                        "schedule_start_time": start,
-                        "schedule_end_time": end,
-                        "classroom_name": "Room 301",
-                        "classroom_lat": 14.5995,
-                        "classroom_lng": 120.9842,
+                        "sessions_per_week": sum(
+                            _day_count(days) for _, days, _, _ in meetings
+                        ),
+                        "schedule_days": first_days,
+                        "schedule_start_time": first_start,
+                        "schedule_end_time": first_end,
+                        "classroom_name": first_room,
+                        "classroom_lat": first_lat,
+                        "classroom_lng": first_lng,
                     },
                     course_id=courses[code].id,
                     program_id=programs[prog].id,
@@ -236,62 +265,90 @@ async def seed_demo(
                         f"{session_count} session(s) already opened"
                     )
                     continue
-                actives = (
+                # Every component of the offering, active or not: the unique
+                # key is (offering, type, days, start) for the offering's
+                # lifetime, so a meeting that was deactivated earlier is
+                # reactivated rather than inserted again.
+                components = (
                     await db.scalars(
                         select(OfferingComponent).where(
                             OfferingComponent.offering_id == offering.id,
-                            OfferingComponent.is_active.is_(True),
                         )
                     )
                 ).all()
-                match = next(
-                    (
-                        c
-                        for c in actives
-                        if c.session_type == SessionType.LECTURE.value
-                        and c.schedule_days == days
-                        and c.schedule_start_time == start
-                    ),
-                    None,
-                )
+                # Reconcile the meetings to the spec, one per entry: the spec
+                # may have changed since an earlier seed run, and
+                # _get_or_create above reuses the row by identity.
+                wanted: dict[tuple[str, str, time], tuple[time, str, float, float]] = {}
+                for session_type, days, start, end in meetings:
+                    room, lat, lng = ROOMS[session_type]
+                    wanted[(session_type, days, start)] = (end, room, lat, lng)
+
+                matched: set[tuple[str, str, time]] = set()
                 repaired = False
-                for component in actives:
-                    if component is not match and component.is_active:
-                        component.is_active = False
+                for component in components:
+                    key = (
+                        component.session_type,
+                        component.schedule_days,
+                        component.schedule_start_time,
+                    )
+
+                    if key not in wanted:
+                        if component.is_active:
+                            component.is_active = False
+                            repaired = True
+                        continue
+
+                    end, room, lat, lng = wanted[key]
+                    matched.add(key)
+
+                    if (
+                        not component.is_active
+                        or component.schedule_end_time != end
+                        or component.classroom_name != room
+                    ):
+                        component.is_active = True
+                        component.schedule_end_time = end
+                        component.classroom_name = room
+                        component.classroom_lat = lat
+                        component.classroom_lng = lng
                         repaired = True
-                if match is None:
+
+                for session_type, days, start, end in meetings:
+                    if (session_type, days, start) in matched:
+                        continue
+                    room, lat, lng = ROOMS[session_type]
                     db.add(
                         OfferingComponent(
                             offering_id=offering.id,
-                            session_type=SessionType.LECTURE.value,
+                            session_type=session_type,
                             schedule_days=days,
                             schedule_start_time=start,
                             schedule_end_time=end,
-                            classroom_name="Room 301",
-                            classroom_lat=14.5995,
-                            classroom_lng=120.9842,
+                            classroom_name=room,
+                            classroom_lat=lat,
+                            classroom_lng=lng,
                             is_active=True,
                         )
                     )
                     repaired = True
-                elif (
-                    match.schedule_end_time != end
-                    or match.classroom_name != "Room 301"
-                ):
-                    match.schedule_end_time = end
-                    match.classroom_name = "Room 301"
-                    match.classroom_lat = 14.5995
-                    match.classroom_lng = 120.9842
-                    repaired = True
-                # D77/D80: the lone active component mirrors onto the offering
-                # columns, and the session count follows the day letters.
-                offering.schedule_days = days
-                offering.schedule_start_time = start
-                offering.schedule_end_time = end
-                offering.classroom_name = "Room 301"
-                offering.classroom_lat = 14.5995
-                offering.classroom_lng = 120.9842
-                offering.sessions_per_week = _day_count(days)
+
+                # D77/D80: the lone active meeting mirrors onto the offering
+                # columns — with several meetings there is no single truth to
+                # mirror, so the columns are left alone (D93). The session
+                # count follows the meeting days either way.
+                offering.sessions_per_week = sum(
+                    _day_count(days) for _, days, _, _ in meetings
+                )
+                if len(meetings) == 1:
+                    session_type, days, start, end = meetings[0]
+                    room, lat, lng = ROOMS[session_type]
+                    offering.schedule_days = days
+                    offering.schedule_start_time = start
+                    offering.schedule_end_time = end
+                    offering.classroom_name = room
+                    offering.classroom_lat = lat
+                    offering.classroom_lng = lng
                 counts["offerings_repaired"] += int(repaired and not created)
             await db.commit()
 

@@ -2961,3 +2961,65 @@
     service's clock: the default offering meets `MWF 08:00-09:00`, which
     the wall clock is inside for three hours a week.
   - Covered by `tests/features/session/test_session_start_window.py`.
+
+### ADR-095: An Offering Declares What It Meets
+
+- **Decision (D95):** The **openable session types** of an offering are the
+  types it configures as active meetings (`offering_components.is_active =
+  true`). Opening a session of a type the offering does not configure is
+  refused with `422 session_type_not_configured`. An offering with **no**
+  active meeting is a **lecture** offering.
+- **Date:** 2026-10-22
+- **Status:** Accepted
+- **Context:** D77 gave each offering one scheduled component per session
+  type, so an offering says what it meets. The session-open path did not
+  honour that: the professor's form offered "Lecture" and "Laboratory" for
+  every offering, and the server opened either one. A laboratory session on
+  a lecture-only offering was accepted silently and inherited the lecture's
+  room and the course template's duration — its plan came back
+  `source: "course_default"` with no meeting, which is the resolver's way of
+  saying *there is nothing to inherit*, but nothing acted on it. The two
+  places that reported an offering's types (`features/course/service.py`
+  and `features/professor/service.py`) computed the list separately and
+  disagreed about an offering with no components: the admin badge called it
+  "Lecture" and the professor's card called it "Schedule".
+- **Alternatives considered:**
+  (1) *Warn in the form and leave the server permissive.* Rejected: the
+      browser is not the authority (D94's rule), and a scripted request
+      would still open a laboratory session on a lecture-only offering.
+  (2) *Treat an offering with no components as meeting both types.* Rejected:
+      its schedule columns are the *lecture's* — D77's migration gave every
+      existing offering a lecture component mirroring them, and the lone
+      active meeting is what keeps them in step — so a laboratory session
+      would inherit a lecture's time and room. "Lecture" is also what Admin
+      → Course Management already displays for such an offering.
+  (3) *Taken:* one shared rule, enforced by the server, and rendered by the
+      form from the same list.
+- **Consequences:**
+  - `shared/schedule.py::openable_session_types()` is the one definition, and
+    it replaces the two copies of the type list. An offering with no active
+    component reports `lecture`; an unknown value is ignored.
+  - The refusal runs in `create_session` after the D82 offering gate and
+    **before** the lab-coordinates check: "this offering has no laboratory"
+    is a more fundamental fact than "you did not type coordinates". The
+    session-plan endpoint refuses a closed type with the same error, so a
+    stale form learns the truth instead of being handed a plan it may not
+    use.
+  - The professor's form renders only the openable types, and its default
+    type is the offering's first openable one — a laboratory-only offering
+    would otherwise ask for a lecture plan on load. A `session_type_not_
+    configured` refusal refreshes the course list, so a stale toggle
+    corrects itself.
+  - **No schema change.** The components already carry the types; this is a
+    rule over them.
+  - Covered by `tests/features/session/test_session_type_gate.py`.
+
+## D96 — Explicit remote/online session mode
+
+- **Context:** Geofencing is a core anti-spoofing layer, but some lectures are remote/online and have no classroom. Previously the only way to skip geofencing was to leave `classroom_lat`/`classroom_lng` null, which is ambiguous (remote vs. misconfigured) and unauditable.
+- **Decision:** Add an explicit `is_remote` flag on `sessions` (default `false`). A remote session skips the geofence and does not require classroom coordinates, even for labs. The flag is stored and surfaced in read DTOs so the anti-spoofing posture is auditable and reportable. The frontend exposes it as a "Remote / online session" toggle on the open-session form, which clears coordinates and hides the classroom fields.
+- **Consequences:**
+  - `sessions.is_remote` is a non-null boolean with server default `false`.
+  - `lab_coordinates_required` is bypassed when `is_remote` is true.
+  - Remote sessions are recorded and can be reported; null coordinates on a non-remote session remain a potential misconfiguration.
+  - Covered by the session service tests and the frontend typecheck.

@@ -7,10 +7,12 @@ the professor reads expose + filter by type.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import time
+from typing import Any, Callable, Coroutine
 
 from sqlalchemy import select
 
+from features.course.model import OfferingComponent
 from features.session.model import Session
 from shared.enums import UserRole
 from tests.conftest import Factories
@@ -34,6 +36,46 @@ async def _seed_offering(factories: Factories, **overrides: Any) -> dict[str, An
         "course": course,
         "offering": offering,
     }
+
+
+async def _seed_offering_with_lab(
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+) -> dict[str, Any]:
+    """An offering that meets a laboratory as well as a lecture (D95).
+
+    A session of a type the offering does not configure is refused, so a
+    laboratory session needs a laboratory meeting. Both meetings cover the
+    suite's pinned clock (D94), and their weekly total is the course's
+    units (D82): three lecture days plus one laboratory day is four units.
+    The laboratory meeting has no coordinates, so the laboratory sessions
+    below resolve their room from the payload.
+    """
+    seed = await _seed_offering(factories)
+    seed["course"].units = 4
+    await factories.db.flush()
+
+    await db_factory(
+        OfferingComponent,
+        offering_id=seed["offering"].id,
+        session_type="lecture",
+        schedule_days="MWF",
+        schedule_start_time=time(8, 0),
+        schedule_end_time=time(9, 0),
+        is_active=True,
+    )
+    await db_factory(
+        OfferingComponent,
+        offering_id=seed["offering"].id,
+        session_type="lab",
+        schedule_days="W",
+        schedule_start_time=time(8, 0),
+        schedule_end_time=time(9, 0),
+        classroom_name="Lab 101",
+        is_active=True,
+    )
+
+    return seed
 
 
 async def _assigned_professor_headers(
@@ -290,12 +332,17 @@ async def test_single_component_mirrors_onto_offering(
 
 
 async def test_open_lab_session_without_coordinates_is_422(
-    api_client: Any, auth_headers: Any, factories: Factories
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+    test_db_session: Any,
 ) -> None:
-    seed = await _seed_offering(factories)
+    seed = await _seed_offering_with_lab(factories, db_factory)
     headers = await _assigned_professor_headers(
         factories, auth_headers, seed["offering"]
     )
+    await test_db_session.commit()
 
     response = await api_client.post(
         SESSIONS,
@@ -308,12 +355,17 @@ async def test_open_lab_session_without_coordinates_is_422(
 
 
 async def test_open_lab_session_with_coordinates_persists_type(
-    api_client: Any, auth_headers: Any, factories: Factories
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+    test_db_session: Any,
 ) -> None:
-    seed = await _seed_offering(factories)
+    seed = await _seed_offering_with_lab(factories, db_factory)
     headers = await _assigned_professor_headers(
         factories, auth_headers, seed["offering"]
     )
+    await test_db_session.commit()
 
     opened = await api_client.post(
         SESSIONS,
@@ -398,11 +450,16 @@ async def test_lab_session_prefills_component_classroom(
 
 
 async def test_session_list_history_and_ledger_filter_by_type(
-    api_client: Any, auth_headers: Any, factories: Factories
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+    test_db_session: Any,
 ) -> None:
-    seed = await _seed_offering(factories)
+    seed = await _seed_offering_with_lab(factories, db_factory)
     offering_id = seed["offering"].id
     headers = await _assigned_professor_headers(factories, auth_headers, seed["offering"])
+    await test_db_session.commit()
 
     lecture = await api_client.post(
         SESSIONS,
@@ -449,11 +506,16 @@ async def test_session_list_history_and_ledger_filter_by_type(
 
 
 async def test_attendance_ledger_carries_session_type(
-    api_client: Any, auth_headers: Any, factories: Factories
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+    test_db_session: Any,
 ) -> None:
-    seed = await _seed_offering(factories)
+    seed = await _seed_offering_with_lab(factories, db_factory)
     offering = seed["offering"]
     headers = await _assigned_professor_headers(factories, auth_headers, offering)
+    await test_db_session.commit()
 
     opened = await api_client.post(
         SESSIONS,

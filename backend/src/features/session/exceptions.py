@@ -166,6 +166,35 @@ class InvalidSessionTimeException(SessionDomainException):
         )
 
 
+class SessionTypeNotConfiguredException(SessionDomainException):
+    """422 - the offering does not meet this kind of session (D95).
+
+    An offering declares what it meets through its active meeting
+    components (D77). Opening a session of a type it does not configure
+    would inherit the lecture's room and the course template's duration —
+    so it is refused, and the message says what the offering does meet.
+    """
+
+    status_code: int = 422
+    code: str = "session_type_not_configured"
+
+    def __init__(self, session_type: str, configured: list[str]) -> None:
+        asked = "laboratory" if session_type == "lab" else "lecture"
+        names = [
+            "a laboratory" if value == "lab" else "a lecture" for value in configured
+        ]
+        meets = names[0] if len(names) == 1 else f"{names[0]} and {names[1]}"
+
+        super().__init__(
+            message=(
+                f"This offering has no {asked} session — it meets {meets}. Ask "
+                "an administrator to add the meeting, or open a session of the "
+                "type it does meet."
+            ),
+            field="session_type",
+        )
+
+
 class SessionOutsideScheduledTimeException(SessionDomainException):
     """422 - the session is outside its scheduled time (D94).
 
@@ -196,3 +225,16 @@ class SessionOutsideScheduledTimeException(SessionDomainException):
             )
 
         super().__init__(message=message)
+
+
+class RemoteNotAllowedForLabException(SessionDomainException):
+    """422 - remote/online mode is only available for lectures."""
+
+    status_code: int = 422
+    code: str = "remote_not_allowed_for_lab"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Remote / online mode is only available for lecture sessions",
+            field="is_remote",
+        )

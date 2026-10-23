@@ -281,7 +281,9 @@ def test_create_offering_ok() -> None:
     # returns [] for unregistered entities); DB-backed tests cover the
     # populated read below.
     assert read.components == []
-    assert read.session_types == []
+    # D95: with no component rows to read, the offering meets a lecture —
+    # that is what an offering without a configured meeting is.
+    assert read.session_types == ["lecture"]
     audit = session.added[2]
     assert audit.action == "create"
     assert audit.entity_type == "course_offering"

@@ -16,11 +16,20 @@ It used to live privately in `features/student/service.py`, but the session
 plan resolver (D93) reads the same string to work out which calendar day a
 meeting falls on, so the mapping lives here with the rest of the schedule
 math rather than being re-derived per feature.
+
+`openable_session_types` is the one definition of which session types an
+offering can open (D95). An offering declares what it meets through its
+active meeting components (D77), and the course read, the professor's
+course list, the session plan and the session open all have to agree on that
+list — so it is resolved here rather than computed in each of them.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import time
+
+from shared.enums import SessionType
 
 # Bounds and fallback for a term's session-week count. `DEFAULT_TERM_WEEKS`
 # stands in for a term that has no `weeks` configured yet (the UI seeds the
@@ -158,3 +167,25 @@ def meeting_minutes(schedule_days: str, start: time, end: time) -> float:
             + start.microsecond / 60000000
         )
     ) * distinct_day_count(schedule_days)
+
+
+def openable_session_types(configured: Iterable[str]) -> list[SessionType]:
+    """The session types an offering can open (D95).
+
+    The types it configures as active meetings (D77). An offering with no
+    active component is a **lecture** offering: D77's migration gave every
+    existing offering a lecture component mirroring its schedule, and the
+    lone active meeting is what the offering's legacy schedule columns
+    mirror — so until an administrator adds a laboratory meeting, the
+    offering meets a lecture and nothing else.
+
+    Unknown values are ignored, so a row written with a type nobody reads
+    cannot widen the list.
+    """
+    known = {SessionType.LECTURE.value, SessionType.LAB.value}
+    types = sorted(
+        {SessionType(value) for value in configured if value in known},
+        key=lambda value: value.value,
+    )
+
+    return types or [SessionType.LECTURE]

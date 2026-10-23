@@ -32,7 +32,9 @@ from features.session.exceptions import (
     SessionExpiredException,
     SessionNotFoundException,
     SessionOutsideScheduledTimeException,
+    SessionTypeNotConfiguredException,
     LabCoordinatesRequiredException,
+    RemoteNotAllowedForLabException,
     OfferingScheduleMismatchException,
 )
 from features.session.model import Session
@@ -71,7 +73,7 @@ from shared.pagination import (
 )
 from shared.query import apply_if
 from shared.rates import attendance_rates
-from shared.schedule import meeting_minutes
+from shared.schedule import meeting_minutes, openable_session_types
 
 
 def _utcnow() -> datetime:
@@ -129,6 +131,12 @@ def _session_type_of(row: Session) -> SessionType:
     and any row written before the D77 backfill.
     """
     return SessionType(row.session_type or SessionType.LECTURE.value)
+
+
+def _is_remote_of(row: Session) -> bool:
+    """Remote flag, defaulting to False for hand-rolled fakes."""
+    value = getattr(row, "is_remote", False)
+    return bool(value) if value is not None else False
 
 
 def _session_status(
@@ -194,11 +202,19 @@ class SessionService:
         await self._require_no_active_session(offering_id=offering.id, now=moment)
 
         # One read of the offering's active meetings, shared by the
-        # weekly-hours gate and the session plan.
+        # weekly-hours gate, the type gate and the session plan.
         components: Sequence[OfferingComponent] = await active_components(
             self._session, offering.id
         )
         await self._require_schedule_requirement(offering, components)
+
+        # D95: the offering declares what it meets. A session of a type it
+        # does not configure would inherit the lecture's room and the course
+        # template's duration, so it is refused — before the lab-coordinates
+        # check, which is about a different mistake.
+        self._require_configured_type(
+            components=components, session_type=payload.session_type
+        )
 
         course: Course | None = await self._session.get(Course, offering.course_id)
         plan: SessionPlan = await resolve_session_plan(
@@ -229,6 +245,11 @@ class SessionService:
         classroom_lng: float | None = _or_fallback(
             payload.classroom_lng, plan.classroom_lng
         )
+
+        # Remote / online mode is only available for lectures: labs always
+        # enforce the geofence, so a remote lab would bypass it.
+        if payload.session_type == SessionType.LAB and payload.is_remote:
+            raise RemoteNotAllowedForLabException()
 
         # D77: laboratory sessions always enforce the geofence, so a lab open
         # that resolves to no coordinates is rejected.
@@ -300,6 +321,7 @@ class SessionService:
             session_code=row.session_code,
             offering_id=offering.id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_start_time=row.scheduled_start_time,
@@ -311,6 +333,28 @@ class SessionService:
             override_reason=row.override_reason,
             created_at=row.created_at or moment,
         )
+
+    @staticmethod
+    def _require_configured_type(
+        *,
+        components: Sequence[OfferingComponent],
+        session_type: SessionType,
+    ) -> None:
+        """Refuse a session of a type the offering does not meet (D95).
+
+        The offering's active meetings are what it meets (D77), and the
+        list is resolved by the shared helper so the course read, the
+        professor's course list, the plan and the open all say the same
+        thing. An offering with no active meeting is a lecture offering.
+        """
+        configured = openable_session_types(
+            component.session_type for component in components
+        )
+
+        if session_type not in configured:
+            raise SessionTypeNotConfiguredException(
+                session_type.value, [value.value for value in configured]
+            )
 
     @staticmethod
     def _original_start(*, plan: SessionPlan, overridden: bool) -> datetime | None:
@@ -525,6 +569,7 @@ class SessionService:
             classroom_name=classroom_name,
             classroom_lat=classroom_lat,
             classroom_lng=classroom_lng,
+            is_remote=payload.is_remote,
         )
         self._session.add(row)
         await self._session.flush()
@@ -573,6 +618,7 @@ class SessionService:
             id=row.id,
             offering=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_end_time=row.scheduled_end_time,
@@ -732,6 +778,7 @@ class SessionService:
             session_id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
@@ -873,6 +920,7 @@ class SessionService:
             id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -950,6 +998,7 @@ class SessionService:
             id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -1297,6 +1346,10 @@ class SessionService:
         what the professor sees is what the server will store. Authorization
         is the same rule the open itself uses: a current teaching assignment
         on the offering.
+
+        A type the offering does not meet is refused with the same error the
+        open would raise (D95): a plan for it would be a plan the professor
+        may not use, and a stale form has to learn that.
         """
         moment: datetime = now or _utcnow()
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
@@ -1307,6 +1360,10 @@ class SessionService:
         components: Sequence[OfferingComponent] = await active_components(
             self._session, offering.id
         )
+        self._require_configured_type(
+            components=components, session_type=session_type
+        )
+
         course: Course | None = await self._session.get(Course, offering.course_id)
         plan: SessionPlan = await resolve_session_plan(
             self._session,
