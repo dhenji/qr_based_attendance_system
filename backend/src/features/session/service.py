@@ -237,14 +237,27 @@ class SessionService:
         radius: int = payload.classroom_radius_meters or plan.radius_meters
 
         # The classroom falls back payload -> matching active component ->
-        # offering, which the plan has already resolved.
-        classroom_name: str | None = payload.classroom_name or plan.classroom_name
-        classroom_lat: float | None = _or_fallback(
-            payload.classroom_lat, plan.classroom_lat
-        )
-        classroom_lng: float | None = _or_fallback(
-            payload.classroom_lng, plan.classroom_lng
-        )
+        # offering, which the plan has already resolved. An explicit
+        # override (D93/D94) is taken verbatim, so a professor who clears the
+        # room keeps a null location instead of inheriting the offering's.
+        if payload.classroom_override:
+            classroom_name = payload.classroom_name
+            classroom_lat = payload.classroom_lat
+            classroom_lng = payload.classroom_lng
+        else:
+            classroom_name = payload.classroom_name or plan.classroom_name
+            classroom_lat = _or_fallback(
+                payload.classroom_lat, plan.classroom_lat
+            )
+            classroom_lng = _or_fallback(
+                payload.classroom_lng, plan.classroom_lng
+            )
+
+        # Remote / online sessions never carry a physical geofence, even when
+        # the offering they were opened against has one.
+        if payload.is_remote:
+            classroom_lat = None
+            classroom_lng = None
 
         # Remote / online mode is only available for lectures: labs always
         # enforce the geofence, so a remote lab would bypass it.
