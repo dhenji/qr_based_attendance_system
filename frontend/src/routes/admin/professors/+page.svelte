@@ -376,10 +376,10 @@
 								Email<span aria-hidden="true">{sortArrow('email')}</span>
 							</button>
 						</th>
-						<th>Department</th>
-						<th>Courses</th>
-						<th>Claim</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Department</th>
+						<th scope="col">Courses</th>
+						<th scope="col">Claim</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>

@@ -304,10 +304,10 @@
 								Name<span aria-hidden="true">{sortArrow('name')}</span>
 							</button>
 						</th>
-						<th>Units</th>
-						<th>Default session (h)</th>
-						<th>Status</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Units</th>
+						<th scope="col">Default session (h)</th>
+						<th scope="col">Status</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>

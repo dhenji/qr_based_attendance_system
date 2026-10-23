@@ -252,12 +252,12 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Name</th>
-						<th>Email</th>
-						<th>Role</th>
-						<th>Status</th>
-						<th>Created</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Name</th>
+						<th scope="col">Email</th>
+						<th scope="col">Role</th>
+						<th scope="col">Status</th>
+						<th scope="col">Created</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>

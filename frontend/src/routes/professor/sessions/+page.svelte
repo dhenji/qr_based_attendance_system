@@ -147,7 +147,7 @@
 		</section>
 	{:else if !summaries}
 		<SkeletonCards count={2} label="Loading sessions…" />
-		<SkeletonTable rows={4} cols={6} label="" />
+		<SkeletonTable rows={4} cols={6} />
 	{:else}
 		<section aria-label="Active sessions">
 			<h2 class="section-title">Active now</h2>
@@ -438,7 +438,7 @@
 		gap: 0.5rem;
 		text-align: center;
 		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
-		border: 2px solid #22c55e;
+		border: 2px solid var(--success);
 		container-type: inline-size;
 	}
 
@@ -456,7 +456,7 @@
 		font-weight: 700;
 		letter-spacing: 0.12em;
 		line-height: 1;
-		color: #14532d;
+		color: var(--success);
 		max-width: 100%;
 		overflow-wrap: anywhere;
 	}
@@ -464,7 +464,7 @@
 	.active-meta {
 		margin: 0;
 		font-weight: 600;
-		color: #14532d;
+		color: var(--success);
 		font-size: 0.9375rem;
 	}
 
@@ -678,8 +678,8 @@
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.mini {

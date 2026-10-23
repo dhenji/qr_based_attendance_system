@@ -128,10 +128,10 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Name</th>
-						<th>Email</th>
-						<th>Department</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Name</th>
+						<th scope="col">Email</th>
+						<th scope="col">Department</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>

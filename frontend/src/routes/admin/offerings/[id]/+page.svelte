@@ -1228,11 +1228,11 @@
 						<table>
 							<thead>
 								<tr>
-									<th>Professor</th>
-									<th>Role</th>
-									<th>Effective</th>
-									<th>Semester</th>
-									<th><span class="sr">Actions</span></th>
+									<th scope="col">Professor</th>
+									<th scope="col">Role</th>
+									<th scope="col">Effective</th>
+									<th scope="col">Semester</th>
+									<th scope="col"><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1308,11 +1308,11 @@
 						<table>
 							<thead>
 								<tr>
-									<th>Student ID</th>
-									<th>Name</th>
-									<th>Section</th>
-									<th>Enrolled</th>
-									<th><span class="sr">Actions</span></th>
+									<th scope="col">Student ID</th>
+									<th scope="col">Name</th>
+									<th scope="col">Section</th>
+									<th scope="col">Enrolled</th>
+									<th scope="col"><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1407,11 +1407,11 @@
 						<table>
 							<thead>
 								<tr>
-									<th>Type</th>
-									<th>Days</th>
-									<th>Time</th>
-									<th>Room</th>
-									<th><span class="sr">Actions</span></th>
+									<th scope="col">Type</th>
+									<th scope="col">Days</th>
+									<th scope="col">Time</th>
+									<th scope="col">Room</th>
+									<th scope="col"><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>

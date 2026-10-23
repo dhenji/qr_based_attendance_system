@@ -508,7 +508,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		</section>
 	{:else if isLoading || !session || scanRemainingSeconds === null || classRemainingSeconds === null}
 		<SkeletonCards count={3} label="Loading live session…" />
-		<SkeletonTable rows={5} cols={5} label="" />
+		<SkeletonTable rows={5} cols={5} />
 	{:else}
 		{#if refreshError}
 			<p class="refresh-error" role="status">{refreshError}</p>
@@ -930,7 +930,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		align-items: center;
 		gap: 1rem;
 		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
-		border: 2px solid #22c55e;
+		border: 2px solid var(--success);
 		text-align: center;
 		container-type: inline-size;
 	}
@@ -949,7 +949,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-weight: 700;
 		letter-spacing: 0.12em;
 		line-height: 1;
-		color: #14532d;
+		color: var(--success);
 		max-width: 100%;
 		overflow-wrap: anywhere;
 	}
@@ -968,12 +968,12 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		min-width: 11rem;
 		padding: 0.75rem 1rem;
 		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.78);
+		background: color-mix(in srgb, var(--bg-card) 80%, transparent);
 		border: 1px solid var(--success-bg);
 	}
 
 	.timer.urgent {
-		border-color: #fca5a5;
+		border-color: var(--danger);
 	}
 
 	.timer-label {
@@ -992,12 +992,12 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-variant-numeric: tabular-nums;
 		font-size: 1.375rem;
 		font-weight: 800;
-		color: #14532d;
+		color: var(--success);
 	}
 
 	.timer-sub {
 		font-size: 0.8125rem;
-		color: #4d7c62;
+		color: var(--text-muted);
 	}
 
 	.tiles {
@@ -1208,7 +1208,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	.status-present { background: var(--success-bg); color: var(--success); }
 	.status-late { background: var(--warning-bg); color: var(--warning-text); }
-	.status-excused { background: var(--info-bg); color: #6d28d9; }
+	.status-excused { background: var(--info-bg); color: var(--info-text); }
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
 
@@ -1224,8 +1224,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.mini {
@@ -1251,8 +1251,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		align-items: center;
 		gap: 0.75rem;
 		background: var(--warning-bg);
-		border-color: #fcd34d;
-		color: #92400e;
+		border-color: var(--warning-text);
+		color: var(--warning-text);
 	}
 
 	.sync strong {

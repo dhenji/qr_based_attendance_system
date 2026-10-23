@@ -795,8 +795,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	/* D36: compliance by default; the title/aria-label reveals participation. */

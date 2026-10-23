@@ -504,7 +504,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		</section>
 	{:else if isLoading}
 		<SkeletonCards count={4} label="Loading reports…" />
-		<SkeletonTable rows={5} cols={6} label="" />
+		<SkeletonTable rows={5} cols={6} />
 	{:else if tab === 'all' && aggregate}
 		<section class="kpis" aria-label="Aggregate report summary">
 			<article class="kpi">

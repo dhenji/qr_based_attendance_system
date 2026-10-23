@@ -253,13 +253,13 @@ import { sessionMixLabel } from '$lib/shared/types';
 					<table>
 						<thead>
 							<tr>
-								<th>Cohort</th>
-								<th>Term</th>
-								<th>Schedule</th>
-								<th>Type</th>
-								<th>Enrolled</th>
-								<th>Status</th>
-								<th><span class="sr">Actions</span></th>
+								<th scope="col">Cohort</th>
+								<th scope="col">Term</th>
+								<th scope="col">Schedule</th>
+								<th scope="col">Type</th>
+								<th scope="col">Enrolled</th>
+								<th scope="col">Status</th>
+								<th scope="col"><span class="sr">Actions</span></th>
 							</tr>
 						</thead>
 						<tbody>

@@ -127,11 +127,11 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Student</th>
-						<th>Session</th>
-						<th>Score</th>
-						<th>Scanned</th>
-						{#if liveStatus === 'pending'}<th>Decision</th>{/if}
+						<th scope="col">Student</th>
+						<th scope="col">Session</th>
+						<th scope="col">Score</th>
+						<th scope="col">Scanned</th>
+						{#if liveStatus === 'pending'}<th scope="col">Decision</th>{/if}
 					</tr>
 				</thead>
 				<tbody>

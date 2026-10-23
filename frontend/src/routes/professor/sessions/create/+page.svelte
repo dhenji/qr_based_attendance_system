@@ -1395,7 +1395,7 @@ let selectedOfferingId = $state<number | null>(null);
 	   than the course's, so it gets the amber treatment to say so. */
 	.location.overridden {
 		background: var(--warning-bg);
-		border-color: #fcd34d;
+		border-color: var(--warning-text);
 		color: var(--warning-text);
 	}
 
@@ -1403,7 +1403,7 @@ let selectedOfferingId = $state<number | null>(null);
 		margin-left: auto;		padding: 0.125rem 0.5rem;
 		border-radius: 6px;
 		background: var(--warning-bg);
-		border: 1px solid #fcd34d;
+		border: 1px solid var(--warning-text);
 		color: var(--warning-text);
 		font-size: 0.6875rem;
 		font-weight: 700;
@@ -1604,7 +1604,7 @@ let selectedOfferingId = $state<number | null>(null);
 
 	.preview.generated {
 		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
-		border: 2px solid #22c55e;
+		border: 2px solid var(--success);
 		border-style: solid;
 	}
 
