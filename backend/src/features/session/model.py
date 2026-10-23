@@ -103,6 +103,13 @@ class Session(CreatedAtMixin, Base):
     is_remote: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Whether the geofence is enforced for this session. An explicit flag
+    # (default true) so an in-person session with no known classroom can
+    # disable the geofence without being mistaken for a misconfiguration or
+    # a remote session (D96). Stored and surfaced for audit/reporting.
+    geofence_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
 
     @property
     def computed_expires_at(self) -> datetime:

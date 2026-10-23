@@ -193,6 +193,8 @@ export const openSession = async (
 		classroomOverride?: boolean;
 		// Remote/online session: skips the geofence.
 		isRemote?: boolean;
+		// Whether the geofence is enforced for this session.
+		geofenceEnabled?: boolean;
 		// D93: the schedule exception.
 		sessionDate?: string;
 		startTime?: string;
@@ -214,6 +216,7 @@ export const openSession = async (
 	if (options?.classroomLng !== undefined) body.classroom_lng = options.classroomLng;
 	if (options?.classroomOverride !== undefined) body.classroom_override = options.classroomOverride;
 	if (options?.isRemote !== undefined) body.is_remote = options.isRemote;
+	if (options?.geofenceEnabled !== undefined) body.geofence_enabled = options.geofenceEnabled;
 	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
 	if (options?.startTime !== undefined) body.start_time = options.startTime;
 	if (options?.overrideReason !== undefined && options.overrideReason.trim() !== '')
