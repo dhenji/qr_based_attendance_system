@@ -139,6 +139,12 @@ def _is_remote_of(row: Session) -> bool:
     return bool(value) if value is not None else False
 
 
+def _geofence_enabled_of(row: Session) -> bool:
+    """Geofence flag, defaulting to True for hand-rolled fakes."""
+    value = getattr(row, "geofence_enabled", True)
+    return bool(value) if value is not None else True
+
+
 def _session_status(
     expires_at: datetime | None, now: datetime
 ) -> Literal["active", "closed"]:
@@ -259,6 +265,14 @@ class SessionService:
             classroom_lat = None
             classroom_lng = None
 
+        # An explicitly disabled geofence (e.g. an in-person session in a
+        # room with no known coordinates) carries no classroom identity, so
+        # the offering's room is not inherited for it.
+        if not payload.geofence_enabled:
+            classroom_name = None
+            classroom_lat = None
+            classroom_lng = None
+
         # Remote / online mode is only available for lectures: labs always
         # enforce the geofence, so a remote lab would bypass it.
         if payload.session_type == SessionType.LAB and payload.is_remote:
@@ -335,6 +349,7 @@ class SessionService:
             offering_id=offering.id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_start_time=row.scheduled_start_time,
@@ -583,6 +598,7 @@ class SessionService:
             classroom_lat=classroom_lat,
             classroom_lng=classroom_lng,
             is_remote=payload.is_remote,
+            geofence_enabled=payload.geofence_enabled,
         )
         self._session.add(row)
         await self._session.flush()
@@ -632,6 +648,7 @@ class SessionService:
             offering=row.offering_id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_end_time=row.scheduled_end_time,
@@ -792,6 +809,7 @@ class SessionService:
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
@@ -935,6 +953,7 @@ class SessionService:
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -1013,6 +1032,7 @@ class SessionService:
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,

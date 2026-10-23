@@ -92,6 +92,7 @@ export interface SessionVerificationResponse {
 	late_window_minutes: number;
 	classroom_name?: string | null;
 	is_remote?: boolean;
+	geofence_enabled?: boolean;
 }
 
 export interface AttendanceScanResponse {

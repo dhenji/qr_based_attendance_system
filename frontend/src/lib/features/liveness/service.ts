@@ -21,6 +21,7 @@ export interface SessionVerification {
 	scheduledEndTime?: string;
 	classroomName?: string | null;
 	isRemote?: boolean;
+	geofenceEnabled?: boolean;
 }
 
 export interface AttendanceScanResult {
@@ -77,6 +78,7 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		scheduledEndTime: response.scheduled_end_time,
 		classroomName: response.classroom_name,
 		isRemote: response.is_remote,
+		geofenceEnabled: response.geofence_enabled,
 	};
 };
 

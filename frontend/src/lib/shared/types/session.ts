@@ -54,6 +54,7 @@ export interface SessionReadResponse {
 	offering_id: number;
 	session_type: CourseType;
 	is_remote: boolean;
+	geofence_enabled?: boolean;
 	qr_payload: {
 		v: 1;
 		code: string;

@@ -3023,3 +3023,26 @@
   - `lab_coordinates_required` is bypassed when `is_remote` is true.
   - Remote sessions are recorded and can be reported; null coordinates on a non-remote session remain a potential misconfiguration.
   - Covered by the session service tests and the frontend typecheck.
+
+## D97 — Explicit `geofence_enabled` flag for sessions with no known classroom
+
+- **Context:** A professor may open a session in a room whose coordinates are
+  unknown (substitute room, off-campus venue, field trip). Reusing
+  `is_remote` mislabels an in-person session; inferring "no geofence" from
+  null coordinates reintroduces the ambiguity D96 eliminated (remote vs.
+  misconfigured).
+- **Decision:** Add an explicit non-null boolean `sessions.geofence_enabled`
+  (default `true`). A session with `geofence_enabled = false` carries no
+  classroom identity (`classroom_name`, `classroom_lat`, `classroom_lng` are
+  null) and skips the geofence, while staying `is_remote = false`. The flag
+  is stored and surfaced in read DTOs so the anti-spoofing posture stays
+  auditable and reportable. The frontend exposes it as a lecture-only
+  "No classroom (skip geofence)" toggle.
+- **Consequences:**
+  - `sessions.geofence_enabled` is a non-null boolean with server default
+    `true`.
+  - `_validate_geofence` returns early when the flag is false (or coords are
+    null).
+  - Remote sessions keep working; both flags can coexist.
+  - Covered by `tests/features/session/test_session_location.py` and the
+    frontend typecheck.

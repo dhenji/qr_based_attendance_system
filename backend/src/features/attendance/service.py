@@ -502,6 +502,9 @@ class AttendanceService:
             raise DuplicateScanException(student_id, session_id)
 
     def _validate_geofence(self, session: Session, gps: GPSInput) -> None:
+        if not getattr(session, "geofence_enabled", True):
+            return
+
         if session.classroom_lat is None or session.classroom_lng is None:
             return
 

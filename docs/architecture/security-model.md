@@ -383,3 +383,5 @@ These are **explicitly out of scope** for this system:
 ## Remote sessions (D96)
 
 Remote/online sessions are an explicit, auditable mode (`sessions.is_remote`). A remote session skips the geofence and does not require classroom coordinates, even for labs. The flag is recorded and reportable, so the anti-spoofing posture (T3/T5) stays visible rather than being silently weakened by null coordinates.
+
+An in-person session with no known classroom uses the separate `sessions.geofence_enabled` flag (default `true`): when `false`, the geofence is skipped and no classroom identity is stored, while `is_remote` remains `false`. This keeps "remote/online" and "no known classroom" distinguishable in the audit trail.
