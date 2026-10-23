@@ -190,6 +190,7 @@ export const openSession = async (
 		classroomName?: string;
 		classroomLat?: number;
 		classroomLng?: number;
+		classroomOverride?: boolean;
 		// Remote/online session: skips the geofence.
 		isRemote?: boolean;
 		// D93: the schedule exception.
@@ -211,6 +212,7 @@ export const openSession = async (
 		body.classroom_name = options.classroomName.trim();
 	if (options?.classroomLat !== undefined) body.classroom_lat = options.classroomLat;
 	if (options?.classroomLng !== undefined) body.classroom_lng = options.classroomLng;
+	if (options?.classroomOverride !== undefined) body.classroom_override = options.classroomOverride;
 	if (options?.isRemote !== undefined) body.is_remote = options.isRemote;
 	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
 	if (options?.startTime !== undefined) body.start_time = options.startTime;

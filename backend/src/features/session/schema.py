@@ -46,6 +46,11 @@ class SessionCreate(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the professor explicitly overrode the offering's classroom. When
+    # True, the payload's classroom fields are used as-is (including None),
+    # so an intentionally cleared room is not replaced by the offering's
+    # default. When False (the default), omitted fields inherit the plan.
+    classroom_override: bool = False
     duration_minutes: int | None = Field(
         default=None, ge=DURATION_MINUTES_MIN, le=DURATION_MINUTES_MAX
     )
