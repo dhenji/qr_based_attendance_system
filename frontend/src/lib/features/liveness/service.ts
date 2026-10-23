@@ -15,6 +15,12 @@ export interface SessionVerification {
 	// Center null = no classroom coordinates; both the server and the scan
 	// page skip the geofence check in that case.
 	geofence: { radius: number; lat: number | null; lng: number | null };
+	programCode?: string;
+	yearLevelLabel?: string;
+	sessionType?: 'lecture' | 'lab';
+	scheduledEndTime?: string;
+	classroomName?: string | null;
+	isRemote?: boolean;
 }
 
 export interface AttendanceScanResult {
@@ -65,6 +71,12 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		courseName: response.course_name,
 		expiresAt: response.expires_at,
 		geofence: response.geofence,
+		programCode: response.program_code,
+		yearLevelLabel: response.year_level_label,
+		sessionType: response.session_type,
+		scheduledEndTime: response.scheduled_end_time,
+		classroomName: response.classroom_name,
+		isRemote: response.is_remote,
 	};
 };
 

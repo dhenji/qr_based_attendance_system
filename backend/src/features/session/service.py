@@ -792,6 +792,7 @@ class SessionService:
             ),
             present_window_minutes=row.present_window_minutes,
             late_window_minutes=row.late_window_minutes,
+            classroom_name=row.classroom_name,
         )
 
     async def list_professor_sessions(

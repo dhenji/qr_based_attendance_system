@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { initFaceModel } from '$lib/features/liveness/model';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { Html5Qrcode } from 'html5-qrcode';
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import {
@@ -28,21 +29,21 @@
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
-	type Step = 'entry' | 'id' | 'qr' | 'liveness';
+	type Step = 'entry' | 'confirm' | 'liveness';
 
 	let sessionCode = $state('');
 	let session = $state<SessionVerification | null>(null);
 	let step = $state<Step>('entry');
+	let uploading = $state(false);
+	let fileInput: HTMLInputElement | null = $state(null);
 	// D27 step-2 ID gate: the number is editable and compared server-side
 	// case-insensitively (403 student_number_mismatch on spoof). Identity
 	// always resolves from the authenticated user — the input can never
-	// impersonate another student. pendingNext remembers whether the ID
-	// check was entered from manual entry (→ QR) or a QR scan (→ liveness).
+	// impersonate another student.
 	let idNumber = $state('');
 	let checkingId = $state(false);
 	let verifiedNumber = $state('');
 	let verifiedName = $state('');
-	let pendingNext = $state<'qr' | 'liveness'>('qr');
 	let precheckFailed = $state(false);
 	let alreadyScannedStop = $state(false);
 	let showPermission = $state(false);
@@ -210,7 +211,7 @@
 		};
 	});
 
-	const verifyCode = async (code: string, openScanner: boolean) => {
+	const verifyCode = async (code: string) => {
 		const normalizedCode = code.trim();
 		if (!normalizedCode || verifying) return;
 
@@ -240,8 +241,9 @@
 			rejectionReason = '';
 			precheckFailed = false;
 			alreadyScannedStop = false;
-			if (openScanner) goToId('qr');
-			else goToId('liveness');
+			qrActive = false;
+			if (!idNumber) idNumber = studentNumber;
+			goToConfirm();
 		} catch (error) {
 			// Offline with a fresh cached config for this code: the session was
 			// verified before the signal dropped, so the scan may proceed —
@@ -256,14 +258,16 @@
 						courseCode: cached.course_code,
 						courseName: cached.course_name,
 						expiresAt: cached.expires_at,
-						geofence: cached.geofence
+						geofence: cached.geofence,
+						scheduledEndTime: cached.expires_at
 					};
 					showFailure = false;
 					rejectionReason = '';
 					precheckFailed = false;
 					alreadyScannedStop = false;
-					if (openScanner) goToQr();
-					else startLiveness();
+					qrActive = false;
+					if (!idNumber) idNumber = studentNumber;
+					goToConfirm();
 					return;
 				}
 			}
@@ -274,11 +278,38 @@
 	};
 
 	const handleVerifyCode = () => {
-		void verifyCode(sessionCode, true);
+		void verifyCode(sessionCode);
 	};
 
 	const handleScanned = (code: string) => {
-		void verifyCode(code, false);
+		void verifyCode(code);
+	};
+
+	const handleUploadClick = () => {
+		fileInput?.click();
+	};
+
+	const handleFileChange = async (event: Event) => {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || uploading) return;
+		uploading = true;
+		scanError = null;
+		try {
+			const scanner = new Html5Qrcode('upload-qr-reader');
+			const decoded = await scanner.scanFile(file, false);
+			try { scanner.clear(); } catch { /* ignore */ }
+			if (!decoded) {
+				scanError = 'Could not read a QR code from that image. Try another image or enter the code manually.';
+				return;
+			}
+			await verifyCode(decoded);
+		} catch {
+			scanError = 'Could not read a QR code from that image. Try another image or enter the code manually.';
+		} finally {
+			uploading = false;
+			input.value = '';
+		}
 	};
 
 	// D27 step-2 gate: enrollment + duplicate check before GPS/face run.
@@ -311,14 +342,12 @@
 			}
 			verifiedNumber = entered;
 			verifiedName = result.studentName;
-			if (pendingNext === 'qr') goToQr();
-			else startLiveness();
+			startLiveness();
 		} catch (error) {
 			if (isNetworkError(error)) {
 				// Offline: proceed without the gate; submit queues for sync.
 				verifiedNumber = entered;
-				if (pendingNext === 'qr') goToQr();
-				else startLiveness();
+				startLiveness();
 				return;
 			}
 			scanError = toUserMessage(error, 'Unable to check your ID number');
@@ -327,29 +356,24 @@
 		}
 	};
 
-	const goToQr = () => {
+	const goToConfirm = () => {
 		qrActive = false;
 		livenessActive = false;
 		showSuccess = false;
 		showFailure = false;
-		step = 'qr';
-		showPermission = true;
+		scanError = null;
+		step = 'confirm';
 	};
 
-	const goToId = (next: 'qr' | 'liveness') => {
-		qrActive = false;
+	const backToConfirm = () => {
+		if (submitting) return;
 		livenessActive = false;
-		showSuccess = false;
 		showFailure = false;
+		rejectionReason = '';
+		scanError = null;
 		precheckFailed = false;
 		alreadyScannedStop = false;
-		verifiedNumber = '';
-		verifiedName = '';
-		// Prefill from the signed-in profile; the student may correct it —
-		// the backend compares case-insensitively and 403s on mismatch.
-		if (!idNumber) idNumber = studentNumber;
-		pendingNext = next;
-		step = 'id';
+		step = 'confirm';
 	};
 
 	const startLiveness = () => {
@@ -363,19 +387,6 @@
 		livenessActive = true;
 	};
 
-	const backToQr = () => {
-		if (submitting) return;
-		livenessActive = false;
-		showFailure = false;
-		rejectionReason = '';
-		scanError = null;
-		precheckFailed = false;
-		alreadyScannedStop = false;
-		showPermission = false;
-		step = 'qr';
-		qrActive = true;
-	};
-
 	const backToEntry = () => {
 		if (submitting) return;
 		submitting = false;
@@ -387,6 +398,7 @@
 		showPermission = false;
 		showSuccess = false;
 		showFailure = false;
+		uploading = false;
 		precheckFailed = false;
 		alreadyScannedStop = false;
 		verifiedNumber = '';
@@ -628,95 +640,22 @@
 		<p class="error" role="alert">{scanError}</p>
 	{/if}
 
+	<div aria-live="polite" class="sr-only">
+		{verifying ? 'Verifying session code' : uploading ? 'Reading QR image' : ''}
+	</div>
+
 	{#if step === 'entry'}
 		<div class="page">
 			<div class="page-header">
 				<button class="back-btn" onclick={() => goto(Routes.DASHBOARD)}>
 					← <span>Back</span>
 				</button>
-				<h1>Attendance Scanner</h1>
+				<h1>Scan to Attend</h1>
 			</div>
 
-			<!-- Session Code -->
+			<!-- QR Code Scanner (primary) -->
 			<section class="card">
-				<h2 class="section-title">Session Code (manual entry)</h2>
-				<div class="code-row">
-					<input
-						class="form-input code-input code-input-plain"
-						placeholder="Enter code from projector (e.g. wan9YQXY)"
-						aria-label="Session code"
-						autocomplete="off"
-						spellcheck={false}
-						value={sessionCode}
-						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value; }}
-					/>
-					<button
-						class="btn-secondary"
-						disabled={verifying}
-						onclick={() => void handleVerifyCode()}
-					>
-						{verifying ? 'Verifying…' : 'Verify Code'}
-					</button>
-				</div>
-			</section>
-
-			<p class="footnote">
-				Verify the session code, confirm your student ID, then open the QR scanner and complete face liveness.
-			</p>
-		</div>
-	{:else if step === 'id'}
-		<div class="page">
-			<div class="page-header">
-				<button class="back-btn" onclick={backToEntry} disabled={submitting}>
-					← <span>Back</span>
-				</button>
-				<h1>Confirm Student ID</h1>
-			</div>
-
-			<!-- D27 step 2: ID-number gate (enrollment + duplicate check) -->
-			<section class="card">
-				<h2 class="section-title">
-					{session?.courseCode ?? 'Session'}{session ? ` — ${session.courseName}` : ''}
-				</h2>
-				<div class="code-row">
-					<input
-						class="form-input code-input"
-						placeholder="Student ID (e.g. 24-0001)"
-						aria-label="Student ID number"
-						value={idNumber}
-						oninput={(e) => { idNumber = (e.target as HTMLInputElement).value.toUpperCase(); }}
-						onkeydown={(e) => { if (e.key === 'Enter') void checkId(); }}
-					/>
-					<button
-						class="btn-secondary"
-						disabled={checkingId}
-						onclick={() => void checkId()}
-					>
-						{checkingId ? 'Checking…' : 'Check'}
-					</button>
-				</div>
-				{#if verifiedName}
-					<p class="footnote">Checked in as {verifiedName}.</p>
-				{:else}
-					<p class="footnote">
-						Prefilled from your signed-in profile — correct it if needed. The server
-						compares it to your account and rejects mismatches.
-					</p>
-				{/if}
-			</section>
-		</div>
-	{:else if step === 'qr'}
-		<div class="page">
-			<div class="page-header">
-				<button class="back-btn" onclick={backToEntry} disabled={submitting}>
-					← <span>Back</span>
-				</button>
-				<h1>QR Scanner</h1>
-			</div>
-
-			<!-- QR Camera Scanner -->
-			<section class="card">
-				<h2 class="section-title">QR Camera Scanner</h2>
+				<h2 class="section-title">Scan Session QR Code</h2>
 				<div
 					class="viewport"
 					class:inactive={!qrActive}
@@ -741,24 +680,184 @@
 					{/if}
 				</div>
 
+				{#if verifying}
+					<p class="footnote" aria-live="polite">Verifying session…</p>
+				{:else}
+					<p class="footnote">Align the QR code within the frame, or upload an image below.</p>
+				{/if}
+
 				<div class="camera-actions">
 					<button
 						class={qrActive ? 'btn-danger' : 'btn-primary'}
 						onclick={toggleQr}
+						disabled={verifying || uploading}
 					>
 						{qrActive ? 'Stop Camera' : 'Start Camera'}
 					</button>
+					<button
+						class="btn-secondary"
+						disabled={uploading || qrActive}
+						onclick={handleUploadClick}
+					>
+						{uploading ? 'Reading…' : 'Upload QR image'}
+					</button>
 				</div>
 
+				<div id="upload-qr-reader" style="display: none;"></div>
+				<input
+					bind:this={fileInput}
+					type="file"
+					accept="image/*"
+					style="display: none;"
+					onchange={handleFileChange}
+				/>
+
 				<p class="footnote">
-					Scan the session QR code shown on the projector. Face liveness opens after verification.
+					Point the camera at the session QR code shown on the projector, or upload a
+					screenshot/photo of it.
 				</p>
 			</section>
+
+			<!-- Manual entry -->
+			<section class="card">
+				<h2 class="section-title">Session Code (manual entry)</h2>
+				<div class="code-row">
+					<input
+						class="form-input code-input code-input-plain"
+						placeholder="Enter code from projector (e.g. wan9YQXY)"
+						aria-label="Session code"
+						autocomplete="off"
+						spellcheck={false}
+						value={sessionCode}
+						oninput={(e) => { sessionCode = (e.target as HTMLInputElement).value; }}
+					/>
+					<button
+						class="btn-secondary"
+						disabled={verifying}
+						onclick={() => void handleVerifyCode()}
+					>
+						{verifying ? 'Verifying…' : 'Verify Code'}
+					</button>
+				</div>
+			</section>
+
+			<p class="footnote">
+				Scan the QR code (or enter a code manually), complete session confirmation, then
+				finish face liveness.
+			</p>
+		</div>
+	{:else if step === 'confirm'}
+		<div class="page">
+			<div class="page-header">
+				<button class="back-btn" onclick={backToEntry} disabled={verifying}>
+					← <span>Back</span>
+				</button>
+				<h1>Session Confirmation</h1>
+			</div>
+			{#if session}
+				<p class="footnote" style="margin-top: -0.5rem; margin-bottom: 1rem; font-weight: 600;">
+					{session.courseCode} — {session.courseName}
+				</p>
+				<p class="footnote" style="margin-top: -0.75rem; margin-bottom: 1rem;">
+					{session.sessionType ?? 'Session'} · {session.isRemote ? 'Remote / online' : (session.classroomName ?? 'On campus')}
+				</p>
+			{/if}
+
+			{#if verifying}
+				<section class="card">
+					<p class="footnote">Verifying session…</p>
+				</section>
+			{:else if !session}
+				<section class="card">
+					<p class="error" role="alert">Session information is unavailable. Go back and try again.</p>
+				</section>
+			{:else}
+				<section class="card">
+					<h2 class="section-title">Session details</h2>
+					<div class="ticket-lines">
+						<p class="ticket-line">
+							<span class="ticket-label">Course</span>
+							<span class="ticket-value">
+								<span class="mono-data">{session.courseCode}</span>
+								{session.courseName}
+							</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Session type</span>
+							<span class="ticket-value">{session.sessionType ?? '—'}</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Session ends</span>
+							<span class="ticket-value mono-data">{formatLocalDateTime(session.expiresAt)}</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Class ends</span>
+							<span class="ticket-value mono-data">{session.scheduledEndTime ? formatLocalDateTime(session.scheduledEndTime) : '—'}</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Location</span>
+							<span class="ticket-value">
+								{#if session.isRemote}
+									Remote / online session
+								{:else if session.classroomName}
+									{session.classroomName}
+								{:else if session.geofence.lat !== null && session.geofence.lng !== null}
+									Classroom coordinates available
+								{:else}
+									No classroom location
+								{/if}
+							</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Student ID</span>
+							<span class="ticket-value mono-data">{idNumber || '—'}</span>
+						</p>
+						{#if !session.isRemote && session.geofence.lat !== null && session.geofence.lng !== null}
+							<p class="ticket-line">
+								<span class="ticket-label">Map</span>
+								<span class="ticket-value">
+									<a
+										href={`https://www.openstreetmap.org/?mlat=${session.geofence.lat}&mlon=${session.geofence.lng}#map=17/${session.geofence.lat}/${session.geofence.lng}`}
+										target="_blank"
+										rel="noopener noreferrer"
+									>
+										View on map
+									</a>
+								</span>
+							</p>
+							<div class="map-preview">
+								<iframe
+									title="Classroom location"
+									src={`https://www.openstreetmap.org/export/embed.html?bbox=${session.geofence.lng - 0.005},${session.geofence.lat - 0.005},${session.geofence.lng + 0.005},${session.geofence.lat + 0.005}&layer=mapnik&marker=${session.geofence.lat},${session.geofence.lng}`}
+									loading="lazy"
+								></iframe>
+							</div>
+						{/if}
+					</div>
+
+					{#if !idNumber}
+						<p class="footnote">Your student ID is not available. Please complete your profile.</p>
+					{/if}
+
+					<div class="camera-actions" style="margin-top: 1.25rem;">
+						<button
+							class="btn-secondary"
+							disabled={checkingId || !idNumber}
+							onclick={() => void checkId()}
+						>
+							{checkingId ? 'Checking…' : 'Confirm'}
+						</button>
+						<button class="btn-secondary" onclick={backToEntry} disabled={verifying}>
+							Cancel
+						</button>
+					</div>
+				</section>
+			{/if}
 		</div>
 	{:else}
 		<div class="page">
 			<div class="page-header">
-				<button class="back-btn" onclick={backToQr} disabled={submitting}>
+				<button class="back-btn" onclick={backToConfirm} disabled={submitting}>
 					← <span>Back</span>
 				</button>
 				<h1>Face Liveness</h1>
@@ -1532,6 +1631,21 @@
 		.code-row .btn-secondary {
 			width: 100%;
 		}
+	}
+
+	.map-preview {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		margin-top: 0.75rem;
+		border-radius: 8px;
+		overflow: hidden;
+		border: 1px solid var(--border);
+	}
+
+	.map-preview iframe {
+		width: 100%;
+		height: 100%;
+		border: 0;
 	}
 
 	:global(.scan button:focus-visible),

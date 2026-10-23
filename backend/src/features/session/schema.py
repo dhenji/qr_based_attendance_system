@@ -344,3 +344,5 @@ class VerifyCodeResponse(BaseModel):
     geofence: VerifyGeofence
     present_window_minutes: int
     late_window_minutes: int
+    classroom_name: str | None = None
+    is_remote: bool = False
