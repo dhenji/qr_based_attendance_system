@@ -143,6 +143,7 @@ async def test_precheck_flips_already_scanned_after_a_scan(
     """The second step of the flow: scan, then precheck reports the duplicate."""
 
     stack = await linked_stack(factories)
+    stack["student"].face_embedding = b"stored-blob"
     headers = await auth_headers(stack["user"])
     precheck_body = {
         "session_id": stack["session"].id,
@@ -178,6 +179,7 @@ async def test_scan_enforces_ear_sample_limit(
     expected_status: int,
 ) -> None:
     stack = await linked_stack(factories)
+    stack["student"].face_embedding = b"stored-blob"
     await test_db_session.commit()
     body = scan_body(
         stack["session"].id,
@@ -347,9 +349,11 @@ async def test_idempotency_key_is_scoped_to_the_caller(
     """
 
     stack = await linked_stack(factories)
+    stack["student"].face_embedding = b"stored-blob"
     # A second student enrolled in the same offering, so both may scan it.
     other_user = await factories.user(role=UserRole.STUDENT.value)
     other = await factories.student(stack["year_level"], user=other_user)
+    other.face_embedding = b"stored-blob"
     await factories.enrollment(other, stack["offering"])
     shared_key = "shared-key"
 

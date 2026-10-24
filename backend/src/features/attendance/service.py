@@ -70,7 +70,11 @@ from features.session.exceptions import (
     SessionNotFoundException,
 )
 from features.session.model import Session
-from features.student.exceptions import NotEnrolledException, StudentNotFoundException
+from features.student.exceptions import (
+    FaceNotEnrolledException,
+    NotEnrolledException,
+    StudentNotFoundException,
+)
 from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.audit import record_audit
@@ -357,6 +361,7 @@ class AttendanceService:
         db_session, student = await self._resolve_scan_parties(
             payload.session_id, scanned_at, now, user_id, payload.student_number
         )
+        await self._require_face_enrollment(student)
 
         if not self._settings.benchmark_mode:
             # Load profile: skip the geofence + liveness gates so a benchmark
@@ -500,6 +505,15 @@ class AttendanceService:
 
         if existing is not None:
             raise DuplicateScanException(student_id, session_id)
+
+    async def _require_face_enrollment(self, student: Student) -> None:
+        """Block scans when the student has no face enrollment on record.
+
+        Runs unconditionally (also under benchmark mode) so the gate cannot be
+        bypassed by direct API calls or benchmark scans.
+        """
+        if student.face_embedding is None:
+            raise FaceNotEnrolledException(student.id)
 
     def _validate_geofence(self, session: Session, gps: GPSInput | None) -> None:
         if not getattr(session, "geofence_enabled", True):

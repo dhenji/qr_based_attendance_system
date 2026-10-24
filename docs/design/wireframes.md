@@ -1925,7 +1925,11 @@ Partial failure:
 - **Admin provisioning**: no public admin registration — the first admin is seeded at deployment as **Super Admin**; additional admins are managed on the Admin Users screen (4.13, Super Admin only)
 - **Academic structure updates**: admin-managed through Program Management (4.5) — add/rename year levels, adjust term structures, move courses. All changes audited (D38)
 - **Excuse workflow**: three initiation paths (D21) — prof quick-excuse, prof-initiated with evidence, student-initiated request; bulk Excuse All Absent per session (D23)
+<<<<<<< HEAD
 - **Scan flow**: strictly sequential single-page flow (D27 as amended by ADR-083) - session code → student-ID confirmation → session-QR camera → liveness → GPS → result overlay. No student-ID QR is scanned, and the professor UI does not render the session QR yet.
+=======
+- **Scan flow**: strictly sequential 5-step flow (D27) — session code/QR → student-ID QR → GPS geofence → face liveness (fixed blink-left-right) → result overlay; requires prior face enrollment (NULL `face_embedding` → `403 face_not_enrolled`)
+>>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
 - **Embedded conventions**: locked fields (§9), window math blocks, dual timers, full status legend, cohort badges, filter rails, lettered sub-screens (2.2a, 4.5b, etc.)
 - **Admin face enrollment** (4.14): modal on the Student Management page for enrolling student faces (D28); uploads 3 photos (front/left/right) and records enrollment. Real embedding generation and encryption are **not implemented** in this build — the stored blob is a zero-filled placeholder.
 - **Session History breakdown** (3.5): Present/Late/Absent counts per session for quick overview
