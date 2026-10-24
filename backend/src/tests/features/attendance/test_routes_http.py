@@ -29,25 +29,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.security import hash_password
 from features.attendance.model import Attendance
 from shared.enums import UserRole, ValidationStatus
+from shared.face_embeddings import embedding_to_base64, serialize_embedding
 from tests.conftest import Factories
+import numpy as np
 
 # One point either side of the classroom coordinates below.
 INSIDE_LAT = 14.0001
 INSIDE_LNG = 121.0001
 CLASSROOM_LAT = 14.0
 CLASSROOM_LNG = 121.0
-
-# Well above face_match_threshold (0.70), so status is unambiguous.
 HIGH_SCORE = 0.92
-# Inside the review band: face_review_band_low <= score < face_match_threshold.
 REVIEW_BAND_SCORE = 0.68
 
 
-def liveness_evidence_payload() -> dict[str, Any]:
-    """A passing blink -> left -> right challenge (D31).
+def _make_live_emb_http() -> str:
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+    live = live / np.linalg.norm(live)
+    return embedding_to_base64(live)
 
-    `ear_samples` averages 0.2, inside the EAR_MEAN_MIN..EAR_MEAN_MAX band.
-    """
+
+def liveness_evidence_payload() -> dict[str, Any]:
+    """A passing blink -> left -> right challenge (D31)."""
 
     return {
         "blink_detected": True,
@@ -61,20 +65,22 @@ def liveness_evidence_payload() -> dict[str, Any]:
 def scan_body(
     session_id: int,
     student_number: str,
-    scanned_at: datetime,
-    **overrides: Any,
-) -> dict[str, Any]:
-    body: dict[str, Any] = {
+    scanned_at,
+    **overrides,
+):
+    body = {
         "session_id": session_id,
         "student_number": student_number,
         "gps": {"lat": INSIDE_LAT, "lng": INSIDE_LNG, "accuracy": 5.0},
         "liveness_evidence": liveness_evidence_payload(),
-        "face_match_score": HIGH_SCORE,
-        "scanned_at": scanned_at.isoformat(),
+        "live_face_embedding": _make_live_emb_http(),
+        "scanned_at": scanned_at.isoformat() if hasattr(scanned_at, 'isoformat') else scanned_at,
         "scanned_via": "qr_camera",
     }
     body.update(overrides)
     return body
+
+
 
 
 async def linked_stack(
@@ -138,12 +144,18 @@ async def test_precheck_writes_nothing(
 
 
 async def test_precheck_flips_already_scanned_after_a_scan(
-    api_client: Any, auth_headers: Any, factories: Factories
+    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
 ) -> None:
     """The second step of the flow: scan, then precheck reports the duplicate."""
 
     stack = await linked_stack(factories)
-    stack["student"].face_embedding = b"stored-blob"
+    import numpy as np
+    from shared.face_embeddings import serialize_embedding
+
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
+    await test_db_session.commit()
     headers = await auth_headers(stack["user"])
     precheck_body = {
         "session_id": stack["session"].id,
@@ -179,7 +191,12 @@ async def test_scan_enforces_ear_sample_limit(
     expected_status: int,
 ) -> None:
     stack = await linked_stack(factories)
-    stack["student"].face_embedding = b"stored-blob"
+    import numpy as np
+    from shared.face_embeddings import serialize_embedding
+
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     await test_db_session.commit()
     body = scan_body(
         stack["session"].id,
@@ -349,11 +366,16 @@ async def test_idempotency_key_is_scoped_to_the_caller(
     """
 
     stack = await linked_stack(factories)
-    stack["student"].face_embedding = b"stored-blob"
+    import numpy as np
+    from shared.face_embeddings import serialize_embedding
+
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     # A second student enrolled in the same offering, so both may scan it.
     other_user = await factories.user(role=UserRole.STUDENT.value)
     other = await factories.student(stack["year_level"], user=other_user)
-    other.face_embedding = b"stored-blob"
+    other.face_embedding = serialize_embedding(ref)
     await factories.enrollment(other, stack["offering"])
     shared_key = "shared-key"
 
@@ -684,7 +706,11 @@ async def seed_pending_review(factories: Factories, **overrides: Any) -> dict[st
         original_status=ValidationStatus.PRESENT.value,
         face_match_score=REVIEW_BAND_SCORE,
         liveness_evidence={
-            **liveness_evidence_payload(),
+            "blink_detected": True,
+            "head_turn_left": True,
+            "head_turn_right": True,
+            "ear_samples": [0.20, 0.21, 0.19],
+            "pnp_evidence": {"depth_mean": 0.4},
             "review": True,
             "accuracy": 5.0,
         },
@@ -805,13 +831,13 @@ async def test_resolving_an_already_resolved_record_is_409(
 
 
 async def test_review_note_is_dropped_when_absent(
-    api_client: Any, auth_headers: Any, factories: Factories
+    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
 ) -> None:
     """A resolve without a note must not leave a stale key behind."""
 
     stack = await seed_pending_review(factories)
     record = (
-        await factories.db.scalars(
+        await test_db_session.scalars(
             select(Attendance).where(Attendance.student_id == stack["student"].id)
         )
     ).one()
@@ -823,5 +849,5 @@ async def test_review_note_is_dropped_when_absent(
     )
 
     assert response.status_code == 200
-    await factories.db.refresh(record)
+    await test_db_session.refresh(record)
     assert "review_note" not in (record.liveness_evidence or {})

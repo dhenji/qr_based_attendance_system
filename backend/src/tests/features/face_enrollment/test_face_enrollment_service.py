@@ -132,10 +132,12 @@ def test_enroll_writes_stub_blob_and_bumps_version() -> None:
 
     student = session.store[(Student, 1)]
     assert student.face_embedding is not None
-    payload = json.loads(student.face_embedding.decode("utf-8"))
-    assert payload["stub"] is True
-    assert len(payload["mean"]) == 128
-    assert set(payload["angles"]) == {"front", "left", "right"}
+    # New behavior: real embedding blob (versioned binary format)
+    from shared.face_embeddings import is_stub_embedding, deserialize_embedding
+
+    assert not is_stub_embedding(student.face_embedding)
+    emb, algo, ver = deserialize_embedding(student.face_embedding)
+    assert emb.shape[0] == 128
     assert student.face_enrolled_at is not None
     assert student.face_embedding_version == 1
     assert result.student_id == 1

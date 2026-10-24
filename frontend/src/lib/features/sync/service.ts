@@ -26,7 +26,7 @@ export type QueuedScanPayload = {
 	// disabled, or no classroom coordinates) do not collect GPS.
 	gps: { lat: number; lng: number; accuracy: number } | null;
 	livenessEvidence: LivenessEvidence;
-	faceMatchScore?: number;
+	liveFaceEmbedding: string;
 	scannedAt: string;
 	idempotencyKey?: string;
 };
@@ -335,10 +335,10 @@ export const queue = {
 const toScanBody = (payload: QueuedScanPayload) => ({
 	sessionId: payload.sessionId,
 	studentNumber: payload.studentNumber,
-	gps: payload.gps,
+	gps: payload.gps ?? null,
 	livenessEvidence: payload.livenessEvidence,
-	faceMatchScore: payload.faceMatchScore,
-	scannedAt: payload.scannedAt
+	liveFaceEmbedding: payload.liveFaceEmbedding,
+	scannedAt: payload.scannedAt,
 });
 
 // Transient API failures worth another attempt: offline, 429 rate-limit,

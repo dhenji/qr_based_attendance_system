@@ -7,4 +7,5 @@ export interface LivenessEvidence {
   headTurnRight: boolean;
   earSamples: number[];
   pnpEvidence: object;
+  faceLandmarks?: any[];
 }

@@ -23,7 +23,6 @@ A web application that:
 
 ## Security & Anti-Spoofing
 
-<<<<<<< HEAD
 The attendance flow applies these layers in order. D27's original step 2
 (student-ID QR) is now a typed/prefilled confirmation gate — see
 [ADR-083](docs/project/decision-log.md).
@@ -36,14 +35,14 @@ writes no attendance row. Any single failure rejects the record with one of the
 canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 `liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`.
 
-| #   | Layer                   | What It Prevents                           | CS Concept                                       |
-| --- | ----------------------- | ------------------------------------------ | ------------------------------------------------ |
-| 1   | Authenticated Identity  | Impersonation / forged client identifiers  | JWT → `users.id` → `students.user_id`             |
-| 2   | Session Entry (code/QR) | Outsiders submitting attendance            | HMAC-derived session code + expiry                |
-| 3   | Student-ID Confirmation | Wrong account / mistyped roster number     | Case-insensitive precheck + 403 mismatch          |
-| 4   | GPS Geofencing          | Remote/fake submissions                    | Haversine Algorithm                              |
-| 5   | Face Liveness           | Casual photo/replay attempts (client-asserted) | Blink/turn challenge; server-graded evidence     |
-| 6   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students | DB Constraint + FK Check                         |
+| #   | Layer                   | What It Prevents                               | CS Concept                                   |
+| --- | ----------------------- | ---------------------------------------------- | -------------------------------------------- |
+| 1   | Authenticated Identity  | Impersonation / forged client identifiers      | JWT → `users.id` → `students.user_id`        |
+| 2   | Session Entry (code/QR) | Outsiders submitting attendance                | HMAC-derived session code + expiry           |
+| 3   | Student-ID Confirmation | Wrong account / mistyped roster number         | Case-insensitive precheck + 403 mismatch     |
+| 4   | GPS Geofencing          | Remote/fake submissions                        | Haversine Algorithm                          |
+| 5   | Face Liveness           | Casual photo/replay attempts (client-asserted) | Blink/turn challenge; server-graded evidence |
+| 6   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students     | DB Constraint + FK Check                     |
 
 > **Current biometric limitation:** the server grades the client's liveness
 > evidence, but it does **not** compare a face embedding. `face_match_score` is
@@ -51,36 +50,34 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > face enrollment is not required to scan. Server-side face matching is not
 > implemented — see the [security model](docs/architecture/security-model.md)
 > and ADR-068.
-=======
-Every attendance submission follows the canonical **5-step scan flow (D27)**:
-`session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
-Any single failure rejects the record with one of the canonical D15 rejection
-reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
-`face_not_enrolled`, `not_enrolled`, `session_expired`.
+> Every attendance submission follows the canonical **5-step scan flow (D27)**:
+> `session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
+> Any single failure rejects the record with one of the canonical D15 rejection
+> reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
+> `face_not_enrolled`, `not_enrolled`, `session_expired`.
 
-| #   | Layer                   | What It Prevents                           | CS Concept                                  |
-| --- | ----------------------- | ------------------------------------------ | ------------------------------------------- |
-| 1   | Session Entry (code/QR) | Outsiders submitting attendance            | HMAC-SHA256                                 |
-| 2   | Student-ID QR           | Wrong identity / unattended devices        | QR payload = student number                 |
-| 3   | GPS Geofencing          | Remote/fake submissions                    | Haversine Algorithm                         |
-| 4   | Face Liveness + Match   | Photos, replay & distortion tricks; requires prior face enrollment       | Blink/turn challenge + embedding similarity |
-| 5   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students                               | DB Constraint + FK Check                    |
->>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
+| #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
+| --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
+| 1   | Session Entry (code/QR) | Outsiders submitting attendance                                    | HMAC-SHA256                                 |
+| 2   | Student-ID QR           | Wrong identity / unattended devices                                | QR payload = student number                 |
+| 3   | GPS Geofencing          | Remote/fake submissions                                            | Haversine Algorithm                         |
+| 4   | Face Liveness + Match   | Photos, replay & distortion tricks; requires prior face enrollment | Blink/turn challenge + embedding similarity |
+| 5   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students                         | DB Constraint + FK Check                    |
 
 ## Features
 
-| Feature          | Purpose                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Session Entry    | Professor shows a session code; students enter it (the scan page also accepts a session QR where one is available)      |
-| Student ID Check | Prefilled from the signed-in profile; the server rejects a number that does not match the account                      |
-| GPS Verification | Ensures student is inside the classroom                                                                                |
-| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts                                  |
-| Offline Mode     | Saves attendance locally when no internet; auto-uploads later                                                          |
-| Student Roster   | Import student from CSV file (with official email)                                                                     |
-| Dashboard        | View attendance in real time                                                                                           |
-| Analytics        | At-risk forecasting and recommendations for professors                                                                 |
-| Reports          | Download attendance reports (CSV/PDF/Print)                                                                            |
-| Data Tables      | Sortable columns, category + date-range filters, search, print                                                         |
+| Feature          | Purpose                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Session Entry    | Professor shows a session code; students enter it (the scan page also accepts a session QR where one is available)          |
+| Student ID Check | Prefilled from the signed-in profile; the server rejects a number that does not match the account                           |
+| GPS Verification | Ensures student is inside the classroom                                                                                     |
+| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts                                    |
+| Offline Mode     | Saves attendance locally when no internet; auto-uploads later                                                               |
+| Student Roster   | Import student from CSV file (with official email)                                                                          |
+| Dashboard        | View attendance in real time                                                                                                |
+| Analytics        | At-risk forecasting and recommendations for professors                                                                      |
+| Reports          | Download attendance reports (CSV/PDF/Print)                                                                                 |
+| Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
 > **Registration**: students and professors self-register with email +
@@ -92,12 +89,12 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 
 ## Tech Stack
 
-| Component | Technology                                                   |
-| --------- | ------------------------------------------------------------ |
-| Backend   | Python (FastAPI, SQLAlchemy async, Alembic, Argon2id, PyJWT) |
-| Frontend  | SvelteKit 2 (Svelte 5 runes) + TypeScript (strict)           |
-| Database  | PostgreSQL 16                                                |
-| Platform  | Progressive Web App (works on any device; planned)           |
+| Component | Technology                                                                               |
+| --------- | ---------------------------------------------------------------------------------------- |
+| Backend   | Python (FastAPI, SQLAlchemy async, Alembic, Argon2id, PyJWT)                             |
+| Frontend  | SvelteKit 2 (Svelte 5 runes) + TypeScript (strict)                                       |
+| Database  | PostgreSQL 16                                                                            |
+| Platform  | Progressive Web App (works on any device; planned)                                       |
 | Tooling   | Docker / docker-compose, html5-qrcode (session QR), qrcode, zod, @mediapipe/tasks-vision |
 
 The MediaPipe face-landmark model and its WASM runtime are vendored under
@@ -150,23 +147,23 @@ shared by several features, so their inner paths must not collide. (`/api/admin/
 is a route on the `/admin` mount — `dashboard/admin_router.py` uses `prefix="/admin"`
 with an inner `@router.get("/dashboard")` — not a separate mount.)
 
-| Mount             | Routers (feature/router)                                                                     |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| `/api/auth`       | `auth`                                                                                        |
-| `/api/admin`      | `system` (audit-logs, system settings, academic-structure), `dashboard/admin_router` (`/dashboard`) |
-| `/api/admin/users` | `admin`                                                                                       |
-| `/api/admin/programs` | `program`                                                                                  |
-| `/api/admin/courses` | `course/router`                                                                            |
-| `/api/admin/offerings` | `course/offering_router`                                                                  |
-| `/api/admin/students` | `student/admin_router`                                                                     |
-| `/api/admin/professors` | `professor/admin_router`                                                                 |
-| `/api/admin/face-enrollment` | `face_enrollment`                                                                     |
-| `/api/admin/attendance` | `attendance/admin_router` (liveness review)                                               |
-| `/api/admin/excuses` | `excuse/admin_router`                                                                      |
-| `/api/admin/analytics` | `analytics`                                                                                |
-| `/api/professor`  | `session`, `professor` (profile only), `excuse/professor_router`, `reports`, `dashboard/professor_router` |
-| `/api/student`    | `student`, `attendance` (scan/precheck/history), `excuse/student_router`, `dashboard/student_router` |
-| `/api/upload`     | `upload`                                                                                      |
+| Mount                        | Routers (feature/router)                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `/api/auth`                  | `auth`                                                                                                    |
+| `/api/admin`                 | `system` (audit-logs, system settings, academic-structure), `dashboard/admin_router` (`/dashboard`)       |
+| `/api/admin/users`           | `admin`                                                                                                   |
+| `/api/admin/programs`        | `program`                                                                                                 |
+| `/api/admin/courses`         | `course/router`                                                                                           |
+| `/api/admin/offerings`       | `course/offering_router`                                                                                  |
+| `/api/admin/students`        | `student/admin_router`                                                                                    |
+| `/api/admin/professors`      | `professor/admin_router`                                                                                  |
+| `/api/admin/face-enrollment` | `face_enrollment`                                                                                         |
+| `/api/admin/attendance`      | `attendance/admin_router` (liveness review)                                                               |
+| `/api/admin/excuses`         | `excuse/admin_router`                                                                                     |
+| `/api/admin/analytics`       | `analytics`                                                                                               |
+| `/api/professor`             | `session`, `professor` (profile only), `excuse/professor_router`, `reports`, `dashboard/professor_router` |
+| `/api/student`               | `student`, `attendance` (scan/precheck/history), `excuse/student_router`, `dashboard/student_router`      |
+| `/api/upload`                | `upload`                                                                                                  |
 
 `enrollment/router.py` is a stub and stays intentionally unmounted, so 24
 `*router*.py` files exist for 23 routers over 15 mount paths.
@@ -227,66 +224,66 @@ then import `demo/rosters/students.csv`, `professors.csv`, and `enrollments.csv`
 
 Backend (`backend/.env.example`):
 
-| Variable                         | Default                                                                | Purpose                                                             |
-| -------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `APP_NAME`                       | `QR Attendance System API`                                             | API name                                                            |
-| `DEBUG`                          | `false`                                                                | Enables SQL echo; skips JWT_SECRET validation when `true`           |
-| `DATABASE_URL`                   | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection                                         |
-| `CORS_ORIGINS`                   | `http://localhost:5173`                                                | Allowed browser origins                                             |
-| `HMAC_SECRET_KEY`                | _(empty)_                                                              | Used for secure session codes                                       |
-| `JWT_SECRET`                     | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32` |
-| `JWT_ALGORITHM`                  | `HS256`                                                                | JWT signing algorithm                                               |
-| `PREAUTH_TOKEN_EXPIRE_MINUTES`   | `5`                                                                    | Pre-auth (claim) token TTL                                          |
-| `RECOVERY_TOKEN_EXPIRE_MINUTES`  | `5`                                                                    | Forgot-password recovery-grant TTL |
-| `ACCESS_TOKEN_EXPIRE_MINUTES`    | `15`                                                                   | Access token TTL                                                    |
-| `REFRESH_TOKEN_EXPIRE_DAYS`      | `7`                                                                    | Refresh token TTL                                                   |
-| `LOCKOUT_ATTEMPTS`               | `5`                                                                    | Failed login attempts before lockout                                |
-| `LOCKOUT_DURATION_MINUTES`       | `15`                                                                   | Lockout duration after failed attempts                              |
-| `FACE_MATCH_THRESHOLD`           | `0.70`                                                                 | Band threshold for the client-submitted score (no comparison)       |
-| `FACE_REVIEW_BAND_LOW`           | `0.65`                                                                 | Lower bound of the review band                                      |
-| `FACE_EMBEDDING_VERSION`         | `1`                                                                    | Placeholder embedding format version                                |
-| `DEFAULT_PRESENT_WINDOW_MINUTES` | `5`                                                                    | Default present window for sessions                                 |
-| `DEFAULT_LATE_WINDOW_MINUTES`    | `10`                                                                   | Default late window for sessions                                    |
-| `DEFAULT_GEOFENCE_RADIUS_METERS` | `50`                                                                   | Default classroom geofence radius                                   |
-| `OTP_EXPIRES_MINUTES`            | `5`                                                                    | OTP code TTL                                                        |
-| `BACKUP_STORAGE_TYPE`            | `local`                                                                | Backup backend: `local` or `s3`                                     |
-| `BACKUP_LOCAL_DIR`               | `./backups`                                                            | Local backup directory                                              |
-| `BACKUP_S3_BUCKET`               | _(empty)_                                                              | S3 bucket (when using S3)                                           |
-| `BACKUP_S3_ENDPOINT`             | _(empty)_                                                              | S3-compatible endpoint                                              |
-| `BACKUP_S3_PREFIX`               | `backups/`                                                             | S3 key prefix                                                       |
-| `BACKUP_ENCRYPTION_KEY`          | _(empty)_                                                              | Backup encryption key                                               |
-| `BACKUP_ENCRYPTION_KEY_VERSION`  | `1`                                                                    | Encryption key version                                              |
-| `BACKUP_RETENTION_DAILY`         | `30`                                                                   | Daily backups to retain                                             |
-| `BACKUP_RETENTION_MONTHLY`       | `12`                                                                   | Monthly backups to retain                                           |
-| `BACKUP_EXCLUDE_OTP_CODES`       | `false`                                                                | Exclude OTP codes from backups                                      |
-| `BACKUP_COMPRESSION_LEVEL`       | `6`                                                                    | pg_dump compression level                                           |
-| `RISK_ABSENCE_RATE_HIGH`         | `0.30`                                                                 | Absence rate threshold for high risk scoring                        |
-| `RISK_ABSENCE_RATE_MEDIUM`       | `0.15`                                                                 | Absence rate threshold for medium risk scoring                      |
-| `RISK_STREAK_GAPS_HIGH`          | `3`                                                                    | Consecutive missed sessions that trigger high risk                  |
-| `RISK_SYNC_LAG_HIGH`             | `5`                                                                    | Days of unsynced records that trigger high risk                     |
-| `RISK_TREND_NEGATIVE`            | `-0.05`                                                                | Negative attendance trend slope threshold                           |
-| `RISK_BATCH_CRON`                | `0 2 * * *`                                                            | Cron schedule for the risk-scoring batch job                        |
-| `RISK_BATCH_CHUNK_SIZE`          | `1000`                                                                 | Risk batch chunk size                                               |
-| `RISK_BATCH_WORKERS`             | `4`                                                                    | Concurrent risk batch workers                                       |
-| `RISK_BATCH_DRY_RUN`             | `false`                                                                | Dry-run flag for risk batch job                                     |
-| `ATTACHMENTS_STORAGE_TYPE`       | `local`                                                                | Excuse attachment storage backend                                   |
-| `ATTACHMENTS_MAX_BYTES`          | `5242880`                                                              | Maximum upload size for excuse attachments                          |
-| `ATTACHMENTS_LOCAL_DIR`          | `./attachments`                                                        | Where the `local` attachment backend writes                          |
-| `SMTP_HOST`                      | _(empty)_                                                              | Mail relay host; empty logs mail instead of sending it               |
-| `SMTP_PORT`                      | `587`                                                                  | Relay port (587 = STARTTLS, 465 = implicit TLS)                     |
-| `SMTP_USER`                      | _(empty)_                                                              | Relay username                                                     |
-| `SMTP_PASSWORD`                  | _(empty)_                                                              | Relay password                                                     |
-| `SMTP_FROM`                      | _(empty)_                                                              | Envelope sender; falls back to `SMTP_USER`                         |
-| `SMTP_START_TLS`                 | `true`                                                                 | Use STARTTLS on port 587                                            |
-| `SMTP_USE_SSL`                   | `false`                                                                | Use implicit TLS on port 465                                        |
-| `SMTP_TIMEOUT_SECONDS`           | `10`                                                                   | Relay timeout                                                      |
-| `TURNSTILE_SECRET_KEY`           | _(empty)_                                                              | Cloudflare Turnstile captcha secret (optional)                      |
-| `BENCHMARK_MODE`                 | `false`                                                                | Enables performance-benchmark endpoint                              |
-| `SCHEDULER_ENABLED`              | `true`                                                                 | Run the background cron scheduler (off = no crons)                  |
-| `SCHEDULER_TIMEZONE`             | `UTC`                                                                  | Scheduler zoneinfo name; unknown values warn and fall back to UTC    |
-| `SCHEDULER_MISFIRE_GRACE_SECONDS`| `300`                                                                  | Grace period for a missed cron fire                                 |
-| `INSTITUTION_TIMEZONE`           | `UTC`                                                                  | Zone for the offering's class times; unknown values warn and fall back to UTC |
-| `BACKUP_CRON`                    | `0 3 * * *`                                                            | Cron schedule for the nightly encrypted backup                      |
+| Variable                          | Default                                                                | Purpose                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `APP_NAME`                        | `QR Attendance System API`                                             | API name                                                                      |
+| `DEBUG`                           | `false`                                                                | Enables SQL echo; skips JWT_SECRET validation when `true`                     |
+| `DATABASE_URL`                    | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection                                                   |
+| `CORS_ORIGINS`                    | `http://localhost:5173`                                                | Allowed browser origins                                                       |
+| `HMAC_SECRET_KEY`                 | _(empty)_                                                              | Used for secure session codes                                                 |
+| `JWT_SECRET`                      | _(empty)_                                                              | Required when `DEBUG=false`; generate via `openssl rand -base64 32`           |
+| `JWT_ALGORITHM`                   | `HS256`                                                                | JWT signing algorithm                                                         |
+| `PREAUTH_TOKEN_EXPIRE_MINUTES`    | `5`                                                                    | Pre-auth (claim) token TTL                                                    |
+| `RECOVERY_TOKEN_EXPIRE_MINUTES`   | `5`                                                                    | Forgot-password recovery-grant TTL                                            |
+| `ACCESS_TOKEN_EXPIRE_MINUTES`     | `15`                                                                   | Access token TTL                                                              |
+| `REFRESH_TOKEN_EXPIRE_DAYS`       | `7`                                                                    | Refresh token TTL                                                             |
+| `LOCKOUT_ATTEMPTS`                | `5`                                                                    | Failed login attempts before lockout                                          |
+| `LOCKOUT_DURATION_MINUTES`        | `15`                                                                   | Lockout duration after failed attempts                                        |
+| `FACE_MATCH_THRESHOLD`            | `0.70`                                                                 | Band threshold for the client-submitted score (no comparison)                 |
+| `FACE_REVIEW_BAND_LOW`            | `0.65`                                                                 | Lower bound of the review band                                                |
+| `FACE_EMBEDDING_VERSION`          | `1`                                                                    | Placeholder embedding format version                                          |
+| `DEFAULT_PRESENT_WINDOW_MINUTES`  | `5`                                                                    | Default present window for sessions                                           |
+| `DEFAULT_LATE_WINDOW_MINUTES`     | `10`                                                                   | Default late window for sessions                                              |
+| `DEFAULT_GEOFENCE_RADIUS_METERS`  | `50`                                                                   | Default classroom geofence radius                                             |
+| `OTP_EXPIRES_MINUTES`             | `5`                                                                    | OTP code TTL                                                                  |
+| `BACKUP_STORAGE_TYPE`             | `local`                                                                | Backup backend: `local` or `s3`                                               |
+| `BACKUP_LOCAL_DIR`                | `./backups`                                                            | Local backup directory                                                        |
+| `BACKUP_S3_BUCKET`                | _(empty)_                                                              | S3 bucket (when using S3)                                                     |
+| `BACKUP_S3_ENDPOINT`              | _(empty)_                                                              | S3-compatible endpoint                                                        |
+| `BACKUP_S3_PREFIX`                | `backups/`                                                             | S3 key prefix                                                                 |
+| `BACKUP_ENCRYPTION_KEY`           | _(empty)_                                                              | Backup encryption key                                                         |
+| `BACKUP_ENCRYPTION_KEY_VERSION`   | `1`                                                                    | Encryption key version                                                        |
+| `BACKUP_RETENTION_DAILY`          | `30`                                                                   | Daily backups to retain                                                       |
+| `BACKUP_RETENTION_MONTHLY`        | `12`                                                                   | Monthly backups to retain                                                     |
+| `BACKUP_EXCLUDE_OTP_CODES`        | `false`                                                                | Exclude OTP codes from backups                                                |
+| `BACKUP_COMPRESSION_LEVEL`        | `6`                                                                    | pg_dump compression level                                                     |
+| `RISK_ABSENCE_RATE_HIGH`          | `0.30`                                                                 | Absence rate threshold for high risk scoring                                  |
+| `RISK_ABSENCE_RATE_MEDIUM`        | `0.15`                                                                 | Absence rate threshold for medium risk scoring                                |
+| `RISK_STREAK_GAPS_HIGH`           | `3`                                                                    | Consecutive missed sessions that trigger high risk                            |
+| `RISK_SYNC_LAG_HIGH`              | `5`                                                                    | Days of unsynced records that trigger high risk                               |
+| `RISK_TREND_NEGATIVE`             | `-0.05`                                                                | Negative attendance trend slope threshold                                     |
+| `RISK_BATCH_CRON`                 | `0 2 * * *`                                                            | Cron schedule for the risk-scoring batch job                                  |
+| `RISK_BATCH_CHUNK_SIZE`           | `1000`                                                                 | Risk batch chunk size                                                         |
+| `RISK_BATCH_WORKERS`              | `4`                                                                    | Concurrent risk batch workers                                                 |
+| `RISK_BATCH_DRY_RUN`              | `false`                                                                | Dry-run flag for risk batch job                                               |
+| `ATTACHMENTS_STORAGE_TYPE`        | `local`                                                                | Excuse attachment storage backend                                             |
+| `ATTACHMENTS_MAX_BYTES`           | `5242880`                                                              | Maximum upload size for excuse attachments                                    |
+| `ATTACHMENTS_LOCAL_DIR`           | `./attachments`                                                        | Where the `local` attachment backend writes                                   |
+| `SMTP_HOST`                       | _(empty)_                                                              | Mail relay host; empty logs mail instead of sending it                        |
+| `SMTP_PORT`                       | `587`                                                                  | Relay port (587 = STARTTLS, 465 = implicit TLS)                               |
+| `SMTP_USER`                       | _(empty)_                                                              | Relay username                                                                |
+| `SMTP_PASSWORD`                   | _(empty)_                                                              | Relay password                                                                |
+| `SMTP_FROM`                       | _(empty)_                                                              | Envelope sender; falls back to `SMTP_USER`                                    |
+| `SMTP_START_TLS`                  | `true`                                                                 | Use STARTTLS on port 587                                                      |
+| `SMTP_USE_SSL`                    | `false`                                                                | Use implicit TLS on port 465                                                  |
+| `SMTP_TIMEOUT_SECONDS`            | `10`                                                                   | Relay timeout                                                                 |
+| `TURNSTILE_SECRET_KEY`            | _(empty)_                                                              | Cloudflare Turnstile captcha secret (optional)                                |
+| `BENCHMARK_MODE`                  | `false`                                                                | Enables performance-benchmark endpoint                                        |
+| `SCHEDULER_ENABLED`               | `true`                                                                 | Run the background cron scheduler (off = no crons)                            |
+| `SCHEDULER_TIMEZONE`              | `UTC`                                                                  | Scheduler zoneinfo name; unknown values warn and fall back to UTC             |
+| `SCHEDULER_MISFIRE_GRACE_SECONDS` | `300`                                                                  | Grace period for a missed cron fire                                           |
+| `INSTITUTION_TIMEZONE`            | `UTC`                                                                  | Zone for the offering's class times; unknown values warn and fall back to UTC |
+| `BACKUP_CRON`                     | `0 3 * * *`                                                            | Cron schedule for the nightly encrypted backup                                |
 
 `LOCUST_*` variables (`LOCUST_MIN_RPS`, `LOCUST_MAX_P95_MS`, `LOCUST_MAX_P99_MS`,
 `LOCUST_MAX_DRAIN_S`, `LOCUST_POOL_SIZE`, `LOCUST_MEAN_WAIT_S`,
@@ -380,11 +377,11 @@ across 71 files (261 sync + 591 async test functions, plus parametrized expansio
 `main`, every pull request, and manually via `workflow_dispatch`, as three parallel jobs — rationale in
 [ADR-069](docs/project/decision-log.md):
 
-| Job | Gate | Needs |
-| --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` — 891 cases on in-memory SQLite | nothing |
-| `migrations` | `alembic upgrade head && alembic check` | a `postgres:16-alpine` service |
-| `frontend` | `npm ci && npm run check` (svelte-check) | nothing |
+| Job          | Gate                                                            | Needs                          |
+| ------------ | --------------------------------------------------------------- | ------------------------------ |
+| `backend`    | `python -m pytest src/tests -q` — 891 cases on in-memory SQLite | nothing                        |
+| `migrations` | `alembic upgrade head && alembic check`                         | a `postgres:16-alpine` service |
+| `frontend`   | `npm ci && npm run check` (svelte-check)                        | nothing                        |
 
 No job reads a secret. The `migrations` job is the one that matters: the test
 schema is built with `Base.metadata.create_all`, straight from the models, so
@@ -392,14 +389,14 @@ the suite exercises the migration chain in neither direction and **cannot** catc
 drift (ADR-065). `alembic check` is the only thing that does — the local
 equivalent is the schema drift check above.
 
-CI **reports**; it only *blocks* a merge once `backend`, `migrations`, and
+CI **reports**; it only _blocks_ a merge once `backend`, `migrations`, and
 `frontend` are added as required status checks in the repository's branch
 protection settings. **`main` is not protected today** — on a private repository
 GitHub gates branch protection and rulesets behind a paid plan, so merges are
 currently enforced by convention, not by the platform.
 
 > **Note**: several test modules pin a fixed `NOW =
-> 2026-09-27 12:00 UTC` fixture and are wall-clock sensitive —
+2026-09-27 12:00 UTC` fixture and are wall-clock sensitive —
 > pre-existing clock sensitivity on `main`, not a regression.
 
 ## Deployment
@@ -488,13 +485,13 @@ backend deliverables; Phases 0, 9 and 12 are explicitly marked `[Done]`, and the
 roadmap is the authority on per-phase status. The frontend calls the real API by
 default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 
-| Area      | Status                                                                                                                                                                                                                     |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend   | 18 feature slices / 21 model classes / 21 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `e6f7a8b9c0d1` (17 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra |
-| Frontend  | 50 +page.svelte files (49 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 11 feature components and 13 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
-| Schema    | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82) |
-| Tests     | 891 backend cases in 71 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                     |
-| Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7 |
+| Area       | Status                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend    | 18 feature slices / 21 model classes / 21 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `e6f7a8b9c0d1` (17 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra                                               |
+| Frontend   | 50 +page.svelte files (49 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 11 feature components and 13 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
+| Schema     | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82)              |
+| Tests      | 891 backend cases in 71 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                                                                                                                                                                                                          |
+| Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |
 
 The remaining known gaps are operational rather than structural: Phase 10
 (production launch) and Phase 11 (ongoing operations) are deployment and process

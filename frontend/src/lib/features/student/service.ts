@@ -335,7 +335,7 @@ export const submitScan = async (scanData: {
 	qrStudentNumber: string;
 	gps: { lat: number; lng: number; accuracy: number };
 	livenessEvidence: LivenessEvidence;
-	faceMatchScore: number;
+	liveFaceEmbedding: string;
 	scannedAt: string;
 }) => {
 	const statuses = ['present', 'late', 'rejected'] as const;
@@ -359,7 +359,7 @@ export const submitScan = async (scanData: {
 		studentNumber: scanData.qrStudentNumber,
 		gps: scanData.gps,
 		livenessEvidence: scanData.livenessEvidence,
-		faceMatchScore: scanData.faceMatchScore,
+		liveFaceEmbedding: scanData.liveFaceEmbedding || '',
 		scannedAt: scanData.scannedAt,
 	});
 

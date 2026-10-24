@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     face_match_threshold: float = 0.70
     face_review_band_low: float = 0.65
     face_embedding_version: int = 1
+    face_embedding_algorithm: str = "mediapipe-v1"
 
     # Backup-attachment fields
     backup_storage_type: str = "local"

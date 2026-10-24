@@ -68,7 +68,7 @@ class ScanRequest(BaseModel):
     # disabled, or no classroom coordinates) must not be forced to supply GPS.
     gps: GPSInput | None = None
     liveness_evidence: LivenessEvidence
-    face_match_score: float = Field(ge=FACE_MATCH_SCORE_MIN, le=FACE_MATCH_SCORE_MAX)
+    live_face_embedding: str
     scanned_at: datetime
     scanned_via: ScannedVia = ScannedVia.QR_CAMERA
 

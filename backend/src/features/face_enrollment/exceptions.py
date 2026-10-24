@@ -19,3 +19,23 @@ class InvalidImageException(FaceEnrollmentDomainException):
 
     def __init__(self, detail: str) -> None:
         super().__init__(message=f"Invalid image: {detail}")
+
+
+class NoFaceDetectedException(FaceEnrollmentDomainException):
+    """400 - no face detected in uploaded photo."""
+
+    status_code: int = 400
+    code: str = "no_face_detected"
+
+    def __init__(self, detail: str = "No face detected") -> None:
+        super().__init__(message=f"No face detected: {detail}")
+
+
+class StubEmbeddingException(FaceEnrollmentDomainException):
+    """400/403 - stub embedding detected, re-enrollment required."""
+
+    status_code: int = 400
+    code: str = "stub_embedding"
+
+    def __init__(self, detail: str = "Re-enrollment required") -> None:
+        super().__init__(message=detail)

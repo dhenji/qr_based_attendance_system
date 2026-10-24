@@ -64,6 +64,7 @@ from features.attendance.schema import (
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
+from features.face_enrollment.exceptions import StubEmbeddingException
 from features.session.exceptions import (
     DuplicateScanException,
     SessionExpiredException,
@@ -84,6 +85,12 @@ from shared.enums import (
     QueueStatus,
     SyncStatus,
     ValidationStatus,
+)
+from shared.face_embeddings import (
+    FaceEmbeddingError,
+    cosine_similarity,
+    embedding_from_base64,
+    is_stub_embedding,
 )
 from shared.pagination import (
     DEFAULT_PAGE,
@@ -314,6 +321,7 @@ class AttendanceService:
         now: datetime,
         cache_key: str | None,
         idempotency_key: str | None,
+        face_match_score: float,
     ) -> ScanResponse:
         """Write the attendance row and build the response.
 
@@ -325,7 +333,7 @@ class AttendanceService:
         Session into the identity map.
         """
         row: Attendance = await self._write_attendance(
-            payload, student_id, db_session.id, scanned_at, status, review, original
+            payload, student_id, db_session.id, scanned_at, status, review, original, face_match_score
         )
         await self._maybe_record_sync(
             db_session.id, student_id, row.id, scanned_at, now, idempotency_key
@@ -363,14 +371,27 @@ class AttendanceService:
         )
         await self._require_face_enrollment(student)
 
+        if student.face_embedding is None or is_stub_embedding(student.face_embedding):
+            raise StubEmbeddingException("Face enrollment requires re-enrollment")
+
+        try:
+            live_emb = embedding_from_base64(payload.live_face_embedding)
+            ref_emb, _algo, _ver = __import__("shared.face_embeddings", fromlist=["deserialize_embedding"]).deserialize_embedding(student.face_embedding)
+        except FaceEmbeddingError as e:
+            raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+
+        score = cosine_similarity(ref_emb, live_emb)
+        threshold = self._settings.face_match_threshold
+        review_low = self._settings.face_review_band_low
+        if score < review_low:
+            raise FaceMismatchException(score, threshold)
+
         if not self._settings.benchmark_mode:
-            # Load profile: skip the geofence + liveness gates so a benchmark
-            # run measures routing + persistence, not sensor checks.
             self._validate_geofence(db_session, payload.gps)
             self._validate_liveness(payload.liveness_evidence)
 
         status, original, review = self._decide_scan_outcome(
-            db_session, scanned_at, payload.face_match_score
+            db_session, scanned_at, score
         )
 
         return await self._persist_scan(
@@ -384,6 +405,7 @@ class AttendanceService:
             now,
             cache_key,
             idempotency_key,
+            score,
         )
 
     async def precheck_scan(
@@ -586,6 +608,7 @@ class AttendanceService:
         status: str,
         review: bool,
         original_status: str | None = None,
+        face_match_score: float = 0.0,
     ) -> Attendance:
         row = Attendance(
             student_id=student_id,
@@ -601,7 +624,7 @@ class AttendanceService:
                 (payload.gps.accuracy if payload.gps is not None else 0.0),
                 review,
             ),
-            face_match_score=Decimal(str(payload.face_match_score)),
+            face_match_score=Decimal(str(face_match_score)),
             scanned_via=payload.scanned_via.value,
         )
         self._session.add(row)
