@@ -528,6 +528,19 @@ async def test_ear_samples_must_stay_in_schema_range() -> None:
         valid_evidence(ear_samples=[1.5])
 
 
+@pytest.mark.parametrize("sample_count", [1, 100])
+async def test_ear_samples_accept_schema_boundaries(sample_count: int) -> None:
+    evidence = valid_evidence(ear_samples=[0.2] * sample_count)
+
+    assert len(evidence.ear_samples) == sample_count
+
+
+@pytest.mark.parametrize("sample_count", [101, 120])
+async def test_ear_samples_over_schema_limit_are_rejected(sample_count: int) -> None:
+    with pytest.raises(ValueError, match="at most 100 items"):
+        valid_evidence(ear_samples=[0.2] * sample_count)
+
+
 async def test_empty_ear_samples_fail_the_grade(
     test_db_session: AsyncSession,
     factories: Factories,
