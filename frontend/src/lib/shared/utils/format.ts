@@ -85,3 +85,21 @@ export const ordinal = (value: number): string => {
 // year instead of asking for free text — that is what stops a label like
 // "1st year" or "2" from disagreeing with its year_number.
 export const yearLabel = (yearNumber: number): string => `${ordinal(yearNumber)} Year`;
+
+// Human file size, e.g. 1536 -> "1.5 KB". Returns "—" for a non-positive or
+// non-numeric size.
+//
+// Lives here rather than in the admin settings slice: the backup audit rows
+// carry a `size_bytes` snapshot, so the audit reader needs it too, and a
+// shared formatter is the one home for it.
+export const formatBytes = (bytes: number): string => {
+	if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+	const units = ['B', 'KB', 'MB', 'GB'];
+	let value = bytes;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit += 1;
+	}
+	return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+};

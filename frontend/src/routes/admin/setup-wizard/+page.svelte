@@ -60,8 +60,7 @@
 		<div>
 			<h1>Setup Wizard</h1>
 			<p class="muted">
-				One guided path from a new program to scheduled offerings. Progress is saved —
-				leave and come back any time.
+				Three guided steps: choose or create a program, add its year levels and courses, then schedule offerings for the term. Progress saves automatically — leave and resume anytime.
 			</p>
 		</div>
 		<div class="header-actions">
@@ -124,7 +123,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {

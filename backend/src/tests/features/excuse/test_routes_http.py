@@ -42,6 +42,7 @@ async def _seed(factories: Factories) -> dict[str, Any]:
     )
     return {
         "offering": offering,
+        "course": course,
         "professor": professor,
         "professor_user": professor_user,
         "student": student,
@@ -298,6 +299,90 @@ async def test_admin_list_excuses_over_http(
     listed = await api_client.get("/api/admin/excuses", headers=admin_headers)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
+
+
+# --- the queues name the people and the classes -----------------------------
+#
+# The read model used to carry ids only, so the admin queue rendered
+# "Student #4" and "Session #38" and the professor queue "Student #4". The
+# slice now resolves the display identity itself (ADR-088) — the same rule
+# `LivenessReviewItem` follows.
+
+
+async def test_excuse_queues_name_the_student_and_the_class(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    graph = await _seed(factories)
+    admin_headers = await auth_headers(role=UserRole.ADMIN.value)
+    professor_headers = await auth_headers(graph["professor_user"])
+
+    student_headers = await auth_headers(graph["student_user"])
+    submitted = await api_client.post(
+        "/api/student/excuse-requests",
+        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
+              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        headers=student_headers,
+    )
+    assert submitted.status_code == 201
+
+    for path, headers in (
+        ("/api/admin/excuses", admin_headers),
+        ("/api/professor/excuse-requests", professor_headers),
+    ):
+        listed = await api_client.get(path, headers=headers)
+        assert listed.status_code == 200
+        (row,) = listed.json()["items"]
+
+        # The student, by the number an administrator actually types.
+        assert row["student_number"] == graph["student"].student_id
+        assert row["student_name"]
+        assert "Student #" not in row["student_name"]
+
+        # The class.
+        assert row["session_code"] == graph["session"].session_code
+        assert row["course_code"] == graph["course"].course_code
+        assert row["course_name"] == graph["course"].course_name
+
+        # Still pending, so nobody has reviewed it yet.
+        assert row["reviewed_by_name"] is None
+
+
+async def test_a_reviewed_excuse_names_its_reviewer(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    graph = await _seed(factories)
+    admin_headers = await auth_headers(role=UserRole.ADMIN.value)
+    professor_headers = await auth_headers(graph["professor_user"])
+
+    student_headers = await auth_headers(graph["student_user"])
+    submitted = await api_client.post(
+        "/api/student/excuse-requests",
+        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
+              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        headers=student_headers,
+    )
+    assert submitted.status_code == 201
+
+    queued = await api_client.get(
+        "/api/professor/excuse-requests", headers=professor_headers
+    )
+    rid = queued.json()["items"][0]["id"]
+
+    approved = await api_client.post(
+        f"/api/professor/excuse-requests/{rid}/review",
+        json={"status": "approved"},
+        headers=professor_headers,
+    )
+    assert approved.status_code == 200
+    # The response of the decision names its reviewer too.
+    assert approved.json()["reviewed_by_name"]
+
+    listed = await api_client.get("/api/admin/excuses", headers=admin_headers)
+    (row,) = listed.json()["items"]
+    assert row["reviewed_by_name"]
+    assert row["reviewed_by_name"] != f"User #{row['reviewed_by']}"
+    # The raw id stays in the response: the per-record paths key on it.
+    assert row["reviewed_by"] == graph["professor_user"].id
 
 
 async def test_excuse_routes_enforce_roles(

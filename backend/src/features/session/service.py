@@ -4,7 +4,7 @@ import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import ColumnElement, Select, func, or_, select
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
 from core.security import build_qr_payload, generate_session_code
+from core.timezones import resolve_timezone
 from features.attendance.model import Attendance
 from features.course.exceptions import (
     OfferingNotFoundException,
@@ -22,14 +23,26 @@ from features.course.model import Course, CourseOffering, OfferingComponent
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.program.model import Program, YearLevel
+from features.session.constants import OVERRIDE_PAST_GRACE_MINUTES
 from features.session.exceptions import (
+    InvalidSessionTimeException,
+    ScheduledStartInPastException,
     SessionAlreadyActiveException,
+    SessionDateInPastException,
     SessionExpiredException,
     SessionNotFoundException,
+    SessionOutsideScheduledTimeException,
+    SessionTypeNotConfiguredException,
     LabCoordinatesRequiredException,
+    RemoteNotAllowedForLabException,
     OfferingScheduleMismatchException,
 )
 from features.session.model import Session
+from features.session.plan import (
+    SessionPlan,
+    active_components,
+    resolve_session_plan,
+)
 from features.session.schema import (
     ActiveStudentItem,
     ProfessorAttendanceItem,
@@ -41,7 +54,9 @@ from features.session.schema import (
     SessionHistoryItem,
     SessionListItem,
     SessionOfferingTile,
+    SessionPlanRead,
     SessionRead,
+    StartWindowRead,
     VerifyCodeResponse,
     VerifyGeofence,
 )
@@ -58,7 +73,7 @@ from shared.pagination import (
 )
 from shared.query import apply_if
 from shared.rates import attendance_rates
-from shared.schedule import meeting_minutes
+from shared.schedule import meeting_minutes, openable_session_types
 
 
 def _utcnow() -> datetime:
@@ -118,6 +133,18 @@ def _session_type_of(row: Session) -> SessionType:
     return SessionType(row.session_type or SessionType.LECTURE.value)
 
 
+def _is_remote_of(row: Session) -> bool:
+    """Remote flag, defaulting to False for hand-rolled fakes."""
+    value = getattr(row, "is_remote", False)
+    return bool(value) if value is not None else False
+
+
+def _geofence_enabled_of(row: Session) -> bool:
+    """Geofence flag, defaulting to True for hand-rolled fakes."""
+    value = getattr(row, "geofence_enabled", True)
+    return bool(value) if value is not None else True
+
+
 def _session_status(
     expires_at: datetime | None, now: datetime
 ) -> Literal["active", "closed"]:
@@ -149,60 +176,128 @@ class SessionService:
         self._offerings: BaseCRUD[CourseOffering] = BaseCRUD(CourseOffering, session)
 
     async def create_session(
-        self, *, professor_id: int, payload: SessionCreate, actor_id: int | None = None
+        self,
+        *,
+        professor_id: int,
+        payload: SessionCreate,
+        actor_id: int | None = None,
+        now: datetime | None = None,
     ) -> SessionRead:
         """Open a new attendance session for an offering.
 
-        Window/classroom fields fall back to the offering defaults and then
-        to the application defaults. The session code derives from the
-        assigned row id, so the row is written in two flushes: insert with a
-        random placeholder, then stamp the code and expiry.
+        The session inherits the offering's plan (D93): the meeting it
+        belongs to, the next occurrence of that meeting, the attendance
+        windows, the classroom and the geofence radius. A professor may
+        override the scheduled time — and the date — for one session, which is
+        recorded on the session and never written back to the offering.
+
+        A session may only be opened while its class is running (D94). The
+        plan resolves the open window, and an un-overridden open outside it
+        is refused; an explicit override is the professor's way past the
+        window, and it carries its own validation.
+
+        The session code derives from the assigned row id, so the row is
+        written in two flushes: insert with a random placeholder, then stamp
+        the code and expiry.
         """
-        now: datetime = _utcnow()
+        moment: datetime = now or _utcnow()
         offering: CourseOffering = await self._get_offering_or_404(payload.offering_id)
         await self._require_assignment(
             offering_id=offering.id, professor_id=professor_id
         )
-        await self._require_no_active_session(offering_id=offering.id, now=now)
-        await self._require_schedule_requirement(offering)
+        await self._require_no_active_session(offering_id=offering.id, now=moment)
 
-        duration: int = await self._resolve_duration(payload, offering)
-        windows: _SessionWindows = self._resolve_windows(payload, offering)
+        # One read of the offering's active meetings, shared by the
+        # weekly-hours gate, the type gate and the session plan.
+        components: Sequence[OfferingComponent] = await active_components(
+            self._session, offering.id
+        )
+        await self._require_schedule_requirement(offering, components)
+
+        # D95: the offering declares what it meets. A session of a type it
+        # does not configure would inherit the lecture's room and the course
+        # template's duration, so it is refused — before the lab-coordinates
+        # check, which is about a different mistake.
+        self._require_configured_type(
+            components=components, session_type=payload.session_type
+        )
+
+        course: Course | None = await self._session.get(Course, offering.course_id)
+        plan: SessionPlan = await resolve_session_plan(
+            self._session,
+            offering=offering,
+            course=course,
+            components=components,
+            session_type=payload.session_type,
+            now=moment,
+            settings=self._settings,
+        )
+
+        duration: int = payload.duration_minutes or plan.duration_minutes
+        windows: _SessionWindows = _SessionWindows(
+            present=payload.present_window_minutes or plan.present_window_minutes,
+            late=payload.late_window_minutes or plan.late_window_minutes,
+        )
         self._check_windows(windows, duration)
 
-        radius: int = (
-            payload.classroom_radius_meters
-            or self._settings.default_geofence_radius_meters
-        )
+        radius: int = payload.classroom_radius_meters or plan.radius_meters
 
-        # D77: the classroom falls back payload -> matching active component
-        # -> offering. Lab sessions always enforce the geofence, so a lab
-        # open that resolves to no coordinates is rejected.
-        component: OfferingComponent | None = await self._component_for(
-            offering.id, payload.session_type
-        )
-        classroom_name: str | None = (
-            payload.classroom_name
-            or (component.classroom_name if component else None)
-            or offering.classroom_name
-        )
-        classroom_lat: float | None = _or_fallback(
-            payload.classroom_lat,
-            (component.classroom_lat if component else None),
-        )
-        if classroom_lat is None:
-            classroom_lat = offering.classroom_lat
-        classroom_lng: float | None = _or_fallback(
-            payload.classroom_lng,
-            (component.classroom_lng if component else None),
-        )
-        if classroom_lng is None:
-            classroom_lng = offering.classroom_lng
+        # The classroom falls back payload -> matching active component ->
+        # offering, which the plan has already resolved. An explicit
+        # override (D93/D94) is taken verbatim, so a professor who clears the
+        # room keeps a null location instead of inheriting the offering's.
+        if payload.classroom_override:
+            classroom_name = payload.classroom_name
+            classroom_lat = payload.classroom_lat
+            classroom_lng = payload.classroom_lng
+        else:
+            classroom_name = payload.classroom_name or plan.classroom_name
+            classroom_lat = _or_fallback(
+                payload.classroom_lat, plan.classroom_lat
+            )
+            classroom_lng = _or_fallback(
+                payload.classroom_lng, plan.classroom_lng
+            )
 
+        # Remote / online sessions never carry a physical geofence, even when
+        # the offering they were opened against has one.
+        if payload.is_remote:
+            classroom_lat = None
+            classroom_lng = None
+
+        # An explicitly disabled geofence (e.g. an in-person session in a
+        # room with no known coordinates) carries no classroom identity, so
+        # the offering's room is not inherited for it.
+        if not payload.geofence_enabled:
+            classroom_name = None
+            classroom_lat = None
+            classroom_lng = None
+
+        # Remote / online mode is only available for lectures: labs always
+        # enforce the geofence, so a remote lab would bypass it.
+        if payload.session_type == SessionType.LAB and payload.is_remote:
+            raise RemoteNotAllowedForLabException()
+
+        # D77: laboratory sessions always enforce the geofence, so a lab open
+        # that resolves to no coordinates is rejected.
         if payload.session_type == SessionType.LAB and (
             classroom_lat is None or classroom_lng is None
         ):
             raise LabCoordinatesRequiredException()
+
+        # D94: the class has to be running. An override is the professor's
+        # explicit way past the window, so the check applies only when the
+        # payload carries none.
+        if payload.session_date is None and payload.start_time is None:
+            self._require_within_start_window(plan=plan, now=moment)
+
+        scheduled_start, scheduled_end, overridden = self._apply_override(
+            plan=plan,
+            session_date=payload.session_date,
+            start_time=payload.start_time,
+            now=moment,
+            duration_minutes=duration,
+        )
 
         row: Session = await self._insert_session(
             offering=offering,
@@ -214,9 +309,16 @@ class SessionService:
             classroom_name=classroom_name,
             classroom_lat=classroom_lat,
             classroom_lng=classroom_lng,
-            now=now,
+            scheduled_start=scheduled_start,
+            scheduled_end=scheduled_end,
+            schedule_overridden=overridden,
+            original_scheduled_start=self._original_start(
+                plan=plan, overridden=overridden
+            ),
+            now=moment,
+            created_by=actor_id,
         )
-        await self._stamp_session(row, duration, now)
+        await self._stamp_session(row, duration, moment)
 
         # After the stamp, not before: `session_code` is still the random
         # placeholder until `_stamp_session` derives it from the assigned id.
@@ -246,11 +348,152 @@ class SessionService:
             session_code=row.session_code,
             offering_id=offering.id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
+            scheduled_start_time=row.scheduled_start_time,
             scheduled_end_time=row.scheduled_end_time,
-            created_at=row.created_at or now,
+            schedule_overridden=row.schedule_overridden,
+            plan_source=plan.source,
+            actual_start_time=row.actual_start_time,
+            original_scheduled_start_time=row.original_scheduled_start_time,
+            override_reason=row.override_reason,
+            created_at=row.created_at or moment,
         )
+
+    @staticmethod
+    def _require_configured_type(
+        *,
+        components: Sequence[OfferingComponent],
+        session_type: SessionType,
+    ) -> None:
+        """Refuse a session of a type the offering does not meet (D95).
+
+        The offering's active meetings are what it meets (D77), and the
+        list is resolved by the shared helper so the course read, the
+        professor's course list, the plan and the open all say the same
+        thing. An offering with no active meeting is a lecture offering.
+        """
+        configured = openable_session_types(
+            component.session_type for component in components
+        )
+
+        if session_type not in configured:
+            raise SessionTypeNotConfiguredException(
+                session_type.value, [value.value for value in configured]
+            )
+
+    @staticmethod
+    def _original_start(*, plan: SessionPlan, overridden: bool) -> datetime | None:
+        """The start of the class an overridden session belongs to (D94).
+
+        When today is one of the meeting's days, that class is today's
+        occurrence — the one the open window was resolved against, and the
+        one the professor meant to run. When today is not one of them there
+        is no such class, and the plan's next occurrence is the nearest one.
+
+        Null for a session that follows the plan: there,
+        `scheduled_start_time` already is that start.
+        """
+        if not overridden:
+            return None
+
+        return plan.start_window.scheduled_start or plan.scheduled_start
+
+    def _require_within_start_window(self, *, plan: SessionPlan, now: datetime) -> None:
+        """Refuse an open that falls outside the class's scheduled time (D94).
+
+        The window is today's occurrence of the meeting plus the early-open
+        and late-open grace, resolved by the plan — so this check and the
+        plan the professor was shown can never disagree.
+
+        The message names the scheduled time and the current one, because
+        the professor's next two options are "wait" and "start at a
+        different time".
+        """
+        window = plan.start_window
+
+        if window.permitted:
+            return
+
+        zone = resolve_timezone(
+            self._settings.institution_timezone, label="institution timezone"
+        )
+        current: str = now.astimezone(zone).strftime("%Y-%m-%d %H:%M")
+        scheduled: str | None = None
+
+        if window.scheduled_start is not None and window.scheduled_end is not None:
+            scheduled = (
+                f"{window.scheduled_start.astimezone(zone).strftime('%Y-%m-%d %H:%M')}"
+                f"–{window.scheduled_end.astimezone(zone).strftime('%H:%M')}"
+            )
+
+        raise SessionOutsideScheduledTimeException(
+            reason=window.reason or "after_window",
+            scheduled=scheduled,
+            current=current,
+        )
+
+    def _apply_override(
+        self,
+        *,
+        plan: SessionPlan,
+        session_date: date | None,
+        start_time: time | None,
+        now: datetime,
+        duration_minutes: int,
+    ) -> tuple[datetime, datetime, bool]:
+        """The session's scheduled window, and whether it is an override.
+
+        Without an override the session runs the offering's plan: the next
+        occurrence of its meeting, stored on the session so the row keeps the
+        class's own start and end rather than the moment of the click.
+
+        With one, the session is an exception. The plan's day or its time is
+        replaced, the meeting keeps its length, and the row records that it
+        was overridden so nothing downstream mistakes it for the plan.
+
+        The offering's recurring schedule is never touched: an override lives
+        on the session alone.
+        """
+        zone = resolve_timezone(
+            self._settings.institution_timezone, label="institution timezone"
+        )
+
+        if session_date is None and start_time is None:
+            if plan.scheduled_start is not None and plan.scheduled_end is not None:
+                return plan.scheduled_start, plan.scheduled_end, False
+
+            # No configured meeting: the session starts now and runs for the
+            # resolved duration.
+            return now, now + timedelta(minutes=duration_minutes), False
+
+        local_now: datetime = now.astimezone(zone)
+
+        if session_date is not None and session_date < local_now.date():
+            raise SessionDateInPastException(session_date.isoformat())
+
+        day: date = session_date or plan.session_date or local_now.date()
+        wall: time = start_time or plan.start_time or local_now.time()
+
+        scheduled_start: datetime = datetime.combine(
+            day, wall, tzinfo=zone
+        ).astimezone(timezone.utc)
+
+        if scheduled_start < now - timedelta(minutes=OVERRIDE_PAST_GRACE_MINUTES):
+            raise ScheduledStartInPastException(
+                scheduled_start.astimezone(zone).strftime("%Y-%m-%d %H:%M")
+            )
+
+        scheduled_end: datetime = scheduled_start + timedelta(
+            minutes=duration_minutes
+        )
+
+        if scheduled_end <= scheduled_start:
+            raise InvalidSessionTimeException()
+
+        return scheduled_start, scheduled_end, True
 
     async def _require_no_active_session(
         self, *, offering_id: int, now: datetime
@@ -267,7 +510,9 @@ class SessionService:
         if active_id is not None:
             raise SessionAlreadyActiveException(offering_id)
 
-    async def _require_schedule_requirement(self, offering: CourseOffering) -> None:
+    async def _require_schedule_requirement(
+        self, offering: CourseOffering, components: Sequence[OfferingComponent]
+    ) -> None:
         """Refuse to open sessions on a mis-scheduled offering (D82).
 
         The merged active-component total must equal the course units
@@ -276,18 +521,10 @@ class SessionService:
         internals. Rows with no configured meetings are exempt (nothing to
         judge: legacy and factory rows keep working). Close/status paths
         never call this.
-        """
-        components: Sequence[OfferingComponent] = (
-            await self._session.scalars(
-                select(OfferingComponent)
-                .where(
-                    OfferingComponent.offering_id == offering.id,
-                    OfferingComponent.is_active.is_(True),
-                )
-                .order_by(OfferingComponent.id)
-            )
-        ).all()
 
+        `components` are the offering's active meeting rows, read once by
+        the caller and shared with the session plan (D93).
+        """
         if not components:
             return
 
@@ -312,23 +549,6 @@ class SessionService:
                 int(course.units),
             )
 
-    def _resolve_windows(
-        self, payload: SessionCreate, offering: CourseOffering
-    ) -> _SessionWindows:
-        """Payload -> offering -> app-default fallback for the two scan windows."""
-        present: int = (
-            payload.present_window_minutes
-            or offering.default_present_window_minutes
-            or self._settings.default_present_window_minutes
-        )
-        late: int = (
-            payload.late_window_minutes
-            or offering.default_late_window_minutes
-            or self._settings.default_late_window_minutes
-        )
-
-        return _SessionWindows(present=present, late=late)
-
     @staticmethod
     def _check_windows(windows: _SessionWindows, duration: int) -> None:
         if windows.present + windows.late > duration:
@@ -348,7 +568,12 @@ class SessionService:
         classroom_name: str | None,
         classroom_lat: float | None,
         classroom_lng: float | None,
+        scheduled_start: datetime,
+        scheduled_end: datetime,
+        schedule_overridden: bool,
+        original_scheduled_start: datetime | None,
         now: datetime,
+        created_by: int | None,
     ) -> Session:
         row = Session(
             offering_id=offering.id,
@@ -358,42 +583,46 @@ class SessionService:
             duration_minutes=duration,
             present_window_minutes=windows.present,
             late_window_minutes=windows.late,
-            scheduled_start_time=now,
-            scheduled_end_time=now + timedelta(minutes=duration),
+            scheduled_start_time=scheduled_start,
+            scheduled_end_time=scheduled_end,
+            schedule_overridden=schedule_overridden,
+            # D94: when the session was really opened, and — for an override —
+            # the start it would have carried without one.
+            actual_start_time=now,
+            original_scheduled_start_time=original_scheduled_start,
+            override_reason=payload.override_reason,
+            created_by=created_by,
             expires_at=None,
             classroom_radius_meters=radius,
             classroom_name=classroom_name,
             classroom_lat=classroom_lat,
             classroom_lng=classroom_lng,
+            is_remote=payload.is_remote,
+            geofence_enabled=payload.geofence_enabled,
         )
         self._session.add(row)
         await self._session.flush()
 
         return row
 
-    async def _component_for(
-        self, offering_id: int, session_type: SessionType
-    ) -> OfferingComponent | None:
-        """The active component matching this session's type, if any."""
-        return (
-            await self._session.scalars(
-                select(OfferingComponent)
-                .where(
-                    OfferingComponent.offering_id == offering_id,
-                    OfferingComponent.session_type == session_type.value,
-                    OfferingComponent.is_active.is_(True),
-                )
-                .order_by(OfferingComponent.id)
-                .limit(1)
-            )
-        ).one_or_none()
-
     async def _stamp_session(
         self, row: Session, duration: int, now: datetime
     ) -> None:
-        """Second flush: derive the code from the assigned id and stamp expiry."""
+        """Second flush: derive the code from the assigned id and stamp expiry.
+
+        D49/D12: `expires_at = min(created_at + duration, scheduled_end_time)`.
+        The class-end cap only binds while the class is still ahead — a
+        professor opening a 09:00-10:30 class at 11:00 would otherwise get a
+        session that was born expired, and the "now + duration" reading of the
+        cap would leave the scan window with nowhere to run.
+        """
         base: datetime = row.created_at or now
-        row.expires_at = min(base + timedelta(minutes=duration), row.scheduled_end_time)
+        candidate: datetime = base + timedelta(minutes=duration)
+        row.expires_at = (
+            min(candidate, row.scheduled_end_time)
+            if row.scheduled_end_time > base
+            else candidate
+        )
         row.session_code = generate_session_code(row.id, self._settings)
         await self._session.flush()
 
@@ -418,6 +647,8 @@ class SessionService:
             id=row.id,
             offering=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_end_time=row.scheduled_end_time,
@@ -504,6 +735,14 @@ class SessionService:
 
         `session_code` is included: it is the value students type in, so it is
         part of what an administrator reviewing a session needs to see.
+        `schedule_overridden` is included because a rescheduled session is
+        not the offering's plan, and the trail is where that difference has
+        to be visible (D93).
+
+        The open-window columns come with it (D94): `actual_start_time` is
+        when the session really opened, and `original_scheduled_start_time`
+        is the start of the class it belongs to — so the trail shows how far
+        the class moved.
         """
         return {
             "offering_id": row.offering_id,
@@ -512,6 +751,16 @@ class SessionService:
             "session_code": row.session_code,
             "scheduled_start_time": row.scheduled_start_time.isoformat(),
             "scheduled_end_time": row.scheduled_end_time.isoformat(),
+            "schedule_overridden": row.schedule_overridden,
+            "actual_start_time": (
+                row.actual_start_time.isoformat() if row.actual_start_time else None
+            ),
+            "original_scheduled_start_time": (
+                row.original_scheduled_start_time.isoformat()
+                if row.original_scheduled_start_time
+                else None
+            ),
+            "override_reason": row.override_reason,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None,
         }
 
@@ -559,6 +808,8 @@ class SessionService:
             session_id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
@@ -572,6 +823,7 @@ class SessionService:
             ),
             present_window_minutes=row.present_window_minutes,
             late_window_minutes=row.late_window_minutes,
+            classroom_name=row.classroom_name,
         )
 
     async def list_professor_sessions(
@@ -700,6 +952,8 @@ class SessionService:
             id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -777,6 +1031,8 @@ class SessionService:
             id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
+            is_remote=_is_remote_of(row),
+            geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
@@ -1110,20 +1366,85 @@ class SessionService:
         if row is None:
             raise ProfessorNotAssignedException(offering_id)
 
-    async def _resolve_duration(
-        self, payload: SessionCreate, offering: CourseOffering
-    ) -> int:
-        if payload.duration_minutes is not None:
-            return payload.duration_minutes
+    async def get_session_plan(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        session_type: SessionType,
+        now: datetime | None = None,
+    ) -> SessionPlanRead:
+        """The resolved plan a session for this offering would inherit (D93).
+
+        The open form renders this instead of re-deriving the schedule, so
+        what the professor sees is what the server will store. Authorization
+        is the same rule the open itself uses: a current teaching assignment
+        on the offering.
+
+        A type the offering does not meet is refused with the same error the
+        open would raise (D95): a plan for it would be a plan the professor
+        may not use, and a stale form has to learn that.
+        """
+        moment: datetime = now or _utcnow()
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        await self._require_assignment(
+            offering_id=offering.id, professor_id=professor_id
+        )
+
+        components: Sequence[OfferingComponent] = await active_components(
+            self._session, offering.id
+        )
+        self._require_configured_type(
+            components=components, session_type=session_type
+        )
 
         course: Course | None = await self._session.get(Course, offering.course_id)
+        plan: SessionPlan = await resolve_session_plan(
+            self._session,
+            offering=offering,
+            course=course,
+            components=components,
+            session_type=session_type,
+            now=moment,
+            settings=self._settings,
+        )
 
-        if course is not None:
-            return int(float(course.session_duration_hours) * 60)
-
-        # Unreachable against a real database (RESTRICT FK guarantees the
-        # course row); only a last resort for incomplete hand-rolled fakes.
-        return 60
+        return SessionPlanRead(
+            offering_id=offering.id,
+            session_type=session_type,
+            source=plan.source,
+            session_date=plan.session_date,
+            start_time=plan.start_time,
+            end_time=plan.end_time,
+            scheduled_start=plan.scheduled_start,
+            scheduled_end=plan.scheduled_end,
+            timezone=self._settings.institution_timezone,
+            duration_minutes=plan.duration_minutes,
+            present_window_minutes=plan.present_window_minutes,
+            late_window_minutes=plan.late_window_minutes,
+            classroom_name=plan.classroom_name,
+            classroom_lat=plan.classroom_lat,
+            classroom_lng=plan.classroom_lng,
+            radius_meters=plan.radius_meters,
+            override_capable=plan.has_meeting,
+            # D94: whether the session may be opened right now, and why not.
+            # The open form renders this instead of re-deriving the window.
+            start_window=StartWindowRead(
+                permitted=plan.start_window.permitted,
+                reason=plan.start_window.reason,
+                scheduled_date=plan.start_window.session_date,
+                start_time=plan.start_window.start_time,
+                end_time=plan.start_window.end_time,
+                scheduled_start=plan.start_window.scheduled_start,
+                scheduled_end=plan.start_window.scheduled_end,
+                opens_at=plan.start_window.opens_at,
+                closes_at=plan.start_window.closes_at,
+                current_time=moment,
+                timezone=self._settings.institution_timezone,
+                early_open_minutes=plan.start_window.early_open_minutes,
+                late_open_minutes=plan.start_window.late_open_minutes,
+            ),
+        )
 
     async def _enrolled_students(self, offering_id: int) -> Sequence[Student]:
         return (

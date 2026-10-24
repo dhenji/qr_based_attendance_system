@@ -36,6 +36,23 @@ class CourseComparisonResponse(BaseModel):
     size: int = DEFAULT_PAGE_SIZE
 
 
+class CourseOption(BaseModel):
+    course_id: int
+    course_code: str
+    course_name: str
+
+
+class CourseOptionsResponse(BaseModel):
+    """Courses with at least one offering in the selected scope (#279).
+
+    Backs the analytics filter rail's course picker, so the options offered
+    and the rows the reports can show come from the same scope predicate.
+    """
+
+    items: list[CourseOption] = Field(default_factory=list)
+    total: int = 0
+
+
 class TrendItem(BaseModel):
     date: date
     compliance_rate: float

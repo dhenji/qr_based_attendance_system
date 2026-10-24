@@ -28,6 +28,8 @@ import type { Paginated } from '$lib/api/endpoints';
 import type {
 	AdminAssignment,
 	AdminAssignmentCreatePayload,
+	AdminAssignmentReassignPayload,
+	AdminAssignmentReopenPayload,
 	AdminAssignmentResponse,
 	AdminBulkEnrollResult,
 	AdminCourse,
@@ -91,6 +93,9 @@ export const toOffering = (o: AdminOfferingResponse): AdminOffering => {
 		classroomLng: o.classroom_lng ?? undefined,
 		presentWindowMinutes: o.default_present_window_minutes,
 		lateWindowMinutes: o.default_late_window_minutes,
+		// D93: null means "inherit the app setting" (Admin -> System
+		// Settings -> Geofence radius).
+		defaultClassroomRadiusMeters: o.default_classroom_radius_meters ?? null,
 		isActive: o.is_active,
 		enrolledCount: o.enrolled_count ?? 0,
 		createdAt: o.created_at,
@@ -292,6 +297,7 @@ const toAssignment = (a: AdminAssignmentResponse): AdminAssignment => ({
 	effectiveFrom: a.effective_from,
 	effectiveTo: a.effective_to ?? undefined,
 	semester: a.semester,
+	hasSessions: Boolean(a.has_sessions),
 	assignedBy: a.assigned_by,
 	assignedAt: a.assigned_at,
 });
@@ -322,14 +328,69 @@ export const assignProfessor = async (
 // End an assignment — sets effective_to=today server-side and returns it.
 export const endAssignment = async (
 	offeringId: number,
-	professorId: number
+	professorId: number,
+	effectiveFrom: string
 ): Promise<string> => {
 	const response = await del<{ effective_to: string }>(
 		'adminOfferingProfessors',
-		undefined,
+		{ effective_from: effectiveFrom },
 		`/${offeringId}/professors/${professorId}`
 	);
 	return response.effective_to;
+};
+
+// Permanently erase an assignment that never opened a session. The backend
+// returns 409 assignment_has_sessions for rows with history, so End must be
+// used instead.
+export const permanentlyRemoveAssignment = async (
+	offeringId: number,
+	professorId: number,
+	effectiveFrom: string
+): Promise<void> => {
+	await del<void>(
+		'adminOfferingProfessors',
+		{ effective_from: effectiveFrom },
+		`/${offeringId}/professors/${professorId}/permanent`
+	);
+};
+
+// Replace a professor on an offering — ends the old assignment and opens a
+// new one in one transaction.
+export const reassignProfessor = async (
+	offeringId: number,
+	oldProfessorId: number,
+	payload: AdminAssignmentReassignPayload
+): Promise<AdminAssignment> => {
+	const response = await post<AdminAssignmentResponse>(
+		'adminOfferingProfessors',
+		payload,
+		undefined,
+		`/${offeringId}/professors/${oldProfessorId}/reassign`
+	);
+	return toAssignment(response);
+};
+
+// Undo an accidental End by clearing the exact row's effective_to. Passing
+// isPrimary=false reopens a former primary as an assistant when another
+// primary already covers the dates; omitting it restores the previous role.
+export const reopenAssignment = async (
+	offeringId: number,
+	professorId: number,
+	effectiveFrom: string,
+	isPrimary?: boolean
+): Promise<AdminAssignment> => {
+	const payload: AdminAssignmentReopenPayload = {
+		effective_from: effectiveFrom,
+	};
+	if (isPrimary !== undefined) payload.is_primary = isPrimary;
+
+	const response = await post<AdminAssignmentResponse>(
+		'adminOfferingProfessors',
+		payload,
+		undefined,
+		`/${offeringId}/professors/${professorId}/reopen`
+	);
+	return toAssignment(response);
 };
 
 // --- Roster + bulk enroll ----------------------------------------------------

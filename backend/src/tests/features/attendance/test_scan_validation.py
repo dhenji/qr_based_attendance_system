@@ -408,6 +408,57 @@ async def test_session_without_classroom_coords_skips_geofence(
     assert result.status == ValidationStatus.PRESENT.value
 
 
+async def test_scan_without_gps_succeeds_when_geofence_disabled(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A session with geofencing disabled must accept a scan with no GPS."""
+
+    stack: dict[str, Any] = await factories.full_stack()
+    student = stack["student"]
+    session = stack["session"]
+    session.geofence_enabled = False
+    session.classroom_lat = None
+    session.classroom_lng = None
+    service = AttendanceService(test_db_session, settings)
+
+    result = await service.submit_scan(
+        user_id=student.user_id,
+        payload=scan_request(
+            session,
+            student.student_id,
+            scanned_at=session.created_at + timedelta(minutes=2),
+            gps=None,
+        )
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
+
+
+async def test_scan_without_gps_fails_when_geofence_required(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A required geofence cannot be satisfied without a GPS fix."""
+
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    with pytest.raises(OutsideGeofenceException):
+        await service.submit_scan(
+            user_id=student.user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=2),
+                gps=None,
+            )
+        )
+
+
 # --- liveness -------------------------------------------------------------
 
 
@@ -475,6 +526,19 @@ async def test_ear_samples_must_stay_in_schema_range() -> None:
 
     with pytest.raises(ValueError):
         valid_evidence(ear_samples=[1.5])
+
+
+@pytest.mark.parametrize("sample_count", [1, 100])
+async def test_ear_samples_accept_schema_boundaries(sample_count: int) -> None:
+    evidence = valid_evidence(ear_samples=[0.2] * sample_count)
+
+    assert len(evidence.ear_samples) == sample_count
+
+
+@pytest.mark.parametrize("sample_count", [101, 120])
+async def test_ear_samples_over_schema_limit_are_rejected(sample_count: int) -> None:
+    with pytest.raises(ValueError, match="at most 100 items"):
+        valid_evidence(ear_samples=[0.2] * sample_count)
 
 
 async def test_empty_ear_samples_fail_the_grade(

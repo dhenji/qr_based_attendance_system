@@ -45,16 +45,19 @@ call it. Three consequences worth knowing:
   own and inherits 409 through `SessionDatabaseException → DatabaseException`, as
   does `year_level_program_mismatch` inheriting 422 via `DomainException`.
 
-**Six codes are defined but unreachable**, so no endpoint row can list them:
+**Five codes are defined but unreachable**, so no endpoint row can list them:
 
 | Code | Why it cannot occur |
 | ---- | ------------------- |
-| `internal_error` | The default `code` on `AppException` and the fallback in `main.py`'s single handler, but no code constructs a code-less `AppException`. An unhandled non-`AppException` (a SQLAlchemy `IntegrityError`, say) escapes to FastAPI's plain-text 500 instead. |
 | `database_error` | `DatabaseException` has a 409 handler but no `raise` site anywhere. |
 | `face_not_enrolled` | `FaceNotEnrolledException` is never raised. |
 | `invalid_semester` | `InvalidSemesterException` is never raised; `semester` is a free-text column with no vocabulary. |
 | `role_mismatch` | `RoleMismatchException` is never raised; `require_role` returns an `HTTPException` with `insufficient_permissions` (403). |
 | `password_policy_violation` | `PasswordPolicyException` is never raised. New passwords *are* strength-checked, but through a Pydantic `password_strength` validator that fails as the generic 422 `validation_error` — so the custom code can never be emitted and was removed from the change-password row rather than left implying otherwise. |
+
+Unhandled non-`AppException` failures are caught by `UnhandledExceptionMiddleware`
+inside CORS and returned as a 500 `internal_error` JSON envelope, so the browser
+sees the real status instead of a transport failure.
 
 They are kept rather than deleted because each is a plausible future guard, and an
 unused exception class is not a defect. If one is ever raised, the guard test fails
@@ -242,12 +245,12 @@ reactivate with `is_active: true`.
 
 |                  |                                                                                     |
 | ---------------- | ----------------------------------------------------------------------------------- |
-| **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label }] } }` |
+| **Request**      | `{ year_number: int, label: string, term_structure: { terms: [{ code, label, weeks?: int }] } }` |
 | **Response 201** | Created year level                                                                  |
 
 | **Errors**       | 409 `year_number_exists` |
 
-| **Notes**        | `year_number` is unique per program, but there is deliberately no `year_number <= program.total_years` check — the `1..total_years` bound is enforced only by the Programs UI and Setup Wizard year pickers (frontend-only). Empty `terms: []` is accepted; the Setup Wizard treats termless years as unusable for offerings (frontend-only), while the API accepts an offering on a termless year with a free-text `semester`. |
+| **Notes**        | `year_number` is unique per program, but there is deliberately no `year_number <= program.total_years` check — the `1..total_years` bound is enforced only by the Programs UI and Setup Wizard year pickers (frontend-only). Empty `terms: []` is accepted; the Setup Wizard treats termless years as unusable for offerings (frontend-only), while the API accepts an offering on a termless year with a free-text `semester`. `terms[].weeks` is the term's session length (D86), optional `1..52`, stored in the JSONB `term_structure`; offerings offered in that term derive their `semester_weeks` from it (missing → 18). |
 #### `GET /admin/programs/{program_id}/years/{year_id}`
 
 |                  |                                                               |
@@ -329,19 +332,19 @@ A course offering is a specific instance of a course template for a program, yea
 |                  |                                                                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?program_id?&year_level_id?&semester?&course_id?&is_active?&page=1&size=20`                                                                                                                                             |
-| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, enrolled_count, session_types: ["lecture" \| "lab"], components: [Component], is_active, created_at, updated_at }], ... }` |
-| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. `session_types` lists the distinct types across the offering's active components and feeds the Lecture / Lab / Mixed badges. `Component = { id, offering_id, session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, is_active, created_at, updated_at }`. |
+| **Response 200** | `{ items: [{ id, course_id, program_id, year_level_id, semester, academic_year, sessions_per_week, semester_weeks, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, default_classroom_radius_meters, enrolled_count, session_types: ["lecture" \| "lab"], components: [Component], is_active, created_at, updated_at }], ... }` |
+| **Notes**        | `enrolled_count` is a computed DTO (count of active enrollments) — feeds the course/offering tables (wireframes.md 4.5c/4.5d) and the active-session "Enrolled" stat. `session_types` lists the types this offering can open (D95): the distinct types across the offering's active components, or `["lecture"]` when it has no active component — an offering without a configured meeting is a lecture offering. It feeds the Lecture / Lab / Mixed badges. `Component = { id, offering_id, session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, is_active, created_at, updated_at }`. `semester_weeks` is **derived, read-only** (D86): resolved from the offering's year-level term entry for its `semester` via `shared/schedule.py::term_weeks`, falling back to `DEFAULT_TERM_WEEKS` (18) for an unmatched/orphaned code. It is not accepted on create/update. |
 
 #### `POST /admin/offerings`
 
 |                  |                                                                                                                                                                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, semester_weeks: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int, components?: [{ session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name?, classroom_lat?, classroom_lng? }] }` |
+| **Request**      | `{ course_id: int, program_id: int, year_level_id: int, semester: string, academic_year: string, sessions_per_week: int, schedule_days: string, schedule_start_time: time, schedule_end_time: time, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, default_present_window_minutes?: int, default_late_window_minutes?: int, default_classroom_radius_meters?: int, components?: [{ session_type, schedule_days, schedule_start_time, schedule_end_time, classroom_name?, classroom_lat?, classroom_lng? }] }` |
 | **Response 201** | Created course offering (with `components` + `session_types`)                                                                                                                                                                                                                                             |
 | **Errors**       | 409 `offering_exists` · 409 `component_exists` · 404 `course_not_found` · 404 `program_not_found` · 422 `windows_exceed_duration` · 422 `weekly_hours_exceed_units` · 422 `weekly_hours_below_units` · 404 `year_level_not_found` |
-| **Notes**        | Omitting `components` creates a single lecture component mirroring the offering schedule/classroom, so pre-existing callers keep working unchanged. |
+| **Notes**        | Omitting `components` creates a single lecture component mirroring the offering schedule/classroom, so pre-existing callers keep working unchanged. Omitting the window defaults (or the radius) stores NULL, which means "follow the system default" (D93) — the `app_settings` value an administrator edits in Admin → System Settings. |
 |                  | Uniqueness is `(course_id, program_id, semester, academic_year)` — `year_level_id` is **not** part of the key, so the same course/program/term/year on a different year level still 409s. On 409 `offering_exists` the admin UI looks the conflicting offering up and links straight to it (it may sit under a different year level than the one filtered). `semester` is free text with no vocabulary (`invalid_semester` is defined but unreachable); the year-terms dropdowns in the Offerings page and Setup Wizard are the only entry path (UI guidance only — free-text entry is not offered). The Setup Wizard builds the same meeting rows (up to 4) as the Offerings page modal; further meetings are added via `POST …/components` afterwards. A new offering still needs a professor assignment (`POST …/professors`) and enrollment before sessions can run. |
-|                  | Scheduling model: one row per meeting (type + days + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. A multi-day meeting (e.g. MWF 08:00–09:00) is stored as a single component with a day-letter string — never fanned out into one row per day — so a time change stays atomic across its days. `sessions_per_week` is derived server-side as one session per meeting day (an `MWF` row counts 3) and re-synced on every component write; the create payload value is recomputed, and the detail Settings tab shows it read-only. The term total shown is `sessions_per_week × semester_weeks` — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. Weekly scheduled hours are Σ meeting durations × day-letter counts and must equal the course's `units` (D79): a 3-unit course holds Mon 07:00–08:30 + Tue 13:00–14:30 (3.0h) but rejects Mon 07:00–08:30 + Tue 13:00–15:00 (3.5h, 422 `weekly_hours_exceed_units`) and a lone Mon 07:00–08:30 (1.5h, 422 `weekly_hours_below_units`). Creation must land exactly; adds (and reactivations) may only converge — strictly closer without crossing sides — while plain meeting edits reshape freely so multi-step changes can pass through mismatched totals (D81). |
+|                  | Scheduling model: one row per meeting (type + days + time + room) stored as offering components (the create forms allow up to 7 rows); the offering-level schedule columns are display default + session pre-fill only. A multi-day meeting (e.g. MWF 08:00–09:00) is stored as a single component with a day-letter string — never fanned out into one row per day — so a time change stays atomic across its days. `sessions_per_week` is derived server-side as one session per meeting day (an `MWF` row counts 3) and re-synced on every component write; the create payload value is recomputed, and the detail Settings tab shows it read-only. The term total shown is `sessions_per_week × semester_weeks`, where `semester_weeks` is the term's value (D86) — the same product the risk batch uses as its expected count. Same-day overlaps are permitted server-side (the UI warns); only one session per offering can be active at a time. Weekly scheduled hours are Σ meeting durations × day-letter counts and must equal the course's `units` (D79): a 3-unit course holds Mon 07:00–08:30 + Tue 13:00–14:30 (3.0h) but rejects Mon 07:00–08:30 + Tue 13:00–15:00 (3.5h, 422 `weekly_hours_exceed_units`) and a lone Mon 07:00–08:30 (1.5h, 422 `weekly_hours_below_units`). Creation must land exactly; adds (and reactivations) may only converge — strictly closer without crossing sides — while plain meeting edits reshape freely so multi-step changes can pass through mismatched totals (D81). |
 
 #### `GET /admin/offerings/{offering_id}`
 
@@ -399,7 +402,7 @@ Archive a scheduled component (soft-delete: `is_active=false`).
 | **Request**      | Any mutable field from POST (except course_id, program_id, year_level_id, semester, academic_year) |
 | **Response 200** | Updated course offering                        |
 | **Errors**       | 404 `offering_not_found` · 422 `invalid_schedule_window` · 422 `schedule_mismatch` |
-| **Notes**        | `invalid_schedule_window` is 422 when the *merged* result would end at or before it starts. A PATCH that moves only `schedule_start_time` past the stored end is caught here, because the request body's own validator only sees the fields it was sent. Activation (`is_active` False → True) additionally requires the merged meeting total to equal the course units requirement exactly, including the zero-meeting case — 422 `schedule_mismatch` otherwise; deactivation and unrelated PATCHes are unaffected. |
+| **Notes**        | `invalid_schedule_window` is 422 when the *merged* result would end at or before it starts. A PATCH that moves only `schedule_start_time` past the stored end is caught here, because the request body's own validator only sees the fields it was sent. Activation (`is_active` False → True) additionally requires the merged meeting total to equal the course units requirement exactly, including the zero-meeting case — 422 `schedule_mismatch` otherwise; deactivation and unrelated PATCHes are unaffected. An explicit `null` for `default_present_window_minutes`, `default_late_window_minutes` or `default_classroom_radius_meters` clears the override and puts the offering back on the system default (D93); a value sets it. |
 
 #### `DELETE /admin/offerings/{offering_id}`
 
@@ -413,11 +416,16 @@ reactivate with `is_active: true`.
 
 | **Errors**       | 409 `not_archived` (record is still `is_active=true`)<br>409 `offering_has_enrollments` (students are still enrolled)<br>409 `offering_has_sessions` (sessions were already opened — history is kept)<br>409 `offering_has_assignments` (professor assignments still reference it, including ended ones)<br>404 `offering_not_found` |
 | **Notes**        | Guards run in FK order (enrollments → sessions → assignments) so a `RESTRICT` violation can never surface as a 500. Components are owned by the offering and are removed with it once the guards pass. One `delete` audit row on `course_offering` per hard delete. |
+Professor assignments are effective-dated. At most **one primary**
+assignment may cover an offering on any date; assistants may overlap freely.
+A primary succession is valid when the ranges are disjoint (one ends today and
+the next starts tomorrow).
+
 #### `GET /admin/offerings/{offering_id}/professors`
 
 |                  |                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `[{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, assigned_by, assigned_at }]` — a bare array, **not** `{ items: […] }`. The only non-paginated list in the app, so the row is outside the `?page/?size` convention. |
+| **Response 200** | `[{ offering_id, professor_id, is_primary, effective_from, effective_to, semester, has_sessions, assigned_by, assigned_at }]` — a bare array, **not** `{ items: […] }`. The only non-paginated list in the app, so the row is outside the `?page/?size` convention. `has_sessions` is true when at least one session was opened while this exact effective window authorized the professor; the admin UI hides permanent removal for those rows. |
 
 | **Errors**       | 404 `offering_not_found` |
 #### `POST /admin/offerings/{offering_id}/professors`
@@ -426,18 +434,71 @@ Assign professor to course offering.
 
 |                  |                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| **Request**      | `{ professor_id: int, is_primary: bool, effective_from: date, effective_to?: date, semester: string }` |
+| **Request**      | `{ professor_id: int, is_primary: bool, effective_from: date, effective_to?: date }` — `semester` is deliberately absent; the assignment always inherits the offering's semester. |
 | **Response 201** | Created assignment                                                                                     |
-| **Errors**       | 409 `overlapping_assignment` · 404 `professor_not_found` · 404 `offering_not_found` |
+| **Errors**       | 409 `overlapping_assignment` · 409 `primary_assignment_conflict` · 422 `professor_not_eligible` · 404 `professor_not_found` · 404 `offering_not_found` |
+
+#### `POST /admin/offerings/{offering_id}/professors/{professor_id}/reassign`
+
+Replace a professor on an existing assignment, preserving history: the old row is
+closed at `effective_from - 1 day` and a new row is created in one transaction.
+`semester` is derived from the offering. `old_effective_from` identifies the
+exact composite-PK row to replace; omit it to target the newest open-ended row.
+A future-dated assignment may be replaced on its own start date (the old row is
+deleted because it never took effect); a started assignment requires a later date.
+
+|                  |                                                                 |
+| ---------------- | --------------------------------------------------------------- |
+| **Request**      | `{ new_professor_id: int, is_primary?: bool, old_effective_from?: date, effective_from?: date, effective_to?: date }` |
+| **Response 201** | Created replacement assignment (`AssignmentRead`)               |
+| **Errors**       | 409 `overlapping_assignment` · 409 `primary_assignment_conflict` · 409 `assignment_already_ended` · 422 `professor_not_eligible` · 422 `invalid_effective_from` · 404 `assignment_not_found` · 404 `professor_not_found` · 404 `offering_not_found` |
 
 #### `DELETE /admin/offerings/{offering_id}/professors/{professor_id}`
 
-End assignment (set `effective_to` = today).
+End assignment (set `effective_to` = today). Pass `?effective_from=YYYY-MM-DD`
+to target a specific composite-PK row; without it the newest open-ended row is
+used. A future-dated assignment is cancelled by deleting it, since it never
+took effect.
 
 |                  |                                  |
 | ---------------- | -------------------------------- |
 | **Response 200** | `{ effective_to: "YYYY-MM-DD" }` |
-| **Errors**       | 404 `assignment_not_found` · 404 `offering_not_found` |
+| **Errors**       | 409 `assignment_already_ended` · 404 `assignment_not_found` · 404 `offering_not_found` |
+
+#### `DELETE /admin/offerings/{offering_id}/professors/{professor_id}/permanent`
+
+Permanently delete one **ended** assignment row that never opened a session.
+"Ended" means `effective_to` is today or earlier; a row with no end date or a
+future end date is still live and must be ended first (`409
+assignment_not_ended`). This is a post-End correction path for an assignment
+created by mistake, not a replacement for End. `effective_from` is **required**
+because the assignment's composite primary key has no surrogate id; without the exact start
+date the wrong historical row could be deleted. Sessions are never deleted, and
+the request is rejected when any session was opened inside the row's effective
+window (the end date is inclusive). The audit trail records one `delete` row on
+`course_professor` with the full `old_value` snapshot. The row cannot be
+reopened afterwards.
+
+|                  |                                                                 |
+| ---------------- | --------------------------------------------------------------- |
+| **Query**        | `effective_from=YYYY-MM-DD` (required)                          |
+| **Response 204** | No content                                                      |
+| **Errors**       | 409 `assignment_not_ended` · 409 `assignment_has_sessions` · 404 `assignment_not_found` · 404 `offering_not_found` · 422 validation error when `effective_from` is missing |
+
+#### `POST /admin/offerings/{offering_id}/professors/{professor_id}/reopen`
+
+Undo an accidental End: clears `effective_to` on the exact row identified by
+`effective_from`. The row becomes open-ended again. Rejected when the row is
+already open-ended, or when a later assignment exists for the same professor
+and offering (clearing the end date would overlap it). `is_primary` is
+optional: omit it to restore the previous role, or pass `false` to reopen as an
+assistant when another primary already covers the dates.
+
+|                  |                                                                 |
+| ---------------- | --------------------------------------------------------------- |
+| **Request**      | `{ effective_from: date, is_primary?: bool }`                   |
+| **Response 200** | Reopened assignment (`AssignmentRead`)                          |
+| **Errors**       | 409 `assignment_not_ended` · 409 `assignment_reopen_conflict` · 409 `primary_assignment_conflict` · 404 `assignment_not_found` · 404 `offering_not_found` |
 
 #### `POST /admin/offerings/{offering_id}/enrollments/bulk`
 
@@ -506,15 +567,35 @@ Check enrollment status.
 |                  |                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | **Role**         | admin                                                                                            |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                      |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                          |
 | **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions }` |
+
+#### `GET /admin/analytics/course-options`
+
+Courses with **at least one offering in the selected scope** — the Analytics
+filter rail's course picker. Uses the same scope predicate as every report
+read, so a course no report can show in the picked Program/Year/Term cannot
+be offered as an option; a course with no offering can never produce a
+silently empty report. No `is_active` gate (mirrors the report reads). `q`
+matches course code or name; `total` lets the picker flag truncation
+honestly instead of silently capping.
+
+|                  |                                                               |
+| ---------------- | ------------------------------------------------------------- |
+| **Role**         | admin                                                         |
+| **Query**        | `?program_id?&year_level_id?&semester?&q?&limit?`             |
+| **Response 200** | `{ items: [{ course_id, course_code, course_name }], total }` |
 
 #### `GET /admin/analytics/course-comparison`
 
+One item per **(course, program, year level)** cohort: the same subject offered
+to two programs/year levels is two rows, not one blended row (D6/D34).
+Semester/dates are filter axes, not identity.
+
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                                                        |
-| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&page?&size?`                                            |
+| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 #### `GET /admin/analytics/trends`
 
@@ -527,7 +608,7 @@ Check enrollment status.
 
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&risk_level=low                                                                                             | medium | high` |
 | **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at }], ... }` |
 
 #### `POST /admin/analytics/export`
@@ -560,7 +641,7 @@ live `student_risk_scores` are untouched until `promote`.
 |                  |                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | admin                                                                                                                                                         |
-| **Query**        | `?program_id?&year_level_id?&semester?&risk_level=low                                                                                                         | medium | high&unpromoted_only=false&...` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&risk_level=low                                                                                             | medium | high&unpromoted_only=false&...` |
 | **Response 200** | `{ items: [{ student_id, student_name, program, year_level, offering_id, course_code, course_name, absence_rate, max_streak, trend_slope, risk_level, computed_at, promoted_at }], ... }` |
 
 #### `POST /admin/analytics/risk-staging/promote`
@@ -568,12 +649,12 @@ live `student_risk_scores` are untouched until `promote`.
 Copy unpromoted staged rows into live `student_risk_scores` (UPSERT per student/offering/semester/day)
 and stamp them `promoted_at` (admin-only). Already-promoted rows in scope are counted as `skipped`.
 
-|                  |                                                         |
-| ---------------- | ------------------------------------------------------- |
-| **Role**         | admin                                                   |
-| **Query**        | `student_id?` `offering_id?` `semester?` (all optional) |
-| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`           |
-| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
+|                  |                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| **Role**         | admin                                                                                  |
+| **Query**        | `student_id?` `offering_id?` `semester?` `program_id?` `year_level_id?` `course_ids?`   |
+| **Response 200** | `{ promoted: N, skipped: M, duration_ms: T }`                                          |
+| **Notes**        | No filter = promote all unpromoted rows. `semester` required when `offering_id` is set. Program/year/course scope the promoted set to match the review list (issue #279); risk level and paging remain list-only. Re-promoting with no fresh dry-run yields `{ promoted: 0, ... }`. |
 
 ---
 
@@ -583,8 +664,8 @@ and stamp them `promoted_at` (admin-only). Already-promoted rows in scope are co
 
 |                  |                                                                                                                                   |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ geofence_default_radius, present_window_default, late_window_default, backup_retention_daily, backup_retention_monthly, pending_sync_count, ... }` |
-| **Notes**        | Persisted in the `app_settings` key-value table (seeded from env defaults at startup) — PATCH writes rows, no in-memory-only updates. `pending_sync_count` is an unprocessed `sync_queue` row count for the maintenance line (wireframes.md 4.9 "Pending sync: N"). |
+| **Response 200** | `{ geofence_default_radius, present_window_default, late_window_default, session_early_open_minutes, session_late_open_minutes, backup_retention_daily, backup_retention_monthly, pending_sync_count, ... }` |
+| **Notes**        | Persisted in the `app_settings` key-value table (seeded from env defaults at startup) — PATCH writes rows, no in-memory-only updates. `pending_sync_count` is an unprocessed `sync_queue` row count for the maintenance line (wireframes.md 4.9 "Pending sync: N"). The two `session_*_open_minutes` values are the open-window grace (D94): how early and how late a session may be opened around its scheduled class. Both accept 0 — "no early opening" and "no late opening" are legal — and fall back to `SESSION_EARLY_OPEN_MINUTES` / `SESSION_LATE_OPEN_MINUTES` when the row is missing. |
 
 #### `PATCH /admin/system/settings`
 
@@ -600,8 +681,8 @@ List structural changes (audit log for program/year/course mutations).
 |                  |                                                                                                                                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?page=1&size=20`                                                                                                                                                                                                      |
-| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], ... }`                                                                                                              |
-| **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at, actor, subject, summary, action_label, changes }], total, page, size }` |
+| **Notes**        | Admin-only. `entity_type` is one of `program`, `year_level`, `course`, `course_offering`, `offering_component`; assignment/enrollment changes are audited separately and surface on `GET /admin/audit-logs`. `old_value`/`new_value` are JSON snapshots, null on create/delete respectively. The shape is the audit row's — see below. |
 
 | **Errors**       | 503 `storage_unconfigured` |
 #### `GET /admin/audit-logs`
@@ -610,20 +691,42 @@ The full audit trail — every sensitive mutation, not just the structural ones.
 
 |                  |                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?entity_type=&action=&performed_by=&date_from=&date_to=&page=1&size=20`                                                                 |
-| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at }], total, page, size }`              |
+| **Query**        | `?entity_type=&action=&performed_by=&actor=&date_from=&date_to=&sort_by=time&sort_dir=desc&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, action, entity_type, entity_id, old_value, new_value, performed_by, performed_at, actor, subject, summary, action_label, changes }], total, page, size }` |
 | **Notes**        | Admin-only. Filters AND-combine and are each optional; a blank value (`?action=`) means "no filter". `date_from` is inclusive from 00:00 UTC, `date_to` inclusive to the end of that day, so `date_from == date_to` selects one day. |
 
+**The stored row, and the reading of it.** The first eight fields are the
+stored row, unaltered — that is the evidence, and it is exactly what the
+writer recorded (ADR-064). The rest is the derived read model (ADR-088), and
+it is additive, so a client that reads the raw row is unaffected:
+
+| Field               | Meaning                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `actor`             | `{ kind, id, name, email, role }`. `kind` is `anonymous` when nobody was authenticated — a lockout from an anonymous attempt, or an unattended run. |
+| `subject`           | `{ type, id, label, sublabel }`. `label` is the record's NAME — "BSCS · Bachelor of Science in Computer Science". It is read out of the audit snapshot first and only then from a join, so it survives the record's deletion. |
+| `summary`           | One sentence: "Updated BSCS · Bachelor of Science in Computer Science — Name".                                                                                 |
+| `action_label`      | The action as a verb: "Updated", "Imported", "Password reset".                                                                                                |
+| `changes`           | `[{ field, label, before, after }]` — the field-level difference, not a JSON blob. A create has no `before`, a delete has no `after`. The id-shaped fields are resolved to names — a `professor_id` reads "Maria Dela Cruz", not "7" — and fall back to a labelled id ("Professor #7") when the referenced row no longer exists. |
+
 **Vocabulary.** `entity_type` is one of `program`, `year_level`, `course`,
-`course_offering`, `student`, `professor`, `enrollment`, `course_professor`,
-`excuse`, `session`, `face_enrollment`, `attendance_record`, `backup`,
-`app_setting`, `user`, `maintenance` (aggregate subject of the sync-flush and
-cleanup runs, one audit row per run with counts in `new_value`). `action` is one of `create`, `update`, `archive`,
-`delete`, `import`, `enroll`, `assign`, `unassign`, `open`, `close`, `approve`,
-`reject`, `revoke`, `lock`, `unlock`, `login_failed`, `password_reset`. A value
+`course_offering`, `offering_component`, `student`, `professor`,
+`enrollment`, `course_professor`, `excuse`, `session`, `face_enrollment`,
+`attendance_record`, `backup`, `app_setting`, `user`, `maintenance`
+(aggregate subject of the sync-flush and cleanup runs, one audit row per run
+with counts in `new_value`). `action` is one of `create`, `update`,
+`archive`, `delete`, `import`, `enroll`, `unenroll`, `assign`, `reassign`,
+`reopen`, `unassign`, `open`, `close`, `approve`, `reject`, `revoke`,
+`lock`, `unlock`, `login_failed`, `password_reset`. A value
 outside either list is **422 `invalid_audit_filter`** rather than an empty page,
 so a mistyped filter can never read as "nothing happened". An inverted range is
 **422 `invalid_audit_date_range`**.
+
+**One id space per entity type.** `entity_id` points into the table the
+entity type names, and that table is its only id space. `face_enrollment`
+audits a STUDENT's face template, so its id is a student id.
+`offering_component` audits a schedule component, so its id is the
+component's own — a component written before ADR-086 carries the OFFERING's
+id under `course_offering`, and the reader recognises it by its snapshot.
 
 **`entity_id` is nullable.** It is null for `course_professor` (composite
 primary key, so there is no single-column id), for the `app_setting` rows a
@@ -633,6 +736,18 @@ batch. Those rows are identified by `old_value`/`new_value` instead.
 **`performed_by` is nullable.** It is null when nobody was authenticated: a
 lockout or failed login triggered by an anonymous attempt, or the nightly cron.
 The subject is still `entity_type` + `entity_id`.
+
+**The `actor` filter** matches the acting account by id, email or name — a
+fragment, case-insensitively. The names come from the account's student or
+professor row, so "Dela Cruz" finds the professor whose account did it. It
+exists because `performed_by` is an exact id, and an administrator filtering
+by a person types a name. `performed_by` stays for a client that already
+knows the id.
+
+**Sorting** is the server's, over the WHOLE trail rather than the loaded
+page: `sort_by` is `time` (the default), `actor` or `action`, and `sort_dir`
+is `asc` or `desc`. Only `time` has an index behind it; `actor` and `action`
+are scans.
 
 #### `GET /admin/backups`
 
@@ -701,13 +816,23 @@ List pending excuse requests.
 | **Query**        | `?status=pending                                | approved | rejected&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
 
+> `ExcuseRequest` carries its display identity, resolved by the slice
+> (ADR-088's rule, applied in ADR-090): `student_name`, `student_number`, `student_section`,
+> `session_code`, `session_date`, `course_code`, `course_name` and
+> `reviewed_by_name`. The ids beside them (`student_id`, `session_id`,
+> `reviewed_by`) stay — the per-record paths key on them — and a reference
+> that cannot be resolved reads as a labelled id (`"Student #4"`), never a
+> blank.
+
 ---
 
 ### Attendance Overview
 
 #### `GET /admin/attendance/overview`
 
-Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
+Per-course attendance overview (wireframes.md 4.6). Backs the **Attendance**
+tab of Analytics & Reports (`/admin/analytics?tab=attendance`) and the
+dashboard's "Attendance at a glance" strip. See ADR-083.
 
 |                  |                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------- |
@@ -716,7 +841,7 @@ Per-course attendance overview for the admin dashboard (wireframes.md 4.6).
 
 #### `GET /admin/attendance/overview/export`
 
-CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview").
+CSV export of the current overview filter set (wireframes.md 4.6 "Export Overview", Attendance tab).
 
 |                  |                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------ |
@@ -984,8 +1109,9 @@ List professor's active course assignments with program/year badges.
 |                  |                                                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role**         | professor                                                                                                                                      |
-| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to, units, enrolled_count, schedule_ok }], ... }` |
-| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. `units` comes from `courses.units`; `enrolled_count` is the active-enrollment count (wireframes.md 3.6 cards). `schedule_ok` is False when the configured meetings mismatch the units requirement (D82) — the professor UI badges those rows and disables opening up front; rows with no configured meetings read True. |
+| **Response 200** | `{ items: [{ offering_id, course_id, course_code, course_name, program_id, program_code, year_level_id, year_level_label, semester, academic_year, section, is_primary, effective_from, effective_to, units, enrolled_count, schedule_ok, schedule_days, schedule_start_time, schedule_end_time, classroom_name, classroom_lat, classroom_lng, default_present_window_minutes, default_late_window_minutes, default_classroom_radius_meters, session_types, components, next_session_date, next_session_start, next_session_end }], ... }` |
+| **Notes**        | The window and radius defaults are the offering's *own* values; `null` means the offering follows the system default (D93). The effective values a session inherits are on `GET /professor/offerings/{id}/session-plan`. |
+| **Notes**        | `section` is derived (from `students.section` via enrollment), not its own column. `units` comes from `courses.units`; `enrolled_count` is the active-enrollment count (wireframes.md 3.6 cards). `schedule_ok` is False when the configured meetings mismatch the units requirement (D82) — the professor UI badges those rows and disables opening up front; rows with no configured meetings read True. Since D93 the row also carries the configuration a session inherits: the offering's own schedule and classroom, its default windows, its radius override (null = inherit the app setting), its active meetings (`components`), the distinct `session_types`, and `next_session_date` / `next_session_start` / `next_session_end` — the next occurrence of the first meeting, in the institution's local terms (null when no meeting is configured). The authoritative per-offering plan is `GET /professor/offerings/{id}/session-plan`. Since D95 `session_types` is the list of types the offering can open (the same rule as the admin read): the types it configures as active meetings, or `["lecture"]` when it has none. The open form offers exactly those types. |
 
 ---
 
@@ -1019,10 +1145,24 @@ Open a new attendance session.
 
 |                  |                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ offering_id: int, session_type?: "lecture" \| "lab" (default "lecture"), duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric }` |
-| **Response 201** | `{ id, session_code, offering_id, session_type, qr_payload: QRPayload, expires_at, scheduled_end_time, created_at }`                                                                                                            |
-| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 422 `lab_coordinates_required` · 422 `offering_schedule_mismatch` · 403 `not_assigned` · 404 `offering_not_found` |
-| **Notes**        | Session created against a course offering. Schedule/classroom/window defaults copied from offering. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49). The classroom falls back payload → matching active component of the same type → offering. Laboratory sessions always enforce the geofence, so a lab open that resolves to no coordinates is rejected with `lab_coordinates_required`; lecture sessions keep coordinates optional. Opening additionally requires the merged meeting total to equal the course units requirement (D82) — 422 `offering_schedule_mismatch` otherwise — except when no meetings are configured at all, which is exempt as legacy. Closing is never gated. |
+| **Request**      | `{ offering_id: int, session_type?: "lecture" \| "lab" (default "lecture"), is_remote?: boolean (default false), geofence_enabled?: boolean (default true), duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, session_date?: "YYYY-MM-DD", start_time?: "HH:MM[:SS]", override_reason?: string }` |
+| **Response 201** | `{ id, session_code, offering_id, session_type, qr_payload: QRPayload, expires_at, scheduled_start_time, scheduled_end_time, schedule_overridden, plan_source, actual_start_time, original_scheduled_start_time, override_reason, created_at }` |
+| **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 422 `lab_coordinates_required` · 422 `remote_not_allowed_for_lab` · 422 `offering_schedule_mismatch` · 422 `session_date_in_past` · 422 `scheduled_start_in_past` · 422 `invalid_session_time` · 422 `session_outside_scheduled_time` · 422 `session_type_not_configured` · 403 `not_assigned` · 404 `offering_not_found` |
+| **Notes**        | Session created against a course offering. The session inherits the offering's **plan** (D93): the meeting it belongs to (the offering's active component for the requested type, else the offering's own schedule columns when it has no components at all), the **next occurrence** of that meeting, the attendance windows, the classroom and the geofence radius. `scheduled_start_time` / `scheduled_end_time` carry that plan — not the moment of the request. `duration_minutes` defaults to the meeting's length, then to `courses.session_duration_hours × 60`, then 60. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49), with the class-end cap binding only while the class is still ahead — a session opened long after its class ended is not born expired. The classroom falls back payload → matching active component of the same type → offering. The radius falls back payload → offering → the `geofence_default_radius` app setting → the environment default. Laboratory sessions always enforce the geofence, so a lab open that resolves to no coordinates is rejected with `lab_coordinates_required` **unless** `is_remote` is true, in which case the geofence is skipped by policy; lecture sessions keep coordinates optional. `is_remote` records the session as remote/online for audit and reporting. `session_date` / `start_time` are the **schedule exception** (D93): wall-clock values in the institution's timezone (`INSTITUTION_TIMEZONE`), either of which marks the session `schedule_overridden`. The meeting keeps its length, and the offering's recurring schedule is never touched. A date in the past is refused with `session_date_in_past`, a start more than an hour gone with `scheduled_start_in_past`. Opening additionally requires the merged meeting total to equal the course units requirement (D82) — 422 `offering_schedule_mismatch` otherwise — except when no meetings are configured at all, which is exempt as legacy. Closing is never gated. |
+| **Notes**        | **The open window (D94).** A session may only be opened while its class is running: *today's* occurrence of the meeting, extended by the early-open grace before it and the late-open grace after it. The grace is the `session_early_open_minutes` / `session_late_open_minutes` app setting, else the environment default. An open outside that window is refused with 422 `session_outside_scheduled_time` unless the request carries the schedule exception — the override *is* the way past the window, and it keeps its own validation. The three reasons are `not_scheduled_today` (today is not one of the meeting's days), `before_window` (the class has not started) and `after_window` (it has ended). An offering with no meeting for that session type is never gated. The new response fields: `actual_start_time` is when the session was really opened, `original_scheduled_start_time` is the start of the class it belongs to (null when the session follows the plan), and `override_reason` is the professor's own note. |
+| **Notes**        | **The type gate (D95).** An offering declares what it meets through its active meeting components, and a session of a type it does not configure is refused with 422 `session_type_not_configured` (`field: "session_type"`). The message names what the offering does meet. The check runs after the D82 offering gate and before the lab-coordinates check — "this offering has no laboratory" is a more fundamental fact than "you did not type coordinates". An offering with no active meeting is a **lecture** offering: D77's migration gave every existing offering a lecture component mirroring its schedule, and the lone active meeting is what the offering's legacy schedule columns mirror. |
+
+#### `GET /professor/offerings/{offering_id}/session-plan`
+
+The resolved plan a session for this offering would inherit (D93).
+
+|                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?session_type=lecture\|lab` (default `lecture`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Response 200** | `{ offering_id, session_type, source, session_date, start_time, end_time, scheduled_start, scheduled_end, timezone, duration_minutes, present_window_minutes, late_window_minutes, classroom_name, classroom_lat, classroom_lng, radius_meters, override_capable, start_window }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Errors**       | 403 `not_assigned` · 404 `offering_not_found` · 422 `session_type_not_configured`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Notes**        | `source` names where the meeting came from: `component` (the offering's active meeting for this type), `offering_legacy` (the offering's own schedule columns), `course_default` (no meeting configured — the duration comes from the course template) or `none`. `session_date` / `start_time` / `end_time` are the next occurrence in the institution's local terms; `scheduled_start` / `scheduled_end` are the same instants as UTC. `session_date` is null when no meeting is configured. `present_window_minutes` / `late_window_minutes` / `radius_meters` are the **effective** values: the offering's own, else the system default an administrator edits in Admin → System Settings, else the environment default (D93). The open form renders this instead of re-deriving the schedule, so what the professor sees is what the server stores. `override_capable` is false when there is no meeting to override. A `session_type` the offering does not meet is refused with 422 `session_type_not_configured` (D95) — a plan for it would be a plan the professor may not use. |
+| **Notes**        | **`start_window` (D94)** is the server's own answer to "may I open this now?": `{ permitted, reason, scheduled_date, start_time, end_time, scheduled_start, scheduled_end, opens_at, closes_at, current_time, timezone, early_open_minutes, late_open_minutes }`. `permitted` is false outside the window, and `reason` says why — `not_scheduled_today`, `before_window` or `after_window`. `scheduled_date` / `start_time` / `end_time` are *today's* occurrence of the meeting in the institution's local terms, and are null when today is not one of the meeting's days (the plan's next occurrence is what the session would carry then). `current_time` is the server's clock and `opens_at` / `closes_at` are the interval the professor may open in. The form renders this; it never re-derives the window. |
 
 #### `GET /professor/sessions/active/{session_id}`
 
@@ -1095,6 +1235,9 @@ List pending excuse requests for professor's courses.
 | **Query**        | `?status=pending                                | approved | rejected&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
 
+> The same `ExcuseRequest` shape as the admin view, with the same resolved
+> display identity (ADR-090).
+
 #### `POST /professor/excuse-requests/{rid}/review`
 
 Approve or reject an excuse request.
@@ -1144,12 +1287,15 @@ Aggregate attendance across all assigned courses.
 
 #### `GET /professor/reports/comparison`
 
-Per-course comparison with program/year slicing.
+Per-course comparison sliced by **(course, program, year level)** cohort
+(D6/D34): the same subject taught to two cohorts is two rows, not one. Each row
+carries its own `program_code`/`year_level_label` so the client labels it
+without a course-id lookup (which cannot tell two cohorts apart).
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?`                                                       |
-| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], ... }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&page?&size?`                                                       |
+| **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, program_code, year_level_label, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 (Compare rows at `:451` and `:1023` do accept `granularity=daily|weekly|monthly`; this scoped row does not.)
 
@@ -1210,7 +1356,7 @@ Verify a typed session code. The scan page also posts raw decoded QR text as `co
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
-| **Response 200** | `{ session_id, offering_id, session_type, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
+| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, classroom_name, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
 | **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` |
 
@@ -1224,7 +1370,7 @@ Submit attendance scan (online or queued for offline sync).
 
 |                  |                                                                                                                                                                                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
+| **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
 | **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
 | **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
@@ -1507,7 +1653,9 @@ from a small preset pool in the settings UI. See
 **Captcha (ADR-053):** `LoginRequest` and `ForgotPasswordStep1Request`
 carry an optional `turnstile_token`. Server calls Cloudflare `siteverify` via
 `shared/captcha.py`; when `TURNSTILE_SECRET_KEY` is unset the check passes
-through (captcha disabled in dev/test/prod-until-key-set).
+through (captcha disabled in dev/test/prod-until-key-set); with the key set, a
+missing or invalid token is `400 invalid_captcha`. Deployment runbook:
+[production-checklist.md §3](../deployment/production-checklist.md).
 
 **MFA backup codes (ADR-054):** `POST /auth/mfa/backup-codes` returns
 `{codes: [10×, shown once], remaining: 10}` and invalidates unconsumed codes; codes

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import (
@@ -20,6 +20,7 @@ from features.professor.constants import (
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
 )
+from shared.enums import SessionType
 from shared.validators import password_strength
 
 
@@ -130,6 +131,24 @@ class ProfessorImportResult(BaseModel):
     errors: list[ProfessorImportError] = Field(default_factory=list)
 
 
+class AssignedOfferingComponent(BaseModel):
+    """One scheduled meeting of an assigned offering (D93).
+
+    The rows a session inherits its schedule and classroom from. Kept in the
+    assigned-offering read so the professor's course cards can show the plan
+    without a second request.
+    """
+
+    id: int
+    session_type: SessionType
+    schedule_days: str
+    schedule_start_time: time
+    schedule_end_time: time
+    classroom_name: str | None = None
+    classroom_lat: float | None = None
+    classroom_lng: float | None = None
+
+
 class AssignedOfferingItem(BaseModel):
     """Assigned offering for GET /professor/courses.
 
@@ -137,6 +156,10 @@ class AssignedOfferingItem(BaseModel):
     offering's enrollments (derived, not a stored column); `units` comes
     from `courses.units` and `enrolled_count` counts the offering's
     enrollment rows. The envelope stays PaginatedResponse either way.
+
+    D93 adds the configuration a session inherits: the offering's own
+    schedule and classroom, its default windows and radius, its scheduled
+    meetings, and the next occurrence of the first meeting it configures.
     """
 
     offering_id: int
@@ -160,6 +183,25 @@ class AssignedOfferingItem(BaseModel):
     # True when the total matches — or when no meetings are configured at
     # all, which the open gate exempts as legacy.
     schedule_ok: bool = True
+    # The offering's own configuration (D93).
+    schedule_days: str = ""
+    schedule_start_time: time | None = None
+    schedule_end_time: time | None = None
+    classroom_name: str | None = None
+    classroom_lat: float | None = None
+    classroom_lng: float | None = None
+    default_present_window_minutes: int = 0
+    default_late_window_minutes: int = 0
+    # NULL means "inherit the app setting" (D93).
+    default_classroom_radius_meters: int | None = None
+    # The distinct session types across the offering's active meetings.
+    session_types: list[SessionType] = Field(default_factory=list)
+    components: list[AssignedOfferingComponent] = Field(default_factory=list)
+    # The next occurrence of the offering's first meeting, in the
+    # institution's local terms. None when no meeting is configured.
+    next_session_date: date | None = None
+    next_session_start: time | None = None
+    next_session_end: time | None = None
 
 
 class ProfessorProfileRead(BaseModel):

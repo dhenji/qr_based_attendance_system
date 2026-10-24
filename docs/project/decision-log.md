@@ -85,7 +85,7 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Multiple professors may teach the same course (primary + assistants).
-- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches.
+- **Consequences:** `course_professors.is_primary` distinguishes primary; both can open sessions if effective range covers current date and semester matches. At most one primary assignment may cover an offering on any date (assistants may overlap); assign, reassign, and reopen reject a conflicting primary with `409 primary_assignment_conflict`.
 
 ### ADR-010: Absent Professor, Class Activities — No Special Feature
 
@@ -272,6 +272,19 @@
 ### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
 
 - **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 128-d embeddings (face-api.js-compatible), stores encrypted (`students.face_embedding BYTEA`) + `face_enrolled_at` + `face_embedding_version`.
+  > **As-built note (2026-10-21)** — the pipeline described above is **not
+  > implemented**. No face-recognition model is installed in this repository: the
+  > only model the project ships is MediaPipe FaceLandmarker
+  > (`frontend/static/models/face_landmarker.task`), which produces landmarks and
+  > blendshapes, not identity embeddings, and the named face-api.js ResNet was
+  > never a dependency of either side. The server writes the documented blob shape
+  > **zero-filled** and tagged `"stub": true` (`_stub_embedding_blob`), the blob is
+  > stored **plaintext** (the AES-256-GCM step is not implemented), and no
+  > similarity comparison runs — `face_match_score` is a client assertion the
+  > server band-checks without ever reading the stored blob. What *did* ship is
+  > the distribution half: the enrollment route, the version column, the
+  > pull-on-login handshake and the device-side encrypted cache (ADR-029). See
+  > `docs/proposals/models.md` §3 for the as-built catalog.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Privacy — biometric enrollment is admin-supervised. 3 angles improve accuracy. Encryption at rest required.
@@ -301,6 +314,13 @@
 ### ADR-031: Fixed Liveness Sequence — Blink → Left → Right
 
 - **Decision (D31):** Liveness sequence is **fixed** (blink → left → right), MediaPipe Face Mesh WASM client-side, EAR + PnP heuristics graded server-side. Sibling-confusion risk is acknowledged as a known limitation, not solved (per instructor: treated as future assignment).
+  > **As-built note (2026-10-21)** — the shipped model is MediaPipe
+  > **FaceLandmarker** (`face_landmarker.task`, 478 landmarks), the successor to
+  > the Face Mesh solver named above; the fixed sequence, the EAR + PnP protocol
+  > and the server-side grading are unchanged. The server's grade is four checks
+  > (`attendance/service.py:147-162`) — the yaw values inside `pnp_evidence` are
+  > never inspected — so "graded server-side" is thinner than the wording implies.
+  > See `docs/proposals/models.md` §2.
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Deterministic sequence simplifies implementation and grading. Sibling confusion accepted as known gap.
@@ -402,6 +422,10 @@
 - **Status:** Accepted
 - **Context:** Lightweight, works with Svelte 5 runes, good date-axis support.
 - **Consequences:** Component `charts/ChartCanvas.svelte` wraps Chart.js.
+  > **Amended by ADR-091** — no chart library was adopted and
+  > `charts/ChartCanvas.svelte` was never built. The frontend ships two
+  > hand-rolled SVG chart components instead; the reusable-component intent
+  > survives, the library does not. Read this entry with ADR-091.
 
 ### ADR-042: Buildings/Campuses Table — Deferred to v2
 
@@ -430,7 +454,7 @@
 - **Status:** Accepted
 - **Context:** A course can be offered by multiple programs AND taken at multiple year levels with differing schedules/classrooms per offering (e.g., CS101 in BSCS MWF 9am vs BSIT TTh 2pm). Single program_id/year_level_id FKs on courses forced 1:1 and broke sharing.
 - **Supersedes:** D1 (FK placement — program_id/year_level_id move to course_offerings), D4 (scheduling metadata — only units + session_duration_hours stay on courses; the rest move to course_offerings), D6 (sharing mechanism — via multiple offerings per course instead of cross-program enrollments), D14 (late policy defaults live on course_offerings, pre-fill sessions from offering).
-- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id.
+- **Consequences:** Migration Step 3 creates course_offerings and strips courses down; enrollments/sessions reference offering_id. `semester_weeks` was later removed from `course_offerings` and moved to the term entry in `year_levels.term_structure` (ADR-086).
 
 ### ADR-045: Professor Assignments & Risk Scores Reference Course Offerings
 

@@ -226,7 +226,7 @@ A **fixed sequence** — no randomization:
 2. **Turn left** — user rotates head ~30° left; detected via face mesh landmark shift
 3. **Turn right** — user rotates head ~30° right
 
-All processing is **client-side** via MediaPipe Face Mesh WASM. The client
+All processing is **client-side** via MediaPipe FaceLandmarker WASM. The client
 generates:
 
 ```json

@@ -1,8 +1,14 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
+	import AttendanceSnapshot from '$lib/features/admin/analytics/components/AttendanceSnapshot.svelte';
+	import { page } from '$app/state';
 import {
 	adminAnalyticsState,
 	adminStagingState,
@@ -19,10 +25,12 @@ import {
 	downloadCsv,
 	enrichComparison,
 	fetchAnalyticsExportCsv,
+	getCourseOptions,
 	overviewCsv,
 	stagingCsv,
 	trendsCsv,
 	type AnalyticsMetric,
+	type CourseOption,
 } from '$lib/features/admin/analytics/service';
 import { isMockMode } from '$lib/api/client';
 import {
@@ -36,29 +44,39 @@ import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
-	// Analytics & Reports (wireframe 4.7, D33): one page, six tabs —
-	// Overview, Comparison, Trends, At-Risk, Staging, Export — over a shared
-	// cascading filter rail (Program → Year → Term → Courses multi → Date
-	// range → Granularity). Same course appears once per cohort (D6/D34).
+	// Analytics & Reports (wireframe 4.7, D33): one page, seven tabs —
+	// Overview, Comparison, Trends, At-Risk, Staging, Attendance, Export — over
+	// a shared cascading filter rail (Program → Year → Term → Courses multi →
+	// Date range → Granularity). Same course appears once per cohort (D6/D34).
+	// The Attendance tab is the per-course snapshot absorbed from the old
+	// admin attendance page and keeps its own Course/Professor/date filters.
 	// Numbers come from the live analytics backend (#136, mocks only when
 	// PUBLIC_MOCK_MODE=true); the filter rail reads live programs/courses
 	// endpoints for its options. Compliance (present/total) is the default
 	// metric; participation ((present+late+excused)/total) is a render
 	// toggle (D36).
 
-	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'export';
+	type Tab = 'overview' | 'comparison' | 'trends' | 'atrisk' | 'staging' | 'attendance' | 'export';
 	const TABS = [
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'comparison', label: 'Comparison' },
 		{ id: 'trends', label: 'Trends' },
 		{ id: 'atrisk', label: 'At-Risk' },
 		{ id: 'staging', label: 'Staging' },
+		{ id: 'attendance', label: 'Attendance' },
 		{ id: 'export', label: 'Export' },
 	] as const;
 
 	const initialRange = defaultAnalyticsRange();
 
-	let tab = $state<Tab>('overview');
+	// Deep link support (?tab=attendance): the dashboard's attendance strip
+	// links straight to the snapshot tab; unknown values fall back to Overview.
+	const initialTab = (): Tab => {
+		const requested = page.url.searchParams.get('tab');
+		return requested && TABS.some((t) => t.id === requested) ? (requested as Tab) : 'overview';
+	};
+
+	let tab = $state<Tab>(initialTab());
 	let programFilter = $state('');
 	let yearFilter = $state('');
 	let semesterFilter = $state('');
@@ -77,6 +95,18 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let courseOptions = $state<AdminCourse[]>([]);
 	let yearsCache = $state<Map<number, YearLevel[]>>(new Map());
 
+	// Catalogue page size for the picker's unscoped fallback and the name-join
+	// lookups; mirrors the backend's MAX_PAGE_SIZE so the list is honestly
+	// bounded (with a "showing X of Y" hint) rather than silently capped.
+	const COURSE_CHOICE_LIMIT = 200;
+	// Scoped picker (#279): courses with at least one offering in the picked
+	// Program/Year/Term. An unset program falls back to the catalogue above.
+	let courseChoices = $state<CourseOption[]>([]);
+	let courseChoicesTotal = $state(0);
+	let courseChoicesLoading = $state(false);
+	let courseLookupsTotal = $state(0);
+	let courseSearch = $state('');
+
 	const metric = $derived(adminAnalyticsState.metric);
 	const overview = $derived(adminAnalyticsState.overview);
 
@@ -85,6 +115,24 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	);
 
 	const allYears = $derived([...yearsCache.values()].flat());
+
+	// Picker source: scoped options when a program is picked, else the loaded
+	// catalogue. `visibleChoices` adds the search narrowing for the catalogue
+	// path; scoped results already arrive server-filtered by `q`.
+	const pickerChoices = $derived(
+		programFilter
+			? courseChoices
+			: courseOptions.map((c) => ({ id: c.id, code: c.courseCode, name: c.courseName }))
+	);
+	const pickerTotal = $derived(programFilter ? courseChoicesTotal : courseLookupsTotal);
+	const visibleChoices = $derived.by(() => {
+		if (programFilter) return pickerChoices;
+		const needle = courseSearch.trim().toLowerCase();
+		if (!needle) return pickerChoices;
+		return pickerChoices.filter(
+			(c) => c.code.toLowerCase().includes(needle) || c.name.toLowerCase().includes(needle)
+		);
+	});
 
 	const comparison = $derived(
 		enrichComparison(adminAnalyticsState.comparison, courseOptions, programOptions, [
@@ -162,8 +210,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	const apply = async () => {
 		formError = null;
 		const parsed = analyticsFilterSchema.safeParse({
-			program_id: programFilter,
-			year_level_id: yearFilter,
+			// Selects bind their raw option value (Svelte 5), so numeric ids
+			// land in state as numbers — the schema models the string form.
+			program_id: String(programFilter),
+			year_level_id: String(yearFilter),
 			semester: semesterFilter,
 			course_ids: selectedCourseIds,
 			date_from: dateFrom,
@@ -192,6 +242,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	onDestroy(() => {
 		pageAlive = false;
+		if (courseSearchTimer) clearTimeout(courseSearchTimer);
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -204,10 +255,55 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	const reloadCourseLookups = async () => {
 		try {
-			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+			const page = await listCourses({ page: 1, size: COURSE_CHOICE_LIMIT });
+			courseOptions = page.items;
+			courseLookupsTotal = page.total;
 		} catch {
 			courseOptions = [];
+			courseLookupsTotal = 0;
 		}
+	};
+
+	// Scoped picker options (#279). `reconcile` drops selections no longer in
+	// scope, but only when the full in-scope set is present — a page truncated
+	// at COURSE_CHOICE_LIMIT must never discard a valid selection.
+	const loadScopedCourseChoices = async (reconcile = false) => {
+		if (!programFilter) return;
+		courseChoicesLoading = true;
+		try {
+			const { items, total } = await getCourseOptions({
+				program_id: Number(programFilter),
+				year_level_id: yearFilter ? Number(yearFilter) : undefined,
+				semester: semesterFilter.trim() || undefined,
+				q: courseSearch.trim() || undefined,
+				limit: COURSE_CHOICE_LIMIT,
+			});
+			courseChoices = items;
+			courseChoicesTotal = total;
+			if (reconcile && !courseSearch.trim() && total <= items.length) {
+				const available = new Set(items.map((c) => c.id));
+				selectedCourseIds = selectedCourseIds.filter((id) => available.has(id));
+			}
+		} catch {
+			// Best effort — the filterNotice covers lookup failures.
+		} finally {
+			courseChoicesLoading = false;
+		}
+	};
+
+	let courseSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const onCourseSearch = (value: string) => {
+		courseSearch = value;
+		// Catalogue search filters instantly via `visibleChoices`; a scoped
+		// search round-trips, so debounce it.
+		if (!programFilter) return;
+		if (courseSearchTimer) clearTimeout(courseSearchTimer);
+		courseSearchTimer = setTimeout(() => void loadScopedCourseChoices(false), 250);
+	};
+
+	const clearCourseSelection = () => {
+		selectedCourseIds = [];
 	};
 
 	const reloadProgramLookups = async () => {
@@ -237,9 +333,12 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		try {
-			courseOptions = (await listCourses({ page: 1, size: 100 })).items;
+			const page = await listCourses({ page: 1, size: COURSE_CHOICE_LIMIT });
+			courseOptions = page.items;
+			courseLookupsTotal = page.total;
 		} catch {
 			courseOptions = [];
+			courseLookupsTotal = 0;
 			filterNotice = 'Some filters failed to load — lists may be incomplete.';
 		}
 		await apply();
@@ -257,6 +356,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		yearFilter = '';
 		semesterFilter = '';
 		yearOptions = [];
+		courseSearch = '';
 		if (programFilter) {
 			try {
 				yearOptions = await listYearLevels(Number(programFilter));
@@ -264,12 +364,25 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				yearOptions = [];
 				filterNotice = 'Some filters failed to load — lists may be incomplete.';
 			}
+			await loadScopedCourseChoices(true);
+		} else {
+			// Back to the catalogue: every course is in scope, nothing to drop.
+			courseChoices = [];
+			courseChoicesTotal = 0;
 		}
 		await apply();
 	};
 
 	const changeYear = async () => {
 		semesterFilter = '';
+		courseSearch = '';
+		await loadScopedCourseChoices(true);
+		await apply();
+	};
+
+	const changeSemester = async () => {
+		courseSearch = '';
+		await loadScopedCourseChoices(true);
 		await apply();
 	};
 
@@ -302,6 +415,14 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	// rows straight from the backend for the rail's filter set. Mock mode and
 	// unreachable backends fall back to the client-side aggregate CSV.
 	let exportNote = $state<string | null>(null);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 	const exportComparison = async () => {
 		const filename = `analytics-comparison-${stamp()}.csv`;
 		exportNote = null;
@@ -336,6 +457,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		program_id: programFilter ? Number(programFilter) : undefined,
 		year_level_id: yearFilter ? Number(yearFilter) : undefined,
 		semester: semesterFilter.trim() || undefined,
+		course_ids: selectedCourseIds,
 		risk_level: riskLevel || undefined,
 		unpromoted_only: true,
 	});
@@ -373,92 +495,130 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	const trendArrow = (slope: number): string => (slope < -0.05 ? '↓' : slope > 0.05 ? '↑' : '→');
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Analytics &amp; Reports</h1>
 			<p class="muted">Aggregates from the live analytics backend</p>
 		</div>
-		<div class="header-actions" role="group" aria-label="Rate metric">
-			<button
-				class="btn btn-secondary"
-				class:selected={metric === 'compliance'}
-				onclick={() => setMetric('compliance')}
-			>
-				Compliance
-			</button>
-			<button
-				class="btn btn-secondary"
-				class:selected={metric === 'participation'}
-				onclick={() => setMetric('participation')}
-			>
-				Participation
-			</button>
-		</div>
+		{#if tab !== 'attendance'}
+			<div class="header-actions" role="group" aria-label="Rate metric">
+				<button
+					class="btn btn-secondary"
+					class:selected={metric === 'compliance'}
+					onclick={() => setMetric('compliance')}
+				>
+					Compliance
+				</button>
+				<button
+					class="btn btn-secondary"
+					class:selected={metric === 'participation'}
+					onclick={() => setMetric('participation')}
+				>
+					Participation
+				</button>
+			</div>
+		{/if}
 	</header>
 
-	<section class="card filters" aria-label="Analytics filters">
-		<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
-			<option value="">All programs</option>
-			{#each programOptions as p (p.id)}
-				<option value={p.id}>{p.code} — {p.name}</option>
-			{/each}
-		</select>
-		<select
-			class="input"
-			aria-label="Year level filter"
-			bind:value={yearFilter}
-			onchange={changeYear}
-			disabled={!programFilter}
-			title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
-		>
-			<option value="">All years</option>
-			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}</option>
-			{/each}
-		</select>
-		{#if semesterOptions.length > 0}
-			<select class="input" aria-label="Semester filter" bind:value={semesterFilter}>
+	{#if tab !== 'attendance'}
+		<section class="card filters" aria-label="Analytics filters">
+			<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
+				<option value="">All programs</option>
+				{#each programOptions as p (p.id)}
+					<option value={p.id}>{p.code} — {p.name}</option>
+				{/each}
+			</select>
+			<select
+				class="input"
+				aria-label="Year level filter"
+				bind:value={yearFilter}
+				onchange={changeYear}
+				disabled={!programFilter}
+				title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
+			>
+				<option value="">All years</option>
+				{#each yearOptions as y (y.id)}
+					<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
+				{/each}
+			</select>
+			<select
+				class="input"
+				aria-label="Semester filter"
+				bind:value={semesterFilter}
+				onchange={changeSemester}
+				disabled={!yearFilter || semesterOptions.length === 0}
+				title={!yearFilter
+					? "Pick a year level first — semesters are the year level's terms"
+					: semesterOptions.length === 0
+						? 'This year level has no terms configured'
+						: undefined}
+			>
 				<option value="">All semesters</option>
 				{#each semesterOptions as t (t.code)}
 					<option value={t.code}>{t.label}</option>
 				{/each}
 			</select>
-		{:else}
-			<input class="input" placeholder="Semester (e.g. 1st Sem)" aria-label="Semester filter" bind:value={semesterFilter} />
-		{/if}
-		<select class="input" aria-label="Granularity" bind:value={granularity}>
-			<option value="daily">Daily</option>
-			<option value="weekly">Weekly</option>
-			<option value="monthly">Monthly</option>
-		</select>
-		<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
-		<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
-		<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
-		{#if formError}
-			<p class="error" role="alert">{formError}</p>
+			<select class="input" aria-label="Granularity" bind:value={granularity}>
+				<option value="daily">Daily</option>
+				<option value="weekly">Weekly</option>
+				<option value="monthly">Monthly</option>
+			</select>
+			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
+			<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
+			<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
+			{#if formError}
+				<p class="error" role="alert">{formError}</p>
 		{/if}
 		{#if filterNotice}
 			<p class="muted" role="status">{filterNotice}</p>
 		{/if}
 		<fieldset class="courses">
 			<legend>Courses (multi)</legend>
-			{#if courseOptions.length === 0}
-				<span class="muted">No courses loaded.</span>
+			<div class="course-picker">
+				<input
+					class="input"
+					type="search"
+					placeholder={programFilter ? 'Search courses in scope' : 'Search courses'}
+					aria-label="Search courses"
+					value={courseSearch}
+					oninput={(e) => onCourseSearch((e.currentTarget as HTMLInputElement).value)}
+				/>
+				<span class="muted small">
+					{selectedCourseIds.length} selected{#if selectedCourseIds.length > 0}
+						<button type="button" class="link-btn" onclick={clearCourseSelection}>Clear</button>{/if}
+				</span>
+			</div>
+			{#if courseChoicesLoading && pickerChoices.length === 0}
+				<span class="muted">Loading courses…</span>
+			{:else if pickerChoices.length === 0}
+				<span class="muted">
+					{programFilter
+						? 'No courses are offered in the selected program/year/term.'
+						: 'No courses loaded.'}
+				</span>
 			{:else}
-				{#each courseOptions as c (c.id)}
+				{#each visibleChoices as c (c.id)}
 					<label class="check">
 						<input
 							type="checkbox"
 							checked={selectedCourseIds.includes(c.id)}
 							onchange={() => toggleCourse(c.id)}
 						/>
-						{c.courseCode}
+						{c.code}
 					</label>
+				{:else}
+					<span class="muted">No courses match “{courseSearch}”.</span>
 				{/each}
+				{#if pickerChoices.length < pickerTotal}
+					<span class="muted small">
+						Showing {pickerChoices.length} of {pickerTotal} — search to narrow.
+					</span>
+				{/if}
 			{/if}
 		</fieldset>
 	</section>
+	{/if}
 
 	<nav class="tabs" aria-label="Analytics sections">
 		{#each TABS as t (t.id)}
@@ -466,8 +626,11 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		{/each}
 	</nav>
 
-	{#if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
-		<section class="card"><p class="muted">Loading…</p></section>
+	{#if tab === 'attendance'}
+		<AttendanceSnapshot />
+	{:else if adminAnalyticsState.loading && adminAnalyticsState.overview === null}
+		<SkeletonCards count={4} label="Loading analytics…" />
+		<SkeletonTable rows={4} cols={6} />
 	{:else if adminAnalyticsState.error}
 		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>
 	{:else if tab === 'overview' && overview}
@@ -486,6 +649,12 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<section class="card" aria-busy={adminAnalyticsState.loading}>
 			<h2 class="card-title">Course Comparison</h2>
 			<p class="muted">Same course shown once per cohort · {metric} rate</p>
+			{#if adminAnalyticsState.comparisonTotal > comparison.length}
+				<p class="muted">
+					Showing {comparison.length} of {adminAnalyticsState.comparisonTotal} cohorts — narrow the
+					filters to see the rest.
+				</p>
+			{/if}
 			<ReportBarChart
 				title="Course comparison"
 				description="Per-cohort rate bars for the current filter set."
@@ -497,7 +666,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				<div class="table-wrap">
 					<table>
 						<thead>
-							<tr><th>Course</th><th>Cohort</th><th>Sessions</th><th>Compliance</th><th>Participation</th></tr>
+							<tr><th scope="col">Course</th><th scope="col">Cohort</th><th scope="col">Sessions</th><th scope="col">Compliance</th><th scope="col">Participation</th></tr>
 						</thead>
 						<tbody>
 							{#each comparison as r (`${r.course_id}-${r.program_id}-${r.year_level_id}`)}
@@ -528,7 +697,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				<div class="table-wrap">
 					<table>
 						<thead>
-							<tr><th>Period</th><th>Sessions</th><th>Compliance</th><th>Participation</th></tr>
+							<tr><th scope="col">Period</th><th scope="col">Sessions</th><th scope="col">Compliance</th><th scope="col">Participation</th></tr>
 						</thead>
 						<tbody>
 							{#each adminAnalyticsState.trends as t (t.date)}
@@ -574,7 +743,11 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				</select>
 			</div>
 			{#if atRiskSorted.length === 0}
-				<p class="empty">No at-risk students match these filters.</p>
+				<EmptyState
+					icon="chart"
+					title="No at-risk students match these filters"
+					hint="Adjust the filters or run a risk batch to populate scores."
+				/>
 			{:else}
 				<div class="table-wrap">
 					<table>
@@ -620,7 +793,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 					<h2 class="card-title">Staging Review</h2>
 					<p class="muted">Dry-run batch output (D35) · promoting copies unpromoted rows into the live At-Risk scores</p>
 				</div>
-				<button class="btn btn-primary" disabled={stagingBusy || stagingSorted.length === 0} onclick={() => (promoteOpen = true)}>
+				<button class="btn btn-primary" aria-busy={stagingBusy} disabled={stagingBusy || stagingSorted.length === 0} onclick={() => (promoteOpen = true)}>
 					{stagingBusy ? 'Promoting…' : 'Promote to Live'}
 				</button>
 			</div>
@@ -643,8 +816,8 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				>
 					<p class="strong">Promote {stagingSorted.length} staged row{stagingSorted.length === 1 ? '' : 's'}?</p>
 					<p class="muted small">
-						Promote acts on the whole semester scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
-						and risk filters narrow this review list only. Promoted rows leave the list and appear in At-Risk.
+						Promote acts on every unpromoted row in the current scope{#if semesterFilter.trim()}{` (${semesterFilter.trim()})`}{:else} (all semesters){/if} — program, year,
+						and course narrow the promoted set; risk level narrows this review list only. Promoted rows leave the list and appear in At-Risk.
 					</p>
 					<div class="confirm-actions">
 						<button class="btn btn-secondary" onclick={() => (promoteOpen = false)}>Cancel</button>
@@ -661,14 +834,22 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				</select>
 			</div>
 			{#if adminStagingState.loading && adminStagingState.items.length === 0}
-				<p class="muted">Loading staged scores…</p>
+				<SkeletonTable bare rows={4} cols={6} label="Loading staged scores…" />
 			{:else if adminStagingState.error}
 				<p class="error" role="alert">{adminStagingState.error}</p>
 			{:else if stagingSorted.length === 0}
 				{#if isMockMode()}
-					<p class="empty">Staging review needs a backend dry-run batch — unavailable in mock mode.</p>
+					<EmptyState
+						icon="chart"
+						title="Staging review needs a backend dry-run batch"
+						hint="Unavailable in mock mode."
+					/>
 				{:else}
-					<p class="empty">No staged scores match these filters. Run a dry-run batch, then review here before promoting.</p>
+					<EmptyState
+						icon="chart"
+						title="No staged scores match these filters"
+						hint="Run a dry-run batch, then review here before promoting."
+					/>
 				{/if}
 			{:else}
 				<div class="table-wrap">
@@ -715,16 +896,27 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 			<h2 class="card-title">Export</h2>
 			<p class="muted">CSV downloads of the current filter set — one file per dataset.</p>
 			<div class="export-list">
-				<div><div><div class="strong">Overview KPIs</div><div class="muted small">Totals + average rates</div></div><button class="btn btn-secondary" onclick={exportOverview} disabled={!overview}>Download CSV</button></div>
-				<div><div><div class="strong">Course comparison</div><div class="muted small">{comparison.length} cohort rows</div></div><button class="btn btn-secondary" onclick={exportComparison}>Download CSV</button></div>
-				<div><div><div class="strong">Trends</div><div class="muted small">{adminAnalyticsState.trends.length} periods</div></div><button class="btn btn-secondary" onclick={exportTrends}>Download CSV</button></div>
-				<div><div><div class="strong">At-risk students</div><div class="muted small">{adminAnalyticsState.atRisk.length} rows</div></div><button class="btn btn-secondary" onclick={exportAtRisk}>Download CSV</button></div>
-				<div><div><div class="strong">Staging review</div><div class="muted small">{adminStagingState.items.length} rows</div></div><button class="btn btn-secondary" onclick={exportStaging}>Download CSV</button></div>
+				<div><div><div class="strong">Overview KPIs</div><div class="muted small">Totals + average rates</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportOverview, details: [{ label: 'Dataset', value: 'Overview KPIs' }, { label: 'Format', value: 'CSV' }] })} disabled={!overview}>Download CSV</button></div>
+				<div><div><div class="strong">Course comparison</div><div class="muted small">{comparison.length} cohort rows</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportComparison, details: [{ label: 'Dataset', value: 'Course comparison' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(comparison.length) }] })}>Download CSV</button></div>
+				<div><div><div class="strong">Trends</div><div class="muted small">{adminAnalyticsState.trends.length} periods</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportTrends, details: [{ label: 'Dataset', value: 'Trends' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminAnalyticsState.trends.length) }] })}>Download CSV</button></div>
+				<div><div><div class="strong">At-risk students</div><div class="muted small">{adminAnalyticsState.atRisk.length} rows</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportAtRisk, details: [{ label: 'Dataset', value: 'At-risk students' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminAnalyticsState.atRisk.length) }] })}>Download CSV</button></div>
+				<div><div><div class="strong">Staging review</div><div class="muted small">{adminStagingState.items.length} rows</div></div><button class="btn btn-secondary" onclick={() => (pendingExport = { run: exportStaging, details: [{ label: 'Dataset', value: 'Staging review' }, { label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(adminStagingState.items.length) }] })}>Download CSV</button></div>
 			</div>
 			{#if exportNote}
 				<p class="muted" role="status">{exportNote}</p>
 			{/if}
 		</section>
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 
@@ -733,7 +925,6 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -848,6 +1039,29 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		font-weight: 600;
 		color: var(--text-secondary);
 		cursor: pointer;
+	}
+
+	.course-picker {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		flex-basis: 100%;
+	}
+
+	.course-picker .input {
+		flex: 1 1 16rem;
+	}
+
+	.link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		margin-left: 0.375rem;
+		font: inherit;
+		color: var(--brand);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 
 	.tabs {
@@ -1080,6 +1294,15 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		border-color: var(--brand);
 		background: var(--brand);
 		color: var(--on-brand);
+	}
+
+	/* The generic secondary hover carries :not(:disabled) (specificity 0,3,0),
+	   which outranks the selected state (0,2,0) — without this rule, hovering a
+	   selected metric button repainted it --divider (near-white) under the
+	   white text. Selected buttons hover into the darker brand shade instead. */
+	.btn-secondary.selected:hover:not(:disabled) {
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
 	}
 
 	.table-wrap {

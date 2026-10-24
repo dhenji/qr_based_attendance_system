@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
@@ -298,7 +301,7 @@
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Professor Management</h1>
@@ -344,12 +347,16 @@
 	</section>
 
 	{#if adminProfessorsState.loading && adminProfessorsState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={6} label="Loading professors…" />
 	{:else if adminProfessorsState.error}
 		<section class="card"><p class="error">Could not load professors: {adminProfessorsState.error}</p></section>
 	{:else if adminProfessorsState.items.length === 0}
 		<section class="card">
-			<p class="empty">No professors match these filters. Add the first record to seed the roster.</p>
+			<EmptyState
+				icon="users"
+				title="No professors match these filters"
+				hint="Add the first record to seed the roster."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminProfessorsState.loading}>
@@ -369,10 +376,10 @@
 								Email<span aria-hidden="true">{sortArrow('email')}</span>
 							</button>
 						</th>
-						<th>Department</th>
-						<th>Courses</th>
-						<th>Claim</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Department</th>
+						<th scope="col">Courses</th>
+						<th scope="col">Claim</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -392,22 +399,24 @@
 							<td>{p.department ?? '—'}</td>
 							<td>{p.assigned_courses.length}</td>
 							<td>{p.claimStatus}</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => openEdit(p)}>Edit</button>
-								<button
-									class="link"
-									onclick={() => {
-										adminProfessorsState.actionError = null;
-										toggleTarget = p;
-									}}
-								>
-									{p.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
-{#if !p.isActive}
-								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
-							{/if}
-							<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
-						</td>
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => openEdit(p)}>Edit</button>
+									<button
+										class="link"
+										onclick={() => {
+											adminProfessorsState.actionError = null;
+											toggleTarget = p;
+										}}
+									>
+										{p.isActive ? 'Deactivate' : 'Reactivate'}
+									</button>
+									{#if !p.isActive}
+										<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
+									{/if}
+									<button class="link" onclick={() => (resetTarget = p)}>Reset password</button>
+								</div>
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -467,7 +476,11 @@
 				<fieldset class="courses">
 					<legend>Course assignments (offerings) · {f_courses.length} selected</legend>
 					{#if offeringsLoading}
-						<p class="hint">Loading offerings…</p>
+						<div class="skeleton-stack" role="status" aria-busy="true">
+							<span class="sr-only">Loading offerings…</span>
+							<Skeleton height={14} width="70%" />
+							<Skeleton height={14} width="55%" />
+						</div>
 					{:else if offeringsError}
 						<p class="error" role="alert">{offeringsError}</p>
 					{:else if offeringOptions.length === 0}
@@ -503,7 +516,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-professor" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-primary" data-testid="save-professor" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -538,6 +551,7 @@
 				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
 				<button
 					class="btn {toggleTarget.isActive ? 'btn-danger' : 'btn-primary'}"
+					aria-busy={toggleBusy}
 					disabled={toggleBusy}
 					onclick={() => void confirmToggle()}
 				>
@@ -590,7 +604,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -741,12 +754,6 @@
 		margin-top: 1rem;
 	}
 
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
-	}
-
 	.error {
 		color: var(--danger);
 		font-size: 0.875rem;
@@ -830,7 +837,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

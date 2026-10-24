@@ -72,7 +72,6 @@ export const offeringCreateSchema = z
 		semester: z.string().trim().min(1, 'Required').max(20),
 		academic_year: z.string().trim().min(4).max(20),
 		sessions_per_week: z.coerce.number().int().min(1, 'Enter at least 1 session per week').max(7, 'At most 7 sessions per week'),
-		semester_weeks: z.coerce.number().int().min(1, 'Enter at least 1 week').max(52, 'At most 52 weeks'),
 		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10),
 		schedule_start_time: timeField,
 		schedule_end_time: timeField,
@@ -90,8 +89,20 @@ export const offeringCreateSchema = z
 			.trim()
 			.optional()
 			.or(z.literal('')),
-		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').default(5),
-		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').default(10),
+		// D93: blank means "follow the system default" (Admin -> System
+		// Settings), so a new offering is born inheriting rather than
+		// carrying a hard-coded 5/10 that nobody chose.
+		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		// D93: the geofence radius override. Blank means "inherit the app
+		// setting" (Admin -> System Settings).
+		default_classroom_radius_meters: z.coerce
+			.number()
+			.int()
+			.min(1, 'At least 1 metre')
+			.max(1000, 'At most 1000 metres')
+			.optional()
+			.or(z.literal('')),
 	})
 	.superRefine(endAfterStart);
 
@@ -100,7 +111,6 @@ export type OfferingCreateInput = z.infer<typeof offeringCreateSchema>;
 export const offeringUpdateSchema = z
 	.object({
 		sessions_per_week: z.coerce.number().int().min(1, 'Enter at least 1 session per week').max(7, 'At most 7 sessions per week').optional(),
-		semester_weeks: z.coerce.number().int().min(1, 'Enter at least 1 week').max(52, 'At most 52 weeks').optional(),
 		schedule_days: z.string().trim().toUpperCase().min(1, 'Pick at least one day').max(10).optional(),
 		schedule_start_time: timeField.optional(),
 		schedule_end_time: timeField.optional(),
@@ -115,8 +125,19 @@ export const offeringUpdateSchema = z
 			.trim()
 			.optional()
 			.or(z.literal('')),
-		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional(),
-		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional(),
+		// D93: blank clears the override and puts the offering back on the
+		// system default.
+		default_present_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		default_late_window_minutes: z.coerce.number().int().min(1, 'At least 1 minute').max(480, 'At most 480 minutes').optional().or(z.literal('')),
+		// D93: the geofence radius override. Blank clears it back to the app
+		// setting.
+		default_classroom_radius_meters: z.coerce
+			.number()
+			.int()
+			.min(1, 'At least 1 metre')
+			.max(1000, 'At most 1000 metres')
+			.optional()
+			.or(z.literal('')),
 		is_active: z.boolean().optional(),
 	})
 	.superRefine(endAfterStart);
@@ -129,7 +150,6 @@ export const assignmentCreateSchema = z
 		is_primary: z.boolean().default(false),
 		effective_from: dateField,
 		effective_to: dateField.optional().or(z.literal('')),
-		semester: z.string().trim().min(1, 'Required').max(20),
 	})
 	.superRefine((value, ctx) => {
 		if (value.effective_to && value.effective_to <= value.effective_from) {
@@ -142,6 +162,25 @@ export const assignmentCreateSchema = z
 	});
 
 export type AssignmentCreateInput = z.infer<typeof assignmentCreateSchema>;
+
+export const assignmentReassignSchema = z
+	.object({
+		new_professor_id: z.coerce.number().int().gt(0, 'Pick a replacement professor'),
+		is_primary: z.boolean().optional(),
+		effective_from: dateField.optional().or(z.literal('')),
+		effective_to: dateField.optional().or(z.literal('')),
+	})
+	.superRefine((value, ctx) => {
+		if (value.effective_from && value.effective_to && value.effective_to <= value.effective_from) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: 'End date must be after start date',
+				path: ['effective_to'],
+			});
+		}
+	});
+
+export type AssignmentReassignInput = z.infer<typeof assignmentReassignSchema>;
 
 // Windows-sum guard checked on the page before submit: present + late must
 // fit inside the course session duration (backend 422 windows_exceed_duration).

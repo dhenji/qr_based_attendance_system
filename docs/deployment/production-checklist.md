@@ -131,16 +131,64 @@ curl -I -X OPTIONS https://attendance-system-api.fly.dev/health \
 | Password policy      | Enforced minimum length/complexity            |
 | OTP expiry           | OTP codes expire after configured duration    |
 
-### Bot Protection (Optional)
+### Bot Protection — Turnstile (Optional)
 
-| Item                  | Check                                                                   |
-| --------------------- | ----------------------------------------------------------------------- |
-| Turnstile site key    | Set in frontend env (`PUBLIC_TURNSTILE_SITE_KEY`) if CAPTCHA is enabled |
-| Turnstile secret key  | Set in backend env (`TURNSTILE_SECRET_KEY`) if CAPTCHA is enabled       |
-| Login/claim endpoints | Verify CAPTCHA token validated server-side (if enabled)                 |
+Turnstile is **key-gated** (ADR-053): while `TURNSTILE_SECRET_KEY` is empty the
+server-side check is a pass-through no-op, so the captcha is turned on and off
+purely via env. When enabled it gates `POST /auth/login` and
+`POST /auth/forgot-password` (step 1) — registration/claim is **not** gated.
+When disabled, rate limiting and account lockout (D25) are the bot protection.
 
-> **Note:** Turnstile integration is optional. If not used, remove these vars and
-> ensure rate limiting and account lockout provide adequate bot protection (D25).
+| Variable                    | Where    | Value                      |
+| --------------------------- | -------- | -------------------------- |
+| `PUBLIC_TURNSTILE_SITE_KEY` | Frontend | Cloudflare widget site key |
+| `TURNSTILE_SECRET_KEY`      | Backend  | Cloudflare widget secret   |
+
+> **Set both keys or neither.** The site key alone is safe — the widget renders
+> and the backend skips verification. The secret alone is **not**: the widget
+> stays hidden, no token is ever sent, and every login / forgot-password step 1
+> returns `400 invalid_captcha`.
+
+#### How to Enable
+
+1. **Create the widget** — Cloudflare dashboard → Turnstile → *Add site*, and
+   list every hostname the frontend is served from (e.g.
+   `attendance-system.vercel.app`); a widget only accepts challenges from its
+   listed hostnames.
+2. **Set the frontend site key** — `PUBLIC_TURNSTILE_SITE_KEY` in the Vercel
+   project env. `PUBLIC_*` vars are inlined at build time, so **redeploy the
+   frontend** afterwards; an existing deployment will not pick it up.
+3. **Set the backend secret** — `TURNSTILE_SECRET_KEY` in the backend env
+   (`fly secrets set TURNSTILE_SECRET_KEY="YOUR_TURNSTILE_SECRET"`, which
+   restarts the API).
+4. **Verify** — using the commands below, on the deployed frontend.
+
+Steps 2 → 3 is the safe order: the widget can ship before enforcement, not the
+other way around.
+
+#### Verification
+
+```bash
+# With TURNSTILE_SECRET_KEY set, a tokenless login must be rejected:
+curl -i -X POST https://attendance-system-api.fly.dev/api/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"admin@example.com","password":"whatever"}'
+# Expected: 400 invalid_captcha
+# Anything else means TURNSTILE_SECRET_KEY is still empty (captcha not enabled).
+
+# Then load https://attendance-system.vercel.app/auth/login — the Turnstile
+# widget must render, and login must succeed once it is solved.
+```
+
+Cloudflare's dummy always-pass pair — site key `1x00000000000000000000AA`,
+secret `1x0000000000000000000000000000000AA` — exercises the wiring without a
+real challenge; swap in the real pair before go-live.
+
+#### Rollback
+
+Unset `TURNSTILE_SECRET_KEY` (backend) and `PUBLIC_TURNSTILE_SITE_KEY`
+(frontend), then restart/redeploy: the API reverts to pass-through and the
+widget disappears. Rate limiting and account lockout (D25) remain in force.
 
 ### Reverse Proxy / Client IP
 
@@ -306,9 +354,17 @@ psql "$DATABASE_URL" -c \
 
 ## 7. Email / SMTP
 
+Email carries login OTPs (mandatory for most accounts), claim-registration and
+forgot-password codes, and excuse notifications. **A broken relay blocks
+sign-in** for every non-MFA user, and the API reports success regardless — so
+verify delivery rather than assuming it. Full setup, provider guidance,
+verification steps, and the outage/rotation runbooks live in
+[email-setup.md](email-setup.md).
+
 ### Required For
 
-- OTP codes (claim registration, password reset)
+- Login OTP (mandatory second factor, except students/professors with MFA)
+- OTP codes (claim registration, forgot password)
 - Excuse notifications (request submitted, approved, rejected, bulk)
 
 ### Configuration
@@ -320,27 +376,25 @@ psql "$DATABASE_URL" -c \
 | `SMTP_USER`           | Set, unless the relay takes no credentials                                                                           |
 | `SMTP_PASSWORD`       | Set (not in git)                                                                                                     |
 | `SMTP_FROM`           | `noreply@yourdomain.com` or similar. Falls back to `SMTP_USER`, then to `noreply@localhost`                          |
-| `SMTP_START_TLS`      | `true` on port 587. Ignored when `SMTP_USE_SSL=true` — set it to `false` there or the handshake is attempted twice |
+| `SMTP_START_TLS`      | `true` on port 587. Ignored when `SMTP_USE_SSL=true` (STARTTLS is skipped automatically) — set it `false` on 465 for clarity |
 | `SMTP_USE_SSL`        | `true` for port 465 only                                                                                             |
 | `SMTP_TIMEOUT_SECONDS`| `10` is fine for most relays                                                                                         |
 
 Delivery is best-effort by design: `shared/email.py` logs and returns on any
-SMTP error rather than raising, and notifications are sent off the request
-thread, so a dead relay costs a log line and never a 5xx. A relay that silently
-rejects everything looks exactly like a working one, so verify rather than
-assume.
+SMTP error rather than raising, OTP sends run inline and notifications off the
+request thread, so a dead relay costs a log line and never a 5xx. A relay that
+silently rejects everything looks exactly like a working one — and since login
+needs an emailed OTP for most accounts, treat email as an **auth dependency**,
+not an extra.
 
 ### Verification
 
-```bash
-# Test OTP email delivery
-# (Register a test user and verify OTP arrives)
-```
+Follow [email-setup.md](email-setup.md) §6 — console smoke test, a real
+login/recovery OTP, and an `otp_codes` row check — then keep this one-liner
+handy:
 
 ```bash
-# Confirm a notification was handed to a relay: with SMTP_HOST set, submit an
-# excuse request and look for "Email sent to=" in the API logs.
-docker compose -f docker-compose.dev.yml logs api | grep "Email sent to="
+fly logs --app attendance-system-api | grep "Email sent to="
 ```
 
 ---
@@ -349,12 +403,13 @@ docker compose -f docker-compose.dev.yml logs api | grep "Email sent to="
 
 ### Vercel Environment
 
-| Item             | Check                                      |
-| ---------------- | ------------------------------------------ |
-| `PUBLIC_API_URL` | Points to Fly.io API URL                   |
-| Framework preset | SvelteKit (auto-detected)                  |
-| Build command    | Default (`npm run build`)                  |
-| Node version     | Matches `engines` in package.json (if set) |
+| Item                        | Check                                      |
+| --------------------------- | ------------------------------------------ |
+| `PUBLIC_API_URL`            | Points to Fly.io API URL                   |
+| `PUBLIC_TURNSTILE_SITE_KEY` | Site key when the captcha is enabled (§3)  |
+| Framework preset            | SvelteKit (auto-detected)                  |
+| Build command               | Default (`npm run build`)                  |
+| Node version                | Matches `engines` in package.json (if set) |
 
 ### Type Checking
 
@@ -499,6 +554,7 @@ curl -w "@curl-timing.txt" -o /dev/null -s https://attendance-system-api.fly.dev
 
 - [Deployment Workflow](deployment-workflow.md) — step-by-step deployment guide
 - [Backup Strategy](backup-strategy.md) — backup pipeline details
+- [Email / OTP Delivery](email-setup.md) — SMTP enablement, verification, rotation & outage runbooks
 - [Runbooks](../operations/runbooks.md) — operational procedures
 - [Monitoring](../operations/monitoring.md) — post-deploy monitoring setup
 - [Incident Response](../operations/incident-response.md) — incident playbooks

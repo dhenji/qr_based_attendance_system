@@ -35,8 +35,8 @@ import { resetAdminProgramsStates } from '$lib/features/admin/programs/store.sve
 import { resetAdminCoursesStates } from '$lib/features/admin/courses/store.svelte';
 import { resetAdminOfferingsStates } from '$lib/features/admin/offerings/store.svelte';
 import { invalidateAttendanceDirectory } from '$lib/features/attendance/service';
-import { invalidateExcuseDirectory } from '$lib/features/excuse/service';
 import { refreshFaceCache } from '$lib/features/student/face.svelte';
+import { resetTheme } from '$lib/features/settings/theme';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous';
 
@@ -139,6 +139,14 @@ const reset = () => {
 	authState.error = null;
 };
 
+// Ending a session also ends the device theme: light is the default for the
+// login page and for whoever signs in next (device prefs are shared, not
+// per-account — see features/settings/theme.ts).
+const endSession = () => {
+	reset();
+	resetTheme();
+};
+
 // Persist a token response and resolve the signed-in user.
 //
 // The backend's TokenResponse carries no identity, so /auth/me is always the
@@ -150,7 +158,7 @@ const establishSession = async (tokens: TokenResponse): Promise<User> => {
 	const current = await me();
 	if (!current) {
 		clearTokens();
-		reset();
+		endSession();
 		throw new Error('Your session could not be verified. Please sign in again.');
 	}
 
@@ -181,6 +189,9 @@ export const restoreSession = (): Promise<User | null> => {
 	hydrateTokens();
 
 	if (!hasTokens()) {
+		// Anonymous entry — never leave a previous session's dark theme on the
+		// login page.
+		resetTheme();
 		authState.status = 'anonymous';
 		return Promise.resolve(null);
 	}
@@ -190,7 +201,7 @@ export const restoreSession = (): Promise<User | null> => {
 		.then((current) => {
 			if (!current) {
 				clearTokens();
-				reset();
+				endSession();
 				return null;
 			}
 			authState.user = toUser(current);
@@ -389,7 +400,7 @@ export const doChangePassword = async (
 
 export const doLogout = async (): Promise<void> => {
 	clearTokens();
-	reset();
+	endSession();
 	// Account data must not survive a logout on shared devices: each store
 	// re-inits for the next login, and stale caches otherwise keep (or
 	// briefly serve) the previous user's profile, rosters, and course lists
@@ -403,7 +414,6 @@ export const doLogout = async (): Promise<void> => {
 	resetAdminCoursesStates();
 	resetAdminOfferingsStates();
 	invalidateAttendanceDirectory();
-	invalidateExcuseDirectory();
 	await goto(Routes.HOME);
 };
 

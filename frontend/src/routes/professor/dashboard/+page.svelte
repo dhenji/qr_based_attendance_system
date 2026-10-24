@@ -1,4 +1,6 @@
 <script lang="ts">
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { formatPercentage } from '$lib/shared/utils/format';
@@ -40,7 +42,7 @@
 	// Status colours follow the wireframe status palette (docs/design/wireframes.md).
 	const STATUS_COLORS: Record<SessionStatus, string> = {
 		active: '#16a34a',
-		closed: '#94a3b8'
+		closed: 'var(--text-muted)'
 	};
 
 	// "Today" is UTC on both endpoints — the dashboard summary anchors on
@@ -164,7 +166,7 @@
 	};
 </script>
 
-<div class="dashboard">
+<div class="dashboard page-enter">
 	<header class="header">
 		<div>
 			<h1>Professor Dashboard</h1>
@@ -178,9 +180,8 @@
 			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Try again</button>
 		</section>
 	{:else if loading}
-		<section class="card">
-			<p class="muted">Loading today's sessions…</p>
-		</section>
+		<SkeletonCards count={3} label="Loading today's sessions…" />
+		<SkeletonTable rows={4} cols={6} />
 	{:else if liveSession}
 		<section class="hero">
 			<article class="live-card">
@@ -326,7 +327,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {
@@ -452,7 +452,7 @@
 	.metric-of {
 		font-size: 1rem;
 		font-weight: 600;
-		color: #94a3b8;
+		color: var(--text-muted);
 	}
 
 	.metric-label {
@@ -516,7 +516,7 @@
 
 	.kpi-sub {
 		font-size: 0.75rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 	}
 
 	/* --- Quick actions ------------------------------------------------------- */
@@ -573,7 +573,7 @@
 	}
 
 	.btn-secondary:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		cursor: not-allowed;
 	}
@@ -666,7 +666,7 @@
 		font-weight: 600;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
-		color: #94a3b8;
+		color: var(--text-muted);
 		flex-shrink: 0;
 	}
 

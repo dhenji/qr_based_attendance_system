@@ -1,8 +1,10 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Routes } from '$lib/shared/constants/routes';
-	import { formatDate, formatTime } from '$lib/shared/utils/format';
+	import { formatBytes, formatDate, formatTime } from '$lib/shared/utils/format';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		cleanupSystem,
 		downloadBackupArchive,
@@ -11,7 +13,6 @@
 		exportAnalyticsOverview,
 		exportAnalyticsTrends,
 		flushSync,
-		formatBytes,
 		getSettings,
 		listBackups,
 		patchSettings,
@@ -31,6 +32,8 @@
 	let geofence = $state('50');
 	let presentWin = $state('5');
 	let lateWin = $state('10');
+	let earlyOpen = $state('30');
+	let lateOpen = $state('0');
 	let retentionDaily = $state('30');
 	let retentionMonthly = $state('12');
 	let saving = $state(false);
@@ -50,6 +53,15 @@
 	let exporting = $state<string | null>(null);
 	let exportError = $state<string | null>(null);
 
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
+
 	const load = async () => {
 		loading = true;
 		loadError = null;
@@ -60,6 +72,8 @@
 			geofence = String(fetched.geofence_default_radius);
 			presentWin = String(fetched.present_window_default);
 			lateWin = String(fetched.late_window_default);
+			earlyOpen = String(fetched.session_early_open_minutes ?? 30);
+			lateOpen = String(fetched.session_late_open_minutes ?? 0);
 			retentionDaily = String(fetched.backup_retention_daily ?? 30);
 			retentionMonthly = String(fetched.backup_retention_monthly ?? 12);
 		} catch (e) {
@@ -82,6 +96,13 @@
 		return parsed >= 1 ? parsed : null;
 	};
 
+	// The open-window grace (D94) accepts 0: "no early opening" and "no late
+	// opening" are exactly what a strict institution wants.
+	const parseNonNegativeInt = (value: string): number | null => {
+		if (!/^\d+$/.test(value.trim())) return null;
+		return parseInt(value.trim(), 10);
+	};
+
 	const saveDefaults = async () => {
 		if (saving) return;
 		saveError = null;
@@ -89,10 +110,16 @@
 		const radius = parsePositiveInt(geofence);
 		const present = parsePositiveInt(presentWin);
 		const late = parsePositiveInt(lateWin);
+		const early = parseNonNegativeInt(earlyOpen);
+		const lateGrace = parseNonNegativeInt(lateOpen);
 		const daily = parsePositiveInt(retentionDaily);
 		const monthly = parsePositiveInt(retentionMonthly);
 		if (radius === null || present === null || late === null || daily === null || monthly === null) {
 			saveError = 'Geofence, windows, and retention must all be whole numbers of at least 1.';
+			return;
+		}
+		if (early === null || lateGrace === null) {
+			saveError = 'The open-window grace must be a whole number of minutes (0 or more).';
 			return;
 		}
 		saving = true;
@@ -101,6 +128,8 @@
 				geofence_default_radius: radius,
 				present_window_default: present,
 				late_window_default: late,
+				session_early_open_minutes: early,
+				session_late_open_minutes: lateGrace,
 				backup_retention_daily: daily,
 				backup_retention_monthly: monthly
 			});
@@ -207,7 +236,7 @@
 	</header>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading system settings…</p></section>
+		<SkeletonDetail rows={7} label="Loading system settings…" />
 	{:else if loadError}
 		<section class="card">
 			<p class="error">{loadError}</p>
@@ -230,6 +259,16 @@
 					<input id="set-late" class="form-input" inputmode="numeric" bind:value={lateWin} />
 				</div>
 				<div class="field">
+					<label class="form-label" for="set-early-open">Session open grace, early (min)</label>
+					<input id="set-early-open" class="form-input" inputmode="numeric" bind:value={earlyOpen} />
+					<p class="hint">How early a session may be opened before its class starts.</p>
+				</div>
+				<div class="field">
+					<label class="form-label" for="set-late-open">Session open grace, late (min)</label>
+					<input id="set-late-open" class="form-input" inputmode="numeric" bind:value={lateOpen} />
+					<p class="hint">How long after its class ends a session may still be opened.</p>
+				</div>
+				<div class="field">
 					<label class="form-label" for="set-retention-daily">Backup retention daily (days)</label>
 					<input id="set-retention-daily" class="form-input" inputmode="numeric" bind:value={retentionDaily} />
 				</div>
@@ -244,7 +283,7 @@
 			{#if saveNote}
 				<p class="note" role="status">{saveNote}</p>
 			{/if}
-			<button class="btn btn-primary" type="button" disabled={saving} onclick={() => void saveDefaults()}>
+			<button class="btn btn-primary" type="button" aria-busy={saving} disabled={saving} onclick={() => void saveDefaults()}>
 				{saving ? 'Saving…' : 'Save Changes'}
 			</button>
 		</section>
@@ -270,8 +309,8 @@
 			<p class="muted">Full database backup · AES-256-GCM · Retention: {settings?.backup_retention_daily ?? 30}D daily + {settings?.backup_retention_monthly ?? 12} monthly</p>
 			{#if latestBackup}
 				<p class="backup-status" role="status">
-					Status: {latestBackup.status === 'completed' ? '✅' : latestBackup.status === 'started' ? '⏳' : '❌'}
-					{backupStatusText(latestBackup)} · {formatBytes(latestBackup.size_bytes)} · {latestBackup.storage_backend}
+					Status: {backupStatusText(latestBackup)}
+					· {formatBytes(latestBackup.size_bytes)} · {latestBackup.storage_backend}
 				</p>
 			{:else}
 				<p class="muted">No backups recorded yet.</p>
@@ -286,9 +325,9 @@
 								type="button"
 								disabled={downloadBusy || row.status !== 'completed'}
 								title={row.status === 'completed' ? 'Download the encrypted backup archive' : 'Only completed backups can be downloaded'}
-								onclick={() => void downloadBackup(row)}
+								onclick={() => (pendingExport = { run: () => downloadBackup(row), title: 'Confirm Download', message: 'Are you sure you want to download this backup? The encrypted archive will be downloaded after you confirm.', confirmLabel: 'Confirm Download', details: [{ label: 'Backup', value: `#${row.id}` }, { label: 'Status', value: row.status }, { label: 'Size', value: formatBytes(row.size_bytes) }] })}
 							>
-								{downloadBusy ? '⏳ Preparing…' : '📥 Download'}
+								{downloadBusy ? 'Preparing…' : 'Download'}
 							</button>
 						</li>
 					{/each}
@@ -302,16 +341,16 @@
 			{/if}
 			<div class="actions">
 				<button class="btn btn-secondary" type="button" disabled={backupBusy} onclick={() => void backupNow()}>
-					{backupBusy ? 'Starting…' : '💾 Backup Now'}
+					{backupBusy ? 'Starting…' : 'Backup Now'}
 				</button>
 				<button
 					class="btn btn-secondary"
 					type="button"
 					disabled={!latestCompleted || downloadBusy}
 					title={latestCompleted ? 'Download the encrypted backup archive' : 'No completed backup yet'}
-					onclick={() => latestCompleted && void downloadBackup(latestCompleted)}
+					onclick={() => latestCompleted && (pendingExport = { run: () => downloadBackup(latestCompleted), title: 'Confirm Download', message: 'Are you sure you want to download this backup? The encrypted archive will be downloaded after you confirm.', confirmLabel: 'Confirm Download', details: [{ label: 'Backup', value: `#${latestCompleted.id}` }, { label: 'Status', value: latestCompleted.status }, { label: 'Size', value: formatBytes(latestCompleted.size_bytes) }] })}
 				>
-					{downloadBusy ? '⏳ Preparing…' : '📥 Download'}
+					{downloadBusy ? 'Preparing…' : 'Download'}
 				</button>
 			</div>
 			<p class="muted">Backup archives are encrypted with the server key — there is no key-management UI; key rotation happens deployment-side.</p>
@@ -324,23 +363,23 @@
 				<p class="error" role="alert">{exportError}</p>
 			{/if}
 			<div class="actions">
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('overview', exportAnalyticsOverview)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('overview', exportAnalyticsOverview), details: [{ label: 'Dataset', value: 'Overview' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'overview' ? 'Exporting…' : 'Overview CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('comparison', exportAnalyticsComparison)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('comparison', exportAnalyticsComparison), details: [{ label: 'Dataset', value: 'Comparison' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'comparison' ? 'Exporting…' : 'Comparison CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('trends', exportAnalyticsTrends)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('trends', exportAnalyticsTrends), details: [{ label: 'Dataset', value: 'Trends' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'trends' ? 'Exporting…' : 'Trends CSV'}
 				</button>
-				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => void exportDataset('at-risk', exportAnalyticsAtRisk)}>
+				<button class="btn btn-secondary" type="button" disabled={exporting !== null} onclick={() => (pendingExport = { run: () => exportDataset('at-risk', exportAnalyticsAtRisk), details: [{ label: 'Dataset', value: 'At-risk' }, { label: 'Format', value: 'CSV' }] })}>
 					{exporting === 'at-risk' ? 'Exporting…' : 'At-risk CSV'}
 				</button>
 				<button
 					class="btn btn-secondary"
 					type="button"
 					title="Print the current page as PDF"
-					onclick={() => window.print()}
+					onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'PDF (print)' }] })}
 				>
 					Export PDF
 				</button>
@@ -366,6 +405,17 @@
 			</div>
 		</section>
 	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -373,7 +423,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
-		font-family: system-ui, sans-serif;
 		width: 100%;
 		min-width: 0;
 	}
@@ -382,21 +431,21 @@
 		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.25rem;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
 	}
 
 	.card {
-		background: white;
-		border: 1px solid #e2e8f0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+		box-shadow: var(--shadow-sm);
 		padding: 1.25rem;
 		min-width: 0;
 	}
@@ -404,7 +453,7 @@
 	.section-title {
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text);
 		margin: 0 0 0.75rem;
 	}
 
@@ -425,23 +474,23 @@
 	.form-label {
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: #475569;
+		color: var(--text-secondary);
 	}
 
 	.form-input {
 		padding: 0.625rem 0.875rem;
-		border: 1.5px solid #d1d5db;
+		border: 1.5px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
-		color: #0f172a;
+		color: var(--text-strong);
 		outline: none;
-		background: white;
+		background: var(--bg-input);
 		width: 100%;
 	}
 
 	.form-input:focus {
-		border-color: #2563eb;
+		border-color: var(--accent);
 	}
 
 	.actions {
@@ -462,8 +511,8 @@
 	}
 
 	.btn-primary {
-		background: #1e3a5f;
-		color: white;
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-primary:disabled {
@@ -472,9 +521,9 @@
 	}
 
 	.btn-secondary {
-		background: white;
-		border-color: #cbd5e1;
-		color: #1e3a5f;
+		background: var(--bg-card);
+		border-color: var(--border-strong);
+		color: var(--brand);
 	}
 
 	.btn-secondary:disabled {
@@ -483,19 +532,19 @@
 	}
 
 	.error {
-		color: #b91c1c;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0.75rem 0 0;
 	}
 
 	.note {
-		color: #15803d;
+		color: var(--success);
 		font-size: 0.875rem;
 		margin: 0.75rem 0 0;
 	}
 
 	.backup-status {
-		color: #1e293b;
+		color: var(--text);
 		font-size: 0.9375rem;
 		margin: 0.75rem 0 0;
 	}
@@ -516,9 +565,9 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		padding: 0.5rem 0.75rem;
-		border: 1px solid #f1f5f9;
+		border: 1px solid var(--divider);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: var(--bg-page);
 		font-size: 0.875rem;
 	}
 

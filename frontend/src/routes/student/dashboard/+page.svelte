@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { onMount } from 'svelte';
 	import {
 		studentState,
@@ -59,20 +61,29 @@
 	<section class="card">
 		<h2 class="section-title">Today's Schedule</h2>
 		{#if studentState.loading}
-			<p class="muted">Loading…</p>
+			<div class="skeleton-stack" role="status" aria-busy="true">
+				<span class="sr-only">Loading today's schedule…</span>
+				<Skeleton height={14} width="55%" />
+				<Skeleton height={14} width="72%" />
+				<Skeleton height={14} width="48%" />
+			</div>
 		{:else if studentState.courses.length > 0}
 			<ul>
 				{#each studentState.courses as course}
 					<li>
-						<strong>{course.courseCode}</strong> — {course.courseName}
-						<span class="muted">
+						<strong class="mono-data">{course.courseCode}</strong> — {course.courseName}
+						<span class="muted mono-data">
 							({course.scheduleDays} {course.scheduleStartTime}–{course.scheduleEndTime})
 						</span>
 					</li>
 				{/each}
 			</ul>
 		{:else}
-			<p class="empty">No classes scheduled yet. Your enrolled subjects will appear here.</p>
+			<EmptyState
+				icon="file"
+				title="No classes scheduled yet"
+				hint="Your enrolled subjects will appear here."
+			/>
 		{/if}
 	</section>
 </div>
@@ -82,11 +93,53 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2rem;
-		font-family: system-ui, sans-serif;
+	}
+
+	/* One orchestrated entrance, top to bottom — sweep in once per visit and
+	 * settle. Static-ness is respected under prefers-reduced-motion: the
+	 * media query below turns the whole sequence off. */
+	.dashboard > * {
+		animation: rise-in 0.35s ease-out both;
+	}
+
+	.dashboard > *:nth-child(2) {
+		animation-delay: 60ms;
+	}
+
+	.dashboard > *:nth-child(3) {
+		animation-delay: 120ms;
+	}
+
+	.dashboard > *:nth-child(4) {
+		animation-delay: 180ms;
+	}
+
+	.dashboard > *:nth-child(5) {
+		animation-delay: 240ms;
+	}
+
+	.dashboard > *:nth-child(6) {
+		animation-delay: 300ms;
+	}
+
+	@keyframes rise-in {
+		from {
+			opacity: 0;
+			transform: translateY(14px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.dashboard > * {
+			animation: none;
+		}
 	}
 
 	.header h1 {
-		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.625rem;
 		font-weight: 700;
 		color: var(--text);
@@ -121,9 +174,10 @@
 	}
 
 	.kpi-value {
-		font-family: 'DM Sans', system-ui, sans-serif;
+		font-family: var(--font-data);
+		font-variant-numeric: tabular-nums;
 		font-size: 1.75rem;
-		font-weight: 700;
+		font-weight: 500;
 		color: var(--text);
 		line-height: 1;
 	}
@@ -143,7 +197,6 @@
 		border-radius: 8px;
 		font-size: 1rem;
 		font-weight: 700;
-		font-family: system-ui, sans-serif;
 		text-align: center;
 		text-decoration: none;
 		cursor: pointer;
@@ -171,7 +224,6 @@
 	}
 
 	.section-title {
-		font-family: 'DM Sans', system-ui, sans-serif;
 		font-size: 1.0625rem;
 		font-weight: 700;
 		color: var(--text);
@@ -195,12 +247,6 @@
 
 	li:last-child {
 		border-bottom: none;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

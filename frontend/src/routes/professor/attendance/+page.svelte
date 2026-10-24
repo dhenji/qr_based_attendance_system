@@ -1,7 +1,10 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		listRecords,
 		type AttendanceLedgerSortBy,
@@ -64,6 +67,15 @@
 	let exportProgress = $state<string | null>(null);
 	let exportCapped = $state(false);
 	let exportToken = $state(0);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+		onabort?: () => void;
+	}>(null);
 	let directoryIncomplete = $state(false);
 	let missingCount = $state(0);
 
@@ -346,7 +358,7 @@
 			if (exportToken === token)
 				exportError = e instanceof Error && e.message ? e.message : 'Export failed. Please try again.';
 		} finally {
-			if (exportToken === token) {
+			if (exportToken === token || exportToken === token + 1) {
 				exporting = false;
 				exportProgress = null;
 			}
@@ -462,7 +474,11 @@
 
 	{#if !canQuery}
 		<section class="card">
-			<p class="empty">Select a course and a section above to view attendance records.</p>
+			<EmptyState
+				icon="chart"
+				title="Select a course and section"
+				hint="Pick both filters above to view attendance records."
+			/>
 		</section>
 	{:else if loadError}
 		<section class="card">
@@ -472,12 +488,14 @@
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
-		<section class="card">
-			<p class="muted">Loading attendance records…</p>
-		</section>
+		<SkeletonTable rows={8} cols={6} label="Loading attendance records…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<p class="empty">No attendance records match these filters. Try widening the date range.</p>
+			<EmptyState
+				icon="file"
+				title="No attendance records match these filters"
+				hint="Try widening the date range."
+			/>
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Attendance ledger table">
@@ -662,7 +680,7 @@
 					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
 				</nav>
 				<div class="table-actions no-print">
-					<button class="btn btn-secondary" type="button" onclick={print}>
+					<button class="btn btn-secondary" type="button" onclick={() => (pendingExport = { run: print, title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>
 						<AppIcon name="file" size={18} />
 						Print
 					</button>
@@ -670,7 +688,7 @@
 						class="btn btn-secondary"
 						type="button"
 						disabled={exporting || total === 0}
-						onclick={() => void exportCsv()}
+						onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }], onabort: cancelExport })}
 					>
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
@@ -693,6 +711,18 @@
 			</div>
 		</section>
 	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onabort={pendingExport.onabort}
+			onclose={() => (pendingExport = null)}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -702,7 +732,6 @@
 		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {
@@ -864,7 +893,7 @@
 	}
 
 	.sort-arrow {
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-size: 0.6875rem;
 	}
 
@@ -907,10 +936,10 @@
 
 	.status-present { background: var(--success-bg); color: var(--success); }
 	.status-late { background: var(--warning-bg); color: var(--warning-text); }
-	.status-excused { background: var(--info-bg); color: #6d28d9; }
+	.status-excused { background: var(--info-bg); color: var(--info-text); }
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
-	.status-rejected { background: var(--danger-bg); color: #7f1d1d; }
+	.status-rejected { background: var(--danger-bg); color: var(--danger-strong); }
 
 	.type-badge {
 		display: inline-block;
@@ -924,8 +953,8 @@
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.mini {
@@ -995,7 +1024,7 @@
 	}
 
 	.page:disabled:not(.current) {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
@@ -1003,7 +1032,7 @@
 
 	.gap {
 		padding: 0 0.125rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-weight: 700;
 		user-select: none;
 	}
@@ -1053,7 +1082,7 @@
 	.btn:disabled {
 		background: var(--bg-page);
 		border-color: var(--border);
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 

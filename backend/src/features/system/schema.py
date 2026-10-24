@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from features.system.constants import (
     GEOFENCE_RADIUS_MAX,
     GEOFENCE_RADIUS_MIN,
+    OPEN_GRACE_MAX_MINUTES,
+    OPEN_GRACE_MIN_MINUTES,
     RETENTION_DAILY_MAX,
     RETENTION_DAILY_MIN,
     RETENTION_MONTHLY_MAX,
@@ -22,6 +24,10 @@ class SystemSettingsRead(BaseModel):
     geofence_default_radius: int
     present_window_default: int
     late_window_default: int
+    # The open-window grace (D94): how early and how late a session may be
+    # opened around its scheduled class.
+    session_early_open_minutes: int
+    session_late_open_minutes: int
     backup_retention_daily: int
     backup_retention_monthly: int
     pending_sync_count: int
@@ -36,6 +42,12 @@ class SystemSettingsUpdate(BaseModel):
     )
     late_window_default: int | None = Field(
         default=None, ge=WINDOW_MIN_MINUTES, le=WINDOW_MAX_MINUTES
+    )
+    session_early_open_minutes: int | None = Field(
+        default=None, ge=OPEN_GRACE_MIN_MINUTES, le=OPEN_GRACE_MAX_MINUTES
+    )
+    session_late_open_minutes: int | None = Field(
+        default=None, ge=OPEN_GRACE_MIN_MINUTES, le=OPEN_GRACE_MAX_MINUTES
     )
     backup_retention_daily: int | None = Field(
         default=None, ge=RETENTION_DAILY_MIN, le=RETENTION_DAILY_MAX
@@ -80,13 +92,56 @@ class CleanupResponse(BaseModel):
     removed: int = 0
 
 
+class AuditActorRead(BaseModel):
+    """Who performed the action.
+
+    `kind` is `anonymous` when nobody was authenticated — a lockout from an
+    anonymous attempt, or an unattended run. Otherwise it is `user`, and
+    `id`/`name`/`email`/`role` name the account.
+    """
+
+    kind: Literal["user", "anonymous"]
+    id: int | None = None
+    name: str
+    email: str | None = None
+    role: str | None = None
+
+
+class AuditSubjectRead(BaseModel):
+    """What the action was about.
+
+    `label` is the record's name — "BSCS · Bachelor of Science in Computer
+    Science" — read out of the audit snapshot first and only then from a
+    join, so it survives the record's deletion. `id` remains the raw
+    reference, in the id space of `type`.
+    """
+
+    type: str
+    id: int | None = None
+    label: str
+    sublabel: str | None = None
+
+
+class AuditChangeRead(BaseModel):
+    """One field that changed."""
+
+    field: str
+    label: str
+    before: str
+    after: str
+
+
 class AuditLogRead(BaseModel):
     """One audit trail row.
 
     The stored shape, unaltered: `entity_type` + `entity_id` identify the
     subject and `old_value`/`new_value` are the JSON snapshots the writer took.
-    Nothing is derived here, so an administrator reading this endpoint sees what
-    was actually recorded.
+    That is the evidence, and it is exactly what was recorded.
+
+    Alongside it, the derived read model (ADR-086): who acted, what the
+    subject is called, a one-line summary, and the field-level change. The
+    derived fields are additive — the stored ones are still there, so nothing
+    that read the raw row stops working.
     """
 
     id: int
@@ -97,6 +152,12 @@ class AuditLogRead(BaseModel):
     new_value: dict | None = None
     performed_by: int | None = None
     performed_at: datetime
+
+    actor: AuditActorRead
+    subject: AuditSubjectRead
+    summary: str
+    action_label: str
+    changes: list[AuditChangeRead] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

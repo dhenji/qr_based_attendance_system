@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -117,7 +120,7 @@
 		`${session.presentCount} / ${session.lateCount} / ${session.absentCount}`;
 </script>
 
-<div class="sessions">
+<div class="sessions page-enter">
 	<header class="header">
 		<div>
 			<h1>Sessions</h1>
@@ -143,19 +146,20 @@
 			</button>
 		</section>
 	{:else if !summaries}
-		<section class="card">
-			<p class="muted">Loading sessions…</p>
-		</section>
+		<SkeletonCards count={2} label="Loading sessions…" />
+		<SkeletonTable rows={4} cols={6} />
 	{:else}
 		<section aria-label="Active sessions">
 			<h2 class="section-title">Active now</h2>
 			{#if activeSessions.length === 0}
 				<div class="card">
-					<p class="empty">
-						No active session right now. Open one from
+					<EmptyState
+						icon="qr"
+						title="No active session right now"
+						hint="Open one and it will appear here with its projector code."
+					>
 						<button class="link" type="button" onclick={goCreate}>New Session</button>
-						and it will appear here with its projector code.
-					</p>
+					</EmptyState>
 				</div>
 			{:else}
 				<div class="active-grid">
@@ -226,7 +230,11 @@
 
 			{#if filtered.length === 0}
 				<div class="card">
-					<p class="empty">No sessions yet for this filter. Open one above.</p>
+					<EmptyState
+						icon="file"
+						title="No sessions yet for this filter"
+						hint="Open one above."
+					/>
 				</div>
 			{:else}
 				<div class="card table-card">
@@ -340,7 +348,6 @@
 		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -431,7 +438,7 @@
 		gap: 0.5rem;
 		text-align: center;
 		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
-		border: 2px solid #22c55e;
+		border: 2px solid var(--success);
 		container-type: inline-size;
 	}
 
@@ -449,7 +456,7 @@
 		font-weight: 700;
 		letter-spacing: 0.12em;
 		line-height: 1;
-		color: #14532d;
+		color: var(--success);
 		max-width: 100%;
 		overflow-wrap: anywhere;
 	}
@@ -457,7 +464,7 @@
 	.active-meta {
 		margin: 0;
 		font-weight: 600;
-		color: #14532d;
+		color: var(--success);
 		font-size: 0.9375rem;
 	}
 
@@ -509,7 +516,7 @@
 	.btn:disabled {
 		background: var(--bg-page);
 		border-color: var(--border);
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 
@@ -607,7 +614,7 @@
 	}
 
 	.sort-arrow {
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-size: 0.6875rem;
 	}
 
@@ -671,8 +678,8 @@
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.mini {

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -529,7 +532,7 @@
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Student Management</h1>
@@ -589,7 +592,7 @@
 	</section>
 
 	{#if adminStudentsState.loading && adminStudentsState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={7} label="Loading students…" />
 	{:else if adminStudentsState.error}
 		<section class="card">
 			<p class="error">Could not load students: {adminStudentsState.error}</p>
@@ -597,7 +600,11 @@
 		</section>
 	{:else if visibleStudents.length === 0}
 		<section class="card">
-			<p class="empty">No students match these filters. Import a roster or add one manually.</p>
+			<EmptyState
+				icon="users"
+				title="No students match these filters"
+				hint="Import a roster or add one manually."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminStudentsState.loading}>
@@ -653,25 +660,27 @@
 							<td>{s.yearLevelLabel}</td>
 							<td>{s.faceEnrolled ? 'Yes' : '—'}</td>
 							<td>{s.claimStatus}</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => openEdit(s)}>Edit</button>
-								<button
-									class="link"
-									onclick={() => {
-										adminStudentsState.actionError = null;
-										toggleTarget = s;
-									}}
-								>
-									{s.isActive ? 'Deactivate' : 'Reactivate'}
-								</button>
-{#if !s.isActive}
-								<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
-							{/if}
-							<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
-							<button class="link" onclick={() => openFace(s)}>
-								{s.faceEnrolled ? 'Re-enroll face' : 'Enroll face'}
-							</button>
-						</td>
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => openEdit(s)}>Edit</button>
+									<button
+										class="link"
+										onclick={() => {
+											adminStudentsState.actionError = null;
+											toggleTarget = s;
+										}}
+									>
+										{s.isActive ? 'Deactivate' : 'Reactivate'}
+									</button>
+									{#if !s.isActive}
+										<button class="link danger" onclick={() => { adminStudentsState.actionError = null; deleteTarget = s; }}>Delete</button>
+									{/if}
+									<button class="link" onclick={() => (resetTarget = s)}>Reset password</button>
+									<button class="link" onclick={() => openFace(s)}>
+										{s.faceEnrolled ? 'Re-enroll face' : 'Enroll face'}
+									</button>
+								</div>
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -776,7 +785,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-student" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-primary" data-testid="save-student" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -840,6 +849,7 @@
 				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
 				<button
 					class="btn {toggleTarget.isActive ? 'btn-danger' : 'btn-primary'}"
+					aria-busy={toggleBusy}
 					disabled={toggleBusy}
 					onclick={() => void confirmToggle()}
 				>
@@ -873,7 +883,11 @@
 				{faceTarget.faceEnrolled ? 'Re-enroll face' : 'Enroll face'} — {fullName(faceTarget)} ({faceTarget.studentId})
 			</h2>
 			{#if faceLoading}
-				<p class="muted">Loading enrollment status…</p>
+				<div class="skeleton-stack" role="status" aria-busy="true">
+					<span class="sr-only">Loading enrollment status…</span>
+					<Skeleton height={12} width="55%" />
+					<Skeleton height={12} width="40%" />
+				</div>
 			{:else if faceStatus?.enrolled}
 				<p class="muted" role="status">
 					Enrolled{#if faceStatus.faceEmbeddingVersion} (v{faceStatus.faceEmbeddingVersion}){/if}{#if faceStatus.faceEnrolledAt} · {new Date(faceStatus.faceEnrolledAt).toLocaleDateString()}{/if}.
@@ -898,7 +912,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (faceTarget = null)}>Close</button>
-				<button class="btn btn-primary" disabled={faceBusy} onclick={() => void uploadFace()}>
+				<button class="btn btn-primary" aria-busy={faceBusy} disabled={faceBusy} onclick={() => void uploadFace()}>
 					{faceBusy ? 'Uploading…' : 'Upload enrollment'}
 				</button>
 			</div>
@@ -911,7 +925,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -1068,12 +1081,6 @@
 		margin-top: 1rem;
 	}
 
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
-	}
-
 	.error {
 		color: var(--danger);
 		font-size: 0.875rem;
@@ -1163,7 +1170,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

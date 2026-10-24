@@ -16,10 +16,13 @@ import type {
 } from '$lib/shared/types';
 import {
 	assignProfessor,
+	reassignProfessor,
+	reopenAssignment,
 	bulkEnroll,
 	deleteOffering,
 	endAssignment,
 	getOffering,
+	permanentlyRemoveAssignment,
 	getRoster,
 	listAssignments,
 	listOfferings,
@@ -29,6 +32,7 @@ import {
 } from '$lib/features/admin/offerings/service';
 import type {
 	AdminAssignmentCreatePayload,
+	AdminAssignmentReassignPayload,
 	AdminOfferingUpdatePayload,
 } from '$lib/shared/types';
 import { friendlyDeleteError } from '$lib/shared/utils/deleteErrors';
@@ -217,15 +221,68 @@ export const assignOfferingProfessor = async (
 
 export const endOfferingAssignment = async (
 	offeringId: number,
-	professorId: number
+	professorId: number,
+	effectiveFrom: string
 ): Promise<void> => {
 	adminOfferingDetailState.actionError = null;
 	try {
-		await endAssignment(offeringId, professorId);
+		await endAssignment(offeringId, professorId, effectiveFrom);
 		await loadOfferingAssignments(offeringId);
 		notifyEntityChanged('offerings');
 	} catch (e: unknown) {
 		adminOfferingDetailState.actionError = toMessage(e, 'Failed to end assignment');
+		throw e;
+	}
+};
+
+export const permanentlyRemoveOfferingAssignment = async (
+	offeringId: number,
+	professorId: number,
+	effectiveFrom: string
+): Promise<void> => {
+	adminOfferingDetailState.actionError = null;
+	try {
+		await permanentlyRemoveAssignment(offeringId, professorId, effectiveFrom);
+		await loadOfferingAssignments(offeringId);
+		notifyEntityChanged('offerings');
+	} catch (e: unknown) {
+		adminOfferingDetailState.actionError = friendlyDeleteError(
+			e,
+			'Failed to permanently remove assignment'
+		);
+		throw e;
+	}
+};
+
+export const reassignOfferingProfessor = async (
+	offeringId: number,
+	oldProfessorId: number,
+	payload: AdminAssignmentReassignPayload
+): Promise<void> => {
+	adminOfferingDetailState.actionError = null;
+	try {
+		await reassignProfessor(offeringId, oldProfessorId, payload);
+		await loadOfferingAssignments(offeringId);
+		notifyEntityChanged('offerings');
+	} catch (e: unknown) {
+		adminOfferingDetailState.actionError = toMessage(e, 'Failed to reassign professor');
+		throw e;
+	}
+};
+
+export const reopenOfferingAssignment = async (
+	offeringId: number,
+	professorId: number,
+	effectiveFrom: string,
+	isPrimary?: boolean
+): Promise<void> => {
+	adminOfferingDetailState.actionError = null;
+	try {
+		await reopenAssignment(offeringId, professorId, effectiveFrom, isPrimary);
+		await loadOfferingAssignments(offeringId);
+		notifyEntityChanged('offerings');
+	} catch (e: unknown) {
+		adminOfferingDetailState.actionError = toMessage(e, 'Failed to reopen assignment');
 		throw e;
 	}
 };

@@ -33,7 +33,9 @@ from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.attendance.model import Attendance
 from features.course.model import CourseOffering
 from features.enrollment.model import Enrollment
+from features.program.model import YearLevel
 from features.session.model import Session
+from shared.schedule import term_weeks
 
 logger = logging.getLogger(__name__)
 
@@ -269,8 +271,25 @@ async def _load_expected_by_offering(
             select(CourseOffering).where(CourseOffering.id.in_(offering_ids))
         )
     ).all()
+
+    # Session weeks are term-scoped (D86): resolve each offering's weeks from
+    # its year level's term structure, batched by year level to avoid a query
+    # per offering. An orphaned `semester` falls back to the shared default.
+    year_level_ids = {row.year_level_id for row in offerings}
+    structures: dict[int, dict] = {}
+    if year_level_ids:
+        rows = (
+            await session.execute(
+                select(YearLevel.id, YearLevel.term_structure).where(
+                    YearLevel.id.in_(year_level_ids)
+                )
+            )
+        ).all()
+        structures = {row.id: row.term_structure for row in rows}
+
     return {
-        row.id: int(row.semester_weeks or 0) * int(row.sessions_per_week or 0)
+        row.id: term_weeks(structures.get(row.year_level_id), row.semester)
+        * int(row.sessions_per_week or 0)
         for row in offerings
     }
 

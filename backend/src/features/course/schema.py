@@ -11,6 +11,8 @@ from shared.constants import (
     LATITUDE_MIN,
     LONGITUDE_MAX,
     LONGITUDE_MIN,
+    RADIUS_METERS_MAX,
+    RADIUS_METERS_MIN,
     SEMESTER_MAX_LENGTH,
     SEMESTER_MIN_LENGTH,
 )
@@ -27,8 +29,6 @@ from features.course.constants import (
     NAME_MIN_LENGTH,
     SCHEDULE_DAYS_MAX_LENGTH,
     SCHEDULE_DAYS_MIN_LENGTH,
-    SEMESTER_WEEKS_MAX,
-    SEMESTER_WEEKS_MIN,
     SESSIONS_PER_WEEK_MAX,
     SESSIONS_PER_WEEK_MIN,
     UNITS_MAX,
@@ -205,7 +205,6 @@ class OfferingCreate(BaseModel):
         min_length=ACADEMIC_YEAR_MIN_LENGTH, max_length=ACADEMIC_YEAR_MAX_LENGTH
     )
     sessions_per_week: int = Field(ge=SESSIONS_PER_WEEK_MIN, le=SESSIONS_PER_WEEK_MAX)
-    semester_weeks: int = Field(ge=SEMESTER_WEEKS_MIN, le=SEMESTER_WEEKS_MAX)
     schedule_days: str = Field(
         min_length=SCHEDULE_DAYS_MIN_LENGTH, max_length=SCHEDULE_DAYS_MAX_LENGTH
     )
@@ -220,15 +219,21 @@ class OfferingCreate(BaseModel):
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
-    default_present_window_minutes: int = Field(
-        default=DEFAULT_PRESENT_WINDOW_MINUTES,
+    default_present_window_minutes: int | None = Field(
+        default=None,
         ge=WINDOW_MINUTES_MIN,
         le=WINDOW_MINUTES_MAX,
     )
-    default_late_window_minutes: int = Field(
-        default=DEFAULT_LATE_WINDOW_MINUTES,
+    default_late_window_minutes: int | None = Field(
+        default=None,
         ge=WINDOW_MINUTES_MIN,
         le=WINDOW_MINUTES_MAX,
+    )
+    # The geofence radius the offering's sessions default to (D93). NULL
+    # means "inherit" — the app setting an administrator edits in Admin ->
+    # System Settings wins, and only an explicit value overrides it.
+    default_classroom_radius_meters: int | None = Field(
+        default=None, ge=RADIUS_METERS_MIN, le=RADIUS_METERS_MAX
     )
     # Optional per-type schedules (D77). Omitted means a single lecture
     # component mirroring the offering schedule/classroom above, so
@@ -261,6 +266,8 @@ class OfferingRead(BaseModel):
     semester: str
     academic_year: str
     sessions_per_week: int
+    # Derived (D86): resolved from the offering's year level + term code via
+    # `shared.schedule.term_weeks`, never stored on the offering.
     semester_weeks: int
     schedule_days: str
     schedule_start_time: time
@@ -268,8 +275,14 @@ class OfferingRead(BaseModel):
     classroom_name: str | None = None
     classroom_lat: float | None = None
     classroom_lng: float | None = None
-    default_present_window_minutes: int
-    default_late_window_minutes: int
+    # NULL means "follow the system default" (D93) for both windows and the
+    # radius.
+    default_present_window_minutes: int | None = None
+    default_late_window_minutes: int | None = None
+    # The geofence radius override. NULL clears it back to the app setting.
+    default_classroom_radius_meters: int | None = Field(
+        default=None, ge=RADIUS_METERS_MIN, le=RADIUS_METERS_MAX
+    )
     enrolled_count: int = 0
     # Distinct session types across the active components (D77) — feeds the
     # Lecture / Lab / Mixed badges. Empty only when an offering has no
@@ -286,9 +299,6 @@ class OfferingRead(BaseModel):
 class OfferingUpdate(BaseModel):
     sessions_per_week: int | None = Field(
         default=None, ge=SESSIONS_PER_WEEK_MIN, le=SESSIONS_PER_WEEK_MAX
-    )
-    semester_weeks: int | None = Field(
-        default=None, ge=SEMESTER_WEEKS_MIN, le=SEMESTER_WEEKS_MAX
     )
     schedule_days: str | None = Field(
         default=None,
@@ -310,6 +320,11 @@ class OfferingUpdate(BaseModel):
     default_late_window_minutes: int | None = Field(
         default=None, ge=WINDOW_MINUTES_MIN, le=WINDOW_MINUTES_MAX
     )
+    # An explicit null clears the override and puts the offering back on the
+    # app setting (D93).
+    default_classroom_radius_meters: int | None = Field(
+        default=None, ge=RADIUS_METERS_MIN, le=RADIUS_METERS_MAX
+    )
     is_active: bool | None = None
 
     @field_validator("schedule_days")
@@ -322,16 +337,15 @@ class OfferingUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _reject_null_on_not_nullable(self) -> "OfferingUpdate":
-        # classroom_* are nullable columns, so an explicit null clears them;
-        # every other mutable field rejects null like CourseUpdate does.
+        # classroom_*, the window defaults and the radius are nullable
+        # columns, so an explicit null clears them (D93: NULL means "follow
+        # the system default"); every other mutable field rejects null like
+        # CourseUpdate does.
         for field in (
             "sessions_per_week",
-            "semester_weeks",
             "schedule_days",
             "schedule_start_time",
             "schedule_end_time",
-            "default_present_window_minutes",
-            "default_late_window_minutes",
             "is_active",
         ):
             if field in self.model_fields_set and getattr(self, field) is None:
@@ -352,13 +366,13 @@ class ProfessorAssignment(BaseModel):
     is_primary: bool = False
     effective_from: date
     effective_to: date | None = None
-    semester: str = Field(
-        min_length=SEMESTER_MIN_LENGTH, max_length=SEMESTER_MAX_LENGTH
-    )
+    semester: str | None = None
 
     @field_validator("semester")
     @classmethod
-    def _strip_semester(cls, value: str) -> str:
+    def _strip_semester(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return value.strip()
 
     @model_validator(mode="after")
@@ -369,13 +383,46 @@ class ProfessorAssignment(BaseModel):
         return self
 
 
+class ProfessorReassignment(BaseModel):
+    new_professor_id: int = Field(gt=0)
+    is_primary: bool | None = None
+    # Composite-PK discriminator: the exact old row to replace. Optional for
+    # older clients; the service falls back to the newest open-ended row.
+    old_effective_from: date | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+    @model_validator(mode="after")
+    def _dates_order(self) -> "ProfessorReassignment":
+        if self.effective_to is not None and self.effective_from is not None and self.effective_to <= self.effective_from:
+            raise ValueError("effective_to must be after effective_from")
+
+        return self
+
+
+class ProfessorReopen(BaseModel):
+    """Undo an accidental End by clearing the exact row's end date.
+
+    `is_primary` is an optional role override: omit it to restore the role the
+    row had before it was ended, or pass `false` to reopen as an assistant when
+    another primary professor already covers the dates.
+    """
+
+    effective_from: date
+    is_primary: bool | None = None
+
+
 class AssignmentRead(BaseModel):
     offering_id: int
     professor_id: int
     is_primary: bool
     effective_from: date
     effective_to: date | None = None
-    semester: str
+    semester: str = ""
+    # True when a session was opened under this exact effective window. The
+    # admin UI hides the permanent-remove action for those rows; the service
+    # enforces the same rule independently.
+    has_sessions: bool = False
     assigned_by: int
     assigned_at: datetime
 

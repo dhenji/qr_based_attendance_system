@@ -64,7 +64,9 @@ class ScanRequest(BaseModel):
     student_number: str = Field(
         min_length=STUDENT_NUMBER_MIN_LENGTH, max_length=STUDENT_NUMBER_MAX_LENGTH
     )
-    gps: GPSInput
+    # Location is optional: scans against sessions with no geofence (remote,
+    # disabled, or no classroom coordinates) must not be forced to supply GPS.
+    gps: GPSInput | None = None
     liveness_evidence: LivenessEvidence
     face_match_score: float = Field(ge=FACE_MATCH_SCORE_MIN, le=FACE_MATCH_SCORE_MAX)
     scanned_at: datetime

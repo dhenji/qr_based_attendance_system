@@ -420,7 +420,8 @@ Two consequences worth knowing before deploying:
   student's excuse request never fails because mail is down — and a notice that
   fails to send is invisible to the sender. Grep the API log for
   `Email sent to=` when verifying a deployment. See
-  [production-checklist.md](../deployment/production-checklist.md#7-email--smtp).
+  [email-setup.md](../deployment/email-setup.md) for relay setup, log
+  markers, and the delivery-outage runbook.
 
 The four events above are the whole set. `quick_excuse`, `excuse_with_evidence`,
 `edit_excuse` and `revoke_excuse` send nothing: the professor already knows they

@@ -11,13 +11,15 @@ from features.course.exceptions import (
     CourseNotFoundException,
     EnrollmentNotFoundException,
     OfferingAssignmentNotFoundException,
+    ProfessorNotEligibleException,
+    InvalidEffectiveFromException,
     OfferingExistsException,
     OfferingNotFoundException,
     OfferingScheduleWindowException,
     WindowsExceedDurationException,
 )
 from features.course.model import Course, CourseOffering, OfferingComponent
-from features.course.schema import OfferingCreate, OfferingUpdate, ProfessorAssignment
+from features.course.schema import OfferingCreate, OfferingUpdate, ProfessorAssignment, ProfessorReassignment
 from features.course.service import CourseService, parse_enrollment_csv
 from features.course_professor.exceptions import OverlappingAssignmentException
 from features.course_professor.model import CourseProfessor
@@ -110,7 +112,6 @@ def _offering(**overrides):
         "semester": "1ST",
         "academic_year": "2026-2027",
         "sessions_per_week": 3,
-        "semester_weeks": 18,
         "schedule_days": "MWF",
         "schedule_start_time": time(9, 0),
         "schedule_end_time": time(10, 0),
@@ -216,7 +217,6 @@ def _assignment(**overrides):
         "effective_from": date(2026, 8, 1),
         "is_primary": True,
         "effective_to": None,
-        "semester": "1ST",
         "assigned_by": 99,
         "assigned_at": NOW,
     }
@@ -245,7 +245,6 @@ def _payload(**overrides):
         "semester": "1ST",
         "academic_year": "2026-2027",
         "sessions_per_week": 3,
-        "semester_weeks": 18,
         "schedule_days": "MWF",
         "schedule_start_time": time(9, 0),
         "schedule_end_time": time(10, 0),
@@ -282,11 +281,38 @@ def test_create_offering_ok() -> None:
     # returns [] for unregistered entities); DB-backed tests cover the
     # populated read below.
     assert read.components == []
-    assert read.session_types == []
+    # D95: with no component rows to read, the offering meets a lecture —
+    # that is what an offering without a configured meeting is.
+    assert read.session_types == ["lecture"]
     audit = session.added[2]
     assert audit.action == "create"
     assert audit.entity_type == "course_offering"
     assert audit.entity_id == read.id
+
+
+def test_create_offering_carries_the_radius_override() -> None:
+    """D93: the offering may override the app setting's geofence radius."""
+    session = _FakeSession(objs=(_course(), _program(), _year()), counts=[0])
+
+    read = _run(
+        CourseService(session).create_offering(
+            payload=_payload(default_classroom_radius_meters=75)
+        )
+    )
+
+    assert read.default_classroom_radius_meters == 75
+    offering = session.added[0]
+    assert offering.default_classroom_radius_meters == 75
+
+
+def test_create_offering_without_a_radius_inherits() -> None:
+    """D93: NULL means "inherit the app setting", not "50"."""
+    session = _FakeSession(objs=(_course(), _program(), _year()), counts=[0])
+
+    read = _run(CourseService(session).create_offering(payload=_payload()))
+
+    assert read.default_classroom_radius_meters is None
+    assert session.added[0].default_classroom_radius_meters is None
 
 
 def test_create_offering_duplicate_409() -> None:
@@ -459,6 +485,32 @@ def test_assign_professor_overlap_raises() -> None:
         raise AssertionError("expected OverlappingAssignmentException")
 
 
+def test_assign_professor_same_day_as_end_overlaps() -> None:
+    """An effective_to date is inclusive, so a new start on that day overlaps."""
+    existing = _assignment(effective_to=date(2026, 9, 1))
+    session = _FakeSession(
+        objs=(_offering(), _professor()),
+        rows={CourseProfessor: [existing]},
+    )
+    payload = ProfessorAssignment(
+        professor_id=7,
+        is_primary=True,
+        effective_from=date(2026, 9, 1),
+        semester="1ST",
+    )
+
+    try:
+        _run(
+            CourseService(session).assign_professor(
+                offering_id=10, payload=payload, assigned_by=99
+            )
+        )
+    except OverlappingAssignmentException as exc:
+        assert exc.code == "overlapping_assignment"
+    else:
+        raise AssertionError("expected OverlappingAssignmentException")
+
+
 def test_remove_professor_sets_today() -> None:
     session = _FakeSession(objs=(_offering(),), rows={CourseProfessor: [_assignment()]})
 
@@ -491,6 +543,170 @@ def test_remove_professor_missing_404() -> None:
         assert exc.code == "assignment_not_found"
     else:
         raise AssertionError("expected OfferingAssignmentNotFoundException")
+
+
+# -- reassignment ---------------------------------------------------------------
+
+
+def test_reassign_professor_ok() -> None:
+    session = _FakeSession(
+        objs=(
+            _offering(),
+            _professor(),
+            _professor(
+                id=8,
+                email="ada@example.com",
+                first_name="Ada",
+                last_name="Lovelace",
+            ),
+        ),
+        rows=[[_assignment()], [], []],
+    )
+
+    read = _run(
+        CourseService(session).reassign_professor(
+            offering_id=10,
+            old_professor_id=7,
+            payload=ProfessorReassignment(
+                new_professor_id=8,
+                effective_from=date(2026, 9, 1),
+            ),
+            assigned_by=99,
+        )
+    )
+
+    assert read.professor_id == 8
+    assert read.semester == "1ST"
+    assert read.assigned_by == 99
+
+    # Old assignment ended the day before the new one starts.
+    audit = session.added[-1]
+    assert isinstance(audit, AuditLog)
+    assert audit.action == AuditAction.REASSIGN
+    assert audit.old_value["professor_id"] == 7
+    assert audit.new_value["professor_id"] == 8
+
+
+def test_reassign_professor_missing_404() -> None:
+    session = _FakeSession(
+        objs=(_offering(), _professor()),
+        rows={CourseProfessor: []},
+    )
+
+    try:
+        _run(
+            CourseService(session).reassign_professor(
+                offering_id=10,
+                old_professor_id=7,
+                payload=ProfessorReassignment(new_professor_id=8),
+                assigned_by=99,
+            )
+        )
+    except OfferingAssignmentNotFoundException as exc:
+        assert exc.code == "assignment_not_found"
+    else:
+        raise AssertionError("expected OfferingAssignmentNotFoundException")
+
+
+def test_reassign_professor_same_professor_raises() -> None:
+    session = _FakeSession(
+        objs=(_offering(), _professor()),
+        rows={CourseProfessor: [_assignment()]},
+    )
+
+    try:
+        _run(
+            CourseService(session).reassign_professor(
+                offering_id=10,
+                old_professor_id=7,
+                payload=ProfessorReassignment(new_professor_id=7),
+                assigned_by=99,
+            )
+        )
+    except ProfessorNotEligibleException as exc:
+        assert exc.code == "professor_not_eligible"
+    else:
+        raise AssertionError("expected ProfessorNotEligibleException")
+
+
+def test_reassign_professor_inactive_raises() -> None:
+    session = _FakeSession(
+        objs=(
+            _offering(),
+            _professor(),
+            _professor(
+                id=8,
+                email="ada@example.com",
+                first_name="Ada",
+                last_name="Lovelace",
+                is_active=False,
+            ),
+        ),
+        rows={CourseProfessor: [_assignment()]},
+    )
+
+    try:
+        _run(
+            CourseService(session).reassign_professor(
+                offering_id=10,
+                old_professor_id=7,
+                payload=ProfessorReassignment(new_professor_id=8),
+                assigned_by=99,
+            )
+        )
+    except ProfessorNotEligibleException as exc:
+        assert exc.code == "professor_not_eligible"
+    else:
+        raise AssertionError("expected ProfessorNotEligibleException")
+
+
+def test_reassign_professor_invalid_effective_from_raises() -> None:
+    session = _FakeSession(
+        objs=(_offering(), _professor(), _professor(id=8)),
+        rows=[[_assignment()]],
+    )
+
+    try:
+        _run(
+            CourseService(session).reassign_professor(
+                offering_id=10,
+                old_professor_id=7,
+                payload=ProfessorReassignment(
+                    new_professor_id=8,
+                    effective_from=date(2026, 8, 1),
+                ),
+                assigned_by=99,
+            )
+        )
+    except InvalidEffectiveFromException as exc:
+        assert exc.code == "invalid_effective_from"
+    else:
+        raise AssertionError("expected InvalidEffectiveFromException")
+
+
+def test_reassign_professor_overlap_raises() -> None:
+    existing = _assignment(professor_id=8, effective_from=date(2026, 8, 15))
+    session = _FakeSession(
+        objs=(_offering(), _professor(), _professor(id=8)),
+        rows=[[_assignment()], [existing]],
+    )
+
+    try:
+        _run(
+            CourseService(session).reassign_professor(
+                offering_id=10,
+                old_professor_id=7,
+                payload=ProfessorReassignment(
+                    new_professor_id=8,
+                    effective_from=date(2026, 9, 1),
+                ),
+                assigned_by=99,
+            )
+        )
+    except OverlappingAssignmentException as exc:
+        assert exc.code == "overlapping_assignment"
+    else:
+        raise AssertionError("expected OverlappingAssignmentException")
 
 
 # -- bulk enroll ---------------------------------------------------------------

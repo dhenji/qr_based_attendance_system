@@ -2,10 +2,11 @@
 // Admin analytics state using Svelte 5 runes ($state object store).
 //
 // One region per tab (overview, comparison, trends, at-risk, export reads the
-// same loaded rows) plus the attendance-overview table and the dashboard
-// recent-scans feed. The filter rail writes `filters`; each tab loads through
-// the service on Apply so tables never disagree with the server. Metric
-// (compliance/participation, D36) is render-only — both rates ride every row.
+// same loaded rows) plus the attendance-overview table that backs the
+// Attendance tab and the dashboard's at-a-glance strip. The filter rail writes
+// `filters`; each tab loads through the service on Apply so tables never
+// disagree with the server. Metric (compliance/participation, D36) is
+// render-only — both rates ride every row.
 
 import type {
 	AdminAnalyticsFilters,
@@ -16,7 +17,6 @@ import type {
 	AttendanceOverviewFilters,
 	AttendanceOverviewItemResponse,
 	PromoteStagingResponse,
-	RecentScanResponse,
 	RiskRefreshResponse,
 	RiskStagingFilters,
 	RiskStagingItemResponse,
@@ -27,7 +27,6 @@ import {
 	getAnalyticsTrends,
 	getAtRisk,
 	getAttendanceOverview,
-	getRecentScans,
 	listRiskStaging,
 	promoteRiskStaging,
 	refreshRiskScores,
@@ -40,6 +39,9 @@ export const adminAnalyticsState = $state({
 	metric: 'compliance' as AnalyticsMetric,
 	overview: null as AnalyticsOverviewResponse | null,
 	comparison: [] as AnalyticsComparisonItemResponse[],
+	// Server `total` for the comparison page: when it exceeds `comparison.length`
+	// the tab shows a truncation hint rather than dropping cohorts silently.
+	comparisonTotal: 0,
 	trends: [] as AnalyticsTrendItemResponse[],
 	atRisk: [] as AnalyticsAtRiskItemResponse[],
 	loading: false,
@@ -67,12 +69,6 @@ export const adminStagingState = $state({
 	lastPromote: null as PromoteStagingResponse | null,
 });
 
-export const adminScansState = $state({
-	items: [] as RecentScanResponse[],
-	loading: false,
-	error: null as string | null,
-});
-
 const toMessage = (e: unknown, fallback: string) =>
 	e instanceof Error && e.message ? e.message : fallback;
 
@@ -93,7 +89,8 @@ export const applyAnalyticsFilters = async (filters: AdminAnalyticsFilters): Pro
 			getAtRisk(filters),
 		]);
 		adminAnalyticsState.overview = overview;
-		adminAnalyticsState.comparison = comparison;
+		adminAnalyticsState.comparison = comparison.items;
+		adminAnalyticsState.comparisonTotal = comparison.total;
 		adminAnalyticsState.trends = trends;
 		adminAnalyticsState.atRisk = atRisk;
 	} catch (e: unknown) {
@@ -144,10 +141,13 @@ export const promoteStaging = async (
 ): Promise<void> => {
 	adminAnalyticsState.actionError = null;
 	try {
-		// The POST honors semester scope only — program/year/risk/paging are
-		// list-side filters the backend ignores, so they stay out of the call.
+		// The POST honors the rail's program/year/course scope plus semester
+		// (#279); risk level / unpromoted_only / paging stay list-side.
 		adminStagingState.lastPromote = await promoteRiskStaging({
 			semester: listFilters.semester,
+			program_id: listFilters.program_id,
+			year_level_id: listFilters.year_level_id,
+			course_ids: listFilters.course_ids,
 		});
 		await Promise.all([
 			applyStagingFilters(listFilters),
@@ -172,18 +172,6 @@ export const initAttendanceOverview = async (
 		adminAttendanceState.error = toMessage(e, 'Failed to load attendance overview');
 	} finally {
 		adminAttendanceState.loading = false;
-	}
-};
-
-export const initRecentScans = async (limit = 10): Promise<void> => {
-	adminScansState.loading = true;
-	adminScansState.error = null;
-	try {
-		adminScansState.items = await getRecentScans(limit);
-	} catch (e: unknown) {
-		adminScansState.error = toMessage(e, 'Failed to load recent scans');
-	} finally {
-		adminScansState.loading = false;
 	}
 };
 

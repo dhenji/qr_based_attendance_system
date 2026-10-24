@@ -190,7 +190,7 @@
 			</div>
 			{#if securityError}<p class="error">{securityError}</p>{/if}
 			<div class="action-row">
-				<button class="btn" onclick={onSaveQuestion} disabled={questionBusy}>
+				<button class="btn" aria-busy={questionBusy} onclick={onSaveQuestion} disabled={questionBusy}>
 					{questionBusy ? 'Saving…' : 'Save'}
 				</button>
 				<button class="btn ghost" onclick={() => (questionOpen = false)}>Cancel</button>
@@ -208,7 +208,6 @@
 		gap: 1.25rem;
 		max-width: 720px;
 		margin-inline: auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {
@@ -281,7 +280,6 @@
 		padding: 0.5rem 1rem;
 		font-size: 0.875rem;
 		font-weight: 600;
-		font-family: system-ui, sans-serif;
 		cursor: pointer;
 	}
 
@@ -370,7 +368,6 @@
 		background: var(--bg-card);
 		color: var(--text-secondary);
 		font-size: 0.9375rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.field input:focus-visible,
@@ -388,7 +385,6 @@
 		color: var(--on-brand);
 		font-size: 0.9375rem;
 		font-weight: 700;
-		font-family: system-ui, sans-serif;
 		text-decoration: none;
 		cursor: pointer;
 		transition: background 0.15s ease, box-shadow 0.15s ease;

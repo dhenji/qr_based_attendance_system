@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -54,6 +56,35 @@ class Session(CreatedAtMixin, Base):
     late_window_minutes: Mapped[int] = mapped_column(Integer)
     scheduled_start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     scheduled_end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # D93: the scheduled start/end above carry the offering's plan, so a
+    # session that was rescheduled differs from the plan it departed from.
+    # This flag keeps the two distinguishable — in the read DTO, in the audit
+    # trail, and in the professor's form.
+    schedule_overridden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # D94: the start the professor actually opened the session at. It differs
+    # from `scheduled_start_time` whenever the class was rescheduled, and it
+    # is what "how late was the class" is measured against. The default only
+    # covers rows written straight to the table (the demo seed); the service
+    # always stamps it with its own clock.
+    actual_start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # D94: the start the session would have carried if the professor had not
+    # overridden it. Null when the session follows the plan — there
+    # `scheduled_start_time` already is that start — so the column only
+    # holds something when an override moved the class.
+    original_scheduled_start_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    # D94: why the professor moved the class, in their own words. Optional.
+    override_reason: Mapped[str | None] = mapped_column(String(255))
+    # D94: the account that opened the session. `professor_id` is the
+    # professor; this is the login behind it.
+    created_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
@@ -65,6 +96,19 @@ class Session(CreatedAtMixin, Base):
     # and callers that do not send a type keep working.
     session_type: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'lecture'")
+    )
+    # Whether this session is remote/online. Remote sessions skip the
+    # geofence (no classroom coordinates required) and are recorded as such
+    # so the anti-spoofing posture stays auditable.
+    is_remote: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Whether the geofence is enforced for this session. An explicit flag
+    # (default true) so an in-person session with no known classroom can
+    # disable the geofence without being mistaken for a misconfiguration or
+    # a remote session (D96). Stored and surfaced for audit/reporting.
+    geofence_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
     )
 
     @property

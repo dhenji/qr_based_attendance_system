@@ -13,6 +13,7 @@
 	import NotificationBell, {
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import {
 		getProfessorPendingCount,
 		maybeNotify,
@@ -21,6 +22,7 @@
 	} from '$lib/features/notifications/poll';
 	import { listExcuseRequests } from '$lib/features/excuse/service';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { NAV_ICONS, type NavItem } from '$lib/shared/constants/navIcons';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	let { children } = $props();
@@ -126,7 +128,7 @@
 
 	// Professor portal nav: Dashboard, My Courses, Sessions, History,
 	// Attendance, Excuses, Reports, Profile, and Settings are all live.
-	const navItems = [
+	const navItems: NavItem[] = [
 		{ label: 'Dashboard', path: Routes.PROFESSOR_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'My Courses', path: Routes.PROFESSOR_COURSES, enabled: true, icon: 'courses' },
 		{ label: 'Sessions', path: Routes.PROFESSOR_SESSIONS, enabled: true, icon: 'sessions' },
@@ -136,29 +138,10 @@
 		{ label: 'Reports', path: Routes.PROFESSOR_REPORTS, enabled: true, icon: 'reports' },
 		{ label: 'Profile', path: Routes.PROFESSOR_PROFILE, enabled: true, icon: 'profile' },
 		{ label: 'Settings', path: Routes.PROFESSOR_SETTINGS, enabled: true, icon: 'settings' },
-	] as const;
-
-	const iconPaths: Record<string, string> = {
-		dashboard:
-			'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-		courses:
-			'<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5Z"/>',
-		sessions:
-			'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4"/><path d="M3 10h18"/><path d="m9.5 15.5 1.8 1.8 3.4-3.6"/>',
-		history:
-			'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
-		attendance:
-			'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>',
-		excuses:
-			'<path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7l-4-4Z"/><path d="M14 3v4h4"/><path d="M12 11v6"/><path d="m9.8 13.2 2.2-2.2 2.2 2.2"/>',
-		reports:
-			'<path d="M4 20h16"/><path d="M7 20v-6"/><path d="M12 20V6"/><path d="M17 20v-9"/>',
-		profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
-		settings:
-			'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
-	};
+	];
 
 	let collapsed = $state(true);
+	let mobileOpen = $state(false);
 	let logoutOpen = $state(false);
 
 	const isActive = (path: string) => page.url.pathname === path;
@@ -182,8 +165,11 @@
 		<button
 			class="menu-btn"
 			aria-label="Toggle sidebar"
-			aria-expanded={!collapsed}
-			onclick={() => (collapsed = !collapsed)}
+			aria-expanded={mobileOpen || !collapsed}
+			onclick={() => {
+				if (window.matchMedia('(max-width: 640px)').matches) mobileOpen = !mobileOpen;
+				else collapsed = !collapsed;
+			}}
 		>
 			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
 				<path d="M4 6h16M4 12h16M4 18h16" />
@@ -223,16 +209,14 @@
 	</header>
 
 	{#if notifToast}
-		<p class="toast" role="status">
-			<span>{notifToast}</span>
-			<button type="button" onclick={() => (notifToast = null)} aria-label="Dismiss notification">
-				Dismiss
-			</button>
-		</p>
+		<Toast message={notifToast} onDismiss={() => (notifToast = null)} />
 	{/if}
 
 	<div class="body">
-		<aside class="sidebar" class:collapsed>
+		{#if mobileOpen}
+			<button type="button" class="drawer-backdrop" aria-label="Close sidebar" onclick={() => (mobileOpen = false)}></button>
+		{/if}
+		<aside class="sidebar" class:collapsed class:mobile-open={mobileOpen}>
 			{#each navItems as item (item.label)}
 				<a
 					class="nav-link"
@@ -240,9 +224,10 @@
 					href={item.path}
 					title={item.label}
 					aria-current={isActive(item.path) ? 'page' : undefined}
+					onclick={() => (mobileOpen = false)}
 				>
 					<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						{@html iconPaths[item.icon]}
+						{@html NAV_ICONS[item.icon]}
 					</svg>
 					<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
 				</a>
@@ -259,7 +244,7 @@
 	</div>
 </div>
 
-<svelte:window onkeydown={(e) => { if (logoutOpen && e.key === 'Escape') logoutOpen = false; }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') { mobileOpen = false; if (logoutOpen) logoutOpen = false; } }} />
 
 {#if logoutOpen}
 	<div class="modal-overlay" role="presentation">
@@ -284,7 +269,6 @@
 <style>
 	.shell {
 		min-height: 100vh;
-		font-family: system-ui, sans-serif;
 		background: var(--bg-page);
 		overflow-x: hidden;
 	}
@@ -321,30 +305,6 @@
 	.icon-btn:hover {
 		background: rgba(255, 255, 255, 0.1);
 		color: var(--on-brand);
-	}
-
-	.toast {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin: 0.75rem 1.5rem 0;
-		padding: 0.625rem 0.875rem;
-		border-radius: 8px;
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		box-shadow: var(--shadow-sm);
-		font-size: 0.875rem;
-		color: var(--text-strong);
-	}
-
-	.toast button {
-		border: 0;
-		background: none;
-		padding: 0;
-		color: var(--accent);
-		font: inherit;
-		font-weight: 600;
-		cursor: pointer;
 	}
 
 	.brand {
@@ -387,6 +347,10 @@
 
 	.logout:hover {
 		background: rgba(220, 38, 38, 0.25);
+	}
+
+	.drawer-backdrop {
+		display: none;
 	}
 
 	.body {
@@ -492,7 +456,6 @@
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		text-align: center;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {
@@ -520,7 +483,6 @@
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-weight: 600;
-		font-family: system-ui, sans-serif;
 		cursor: pointer;
 		transition: background 0.15s ease, color 0.15s ease;
 	}
@@ -551,6 +513,52 @@
 
 		.content {
 			padding: 1.25rem 1.25rem 2.5rem;
+		}
+
+		.drawer-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			background: var(--overlay);
+			z-index: 50;
+			border: 0;
+			padding: 0;
+			cursor: pointer;
+		}
+
+		.topbar {
+			min-height: 56px;
+		}
+
+		.sidebar {
+			position: fixed;
+			top: 56px;
+			left: 0;
+			bottom: 0;
+			z-index: 60;
+			transform: translateX(-100%);
+			transition: transform 0.2s ease;
+			box-shadow: var(--shadow-lg);
+		}
+
+		.sidebar,
+		.sidebar.collapsed {
+			width: 220px;
+		}
+
+		.sidebar .nav-label,
+		.sidebar .nav-label.hidden {
+			display: inline;
+			opacity: 1;
+		}
+
+		.sidebar .nav-link {
+			justify-content: flex-start;
+			padding: 0.625rem 0.75rem;
+		}
+
+		.sidebar.mobile-open {
+			transform: translateX(0);
 		}
 	}
 

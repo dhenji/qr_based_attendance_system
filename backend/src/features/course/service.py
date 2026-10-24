@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.course.exceptions import (
+    AssignmentAlreadyEndedException,
     ComponentExistsException,
     ComponentNotFoundException,
     CourseCodeExistsException,
@@ -17,6 +18,8 @@ from features.course.exceptions import (
     CourseNotFoundException,
     EnrollmentNotFoundException,
     OfferingAssignmentNotFoundException,
+    ProfessorNotEligibleException,
+    InvalidEffectiveFromException,
     OfferingExistsException,
     OfferingHasAssignmentsException,
     OfferingHasEnrollmentsException,
@@ -46,14 +49,22 @@ from features.course.schema import (
     OfferingRead,
     OfferingUpdate,
     ProfessorAssignment,
+    ProfessorReassignment,
+    ProfessorReopen,
     RosterItem,
 )
-from features.course_professor.exceptions import OverlappingAssignmentException
+from features.course_professor.exceptions import (
+    AssignmentHasSessionsException,
+    AssignmentNotEndedException,
+    AssignmentReopenConflictException,
+    OverlappingAssignmentException,
+)
 from features.course_professor.model import CourseProfessor
 from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
 from features.professor.exceptions import ProfessorNotFoundException
 from features.professor.model import Professor
+from features.session.exceptions import LabCoordinatesRequiredException
 from features.session.model import Session
 from features.program.exceptions import (
     ProgramNotFoundException,
@@ -76,7 +87,13 @@ from shared.csv_import import (
 from shared.enums import AuditAction, AuditEntity, SessionType
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
-from shared.schedule import distinct_day_count, meeting_minutes
+from shared.schedule import (
+    distinct_day_count,
+    meeting_length_minutes,
+    meeting_minutes,
+    openable_session_types,
+    term_weeks,
+)
 from features.course.constants import (
     CODE_MAX_LENGTH,
     CODE_MIN_LENGTH,
@@ -555,6 +572,13 @@ class CourseService:
             course,
             payload.default_present_window_minutes,
             payload.default_late_window_minutes,
+            meeting_minutes=self._shortest_meeting_minutes(
+                [
+                    (component.schedule_start_time, component.schedule_end_time)
+                    for component in payload.components or []
+                ]
+                or [(payload.schedule_start_time, payload.schedule_end_time)]
+            ),
         )
         await self._require_no_duplicate_offering(payload)
         if payload.components:
@@ -698,10 +722,24 @@ class CourseService:
             setattr(offering, field, value)
 
         course: Course = await self._get_or_404(offering.course_id)
+        # The session inherits its duration from the meeting it belongs to
+        # (D93), so the windows are budgeted against that meeting's length —
+        # the components when there are any, the offering's own schedule when
+        # there are none.
+        components: Sequence[OfferingComponent] = await self._active_components(
+            offering.id
+        )
         self._check_windows(
             course,
             offering.default_present_window_minutes,
             offering.default_late_window_minutes,
+            meeting_minutes=self._shortest_meeting_minutes(
+                [
+                    (component.schedule_start_time, component.schedule_end_time)
+                    for component in components
+                ]
+                or [(start, end)]
+            ),
         )
 
         await self._session.flush()
@@ -803,7 +841,7 @@ class CourseService:
     # -- professor assignments -------------------------------------------
 
     async def list_assignments(self, *, offering_id: int) -> Sequence[AssignmentRead]:
-        await self._get_offering_or_404(offering_id)
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
 
         rows: Sequence[CourseProfessor] = (
             await self._session.scalars(
@@ -813,7 +851,70 @@ class CourseService:
             )
         ).all()
 
-        return [AssignmentRead.model_validate(row) for row in rows]
+        # One extra query rather than one per assignment: the admin table needs
+        # to know which rows are protected by session history. `Session.created_at`
+        # is the authorization timestamp (not `scheduled_start_time`), so the
+        # same rule decides the flag and the permanent-remove guard.
+        sessions_by_professor: dict[int, list[datetime]] = {}
+        if rows:
+            session_rows = (
+                await self._session.execute(
+                    select(Session.professor_id, Session.created_at).where(
+                        Session.offering_id == offering_id
+                    )
+                )
+            ).all()
+            for professor_id, created_at in session_rows:
+                sessions_by_professor.setdefault(professor_id, []).append(created_at)
+
+        result: list[AssignmentRead] = []
+        for row in rows:
+            read = AssignmentRead.model_validate(row)
+            read.semester = offering.semester
+            start, end = self._assignment_window(row)
+            read.has_sessions = any(
+                self._session_in_assignment_window(created_at, start, end)
+                for created_at in sessions_by_professor.get(row.professor_id, [])
+            )
+            result.append(read)
+        return result
+
+    @staticmethod
+    def _assignment_window(
+        row: CourseProfessor,
+    ) -> tuple[datetime, datetime | None]:
+        """UTC half-open window in which an assignment authorizes sessions."""
+        start = datetime.combine(row.effective_from, time.min).replace(
+            tzinfo=timezone.utc
+        )
+        end = (
+            datetime.combine(
+                row.effective_to + timedelta(days=1), time.min
+            ).replace(tzinfo=timezone.utc)
+            if row.effective_to is not None
+            else None
+        )
+        return start, end
+
+    @staticmethod
+    def _session_in_assignment_window(
+        created_at: datetime, start: datetime, end: datetime | None
+    ) -> bool:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        return created_at >= start and (end is None or created_at < end)
+
+    async def _assignment_has_sessions(self, row: CourseProfessor) -> bool:
+        start, end = self._assignment_window(row)
+        stmt = select(Session.id).where(
+            Session.offering_id == row.offering_id,
+            Session.professor_id == row.professor_id,
+            Session.created_at >= start,
+        )
+        if end is not None:
+            stmt = stmt.where(Session.created_at < end)
+
+        return (await self._session.scalar(stmt.limit(1))) is not None
 
     async def assign_professor(
         self,
@@ -822,10 +923,13 @@ class CourseService:
         payload: ProfessorAssignment,
         assigned_by: int,
     ) -> AssignmentRead:
-        await self._get_offering_or_404(offering_id)
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
 
-        if await self._session.get(Professor, payload.professor_id) is None:
+        professor: Professor | None = await self._session.get(Professor, payload.professor_id)
+        if professor is None:
             raise ProfessorNotFoundException(payload.professor_id)
+        if not professor.is_active:
+            raise ProfessorNotEligibleException(payload.professor_id)
 
         overlap_service = CourseProfessorService(self._session)
         overlap: list[CourseProfessor] = await overlap_service.check_overlap(
@@ -846,13 +950,19 @@ class CourseService:
                 existing.effective_to,
             )
 
+        if payload.is_primary:
+            await overlap_service.ensure_primary_available(
+                offering_id,
+                payload.effective_from,
+                payload.effective_to,
+            )
+
         record = CourseProfessor(
             offering_id=offering_id,
             professor_id=payload.professor_id,
             is_primary=payload.is_primary,
             effective_from=payload.effective_from,
             effective_to=payload.effective_to,
-            semester=payload.semester,
             assigned_by=assigned_by,
         )
         self._session.add(record)
@@ -869,47 +979,356 @@ class CourseService:
 
         return AssignmentRead.model_validate(record)
 
+    async def _get_assignment_row(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        today: date,
+        effective_from: date | None = None,
+    ) -> CourseProfessor:
+        """Return exactly one assignment row.
+
+        The composite primary key is (offering_id, professor_id,
+        effective_from), so the start date is the only unambiguous selector.
+        Without it, prefer the open-ended row (the one the admin UI exposes
+        actions on), then the newest row that has not ended. Never use
+        `.one_or_none()` here: historical and future rows legitimately coexist.
+        """
+        stmt = select(CourseProfessor).where(
+            CourseProfessor.offering_id == offering_id,
+            CourseProfessor.professor_id == professor_id,
+        )
+        if effective_from is not None:
+            stmt = stmt.where(CourseProfessor.effective_from == effective_from)
+        else:
+            stmt = stmt.where(
+                (CourseProfessor.effective_to.is_(None))
+                | (CourseProfessor.effective_to >= today)
+            ).order_by(CourseProfessor.effective_from.desc())
+
+        rows: Sequence[CourseProfessor] = (
+            await self._session.scalars(stmt)
+        ).all()
+
+        if not rows:
+            raise OfferingAssignmentNotFoundException(offering_id, professor_id)
+
+        if effective_from is not None:
+            return rows[0]
+
+        for row in rows:
+            if row.effective_to is None:
+                return row
+        return rows[0]
+
     async def remove_professor(
-        self, *, offering_id: int, professor_id: int, actor_id: int | None = None
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        actor_id: int | None = None,
+        effective_from: date | None = None,
     ) -> date:
         await self._get_offering_or_404(offering_id)
 
         today: date = date.today()
-        row: CourseProfessor | None = (
-            await self._session.scalars(
-                select(CourseProfessor)
-                .where(
-                    CourseProfessor.offering_id == offering_id,
-                    CourseProfessor.professor_id == professor_id,
-                    (
-                        (CourseProfessor.effective_to.is_(None))
-                        | (CourseProfessor.effective_to >= today)
-                    ),
-                )
-                .order_by(CourseProfessor.effective_from.desc())
-            )
-        ).one_or_none()
-
-        if row is None:
-            raise OfferingAssignmentNotFoundException(offering_id, professor_id)
+        row: CourseProfessor = await self._get_assignment_row(
+            offering_id=offering_id,
+            professor_id=professor_id,
+            today=today,
+            effective_from=effective_from,
+        )
 
         old_value: dict[str, Any] = self._assignment_snapshot(row)
-        row.effective_to = today
-        await self._session.flush()
 
-        # Effective-dated rather than deleted: the row stays as the record that
-        # the professor taught the offering until this date.
+        # A future-dated assignment never took effect. Cancel it by deleting
+        # the row: writing effective_to=today would invert the date range
+        # (start tomorrow, end today).
+        if row.effective_from > today:
+            await self._session.delete(row)
+            await self._session.flush()
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.UNASSIGN,
+                entity_type=AuditEntity.COURSE_PROFESSOR,
+                entity_id=None,
+                old_value=old_value,
+            )
+            return today
+
+        if row.effective_to is not None and row.effective_to < today:
+            raise AssignmentAlreadyEndedException(
+                offering_id, professor_id, row.effective_from
+            )
+
+        if row.effective_to != today:
+            row.effective_to = today
+            await self._session.flush()
+
+            # Effective-dated rather than deleted: the row stays as the record
+            # that the professor taught the offering until this date.
+            await record_audit(
+                self._session,
+                actor_id=actor_id,
+                action=AuditAction.UNASSIGN,
+                entity_type=AuditEntity.COURSE_PROFESSOR,
+                entity_id=None,
+                old_value=old_value,
+                new_value=self._assignment_snapshot(row),
+            )
+
+        return today
+
+    async def permanently_remove_professor(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        effective_from: date,
+        actor_id: int | None = None,
+    ) -> None:
+        """Erase an assignment row that was ended and never opened a session.
+
+        This is a narrow correction path, not a replacement for End: the admin
+        must End the assignment first, so a live assignment cannot be erased in
+        one step. The effective window is required because the composite primary
+        key has no surrogate id; without it the wrong historical row could be
+        deleted.
+        """
+        await self._get_offering_or_404(offering_id)
+
+        today: date = date.today()
+        row: CourseProfessor = await self._get_assignment_row(
+            offering_id=offering_id,
+            professor_id=professor_id,
+            today=today,
+            effective_from=effective_from,
+        )
+
+        # "Ended" means the end date has arrived: End stamps today, and any
+        # later end date is still a live assignment that must be End-ed first.
+        if row.effective_to is None or row.effective_to > today:
+            raise AssignmentNotEndedException(
+                offering_id, professor_id, row.effective_from
+            )
+
+        if await self._assignment_has_sessions(row):
+            raise AssignmentHasSessionsException(
+                offering_id, professor_id, row.effective_from
+            )
+
+        # Snapshot before the delete: the instance is detached once flushed.
+        old_value: dict[str, Any] = self._assignment_snapshot(row)
+
         await record_audit(
             self._session,
             actor_id=actor_id,
-            action=AuditAction.UNASSIGN,
+            action=AuditAction.DELETE,
+            entity_type=AuditEntity.COURSE_PROFESSOR,
+            entity_id=None,
+            old_value=old_value,
+        )
+
+        await self._session.delete(row)
+        await self._session.flush()
+
+    async def reassign_professor(
+        self,
+        *,
+        offering_id: int,
+        old_professor_id: int,
+        payload: ProfessorReassignment,
+        assigned_by: int,
+    ) -> AssignmentRead:
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+
+        today: date = date.today()
+        old_row: CourseProfessor = await self._get_assignment_row(
+            offering_id=offering_id,
+            professor_id=old_professor_id,
+            today=today,
+            effective_from=payload.old_effective_from,
+        )
+
+        # A started assignment that already ended cannot be reassigned: doing
+        # so would either extend it or rewrite history.
+        if (
+            old_row.effective_from <= today
+            and old_row.effective_to is not None
+            and old_row.effective_to < today
+        ):
+            raise AssignmentAlreadyEndedException(
+                offering_id, old_professor_id, old_row.effective_from
+            )
+
+        new_professor_id: int = payload.new_professor_id
+        if new_professor_id == old_professor_id:
+            raise ProfessorNotEligibleException(new_professor_id)
+
+        new_professor: Professor | None = await self._session.get(
+            Professor, new_professor_id
+        )
+        if new_professor is None:
+            raise ProfessorNotFoundException(new_professor_id)
+        if not new_professor.is_active:
+            raise ProfessorNotEligibleException(new_professor_id)
+
+        effective_from: date = payload.effective_from or today
+        effective_to: date | None = payload.effective_to
+
+        # A future assignment has not started, so the replacement may begin on
+        # the same day. A started assignment must be replaced by a later date.
+        if old_row.effective_from <= today:
+            if effective_from <= old_row.effective_from:
+                raise InvalidEffectiveFromException(offering_id, old_professor_id)
+        elif effective_from < old_row.effective_from:
+            raise InvalidEffectiveFromException(offering_id, old_professor_id)
+
+        overlap_service = CourseProfessorService(self._session)
+        overlap: list[CourseProfessor] = await overlap_service.check_overlap(
+            offering_id,
+            new_professor_id,
+            effective_from,
+            effective_to,
+        )
+
+        if overlap:
+            existing: CourseProfessor = overlap[0]
+            raise OverlappingAssignmentException(
+                offering_id,
+                new_professor_id,
+                effective_from,
+                effective_to,
+                existing.effective_from,
+                existing.effective_to,
+            )
+
+        old_is_primary: bool = old_row.is_primary
+        is_primary: bool = (
+            payload.is_primary if payload.is_primary is not None else old_is_primary
+        )
+
+        if is_primary:
+            await overlap_service.ensure_primary_available(
+                offering_id,
+                effective_from,
+                effective_to,
+                exclude=old_row,
+            )
+
+        old_value: dict[str, Any] = self._assignment_snapshot(old_row)
+
+        if old_row.effective_from > today and effective_from == old_row.effective_from:
+            # Same-day replacement of a scheduled assignment: it never took
+            # effect, so there is no history to keep.
+            await self._session.delete(old_row)
+        else:
+            old_row.effective_to = effective_from - timedelta(days=1)
+        await self._session.flush()
+
+        record = CourseProfessor(
+            offering_id=offering_id,
+            professor_id=new_professor_id,
+            is_primary=is_primary,
+            effective_from=effective_from,
+            effective_to=effective_to,
+            assigned_by=assigned_by,
+        )
+        self._session.add(record)
+        await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=assigned_by,
+            action=AuditAction.REASSIGN,
+            entity_type=AuditEntity.COURSE_PROFESSOR,
+            entity_id=None,
+            old_value=old_value,
+            new_value=self._assignment_snapshot(record),
+        )
+
+        read = AssignmentRead.model_validate(record)
+        read.semester = offering.semester
+        return read
+
+    async def reopen_professor(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        payload: ProfessorReopen,
+        actor_id: int,
+    ) -> AssignmentRead:
+        """Undo an accidental End by clearing the exact assignment's end date.
+
+        Reopening is only safe when no later assignment exists for the same
+        professor and offering: the reopened row is open-ended, so a later
+        range would overlap it. The caller must end/change that later row first.
+        """
+        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+
+        row: CourseProfessor = await self._get_assignment_row(
+            offering_id=offering_id,
+            professor_id=professor_id,
+            today=date.today(),
+            effective_from=payload.effective_from,
+        )
+
+        if row.effective_to is None:
+            raise AssignmentNotEndedException(
+                offering_id, professor_id, row.effective_from
+            )
+
+        later: CourseProfessor | None = await self._session.scalar(
+            select(CourseProfessor)
+            .where(
+                CourseProfessor.offering_id == offering_id,
+                CourseProfessor.professor_id == professor_id,
+                CourseProfessor.effective_from > row.effective_from,
+            )
+            .order_by(CourseProfessor.effective_from)
+            .limit(1)
+        )
+        if later is not None:
+            raise AssignmentReopenConflictException(
+                offering_id,
+                professor_id,
+                row.effective_from,
+                later.effective_from,
+            )
+
+        is_primary: bool = (
+            payload.is_primary if payload.is_primary is not None else row.is_primary
+        )
+        if is_primary:
+            await CourseProfessorService(self._session).ensure_primary_available(
+                offering_id,
+                row.effective_from,
+                None,
+                exclude=row,
+            )
+
+        old_value: dict[str, Any] = self._assignment_snapshot(row)
+        row.effective_to = None
+        row.is_primary = is_primary
+        await self._session.flush()
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.REOPEN,
             entity_type=AuditEntity.COURSE_PROFESSOR,
             entity_id=None,
             old_value=old_value,
             new_value=self._assignment_snapshot(row),
         )
 
-        return today
+        read = AssignmentRead.model_validate(row)
+        read.semester = offering.semester
+        read.has_sessions = await self._assignment_has_sessions(row)
+        return read
 
     @staticmethod
     def _assignment_snapshot(record: CourseProfessor) -> dict[str, Any]:
@@ -1198,6 +1617,19 @@ class CourseService:
         if year_level is None or year_level.program_id != program_id:
             raise YearLevelNotFoundException(year_level_id, program_id)
 
+    async def _term_weeks(self, offering: CourseOffering) -> int:
+        """Session weeks for an offering's (year level, term) — derived (D86).
+
+        `semester` is free text, so an unmatched or orphaned code resolves to
+        the shared default rather than raising.
+        """
+        year_level: YearLevel | None = await self._session.get(
+            YearLevel, offering.year_level_id
+        )
+        structure = year_level.term_structure if year_level is not None else None
+
+        return term_weeks(structure, offering.semester)
+
     async def _require_no_duplicate_offering(self, payload: OfferingCreate) -> None:
         if (
             await self._offerings.get_by(
@@ -1279,7 +1711,7 @@ class CourseService:
             semester=offering.semester,
             academic_year=offering.academic_year,
             sessions_per_week=offering.sessions_per_week,
-            semester_weeks=offering.semester_weeks,
+            semester_weeks=await self._term_weeks(offering),
             schedule_days=offering.schedule_days,
             schedule_start_time=offering.schedule_start_time,
             schedule_end_time=offering.schedule_end_time,
@@ -1288,8 +1720,14 @@ class CourseService:
             classroom_lng=offering.classroom_lng,
             default_present_window_minutes=offering.default_present_window_minutes,
             default_late_window_minutes=offering.default_late_window_minutes,
+            default_classroom_radius_meters=offering.default_classroom_radius_meters,
             enrolled_count=await self._enrollment_count(offering.id),
-            session_types=sorted({row.session_type for row in components}),
+            # D95: the types this offering can open. The shared helper owns
+            # the rule, so the badge here and the professor's course list
+            # cannot disagree.
+            session_types=openable_session_types(
+                row.session_type for row in components
+            ),
             components=reads,
             is_active=offering.is_active,
             created_at=offering.created_at,
@@ -1341,6 +1779,10 @@ class CourseService:
             payload.schedule_end_time,
         )
         _check_weekly_hours(course, new_total, old_total)
+        if payload.session_type == SessionType.LAB and (
+            payload.classroom_lat is None or payload.classroom_lng is None
+        ):
+            raise LabCoordinatesRequiredException()
         row: OfferingComponent = await self._insert_component(
             offering=offering, payload=payload
         )
@@ -1351,8 +1793,11 @@ class CourseService:
             self._session,
             actor_id=actor_id,
             action=AuditAction.CREATE,
-            entity_type=AuditEntity.COURSE_OFFERING,
-            entity_id=offering.id,
+            # The component's own id, not the offering's: `entity_id` points
+            # into the table the entity type names, and a component has an id
+            # of its own (ADR-086).
+            entity_type=AuditEntity.OFFERING_COMPONENT,
+            entity_id=row.id,
             new_value=self._component_snapshot(row),
         )
 
@@ -1382,6 +1827,13 @@ class CourseService:
             raise OfferingScheduleWindowException()
 
         merged_days = changes.get("schedule_days", row.schedule_days)
+        # Laboratory meetings must carry coordinates (D77): the geofence is
+        # mandatory for labs, so clearing them on a lab row is refused.
+        if row.session_type == SessionType.LAB.value:
+            merged_lat = changes.get("classroom_lat", row.classroom_lat)
+            merged_lng = changes.get("classroom_lng", row.classroom_lng)
+            if merged_lat is None or merged_lng is None:
+                raise LabCoordinatesRequiredException()
         # Reshape edits on active rows are unconstrained: a multi-step
         # schedule change (shrink one meeting, add another) necessarily passes
         # through a mismatched total no single write could land exactly on,
@@ -1421,8 +1873,8 @@ class CourseService:
             self._session,
             actor_id=actor_id,
             action=AuditAction.UPDATE,
-            entity_type=AuditEntity.COURSE_OFFERING,
-            entity_id=offering_id,
+            entity_type=AuditEntity.OFFERING_COMPONENT,
+            entity_id=row.id,
             old_value=old_value,
             new_value=self._component_snapshot(row),
         )
@@ -1446,8 +1898,8 @@ class CourseService:
             self._session,
             actor_id=actor_id,
             action=AuditAction.ARCHIVE,
-            entity_type=AuditEntity.COURSE_OFFERING,
-            entity_id=offering_id,
+            entity_type=AuditEntity.OFFERING_COMPONENT,
+            entity_id=row.id,
             old_value=old_value,
             new_value=self._component_snapshot(row),
         )
@@ -1577,7 +2029,6 @@ class CourseService:
             "semester": offering.semester,
             "academic_year": offering.academic_year,
             "sessions_per_week": offering.sessions_per_week,
-            "semester_weeks": offering.semester_weeks,
             "schedule_days": offering.schedule_days,
             "schedule_start_time": offering.schedule_start_time.isoformat(),
             "schedule_end_time": offering.schedule_end_time.isoformat(),
@@ -1586,12 +2037,53 @@ class CourseService:
             "classroom_lng": offering.classroom_lng,
             "default_present_window_minutes": offering.default_present_window_minutes,
             "default_late_window_minutes": offering.default_late_window_minutes,
+            "default_classroom_radius_meters": offering.default_classroom_radius_meters,
             "is_active": offering.is_active,
         }
 
     @staticmethod
-    def _check_windows(course: Course, present_minutes: int, late_minutes: int) -> None:
+    def _shortest_meeting_minutes(rows: Sequence[tuple[time, time]]) -> int:
+        """The shortest meeting length in `rows`; 0 when there are none.
+
+        A session inherits its duration from one meeting, so the windows have
+        to fit inside the *shortest* one — a mixed offering with a 90-minute
+        lecture and a 45-minute lab budgets against the lab (D93).
+        """
+        lengths = [
+            meeting_length_minutes(start, end) for start, end in rows
+        ]
+
+        return min(lengths) if lengths else 0
+
+    @staticmethod
+    def _check_windows(
+        course: Course,
+        present_minutes: int | None,
+        late_minutes: int | None,
+        *,
+        meeting_minutes: int | None = None,
+    ) -> None:
+        """The windows must fit inside the session they are opened against.
+
+        The budget is the course template's `session_duration_hours`, and —
+        since D93 — the offering's own meeting length when it is shorter. A
+        session inherits its duration from the meeting it belongs to, so
+        windows that do not fit inside that meeting could never open one:
+        the session-open path would refuse with `windows_exceed_duration`
+        long after the administrator had configured them. Catching it here
+        is what keeps an offering openable.
+
+        NULL windows are skipped: they mean "follow the system default"
+        (D93), so the offering has no window of its own to judge — the
+        effective value is checked when a session is opened.
+        """
+        if present_minutes is None or late_minutes is None:
+            return
+
         duration_minutes: float = float(course.session_duration_hours) * 60
+
+        if meeting_minutes:
+            duration_minutes = min(duration_minutes, float(meeting_minutes))
 
         if present_minutes + late_minutes > duration_minutes:
             raise WindowsExceedDurationException(

@@ -501,9 +501,19 @@ class AttendanceService:
         if existing is not None:
             raise DuplicateScanException(student_id, session_id)
 
-    def _validate_geofence(self, session: Session, gps: GPSInput) -> None:
+    def _validate_geofence(self, session: Session, gps: GPSInput | None) -> None:
+        if not getattr(session, "geofence_enabled", True):
+            return
+
         if session.classroom_lat is None or session.classroom_lng is None:
             return
+
+        # A session that requires a geofence cannot be validated without a
+        # position; treat a missing fix as "outside" rather than crashing.
+        if gps is None:
+            raise OutsideGeofenceException(
+                float("inf"), session.classroom_radius_meters
+            )
 
         distance: float = _haversine_distance(
             gps.lat, gps.lng, session.classroom_lat, session.classroom_lng
@@ -567,13 +577,15 @@ class AttendanceService:
             student_id=student_id,
             session_id=session_id,
             timestamp=scanned_at,
-            gps_lat=payload.gps.lat,
-            gps_lng=payload.gps.lng,
+            gps_lat=(payload.gps.lat if payload.gps is not None else None),
+            gps_lng=(payload.gps.lng if payload.gps is not None else None),
             validation_status=status,
             original_status=original_status,
             sync_status=SyncStatus.SYNCED.value,
             liveness_evidence=self._build_evidence(
-                payload.liveness_evidence, payload.gps.accuracy, review
+                payload.liveness_evidence,
+                (payload.gps.accuracy if payload.gps is not None else 0.0),
+                review,
             ),
             face_match_score=Decimal(str(payload.face_match_score)),
             scanned_via=payload.scanned_via.value,
@@ -1192,7 +1204,7 @@ class AttendanceService:
         enrolled_by_offering: dict[int, set[int]] = (
             await self._overview_enrollments(offering_ids)
         )
-        tallies: Counter[int] = await self._overview_present_counts(
+        tallies: dict[int, Counter[str]] = await self._overview_tallies(
             [row.id for row in sessions]
         )
         enrolled_by_session: dict[int, int] = {
@@ -1233,10 +1245,13 @@ class AttendanceService:
             expected: int = sum(
                 enrolled_by_session.get(row.id, 0) for row in course_sessions
             )
-            present: int = sum(tallies.get(row.id, 0) for row in course_sessions)
-            avg_rate: float = (
-                round(present / expected, 4) if expected > 0 else 0.0
+            present, late, excused = self._overview_status_counts(
+                course_sessions, tallies
             )
+            # One rate definition (shared.rates): compliance is present/expected.
+            avg_rate: float = attendance_rates(
+                present=present, late=late, excused=excused, enrolled=expected
+            )[0]
 
             items.append(
                 OverviewItem(
@@ -1311,30 +1326,47 @@ class AttendanceService:
 
         return grouped
 
-    async def _overview_present_counts(
+    async def _overview_tallies(
         self, session_ids: list[int]
-    ) -> Counter[int]:
-        """Present-scan counts keyed by session id."""
+    ) -> dict[int, Counter[str]]:
+        """Validation-status counts keyed by session id."""
         if not session_ids:
-            return Counter()
+            return {}
 
-        rows: Sequence[tuple[int, int]] = (
+        rows: Sequence[tuple[int, str, int]] = (
             await self._session.execute(
-                select(Attendance.session_id, func.count())
-                .where(Attendance.session_id.in_(session_ids))
-                .where(
-                    Attendance.validation_status == ValidationStatus.PRESENT.value
+                select(
+                    Attendance.session_id,
+                    Attendance.validation_status,
+                    func.count(),
                 )
-                .group_by(Attendance.session_id)
+                .where(Attendance.session_id.in_(session_ids))
+                .group_by(Attendance.session_id, Attendance.validation_status)
             )
         ).all()  # type: ignore[assignment]
 
-        return Counter({session_id: count for session_id, count in rows})
+        tallies: dict[int, Counter[str]] = {}
+        for session_id, status, count in rows:
+            tallies.setdefault(session_id, Counter())[status] = count
+        return tallies
 
     @staticmethod
+    def _overview_status_counts(
+        ordered: Sequence[Session], tallies: dict[int, Counter[str]]
+    ) -> tuple[int, int, int]:
+        """Present/late/excused totals across a set of sessions."""
+        present = late = excused = 0
+        for row in ordered:
+            session_tally = tallies.get(row.id, Counter())
+            present += session_tally.get(ValidationStatus.PRESENT.value, 0)
+            late += session_tally.get(ValidationStatus.LATE.value, 0)
+            excused += session_tally.get(ValidationStatus.EXCUSED.value, 0)
+        return present, late, excused
+
     def _overview_trend(
+        self,
         ordered: list[Session],
-        present_by_session: Counter[int],
+        tallies: dict[int, Counter[str]],
         enrolled_by_session: dict[int, int],
     ) -> str:
         """Half-split trend: second-half compliance vs first-half compliance."""
@@ -1343,24 +1375,18 @@ class AttendanceService:
 
         mid: int = len(ordered) // 2
 
-        def _rate(session_ids: list[int]) -> float:
-            expected: int = sum(
-                enrolled_by_session.get(session_id, 0)
-                for session_id in session_ids
+        def _rate(rows: list[Session]) -> float:
+            enrolled: int = sum(
+                enrolled_by_session.get(row.id, 0) for row in rows
             )
+            present, late, excused = self._overview_status_counts(rows, tallies)
+            return attendance_rates(
+                present=present, late=late, excused=excused, enrolled=enrolled
+            )[0]
 
-            if expected <= 0:
-                return 0.0
-
-            present: int = sum(
-                present_by_session.get(session_id, 0) for session_id in session_ids
-            )
-
-            return present / expected
-
-        first_ids: list[int] = [row.id for row in ordered[:mid]]
-        second_ids: list[int] = [row.id for row in ordered[mid:]]
-        diff: float = _rate(second_ids) - _rate(first_ids)
+        first: list[Session] = ordered[:mid]
+        second: list[Session] = ordered[mid:]
+        diff: float = _rate(second) - _rate(first)
 
         if diff > OVERVIEW_TREND_EPSILON:
             return "up"

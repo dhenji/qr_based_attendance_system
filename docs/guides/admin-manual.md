@@ -96,7 +96,7 @@ An _offering_ is a specific instance of a course for a program, year level, and 
 | `semester`                                           | Term (e.g., 1st Sem)                     |
 | `academic_year`                                      | Academic year (e.g., 2025–2026)          |
 | `sessions_per_week`                                  | Meetings per week — counted automatically, one per meeting day (D80) |
-| `semester_weeks`                                     | Weeks in the semester                    |
+| `semester_weeks`                                     | Read-only — the term's session length (set per term in _Manage Terms_, D86) |
 | `schedule_days`                                      | Pattern (e.g., `MWF`, `TTH`)             |
 | `schedule_start_time` / `schedule_end_time`          | Class times                              |
 | `classroom_name` / `classroom_lat` / `classroom_lng` | Default _geofence_ center                |
@@ -203,7 +203,9 @@ first_name, middle_name, last_name, email, department
 
 ### 5.1 Accessing Analytics — `/admin/analytics`
 
-[FIG: Analytics & Reports with left filter rail (Program ▸ Year ▸ Term ▸ Courses ▸ Date Range ▸ Granularity), five tabs: Overview, Course Comparison, Trends, At-Risk, Export]
+[FIG: Analytics & Reports with left filter rail (Program ▸ Year ▸ Term ▸ Courses ▸ Date Range ▸ Granularity), seven tabs: Overview, Course Comparison, Trends, At-Risk, Staging, Attendance, Export]
+
+> The **Attendance** tab keeps its own Course ▸ Professor ▸ Date filter row and hides the analytics filter rail — its slice is per course/professor, not per program/year/term ([ADR-083](../project/decision-log.md)).
 
 ### 5.2 Filter Rail (Cascading Filters)
 
@@ -261,6 +263,22 @@ KPI cards: Total Students, Active Sessions, Avg Compliance Rate, Avg Participati
 
 - Computed nightly via batch job (02:00 default, configurable via `RISK_BATCH_CRON`)
 - **[Refresh Risk Scores]** triggers manual recomputation (admin-only)
+
+#### Staging Tab
+
+Dry-run review of staged risk scores: promote or discard batches before they affect the At-Risk tab.
+
+#### Attendance Tab
+
+Per-course attendance snapshot (wireframe 4.6), relocated here from the old `/admin/attendance` page ([ADR-083](../project/decision-log.md)).
+
+- **Filters**: Course ▸ Professor ▸ Date From / Date To (each change re-runs the snapshot)
+- **Sortable columns**: Course, Sessions, Avg (compliance), Trend
+- **Trend** compares second-half against first-half compliance of the filtered sessions (`↑` rising · `→` flat · `↓` falling)
+- Course codes deep-link to the course detail page
+- **[Print]** prints the on-screen table · **[Export Overview]** downloads CSV for the current filters (server-first, falling back to the on-screen rows)
+
+> Deep link: `/admin/analytics?tab=attendance` — the dashboard's "Attendance at a glance" strip links here.
 
 #### Export Tab
 
@@ -346,7 +364,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | ------------------------ | ------------------------------------- | ----------------------------------------------------- |
 | **Student Management**   | `/admin/students`                     | CRUD, search, deactivate, reset password, archive     |
 | **Professor Management** | `/admin/professors`                   | CRUD, course assignment, claim status                 |
-| **Attendance Overview**  | `/admin/attendance/overview`          | Cross-course attendance summary                       |
+| **Attendance Snapshot**  | `/admin/analytics?tab=attendance`     | Cross-course attendance summary (Analytics → Attendance tab) |
 | **Audit Logs**           | `/admin/audit-logs`                   | System-wide action log with filters                   |
 | **Archive**              | `/admin/students/archive`             | View/restore/permanently delete archived students     |
 | **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged scans (GPS / submitted score band) |
@@ -366,6 +384,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | Course Detail       | `/admin/courses/{cid}`                      |
 | Student Import      | `/admin/students/import`                    |
 | Analytics & Reports | `/admin/analytics`                          |
+| Attendance Review   | `/admin/attendance`                         |
 | System Settings     | `/admin/system/settings`                    |
 | Audit Logs          | `/admin/audit-logs`                         |
 | Face Enrollment     | `/admin/students` → **Enroll face** (modal) |

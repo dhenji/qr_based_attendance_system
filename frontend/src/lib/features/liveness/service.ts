@@ -15,6 +15,13 @@ export interface SessionVerification {
 	// Center null = no classroom coordinates; both the server and the scan
 	// page skip the geofence check in that case.
 	geofence: { radius: number; lat: number | null; lng: number | null };
+	programCode?: string;
+	yearLevelLabel?: string;
+	sessionType?: 'lecture' | 'lab';
+	scheduledEndTime?: string;
+	classroomName?: string | null;
+	isRemote?: boolean;
+	geofenceEnabled?: boolean;
 }
 
 export interface AttendanceScanResult {
@@ -65,6 +72,13 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		courseName: response.course_name,
 		expiresAt: response.expires_at,
 		geofence: response.geofence,
+		programCode: response.program_code,
+		yearLevelLabel: response.year_level_label,
+		sessionType: response.session_type,
+		scheduledEndTime: response.scheduled_end_time,
+		classroomName: response.classroom_name,
+		isRemote: response.is_remote,
+		geofenceEnabled: response.geofence_enabled,
 	};
 };
 
@@ -111,7 +125,9 @@ export const FACE_MATCH_SCORE_PLACEHOLDER = 1;
 export const submitAttendanceScan = async (input: {
 	sessionId: number;
 	studentNumber: string;
-	gps: { lat: number; lng: number; accuracy: number };
+	// Location is optional: scans against sessions with no geofence (remote,
+	// disabled, or no classroom coordinates) do not collect GPS.
+	gps?: { lat: number; lng: number; accuracy: number } | null;
 	livenessEvidence: LivenessEvidence;
 	faceMatchScore?: number;
 	scannedAt: string;
@@ -126,7 +142,7 @@ export const submitAttendanceScan = async (input: {
 		{
 			session_id: input.sessionId,
 			student_number: input.studentNumber,
-			gps: input.gps,
+			gps: input.gps ?? null,
 			liveness_evidence: {
 				blink_detected: input.livenessEvidence.blinkDetected,
 				head_turn_left: input.livenessEvidence.headTurnLeft,

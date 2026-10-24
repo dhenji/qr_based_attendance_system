@@ -188,7 +188,7 @@
 		border: none;
 		border-radius: 0;
 		padding: 1rem;
-		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+		font-family: var(--font-data);
 		font-size: 0.8125rem;
 		color: var(--text-secondary);
 		overflow-x: auto;

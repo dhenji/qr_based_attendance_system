@@ -32,7 +32,7 @@ from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
@@ -40,7 +40,10 @@ from core.database import database
 from core.exceptions import DomainException
 from core.scheduler import JOB_BACKUP, scheduled_job_running, track
 from features.attendance.model import Attendance
-from features.auth.model import OtpCodes
+from features.auth.model import OtpCodes, User
+from features.professor.model import Professor
+from features.student.model import Student
+from features.system.audit_labels import AuditLabelResolver, AuditRowView
 from features.system.constants import (
     ERROR_MAX_CHARS,
     EXPORT_FILENAME_PREFIX,
@@ -54,6 +57,8 @@ from features.system.constants import (
     SETTING_PRESENT_WINDOW,
     SETTING_RETENTION_DAILY,
     SETTING_RETENTION_MONTHLY,
+    SETTING_SESSION_EARLY_OPEN,
+    SETTING_SESSION_LATE_OPEN,
     S3_PREFIX_FALLBACK,
     SIDECAR_SUFFIX,
     STDERR_TAIL_CHARS,
@@ -75,8 +80,11 @@ from features.system.model import AppSetting, AuditLog, BackupLog
 from features.system.schema import (
     AcademicStructureListResponse,
     AcademicStructureRead,
+    AuditActorRead,
+    AuditChangeRead,
     AuditLogListResponse,
     AuditLogRead,
+    AuditSubjectRead,
     BackupListResponse,
     BackupRead,
     CleanupResponse,
@@ -213,6 +221,115 @@ def select_prune_candidates(
     if spare < 2:
         doomed = doomed[: max(len(rows) - 2, 0)]
     return doomed
+
+
+# --- The audit read model ----------------------------------------------------
+#
+# ADR-064 had the endpoints return the stored row unaltered. ADR-086 keeps
+# that — the stored fields are still the evidence — and ADDS the derived
+# reading beside them. These helpers build the response and apply the
+# filters and the sort.
+
+# The acting account's display name. The `users` table has no name columns
+# (a person's name lives on their student or professor row), so the name is
+# outer-joined in, exactly as `features/admin/service.py::_users_stmt` does.
+_ACTOR_NAME = func.coalesce(
+    func.concat_ws(" ", Student.first_name, Student.last_name),
+    func.concat_ws(" ", Professor.first_name, Professor.last_name),
+    User.email,
+)
+
+
+def _actor_ids(actor: str) -> Select[Any]:
+    """The `users.id`s matching an actor fragment.
+
+    A fragment matches the account's id, email or name, case-insensitively.
+    The names come from the roster rows, so "Dela Cruz" finds the professor
+    whose account did it.
+    """
+    needle = actor.strip()
+    term = f"%{needle}%"
+    conditions = [
+        User.email.ilike(term),
+        Student.first_name.ilike(term),
+        Student.last_name.ilike(term),
+        Professor.first_name.ilike(term),
+        Professor.last_name.ilike(term),
+    ]
+    if needle.isdigit():
+        conditions.append(User.id == int(needle))
+    return (
+        select(User.id)
+        .outerjoin(Student, Student.user_id == User.id)
+        .outerjoin(Professor, Professor.user_id == User.id)
+        .where(or_(*conditions))
+    )
+
+
+def _audit_order(sort_by: str, sort_dir: str) -> tuple[Any, ...]:
+    """The ORDER BY for the audit trail.
+
+    Sorting happens in the database so it orders the WHOLE trail, not the
+    page a client happens to have loaded. `time` is the default and the only
+    one with an index behind it; `actor` and `action` are scans.
+    """
+    ascending = sort_dir == "asc"
+    if sort_by == "action":
+        return (
+            AuditLog.action.asc() if ascending else AuditLog.action.desc(),
+            AuditLog.performed_at.desc(),
+            AuditLog.id.desc(),
+        )
+    if sort_by == "actor":
+        return (
+            (_ACTOR_NAME.asc() if ascending else _ACTOR_NAME.desc()).nulls_last(),
+            AuditLog.performed_at.desc(),
+            AuditLog.id.desc(),
+        )
+    return (
+        AuditLog.performed_at.asc() if ascending else AuditLog.performed_at.desc(),
+        AuditLog.id.desc(),
+    )
+
+
+def _to_audit_read(
+    row: AuditLog, view: AuditRowView, model: type[AuditLogRead]
+) -> AuditLogRead:
+    """One stored row plus its derived reading."""
+    return model(
+        id=row.id,
+        action=row.action,
+        entity_type=row.entity_type,
+        entity_id=row.entity_id,
+        old_value=row.old_value,
+        new_value=row.new_value,
+        performed_by=row.performed_by,
+        performed_at=row.performed_at,
+        actor=AuditActorRead(
+            kind=view.actor.kind,
+            id=view.actor.id,
+            name=view.actor.name,
+            email=view.actor.email,
+            role=view.actor.role,
+        ),
+        subject=AuditSubjectRead(
+            type=view.subject.type,
+            id=view.subject.id,
+            label=view.subject.label,
+            sublabel=view.subject.sublabel,
+        ),
+        summary=view.summary,
+        action_label=view.action_label,
+        changes=[
+            AuditChangeRead(
+                field=change.field,
+                label=change.label,
+                before=change.before,
+                after=change.after,
+            )
+            for change in view.changes
+        ],
+    )
 
 
 class SystemService:
@@ -503,6 +620,10 @@ class SystemService:
                 return int(settings.default_present_window_minutes)
             case _ if key == SETTING_LATE_WINDOW:
                 return int(settings.default_late_window_minutes)
+            case _ if key == SETTING_SESSION_EARLY_OPEN:
+                return int(settings.session_early_open_minutes)
+            case _ if key == SETTING_SESSION_LATE_OPEN:
+                return int(settings.session_late_open_minutes)
             case _ if key == SETTING_RETENTION_DAILY:
                 return int(settings.backup_retention_daily)
             case _:
@@ -514,6 +635,8 @@ class SystemService:
             SETTING_GEOFENCE_RADIUS,
             SETTING_PRESENT_WINDOW,
             SETTING_LATE_WINDOW,
+            SETTING_SESSION_EARLY_OPEN,
+            SETTING_SESSION_LATE_OPEN,
             SETTING_RETENTION_DAILY,
             SETTING_RETENTION_MONTHLY,
         )
@@ -560,6 +683,8 @@ class SystemService:
             geofence_default_radius=values[SETTING_GEOFENCE_RADIUS],
             present_window_default=values[SETTING_PRESENT_WINDOW],
             late_window_default=values[SETTING_LATE_WINDOW],
+            session_early_open_minutes=values[SETTING_SESSION_EARLY_OPEN],
+            session_late_open_minutes=values[SETTING_SESSION_LATE_OPEN],
             backup_retention_daily=values[SETTING_RETENTION_DAILY],
             backup_retention_monthly=values[SETTING_RETENTION_MONTHLY],
             pending_sync_count=await self.pending_sync_total(),
@@ -582,6 +707,8 @@ class SystemService:
             (SETTING_GEOFENCE_RADIUS, "geofence_default_radius"),
             (SETTING_PRESENT_WINDOW, "present_window_default"),
             (SETTING_LATE_WINDOW, "late_window_default"),
+            (SETTING_SESSION_EARLY_OPEN, "session_early_open_minutes"),
+            (SETTING_SESSION_LATE_OPEN, "session_late_open_minutes"),
             (SETTING_RETENTION_DAILY, "backup_retention_daily"),
             (SETTING_RETENTION_MONTHLY, "backup_retention_monthly"),
         ):
@@ -653,8 +780,12 @@ class SystemService:
                 .limit(size)
             )
         ).all()
+        views = await AuditLabelResolver(self._session).resolve(rows)
         return AcademicStructureListResponse(
-            items=[AcademicStructureRead.model_validate(row) for row in rows],
+            items=[
+                _to_audit_read(row, view, AcademicStructureRead)
+                for row, view in zip(rows, views)
+            ],
             total=int(total or 0),
             page=page,
             size=size,
@@ -666,8 +797,11 @@ class SystemService:
         entity_type: str | None = None,
         action: str | None = None,
         performed_by: int | None = None,
+        actor: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        sort_by: str = "time",
+        sort_dir: str = "desc",
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> AuditLogListResponse:
@@ -684,6 +818,15 @@ class SystemService:
 
         `date_from` is inclusive from 00:00 UTC and `date_to` inclusive to the
         end of that day, so `date_from == date_to` selects exactly one day.
+
+        `actor` matches the acting account by id, email or name — a
+        fragment, case-insensitively. `performed_by` stays the exact-id
+        filter, because a client that already knows the id should not pay
+        for a join.
+
+        `sort_by` is `time` (the default), `actor` or `action`. Sorting
+        happens in the database, so it orders the WHOLE trail rather than
+        the page a client happens to have loaded (ADR-086).
         """
         page = max(page, 1)
         size = min(max(size, 1), MAX_PAGE_SIZE)
@@ -694,6 +837,7 @@ class SystemService:
         # nothing in particular.
         entity_type = entity_type or None
         action = action or None
+        actor = (actor or "").strip() or None
 
         # `in` against the StrEnum compares by value, so a plain query string
         # matches the member without unwrapping it first.
@@ -718,6 +862,9 @@ class SystemService:
             scope, performed_by, lambda v: AuditLog.performed_by == v
         )
 
+        if actor is not None:
+            scope = scope.where(AuditLog.performed_by.in_(_actor_ids(actor)))
+
         # Half-open on the upper bound so `date_to` covers the whole day.
         scope = apply_if(
             scope,
@@ -739,14 +886,18 @@ class SystemService:
         )
         rows = (
             await self._session.scalars(
-                scope.order_by(AuditLog.performed_at.desc(), AuditLog.id.desc())
+                scope.order_by(*_audit_order(sort_by, sort_dir))
                 .offset((page - 1) * size)
                 .limit(size)
             )
         ).all()
 
+        views = await AuditLabelResolver(self._session).resolve(rows)
         return AuditLogListResponse(
-            items=[AuditLogRead.model_validate(row) for row in rows],
+            items=[
+                _to_audit_read(row, view, AuditLogRead)
+                for row, view in zip(rows, views)
+            ],
             total=int(total or 0),
             page=page,
             size=size,

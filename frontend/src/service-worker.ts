@@ -1,7 +1,7 @@
 /// <reference types="@sveltejs/kit" />
 /// <reference no-default-lib="true"/>
 /// <reference lib="esnext" />
-/// <reference lib="webworker" */
+/// <reference lib="webworker" />
 
 // Attendly offline shell (no backend involved).
 //

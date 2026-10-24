@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -49,15 +51,18 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 
 	let yearOpen = $state(false);
 	let y_number = $state('');
-	let y_terms = $state<{ code: string; label: string; existing?: boolean }[]>([]);
+	let y_terms = $state<{ code: string; label: string; weeks?: number; existing?: boolean }[]>([]);
 	let yearError = $state<string | null>(null);
 	let yearBusy = $state(false);
 
 	let termsOpen = $state(false);
 	let termsTarget = $state<YearLevel | null>(null);
-	let t_rows = $state<{ code: string; label: string; existing?: boolean }[]>([]);
+	let t_rows = $state<{ code: string; label: string; weeks?: number; existing?: boolean }[]>([]);
 	let termsError = $state<string | null>(null);
 	let termsBusy = $state(false);
+	// When set, saving Manage Terms also writes these weeks to every sibling
+	// year level that offers the same term code (D86 drift guard).
+	let applyWeeksToAll = $state(false);
 
 	let deleteTarget = $state<YearLevel | null>(null);
 	let deleteBusy = $state(false);
@@ -148,7 +153,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			const parsed = yearLevelCreateSchema.safeParse({
 				year_number: y_number,
 				label: yearLabel(Number(y_number)),
-				terms: y_terms.map(({ code, label }) => ({ code, label })),
+				terms: y_terms.map(({ code, label, weeks }) => ({ code, label, weeks })),
 			});
 			if (!parsed.success) {
 				yearError =
@@ -173,6 +178,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	const openTerms = (year: YearLevel) => {
 		termsTarget = year;
 		termsError = null;
+		applyWeeksToAll = false;
 		t_rows = year.terms.map((t) => ({ ...t, existing: true }));
 		termsOpen = true;
 	};
@@ -183,7 +189,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		termsBusy = true;
 		try {
 			const parsed = yearLevelUpdateSchema.safeParse({
-				terms: t_rows.map(({ code, label }) => ({ code, label })),
+				terms: t_rows.map(({ code, label, weeks }) => ({ code, label, weeks })),
 			});
 			if (!parsed.success) {
 				termsError =
@@ -191,11 +197,37 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 					'Each term needs a code and a label.';
 				return;
 			}
+			const terms = parsed.data.terms ?? [];
 			await updateYearLevel(program.id, termsTarget.id, {
-				term_structure: { terms: parsed.data.terms ?? [] },
+				term_structure: { terms },
 			});
+			// Drift guard: optionally push these weeks to every sibling year
+			// level offering the same term code (D86).
+			if (applyWeeksToAll) {
+				const edits = new Map<string, number | undefined>(
+					terms.map((t) => [t.code, t.weeks])
+				);
+				for (const y of program.yearLevels) {
+					if (y.id === termsTarget.id) continue;
+					let changed = false;
+					const siblingTerms = y.terms.map((t) => {
+						const weeks = edits.get(t.code);
+						if (weeks !== undefined && weeks !== t.weeks) {
+							changed = true;
+							return { ...t, weeks };
+						}
+						return t;
+					});
+					if (changed) {
+						await updateYearLevel(program.id, y.id, {
+							term_structure: { terms: siblingTerms },
+						});
+					}
+				}
+			}
 			termsOpen = false;
 			termsTarget = null;
+			applyWeeksToAll = false;
 			await refreshAdminProgramDetail(program.id);
 			notifyEntityChanged('programs');
 		} catch (e: unknown) {
@@ -204,6 +236,69 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			termsBusy = false;
 		}
 	};
+
+	// Term codes whose session weeks differ across the program's year levels
+	// (D86). Non-blocking: offerings in different years would be scored
+	// against different term lengths, which is usually accidental. The modal
+	// value is the reference; any year that disagrees is flagged so the odd
+	// one out is visible at a glance.
+	const termDrift = $derived.by<
+		{ code: string; values: { yearId: number; label: string; weeks: number; isOutlier: boolean }[] }[]
+	>(() => {
+		if (!program || !termsTarget) return [];
+		const rows: {
+			code: string;
+			values: { yearId: number; label: string; weeks: number; isOutlier: boolean }[];
+		}[] = [];
+		const codes = new Set(t_rows.map((row) => row.code));
+		for (const code of codes) {
+			const values: { yearId: number; label: string; weeks: number }[] = [];
+			for (const y of program.yearLevels) {
+				if (y.id === termsTarget.id) {
+					// Use the editor's pending value for this year so the
+					// warning clears as soon as the admin fixes it.
+					const row = t_rows.find((r) => r.code === code);
+					if (row && row.weeks != null) {
+						values.push({ yearId: y.id, label: y.label, weeks: Number(row.weeks) });
+					}
+					continue;
+				}
+				const term = y.terms.find((t) => t.code === code);
+				if (term?.weeks != null) {
+					values.push({ yearId: y.id, label: y.label, weeks: Number(term.weeks) });
+				}
+			}
+			if (new Set(values.map((v) => v.weeks)).size <= 1) continue;
+
+			// Reference = the modal value (ties → earliest year level), so the
+			// minority values are the ones flagged.
+			const counts = new Map<number, number>();
+			for (const v of values) counts.set(v.weeks, (counts.get(v.weeks) ?? 0) + 1);
+			let reference = values[0].weeks;
+			let best = -1;
+			for (const v of values) {
+				const count = counts.get(v.weeks) ?? 0;
+				if (count > best) {
+					best = count;
+					reference = v.weeks;
+				}
+			}
+
+			rows.push({
+				code,
+				values: values.map((v) => ({ ...v, isOutlier: v.weeks !== reference })),
+			});
+		}
+		return rows;
+	});
+	const hasSiblings = $derived((program?.yearLevels.length ?? 0) > 1);
+	// What the "apply to other year levels" checkbox will actually copy —
+	// only terms with a week count typed in this year's editor.
+	const weeksToApply = $derived(
+		t_rows
+			.filter((row) => row.weeks != null)
+			.map((row) => `${row.code} ${row.weeks}w`)
+	);
 
 	const confirmDeleteYear = async () => {
 		if (!program || !deleteTarget) return;
@@ -259,7 +354,11 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	};
 
 	const termsText = (year: YearLevel) =>
-		year.terms.length > 0 ? year.terms.map((t) => t.label).join(' · ') : 'No terms yet';
+		year.terms.length > 0
+			? year.terms
+					.map((t) => (t.weeks ? `${t.label} (${t.weeks}w)` : t.label))
+					.join(' · ')
+			: 'No terms yet';
 </script>
 
 <div class="page">
@@ -267,11 +366,10 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_PROGRAMS)}>
 			← Back to Program Management
 		</button>
-		<p class="crumb"><a href={Routes.ADMIN_PROGRAMS}>Programs</a> / Detail</p>
 	</div>
 
 	{#if adminProgramDetailState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={6} label="Loading program…" />
 	{:else if adminProgramDetailState.error || !program}
 		<section class="card">
 			<p class="error">Could not load program: {adminProgramDetailState.error ?? 'Not found.'}</p>
@@ -312,7 +410,11 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 
 		{#if program.yearLevels.length === 0}
 			<section class="card">
-				<p class="empty">No year levels yet — add Year 1 to start. Student imports resolve their year_level against these rows.</p>
+				<EmptyState
+					icon="file"
+					title="No year levels yet"
+					hint="Add Year 1 to start. Student imports resolve their year_level against these rows."
+				/>
 			</section>
 		{:else}
 			<ul class="years">
@@ -391,7 +493,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
+				<button class="btn btn-primary" aria-busy={editBusy} disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -430,7 +532,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (yearOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-year" disabled={yearBusy} onclick={submitYear}>
+				<button class="btn btn-primary" data-testid="save-year" aria-busy={yearBusy} disabled={yearBusy} onclick={submitYear}>
 					{yearBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -463,10 +565,53 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 					lockCodeForExisting={true}
 					emptyMessage="No terms yet. Add one below, or save empty — a termless year just can't back offerings yet."
 				/>
+				{#if termDrift.length > 0}
+					<aside class="drift" role="status" aria-live="polite">
+						<div class="drift-head">
+							<span class="drift-icon"><AppIcon name="alert" size={16} /></span>
+							<div>
+								<p class="drift-title">Session weeks differ across year levels</p>
+								<p class="drift-sub">
+									The same term is set to different lengths, so offerings in different
+									years are scored against different session totals.
+								</p>
+							</div>
+						</div>
+						<ul class="drift-list">
+							{#each termDrift as drift (drift.code)}
+								<li class="drift-row">
+									<span class="drift-code">{drift.code}</span>
+									<span class="drift-chips">
+										{#each drift.values as value (value.yearId)}
+											<span class="drift-chip" class:outlier={value.isOutlier}>
+												<span class="drift-year">{value.label}</span>
+												<span class="drift-weeks">{value.weeks}w</span>
+											</span>
+										{/each}
+									</span>
+								</li>
+							{/each}
+						</ul>
+						{#if hasSiblings && weeksToApply.length > 0}
+							<label class="drift-apply">
+								<input type="checkbox" bind:checked={applyWeeksToAll} disabled={termsBusy} />
+								<span>
+									<span class="drift-apply-title">
+										Copy {termsTarget.label}'s weeks to the other year levels
+									</span>
+									<span class="drift-apply-hint">
+										On save, {weeksToApply.join(' · ')} are also written to every other
+										year level that has these terms. Term codes and names aren't changed.
+									</span>
+								</span>
+							</label>
+						{/if}
+					</aside>
+				{/if}
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => { termsOpen = false; termsTarget = null; }}>Cancel</button>
-				<button class="btn btn-primary" disabled={termsBusy} onclick={submitTerms}>
+				<button class="btn btn-primary" aria-busy={termsBusy} disabled={termsBusy} onclick={submitTerms}>
 					{termsBusy ? 'Saving…' : 'Save terms'}
 				</button>
 			</div>
@@ -522,7 +667,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
-				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
@@ -564,32 +709,15 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
-	/* Back button + breadcrumb read as one header block, so the .page flex gap
-	 * (1.5rem) does not push them a full row apart. */
+	/* Back button reads as its own header block, so the .page flex gap
+	 * (1.5rem) does not push it a full row apart from the content. */
 	.page-top {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 0.75rem;
-	}
-
-	.crumb {
-		margin: 0;
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-	}
-
-	.crumb a {
-		color: var(--accent);
-		text-decoration: none;
-		font-weight: 600;
-	}
-
-	.crumb a:hover {
-		text-decoration: underline;
 	}
 
 	.header {
@@ -734,12 +862,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		color: var(--danger);
 	}
 
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
-	}
-
 	.error {
 		color: var(--danger);
 		font-size: 0.875rem;
@@ -839,7 +961,6 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {
@@ -886,6 +1007,131 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		font-size: 0.75rem;
 		color: var(--text-muted);
 		margin: 0;
+	}
+
+	.drift {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		padding: 0.875rem 1rem;
+		border: 1px solid var(--border-strong);
+		border-left: 3px solid var(--warning-text);
+		border-radius: 8px;
+		background: var(--bg-muted);
+	}
+
+	.drift-head {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.625rem;
+	}
+
+	.drift-icon {
+		flex: none;
+		margin-top: 0.0625rem;
+		color: var(--warning-text);
+	}
+
+	.drift-title {
+		margin: 0;
+		font-size: 0.875rem;
+		font-weight: 700;
+		color: var(--text-strong);
+	}
+
+	.drift-sub {
+		margin: 0.125rem 0 0;
+		font-size: 0.75rem;
+		line-height: 1.45;
+		color: var(--text-muted);
+	}
+
+	.drift-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.drift-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.625rem;
+	}
+
+	.drift-code {
+		font-size: 0.8125rem;
+		font-weight: 700;
+		color: var(--text-strong);
+	}
+
+	.drift-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+	}
+
+	.drift-chip {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.375rem;
+		padding: 0.1875rem 0.5rem;
+		border: 1px solid var(--border);
+		border-radius: 99px;
+		background: var(--bg-card);
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+	}
+
+	.drift-chip.outlier {
+		border-color: var(--warning-bg);
+		background: var(--warning-bg);
+		color: var(--warning-text);
+	}
+
+	.drift-year {
+		color: var(--text-muted);
+	}
+
+	.drift-chip.outlier .drift-year {
+		color: inherit;
+		opacity: 0.85;
+	}
+
+	.drift-weeks {
+		font-weight: 700;
+	}
+
+	.drift-apply {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.625rem;
+		padding-top: 0.75rem;
+		border-top: 1px solid var(--border);
+		cursor: pointer;
+	}
+
+	.drift-apply input {
+		flex: none;
+		margin-top: 0.1875rem;
+	}
+
+	.drift-apply-title {
+		display: block;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-strong);
+	}
+
+	.drift-apply-hint {
+		display: block;
+		margin-top: 0.125rem;
+		font-size: 0.75rem;
+		line-height: 1.45;
+		color: var(--text-muted);
 	}
 
 	.modal-actions {

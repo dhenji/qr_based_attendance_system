@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -7,13 +10,16 @@
 		adminOfferingDetailState,
 		adminOfferingsState,
 		assignOfferingProfessor,
+		reassignOfferingProfessor,
 		bulkEnrollOffering,
 		deleteArchivedOffering,
 		endOfferingAssignment,
 		initAdminOfferingDetail,
 		loadOfferingAssignments,
 		loadOfferingRoster,
+		permanentlyRemoveOfferingAssignment,
 		refreshAdminOfferingDetail,
+		reopenOfferingAssignment,
 		unenrollStudentFromOffering,
 		updateAdminOffering,
 	} from '$lib/features/admin/offerings/store.svelte';
@@ -25,17 +31,20 @@
 		updateComponent,
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
+	import { getSettings } from '$lib/features/admin/settings/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
 	import { listProfessors, listStudents } from '$lib/features/admin/service';
 	import {
 		assignmentCreateSchema,
+		assignmentReassignSchema,
 		componentCreateSchema,
-		offeringUpdateSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
+	import type { AssignmentCreateInput, AssignmentReassignInput } from '$lib/features/admin/offerings/schema';
 	import { totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount, weeklyWriteBlocked } from '$lib/shared/utils/schedule';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import type {
+		AdminAssignment,
 		AdminBulkEnrollResult,
 		AdminCourse,
 		AdminProfessor,
@@ -51,6 +60,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
+	import ClassroomMapPicker from '$lib/components/ClassroomMapPicker.svelte';
 	import { APIError } from '$lib/api/client';
 	import {
 		WEEKLY_HOURS_CODES,
@@ -74,6 +84,14 @@
 	type OfferingTab = 'overview' | 'professors' | 'enrolled' | 'settings';
 	const OFFERING_TABS: OfferingTab[] = ['overview', 'professors', 'enrolled', 'settings'];
 
+	const isoToday = (): string => new Date().toISOString().slice(0, 10);
+
+	const addDaysIso = (iso: string, days: number): string => {
+		const date = new Date(`${iso}T00:00:00Z`);
+		date.setUTCDate(date.getUTCDate() + days);
+		return date.toISOString().slice(0, 10);
+	};
+
 	// Deep-linkable tabs (?tab=professors) so the Setup Wizard completion
 	// screen can point at the next step directly. Read once on entry (same
 	// convention as ?offering= on professor session create); in-page tab
@@ -91,19 +109,33 @@
 	let professorIndex = $state<Map<number, AdminProfessor>>(new Map());
 
 	// Settings form (offering-level only: rates and windows. Schedule and
-	// rooms live on the class meetings below).
-	let s_weeks = $state('');
+	// rooms live on the class meetings below). Session weeks are term-scoped
+	// (D86) and shown read-only here.
 	let s_present = $state('');
 	let s_late = $state('');
+	// D93: the geofence radius override. Blank means "inherit the app setting".
+	let s_radius = $state('');
+	let s_room = $state('');
+	let s_lat = $state('');
+	let s_lng = $state('');	// The system-wide defaults, for the "inherit" placeholders and the
+	// effective-value hints. Read once; they only change in Admin -> System
+	// Settings.
+	let systemDefaults = $state<{ present: number; late: number; radius: number } | null>(
+		null
+	);
 	let settingsError = $state<string | null>(null);
 	let settingsBusy = $state(false);
 	let archiveBusy = $state(false);
 
 	// Scheduled components (D77: per-type schedules). The offering row
-	// already carries its active components, so add/edit/archive refresh
+	// already carries its active components, so add/edit/remove refresh
 	// the detail and render from there — no separate fetch.
 	let compError = $state<string | null>(null);
 	let compBusy = $state(false);
+	// Confirm gate for the row-level Remove action (soft-archives the
+	// meeting server-side; UI keeps the endpoint wording "archive").
+	let removeCompTarget = $state<OfferingComponent | null>(null);
+	let addMeetingOpen = $state(false);
 	let c_type = $state<'lecture' | 'lab'>('lab');
 	let c_days = $state('');
 	let c_start = $state('');
@@ -143,8 +175,13 @@
 	// write re-syncs the stored column server-side, so this is always current.
 	const detailSessionCount = $derived(weeklySessionCount(detailRows));
 	// Term total, same product the risk batch uses as its expected session
-	// count — identical line to the Setup Wizard step 3.
-	const detailExpectedTotal = $derived(totalExpectedSessions(String(detailSessionCount), s_weeks));
+	// count. Weeks are derived from the offering's term (D86), so this is
+	// read-only.
+	const detailExpectedTotal = $derived(
+		offering
+			? totalExpectedSessions(String(detailSessionCount), String(offering.semesterWeeks))
+			: null
+	);
 	const overviewExpectedTotal = $derived(
 		offering ? totalExpectedSessions(String(offering.sessionsPerWeek), String(offering.semesterWeeks)) : null
 	);
@@ -188,9 +225,39 @@
 	let a_primary = $state(false);
 	let a_from = $state('');
 	let a_to = $state('');
-	let a_semester = $state('');
 	let assignError = $state<string | null>(null);
 	let assignBusy = $state(false);
+	let assignConfirmOpen = $state(false);
+	let pendingAssign = $state<AssignmentCreateInput | null>(null);
+
+	// Reassign-professor form.
+	let reassignOpen = $state(false);
+	let reassignTarget = $state<AdminAssignment | null>(null);
+	let r_new_professor_id = $state('');
+	let r_primary = $state(false);
+	let r_from = $state('');
+	let r_to = $state('');
+	let reassignError = $state<string | null>(null);
+	let reassignBusy = $state(false);
+	let reassignConfirmOpen = $state(false);
+	let pendingReassign = $state<AssignmentReassignInput | null>(null);
+
+	// End-assignment confirmation.
+	let endAssignmentTarget = $state<AdminAssignment | null>(null);
+	let endAssignmentBusy = $state(false);
+	let endAssignmentIsFuture = $derived(
+		endAssignmentTarget ? endAssignmentTarget.effectiveFrom > isoToday() : false
+	);
+
+	// Reopen-assignment confirmation (undo an accidental End).
+	let reopenTarget = $state<AdminAssignment | null>(null);
+	let reopenBusy = $state(false);
+	let reopenAsAssistant = $state(false);
+
+	// Permanent removal is a correction path for assignments that never opened
+	// a session. End remains the normal removal action.
+	let permanentRemoveTarget = $state<AdminAssignment | null>(null);
+	let permanentRemoveBusy = $state(false);
 
 	// Roster + bulk enroll.
 	let sectionFilter = $state('');
@@ -253,6 +320,17 @@
 		await initAdminOfferingDetail(offeringId);
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
+		// The system-wide defaults, for the "inherit" placeholders (D93).
+		try {
+			const settings = await getSettings();
+			systemDefaults = {
+				present: settings.present_window_default,
+				late: settings.late_window_default,
+				radius: settings.geofence_default_radius
+			};
+		} catch {
+			systemDefaults = null;
+		}
 		await Promise.all([
 			loadOfferingAssignments(offeringId),
 			loadOfferingRoster(offeringId),
@@ -303,9 +381,18 @@
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
 		settingsError = null;
-		s_weeks = String(o.semesterWeeks);
-		s_present = String(o.presentWindowMinutes);
-		s_late = String(o.lateWindowMinutes);
+		// A blank field means "follow the system default" (D93), so a NULL
+		// on the offering reads as an empty input rather than the text
+		// "null".
+		s_present = o.presentWindowMinutes === null ? '' : String(o.presentWindowMinutes);
+		s_late = o.lateWindowMinutes === null ? '' : String(o.lateWindowMinutes);
+		s_radius =
+			o.defaultClassroomRadiusMeters === null || o.defaultClassroomRadiusMeters === undefined
+			? ''
+			: String(o.defaultClassroomRadiusMeters);
+		s_room = o.classroomName ?? '';
+		s_lat = o.classroomLat === undefined || o.classroomLat === null ? '' : String(o.classroomLat);
+		s_lng = o.classroomLng === undefined || o.classroomLng === null ? '' : String(o.classroomLng);
 	};
 
 	const onArchive = async () => {
@@ -370,27 +457,54 @@
 		settingsError = null;
 		settingsBusy = true;
 		try {
-			const parsed = offeringUpdateSchema.safeParse({
-				semester_weeks: s_weeks,
-			});
-			if (!parsed.success) {
-				settingsError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-				return;
-			}
-			const present = Number(s_present);
-			const late = Number(s_late);
-			if (!Number.isInteger(present) || present < 1 || present > 480 || !Number.isInteger(late) || late < 1 || late > 480) {
+			// A blank field means "follow the system default" (D93): the
+			// offering stores NULL and the session resolves the value from
+			// Admin -> System Settings.
+			const present = s_present.trim() === '' ? null : Number(s_present);
+			const late = s_late.trim() === '' ? null : Number(s_late);
+			if (
+				(present !== null && (!Number.isInteger(present) || present < 1 || present > 480)) ||
+				(late !== null && (!Number.isInteger(late) || late < 1 || late > 480))
+			) {
 				settingsError = 'Windows must be whole minutes between 1 and 480';
 				return;
 			}
-			if (course && !windowsWithinDuration(present, late, course.sessionDurationHours)) {
+			if (
+				course &&
+				present !== null &&
+				late !== null &&
+				!windowsWithinDuration(present, late, course.sessionDurationHours)
+			) {
 				settingsError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
 			}
+			const radius = s_radius.trim() === '' ? null : Number(s_radius);
+			if (radius !== null && (!Number.isInteger(radius) || radius < 1 || radius > 1000)) {
+				settingsError = 'The geofence radius must be a whole number of metres between 1 and 1000';
+				return;
+			}
+			let lat: number | null = null;
+			let lng: number | null = null;
+			if (s_lat.trim() !== '' || s_lng.trim() !== '') {
+				try {
+					lat = parseOptCoord(s_lat, 'Latitude', -90, 90) ?? null;
+					lng = parseOptCoord(s_lng, 'Longitude', -180, 180) ?? null;
+				} catch (e: unknown) {
+					settingsError = e instanceof Error ? e.message : 'Invalid coordinates';
+					return;
+				}
+				if (lat === null || lng === null) {
+					settingsError = 'Both latitude and longitude are required to pin a classroom';
+					return;
+				}
+			}
 			await updateAdminOffering(offering.id, {
-				semester_weeks: parsed.data.semester_weeks,
+				classroom_name: s_room.trim() ? s_room.trim() : null,
+				classroom_lat: lat,
+				classroom_lng: lng,
 				default_present_window_minutes: present,
 				default_late_window_minutes: late,
+				default_classroom_radius_meters: radius,
 			});
 			fillSettings();
 		} catch (e: unknown) {
@@ -406,7 +520,6 @@
 		a_primary = false;
 		a_from = new Date().toISOString().slice(0, 10);
 		a_to = '';
-		a_semester = offering?.semester ?? '';
 		assignOpen = true;
 	};
 
@@ -487,6 +600,10 @@
 						: `Weekly scheduled hours (${addProjection?.scheduled}h) exceed the ${course.units}-unit requirement (${addProjection?.limit}h) for ${course.courseCode} — shorten a meeting first.`;
 				return;
 			}
+			if (c_type === 'lab' && (!c_lat.trim() || !c_lng.trim())) {
+				compError = 'Laboratory meetings require both latitude and longitude.';
+				return;
+			}
 			await createComponent(offering.id, {
 				session_type: parsed.data.session_type,
 				schedule_days: parsed.data.schedule_days,
@@ -500,7 +617,11 @@
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
 		} catch (e: unknown) {
-			compError = compFailure(e, 'Save failed. Please try again.');
+			// The inline weekly-hours status already reports these, so setting
+			// compError too would duplicate the same failure message.
+			if (!(e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code))) {
+				compError = compFailure(e, 'Save failed. Please try again.');
+			}
 		} finally {
 			compBusy = false;
 		}
@@ -553,6 +674,10 @@
 		compBusy = true;
 		compError = null;
 		try {
+			if (editingComp.sessionType === 'lab' && (!e_lat.trim() || !e_lng.trim())) {
+				compError = 'Laboratory meetings require both latitude and longitude.';
+				return;
+			}
 			const parsed = componentCreateSchema.safeParse({
 				session_type: editingComp.sessionType,
 				schedule_days: e_days,
@@ -582,8 +707,8 @@
 		}
 	};
 
-	const archiveRow = async (c: OfferingComponent) => {
-		if (!offering || compBusy) return;
+	const removeMeetingRow = async (c: OfferingComponent): Promise<boolean> => {
+		if (!offering || compBusy) return false;
 		compError = null;
 		compBusy = true;
 		try {
@@ -592,50 +717,220 @@
 			editConfirmOpen = false;
 			await refreshAdminOfferingDetail(offering.id);
 			notifyEntityChanged('offerings');
+			return true;
 		} catch (e: unknown) {
-			compError = compFailure(e, 'Archive failed. Please try again.');
+			compError = compFailure(e, 'Remove failed. Please try again.');
+			return false;
 		} finally {
 			compBusy = false;
 		}
 	};
 
-	const submitAssign = async () => {
+	const askRemoveMeeting = (c: OfferingComponent) => {
+		if (compBusy) return;
+		compError = null;
+		removeCompTarget = c;
+	};
+
+	const confirmRemoveMeeting = async () => {
+		if (!removeCompTarget) return;
+		if (await removeMeetingRow(removeCompTarget)) removeCompTarget = null;
+	};
+
+	const submitAssign = () => {
 		if (!offering) return;
 		assignError = null;
+		const parsed = assignmentCreateSchema.safeParse({
+			professor_id: a_professor_id,
+			is_primary: a_primary,
+			effective_from: a_from,
+			effective_to: a_to || undefined,
+		});
+		if (!parsed.success) {
+			assignError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+			return;
+		}
+		pendingAssign = parsed.data;
+		assignOpen = false;
+		assignConfirmOpen = true;
+	};
+
+	const confirmAssign = async () => {
+		if (!offering || !pendingAssign) return;
 		assignBusy = true;
 		try {
-			const parsed = assignmentCreateSchema.safeParse({
-				professor_id: a_professor_id,
-				is_primary: a_primary,
-				effective_from: a_from,
-				effective_to: a_to || undefined,
-				semester: a_semester,
-			});
-			if (!parsed.success) {
-				assignError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
-				return;
-			}
 			await assignOfferingProfessor(offering.id, {
-				professor_id: parsed.data.professor_id,
-				is_primary: parsed.data.is_primary,
-				effective_from: parsed.data.effective_from,
-				effective_to: parsed.data.effective_to || undefined,
-				semester: parsed.data.semester,
+				professor_id: pendingAssign.professor_id,
+				is_primary: pendingAssign.is_primary,
+				effective_from: pendingAssign.effective_from,
+				effective_to: pendingAssign.effective_to || undefined,
 			});
-			assignOpen = false;
+			assignConfirmOpen = false;
+			pendingAssign = null;
 		} catch (e: unknown) {
 			assignError = e instanceof Error && e.message ? e.message : 'Assign failed. Please try again.';
+			assignConfirmOpen = false;
+			assignOpen = true;
 		} finally {
 			assignBusy = false;
 		}
 	};
 
-	const endRow = async (professorId: number) => {
+	const cancelAssignConfirm = () => {
+		assignConfirmOpen = false;
+		assignOpen = true;
+	};
+
+	const openReassign = (assignment: AdminAssignment) => {
 		if (!offering) return;
+		reassignError = null;
+		reassignTarget = assignment;
+		r_new_professor_id = '';
+		r_primary = assignment.isPrimary;
+		// A scheduled row may be replaced on its own start date. A started
+		// row must be replaced later; a row that started today defaults to
+		// tomorrow so the old assignment never gets an inverted range.
+		const today = isoToday();
+		r_from =
+			assignment.effectiveFrom > today
+				? assignment.effectiveFrom
+				: assignment.effectiveFrom === today
+					? addDaysIso(today, 1)
+					: today;
+		r_to = '';
+		reassignOpen = true;
+	};
+
+	const submitReassign = () => {
+		if (!offering || !reassignTarget) return;
+		reassignError = null;
+		const parsed = assignmentReassignSchema.safeParse({
+			new_professor_id: r_new_professor_id,
+			is_primary: r_primary,
+			effective_from: r_from || undefined,
+			effective_to: r_to || undefined,
+		});
+		if (!parsed.success) {
+			reassignError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+			return;
+		}
+		pendingReassign = parsed.data;
+		reassignOpen = false;
+		reassignConfirmOpen = true;
+	};
+
+	const confirmReassign = async () => {
+		if (!offering || !reassignTarget || !pendingReassign) return;
+		reassignBusy = true;
 		try {
-			await endOfferingAssignment(offering.id, professorId);
+			await reassignOfferingProfessor(offering.id, reassignTarget.professorId, {
+				new_professor_id: pendingReassign.new_professor_id,
+				is_primary: pendingReassign.is_primary,
+				old_effective_from: reassignTarget.effectiveFrom,
+				effective_from: pendingReassign.effective_from,
+				effective_to: pendingReassign.effective_to || undefined,
+			});
+			reassignConfirmOpen = false;
+			reassignTarget = null;
+			pendingReassign = null;
+		} catch (e: unknown) {
+			reassignError = e instanceof Error && e.message ? e.message : 'Reassign failed. Please try again.';
+			reassignConfirmOpen = false;
+			reassignOpen = true;
+		} finally {
+			reassignBusy = false;
+		}
+	};
+
+	const cancelReassignConfirm = () => {
+		reassignConfirmOpen = false;
+		reassignOpen = true;
+	};
+
+	const askEndAssignment = (assignment: AdminAssignment) => {
+		adminOfferingDetailState.actionError = null;
+		endAssignmentTarget = assignment;
+	};
+
+	const confirmEndAssignment = async () => {
+		if (!offering || !endAssignmentTarget) return;
+		endAssignmentBusy = true;
+		try {
+			await endOfferingAssignment(
+				offering.id,
+				endAssignmentTarget.professorId,
+				endAssignmentTarget.effectiveFrom
+			);
+			endAssignmentTarget = null;
 		} catch {
 			// Surfaced via the detail state's actionError.
+		} finally {
+			endAssignmentBusy = false;
+		}
+	};
+
+	const canReopenAssignment = (assignment: AdminAssignment): boolean =>
+		!!assignment.effectiveTo &&
+		!adminOfferingDetailState.assignments.some(
+			(other) =>
+				other.professorId === assignment.professorId &&
+				other.effectiveFrom > assignment.effectiveFrom
+		);
+
+	const openReopen = (assignment: AdminAssignment) => {
+		adminOfferingDetailState.actionError = null;
+		reopenAsAssistant = false;
+		reopenTarget = assignment;
+	};
+
+	const confirmReopen = async () => {
+		if (!offering || !reopenTarget) return;
+		reopenBusy = true;
+		try {
+			await reopenOfferingAssignment(
+				offering.id,
+				reopenTarget.professorId,
+				reopenTarget.effectiveFrom,
+				reopenTarget.isPrimary && reopenAsAssistant ? false : undefined
+			);
+			reopenTarget = null;
+			reopenAsAssistant = false;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			reopenBusy = false;
+		}
+	};
+
+	// Permanent removal is a post-End cleanup: End first, then erase a row
+	// whose end date has arrived and that never opened a session. Rows with a
+	// future end date are still live; ended rows with session history stay
+	// visible but disabled, so the reason is on screen rather than in a 409.
+	const isEndedAssignment = (assignment: AdminAssignment): boolean =>
+		assignment.effectiveTo != null && assignment.effectiveTo <= isoToday();
+
+	const canPermanentlyRemoveAssignment = (assignment: AdminAssignment): boolean =>
+		isEndedAssignment(assignment) && !assignment.hasSessions;
+
+	const askPermanentRemove = (assignment: AdminAssignment) => {
+		adminOfferingDetailState.actionError = null;
+		permanentRemoveTarget = assignment;
+	};
+
+	const confirmPermanentRemove = async () => {
+		if (!offering || !permanentRemoveTarget) return;
+		permanentRemoveBusy = true;
+		try {
+			await permanentlyRemoveOfferingAssignment(
+				offering.id,
+				permanentRemoveTarget.professorId,
+				permanentRemoveTarget.effectiveFrom
+			);
+			permanentRemoveTarget = null;
+		} catch {
+			// Surfaced via the detail state's actionError.
+		} finally {
+			permanentRemoveBusy = false;
 		}
 	};
 
@@ -832,11 +1127,10 @@
 		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_OFFERINGS)}>
 			← Back to Offering Management
 		</button>
-		<p class="crumb"><a href={Routes.ADMIN_OFFERINGS}>Offerings</a> / Detail</p>
 	</div>
 
 	{#if adminOfferingDetailState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={7} label="Loading offering…" />
 	{:else if adminOfferingDetailState.error || !offering}
 		<section class="card">
 			<p class="error">Could not load offering: {adminOfferingDetailState.error ?? 'Not found'}</p>
@@ -907,8 +1201,8 @@
 					{#if offering.classroomLat !== undefined && offering.classroomLng !== undefined}
 						<div><dt>Geofence center</dt><dd>{offering.classroomLat}, {offering.classroomLng}</dd></div>
 					{/if}
-					<div><dt>Present window</dt><dd>{offering.presentWindowMinutes} min</dd></div>
-					<div><dt>Late window</dt><dd>{offering.lateWindowMinutes} min</dd></div>
+					<div><dt>Present window</dt><dd>{offering.presentWindowMinutes === null ? 'System default' : `${offering.presentWindowMinutes} min`}</dd></div>
+					<div><dt>Late window</dt><dd>{offering.lateWindowMinutes === null ? 'System default' : `${offering.lateWindowMinutes} min`}</dd></div>
 					<div><dt>Enrolled</dt><dd>{offering.enrolledCount}</dd></div>
 				</dl>
 				{#if course}
@@ -922,23 +1216,27 @@
 					<button class="btn btn-primary" onclick={openAssign}>Assign professor</button>
 				</div>
 				{#if adminOfferingDetailState.assignmentsLoading}
-					<p class="muted">Loading assignments…</p>
+					<SkeletonTable bare rows={3} cols={6} label="Loading assignments…" />
 				{:else if adminOfferingDetailState.assignments.length === 0}
-					<p class="empty">No professors assigned yet. Any professor with an active assignment may open sessions for this offering.</p>
+					<EmptyState
+						icon="users"
+						title="No professors assigned yet"
+						hint="Any professor with an active assignment may open sessions for this offering."
+					/>
 				{:else}
 					<div class="table-wrap">
 						<table>
 							<thead>
 								<tr>
-									<th>Professor</th>
-									<th>Role</th>
-									<th>Effective</th>
-									<th>Semester</th>
-									<th><span class="sr">Actions</span></th>
+									<th scope="col">Professor</th>
+									<th scope="col">Role</th>
+									<th scope="col">Effective</th>
+									<th scope="col">Semester</th>
+									<th scope="col"><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each adminOfferingDetailState.assignments as a (a.professorId)}
+								{#each adminOfferingDetailState.assignments as a (`${a.professorId}:${a.effectiveFrom}`)}
 									<tr>
 										<td>
 											<div class="strong">{professorName(a.professorId)}</div>
@@ -951,19 +1249,36 @@
 										</td>
 										<td>{a.effectiveFrom} → {a.effectiveTo ?? 'ongoing'}</td>
 										<td>{a.semester}</td>
-										<td class="row-actions">
-											{#if !a.effectiveTo}
-												<button class="link" onclick={() => endRow(a.professorId)}>End</button>
-											{:else}
-												<span class="muted small">ended</span>
-											{/if}
+										<td>
+											<div class="row-actions">
+												{#if !a.effectiveTo}
+													<button class="link" onclick={() => openReassign(a)}>Reassign</button>
+													<button class="link" onclick={() => askEndAssignment(a)}>End</button>
+												{:else if canReopenAssignment(a)}
+													<button class="link" onclick={() => openReopen(a)}>Reopen</button>
+												{:else}
+													<span class="muted small">ended</span>
+												{/if}
+												{#if isEndedAssignment(a)}
+													<button
+														class="link danger-link"
+														disabled={!canPermanentlyRemoveAssignment(a)}
+														title={a.hasSessions
+															? 'This assignment has sessions; its history must be kept.'
+															: 'Permanently erase this ended assignment. Only available when no sessions were opened under it.'}
+														onclick={() => askPermanentRemove(a)}
+													>
+														Remove permanently
+													</button>
+												{/if}
+											</div>
 										</td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
 					</div>
-					<p class="hint">Mid-term replacement: end the old assignment, then create the new one — history is never rewritten.</p>
+					<p class="hint">Mid-term replacement: use <strong>Reassign</strong> to hand the offering to another professor in one step. Only one primary professor may cover an offering at a time; assistants may overlap. Ending an assignment keeps it active through today; use <strong>Reopen</strong> on an ended row to undo an accidental end, or assign the same professor with a start date after the ended assignment. <strong>Remove permanently</strong> appears only after an assignment is ended; ended rows that opened a session keep their history and stay disabled.</p>
 				{/if}
 			</section>
 		{:else if tab === 'enrolled'}
@@ -985,19 +1300,19 @@
 					<button class="btn btn-secondary" onclick={applySection}>Apply</button>
 				</div>
 				{#if adminOfferingDetailState.rosterLoading}
-					<p class="muted">Loading roster…</p>
+					<SkeletonTable bare rows={4} cols={6} label="Loading roster…" />
 				{:else if adminOfferingDetailState.roster.length === 0}
-					<p class="empty">No students enrolled yet.</p>
+					<EmptyState icon="users" title="No students enrolled yet" />
 				{:else}
 					<div class="table-wrap">
 						<table>
 							<thead>
 								<tr>
-									<th>Student ID</th>
-									<th>Name</th>
-									<th>Section</th>
-									<th>Enrolled</th>
-									<th><span class="sr">Actions</span></th>
+									<th scope="col">Student ID</th>
+									<th scope="col">Name</th>
+									<th scope="col">Section</th>
+									<th scope="col">Enrolled</th>
+									<th scope="col"><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1007,8 +1322,10 @@
 										<td>{r.name}</td>
 										<td>{r.section ?? '—'}</td>
 										<td>{r.enrolledAt.slice(0, 10)}</td>
-										<td class="row-actions">
-											<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+										<td>
+											<div class="row-actions">
+												<button class="link" onclick={() => askUnenroll(r)}>Remove</button>
+											</div>
 										</td>
 									</tr>
 								{/each}
@@ -1040,7 +1357,7 @@
 				<p class="muted">CSV of EXISTING students: student_id, first_name, middle_name, last_name, email, program_code, year_level, section. Rows that fail (unknown id, email mismatch, wrong program) are reported per line, not applied.</p>
 				<div class="filters">
 					<input class="input" type="file" accept=".csv,text/csv" onchange={onBulkFile} aria-label="Roster CSV file" />
-					<button class="btn btn-primary" disabled={!bulkFile || bulkBusy} onclick={submitBulk}>
+					<button class="btn btn-primary" aria-busy={bulkBusy} disabled={!bulkFile || bulkBusy} onclick={submitBulk}>
 						{bulkBusy ? 'Uploading…' : 'Upload'}
 					</button>
 				</div>
@@ -1079,21 +1396,22 @@
 						</div>
 					{/if}
 				{/if}
-				{#if compError}
-					<p class="error" role="alert">{compError}</p>
-				{/if}
 				{#if offering.components.length === 0}
-					<p class="empty">No active components. Add one below so sessions have a schedule to inherit.</p>
+					<EmptyState
+						icon="chart"
+						title="No active components"
+						hint="Add one below so sessions have a schedule to inherit."
+					/>
 				{:else}
 					<div class="table-wrap">
 						<table>
 							<thead>
 								<tr>
-									<th>Type</th>
-									<th>Days</th>
-									<th>Time</th>
-									<th>Room</th>
-									<th><span class="sr">Actions</span></th>
+									<th scope="col">Type</th>
+									<th scope="col">Days</th>
+									<th scope="col">Time</th>
+									<th scope="col">Room</th>
+									<th scope="col"><span class="sr">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1107,9 +1425,11 @@
 										<td>{comp.scheduleDays}</td>
 										<td>{comp.scheduleStartTime.slice(0, 5)}–{comp.scheduleEndTime.slice(0, 5)}</td>
 										<td>{comp.classroomName ?? '—'}</td>
-										<td class="row-actions">
-											<button class="link" onclick={() => openEditComponent(comp)}>Edit</button>
-											<button class="link" disabled={compBusy} onclick={() => void archiveRow(comp)}>Archive</button>
+										<td>
+											<div class="row-actions">
+												<button class="link" onclick={() => openEditComponent(comp)}>Edit</button>
+												<button class="link" disabled={compBusy} onclick={() => askRemoveMeeting(comp)}>Remove</button>
+											</div>
 										</td>
 									</tr>
 								{/each}
@@ -1131,23 +1451,42 @@
 						</div>
 						<label>Room (optional)<input class="input" bind:value={e_room} placeholder="Lab 101" /></label>
 						<div class="grid2">
-							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
-							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
+							<label>Latitude {editingComp?.sessionType === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={e_lat} /></label>
+							<label>Longitude {editingComp?.sessionType === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={e_lng} /></label>
 						</div>
+						<ClassroomMapPicker
+							lat={e_lat.trim() === '' ? null : Number(e_lat)}
+							lng={e_lng.trim() === '' ? null : Number(e_lng)}
+							onChange={(la, lo) => { e_lat = String(la); e_lng = String(lo); }}
+							onClear={() => { e_lat = ''; e_lng = ''; }}
+							height="320px"
+						/>
 						{#if course && editProjection}
 							<p class="hint">Saving would bring the weekly total to {editProjection.scheduled}h of {editProjection.limit}h ({editProjection.status === 'ok' ? 'exact' : editProjection.status === 'under' ? `${editProjection.remaining}h short` : `${-editProjection.remaining}h over`}). Reshapes save freely — the panel above tracks the total back to exact.</p>
 						{/if}
+						{#if compError}
+							<p class="error" role="alert">{compError}</p>
+						{/if}
 						<div class="modal-actions">
 							<button class="btn btn-ghost" onclick={() => { editingComp = null; editConfirmOpen = false; }}>Cancel</button>
-							<button class="btn btn-primary" disabled={compBusy} onclick={submitEditComponent}>
+							<button class="btn btn-primary" aria-busy={compBusy} disabled={compBusy} onclick={submitEditComponent}>
 								{compBusy ? 'Saving…' : 'Save'}
 							</button>
 						</div>
 					</div>
 				{:else}
+					<div class="comp-add-trigger">
+						<button class="btn btn-primary" onclick={() => { if (!addMeetingOpen) resetCompForm(); addMeetingOpen = !addMeetingOpen; }}>
+							{addMeetingOpen ? 'Hide form' : 'Add meeting'}
+						</button>
+					</div>
+					{#if addMeetingOpen}
 					<div class="comp-add">
 						<h3 class="sub-title">Add a meeting</h3>
 						<p class="hint">One row, one time: days on the same row share the time below. For a different time, add another row.</p>
+						{#if compError}
+							<p class="error" role="alert">{compError}</p>
+						{/if}
 						<DayPicker bind:value={c_days} />
 						<label>Type
 							<select class="input" bind:value={c_type}>
@@ -1161,10 +1500,17 @@
 						</div>
 						<label>Room (optional)<input class="input" bind:value={c_room} placeholder="Lab 101" /></label>
 						<div class="grid2">
-							<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={c_lat} placeholder="14.5995" /></label>
-							<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
+							<label>Latitude {c_type === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={c_lat} placeholder="14.5995" /></label>
+							<label>Longitude {c_type === 'lab' ? '(required)' : '(optional)'}<input class="input" inputmode="decimal" bind:value={c_lng} placeholder="120.9842" /></label>
 						</div>
-						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence and inherit this room when the professor opens them without an override.</p>
+						<ClassroomMapPicker
+							lat={c_lat.trim() === '' ? null : Number(c_lat)}
+							lng={c_lng.trim() === '' ? null : Number(c_lng)}
+							onChange={(la, lo) => { c_lat = String(la); c_lng = String(lo); }}
+							onClear={() => { c_lat = ''; c_lng = ''; }}
+							height="320px"
+						/>
+						<p class="hint">Laboratory meetings should carry coordinates: lab sessions enforce the geofence. Leave the coordinates blank to inherit the offering default.</p>
 						{#if course && addProjection && c_days.trim() && c_start && c_end}
 							{#if addBlocked}
 								<p class="error" role="alert">Adding this meeting would bring the weekly total to {addProjection.scheduled}h of {addProjection.limit}h ({addProjection.status === 'under' ? `${addProjection.remaining}h short` : `${-addProjection.remaining}h over`}).</p>
@@ -1173,11 +1519,13 @@
 							{/if}
 						{/if}
 						<div class="modal-actions">
-							<button class="btn btn-secondary" disabled={compBusy} onclick={submitAddComponent}>
+							<button class="btn btn-ghost" onclick={() => (addMeetingOpen = false)}>Cancel</button>
+							<button class="btn btn-primary" aria-busy={compBusy} disabled={compBusy} onclick={async () => { await submitAddComponent(); if (!compError) addMeetingOpen = false; }}>
 								{compBusy ? 'Adding…' : 'Add meeting'}
 							</button>
 						</div>
 					</div>
+					{/if}
 				{/if}
 			</section>
 
@@ -1190,23 +1538,43 @@
 				<div class="form">
 					<div class="grid2">
 						<label>Sessions / week (automatic)<input class="input" value={detailSessionCount} disabled aria-label="Sessions per week, counted automatically from the meetings" /></label>
-						<label>Semester weeks<input class="input" inputmode="numeric" bind:value={s_weeks} /></label>
+						<label>Semester weeks (from term)<input class="input" value={offering.semesterWeeks} disabled aria-label="Session weeks, set on the term in Manage Terms" /></label>
 					</div>
 					<p class="hint">Sessions per week are counted from the class meetings above — one per meeting day — and update automatically when meetings change.</p>
 					{#if detailExpectedTotal !== null}
-						<p class="hint">{detailSessionCount} sessions/week × {s_weeks.trim()} weeks = {detailExpectedTotal} expected sessions this term.</p>
-					{:else}
-						<p class="hint">Enter the semester weeks to see the expected session total.</p>
+						<p class="hint">{detailSessionCount} sessions/week × {offering.semesterWeeks} weeks = {detailExpectedTotal} expected sessions this term. Edit the term's weeks in Program Management → Year Levels → Manage Terms.</p>
 					{/if}
 					<div class="grid2">
-						<label>Present window, min<input class="input" inputmode="numeric" bind:value={s_present} /></label>
-						<label>Late window, min<input class="input" inputmode="numeric" bind:value={s_late} /></label>
+						<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={s_present} /></label>
+						<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={s_late} /></label>
 					</div>
-					<p class="hint">Present + late windows must fit the course session duration.</p>
+					<p class="hint">
+						Present + late windows must fit the course session duration. Leave a field
+						blank to follow the system default.
+					</p>
+					<label>Default classroom (optional)<input class="input" bind:value={s_room} placeholder="Room 301" /></label>
+					<p class="hint">Used when a class meeting has no classroom of its own. Meetings can override this per row.</p>
+					<div class="grid2">
+						<label>Default latitude (optional)<input class="input" inputmode="decimal" bind:value={s_lat} placeholder="14.5995" /></label>
+						<label>Default longitude (optional)<input class="input" inputmode="decimal" bind:value={s_lng} placeholder="120.9842" /></label>
+					</div>
+					<ClassroomMapPicker
+						lat={s_lat.trim() === '' ? null : Number(s_lat)}
+						lng={s_lng.trim() === '' ? null : Number(s_lng)}
+						onChange={(la, lo) => { s_lat = String(la); s_lng = String(lo); }}
+						onClear={() => { s_lat = ''; s_lng = ''; }}
+					/>
+					<div class="grid2">
+						<label>Geofence radius, m<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.radius})` : 'System default'} bind:value={s_radius} /></label>
+					</div>
+					<p class="hint">
+						Blank inherits the value set in System Settings. A value here applies to this
+						offering's sessions only.
+					</p>
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" onclick={fillSettings}>Reset</button>
-					<button class="btn btn-primary" disabled={settingsBusy} onclick={submitSettings}>
+					<button class="btn btn-primary" aria-busy={settingsBusy} disabled={settingsBusy} onclick={submitSettings}>
 						{settingsBusy ? 'Saving…' : 'Save'}
 					</button>
 				</div>
@@ -1279,16 +1647,51 @@
 				<label class="check">
 					<input type="checkbox" bind:checked={a_primary} /> Primary (uncheck for assistant)
 				</label>
+				<p class="hint">
+					Only one primary professor can cover an offering at a time. Leave this unchecked to add an assistant.
+				</p>
 				<div class="grid2">
 					<label>Effective from<input class="input" type="date" bind:value={a_from} /></label>
 					<label>Effective to (optional)<input class="input" type="date" bind:value={a_to} /></label>
 				</div>
-				<label>Semester<input class="input" bind:value={a_semester} placeholder="1st Sem" /></label>
+				<p class="hint">Semester: <strong>{offering.semester}</strong></p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (assignOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={assignBusy} onclick={submitAssign}>
-					{assignBusy ? 'Saving…' : 'Assign'}
+				<button class="btn btn-primary" onclick={submitAssign}>
+					Review assignment
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if assignConfirmOpen && pendingAssign && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="assign-confirm-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: cancelAssignConfirm }}
+		>
+			<h2 id="assign-confirm-title" class="modal-title">Assign this professor?</h2>
+			<p class="modal-text">
+				<strong>{professorName(pendingAssign.professor_id)}</strong> will be assigned to this offering as
+				{pendingAssign.is_primary ? 'primary' : 'assistant'} from {pendingAssign.effective_from}
+				{pendingAssign.effective_to ? ` to ${pendingAssign.effective_to}` : ''}.
+			</p>
+			<p class="muted">
+				Semester: {offering.semester} · {offering.academicYear}
+			</p>
+			{#if assignError}
+				<p class="error" role="alert">{assignError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={cancelAssignConfirm}>Back</button>
+				<button class="btn btn-primary" disabled={assignBusy} onclick={confirmAssign}>
+					{assignBusy ? 'Assigning…' : 'Confirm assign'}
 				</button>
 			</div>
 		</div>
@@ -1425,7 +1828,7 @@
 			</p>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editConfirmOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={compBusy} onclick={() => void persistEditComponent()}>
+				<button class="btn btn-primary" aria-busy={compBusy} disabled={compBusy} onclick={() => void persistEditComponent()}>
 					{compBusy ? 'Saving…' : 'Save anyway'}
 				</button>
 			</div>
@@ -1461,6 +1864,208 @@
 	</div>
 {/if}
 
+{#if reassignOpen && reassignTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reassign-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reassignOpen = false) }}
+		>
+			<h2 id="reassign-title" class="modal-title">Reassign professor</h2>
+			{#if reassignError}
+				<p class="error" role="alert">{reassignError}</p>
+			{/if}
+			<div class="form">
+				<p class="hint">
+					Current: <strong>{professorName(reassignTarget.professorId)}</strong> — {reassignTarget.effectiveFrom} → {reassignTarget.effectiveTo ?? 'ongoing'}
+				</p>
+				<label>Replacement professor
+					<select class="input" bind:value={r_new_professor_id}>
+						<option value="">Pick a professor…</option>
+						{#each [...professorIndex.values()] as p (p.id)}
+							<option value={p.id} disabled={p.id === reassignTarget.professorId}>
+								{p.firstName} {p.lastName} — {p.email}
+							</option>
+						{/each}
+					</select>
+				</label>
+				<label class="check">
+					<input type="checkbox" bind:checked={r_primary} /> Primary (uncheck for assistant)
+				</label>
+				<p class="hint">
+					Only one primary professor can cover an offering at a time. Leave this unchecked to reassign as an assistant.
+				</p>
+				<div class="grid2">
+					<label>Effective from<input class="input" type="date" bind:value={r_from} /></label>
+					<label>Effective to (optional)<input class="input" type="date" bind:value={r_to} /></label>
+				</div>
+				<p class="hint">Semester: <strong>{offering.semester}</strong></p>
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (reassignOpen = false)}>Cancel</button>
+				<button class="btn btn-primary" onclick={submitReassign}>
+					Review reassignment
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reassignConfirmOpen && pendingReassign && reassignTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reassign-confirm-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: cancelReassignConfirm }}
+		>
+			<h2 id="reassign-confirm-title" class="modal-title">Reassign this professor?</h2>
+			<p class="modal-text">
+				<strong>{professorName(reassignTarget.professorId)}</strong> will be replaced by
+				<strong>{professorName(pendingReassign.new_professor_id)}</strong> on this offering.
+			</p>
+			<p class="muted">
+				New effective from {pendingReassign.effective_from ?? 'today'}
+				{pendingReassign.effective_to ? ` to ${pendingReassign.effective_to}` : ''} · Semester {offering.semester}
+			</p>
+			{#if reassignError}
+				<p class="error" role="alert">{reassignError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={cancelReassignConfirm}>Back</button>
+				<button class="btn btn-primary" disabled={reassignBusy} onclick={confirmReassign}>
+					{reassignBusy ? 'Reassigning…' : 'Confirm reassign'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if endAssignmentTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="end-assignment-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (endAssignmentTarget = null) }}
+		>
+			<h2 id="end-assignment-title" class="modal-title">
+				{endAssignmentIsFuture ? 'Cancel this scheduled assignment?' : 'End this assignment?'}
+			</h2>
+			{#if endAssignmentIsFuture}
+				<p class="modal-text">
+					<strong>{professorName(endAssignmentTarget.professorId)}</strong>'s scheduled assignment starts on
+					{endAssignmentTarget.effectiveFrom} and has not begun. Cancelling removes it from the offering.
+				</p>
+			{:else}
+				<p class="modal-text">
+					<strong>{professorName(endAssignmentTarget.professorId)}</strong> will remain assigned through today
+					({isoToday()}). The assignment ends tomorrow; past sessions stay attributed to them. After ending,
+					you can use <strong>Remove permanently</strong> on the ended row if no sessions were opened under it.
+				</p>
+			{/if}
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (endAssignmentTarget = null)}>Back</button>
+				<button class="btn btn-danger" disabled={endAssignmentBusy} onclick={confirmEndAssignment}>
+					{endAssignmentBusy
+						? endAssignmentIsFuture
+							? 'Cancelling…'
+							: 'Ending…'
+						: endAssignmentIsFuture
+							? 'Cancel assignment'
+							: 'End assignment'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reopenTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reopen-assignment-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reopenTarget = null) }}
+		>
+			<h2 id="reopen-assignment-title" class="modal-title">Reopen this assignment?</h2>
+			<p class="modal-text">
+				<strong>{professorName(reopenTarget.professorId)}</strong> will become active again on this offering
+				from {reopenTarget.effectiveFrom} with no end date as
+				<strong>{reopenTarget.isPrimary && !reopenAsAssistant ? 'primary' : 'assistant'}</strong>.
+				This undoes the previous end action.
+			</p>
+			{#if reopenTarget.isPrimary}
+				<label class="check">
+					<input type="checkbox" bind:checked={reopenAsAssistant} /> Reopen as assistant
+				</label>
+				<p class="hint">
+					Choose this if another professor is already primary for these dates.
+				</p>
+			{/if}
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (reopenTarget = null)}>Back</button>
+				<button class="btn btn-primary" disabled={reopenBusy} onclick={confirmReopen}>
+					{reopenBusy ? 'Reopening…' : 'Reopen assignment'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if permanentRemoveTarget && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="permanent-remove-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (permanentRemoveTarget = null) }}
+		>
+			<h2 id="permanent-remove-title" class="modal-title">Permanently remove this assignment?</h2>
+			<p class="modal-text">
+				<strong>{professorName(permanentRemoveTarget.professorId)}</strong>'s assignment from
+				{permanentRemoveTarget.effectiveFrom} → {permanentRemoveTarget.effectiveTo ?? 'ongoing'}
+				({offering.semester}) will be erased from history. This cannot be undone, and the
+				assignment can no longer be reopened.
+			</p>
+			<p class="hint">
+				Sessions are never deleted. If any session was opened under this assignment, the server
+				blocks removal and you must use <strong>End</strong> instead.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (permanentRemoveTarget = null)}>Back</button>
+				<button
+					class="btn btn-danger"
+					disabled={permanentRemoveBusy}
+					onclick={confirmPermanentRemove}
+				>
+					{permanentRemoveBusy ? 'Removing…' : 'Remove permanently'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if archiveConfirm && offering}
 	<div class="modal-overlay" role="presentation">
 		<div
@@ -1481,7 +2086,7 @@
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
-				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
@@ -1518,12 +2123,39 @@
 	</div>
 {/if}
 
+{#if removeCompTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="component-remove-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (removeCompTarget = null) }}
+		>
+			<h2 id="component-remove-title" class="modal-title">Remove this meeting?</h2>
+			<p class="modal-text">
+				It will be taken off this offering's active schedule. Attendance history
+				for past sessions is kept.
+			</p>
+			{#if compError}
+				<p class="error" role="alert">{compError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => (removeCompTarget = null)}>Cancel</button>
+				<button class="btn btn-danger" disabled={compBusy} onclick={confirmRemoveMeeting}>
+					{compBusy ? 'Removing…' : 'Remove'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.page {
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -1705,8 +2337,8 @@
 	}
 
 	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	/* Blocked-sessions callout: icon + tinted box, unmissable next to the
@@ -1744,8 +2376,26 @@
 		color: var(--text);
 	}
 
-	.comp-edit,
+	.comp-add-trigger {
+		margin-top: 1.25rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--divider);
+		display: flex;
+		justify-content: flex-end;
+	}
+
 	.comp-add {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+		margin-top: 1rem;
+		padding: 1.25rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-page);
+	}
+
+	.comp-edit {
 		display: flex;
 		flex-direction: column;
 		gap: 0.875rem;
@@ -1758,10 +2408,7 @@
 		section-level margins would otherwise stack on top of it (e.g. a
 		2.4rem pile-up between the heading and its hint). */
 	.comp-edit > .hint,
-	.comp-add > .hint,
-	.comp-add > .error,
-	.comp-edit > .sub-title,
-	.comp-add > .sub-title {
+	.comp-edit > .sub-title {
 		margin: 0;
 	}
 
@@ -1769,7 +2416,7 @@
 	.comp-add label {
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: 0.5rem;
 		font-size: 0.8125rem;
 		font-weight: 600;
 		color: var(--text-secondary);
@@ -1795,29 +2442,26 @@
 		text-decoration: underline;
 	}
 
-	/* Back button + breadcrumb read as one header block, so the .page flex gap
-	 * does not push them a full row apart (same pattern as Program Management). */
+	.danger-link {
+		color: var(--danger);
+	}
+
+	.danger-link:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.danger-link:disabled:hover {
+		text-decoration: none;
+	}
+
+	/* Back button reads as its own header block, so the .page flex gap
+	 * does not push it a full row apart (same pattern as Program Management). */
 	.page-top {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 0.75rem;
-	}
-
-	.crumb {
-		margin: 0;
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-	}
-
-	.crumb a {
-		color: var(--accent);
-		text-decoration: none;
-		font-weight: 600;
-	}
-
-	.crumb a:hover {
-		text-decoration: underline;
 	}
 
 	.empty {
@@ -2013,7 +2657,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

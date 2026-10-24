@@ -161,6 +161,21 @@ fly secrets set DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.REF.supabas
 fly secrets set HMAC_SECRET_KEY="generate-a-random-secret-key"
 fly secrets set CORS_ORIGINS="https://attendance-system.vercel.app"
 
+# Optional — enable the Turnstile captcha on login + forgot-password step 1.
+# Both keys or neither: also set PUBLIC_TURNSTILE_SITE_KEY on Vercel (§5).
+# Full runbook: production-checklist.md §3.
+fly secrets set TURNSTILE_SECRET_KEY="YOUR_TURNSTILE_SECRET"
+
+# Email — required for real users: login OTPs are mailed, so a missing relay
+# blocks sign-in. Leave SMTP_HOST unset and mail is only logged instead.
+# Full runbook: docs/deployment/email-setup.md
+fly secrets set \
+  SMTP_HOST="smtp-relay.brevo.com" \
+  SMTP_PORT="587" \
+  SMTP_USER="you@example.com" \
+  SMTP_PASSWORD="YOUR_SMTP_KEY" \
+  SMTP_FROM="attendance@example.com"
+
 # Deploy
 fly deploy
 
@@ -227,6 +242,9 @@ In your `frontend/.env`:
 
 ```
 PUBLIC_API_URL=https://attendance-system-api.fly.dev
+# Optional — enables the Turnstile captcha. The backend TURNSTILE_SECRET_KEY
+# must be set too (both keys, or neither); see production-checklist.md §3.
+# PUBLIC_TURNSTILE_SITE_KEY=YOUR_TURNSTILE_SITE_KEY
 ```
 
 In `svelte.config.js` — the scaffold already uses `@sveltejs/adapter-auto`, which auto-selects the Vercel adapter when deployed on Vercel, so no config change is required:
@@ -250,11 +268,16 @@ export default {
 2. Click "Add New Project"
 3. Import your GitHub repository
 4. Set framework preset to "SvelteKit"
-5. Add environment variable:
+5. Add environment variables:
    - Name: PUBLIC_API_URL
    - Value: https://attendance-system-api.fly.dev
+   - Name: PUBLIC_TURNSTILE_SITE_KEY  (optional — see production-checklist.md §3)
+   - Value: YOUR_TURNSTILE_SITE_KEY
 6. Click "Deploy"
 ```
+
+> `PUBLIC_*` vars are inlined at build time: if the site key is added after the
+> first deploy, redeploy for it to take effect.
 
 Vercel automatically:
 
@@ -365,6 +388,7 @@ The `API_URL` here must be the **public** value (`%PUBLIC_API_URL%`). In a Svelt
 | ------------------ | ----------------------------------------------------------------------------------- |
 | Backend accessible | Visit `https://attendance-system-api.fly.dev/docs` — should see Swagger UI          |
 | Database connected | Try creating a student via the Swagger UI or API                                    |
+| Email OTP delivers | Login with a test account; the code arrives and `fly logs` shows `Email sent to=` (see [email-setup.md](email-setup.md)) |
 | CORS working       | Open frontend URL → check browser console for no CORS errors                        |
 | PWA installable    | Open frontend in Chrome → check Lighthouse → PWA badge                              |
 | Offline mode       | Open frontend → DevTools → Network tab → toggle "Offline" → app should still load   |

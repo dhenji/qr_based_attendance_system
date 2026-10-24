@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -141,7 +142,7 @@
 	</button>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading professor…</p></section>
+		<SkeletonDetail rows={5} label="Loading professor…" />
 	{:else if error || !professor}
 		<section class="card">
 			<p class="error" role="alert">{error ?? 'Professor not found.'}</p>
@@ -209,7 +210,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.back {

@@ -325,9 +325,9 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 **All fields are read-only** per [D32](../project/decision-log.md). Contact your admin for changes.
 
-### 10.2 Settings — `/professor/settings` (Security Only)
+### 10.2 Settings — `/professor/settings`
 
-[FIG: Settings tab with Change Password (policy hint), Two-Factor Auth (MFA setup), Security Question, App version]
+[FIG: Settings tab with Appearance (theme toggle), Notifications (push/email toggles), Privacy (GPS/camera toggles), Change Password (policy hint), Two-Factor Auth (MFA setup), Security Question, App version]
 
 **Available Actions**:
 
@@ -335,7 +335,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 - **Set Up MFA**: TOTP authenticator app + backup codes
 - **Set Security Question**: Used for password reset fallback
 
-> **No** appearance, notifications, or account deletion options — security only per [D32](../project/decision-log.md).
+> Alongside security, the page carries device-local preferences — Appearance (Light/Dark theme), Notifications, and Privacy (GPS/camera) toggles. They are stored per browser, never per account, and the theme resets to Light at logout. Identity fields stay admin-managed per [D32](../project/decision-log.md).
 
 ---
 
@@ -372,3 +372,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 _For technical details on the scan flow, offline-first sync, or the current biometric limitations, see the [Architecture Docs](../architecture/)._
 
+
+## Remote / online sessions
+
+When opening a session, tick "Remote / online session" for classes with no physical classroom. This disables geofencing and removes the classroom coordinate fields; the session is recorded as remote for audit and reporting. In-person sessions still require classroom coordinates for labs and apply the geofence when coordinates are present.

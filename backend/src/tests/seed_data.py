@@ -248,7 +248,8 @@ async def seed(
                             "label": f"{n} Year" if False else ordinal(n),
                             "term_structure": {
                                 "terms": [
-                                    {"code": t, "label": label(t)} for t in terms
+                                    {"code": t, "label": label(t), "weeks": 16}
+                                    for t in terms
                                 ]
                             },
                             "sort_order": n,
@@ -303,7 +304,6 @@ async def seed(
                         "semester": "1st_sem",
                         "academic_year": "2026-2027",
                         "sessions_per_week": 2,
-                        "semester_weeks": 16,
                         "schedule_days": days,
                         "schedule_start_time": start,
                         "schedule_end_time": end,
@@ -404,7 +404,6 @@ async def seed(
                             effective_from=start,
                             is_primary=primary,
                             effective_to=end,
-                            semester="1st_sem",
                             assigned_by=admin.id,
                         )
                     )

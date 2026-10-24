@@ -21,6 +21,31 @@ import type {
 	ProfessorProfileResponse,
 } from '$lib/shared/types';
 
+// Assignment history can contain several rows for one offering (an ended
+// assignment plus its replacement). The server collapses these, but pages key
+// course cards by offering id, so keep a defensive dedupe here too. Prefer an
+// open-ended row, then the latest effective start.
+const dedupeAssignments = (
+	rows: ProfessorAssignedOffering[]
+): ProfessorAssignedOffering[] => {
+	const byOffering = new Map<number, ProfessorAssignedOffering>();
+	for (const row of rows) {
+		const current = byOffering.get(row.offering_id);
+		const currentRank = current
+			? [current.effective_to ? 0 : 1, current.effective_from ?? '']
+			: [-1, ''];
+		const nextRank = [row.effective_to ? 0 : 1, row.effective_from ?? ''];
+		if (
+			!current ||
+			nextRank[0] > currentRank[0] ||
+			(nextRank[0] === currentRank[0] && nextRank[1] > currentRank[1])
+		) {
+			byOffering.set(row.offering_id, row);
+		}
+	}
+	return [...byOffering.values()];
+};
+
 // Profile view-model assembled from GET /professor/profile.
 const toProfessor = (p: ProfessorProfileResponse): Professor => ({
 	id: p.id,
@@ -29,7 +54,7 @@ const toProfessor = (p: ProfessorProfileResponse): Professor => ({
 	lastName: p.last_name,
 	email: p.email,
 	department: p.department ?? undefined,
-	assignedCourses: p.assigned_courses ?? [],
+	assignedCourses: dedupeAssignments(p.assigned_courses ?? []),
 	claimStatus: p.claim_status,
 	createdAt: p.created_at,
 	sessionCount: p.session_count,
@@ -60,22 +85,38 @@ const toCourseSummary = (item: ProfessorAssignedOffering): ProfessorCourseSummar
 	isPrimary: item.is_primary,
 	enrolledCount: item.enrolled_count ?? 0,
 	scheduleOk: item.schedule_ok ?? true,
+	// The offering's own configuration (D93) — what a session for this
+	// offering inherits.
+	scheduleDays: item.schedule_days ?? '',
+	scheduleStartTime: item.schedule_start_time ?? null,
+	scheduleEndTime: item.schedule_end_time ?? null,
+	classroomName: item.classroom_name ?? null,
+	classroomLat: item.classroom_lat ?? null,
+	classroomLng: item.classroom_lng ?? null,
+	defaultPresentWindowMinutes: item.default_present_window_minutes ?? 0,
+	defaultLateWindowMinutes: item.default_late_window_minutes ?? 0,
+	defaultClassroomRadiusMeters: item.default_classroom_radius_meters ?? null,
+	sessionTypes: item.session_types ?? [],
+	components: item.components ?? [],
+	nextSessionDate: item.next_session_date ?? null,
+	nextSessionStart: item.next_session_start ?? null,
+	nextSessionEnd: item.next_session_end ?? null,
 });
 
 export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {
-	const all: ProfessorCourseSummary[] = [];
+	const all: ProfessorAssignedOffering[] = [];
 	let page = 1;
 	for (;;) {
 		const response = await get<Paginated<ProfessorAssignedOffering>>('professorCourses', {
 			page: String(page),
 			size: '100',
 		});
-		for (const item of response.items ?? []) all.push(toCourseSummary(item));
+		for (const item of response.items ?? []) all.push(item);
 		const total = response.total ?? all.length;
 		if ((response.items ?? []).length < 100 || all.length >= total) break;
 		page += 1;
 	}
-	return all;
+	return dedupeAssignments(all).map(toCourseSummary);
 };
 
 // GET /professor/dashboard — today's session counts, the enrolled roster, and

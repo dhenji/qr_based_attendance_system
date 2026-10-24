@@ -107,3 +107,134 @@ class OfferingScheduleMismatchException(SessionDomainException):
                 f"requirement ({limit_hours}h). Contact your administrator."
             )
         )
+
+
+class SessionDateInPastException(SessionDomainException):
+    """422 - an overridden session date is in the past (D93).
+
+    A class can move earlier or later than planned, but it cannot be opened
+    for a day that has already gone by.
+    """
+
+    status_code: int = 422
+    code: str = "session_date_in_past"
+    field: str = "session_date"
+
+    def __init__(self, session_date: str) -> None:
+        super().__init__(
+            message=(
+                f"A session date of {session_date} is in the past — pick today "
+                "or a later day."
+            )
+        )
+
+
+class ScheduledStartInPastException(SessionDomainException):
+    """422 - an overridden start time has already gone by (D93).
+
+    The default (unoverridden) start may legitimately be in the past — a
+    class that began an hour ago and is being opened now. Only an explicit
+    override is checked, and only against a short grace.
+    """
+
+    status_code: int = 422
+    code: str = "scheduled_start_in_past"
+    field: str = "start_time"
+
+    def __init__(self, start_time: str) -> None:
+        super().__init__(
+            message=(
+                f"A start time of {start_time} is already in the past — pick a "
+                "later time or today's date."
+            )
+        )
+
+
+class InvalidSessionTimeException(SessionDomainException):
+    """422 - the resolved session window is not a valid interval (D93)."""
+
+    status_code: int = 422
+    code: str = "invalid_session_time"
+    field: str = "start_time"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message=(
+                "The session must end after it starts — check the scheduled "
+                "time."
+            )
+        )
+
+
+class SessionTypeNotConfiguredException(SessionDomainException):
+    """422 - the offering does not meet this kind of session (D95).
+
+    An offering declares what it meets through its active meeting
+    components (D77). Opening a session of a type it does not configure
+    would inherit the lecture's room and the course template's duration —
+    so it is refused, and the message says what the offering does meet.
+    """
+
+    status_code: int = 422
+    code: str = "session_type_not_configured"
+
+    def __init__(self, session_type: str, configured: list[str]) -> None:
+        asked = "laboratory" if session_type == "lab" else "lecture"
+        names = [
+            "a laboratory" if value == "lab" else "a lecture" for value in configured
+        ]
+        meets = names[0] if len(names) == 1 else f"{names[0]} and {names[1]}"
+
+        super().__init__(
+            message=(
+                f"This offering has no {asked} session — it meets {meets}. Ask "
+                "an administrator to add the meeting, or open a session of the "
+                "type it does meet."
+            ),
+            field="session_type",
+        )
+
+
+class SessionOutsideScheduledTimeException(SessionDomainException):
+    """422 - the session is outside its scheduled time (D94).
+
+    A session may only be opened while its class is running. Outside that
+    window the professor has two choices — wait for the scheduled time, or
+    open the session at a different date and time — so the message names
+    both, and the form renders the same panel the plan endpoint does.
+    """
+
+    status_code: int = 422
+    code: str = "session_outside_scheduled_time"
+
+    def __init__(
+        self, *, reason: str, scheduled: str | None, current: str
+    ) -> None:
+        if reason == "not_scheduled_today":
+            message: str = (
+                "This session is outside its scheduled time — this course has "
+                f"no class today and it is now {current}. Please wait until "
+                "the next class or select a different start time to continue."
+            )
+        else:
+            message = (
+                "This session is outside its scheduled time — the class is "
+                f"scheduled for {scheduled} and it is now {current}. Please "
+                "wait until the scheduled time or select a different start "
+                "time to continue."
+            )
+
+        super().__init__(message=message)
+
+
+class RemoteNotAllowedForLabException(SessionDomainException):
+    """422 - remote/online mode is only available for lectures."""
+
+    status_code: int = 422
+    code: str = "remote_not_allowed_for_lab"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Remote / online mode is only available for lecture sessions",
+            field="is_remote",
+        )

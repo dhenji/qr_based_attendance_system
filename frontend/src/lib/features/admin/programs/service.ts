@@ -54,6 +54,7 @@ const toYearLevel = (y: YearLevelResponse): YearLevel => ({
 	terms: (y.term_structure?.terms ?? []).map((t: ProgramTerm) => ({
 		code: t.code,
 		label: t.label,
+		weeks: t.weeks,
 	})),
 	sortOrder: y.sort_order,
 });

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onMount } from 'svelte';
 	import {
 		listAdminExcuses,
@@ -67,35 +69,59 @@
 	</section>
 
 	{#if loading}
-		<section class="card"><p class="muted">Loading excuse requests…</p></section>
+		<SkeletonTable rows={6} cols={4} label="Loading excuse requests…" />
 	{:else if error}
 		<section class="card">
 			<p class="error">{error}</p>
 			<button class="btn btn-secondary" type="button" onclick={() => void load()}>Retry</button>
 		</section>
 	{:else if items.length === 0}
-		<section class="card"><p class="empty">No {status} excuse requests.</p></section>
+		<section class="card">
+			<EmptyState
+				icon="file"
+				title={`No ${status} excuse requests`}
+				hint="New ones appear here as students and professors submit them."
+			/>
+		</section>
 	{:else}
 		<section class="card table-wrap">
 			<table>
 				<thead>
 					<tr>
-						<th>Student</th>
-						<th>Session</th>
-						<th>Reason</th>
-						<th>Requested</th>
+						<th scope="col">Student</th>
+						<th scope="col">Class</th>
+						<th scope="col">Reason</th>
+						<th scope="col">Requested</th>
+						<th scope="col">Reviewed</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each items as row (row.id)}
 						<tr>
 							<td>
-								<span class="strong">Student #{row.student_id}</span>
-								<div class="muted small">{humanizeInitiatedVia(row.initiated_via)} · {row.status}</div>
+								<span class="strong">{row.student_name}</span>
+								<div class="muted small">
+									{row.student_number}
+									{row.student_section ? ` · Section ${row.student_section}` : ''}
+									· {humanizeInitiatedVia(row.initiated_via)} · {row.status}
+								</div>
 							</td>
-							<td>Session #{row.session_id}</td>
+							<td>
+								<div class="strong">{row.course_code} · {row.course_name}</div>
+								<div class="muted small">Session {row.session_code}</div>
+							</td>
 							<td class="reason">{row.reason}</td>
 							<td>{formatLocalDateTime(row.requested_at)}</td>
+							<td>
+								{#if row.reviewed_by_name}
+									<div class="strong">{row.reviewed_by_name}</div>
+									<div class="muted small">
+										{row.reviewed_at ? formatLocalDateTime(row.reviewed_at) : ''}
+									</div>
+								{:else}
+									<span class="muted">—</span>
+								{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -109,7 +135,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {
@@ -186,11 +211,6 @@
 
 	.reason {
 		max-width: 28rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		margin: 0;
 	}
 
 	.error {

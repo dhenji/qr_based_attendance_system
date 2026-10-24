@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -223,7 +225,7 @@
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Program Management</h1>
@@ -261,12 +263,16 @@
 	</section>
 
 	{#if adminProgramsState.loading && adminProgramsState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={7} cols={6} label="Loading programs…" />
 	{:else if adminProgramsState.error}
 		<section class="card"><p class="error">Could not load programs: {adminProgramsState.error}</p></section>
 	{:else if sortedItems.length === 0}
 		<section class="card">
-			<p class="empty">No programs yet. Add the first one — year levels and terms come next on its detail page.</p>
+			<EmptyState
+				icon="file"
+				title="No programs yet"
+				hint="Add the first one — year levels and terms come next on its detail page."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminProgramsState.loading}>
@@ -286,11 +292,11 @@
 								Name<span aria-hidden="true">{sortArrow('name')}</span>
 							</button>
 						</th>
-						<th>Years</th>
-						<th>Terms</th>
-						<th>Courses</th>
-						<th>Status</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Years</th>
+						<th scope="col">Terms</th>
+						<th scope="col">Courses</th>
+						<th scope="col">Status</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -306,31 +312,33 @@
 									{p.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
-								{#if p.isActive}
-									<button
-										class="link"
-										onclick={() => { adminProgramsState.actionError = null; deactivateTarget = p; }}
-									>
-										Deactivate
-									</button>
-								{:else}
-									<button
-										class="link"
-										onclick={() => void toggleProgramActive(p)}
-									>
-										Reactivate
-									</button>
-								{/if}
-								{#if !p.isActive}
-									<button
-										class="link danger"
-										onclick={() => { adminProgramsState.actionError = null; deleteTarget = p; }}
-									>
-										Delete
-									</button>
-								{/if}
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => goto(adminProgram(p.id))}>Open</button>
+									{#if p.isActive}
+										<button
+											class="link"
+											onclick={() => { adminProgramsState.actionError = null; deactivateTarget = p; }}
+										>
+											Deactivate
+										</button>
+									{:else}
+										<button
+											class="link"
+											onclick={() => void toggleProgramActive(p)}
+										>
+											Reactivate
+										</button>
+									{/if}
+									{#if !p.isActive}
+										<button
+											class="link danger"
+											onclick={() => { adminProgramsState.actionError = null; deleteTarget = p; }}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -382,7 +390,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-program" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-primary" data-testid="save-program" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -402,7 +410,7 @@
 		>
 			<h2 id="deactivate-program-title" class="modal-title">Deactivate {deactivateTarget.code}?</h2>
 			<p class="modal-text">
-				{deactivateTarget.name} will be flipped to archived. Year levels stay,
+				{deactivateTarget.name} will be flipped to inactive. Year levels stay,
 				offerings and students keep working, and you can reactivate it anytime.
 			</p>
 			{#if adminProgramsState.actionError}
@@ -452,7 +460,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -619,12 +626,6 @@
 		margin-top: 1rem;
 	}
 
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
-	}
-
 	.error {
 		color: var(--danger);
 		font-size: 0.875rem;
@@ -708,7 +709,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

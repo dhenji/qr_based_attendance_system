@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { professorState, initProfessor } from '$lib/features/professor/store.svelte';
 
@@ -40,7 +41,7 @@
 	</header>
 
 	{#if professorState.loading}
-		<p class="muted">Loading…</p>
+		<SkeletonDetail rows={4} label="Loading profile…" />
 	{:else if professor}
 		<section class="card identity">
 			<div class="avatar">{initials}</div>
@@ -54,7 +55,7 @@
 				<span class="field">Claim Status</span>
 				<span>
 					<span class="badge" class:ok={professor.claimStatus === 'Claimed'}>
-						{professor.claimStatus === 'Claimed' ? '✅ Claimed' : 'Unclaimed'}
+						{professor.claimStatus === 'Claimed' ? 'Claimed' : 'Unclaimed'}
 					</span>
 				</span>
 			</div>
@@ -106,7 +107,6 @@
 		gap: 1.25rem;
 		max-width: 720px;
 		margin-inline: auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {

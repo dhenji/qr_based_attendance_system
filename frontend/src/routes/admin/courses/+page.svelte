@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -238,7 +240,7 @@
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Course Management</h1>
@@ -273,12 +275,16 @@
 	</section>
 
 	{#if adminCoursesState.loading && adminCoursesState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={6} label="Loading courses…" />
 	{:else if adminCoursesState.error}
 		<section class="card"><p class="error">Could not load courses: {adminCoursesState.error}</p></section>
 	{:else if visibleItems.length === 0}
 		<section class="card">
-			<p class="empty">No courses yet. Add the first template — offerings attach it to a program and year.</p>
+			<EmptyState
+				icon="file"
+				title="No courses yet"
+				hint="Add the first template — offerings attach it to a program and year."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminCoursesState.loading}>
@@ -298,10 +304,10 @@
 								Name<span aria-hidden="true">{sortArrow('name')}</span>
 							</button>
 						</th>
-						<th>Units</th>
-						<th>Default session (h)</th>
-						<th>Status</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Units</th>
+						<th scope="col">Default session (h)</th>
+						<th scope="col">Status</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -316,32 +322,34 @@
 									{c.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => goto(adminCourse(c.id))}>Open</button>
-								<button class="link" onclick={() => openEdit(c)}>Edit</button>
-								{#if c.isActive}
-									<button
-										class="link"
-										onclick={() => { adminCoursesState.actionError = null; deactivateTarget = c; }}
-									>
-										Deactivate
-									</button>
-								{:else}
-									<button
-										class="link"
-										onclick={() => void toggleCourseActive(c)}
-									>
-										Reactivate
-									</button>
-								{/if}
-								{#if !c.isActive}
-									<button
-										class="link danger"
-										onclick={() => { adminCoursesState.actionError = null; deleteTarget = c; }}
-									>
-										Delete
-									</button>
-								{/if}
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => goto(adminCourse(c.id))}>Open</button>
+									<button class="link" onclick={() => openEdit(c)}>Edit</button>
+									{#if c.isActive}
+										<button
+											class="link"
+											onclick={() => { adminCoursesState.actionError = null; deactivateTarget = c; }}
+										>
+											Deactivate
+										</button>
+									{:else}
+										<button
+											class="link"
+											onclick={() => void toggleCourseActive(c)}
+										>
+											Reactivate
+										</button>
+									{/if}
+									{#if !c.isActive}
+										<button
+											class="link danger"
+											onclick={() => { adminCoursesState.actionError = null; deleteTarget = c; }}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -393,7 +401,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-course" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-primary" data-testid="save-course" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -463,7 +471,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -630,12 +637,6 @@
 		margin-top: 1rem;
 	}
 
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
-	}
-
 	.error {
 		color: var(--danger);
 		font-size: 0.875rem;
@@ -719,7 +720,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

@@ -23,6 +23,7 @@ import type {
 	SessionCloseResponse,
 	SessionHistoryItemResponse,
 	SessionListItemResponse,
+	SessionPlanResponse,
 	SessionReadResponse,
 	SessionRowStatus,
 	SessionSummary,
@@ -152,12 +153,31 @@ export const listSessions = async (params?: {
 	return { items, total: response.total, page: response.page, size: response.size };
 };
 
+// getSessionPlan
+// What a session for this offering would inherit (D93): the meeting it
+// belongs to, the next occurrence of that meeting, the attendance windows,
+// the classroom and the geofence radius. The open form renders this instead
+// of re-deriving the schedule, so what the professor sees is what the
+// server will store.
+export const getSessionPlan = async (
+	offeringId: number,
+	sessionType: CourseType = 'lecture'
+): Promise<SessionPlanResponse> => {
+	const query: Record<string, string> = { session_type: sessionType };
+
+	return get<SessionPlanResponse>('sessionPlan', query, `/${offeringId}/session-plan`);
+};
+
 // openSession
 // Create a new attendance session against a course offering. qrPayload is what
-// gets rendered into the QR code students scan. Omitted window/classroom
-// fields fall back server-side to the offering defaults, then the app
-// defaults — but the form always sends explicit values so the projector
-// preview never disagrees with what was stored.
+// gets rendered into the QR code students scan.
+//
+// The session inherits the offering's configuration (D93), so the form sends
+// only what the professor actually changed: an omitted window, radius or
+// coordinate is resolved server-side from the offering's plan. `sessionDate`
+// and `startTime` are the schedule exception — a wall-clock date and time in
+// the institution's timezone — and either one marks the session as
+// overridden.
 export const openSession = async (
 	offeringId: number,
 	options?: {
@@ -170,9 +190,19 @@ export const openSession = async (
 		classroomName?: string;
 		classroomLat?: number;
 		classroomLng?: number;
+		classroomOverride?: boolean;
+		// Remote/online session: skips the geofence.
+		isRemote?: boolean;
+		// Whether the geofence is enforced for this session.
+		geofenceEnabled?: boolean;
+		// D93: the schedule exception.
+		sessionDate?: string;
+		startTime?: string;
+		// D94: why the professor moved the class, in their own words.
+		overrideReason?: string;
 	}
 ): Promise<OpenedSession> => {
-	const body: Record<string, number | string> = { offering_id: offeringId };
+	const body: Record<string, number | string | boolean> = { offering_id: offeringId };
 	if (options?.sessionType !== undefined) body.session_type = options.sessionType;
 	if (options?.durationMinutes !== undefined) body.duration_minutes = options.durationMinutes;
 	if (options?.presentWindowMinutes !== undefined)
@@ -184,6 +214,13 @@ export const openSession = async (
 		body.classroom_name = options.classroomName.trim();
 	if (options?.classroomLat !== undefined) body.classroom_lat = options.classroomLat;
 	if (options?.classroomLng !== undefined) body.classroom_lng = options.classroomLng;
+	if (options?.classroomOverride !== undefined) body.classroom_override = options.classroomOverride;
+	if (options?.isRemote !== undefined) body.is_remote = options.isRemote;
+	if (options?.geofenceEnabled !== undefined) body.geofence_enabled = options.geofenceEnabled;
+	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
+	if (options?.startTime !== undefined) body.start_time = options.startTime;
+	if (options?.overrideReason !== undefined && options.overrideReason.trim() !== '')
+		body.override_reason = options.overrideReason.trim();
 
 	const response = await post<SessionReadResponse>('sessionCreate', body);
 
@@ -191,10 +228,16 @@ export const openSession = async (
 		id: response.id,
 		offeringId: response.offering_id,
 		sessionType: response.session_type ?? 'lecture',
+		isRemote: response.is_remote ?? false,
 		sessionCode: response.session_code,
 		qrPayload: response.qr_payload,
 		expiresAt: response.expires_at,
+		scheduledStartTime: response.scheduled_start_time,
 		scheduledEndTime: response.scheduled_end_time,
+		scheduleOverridden: response.schedule_overridden ?? false,
+		actualStartTime: response.actual_start_time ?? null,
+		originalScheduledStartTime: response.original_scheduled_start_time ?? null,
+		overrideReason: response.override_reason ?? null,
 		createdAt: response.created_at,
 	};
 };
@@ -234,6 +277,7 @@ export const getActiveSession = async (sessionId: number): Promise<LiveSession> 
 		id: response.id,
 		offeringId: response.offering,
 		sessionType: response.session_type ?? 'lecture',
+		isRemote: response.is_remote ?? false,
 		offeringCode: courseCodeFor(response.offering),
 		offeringName: courseNameFor(response.offering),
 		offeringSections: sectionsFor(response.offering),

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import {
@@ -22,6 +23,7 @@
 	} from '$lib/features/excuse/attachments';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	type Status = StudentHistoryStatus;
 	type Row = {
@@ -305,6 +307,15 @@
 	let exportError: string | null = $state(null);
 	let exportNote: string | null = $state(null);
 
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
+
 	// Export is server-side (GET /student/attendance/history/export), so the
 	// file holds every matching row — the old client path paged through the list
 	// endpoint and stopped at 2000.
@@ -519,7 +530,7 @@
 	};
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<h1>Attendance History</h1>
 		<p class="subtitle">
@@ -576,8 +587,8 @@
 		</select>
 
 		<div class="actions">
-			<button class="btn-ghost" onclick={doPrint}>Print</button>
-			<button class="btn-ghost" onclick={exportCsv} disabled={exporting}>
+			<button class="btn-ghost" onclick={() => (pendingExport = { run: doPrint, title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>Print</button>
+			<button class="btn-ghost" onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: String(filtered.length) }] })} disabled={exporting}>
 				{exporting ? 'Exporting…' : 'Export CSV'}
 			</button>
 		</div>
@@ -630,17 +641,23 @@
 			<table>
 				<thead>
 					<tr>
-						<th><button class="th-btn" onclick={() => handleSort('date')}>Date<span class="sort-glyph">{sortGlyph('date')}</span></button></th>
-						<th><button class="th-btn" onclick={() => handleSort('course')}>Course<span class="sort-glyph">{sortGlyph('course')}</span></button></th>
-						<th><button class="th-btn" onclick={() => handleSort('status')}>Status<span class="sort-glyph">{sortGlyph('status')}</span></button></th>
-						<th><button class="th-btn" onclick={() => handleSort('time')}>Time<span class="sort-glyph">{sortGlyph('time')}</span></button></th>
-						<th><span class="sr-only">Actions</span></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('date')}>Date<span class="sort-glyph">{sortGlyph('date')}</span></button></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('course')}>Course<span class="sort-glyph">{sortGlyph('course')}</span></button></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('status')}>Status<span class="sort-glyph">{sortGlyph('status')}</span></button></th>
+						<th scope="col"><button class="th-btn" onclick={() => handleSort('time')}>Time<span class="sort-glyph">{sortGlyph('time')}</span></button></th>
+						<th scope="col"><span class="sr-only">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if loading}
 						<tr>
-							<td class="empty-row" colspan="5">Loading attendance history…</td>
+							<td class="empty-row" colspan="5">
+								<div class="skeleton-stack" role="status" aria-busy="true">
+									<span class="sr-only">Loading attendance history…</span>
+									<Skeleton height={12} width="70%" />
+									<Skeleton height={12} width="55%" />
+								</div>
+							</td>
 						</tr>
 					{:else if loadError}
 						<tr>
@@ -819,6 +836,7 @@
 					<button
 						class="btn-primary"
 						type="button"
+						aria-busy={excuseBusy}
 						disabled={excuseBusy}
 						onclick={() => void submitExcuse()}
 					>
@@ -828,6 +846,17 @@
 			</div>
 		</div>
 	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -835,7 +864,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
-		font-family: system-ui, sans-serif;
 		width: 100%;
 		min-width: 0;
 	}
@@ -890,7 +918,7 @@
 
 	.form-input {
 		padding: 0.625rem 0.875rem;
-		border: 1.5px solid #d1d5db;
+		border: 1.5px solid var(--border-strong);
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-family: inherit;
@@ -1027,9 +1055,9 @@
 	}
 
 	.badge.rejected {
-		color: #6b7280;
-		background: #f3f4f6;
-		border: 1px solid #e5e7eb;
+		color: var(--text-muted);
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
 	}
 
 	.retry-btn {
@@ -1039,7 +1067,7 @@
 	.export-error {
 		flex-basis: 100%;
 		margin: 0;
-		color: #b91c1c;
+		color: var(--danger);
 		font-size: 0.875rem;
 	}
 
@@ -1066,12 +1094,12 @@
 	.section-title {
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text-strong);
 		margin: 0;
 	}
 
 	.muted {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0.5rem 0 0;
 	}
@@ -1095,7 +1123,7 @@
 	}
 
 	.error {
-		color: #b91c1c;
+		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0.5rem 0 0;
 	}
@@ -1111,7 +1139,7 @@
 	.requests-title {
 		font-size: 1.125rem;
 		font-weight: 700;
-		color: #1e293b;
+		color: var(--text-strong);
 		margin: 0;
 	}
 
@@ -1130,11 +1158,11 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #f1f5f9;
+		border: 1px solid var(--divider);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: var(--bg-muted);
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.request-text {
@@ -1242,8 +1270,7 @@
 		font-size: 0.875rem;
 		font-weight: 600;
 		font-family: inherit;
-		color: #fff;
-		cursor: pointer;
+color: var(--on-brand);
 	}
 
 	.btn-primary:disabled {
@@ -1266,11 +1293,11 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		padding: 0.625rem 0.875rem;
-		border: 1px solid #f1f5f9;
+		border: 1px solid var(--divider);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: var(--bg-muted);
 		font-size: 0.9375rem;
-		color: #1e293b;
+		color: var(--text);
 	}
 
 	.queue-actions {
@@ -1321,7 +1348,7 @@
 	}
 
 	.page-btn:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 

@@ -84,7 +84,6 @@
 		background: var(--bg-card);
 		color: var(--text-strong);
 		box-shadow: var(--shadow-lg);
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

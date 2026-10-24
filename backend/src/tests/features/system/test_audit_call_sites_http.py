@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity, UserRole
-from tests.conftest import Factories
+from tests.conftest import SESSION_TEST_NOW, Factories
 
 AUDIT_ENDPOINT = "/api/admin/audit-logs"
 
@@ -43,9 +43,10 @@ async def _assigned_professor(
     row is unclaimed and unassigned.
     """
     # `full_stack` seeds an active session, which would make the create a 409.
-    stack = await factories.full_stack(
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=1)
-    )
+    # The expiry is on the session service's clock — the suite pins it, so the
+    # open-window check (D94) and the "is a session already live" check read
+    # the same instant.
+    stack = await factories.full_stack(expires_at=SESSION_TEST_NOW - timedelta(hours=1))
     professor_user = await factories.user(role=UserRole.PROFESSOR.value)
     stack["professor"].user_id = professor_user.id
     assigner = await factories.user(role=UserRole.ADMIN.value)
@@ -174,8 +175,123 @@ async def test_rejected_mutation_leaves_no_trail(
     assert await _rows(test_db_session, AuditEntity.STUDENT, other_id) == []
 
 
-# --- professor archive -----------------------------------------------------
+# --- roster creation -------------------------------------------------------
+#
+# A roster row appearing is a change to the institution, so it is audited
+# like any other. These rows used to be missing entirely, and the client
+# INFERRED them from each roster's `created_at` — an inferred row is not
+# evidence, it could not be filtered or paged with the real ones, and it
+# needed four roster fetches on every audit page load (ADR-086).
 
+
+async def test_student_create_writes_a_row(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    program = await factories.program()
+    year = await factories.year_level(program)
+    await test_db_session.commit()
+    headers = await _headers(auth_headers, factories)
+
+    response = await api_client.post(
+        "/api/admin/students",
+        json={
+            "student_id": "2024-0001",
+            "first_name": "Juan",
+            "last_name": "Dela Cruz",
+            "email": "juan.delacruz@example.com",
+            "program_id": program.id,
+            "year_level_id": year.id,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+    created = response.json()
+    (row,) = await _rows(test_db_session, AuditEntity.STUDENT, created["id"])
+    assert row.action == AuditAction.CREATE
+    assert row.new_value["student_id"] == "2024-0001"
+    assert row.new_value["first_name"] == "Juan"
+    # The admin who created it is the actor.
+    assert row.performed_by is not None
+
+
+async def test_professor_create_writes_a_row(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    await test_db_session.commit()
+    headers = await _headers(auth_headers, factories)
+
+    response = await api_client.post(
+        "/api/admin/professors",
+        json={
+            "first_name": "Maria",
+            "last_name": "Garcia",
+            "email": "maria.garcia@example.com",
+            "department": "Computer Science",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+    created = response.json()
+    (row,) = await _rows(test_db_session, AuditEntity.PROFESSOR, created["id"])
+    assert row.action == AuditAction.CREATE
+    assert row.new_value["email"] == "maria.garcia@example.com"
+    assert row.new_value["last_name"] == "Garcia"
+
+
+# --- offering components ---------------------------------------------------
+#
+# A schedule component used to be written as `course_offering` with the
+# OFFERING's id, so one entity type carried two id spaces and the reader
+# could not tell an offering from one of its components. A component has an
+# id of its own, so it gets its own entity type (ADR-086).
+
+
+async def test_component_changes_use_the_component_entity_type(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+) -> None:
+    stack = await factories.full_stack()
+    await test_db_session.commit()
+    headers = await _headers(auth_headers, factories)
+
+    response = await api_client.post(
+        f"/api/admin/offerings/{stack['offering'].id}/components",
+        json={
+            "session_type": "lab",
+            "schedule_days": "H",
+            "schedule_start_time": "10:00",
+            "schedule_end_time": "12:00",
+            "classroom_name": "Lab 2",
+            "classroom_lat": 14.0,
+            "classroom_lng": 121.0,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+    component = response.json()
+    (row,) = await _rows(
+        test_db_session, AuditEntity.OFFERING_COMPONENT, component["id"]
+    )
+    assert row.action == AuditAction.CREATE
+    # The id is the COMPONENT's, not the offering's.
+    assert row.entity_id == component["id"]
+    assert row.new_value["session_type"] == "lab"
+    # Nothing was written under the offering's type.
+    assert await _rows(test_db_session, AuditEntity.COURSE_OFFERING) == []
+
+
+# --- professor archive -----------------------------------------------------
 
 async def test_professor_archive_writes_one_row(
     api_client: Any,

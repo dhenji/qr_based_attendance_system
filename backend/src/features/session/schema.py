@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -10,14 +10,15 @@ from shared.constants import (
     LATITUDE_MIN,
     LONGITUDE_MAX,
     LONGITUDE_MIN,
+    RADIUS_METERS_MAX,
+    RADIUS_METERS_MIN,
 )
 from shared.enums import SessionType, ValidationStatus
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
     DURATION_MINUTES_MIN,
-    RADIUS_METERS_MAX,
-    RADIUS_METERS_MIN,
+    OVERRIDE_REASON_MAX_LENGTH,
     SESSION_CODE_MAX_LENGTH,
     SESSION_CODE_MIN_LENGTH,
     WINDOW_MINUTES_MAX,
@@ -42,6 +43,17 @@ class SessionCreate(BaseModel):
     # resolve classroom coordinates or creation fails with
     # `lab_coordinates_required`.
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
+    # Whether the professor explicitly overrode the offering's classroom. When
+    # True, the payload's classroom fields are used as-is (including None),
+    # so an intentionally cleared room is not replaced by the offering's
+    # default. When False (the default), omitted fields inherit the plan.
+    classroom_override: bool = False
     duration_minutes: int | None = Field(
         default=None, ge=DURATION_MINUTES_MIN, le=DURATION_MINUTES_MAX
     )
@@ -63,6 +75,20 @@ class SessionCreate(BaseModel):
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
+    # Schedule exception (D93). Omitted means "use the offering's plan" —
+    # the server resolves the next occurrence of the offering's meeting and
+    # stores it as the session's scheduled start/end.
+    #
+    # These are wall clock values in the institution's timezone, not ISO
+    # instants: the offering's own `schedule_start_time` is a naive wall
+    # clock too, and the browser cannot convert an IANA zone without a
+    # timezone library. Either field alone is an override; together they
+    # re-point the session. Either one sets `schedule_overridden`.
+    session_date: date | None = None
+    start_time: time | None = None
+    # D94: why the professor moved the class, in their own words. Optional,
+    # and only meaningful with an override.
+    override_reason: str | None = Field(default=None, max_length=OVERRIDE_REASON_MAX_LENGTH)
 
     @model_validator(mode="after")
     def _windows_within_duration(self) -> "SessionCreate":
@@ -86,12 +112,93 @@ class SessionRead(BaseModel):
     session_code: str
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     qr_payload: QRPayload
     expires_at: datetime | None = None
+    # The scheduled window (D93): the offering's plan, or the override the
+    # professor asked for. `schedule_overridden` says which.
+    scheduled_start_time: datetime
     scheduled_end_time: datetime
+    schedule_overridden: bool = False
+    plan_source: str = "none"
+    # D94: when the session was actually opened, and — for an override — the
+    # start it would have carried.
+    actual_start_time: datetime | None = None
+    original_scheduled_start_time: datetime | None = None
+    override_reason: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StartWindowRead(BaseModel):
+    """Whether the session may be opened right now, and why not (D94).
+
+    The server's own answer, so the open form renders the window instead of
+    re-deriving it. `scheduled_date` / `start_time` / `end_time` are today's
+    occurrence of the meeting in the institution's local terms, and are null
+    when today is not one of the meeting's days — the plan's *next*
+    occurrence is what the session would carry then.
+    """
+
+    permitted: bool = True
+    reason: str | None = None
+    scheduled_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    scheduled_start: datetime | None = None
+    scheduled_end: datetime | None = None
+    opens_at: datetime | None = None
+    closes_at: datetime | None = None
+    current_time: datetime
+    timezone: str = "UTC"
+    early_open_minutes: int = 0
+    late_open_minutes: int = 0
+
+
+class SessionPlanRead(BaseModel):
+    """Everything a session for an offering inherits (D93).
+
+    The resolved plan, so the open form renders what the server will store
+    rather than re-deriving it. `source` names where the meeting came from:
+    `component` (the offering's active meeting for this type), `offering_legacy`
+    (the offering's own schedule columns), `course_default` (no meeting
+    configured) or `none` (nothing at all).
+    """
+
+    offering_id: int
+    session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
+    source: str = "none"
+    # The next occurrence, in the institution's local terms and as UTC.
+    session_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    scheduled_start: datetime | None = None
+    scheduled_end: datetime | None = None
+    timezone: str = "UTC"
+    duration_minutes: int = 0
+    present_window_minutes: int = 0
+    late_window_minutes: int = 0
+    classroom_name: str | None = None
+    classroom_lat: float | None = None
+    classroom_lng: float | None = None
+    radius_meters: int = 0
+    # Whether a professor may override the time at all — there is nothing to
+    # override when no meeting is configured.
+    override_capable: bool = False
+    # Whether the session may be opened right now (D94).
+    start_window: StartWindowRead | None = None
 
 
 class SessionOfferingTile(BaseModel):
@@ -121,6 +228,12 @@ class SessionListItem(BaseModel):
     id: int
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     session_code: str
     created_at: datetime
     expires_at: datetime | None = None
@@ -161,6 +274,12 @@ class SessionActiveResponse(BaseModel):
     id: int
     offering: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     session_code: str
     scan_window_remaining: int = Field(
         description=(
@@ -193,6 +312,12 @@ class ProfessorAttendanceItem(BaseModel):
     section: str | None = None
     session_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     status: ValidationStatus
     original_status: ValidationStatus | None = None
     scanned_at: datetime
@@ -230,6 +355,12 @@ class VerifyCodeResponse(BaseModel):
     session_id: int
     offering_id: int
     session_type: SessionType = SessionType.LECTURE
+    # Remote/online session: skips the geofence (no classroom coordinates
+    # required) and is recorded as remote for audit/reporting purposes.
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     course_code: str
     course_name: str
     program_code: str
@@ -239,3 +370,8 @@ class VerifyCodeResponse(BaseModel):
     geofence: VerifyGeofence
     present_window_minutes: int
     late_window_minutes: int
+    classroom_name: str | None = None
+    is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -231,12 +233,16 @@
 	</section>
 
 	{#if adminUsersState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={6} label="Loading users…" />
 	{:else if adminUsersState.error}
 		<section class="card"><p class="error">Could not load users: {adminUsersState.error}</p></section>
 	{:else if adminUsersState.items.length === 0}
 		<section class="card">
-			<p class="empty">No users match these filters.</p>
+			<EmptyState
+				icon="users"
+				title="No users match these filters"
+				hint="Create the first account with the + button."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap">
@@ -246,12 +252,12 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Name</th>
-						<th>Email</th>
-						<th>Role</th>
-						<th>Status</th>
-						<th>Created</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Name</th>
+						<th scope="col">Email</th>
+						<th scope="col">Role</th>
+						<th scope="col">Status</th>
+						<th scope="col">Created</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -266,21 +272,23 @@
 								</span>
 							</td>
 							<td class="mono">{formatLocalDate(u.createdAt)}</td>
-							<td class="row-actions">
-								{#if u.isActive}
-									{#if isSelf(u)}
-										<span class="hint" title="You cannot deactivate your own account">You</span>
+							<td>
+								<div class="row-actions">
+									{#if u.isActive}
+										{#if isSelf(u)}
+											<span class="hint" title="You cannot deactivate your own account">You</span>
+										{:else}
+											<button class="link danger" onclick={() => (deactivateTarget = u)}>
+												Deactivate
+											</button>
+										{/if}
 									{:else}
-										<button class="link danger" onclick={() => (deactivateTarget = u)}>
-											Deactivate
+										<button class="link" onclick={() => (reactivateTarget = u)}>
+											Reactivate
 										</button>
 									{/if}
-								{:else}
-									<button class="link" onclick={() => (reactivateTarget = u)}>
-										Reactivate
-									</button>
-								{/if}
-								<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+									<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -341,7 +349,7 @@
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" data-testid="save-user" disabled={formBusy} onclick={submitForm}>
+				<button class="btn btn-primary" data-testid="save-user" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -448,7 +456,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -599,12 +606,6 @@
 		margin-top: 1rem;
 	}
 
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
-	}
-
 	.error {
 		color: var(--danger);
 		font-size: 0.875rem;
@@ -688,7 +689,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

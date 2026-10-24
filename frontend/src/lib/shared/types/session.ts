@@ -53,6 +53,8 @@ export interface SessionReadResponse {
 	session_code: string;
 	offering_id: number;
 	session_type: CourseType;
+	is_remote: boolean;
+	geofence_enabled?: boolean;
 	qr_payload: {
 		v: 1;
 		code: string;
@@ -62,8 +64,73 @@ export interface SessionReadResponse {
 		lw: number;
 	};
 	expires_at: string | null;
+	// The scheduled window (D93): the offering's plan, or the override the
+	// professor asked for. `schedule_overridden` says which.
+	scheduled_start_time: string;
 	scheduled_end_time: string;
+	schedule_overridden: boolean;
+	plan_source: string;
+	// D94: when the session was actually opened, and — for an override — the
+	// start it would have carried without one.
+	actual_start_time: string | null;
+	original_scheduled_start_time: string | null;
+	override_reason: string | null;
 	created_at: string;
+}
+
+// GET /professor/offerings/{id}/session-plan
+//
+// Everything a session for an offering inherits (D93). The open form renders
+// this instead of re-deriving the schedule, so what the professor sees is
+// what the server will store.
+export interface SessionPlanResponse {
+	offering_id: number;
+	session_type: CourseType;
+	// 'component' (the offering's active meeting for this type),
+	// 'offering_legacy' (the offering's own schedule columns),
+	// 'course_default' (no meeting configured) or 'none'.
+	source: string;
+	// The next occurrence, in the institution's local terms and as UTC.
+	session_date: string | null;
+	start_time: string | null;
+	end_time: string | null;
+	scheduled_start: string | null;
+	scheduled_end: string | null;
+	timezone: string;
+	duration_minutes: number;
+	present_window_minutes: number;
+	late_window_minutes: number;
+	classroom_name: string | null;
+	classroom_lat: number | null;
+	classroom_lng: number | null;
+	radius_meters: number;
+	override_capable: boolean;
+	// D94: whether the session may be opened right now. The server's own
+	// answer — the form never re-derives the window.
+	start_window: SessionStartWindow | null;
+}
+
+// D94: the open window.
+//
+// `permitted` says whether a session may be opened at this very moment.
+// `scheduled_date` / `start_time` / `end_time` are today's occurrence of the
+// meeting in the institution's local terms, and are null when today is not
+// one of the meeting's days.
+export interface SessionStartWindow {
+	permitted: boolean;
+	// 'not_scheduled_today' | 'before_window' | 'after_window' | null
+	reason: string | null;
+	scheduled_date: string | null;
+	start_time: string | null;
+	end_time: string | null;
+	scheduled_start: string | null;
+	scheduled_end: string | null;
+	opens_at: string | null;
+	closes_at: string | null;
+	current_time: string | null;
+	timezone: string;
+	early_open_minutes: number;
+	late_open_minutes: number;
 }
 
 // GET /professor/sessions/active/{id}
@@ -80,6 +147,7 @@ export interface SessionActiveResponse {
 	id: number;
 	offering: number;
 	session_type: CourseType;
+	is_remote?: boolean;
 	session_code: string;
 	scan_window_remaining: number;
 	scheduled_end_time: string;
@@ -131,6 +199,7 @@ export interface SessionSummary {
 	id: number;
 	offeringId: number;
 	sessionType: CourseType;
+	isRemote?: boolean;
 	courseCode: string;
 	courseName: string;
 	section: string;
@@ -162,6 +231,7 @@ export interface LiveSession {
 	id: number;
 	offeringId: number;
 	sessionType: CourseType;
+	isRemote?: boolean;
 	offeringCode: string;
 	offeringName: string;
 	offeringSections: string;
@@ -186,6 +256,7 @@ export interface OpenedSession {
 	id: number;
 	offeringId: number;
 	sessionType: CourseType;
+	isRemote?: boolean;
 	sessionCode: string;
 	qrPayload: {
 		v: 1;
@@ -196,7 +267,16 @@ export interface OpenedSession {
 		lw: number;
 	};
 	expiresAt: string | null;
+	// The scheduled window (D93): the offering's plan, or the override the
+	// professor asked for.
+	scheduledStartTime: string;
 	scheduledEndTime: string;
+	scheduleOverridden: boolean;
+	// D94: when the session was really opened, and — for an override — the
+	// start it would have carried without one.
+	actualStartTime: string | null;
+	originalScheduledStartTime: string | null;
+	overrideReason: string | null;
 	createdAt: string;
 }
 export interface Session {

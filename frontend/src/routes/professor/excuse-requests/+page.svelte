@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import {
 		editExcuse,
 		EXCUSE_REASON_MIN_LENGTH,
@@ -490,12 +492,10 @@
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
-		<section class="card">
-			<p class="muted">Loading excuse requests…</p>
-		</section>
+		<SkeletonTable rows={6} cols={6} label="Loading excuse requests…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<p class="empty">No excuse requests match these filters.</p>
+			<EmptyState icon="file" title="No excuse requests match these filters" />
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Excuse requests table">
@@ -532,6 +532,9 @@
 								<td>
 									<span class="status status-{row.status}">{row.status}</span>
 									<div class="status-sub">was {originalLabel(row.originalStatus)}</div>
+									{#if row.reviewedByName}
+										<div class="status-sub">by {row.reviewedByName}</div>
+									{/if}
 								</td>
 								<td>
 									<button
@@ -640,6 +643,17 @@
 					<dt>Status</dt>
 					<dd><span class="status status-{selected.status}">{selected.status}</span></dd>
 				</div>
+				{#if selected.reviewedByName}
+					<div>
+						<dt>Reviewed by</dt>
+						<dd>
+							{selected.reviewedByName}
+							{#if selected.reviewedAt}
+								· {formatDate(selected.reviewedAt)}
+							{/if}
+						</dd>
+					</div>
+				{/if}
 				{#if selected.reviewNotes}
 					<div>
 						<dt>Review notes</dt>
@@ -719,6 +733,7 @@
 							<button
 								class="btn btn-primary"
 								type="button"
+								aria-busy={editBusy}
 								disabled={editBusy}
 								onclick={() => void doEditExcuse()}
 							>
@@ -914,6 +929,7 @@
 				<button
 					class="btn btn-primary"
 					type="button"
+					aria-busy={quickBusy}
 					disabled={quickBusy}
 					onclick={() => void doQuickExcuse()}
 				>
@@ -931,7 +947,6 @@
 		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -1239,7 +1254,7 @@
 	}
 
 	.page:disabled:not(.current) {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
@@ -1273,7 +1288,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal h2 {

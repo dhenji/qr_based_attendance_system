@@ -95,10 +95,11 @@ def _offering(**overrides: Any) -> CourseOffering:
         "semester": "1ST",
         "academic_year": "2026-2027",
         "sessions_per_week": 3,
-        "semester_weeks": 18,
         "schedule_days": "MWF",
-        "schedule_start_time": time(9, 0),
-        "schedule_end_time": time(10, 0),
+        # The same window the factory offering uses, so the pinned clock of
+        # this package falls inside it (D94).
+        "schedule_start_time": time(8, 0),
+        "schedule_end_time": time(9, 0),
         "classroom_name": "Room 101",
         "classroom_lat": 14.5,
         "classroom_lng": 121.0,
@@ -134,7 +135,6 @@ def _assignment(**overrides: Any) -> CourseProfessor:
         "effective_from": date.today() - timedelta(days=1),
         "effective_to": None,
         "is_primary": True,
-        "semester": "1ST",
         "assigned_by": 1,
         "created_at": NOW,
     }
@@ -214,12 +214,18 @@ def test_create_session_copies_offering_defaults() -> None:
     assert read.qr_payload.radius == 50
     assert read.qr_payload.pw == 5
     assert read.qr_payload.lw == 10
-    # The fake stamps created_at at insert time (~service now, never stale),
-    # so base + duration >= scheduled end and expiry is the scheduled end.
-    assert read.expires_at == read.scheduled_end_time
-    assert abs((read.scheduled_end_time - before) - timedelta(minutes=120)) < timedelta(
-        seconds=60
-    )
+    # D93: the offering's own meeting (09:00-10:00) is the plan, so the
+    # session carries that window rather than "now" and "now + duration".
+    assert read.plan_source == "offering_legacy"
+    assert read.scheduled_end_time - read.scheduled_start_time == timedelta(minutes=60)
+    assert not read.schedule_overridden
+    # The fake stamps created_at at insert time (~service now, never stale).
+    expected = read.created_at + timedelta(minutes=60)
+
+    if read.scheduled_end_time > read.created_at:
+        expected = min(expected, read.scheduled_end_time)
+
+    assert abs(read.expires_at - expected) < timedelta(seconds=1)
 
 
 def test_create_session_rejects_second_active() -> None:

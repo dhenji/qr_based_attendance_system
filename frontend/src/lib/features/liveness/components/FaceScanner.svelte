@@ -122,6 +122,7 @@
 	const CENTER_YAW_THRESHOLD = 5;
 	const STAGE_TIMEOUT_MS = 12000;
 	const MAX_POSE_SAMPLES = 120;
+	const MAX_EAR_SAMPLES = 100;
 	// Retry budget for stage timeouts: after this many auto-restarts the
 	// challenge halts with a surfaced error + manual Try again instead of
 	// looping the camera forever.
@@ -504,6 +505,11 @@
 			}
 			video.srcObject = stream;
 			await video.play();
+			// A stop() can fire while play() is pending (component deactivation,
+			// unmount, retry press mid-boot). Bailing here keeps the rAF arm
+			// below from creating a loop stop() can no longer cancel — its
+			// cancelAnimationFrame already ran before we armed anything.
+			if (token !== startToken) return;
 
 			// Per-frame render loop: only detect when fresh frame data arrives.
 			const tick = () => {
@@ -606,7 +612,7 @@
 		}
 
 		const avgEar = (eyeEar(lm, LEFT_EYE) + eyeEar(lm, RIGHT_EYE)) / 2;
-		if (earSamples.length >= 120) earSamples.shift();
+		if (earSamples.length >= MAX_EAR_SAMPLES) earSamples.shift();
 		earSamples.push(Number(avgEar.toFixed(4)));
 		smoothedEar = smoothedEar * (1 - EYE_SMOOTH) + avgEar * EYE_SMOOTH;
 
@@ -955,7 +961,7 @@
 
 	.hold-fill {
 		height: 100%;
-		background: #22c55e;
+		background: var(--success);
 		border-radius: 99px;
 		transition: width 0.1s linear;
 	}

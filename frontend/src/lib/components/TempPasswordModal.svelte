@@ -126,7 +126,7 @@
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={onclose}>Cancel</button>
-				<button class="btn btn-danger" disabled={busy} onclick={confirm}>
+				<button class="btn btn-danger" aria-busy={busy} disabled={busy} onclick={confirm}>
 					{busy ? 'Resetting…' : 'Reset password'}
 				</button>
 			</div>
@@ -172,7 +172,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {
@@ -196,7 +195,7 @@
 	.error {
 		margin: 0 0 1rem;
 		font-size: 0.8125rem;
-		color: var(--danger, #dc2626);
+		color: var(--danger);
 	}
 
 	.temp-row {
@@ -212,10 +211,10 @@
 		flex: 1;
 		min-width: 0;
 		padding: 0.75rem;
-		background: var(--bg-subtle, #f1f5f9);
-		border: 1px solid var(--border, #e2e8f0);
+		background: var(--bg-muted);
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-family: var(--font-data);
 		font-size: 1rem;
 		word-break: break-all;
 		user-select: all;
@@ -243,7 +242,7 @@
 	}
 
 	.btn:focus-visible {
-		outline: 2px solid var(--primary, #2563eb);
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 
@@ -253,13 +252,13 @@
 	}
 
 	.btn-primary {
-		background: var(--primary, #2563eb);
-		color: #fff;
+		background: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.btn-secondary {
 		background: var(--bg-card);
-		border-color: var(--border, #e2e8f0);
+		border-color: var(--border);
 		color: var(--text);
 	}
 
@@ -269,8 +268,8 @@
 	}
 
 	.btn-danger {
-		background: var(--danger, #dc2626);
-		color: #fff;
+		background: var(--danger);
+		color: var(--on-brand);
 	}
 
 	.modal-actions {

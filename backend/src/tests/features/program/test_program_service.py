@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.program.exceptions import (
@@ -324,6 +325,69 @@ async def test_terms_count_sums_terms_list(
 
     assert detail.year_level_count == 3
     assert detail.terms_count == 4
+
+
+async def test_term_weeks_round_trip(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """A term's session weeks persist through create and read (D86)."""
+
+    program = await factories.program(code="BSCS")
+
+    created = await ProgramService(test_db_session).create_year(
+        program_id=program.id,
+        payload=YearLevelCreate(
+            year_number=1,
+            label="Year 1",
+            term_structure={
+                "terms": [
+                    {"code": "1ST", "label": "1st Sem", "weeks": 9},
+                    {"code": "2ND", "label": "2nd Sem", "weeks": 12},
+                ]
+            },
+        ),
+    )
+
+    assert [(t.code, t.weeks) for t in created.term_structure.terms] == [
+        ("1ST", 9),
+        ("2ND", 12),
+    ]
+
+
+def test_term_weeks_bounds_rejected() -> None:
+    """0 and 53 are outside the 1..52 range the column used to enforce."""
+
+    for weeks in (0, 53):
+        with pytest.raises(ValidationError):
+            YearLevelCreate(
+                year_number=1,
+                label="Year 1",
+                term_structure={
+                    "terms": [{"code": "1ST", "label": "1st Sem", "weeks": weeks}]
+                },
+            )
+
+
+async def test_update_year_omits_unset_weeks(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """A term with no weeks must not persist `weeks: null` (D86)."""
+
+    program = await factories.program(code="BSCS")
+    year = await factories.year_level(
+        program, year_number=1, term_structure={"terms": []}
+    )
+
+    updated = await ProgramService(test_db_session).update_year(
+        program_id=program.id,
+        year_id=year.id,
+        payload=YearLevelUpdate(
+            term_structure={"terms": [{"code": "1ST", "label": "1st Sem"}]}
+        ),
+    )
+
+    assert updated.term_structure.terms[0].weeks is None
+    assert "weeks" not in year.term_structure["terms"][0]
 
 
 async def test_create_year_defaults_sort_order(

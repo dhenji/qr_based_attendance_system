@@ -14,9 +14,11 @@
 	import NotificationBell, {
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import { listAdminExcuses } from '$lib/features/admin/excuses/service';
 	import { POLL_INTERVAL_MS, truncateNotifPreview } from '$lib/features/notifications/poll';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { NAV_ICONS, type NavItem } from '$lib/shared/constants/navIcons';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
 	let { children } = $props();
@@ -34,17 +36,29 @@
 	let pendingCount = $state(0);
 	let notifPreview = $state<NotificationBellItem[]>([]);
 	let notifLoading = $state(false);
+	let notifToast = $state<string | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let refreshing = false;
+	// False while the last poll failed. Without it, a transient error resets
+	// pendingCount to 0 and the next successful poll would announce every
+	// already-pending request as "new".
+	let pollHealthy = true;
 
 	const refreshNotif = async () => {
 		if (refreshing) return;
 		refreshing = true;
 		try {
 			const result = await listAdminExcuses({ status: 'pending', page: 1, size: 1 });
-			pendingCount = result.total ?? 0;
+			const next = result.total ?? 0;
+			if (pollHealthy && next > pendingCount) {
+				const fresh = next - pendingCount;
+				notifToast = `${fresh} new excuse request${fresh === 1 ? '' : 's'} awaiting review — tap the bell to open the queue.`;
+			}
+			pendingCount = next;
+			pollHealthy = true;
 		} catch {
 			pendingCount = 0;
+			pollHealthy = false;
 		} finally {
 			refreshing = false;
 		}
@@ -121,7 +135,7 @@
 // real system backend (app_settings persists, backups download as encrypted
 // archives). Users is super_admin-only (backend require_role(SUPER_ADMIN)) and
 // stays hidden for plain admins.
-	const baseNavItems = [
+	const baseNavItems: NavItem[] = [
 		{ label: 'Dashboard', path: Routes.ADMIN_DASHBOARD, enabled: true, icon: 'dashboard' },
 		{ label: 'Setup Wizard', path: Routes.ADMIN_SETUP_WIZARD, enabled: true, icon: 'wizard' },
 		{ label: 'Students', path: Routes.ADMIN_STUDENTS, enabled: true, icon: 'students' },
@@ -130,48 +144,22 @@
 		{ label: 'Courses', path: Routes.ADMIN_COURSES, enabled: true, icon: 'courses' },
 		{ label: 'Offerings', path: Routes.ADMIN_OFFERINGS, enabled: true, icon: 'offerings' },
 		{ label: 'Analytics', path: Routes.ADMIN_ANALYTICS, enabled: true, icon: 'reports' },
-		{ label: 'Attendance', path: Routes.ADMIN_ATTENDANCE, enabled: true, icon: 'reports' },
-		{ label: 'Excuses', path: Routes.ADMIN_EXCUSES, enabled: true, icon: 'reports' },
+		{ label: 'Attendance Review', path: Routes.ADMIN_ATTENDANCE, enabled: true, icon: 'review' },
+		{ label: 'Excuses', path: Routes.ADMIN_EXCUSES, enabled: true, icon: 'excuses' },
 		{ label: 'Audit Logs', path: Routes.ADMIN_AUDIT_LOGS, enabled: true, icon: 'audit' },
 		{ label: 'Settings', path: Routes.ADMIN_SYSTEM_SETTINGS, enabled: true, icon: 'settings' },
 		{ label: 'Profile', path: Routes.ADMIN_PROFILE, enabled: true, icon: 'profile' },
-	] as const;
+	];
 
 	const navItems = $derived([
 		...baseNavItems,
 		...(isSuperAdmin()
-			? [{ label: 'Users', path: Routes.ADMIN_USERS, enabled: true, icon: 'users' } as const]
+			? [{ label: 'Users', path: Routes.ADMIN_USERS, enabled: true, icon: 'users' } satisfies NavItem]
 			: []),
 	]);
 
-	const iconPaths: Record<string, string> = {
-		dashboard:
-			'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-		wizard:
-			'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m9 13 2 2 4-4"/>',
-		students:
-			'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6"/><path d="M18 14.8c2.1.7 3.5 2.4 3.5 5.2"/>',
-		professors:
-			'<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5Z"/>',
-		programs:
-			'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>',
-		courses:
-			'<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5Z"/>',
-		offerings:
-			'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4"/><path d="M3 10h18"/>',
-		reports:
-			'<path d="M4 20h16"/><path d="M7 20v-6"/><path d="M12 20V6"/><path d="M17 20v-9"/>',
-		audit:
-			'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
-		users:
-			'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6"/><path d="M18 14.8c2.1.7 3.5 2.4 3.5 5.2"/>',
-		settings:
-			'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
-		profile:
-			'<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/>',
-	};
-
 	let collapsed = $state(true);
+	let mobileOpen = $state(false);
 	let logoutOpen = $state(false);
 
 	const isActive = (path: string) => page.url.pathname === path || page.url.pathname.startsWith(`${path}/`);
@@ -194,8 +182,11 @@
 		<button
 			class="menu-btn"
 			aria-label="Toggle sidebar"
-			aria-expanded={!collapsed}
-			onclick={() => (collapsed = !collapsed)}
+			aria-expanded={mobileOpen || !collapsed}
+			onclick={() => {
+				if (window.matchMedia('(max-width: 640px)').matches) mobileOpen = !mobileOpen;
+				else collapsed = !collapsed;
+			}}
 		>
 			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
 				<path d="M4 6h16M4 12h16M4 18h16" />
@@ -234,8 +225,15 @@
 		</button>
 	</header>
 
+	{#if notifToast}
+		<Toast message={notifToast} onDismiss={() => (notifToast = null)} />
+	{/if}
+
 	<div class="body">
-		<aside class="sidebar" class:collapsed>
+		{#if mobileOpen}
+			<button type="button" class="drawer-backdrop" aria-label="Close sidebar" onclick={() => (mobileOpen = false)}></button>
+		{/if}
+		<aside class="sidebar" class:collapsed class:mobile-open={mobileOpen}>
 			{#each navItems as item (item.label)}
 				<a
 					class="nav-link"
@@ -243,9 +241,10 @@
 					href={item.path}
 					title={item.label}
 					aria-current={isActive(item.path) ? 'page' : undefined}
+					onclick={() => (mobileOpen = false)}
 				>
 					<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						{@html iconPaths[item.icon]}
+						{@html NAV_ICONS[item.icon]}
 					</svg>
 					<span class="nav-label" class:hidden={collapsed}>{item.label}</span>
 				</a>
@@ -262,7 +261,7 @@
 	</div>
 </div>
 
-<svelte:window onkeydown={(e) => { if (logoutOpen && e.key === 'Escape') logoutOpen = false; }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') { mobileOpen = false; if (logoutOpen) logoutOpen = false; } }} />
 
 {#if logoutOpen}
 	<div class="modal-overlay" role="presentation">
@@ -287,7 +286,6 @@
 <style>
 	.shell {
 		min-height: 100vh;
-		font-family: system-ui, sans-serif;
 		background: var(--bg-page);
 		overflow-x: hidden;
 	}
@@ -366,6 +364,10 @@
 
 	.logout:hover {
 		background: rgba(220, 38, 38, 0.25);
+	}
+
+	.drawer-backdrop {
+		display: none;
 	}
 
 	.body {
@@ -471,7 +473,6 @@
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
 		text-align: center;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {
@@ -499,7 +500,6 @@
 		border-radius: 8px;
 		font-size: 0.9375rem;
 		font-weight: 600;
-		font-family: system-ui, sans-serif;
 		cursor: pointer;
 		transition: background 0.15s ease, color 0.15s ease;
 	}
@@ -530,6 +530,52 @@
 
 		.content {
 			padding: 1.25rem 1.25rem 2.5rem;
+		}
+
+		.drawer-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			background: var(--overlay);
+			z-index: 50;
+			border: 0;
+			padding: 0;
+			cursor: pointer;
+		}
+
+		.topbar {
+			min-height: 56px;
+		}
+
+		.sidebar {
+			position: fixed;
+			top: 56px;
+			left: 0;
+			bottom: 0;
+			z-index: 60;
+			transform: translateX(-100%);
+			transition: transform 0.2s ease;
+			box-shadow: var(--shadow-lg);
+		}
+
+		.sidebar,
+		.sidebar.collapsed {
+			width: 220px;
+		}
+
+		.sidebar .nav-label,
+		.sidebar .nav-label.hidden {
+			display: inline;
+			opacity: 1;
+		}
+
+		.sidebar .nav-link {
+			justify-content: flex-start;
+			padding: 0.625rem 0.75rem;
+		}
+
+		.sidebar.mobile-open {
+			transform: translateX(0);
 		}
 	}
 

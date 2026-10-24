@@ -61,19 +61,23 @@ class CourseOffering(TimestampMixin, Base):
     semester: Mapped[str] = mapped_column(String(20))
     academic_year: Mapped[str] = mapped_column(String(20))
     sessions_per_week: Mapped[int] = mapped_column(Integer)
-    semester_weeks: Mapped[int] = mapped_column(Integer)
     schedule_days: Mapped[str] = mapped_column(String(10))
     schedule_start_time: Mapped[time] = mapped_column(Time)
     schedule_end_time: Mapped[time] = mapped_column(Time)
     classroom_name: Mapped[str | None] = mapped_column(String(100))
     classroom_lat: Mapped[float | None] = mapped_column(Float)
     classroom_lng: Mapped[float | None] = mapped_column(Float)
-    default_present_window_minutes: Mapped[int] = mapped_column(
-        Integer, server_default=text("5")
-    )
-    default_late_window_minutes: Mapped[int] = mapped_column(
-        Integer, server_default=text("10")
-    )
+    # D93: the scan windows a session opened for this offering inherits. NULL
+    # means "follow the system default" — the app setting an administrator
+    # edits in Admin -> System Settings — so the chain is offering -> system
+    # default -> environment default.
+    default_present_window_minutes: Mapped[int | None] = mapped_column(Integer)
+    default_late_window_minutes: Mapped[int | None] = mapped_column(Integer)
+    # D93: the geofence radius the offering's sessions default to. NULL means
+    # "inherit" — the app setting an administrator edits in Admin -> System
+    # Settings wins, and only an explicit offering value overrides it. The
+    # chain is payload -> offering -> app setting -> env.
+    default_classroom_radius_meters: Mapped[int | None] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     course: Mapped[Course] = relationship("Course", back_populates="course_offerings")

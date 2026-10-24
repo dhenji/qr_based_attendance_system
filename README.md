@@ -101,7 +101,7 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 │   ├── Dockerfile.dev    # Vite dev server on :5173 (node:22-alpine)
 │   ├── static/           # PWA manifest + icons, robots.txt, and vendored MediaPipe assets (models/face_landmarker.task, wasm/)
 │   ├── src/service-worker.ts # Offline cache for queued scans + notification polling
- │   ├── src/routes/       # 46 +page.svelte files (45 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings), admin (dashboard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
+ │   ├── src/routes/       # 50 +page.svelte files (49 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings), admin (dashboard/setup-wizard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
 │   └── src/lib/
 │       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (named typed EndpointDefs with mock fixtures, collected into an `endpoints` registry)
  │       ├── components/   # AppIcon, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, Modal, TempPasswordModal (7 shared)
@@ -114,9 +114,9 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 │   │   ├── shared/       # enums.py (15 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py, constants.py, query.py, audit.py, rates.py, storage.py, datetimes.py
  │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 15 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 18 slices: admin, analytics, attendance, auth, course, course_professor, dashboard, enrollment, excuse, face_enrollment, professor, program, reports, session, student, sync, system, upload
-│   │   │   └── */        # model.py in 13 slices (20 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
- │   │   └── tests/        # pytest suite — 760 cases in 56 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini
- │   ├── alembic/          # env.py imports all 13 feature models; 11 revisions — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), a562c3f8a6f7 (FK restrict), d4e5f6a7b8c9 (risk-score staging), e7f8a9b0c1d2 (app_settings), f4a9c2b7d103 (audit_logs), b1c4e7f0a2d6, 1e1582c4e9f8 (timestamp indexes), c9d4e5f6a7b8 (drop users.username, ADR-073) → head c9d4e5f6a7b8
+│   │   │   └── */        # model.py in 13 slices (21 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
+ │   │   └── tests/        # pytest suite — 891 cases in 71 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini
+ │   ├── alembic/          # env.py imports all 13 feature models; 17 revisions — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), a562c3f8a6f7 (FK restrict), d4e5f6a7b8c9 (risk-score staging), e7f8a9b0c1d2 (app_settings), f4a9c2b7d103 (audit_logs), b1c4e7f0a2d6, 1e1582c4e9f8 (timestamp indexes), c9d4e5f6a7b8 (drop users.username, ADR-073), e8f9a0b1c2d3 (sessions.session_type + offering_components, D77), f1a2b3c4d5e6 (term-scoped session weeks), b2c3d4e5f6a7 (drop course_professors.semester), c3d4e5f6a7b8 (repair assignment date ranges), d5e6f7a8b9c0 (demote duplicate primaries), e6f7a8b9c0d1 (audit_logs action index, ADR-089) → head e6f7a8b9c0d1
 │   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
 │   ├── locustfile.py     # Concurrent-scan load harness (locust; 30 VUs over a pool of SEED-LOAD-* sessions)
 │   ├── bench_timings.py  # One-shot risk-batch / backup timings + the import-safe helpers locustfile reuses
@@ -269,6 +269,7 @@ Backend (`backend/.env.example`):
 | `SCHEDULER_ENABLED`              | `true`                                                                 | Run the background cron scheduler (off = no crons)                  |
 | `SCHEDULER_TIMEZONE`             | `UTC`                                                                  | Scheduler zoneinfo name; unknown values warn and fall back to UTC    |
 | `SCHEDULER_MISFIRE_GRACE_SECONDS`| `300`                                                                  | Grace period for a missed cron fire                                 |
+| `INSTITUTION_TIMEZONE`           | `UTC`                                                                  | Zone for the offering's class times; unknown values warn and fall back to UTC |
 | `BACKUP_CRON`                    | `0 3 * * *`                                                            | Cron schedule for the nightly encrypted backup                      |
 
 `LOCUST_*` variables (`LOCUST_MIN_RPS`, `LOCUST_MAX_P95_MS`, `LOCUST_MAX_P99_MS`,
@@ -278,10 +279,11 @@ than by `Settings()`, and gate the load run.
 
 Frontend (`frontend/.env.example`):
 
-| Variable           | Default                 | Purpose                                              |
-| ------------------ | ----------------------- | ---------------------------------------------------- |
-| `PUBLIC_API_URL`   | `http://localhost:8000` | Backend base URL exposed to browser                  |
-| `PUBLIC_MOCK_MODE` | `false`                 | `true` serves fixtures instead of calling the API; defaults to real requests |
+| Variable                    | Default                 | Purpose                                                                      |
+| --------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `PUBLIC_API_URL`            | `http://localhost:8000` | Backend base URL exposed to browser                                          |
+| `PUBLIC_MOCK_MODE`          | `false`                 | `true` serves fixtures instead of calling the API; defaults to real requests |
+| `PUBLIC_TURNSTILE_SITE_KEY` | _(empty)_               | Cloudflare Turnstile site key (optional; needs the backend secret)           |
 
 ## Verification
 
@@ -291,7 +293,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**760 cases across 56 files**) against the dedicated
+This runs the suite (**891 cases across 71 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at
@@ -353,8 +355,8 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite is 760 cases
-across 56 files (228 sync + 490 async test functions, plus parametrized expansions).
+There are no linters or formatters configured. The backend suite is 891 cases
+across 71 files (261 sync + 591 async test functions, plus parametrized expansions).
 
 ### CI
 
@@ -364,7 +366,7 @@ across 56 files (228 sync + 490 async test functions, plus parametrized expansio
 
 | Job | Gate | Needs |
 | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` — 760 cases on in-memory SQLite | nothing |
+| `backend` | `python -m pytest src/tests -q` — 891 cases on in-memory SQLite | nothing |
 | `migrations` | `alembic upgrade head && alembic check` | a `postgres:16-alpine` service |
 | `frontend` | `npm ci && npm run check` (svelte-check) | nothing |
 
@@ -419,10 +421,11 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workflow.md) — free-tier: Supabase → Fly.io → Vercel
 - [`docs/deployment/backup-strategy.md`](docs/deployment/backup-strategy.md) — full pg_dump pipeline, encryption, retention
 - [`docs/deployment/production-checklist.md`](docs/deployment/production-checklist.md) — secrets, CORS, storage, first-admin seeding
+- [`docs/deployment/email-setup.md`](docs/deployment/email-setup.md) — SMTP/OTP enablement, verification, credential rotation & outage runbook
 
 ### Design
 
-- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (20 tables landed)
+- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (21 tables landed)
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
 
 ### Developer
@@ -471,10 +474,10 @@ default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 
 | Area      | Status                                                                                                                                                                                                                     |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend   | 18 feature slices / 20 model classes / 20 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `c9d4e5f6a7b8` (11 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`audit.py`/`email.py` infra |
-| Frontend  | 46 +page.svelte files (45 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 8 sub-slices) + runes stores (auth, student, admin) + 5 feature components and 7 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
-| Schema    | 20 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging` and `mfa_backup_codes` ([ERD](docs/design/database-er.md)); `users.username` removed (D73, email is the whole identity) |
-| Tests     | 760 backend cases in 56 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                     |
+| Backend   | 18 feature slices / 21 model classes / 21 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `e6f7a8b9c0d1` (17 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra |
+| Frontend  | 50 +page.svelte files (49 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 11 feature components and 13 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
+| Schema    | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82) |
+| Tests     | 891 backend cases in 71 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                     |
 | Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7 |
 
 The remaining known gaps are operational rather than structural: Phase 10

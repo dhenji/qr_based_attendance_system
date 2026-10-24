@@ -109,7 +109,12 @@
 
 	// Single validation path shared by the file picker and drag-and-drop, so
 	// both surface the same csvFileSchema errors (extension, empty, 5 MB cap).
+	// Rapid picks overlap on the async text read; a stale read must not
+	// clobber a newer file's preview (seq counter, same pattern as
+	// student/history's loadSeq).
+	let pickSeq = 0;
 	const handleFile = async (picked: File | null) => {
+		const seq = ++pickSeq;
 		fileError = null;
 		importError = null;
 		result = null;
@@ -127,8 +132,11 @@
 		}
 		file = parsed.data;
 		try {
-			preview = parseCsvPreview(await picked.text());
+			const previewData = parseCsvPreview(await picked.text());
+			if (seq !== pickSeq) return;
+			preview = previewData;
 		} catch {
+			if (seq !== pickSeq) return;
 			preview = null;
 		}
 	};
@@ -366,7 +374,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {

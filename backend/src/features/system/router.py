@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
 from api.deps import SystemServiceDep, require_role
 from features.auth.model import User
-from features.system.constants import ACTION_MAX_LENGTH, ENTITY_TYPE_MAX_LENGTH
+from features.system.constants import (
+    ACTION_MAX_LENGTH,
+    ACTOR_MAX_LENGTH,
+    ENTITY_TYPE_MAX_LENGTH,
+)
 from features.system.schema import (
     AcademicStructureListResponse,
     AuditLogListResponse,
@@ -79,8 +83,11 @@ async def list_audit_logs(
     entity_type: str | None = Query(default=None, max_length=ENTITY_TYPE_MAX_LENGTH),
     action: str | None = Query(default=None, max_length=ACTION_MAX_LENGTH),
     performed_by: int | None = Query(default=None, ge=1),
+    actor: str | None = Query(default=None, max_length=ACTOR_MAX_LENGTH),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    sort_by: Literal["time", "actor", "action"] = Query(default="time"),
+    sort_dir: Literal["asc", "desc"] = Query(default="desc"),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> AuditLogListResponse:
@@ -88,8 +95,11 @@ async def list_audit_logs(
         entity_type=entity_type,
         action=action,
         performed_by=performed_by,
+        actor=actor,
         date_from=date_from,
         date_to=date_to,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
         page=page,
         size=size,
     )

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -204,11 +207,10 @@ import { sessionMixLabel } from '$lib/shared/types';
 		<button class="btn btn-secondary" onclick={() => goto(Routes.ADMIN_COURSES)}>
 			← Back to Course Management
 		</button>
-		<p class="crumb"><a href={Routes.ADMIN_COURSES}>Courses</a> / Detail</p>
 	</div>
 
 	{#if adminCourseDetailState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonDetail rows={5} label="Loading course…" />
 	{:else if adminCourseDetailState.error || !course}
 		<section class="card">
 			<p class="error">Could not load course: {adminCourseDetailState.error ?? 'Not found'}</p>
@@ -237,23 +239,27 @@ import { sessionMixLabel } from '$lib/shared/types';
 			<h2 class="card-title">Offerings ({offerings.length})</h2>
 			<p class="muted">Program/year instances of this template. Schedule, professors, and roster live on each offering.</p>
 			{#if offeringsLoading}
-				<p class="muted">Loading offerings…</p>
+				<SkeletonTable bare rows={3} cols={5} label="Loading offerings…" />
 			{:else if offeringsError}
 				<p class="error">{offeringsError}</p>
 			{:else if offerings.length === 0}
-				<p class="empty">No offerings yet. Create one from the Offerings page.</p>
+				<EmptyState
+					icon="file"
+					title="No offerings yet"
+					hint="Create one from the Offerings page."
+				/>
 			{:else}
 				<div class="table-wrap">
 					<table>
 						<thead>
 							<tr>
-								<th>Cohort</th>
-								<th>Term</th>
-								<th>Schedule</th>
-								<th>Type</th>
-								<th>Enrolled</th>
-								<th>Status</th>
-								<th><span class="sr">Actions</span></th>
+								<th scope="col">Cohort</th>
+								<th scope="col">Term</th>
+								<th scope="col">Schedule</th>
+								<th scope="col">Type</th>
+								<th scope="col">Enrolled</th>
+								<th scope="col">Status</th>
+								<th scope="col"><span class="sr">Actions</span></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -273,8 +279,10 @@ import { sessionMixLabel } from '$lib/shared/types';
 											{o.isActive ? 'Active' : 'Inactive'}
 										</span>
 									</td>
-									<td class="row-actions">
-										<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
+									<td>
+										<div class="row-actions">
+											<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
+										</div>
 									</td>
 								</tr>
 							{/each}
@@ -342,7 +350,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
-				<button class="btn btn-primary" disabled={editBusy} onclick={submitEdit}>
+				<button class="btn btn-primary" aria-busy={editBusy} disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -370,7 +378,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
-				<button class="btn btn-danger" disabled={archiveBusy} onclick={confirmArchive}>
+				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
 				</button>
 			</div>
@@ -412,7 +420,6 @@ import { sessionMixLabel } from '$lib/shared/types';
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -514,8 +521,8 @@ import { sessionMixLabel } from '$lib/shared/types';
 	}
 
 	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.row-actions {
@@ -538,35 +545,13 @@ import { sessionMixLabel } from '$lib/shared/types';
 		text-decoration: underline;
 	}
 
-	/* Back button + breadcrumb read as one header block, so the .page flex gap
-	 * does not push them a full row apart (same pattern as Program Management). */
+	/* Back button reads as its own header block, so the .page flex gap
+	 * does not push it a full row apart (same pattern as Program Management). */
 	.page-top {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 0.75rem;
-	}
-
-	.crumb {
-		margin: 0;
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-	}
-
-	.crumb a {
-		color: var(--accent);
-		text-decoration: none;
-		font-weight: 600;
-	}
-
-	.crumb a:hover {
-		text-decoration: underline;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {
@@ -672,7 +657,6 @@ import { sessionMixLabel } from '$lib/shared/types';
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal-title {

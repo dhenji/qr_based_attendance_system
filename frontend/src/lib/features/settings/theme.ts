@@ -28,6 +28,17 @@ export function setTheme(theme: Theme): void {
 	applyTheme(theme);
 }
 
+/**
+ * Return the device to the light default when a session ends — logout, an
+ * expired token, or a session that cannot be verified. Persists as well as
+ * applies, so the login page (and the next person who signs in) never inherits
+ * the previous session's dark mode. Device prefs are shared, not per-account;
+ * this is the one preference that resets with the session.
+ */
+export function resetTheme(): void {
+	setTheme('light');
+}
+
 /** Apply the saved preference (default light). Called once from root layout. */
 export function initTheme(): void {
 	applyTheme(getTheme());

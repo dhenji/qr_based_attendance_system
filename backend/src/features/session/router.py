@@ -15,6 +15,7 @@ from features.session.schema import (
     SessionCreate,
     SessionHistoryItem,
     SessionListItem,
+    SessionPlanRead,
     SessionRead,
 )
 from shared.enums import SessionType, UserRole, ValidationStatus
@@ -119,6 +120,34 @@ async def session_history(
         sort_dir=sort_dir,
         page=page,
         size=size,
+    )
+
+
+@router.get(
+    "/offerings/{offering_id}/session-plan",
+    response_model=SessionPlanRead,
+    summary="Resolved session plan for an offering",
+)
+async def get_session_plan(
+    offering_id: int,
+    user: ProfessorUser,
+    service: SessionServiceDep,
+    professor_service: ProfessorServiceDep,
+    session_type: SessionType = Query(default=SessionType.LECTURE),
+) -> SessionPlanRead:
+    """What a session for this offering would inherit (D93).
+
+    The open form renders this instead of re-deriving the schedule, so what
+    the professor sees is what the server stores. A professor without a
+    current assignment on the offering is refused with 403 `not_assigned`,
+    the same rule the open itself uses.
+    """
+    professor_id = await professor_service.resolve_professor_id(user_id=user.id)
+
+    return await service.get_session_plan(
+        offering_id=offering_id,
+        professor_id=professor_id,
+        session_type=session_type,
     )
 
 

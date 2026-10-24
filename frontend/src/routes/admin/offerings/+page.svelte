@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -22,6 +24,8 @@
 	} from '$lib/features/admin/offerings/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+	import { getSettings } from '$lib/features/admin/settings/service';
+	import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 	import {
 		componentCreateSchema,
 		offeringCreateSchema,
@@ -85,9 +89,12 @@
 	let m_year_level_id = $state('');
 	let m_semester = $state('');
 	let m_academic_year = $state('');
-	let m_semester_weeks = $state('18');
-	let m_present = $state('5');
-	let m_late = $state('10');
+	// D93: blank means "follow the system default" (Admin -> System
+	// Settings), so a new offering is born inheriting rather than carrying a
+	// hard-coded 5/10 that nobody chose.
+	let m_present = $state('');
+	let m_late = $state('');
+	let systemDefaults = $state<{ present: number; late: number } | null>(null);
 	let m_yearOptions = $state<YearLevel[]>([]);
 
 	const isActiveFilter = $derived(
@@ -181,6 +188,17 @@
 		} catch {
 			courseOptions = [];
 		}
+		// The system-wide window defaults, for the "inherit" placeholders
+		// (D93). Read once; they only change in Admin -> System Settings.
+		try {
+			const settings = await getSettings();
+			systemDefaults = {
+				present: settings.present_window_default,
+				late: settings.late_window_default
+			};
+		} catch {
+			systemDefaults = null;
+		}
 	};
 
 	const reloadProgramLookups = async () => {
@@ -251,6 +269,15 @@
 		load(1);
 	};
 
+	// D93: a window field is either a whole number of minutes or "inherit
+	// the system default" (blank). The schema passes the blank through as
+	// an empty string; this turns it into null so the payload omits it.
+	const windowNumber = (raw: unknown): number | null => {
+		if (raw === undefined || raw === null || raw === '') return null;
+		const value = Number(raw);
+		return Number.isInteger(value) ? value : null;
+	};
+
 	const openCreate = async () => {
 		formError = null;
 		conflictOffering = null;
@@ -260,10 +287,9 @@
 		m_year_level_id = '';
 		m_semester = '';
 		m_academic_year = defaultAcademicYear();
-		m_semester_weeks = '18';
 		meetings = [blankMeeting()];
-		m_present = '5';
-		m_late = '10';
+		m_present = '';
+		m_late = '';
 		m_yearOptions = [];
 		if (courseOptions.length === 0) {
 			try {
@@ -345,9 +371,14 @@
 	const modalSessionsPerWeek = $derived(weeklySessionCount(modalScheduleRows));
 
 	// Term total, same product the risk batch uses as its expected session
-	// count — identical line to the Setup Wizard step 3.
+	// count. Weeks come from the selected term (D86) — read-only here; the
+	// fallback matches the shared default when a term has none configured.
+	const modalTerm = $derived(
+		modalSemesterOptions.find((t) => t.code === m_semester) ?? null
+	);
+	const modalTermWeeks = $derived(modalTerm?.weeks ?? DEFAULT_TERM_WEEKS);
 	const modalExpectedTotal = $derived(
-		totalExpectedSessions(String(modalSessionsPerWeek), m_semester_weeks)
+		totalExpectedSessions(String(modalSessionsPerWeek), String(modalTermWeeks))
 	);
 
 	// 409 rescue lookup, shared by both save buttons. Null when the identity
@@ -419,7 +450,6 @@
 				academic_year: m_academic_year,
 				// Sessions/week is one per meeting day (shared helper above).
 				sessions_per_week: modalSessionsPerWeek,
-				semester_weeks: m_semester_weeks,
 				schedule_days: first.days,
 				schedule_start_time: first.start,
 				schedule_end_time: first.end,
@@ -431,16 +461,19 @@
 				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
 				return;
 			}
+			// D93: a blank field means "follow the system default", so the
+			// offering stores NULL and the session resolves the value from
+			// Admin -> System Settings. Only an explicit value is sent.
+			const present = windowNumber(parsed.data.default_present_window_minutes);
+			const late = windowNumber(parsed.data.default_late_window_minutes);
 			// Windows-sum guard (backend 422 windows_exceed_duration): present
 			// + late must fit inside the selected course's session duration.
 			const course = courseOptions.find((c) => c.id === parsed.data.course_id);
 			if (
 				course &&
-				!windowsWithinDuration(
-					parsed.data.default_present_window_minutes,
-					parsed.data.default_late_window_minutes,
-					course.sessionDurationHours
-				)
+				present !== null &&
+				late !== null &&
+				!windowsWithinDuration(present, late, course.sessionDurationHours)
 			) {
 				formError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
@@ -527,7 +560,6 @@
 				semester: parsed.data.semester,
 				academic_year: parsed.data.academic_year,
 				sessions_per_week: parsed.data.sessions_per_week,
-				semester_weeks: parsed.data.semester_weeks,
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
@@ -535,8 +567,8 @@
 				classroom_name: parsed.data.classroom_name || undefined,
 				classroom_lat: head?.classroom_lat,
 				classroom_lng: head?.classroom_lng,
-				default_present_window_minutes: parsed.data.default_present_window_minutes,
-				default_late_window_minutes: parsed.data.default_late_window_minutes,
+				...(present !== null ? { default_present_window_minutes: present } : {}),
+				...(late !== null ? { default_late_window_minutes: late } : {}),
 			});
 			formOpen = false;
 			await refreshAdminOfferings();
@@ -600,7 +632,7 @@
 	const rowTitle = (o: AdminOffering) => offeringTitle(o);
 </script>
 
-<div class="page">
+<div class="page page-enter">
 	<header class="header">
 		<div>
 			<h1>Offering Management</h1>
@@ -638,27 +670,26 @@
 		>
 			<option value="">All years</option>
 			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}</option>
+				<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
 			{/each}
 		</select>
-		{#if semesterOptions.length > 0}
-			<select class="input" aria-label="Semester filter" bind:value={semesterFilter} onchange={applyFilters}>
-				<option value="">All semesters</option>
-				{#each semesterOptions as t (t.code)}
-					<option value={t.code}>{t.label}</option>
-				{/each}
-			</select>
-		{:else}
-			<input
-				class="input"
-				placeholder="Semester (e.g. 1st Sem)"
-				aria-label="Semester filter"
-				bind:value={semesterFilter}
-				onkeydown={(e) => {
-					if (e.key === 'Enter') applyFilters();
-				}}
-			/>
-		{/if}
+		<select
+			class="input"
+			aria-label="Semester filter"
+			bind:value={semesterFilter}
+			onchange={applyFilters}
+			disabled={!yearFilter || semesterOptions.length === 0}
+			title={!yearFilter
+				? "Pick a year level first — semesters are the year level's terms"
+				: semesterOptions.length === 0
+					? 'This year level has no terms configured'
+					: undefined}
+		>
+			<option value="">All semesters</option>
+			{#each semesterOptions as t (t.code)}
+				<option value={t.code}>{t.label}</option>
+			{/each}
+		</select>
 		<select class="input" aria-label="Course filter" bind:value={courseFilter} onchange={applyFilters}>
 			<option value="">All courses</option>
 			{#each courseOptions as c (c.id)}
@@ -674,12 +705,16 @@
 	</section>
 
 	{#if adminOfferingsState.loading && adminOfferingsState.items.length === 0}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={8} cols={7} label="Loading offerings…" />
 	{:else if adminOfferingsState.error}
 		<section class="card"><p class="error">Could not load offerings: {adminOfferingsState.error}</p></section>
 	{:else if visibleItems.length === 0}
 		<section class="card">
-			<p class="empty">No offerings match these filters. Add the first one — it instances a course template for a program and year.</p>
+			<EmptyState
+				icon="file"
+				title="No offerings match these filters"
+				hint="Add the first one — it instances a course template for a program and year."
+			/>
 		</section>
 	{:else}
 		<section class="card table-wrap" aria-busy={adminOfferingsState.loading}>
@@ -726,31 +761,33 @@
 									{o.isActive ? 'Active' : 'Inactive'}
 								</span>
 							</td>
-							<td class="row-actions">
-								<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
-								{#if o.isActive}
-									<button
-										class="link"
-										onclick={() => { adminOfferingsState.actionError = null; deactivateTarget = o; }}
-									>
-										Deactivate
-									</button>
-								{:else}
-									<button
-										class="link"
-										onclick={() => void toggleOfferingActive(o)}
-									>
-										Reactivate
-									</button>
-								{/if}
-								{#if !o.isActive}
-									<button
-										class="link danger"
-										onclick={() => { adminOfferingsState.actionError = null; deleteTarget = o; }}
-									>
-										Delete
-									</button>
-								{/if}
+							<td>
+								<div class="row-actions">
+									<button class="link" onclick={() => goto(adminOffering(o.id))}>Open</button>
+									{#if o.isActive}
+										<button
+											class="link"
+											onclick={() => { adminOfferingsState.actionError = null; deactivateTarget = o; }}
+										>
+											Deactivate
+										</button>
+									{:else}
+										<button
+											class="link"
+											onclick={() => void toggleOfferingActive(o)}
+										>
+											Reactivate
+										</button>
+									{/if}
+									{#if !o.isActive}
+										<button
+											class="link danger"
+											onclick={() => { adminOfferingsState.actionError = null; deleteTarget = o; }}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -841,11 +878,13 @@
 					</select>
 				</label>
 				<p class="hint">Meetings per week: {modalSessionsPerWeek} (counted automatically — one per meeting day).</p>
-				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={m_semester_weeks} /></label>
-				{#if modalExpectedTotal !== null}
-					<p class="hint">{modalSessionsPerWeek} sessions/week × {m_semester_weeks.trim()} weeks = {modalExpectedTotal} expected sessions this term.</p>
+				{#if m_semester && modalTerm}
+					<p class="hint" data-testid="expected-sessions">
+						{modalSessionsPerWeek} sessions/week × {modalTermWeeks} weeks = {modalExpectedTotal} expected sessions this term.
+						<span class="muted">Weeks come from the term (edit in Manage Terms).</span>
+					</p>
 				{:else}
-					<p class="hint">Enter the semester weeks to see the expected session total.</p>
+					<p class="hint">Pick a semester to see the expected session total.</p>
 				{/if}
 				<p class="hint">One offering per course + program + term + academic year — the year level doesn't disambiguate, so re-offering the same course in the same term fails as a duplicate.</p>
 				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} />
@@ -866,17 +905,17 @@
 					{/if}
 				{/if}
 				<div class="grid2">
-					<label>Present window, min<input class="input" inputmode="numeric" bind:value={m_present} /></label>
-					<label>Late window, min<input class="input" inputmode="numeric" bind:value={m_late} /></label>
+					<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={m_present} /></label>
+					<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={m_late} /></label>
 				</div>
 				<p class="hint">Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
-				<button class="btn btn-secondary" data-testid="save-open-offering" disabled={formBusy} onclick={() => void submitForm(true)}>
+				<button class="btn btn-secondary" data-testid="save-open-offering" aria-busy={formBusy} disabled={formBusy} onclick={() => void submitForm(true)}>
 					{formBusy ? 'Saving…' : 'Save & open'}
 				</button>
-				<button class="btn btn-primary" data-testid="save-offering" disabled={formBusy} onclick={() => void submitForm(false)}>
+				<button class="btn btn-primary" data-testid="save-offering" aria-busy={formBusy} disabled={formBusy} onclick={() => void submitForm(false)}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
 			</div>
@@ -946,7 +985,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -1060,8 +1098,8 @@
 	}
 
 	.badge.type-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.th-btn {
@@ -1127,12 +1165,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-top: 1rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {
@@ -1229,7 +1261,6 @@
 		border-radius: 12px;
 		box-shadow: var(--shadow-lg);
 		padding: 1.75rem 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.modal.wide {

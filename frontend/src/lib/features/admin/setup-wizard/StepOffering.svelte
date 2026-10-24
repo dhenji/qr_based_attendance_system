@@ -1,8 +1,10 @@
 <script lang="ts">
+	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { goToStep, setWizardYear, wizardState } from './store.svelte';
 	import { getProgram } from '$lib/features/admin/programs/service';
 	import { listCourses } from '$lib/features/admin/courses/service';
+	import { getSettings } from '$lib/features/admin/settings/service';
 	import {
 		createOffering,
 		findConflictingOffering,
@@ -17,6 +19,7 @@
 		blankMeeting,
 		type MeetingDraft,
 	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
+	import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 	import {
 		findDuplicateMeetings,
 		findOverlappingMeetings,
@@ -56,9 +59,21 @@
 	let f_course_id = $state('');
 	let f_semester = $state('');
 	let f_academic_year = $state('');
-	let f_semester_weeks = $state('18');
-	let f_present = $state('5');
-	let f_late = $state('10');
+	// D93: blank means "follow the system default" (Admin -> System
+	// Settings), so a new offering is born inheriting rather than carrying a
+	// hard-coded 5/10 that nobody chose.
+	// D93: a window field is either a whole number of minutes or "inherit
+	// the system default" (blank). The schema passes the blank through as
+	// an empty string; this turns it into null so the payload omits it.
+	const windowNumber = (raw: unknown): number | null => {
+		if (raw === undefined || raw === null || raw === '') return null;
+		const value = Number(raw);
+		return Number.isInteger(value) ? value : null;
+	};
+
+	let f_present = $state('');
+	let f_late = $state('');
+	let systemDefaults = $state<{ present: number; late: number } | null>(null);
 
 	// Class meetings (D77): one row per weekly meeting, starting with a
 	// single lecture. Row 1 also feeds the offering's own schedule/room
@@ -157,7 +172,13 @@
 
 	const sessionsPerWeek = $derived(weeklySessionCount(asScheduleRows));
 
-	const expectedTotal = $derived(totalExpectedSessions(String(sessionsPerWeek), f_semester_weeks));
+	// Session weeks come from the selected term (D86) — read-only here; the
+	// fallback matches the shared default when a term has none configured.
+	const pickedTerm = $derived(semesterOptions.find((t) => t.code === f_semester) ?? null);
+	const pickedTermWeeks = $derived(pickedTerm?.weeks ?? DEFAULT_TERM_WEEKS);
+	const expectedTotal = $derived(
+		totalExpectedSessions(String(sessionsPerWeek), String(pickedTermWeeks))
+	);
 
 	// Same-day time intersections (any types). Guidance only — the backend
 	// permits overlaps, so these never block the submit.
@@ -173,6 +194,18 @@
 			loading = false;
 			return;
 		}
+		// The system-wide window defaults, for the "inherit" placeholders
+		// (D93). Read alongside the rest; a failure only costs the hint.
+		void getSettings()
+			.then((settings) => {
+				systemDefaults = {
+					present: settings.present_window_default,
+					late: settings.late_window_default
+				};
+			})
+			.catch(() => {
+				systemDefaults = null;
+			});
 		try {
 			const [detail, courseList] = await Promise.all([
 				getProgram(wizardState.programId),
@@ -244,7 +277,6 @@
 				semester: f_semester,
 				academic_year: f_academic_year,
 				sessions_per_week: sessionsPerWeek,
-				semester_weeks: f_semester_weeks,
 				schedule_days: first.days,
 				schedule_start_time: first.start,
 				schedule_end_time: first.end,
@@ -259,13 +291,16 @@
 			// Windows-sum guard (backend 422 windows_exceed_duration): present
 			// + late must fit inside the selected course's session duration.
 			const course = courses.find((c) => c.id === parsed.data.course_id);
+			// D93: a blank field means "follow the system default", so the
+			// offering stores NULL and the session resolves the value from
+			// Admin -> System Settings. Only an explicit value is sent.
+			const present = windowNumber(parsed.data.default_present_window_minutes);
+			const late = windowNumber(parsed.data.default_late_window_minutes);
 			if (
 				course &&
-				!windowsWithinDuration(
-					parsed.data.default_present_window_minutes,
-					parsed.data.default_late_window_minutes,
-					course.sessionDurationHours
-				)
+				present !== null &&
+				late !== null &&
+				!windowsWithinDuration(present, late, course.sessionDurationHours)
 			) {
 				formError = `Present + late windows exceed the ${course.courseCode} session duration (${course.sessionDurationHours * 60} min)`;
 				return;
@@ -352,15 +387,14 @@
 				semester: parsed.data.semester,
 				academic_year: parsed.data.academic_year,
 				sessions_per_week: parsed.data.sessions_per_week,
-				semester_weeks: parsed.data.semester_weeks,
 				schedule_days: parsed.data.schedule_days,
 				schedule_start_time: parsed.data.schedule_start_time,
 				schedule_end_time: parsed.data.schedule_end_time,
 				classroom_name: parsed.data.classroom_name || undefined,
 				classroom_lat: head?.classroom_lat,
 				classroom_lng: head?.classroom_lng,
-				default_present_window_minutes: parsed.data.default_present_window_minutes,
-				default_late_window_minutes: parsed.data.default_late_window_minutes,
+				...(present !== null ? { default_present_window_minutes: present } : {}),
+				...(late !== null ? { default_late_window_minutes: late } : {}),
 				components,
 			});
 			lastSaved = saved;
@@ -414,7 +448,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="muted">Loading setup data…</p>
+		<SkeletonDetail bare rows={5} label="Loading setup data…" />
 	{:else if loadError && !program}
 		<p class="error" role="alert">{loadError}</p>
 		<div class="nav-row">
@@ -549,7 +583,7 @@
 					{/each}
 				{/if}
 				<p class="hint">Meetings per week: {sessionsPerWeek} (counted automatically — one per meeting day).</p>
-				<label>Semester weeks<input class="input" inputmode="numeric" bind:value={f_semester_weeks} placeholder="How many weeks does this term run?" /></label>
+				<label>Semester weeks (from term)<input class="input" value={pickedTermWeeks} disabled aria-label="Session weeks, set on the term in Manage Terms" /></label>
 				{#if weeklyBreakdown && weeklyHours > 0}
 					{#if weeklyBreakdown.status === 'ok'}
 						<p class="hint">{weeklyBreakdown.scheduled}h scheduled of {weeklyBreakdown.limit}h weekly requirement ({selectedCourse?.courseCode} · exact) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
@@ -561,10 +595,10 @@
 				{:else if weeklyHours > 0}
 					<p class="hint">{weeklyHours} scheduled {weeklyHours === 1 ? 'hour' : 'hours'} per week across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
 				{/if}
-				{#if expectedTotal !== null}
-					<p class="hint">{sessionsPerWeek} sessions/week × {f_semester_weeks.trim()} weeks = {expectedTotal} expected sessions this term.</p>
+				{#if f_semester && pickedTerm}
+					<p class="hint">{sessionsPerWeek} sessions/week × {pickedTermWeeks} weeks = {expectedTotal} expected sessions this term. Edit the term's weeks in Program Management → Year Levels → Manage Terms.</p>
 				{:else}
-					<p class="hint">Enter the semester weeks to see the expected session total.</p>
+					<p class="hint">Pick a semester to see the expected session total.</p>
 				{/if}
 				<p class="hint">
 					One offering per course + program + term + academic year — the year level
@@ -572,8 +606,8 @@
 					as a duplicate.
 				</p>
 				<div class="grid2">
-					<label>Present window, min<input class="input" inputmode="numeric" bind:value={f_present} /></label>
-					<label>Late window, min<input class="input" inputmode="numeric" bind:value={f_late} /></label>
+					<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={f_present} /></label>
+					<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={f_late} /></label>
 				</div>
 				{#if windowBudget !== null}
 					<p class="hint">
@@ -593,6 +627,7 @@
 					<button
 						class="btn btn-primary"
 						data-testid="wizard-save-offering"
+						aria-busy={formBusy}
 						disabled={formBusy}
 						onclick={() => void submitForm()}
 					>
@@ -618,7 +653,6 @@
 		border-radius: 8px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
-		font-family: system-ui, sans-serif;
 	}
 
 	.step-title {

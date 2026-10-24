@@ -40,6 +40,8 @@ export type SettingsPatch = Partial<
 		| 'geofence_default_radius'
 		| 'present_window_default'
 		| 'late_window_default'
+		| 'session_early_open_minutes'
+		| 'session_late_open_minutes'
 		| 'backup_retention_daily'
 		| 'backup_retention_monthly'
 	>
@@ -134,7 +136,7 @@ export const exportAnalyticsOverview = async (): Promise<void> => {
 };
 
 export const exportAnalyticsComparison = async (): Promise<void> => {
-	const items = await getAnalyticsComparison();
+	const { items } = await getAnalyticsComparison();
 	downloadCsv(`analytics-comparison-${stamp()}.csv`, comparisonCsv(items));
 };
 
@@ -148,14 +150,8 @@ export const exportAnalyticsAtRisk = async (): Promise<void> => {
 	downloadCsv(`analytics-atrisk-${stamp()}.csv`, atRiskCsv(items));
 };
 
-export const formatBytes = (bytes: number): string => {
-	if (bytes <= 0) return '—';
-	const units = ['B', 'KB', 'MB', 'GB'];
-	let value = bytes;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit += 1;
-	}
-	return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
-};
+// `formatBytes` now lives in `$lib/shared/utils/format` — the audit reader
+// needs it for a backup row's `size_bytes` snapshot too, and a shared
+// formatter is the one home for it. Re-exported here so the settings page
+// keeps a single import site for the slice's helpers.
+export { formatBytes } from '$lib/shared/utils/format';

@@ -49,7 +49,7 @@ ORDER BY hour DESC;
    - Close the session early (`POST /professor/sessions/{id}/close`)
    - Notify the professor via direct message
 3. If a specific student is repeatedly rejected:
-   - Flag for manual review in the liveness review queue (`/admin/attendance/liveness-review`)
+   - Flag for manual review in the Attendance Review queue (`/admin/attendance`)
    - Do NOT lock the account automatically (let admin investigate)
 
 ### Investigation

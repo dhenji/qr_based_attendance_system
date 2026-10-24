@@ -1,7 +1,10 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		buildCsv,
 		defaultReportRange
@@ -50,6 +53,15 @@
 	let exportWarning = $state<string | null>(null);
 	let exportProgress = $state<string | null>(null);
 	let exportToken = $state(0);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+		onabort?: () => void;
+	}>(null);
 
 	// Course options deduped by code; sections join from the live courses
 	// store (the history rows carry no section identity of their own, and the
@@ -279,7 +291,7 @@
 			if (exportToken === token)
 				exportError = friendlyActionError(e, 'Export failed. Please try again.');
 		} finally {
-			if (exportToken === token) {
+			if (exportToken === token || exportToken === token + 1) {
 				exporting = false;
 				exportProgress = null;
 			}
@@ -384,12 +396,14 @@
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
-		<section class="card">
-			<p class="muted">Loading session history…</p>
-		</section>
+		<SkeletonTable rows={8} cols={6} label="Loading session history…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<p class="empty">No sessions match these filters. Try widening the date range.</p>
+			<EmptyState
+				icon="file"
+				title="No sessions match these filters"
+				hint="Try widening the date range."
+			/>
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Session history table">
@@ -542,7 +556,7 @@
 					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
 				</nav>
 				<div class="table-actions no-print">
-					<button class="btn btn-secondary" type="button" onclick={print}>
+					<button class="btn btn-secondary" type="button" onclick={() => (pendingExport = { run: print, title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>
 						<AppIcon name="file" size={18} />
 						Print
 					</button>
@@ -550,7 +564,7 @@
 						class="btn btn-secondary"
 						type="button"
 						disabled={exporting || total === 0}
-						onclick={() => void exportCsv()}
+						onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }], onabort: cancelExport })}
 					>
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
@@ -573,6 +587,18 @@
 			</div>
 		</section>
 	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onabort={pendingExport.onabort}
+			onclose={() => (pendingExport = null)}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -582,7 +608,6 @@
 		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header h1 {
@@ -605,12 +630,6 @@
 		border-radius: 12px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
-	}
-
-	.empty {
-		margin: 0;
-		color: var(--text-muted);
-		font-size: 0.9375rem;
 	}
 
 	.error {
@@ -736,7 +755,7 @@
 	}
 
 	.sort-arrow {
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-size: 0.6875rem;
 	}
 
@@ -776,8 +795,8 @@
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	/* D36: compliance by default; the title/aria-label reveals participation. */
@@ -785,7 +804,7 @@
 		display: inline-block;
 		padding: 0;
 		border: none;
-		border-bottom: 1px dotted #94a3b8;
+		border-bottom: 1px dotted var(--text-muted);
 		background: none;
 		font: inherit;
 		font-variant-numeric: tabular-nums;
@@ -861,7 +880,7 @@
 	}
 
 	.page:disabled:not(.current) {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
@@ -869,7 +888,7 @@
 
 	.gap {
 		padding: 0 0.125rem;
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-weight: 700;
 		user-select: none;
 	}
@@ -919,7 +938,7 @@
 	.btn:disabled {
 		background: var(--bg-page);
 		border-color: var(--border);
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 	}
 

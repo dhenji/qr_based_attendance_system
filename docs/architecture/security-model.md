@@ -129,7 +129,8 @@ exposure; it is not a way to kick an existing session out.
 > **Status: designed, not implemented.** What the server stores today is a
 > zero-filled placeholder from `_stub_embedding_blob` — a plain JSON blob with
 > `"mean"` and all three angle vectors set to `0.0` and `"stub": true`. There is
-> no ResNet inference, no AES-GCM step and no encryption code in the feature. The
+> no embedding inference, no AES-GCM step and no encryption code in the feature,
+> and no recognition model is installed anywhere in the repository. The
 > pipeline below is the design D28 records. The blob's *shape* is already the
 > documented one so swapping the builder is the only change a real pipeline
 > needs. The audit-trail exclusion in `_face_snapshot` is implemented and holds
@@ -137,7 +138,7 @@ exposure; it is not a way to kick an existing session out.
 
 ```
 Server:
-  3 photos → face-api.js ResNet → 128-d vectors per angle
+  3 photos → a recognition model (none installed) → 128-d vectors per angle
   → JSON blob: {"mean":[128f], "angles":{"front":[128f],"left":[128f],"right":[128f]}}
   → AES-256-GCM encrypt with server key
   → Store BYTEA in students.face_embedding
@@ -175,7 +176,7 @@ right column is all the server enforces. An earlier version of this table claime
 "EAR < 0.25 for >= 3 frames" as a server-side rule, which the code has never
 enforced — see *Client-Asserted Biometrics* below.
 
-All processing client-side (MediaPipe Face Mesh WASM). Only scores/evidence
+All processing client-side (MediaPipe FaceLandmarker WASM). Only scores/evidence
 sync to server for audit. Server re-validates evidence plausibility.
 
 ### Identity Resolution (ADR-083)
@@ -274,8 +275,11 @@ The other one that used to be missing is now throttled:
   (~2.2 × 10¹⁴ possibilities, which is why T7 stayed Medium rather than High), and now an
   automated probe is additionally throttled.
 
-> **Captcha.** `POST /auth/login` and `POST /auth/forgot-password` call
-> `verify_turnstile_token(...)` when a token is supplied, so Turnstile is enforced on those two.
+> **Captcha.** `POST /auth/login` and `POST /auth/forgot-password` (step 1) call
+> `verify_turnstile_token(...)`. Enforcement is key-gated (ADR-053): with
+> `TURNSTILE_SECRET_KEY` set, a missing or invalid token is `400 invalid_captcha`;
+> while it is empty the check passes through. See `production-checklist.md` §3
+> for enabling it.
 
 > **HMAC secret.** `_resolve_hmac_secret` prefers `HMAC_SECRET_KEY` and falls back to
 > `JWT_SECRET`, raising if neither is set — so code generation works on a deployment configured
@@ -304,13 +308,15 @@ All sensitive operations are logged in the audit trail:
 
 | Action                                           | Logged | Trail row                                        |
 | ------------------------------------------------ | ------ | ------------------------------------------------ |
-| Student enrollment/unenrollment                  | Yes    | `enroll` / `enrollment`                         |
-| Professor assignment changes                     | Yes    | `assign` / `unassign` on `course_professor`     |
+| Roster creation (student / professor)            | Yes    | `create` on `student` / `professor`              |
+| Student enrollment/unenrollment                  | Yes    | `enroll` / `unenroll` on `enrollment`           |
+| Professor assignment changes                     | Yes    | `assign` / `reassign` / `reopen` / `unassign` on `course_professor` |
 | Excuse create/approve/revoke                     | Yes    | `create` / `approve` / `reject` / `revoke` on `excuse`, plus the `attendance_records` each one restatus |
 | Session open/close                               | Yes    | `open` / `close` on `session`                   |
 | Face enrollment/re-enrollment                    | Yes    | `update` on `face_enrollment`. `revoke` exists as a service method but **no route exposes it**, so the row it would write is unreachable |
 | Backup create/restore                            | Yes    | `create` on `backup`. **Restore is not implemented** — only download |
 | Academic structure changes (program/year/course) | Yes    | `create` / `update` / `archive` / `delete`      |
+| Schedule component changes                        | Yes    | `create` / `update` / `archive` on `offering_component` |
 | System settings changes                          | Yes    | `update` on `app_setting`, with the previous value |
 | Admin account creation                           | Yes    | `create` on `user`, with the role granted       |
 | Account lockout/unlock                           | Yes    | `lock` / `unlock` on `user`. **There is no standalone admin unlock** — an admin clears a lockout by resetting the password, which is audited as `password_reset` |
@@ -330,9 +336,18 @@ password, the hash or the TOTP secret — `_account_snapshot` omits all three by
 design, and the audit assertions pin that.
 
 Read the trail through `GET /admin/audit-logs` (admin-only, filterable by
-`entity_type` / `action` / `performed_by` / date range).
-`GET /admin/system/academic-structure` reads the same table scoped to the four
+`entity_type` / `action` / `performed_by` / `actor` / date range, sortable by
+time / actor / action).
+`GET /admin/system/academic-structure` reads the same table scoped to the
 structural entity types.
+
+Each row carries the stored evidence (`action`, `entity_type`, `entity_id`,
+`old_value`, `new_value`, `performed_by`, `performed_at`) **and** a derived
+reading of it — the actor's name and role, the subject's name, a one-line
+summary and a field-level change (ADR-088). The derived names are read out
+of the audit snapshot first, so they survive the record's deletion; a plain
+admin sees them too, which a client-side lookup could not manage because
+`GET /admin/users` is super-admin-only.
 
 One row above is marked unimplemented because the surface does not exist yet:
 there is no admin account unlock route. See ADR-064.
@@ -376,3 +391,9 @@ These are **explicitly out of scope** for this system:
 | D31      | Liveness protocol (fixed sequence, EAR + PnP)       |
 | D32      | Profile read-only (identity admin-managed)          |
 | D39      | Backup encryption (AES-256-GCM)                     |
+
+## Remote sessions (D96)
+
+Remote/online sessions are an explicit, auditable mode (`sessions.is_remote`). A remote session skips the geofence and does not require classroom coordinates, even for labs. The flag is recorded and reportable, so the anti-spoofing posture (T3/T5) stays visible rather than being silently weakened by null coordinates.
+
+An in-person session with no known classroom uses the separate `sessions.geofence_enabled` flag (default `true`): when `false`, the geofence is skipped and no classroom identity is stored, while `is_remote` remains `false`. This keeps "remote/online" and "no known classroom" distinguishable in the audit trail.

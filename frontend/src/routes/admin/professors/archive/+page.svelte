@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
@@ -111,12 +113,12 @@
 	</section>
 
 	{#if adminProfessorsState.loading}
-		<section class="card"><p class="muted">Loading…</p></section>
+		<SkeletonTable rows={6} cols={4} label="Loading archived professors…" />
 	{:else if adminProfessorsState.error}
 		<section class="card"><p class="error">Could not load archive: {adminProfessorsState.error}</p></section>
 	{:else if adminProfessorsState.items.length === 0}
 		<section class="card">
-			<p class="empty">Archive is empty. Deactivated professors appear here.</p>
+			<EmptyState icon="file" title="Archive is empty" hint="Deactivated professors appear here." />
 		</section>
 	{:else}
 		<section class="card table-wrap">
@@ -126,10 +128,10 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Name</th>
-						<th>Email</th>
-						<th>Department</th>
-						<th><span class="sr">Actions</span></th>
+						<th scope="col">Name</th>
+						<th scope="col">Email</th>
+						<th scope="col">Department</th>
+						<th scope="col"><span class="sr">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -138,17 +140,19 @@
 							<td>{fullName(p)}</td>
 							<td class="mono">{p.email}</td>
 							<td>{p.department ?? '—'}</td>
-							<td class="row-actions">
-								<button
-									class="link success"
-									onclick={() => {
-										adminProfessorsState.actionError = null;
-										toggleTarget = p;
-									}}
-								>
-									Restore
-								</button>
-								<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
+							<td>
+								<div class="row-actions">
+									<button
+										class="link success"
+										onclick={() => {
+											adminProfessorsState.actionError = null;
+											toggleTarget = p;
+										}}
+									>
+										Restore
+									</button>
+									<button class="link danger" onclick={() => { adminProfessorsState.actionError = null; deleteTarget = p; }}>Delete</button>
+								</div>
 							</td>
 						</tr>
 					{/each}
@@ -194,7 +198,7 @@
 			{/if}
 			<div class="modal-actions">
 				<button class="btn btn-ghost" disabled={toggleBusy} onclick={() => (toggleTarget = null)}>Cancel</button>
-				<button class="btn btn-success" disabled={toggleBusy} onclick={() => void confirmToggle()}>
+				<button class="btn btn-success" aria-busy={toggleBusy} disabled={toggleBusy} onclick={() => void confirmToggle()}>
 					{toggleBusy ? 'Saving…' : 'Restore'}
 				</button>
 			</div>
@@ -235,7 +239,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		font-family: system-ui, sans-serif;
 	}
 
 	.back {
@@ -358,12 +361,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-top: 1rem;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-		margin: 0;
 	}
 
 	.error {

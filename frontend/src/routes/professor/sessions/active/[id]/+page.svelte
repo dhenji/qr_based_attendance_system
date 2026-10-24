@@ -1,7 +1,10 @@
 <script lang="ts">
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
+	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
+import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		closeSession,
 		getActiveSession
@@ -70,6 +73,14 @@
 	let currentPage = $state(1);
 	let tableScroller = $state<HTMLDivElement | undefined>(undefined);
 	let exporting = $state(false);
+	let pendingExport = $state<null | {
+		run: () => void | Promise<void>;
+		details?: { label: string; value: string }[];
+		title?: string;
+		message?: string;
+		confirmLabel?: string;
+		busyLabel?: string;
+	}>(null);
 
 	// Server-first export (POST /professor/reports/export) scoped to the
 	// session's course was abandoned on purpose: the server leg always
@@ -279,11 +290,18 @@
 		return Math.max(0, Math.floor((scanExpiresAt - now) / 1000));
 	});
 
+	// The class end is the offering's plan (D93), so the countdown reads the
+	// real end of the scheduled class rather than "when the professor clicked".
 	const classEndsAt = $derived(session ? new Date(session.scheduledEndTime).getTime() : null);
 	const classRemainingSeconds = $derived.by(() => {
 		if (classEndsAt === null) return null;
 		return Math.max(0, Math.floor((classEndsAt - now) / 1000));
 	});
+	// A session opened after its class ended still runs, so the tile says so
+	// rather than showing a zero countdown.
+	const classEnded = $derived(
+		classRemainingSeconds !== null && classRemainingSeconds <= 0
+	);
 
 	const isClosed = $derived(session?.status === 'closed');
 	const closedSession = $derived(isClosed ? session : null);
@@ -458,7 +476,7 @@
 			<div class="title">
 				<h1>Active: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offeringSections} · Code {session.sessionCode} ·
+					Section {session.offeringSections} · Code <span class="mono-data">{session.sessionCode}</span> ·
 					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
 						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
 					</span>
@@ -467,6 +485,7 @@
 			<button
 				class="btn btn-danger"
 				type="button"
+				aria-busy={closing}
 				disabled={closing || isClosed}
 				onclick={handleClose}
 			>
@@ -488,9 +507,8 @@
 			{/if}
 		</section>
 	{:else if isLoading || !session || scanRemainingSeconds === null || classRemainingSeconds === null}
-		<section class="card">
-			<p class="muted">Loading live session…</p>
-		</section>
+		<SkeletonCards count={3} label="Loading live session…" />
+		<SkeletonTable rows={5} cols={5} />
 	{:else}
 		{#if refreshError}
 			<p class="refresh-error" role="status">{refreshError}</p>
@@ -507,8 +525,8 @@
 					<span class="timer-label">Scan window</span>
 					<span class="timer-value">{formatCountdown(scanRemainingSeconds)}</span>
 				</div>
-				<div class="timer">
-					<span class="timer-label">Class ends in</span>
+				<div class="timer" class:urgent={classEnded}>
+					<span class="timer-label">{classEnded ? 'Class ended' : 'Class ends in'}</span>
 					<span class="timer-value">{formatCountdown(classRemainingSeconds)}</span>
 					<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
 				</div>
@@ -681,11 +699,11 @@
 				type="button"
 				disabled={exporting || session === null}
 				title="Download this session's attendance as CSV (server rows when reachable)"
-				onclick={() => void exportCurrent()}
+				onclick={() => (pendingExport = { run: exportCurrent, details: [{ label: 'Dataset', value: 'Session attendance' }, { label: 'Format', value: 'CSV' }] })}
 			>
 				{exporting ? 'Exporting…' : 'Export Current'}
 			</button>
-			<button class="btn btn-secondary" type="button" onclick={() => window.print()}>
+			<button class="btn btn-secondary" type="button" onclick={() => (pendingExport = { run: () => window.print(), title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>
 				Print
 			</button>
 			<button class="btn btn-secondary" type="button" onclick={() => goto(Routes.PROFESSOR_SESSIONS_HISTORY)}>
@@ -728,7 +746,7 @@
 						<button class="btn btn-ghost" type="button" onclick={() => (excuseTarget = null)}>
 							Cancel
 						</button>
-						<button class="btn btn-primary" type="button" disabled={excuseBusy} onclick={() => void submitExcuse()}>
+						<button class="btn btn-primary" type="button" aria-busy={excuseBusy} disabled={excuseBusy} onclick={() => void submitExcuse()}>
 							{excuseBusy ? 'Saving…' : 'Excuse'}
 						</button>
 					</div>
@@ -762,13 +780,24 @@
 						<button class="btn btn-ghost" type="button" onclick={() => (bulkOpen = false)}>
 							Cancel
 						</button>
-						<button class="btn btn-primary" type="button" disabled={bulkBusy} onclick={() => void submitBulk()}>
+						<button class="btn btn-primary" type="button" aria-busy={bulkBusy} disabled={bulkBusy} onclick={() => void submitBulk()}>
 							{bulkBusy ? 'Saving…' : 'Excuse all absent'}
 						</button>
 					</div>
 				</div>
 			</div>
 		{/if}
+	{/if}
+	{#if pendingExport}
+		<ConfirmExportDialog
+			title={pendingExport.title}
+			message={pendingExport.message}
+			confirmLabel={pendingExport.confirmLabel}
+			busyLabel={pendingExport.busyLabel}
+			details={pendingExport.details}
+			onconfirm={pendingExport.run}
+			onclose={() => (pendingExport = null)}
+		/>
 	{/if}
 </div>
 
@@ -779,7 +808,6 @@
 		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
-		font-family: system-ui, sans-serif;
 	}
 
 	.header {
@@ -865,7 +893,7 @@
 	.btn:disabled {
 		background: var(--bg-page);
 		border-color: var(--border);
-		color: #94a3b8;
+		color: var(--text-muted);
 		cursor: not-allowed;
 		box-shadow: none;
 	}
@@ -902,7 +930,7 @@
 		align-items: center;
 		gap: 1rem;
 		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
-		border: 2px solid #22c55e;
+		border: 2px solid var(--success);
 		text-align: center;
 		container-type: inline-size;
 	}
@@ -921,7 +949,7 @@
 		font-weight: 700;
 		letter-spacing: 0.12em;
 		line-height: 1;
-		color: #14532d;
+		color: var(--success);
 		max-width: 100%;
 		overflow-wrap: anywhere;
 	}
@@ -940,12 +968,12 @@
 		min-width: 11rem;
 		padding: 0.75rem 1rem;
 		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.78);
+		background: color-mix(in srgb, var(--bg-card) 80%, transparent);
 		border: 1px solid var(--success-bg);
 	}
 
 	.timer.urgent {
-		border-color: #fca5a5;
+		border-color: var(--danger);
 	}
 
 	.timer-label {
@@ -964,12 +992,12 @@
 		font-variant-numeric: tabular-nums;
 		font-size: 1.375rem;
 		font-weight: 800;
-		color: #14532d;
+		color: var(--success);
 	}
 
 	.timer-sub {
 		font-size: 0.8125rem;
-		color: #4d7c62;
+		color: var(--text-muted);
 	}
 
 	.tiles {
@@ -1030,7 +1058,7 @@
 	.dot-present { background: var(--success); }
 	.dot-late { background: #f59e0b; }
 	.dot-excused { background: #8b5cf6; }
-	.dot-pending { background: #94a3b8; }
+	.dot-pending { background: var(--text-muted); }
 	.dot-absent { background: var(--danger); }
 
 	.feed-head {
@@ -1104,7 +1132,7 @@
 	}
 
 	.sort-arrow {
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-size: 0.6875rem;
 	}
 
@@ -1149,7 +1177,7 @@
 	}
 
 	.page:disabled:not(.current) {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
@@ -1180,7 +1208,7 @@
 
 	.status-present { background: var(--success-bg); color: var(--success); }
 	.status-late { background: var(--warning-bg); color: var(--warning-text); }
-	.status-excused { background: var(--info-bg); color: #6d28d9; }
+	.status-excused { background: var(--info-bg); color: var(--info-text); }
 	.status-pending { background: var(--bg-muted); color: var(--text-muted); }
 	.status-absent { background: var(--danger-bg); color: var(--danger-strong); }
 
@@ -1196,8 +1224,8 @@
 	}
 
 	.type-badge.is-lab {
-		color: #92400e;
-		background: #fef3c7;
+		color: var(--warning-text);
+		background: var(--warning-bg);
 	}
 
 	.mini {
@@ -1212,7 +1240,7 @@
 	}
 
 	.mini:disabled {
-		color: #94a3b8;
+		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);
 		cursor: not-allowed;
@@ -1223,8 +1251,8 @@
 		align-items: center;
 		gap: 0.75rem;
 		background: var(--warning-bg);
-		border-color: #fcd34d;
-		color: #92400e;
+		border-color: var(--warning-text);
+		color: var(--warning-text);
 	}
 
 	.sync strong {
