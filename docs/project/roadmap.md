@@ -110,7 +110,7 @@
 - Student CRUD: create, import (CSV), edit, archive, reactivate
 - Professor CRUD: create, edit, archive
 - Bulk CSV import with validation
-- Student face enrollment (3-photo capture, embedding generation) (D28, D43)
+- Student face enrollment (3-photo capture; placeholder embedding only — real generation/encryption not implemented) (D28, D43)
 - Program Management suite (replaces flat Course Management) (D38, D40)
   - Programs list, detail, year-level tabs, term structure editor
   - Year-level course list with CRUD
@@ -120,7 +120,7 @@
 
 | ID  | Decision                                                                                    |
 | --- | ------------------------------------------------------------------------------------------- |
-| D28 | Face enrollment: 3 photos (front/left/right), 128-d embeddings, encrypted BYTEA             |
+| D28 | Face enrollment: 3 photos (front/left/right); 128-d embedding/encryption not implemented    |
 | D38 | Remove Year+Section Promotion; replace with Academic Structure Updates                      |
 | D40 | Admin nav: Dashboard · Students · Professors · Programs · Analytics · Audit Logs · Settings |
 | D43 | Multi-angle enrollment reduced to 3 photos                                                  |
@@ -167,18 +167,24 @@
 
 ---
 
-## Phase 5: Student — 5-Step Scan & Attendance
+## Phase 5: Student — Scan Flow & Attendance
 
 **Goal:** Student scan flow with offline-first support, liveness, and geofencing.
 
+> **Implementation note (2026-10-24):** the shipped scan is a single
+> `/student/scan` page, not five routes. Identity resolves from the signed-in
+> account (no student-ID QR, [ADR-083](decision-log.md)); the liveness step
+> submits evidence only and does **not** compare an embedding. The steps below
+> are retained as the original plan.
+
 ### Deliverables
 
-- 5-step scan flow (D27):
-  1. Session entry (type code or scan session QR)
-  2. Student-ID QR scan → resolve student number → fetch record + enrollment check
-  3. GPS geofence validation (Haversine)
-  4. Liveness challenge (blink → left → right) + embedding comparison (D31)
-  5. Result overlay (present/late/rejected/pending)
+- Scan flow (D27, as amended by ADR-083):
+  1. Session entry (type code; session QR payload exists but is not rendered yet)
+  2. Student-number confirmation → resolve from token → enrollment check
+  3. Session-QR camera (mandatory on the manual-code path) or skip if a QR was scanned
+  4. Liveness challenge (blink → left → right); no embedding comparison (D31)
+  5. GPS geofence + submit; result overlay (present/late/rejected/pending)
 - Offline queue: pending records stored client-side, synced with exponential backoff (D16)
 - `scanned_at` server-side validation on sync
 - Embedding pull-on-login (version-gated) (D29)
@@ -191,10 +197,10 @@
 | --- | -------------------------------------------------------------------------- |
 | D15 | ValidationStatus: present, late, absent, excused, pending, rejected        |
 | D16 | Offline scanned_at validation; expired-window → rejected (session_expired) |
-| D19 | Student ID QR contains student number only; course context from session    |
-| D27 | Strict 5-step sequential scan flow                                         |
-| D29 | Embedding distribution: pull-on-login, version-gated                       |
-| D30 | Offline face verification uses cached embedding                            |
+| D19 | Student number identifies the roster record; course context from session  |
+| D27 | Strict sequential scan flow (amended by ADR-083 — no student-ID QR)        |
+| D29 | Embedding distribution: pull-on-login, version-gated (cache only)          |
+| D30 | Offline face verification uses cached embedding (not implemented)          |
 
 ### Prerequisite Docs
 

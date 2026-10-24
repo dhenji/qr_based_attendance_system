@@ -143,6 +143,7 @@ async def test_precheck_flips_already_scanned_after_a_scan(
     """The second step of the flow: scan, then precheck reports the duplicate."""
 
     stack = await linked_stack(factories)
+    stack["student"].face_embedding = b"stored-blob"
     headers = await auth_headers(stack["user"])
     precheck_body = {
         "session_id": stack["session"].id,
@@ -163,6 +164,45 @@ async def test_precheck_flips_already_scanned_after_a_scan(
 
     assert precheck.status_code == 200
     assert precheck.json()["already_scanned"] is True
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "expected_status"),
+    [(100, 200), (101, 422), (120, 422)],
+)
+async def test_scan_enforces_ear_sample_limit(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
+    sample_count: int,
+    expected_status: int,
+) -> None:
+    stack = await linked_stack(factories)
+    stack["student"].face_embedding = b"stored-blob"
+    await test_db_session.commit()
+    body = scan_body(
+        stack["session"].id,
+        stack["student"].student_id,
+        stack["session"].created_at + timedelta(minutes=2),
+    )
+    body["liveness_evidence"]["ear_samples"] = [0.2] * sample_count
+
+    response = await api_client.post(
+        "/api/student/attendance/scan",
+        json=body,
+        headers=await auth_headers(stack["user"]),
+    )
+
+    assert response.status_code == expected_status
+    if expected_status == 422:
+        error = response.json()["detail"][0]
+        assert error["type"] == "too_long"
+        assert error["loc"] == ["body", "liveness_evidence", "ear_samples"]
+        assert (await test_db_session.scalars(select(Attendance))).all() == []
+    else:
+        assert response.json()["status"] == ValidationStatus.PRESENT.value
+        assert len((await test_db_session.scalars(select(Attendance))).all()) == 1
 
 
 async def test_precheck_for_an_expired_session_is_410(
@@ -309,9 +349,11 @@ async def test_idempotency_key_is_scoped_to_the_caller(
     """
 
     stack = await linked_stack(factories)
+    stack["student"].face_embedding = b"stored-blob"
     # A second student enrolled in the same offering, so both may scan it.
     other_user = await factories.user(role=UserRole.STUDENT.value)
     other = await factories.student(stack["year_level"], user=other_user)
+    other.face_embedding = b"stored-blob"
     await factories.enrollment(other, stack["offering"])
     shared_key = "shared-key"
 

@@ -582,11 +582,11 @@ erDiagram
 > - `attendance_records → sync_queue` is an **offline queue**, not a relational child. `sync_queue.record_data` stores a serialized attendance record as JSON; written by client's offline worker; no enforced FK.
 > - `app_settings` and `backup_log` have **no foreign keys at all** — neither is a child of any table, and they appear in no cardinality row above. `app_settings` is a standalone key/value config table; `backup_log` records backup runs and is written only by the scheduler (`system/service.py::run_scheduled_backup`). An earlier revision of this diagram drew a `users → backup_log` edge; there is no such column.
 > - `course_professors` uses **effectiveness dating** (D7/D8): a session's professor of record is the `course_professors` row where `session.created_at::date BETWEEN effective_from AND COALESCE(effective_to, 'infinity')` AND `semester` matches.
-> - `students.face_embedding` stores encrypted JSON blob: `{"mean":[128f],"angles":{"front":[...],"left":[...],"right":[...]}}` (D28/D43).
+> - `students.face_embedding` stores a zero-filled placeholder JSON blob shaped like `{"mean":[128f],"angles":{"front":[...],"left":[...],"right":[...]},"stub":true}` (D28/D43); real vector generation and encryption are not implemented.
 > - `year_levels.term_structure` JSONB: `{"terms":[{"code":"1st_sem","label":"1st Semester"},...]}` (D3).
 > - `sessions.expires_at` is a **regular column populated by the application service layer**: `LEAST(created_at + duration_minutes * interval '1 minute', scheduled_end_time)` (D12, D49).
 > - `ValidationStatus` enum: `present` · `late` · `absent` · `excused` · `pending` · `rejected` (D15).
-> - Rejection reasons: `duplicate` · `outside_geofence` · `liveness_failed` · `face_mismatch` · `not_enrolled` · `session_expired` (D15/D16).
+> - Rejection reasons / API error codes: `duplicate_scan` · `outside_geofence` · `liveness_failed` · `face_mismatch` · `not_enrolled` · `session_expired` (D15/D16).
 
 ---
 

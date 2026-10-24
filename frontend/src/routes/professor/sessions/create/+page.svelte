@@ -113,6 +113,7 @@ let selectedOfferingId = $state<number | null>(null);
 	// offering's classroom applies and nothing is sent for it.
 	let locationOverride = $state(false);
 	let remoteSession = $state(false);
+	let noClassroom = $state(false);
 
 	$effect(() => {
 		if (sessionType === 'lab' && remoteSession) remoteSession = false;
@@ -211,6 +212,13 @@ let selectedOfferingId = $state<number | null>(null);
 	// only. The toggle is explicit, so the offering's own classroom keeps
 	// applying until the professor says otherwise.
 	const overrideActive = $derived(locationOverride);
+
+	// A "different room" whose name and pin have both been cleared: the
+	// session has no physical location, so the geofence is disabled and the
+	// radius selection is meaningless.
+	const locationCleared = $derived(
+		sessionType === 'lecture' && (noClassroom || remoteSession)
+	);
 
 	// What the geofence will actually use, which is what the callout displays.
 	const effectiveRoom = $derived(
@@ -518,7 +526,9 @@ let selectedOfferingId = $state<number | null>(null);
 							? { presentWindowMinutes: presentWindow }
 							: {}),
 						...(lateWindow !== inherited.late ? { lateWindowMinutes: lateWindow } : {}),
-						...(radius !== inherited.radius ? { geofenceRadius: radius } : {})
+						...(radius !== inherited.radius && !locationCleared
+							? { geofenceRadius: radius }
+							: {})
 				};
 
 			const created = await openSession(course.offeringId, {
@@ -529,12 +539,15 @@ let selectedOfferingId = $state<number | null>(null);
 				// server resolves otherwise.
 				...(overrideActive
 					? {
+							classroomOverride: true,
 							classroomName: classroomOverride.trim() || undefined,
 							classroomLat: classroomLat ?? undefined,
 							classroomLng: classroomLng ?? undefined
 						}
 					: {}),
-				...(remoteSession ? { isRemote: true } : {}),
+				...(remoteSession ? { isRemote: true, classroomOverride: true } : {}),
+				geofenceEnabled: !noClassroom && !remoteSession,
+				...(noClassroom ? { classroomOverride: true } : {}),
 				// D93: the schedule exception, in the institution's wall
 				// clock. Both fields travel together so the override is
 				// unambiguous. D94 adds the professor's own reason.
@@ -869,7 +882,33 @@ let selectedOfferingId = $state<number | null>(null);
 			{/if}
 		</div>
 
-		{#if sessionType !== 'lab'}
+		{#if sessionType !== 'lab' && !(locationOverride && (classroomOverride.trim() !== '' || classroomLat !== null || classroomLng !== null))}
+		<div class="field">
+			<label class="override-toggle">
+				<input
+					type="checkbox"
+					checked={noClassroom}
+					onchange={(e) => {
+						noClassroom = e.currentTarget.checked;
+						if (noClassroom) {
+							remoteSession = false;
+							locationOverride = true;
+							classroomOverride = '';
+							classroomLat = null;
+							classroomLng = null;
+						} else {
+							locationOverride = false;
+							if (plan) {
+								classroomOverride = plan.classroom_name ?? '';
+								classroomLat = plan.classroom_lat;
+								classroomLng = plan.classroom_lng;
+							}
+						}
+					}}
+				/>
+				No classroom
+			</label>
+		</div>
 		<div class="field">
 			<label class="override-toggle">
 				<input
@@ -878,17 +917,15 @@ let selectedOfferingId = $state<number | null>(null);
 					onchange={(e) => {
 						remoteSession = e.currentTarget.checked;
 						if (remoteSession) {
+							noClassroom = false;
 							locationOverride = false;
 							classroomLat = null;
 							classroomLng = null;
 						}
 					}}
 				/>
-				Remote / online session (skips geofencing)
+				Remote / online session
 			</label>
-			{#if remoteSession}
-				<p class="hint">No classroom coordinates required; geofence is disabled for this session.</p>
-			{/if}
 		</div>
 		{/if}
 
@@ -907,7 +944,7 @@ let selectedOfferingId = $state<number | null>(null);
 			</div>
 		{/if}
 
-		{#if !remoteSession}
+		{#if !(remoteSession || locationCleared)}
 		<div class="field">
 			<span class="form-label">
 				Geofence Radius
@@ -952,7 +989,11 @@ let selectedOfferingId = $state<number | null>(null);
 			</p>
 		</div>
 		{:else}
-			<p class="hint">Geofence disabled for this remote session.</p>
+			<p class="hint">
+				{#if remoteSession}
+					Geofence skipped — no classroom coordinates.
+				{/if}
+			</p>
 		{/if}
 
 			<div class="field">
@@ -1028,7 +1069,7 @@ let selectedOfferingId = $state<number | null>(null);
 				<AppIcon name={windowsFit ? 'check' : 'alert'} size={18} />
 			</div>
 
-		{#if !remoteSession}
+		{#if !remoteSession && !noClassroom}
 		<div class="field">
 			<span class="form-label">Classroom</span>
 			<div class="field">
@@ -1036,7 +1077,24 @@ let selectedOfferingId = $state<number | null>(null);
 					<input
 						type="checkbox"
 						checked={locationOverride}
-						onchange={(e) => (locationOverride = e.currentTarget.checked)}
+						onchange={(e) => {
+							const checked = e.currentTarget.checked;
+							if (checked) {
+								noClassroom = false;
+								locationOverride = true;
+							} else {
+								locationOverride = false;
+								if (plan) {
+									classroomOverride = plan.classroom_name ?? '';
+									classroomLat = plan.classroom_lat;
+									classroomLng = plan.classroom_lng;
+								} else {
+									classroomOverride = '';
+									classroomLat = null;
+									classroomLng = null;
+								}
+							}
+						}}
 					/>
 					Use a different room
 				</label>

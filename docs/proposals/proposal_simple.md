@@ -1,6 +1,9 @@
 # Project Proposal: QR-Based Attendance System
 
-> **As-built note (2026-10-21):** this is a point-in-time proposal and its technology table is preserved as written. The system ships **one** model — MediaPipe FaceLandmarker (detection + 478 landmarks, client-side WASM) — and **no** face-recognition/embedding model: the 128-d "face embedding" the server stores is a zero-filled placeholder. Charts are hand-rolled SVG, not Chart.js (ADR-091). See [`models.md`](models.md) for the as-built model catalog and [`contributions.md`](contributions.md) for the as-built contribution claims.
+> **Historical document (2026-10-24):** this proposal describes the original
+> student-ID QR design. The shipped system resolves identity from the signed-in
+> account and has no student-ID QR scan
+> ([ADR-083](../project/decision-log.md)); face matching is not implemented.
 
 **Course**: Software Engineering 1
 

@@ -26,5 +26,6 @@ docker-compose.override.yml
 postgres_data/
 pgdata/
 
-# ai prompts
+# ai prompts and agents
 docs/developer/prompts
+.kilo

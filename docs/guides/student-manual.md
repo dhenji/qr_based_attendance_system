@@ -2,7 +2,7 @@
 
 > QR-Based Attendance System — Student Guide
 >
-> Covers: 5-step scan flow (both entry modes), offline behavior, requesting excuses, calendar/schedule, settings limits.
+> Covers: the scan flow, offline behavior, requesting excuses, calendar/schedule, settings limits.
 >
 > **Glossary**: All italicized terms are defined in the [Glossary](../project/glossary.md).
 >
@@ -14,7 +14,7 @@
 
 1. [Getting Started](#1-getting-started)
 2. [Dashboard](#2-dashboard)
-3. [The 5-Step Scan Flow](#3-the-5-step-scan-flow)
+3. [The Scan Flow](#3-the-scan-flow)
 4. [Offline Behavior](#4-offline-behavior)
 5. [Attendance History](#5-attendance-history)
 6. [Requesting Excuses](#6-requesting-excuses)
@@ -35,13 +35,13 @@
 5. Set your password (policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol)
 6. Your name, _program_, _section_, and _year level_ are pulled from the roster automatically — nothing is typed
 
-> **Important**: Your **Student ID QR** contains only your _student number_ ([D19](../project/decision-log.md)). Course context always comes from the verified _session_, never from the QR.
+> **Important**: Your _student number_ ([D19](../project/decision-log.md)) identifies your roster record, but attendance never scans a student-ID QR. Your identity comes from your signed-in account, and the scan's student-number field is only a confirmation check. Course context always comes from the verified _session_.
 
 ### 1.2 Permissions
 
 Before scanning, you will be prompted to allow:
 
-- **Camera**: Required for QR scanning and face verification
+- **Camera**: Required for the session QR step and the face-liveness challenge
 - **GPS**: Required for _geofence_ validation
 
 ---
@@ -69,65 +69,66 @@ Before scanning, you will be prompted to allow:
 
 ---
 
-## 3. The 5-Step Scan Flow
+## 3. The Scan Flow
 
-The scan flow is **strictly sequential** per [D27](../project/decision-log.md). You cannot skip steps.
+The scan is a guided, single-page flow at `/student/scan` (not five separate
+URLs). It is **sequential** per [D27](../project/decision-log.md), as amended by
+[ADR-083](../project/decision-log.md): you cannot skip stages. Student identity
+always comes from your signed-in account; the student-number field is a
+confirmation gate, not an identity source.
 
-**Route**: `/student/scan/step/[1-5]` — screens advance automatically on success.
+### Stage 1: Session Entry
 
-### Step 1: Session Entry — `/student/scan`
+[FIG: Session code input + Verify button; error states]
 
-[FIG: QR scanner (primary) with Start/Stop Camera + Upload QR image; manual session-code entry card below; verifying spinner; error states]
+1. Look at the projector in your classroom — the _session code_ is displayed
+   (e.g. `A7X-9K2M`).
+2. Type the code into **Session Code (manual entry)**.
+3. Click **Verify Code**.
 
-**Two ways to join**:
+The server verifies the code and fetches the _session_ config (windows,
+duration, _geofence_ radius, classroom). On failure, a generic "Invalid code"
+message is shown (no detail leak about the wrong program or an expired
+_session_).
 
-#### Option A: Scan Session QR
+> **Session QR:** a later stage can read a session QR, but the current professor
+> live page displays the code only, not a QR image. See Stage 3.
 
-1. Click **Start Camera** and point it at the QR code projected on screen (or use **Upload QR image**)
-2. The app reads the QR payload automatically
+### Stage 2: Confirm Student ID
 
-#### Option B: Type Session Code
+[FIG: Student ID field prefilled from the profile + Check button]
 
-1. Look at the projector in your classroom — the _session code_ is displayed (e.g., `A7X-9K2M`)
-2. Enter the code in the manual-entry field
-3. Click **Verify Code**
+1. Your _student number_ is prefilled from your signed-in profile.
+2. Correct it if needed, then click **Check**.
+3. The server resolves your student record from your **account**, not from the
+   number you type, and compares the number case-insensitively. A mismatch is
+   rejected with `student_number_mismatch`.
+4. The same call checks enrollment and whether you already scanned this
+   _session_.
 
-> **Session QR payload** ([D18](../project/decision-log.md)): `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}` — versioned for future migration.
+**Possible failures**:
 
-**What happens**: Server verifies the code, fetches the _session_ config (windows, duration, _geofence_ radius, classroom). On failure, a generic "Invalid code" message is shown (no detail leak about wrong program or expired _session_).
+- `not_enrolled` — you are not registered for this _course_
+- `duplicate_scan` — this _session_ is already recorded for you
+- `student_number_mismatch` — the number does not match your account
 
-### Step 2: Session Confirmation — `/student/scan`
+### Stage 3: Session QR Camera
 
-[FIG: Session details card (course, session type, session/class end times, location/map) with your Student ID shown; Confirm button]
+[FIG: QR scanner with the session QR prompt]
 
-1. **Header** shows "Session Confirmation" with the verified _course_ name
-2. Review the session details (course, type, times, location; remote sessions show no map)
-3. Your **Student ID** is shown read-only (prefilled from your profile)
-4. Click **Confirm** — server runs the enrollment + duplicate-scan check
+The app opens its camera scanner and asks you to scan the session QR shown on
+the projector. A successful scan re-verifies the session and opens the liveness
+challenge.
 
-**Possible Failures**:
+> **Known limitation (current build):** the professor live page displays the
+> session code but does not render a QR image. "No thanks, enter manually"
+> returns to Stage 1, so the manual path cannot pass this camera stage unless a
+> QR encoding the bare session code is supplied separately. This is a UI gap,
+> not an identity check; the API itself accepts a typed session code.
 
-- "Not enrolled in this course" — you are not registered for this _course_
-- "Already scanned for this session" — duplicate scan rejected
+### Stage 4: Face Liveness
 
-### Step 3: Location Check — `/student/scan/step/3`
-
-[FIG: Auto-running GPS check with accuracy pill, distance-to-boundary meter, required radius, pass/fail indicator, [Retry Location] button]
-
-1. Runs **automatically in parallel** with Step 2
-2. Uses **Haversine formula** vs the _session_ (or _course_ default) _geofence_ center + radius ([D17](../project/decision-log.md))
-3. Shows: GPS accuracy (±m), distance to boundary (m), required radius (m)
-
-**If You're Outside the Geofence**:
-
-- [Retry Location] button to try again after moving
-- If you believe the coordinates are wrong, contact your professor
-
-> **Privacy Note**: GPS is used only for attendance validation during active scans. Your location is not tracked outside of scan sessions.
-
-### Step 4: Face Check — `/student/scan/step/4`
-
-[FIG: Live camera with face detected indicator, fixed liveness challenge stepper (Blink → Turn Left → Turn Right) with progress dots, "Verifying identity…" message, match score bands, offline badge variant]
+[FIG: Live camera with face detected indicator, fixed liveness challenge stepper (Blink → Turn Left → Turn Right) with progress dots, offline badge variant]
 
 **Liveness Challenge** ([D31](../project/decision-log.md)):
 
@@ -140,23 +141,31 @@ The scan flow is **strictly sequential** per [D27](../project/decision-log.md). 
 1. Camera activates — detects your face
 2. Follow the prompts: **Blink** → **Turn Left** → **Turn Right**
 3. Progress dots advance on success
-4. Server compares your face against your _admin-enrolled embedding_ (cosine similarity ≥ 0.70)
+4. The app sends the evidence bundle to the server, which re-checks the
+   submitted signals (the three booleans, the EAR mean, and non-empty PnP
+   evidence)
 
-**Score Bands**:
+> **Face matching is not implemented in this build.** The app does not compare
+> your face with an enrolled embedding, and it does not use a cached embedding
+> offline. It sends a placeholder match score (`1.0`); the server only applies
+> its score bands to that submitted number. The liveness challenge still runs.
+> See [face-enrollment.md](../architecture/face-enrollment.md) §4.2.
 
-| Score     | Result                                                 |
-| --------- | ------------------------------------------------------ |
-| ≥ 0.70    | ✅ **Pass** — proceeds to Step 5                       |
-| 0.65–0.70 | ⚠ **Review** — flagged for admin liveness review queue |
-| < 0.65    | ❌ **Fail** — rejection with reason `face_mismatch`    |
+### Stage 5: Location Check & Result
 
-> **Known Limitation**: Sibling confusion is acknowledged but not solved ([D31](../project/decision-log.md)). Liveness checks mitigate photo/video replay.
+[FIG: GPS accuracy pill, distance-to-boundary meter, pass/fail indicator, [Retry Location]; success overlay (PRESENT/LATE + time); failure overlay with reason + [Try Again]/[Request Excuse]; offline queued variant]
 
-> **Offline Mode**: If you're offline, your device compares your face against the _cached embedding_ ([D29](../project/decision-log.md)) stored encrypted in IndexedDB. The server re-validates on sync.
+After liveness, the app requests your location and pre-checks the distance with
+the **Haversine formula** against the _session_ (or _course_ default)
+_geofence_ center + radius ([D17](../project/decision-log.md)). The server
+repeats the geofence check on submit.
 
-### Step 5: Result — `/student/scan/step/5`
+**If You're Outside the Geofence**:
 
-[FIG: Success overlay (status word PRESENT/LATE prominent + time), failure overlay with specific reason + [Try Again]/[Request Excuse], offline queued variant with pending count]
+- Move closer and retry
+- If you believe the coordinates are wrong, contact your professor
+
+> **Privacy Note**: GPS is used only for attendance validation during active scans. Your location is not tracked outside of scan sessions.
 
 **Three possible outcomes**:
 
@@ -169,19 +178,22 @@ The scan flow is **strictly sequential** per [D27](../project/decision-log.md). 
 #### ❌ Failure
 
 - Reason displayed:
-  - `duplicate` — already scanned for this _session_
+  - `duplicate_scan` — already scanned for this _session_
   - `outside_geofence` — GPS distance > radius
   - `liveness_failed` — failed the blink/turn challenge
-  - `face_mismatch` — embedding score < threshold
+  - `face_mismatch` — only reachable if a client submits a score below 0.65;
+    the shipped app sends `1.0`
   - `not_enrolled` — not registered for this _course_
   - `session_expired` — scanned after `expires_at`
-- **[Try Again]** — restart from Step 1
-- **[Request Excuse]** — opens excuse request form (for `absent`/`rejected` paths)
+  - `student_number_mismatch` — the number does not match your account
+- **[Try Again]** — restart from Stage 1
+- **[Request Excuse]** — opens the excuse request form (for `absent`/`rejected` paths)
 
 #### ⏳ Offline Queued
 
 - "Saved Offline" message with pending count
 - Records sync when you regain connectivity
+- The server re-validates the record on sync; it can still be rejected
 
 ---
 
@@ -189,12 +201,17 @@ The scan flow is **strictly sequential** per [D27](../project/decision-log.md). 
 
 ### 4.1 How Offline Scanning Works
 
-When your device is offline:
+Offline support covers a scan that is already in progress when connectivity
+drops. It does **not** perform face-embedding matching on the device.
 
-1. Scan proceeds normally through all 5 steps using local data
-2. Face verification uses your **cached embedding** (pulled on last login, [D29](../project/decision-log.md), stored encrypted in IndexedDB)
-3. The attendance record is queued locally in the `sync_queue`
-4. On reconnection, background sync sends the queue to the server
+1. If the session was verified earlier on this device, the app can use its
+   cached config when you enter the same code offline
+2. The student-ID precheck is a server call, so it is skipped offline. Your
+   identity is still resolved from the signed-in token when the scan syncs
+3. Complete the liveness challenge and GPS capture; if the final upload cannot
+   reach the server, the evidence is queued locally in the `sync_queue`
+4. On reconnection, background sync replays the queue. The server re-checks the
+   session window, geofence, liveness evidence, enrollment, and duplicate
 
 ### 4.2 Offline Sync Status Banner
 
@@ -212,8 +229,8 @@ When your device is offline:
 
 ### 4.3 What to Do If Offline
 
-- Continue scanning — your records are safely queued
-- Check the **Notifications** screen for sync status
+- If you can reach the liveness stage, continue — the record is queued safely
+- Check the sync banner on the scan page or dashboard for status
 - If a scan is rejected after sync, you'll see the reason and can **[Request Excuse]**
 
 ---
@@ -352,10 +369,12 @@ Click any day to see:
 
 **Face Enrollment Status** ([D28](../project/decision-log.md)):
 
-- ✅ Enrolled — 3 photos captured, embedding stored, version tracked
+- ✅ Enrolled — 3 photos uploaded and enrollment/version recorded; the stored
+  embedding is a placeholder in this build
 - ❌ Not enrolled — contact admin for face enrollment
 
-**My QR**: Your _student number QR_ tile — your ID card's QR is used in Step 2 of the scan flow.
+**My QR**: A device-generated tile from your _student number_. It is **not**
+scanned during attendance; identity comes from your signed-in account.
 
 ### 9.2 Settings — `/student/settings`
 
@@ -376,19 +395,15 @@ Click any day to see:
 
 ## Quick Reference: Key Routes
 
-| Task                          | Route                         |
-| ----------------------------- | ----------------------------- |
-| Dashboard                     | `/student/dashboard`          |
-| Scan — Step 1 (Session Entry) | `/student/scan/step/1`        |
-| Scan — Step 2 (ID Scan)       | `/student/scan/step/2`        |
-| Scan — Step 3 (Location)      | `/student/scan/step/3`        |
-| Scan — Step 4 (Face)          | `/student/scan/step/4`        |
-| Scan — Step 5 (Result)        | `/student/scan/step/5`        |
-| Attendance History            | `/student/attendance/history` |
-| Schedule / Calendar           | `/student/schedule`           |
-| Notifications                 | `/student/notifications`      |
-| Profile                       | `/student/profile`            |
-| Settings                      | `/student/settings`           |
+| Task                           | Route                         |
+| ------------------------------ | ----------------------------- |
+| Dashboard                      | `/student/dashboard`          |
+| Scan (session entry → result)  | `/student/scan`               |
+| Attendance History             | `/student/attendance/history` |
+| Schedule / Calendar            | `/student/schedule`           |
+| Notifications                  | `/student/notifications`      |
+| Profile                        | `/student/profile`            |
+| Settings                       | `/student/settings`           |
 
 ---
 
@@ -396,13 +411,15 @@ Click any day to see:
 
 | Issue                        | Possible Cause                                       | Solution                                                            |
 | ---------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------- |
-| "Invalid code" in Step 1     | Wrong code typed; _session_ expired; wrong _program_ | Check code on projector; ask professor to generate new _session_    |
-| "Not enrolled" in Step 2     | Email in wrong _course_ roster                       | Contact admin to verify enrollment                                  |
-| "Outside geofence" in Step 3 | Too far from classroom                               | Move closer; check classroom location with professor                |
-| "Liveness failed" in Step 4  | Camera angle; lighting; did not complete challenge   | Ensure face is centered; complete all 3 challenges; retry           |
-| "Face mismatch" in Step 4    | Embedding changed; not enrolled                      | Contact admin for re-enrollment if appearance changed significantly |
-| "Session expired" in Step 5  | Scanned after `expires_at`                           | Cannot be undone; submit excuse request if valid reason             |
-| Offline scan rejected        | `scanned_at` > `expires_at`                          | Submit excuse request; check device time is correct                 |
+| "Invalid code" in Stage 1        | Wrong code typed; _session_ expired; wrong _program_ | Check code on projector; ask professor to generate new _session_    |
+| "Not enrolled" in Stage 2        | Email in wrong _course_ roster                       | Contact admin to verify enrollment                                  |
+| "Student number mismatch"        | Typed number differs from your account               | Clear the field; use the prefilled number from your profile         |
+| QR scanner has no QR to scan     | Professor UI shows the code only (known gap)         | Use a QR encoding the bare session code, or report the missing QR   |
+| "Outside geofence" after Stage 4 | Too far from classroom                               | Move closer; check classroom location with professor                |
+| "Liveness failed" in Stage 4     | Camera angle; lighting; did not complete challenge   | Ensure face is centered; complete all 3 challenges; retry           |
+| "Face mismatch" in Stage 4       | Only a non-standard client sending a low score       | The shipped app sends `1.0`; retry or report the client             |
+| "Session expired" after submit   | Scanned after `expires_at`                           | Cannot be undone; submit excuse request if valid reason             |
+| Offline scan rejected            | `scanned_at` > `expires_at`                          | Submit excuse request; check device time is correct                 |
 
 ---
 

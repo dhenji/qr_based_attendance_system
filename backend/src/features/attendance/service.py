@@ -70,7 +70,11 @@ from features.session.exceptions import (
     SessionNotFoundException,
 )
 from features.session.model import Session
-from features.student.exceptions import NotEnrolledException, StudentNotFoundException
+from features.student.exceptions import (
+    FaceNotEnrolledException,
+    NotEnrolledException,
+    StudentNotFoundException,
+)
 from features.student.model import Student
 from features.sync.model import SyncQueue
 from shared.audit import record_audit
@@ -357,6 +361,7 @@ class AttendanceService:
         db_session, student = await self._resolve_scan_parties(
             payload.session_id, scanned_at, now, user_id, payload.student_number
         )
+        await self._require_face_enrollment(student)
 
         if not self._settings.benchmark_mode:
             # Load profile: skip the geofence + liveness gates so a benchmark
@@ -501,9 +506,28 @@ class AttendanceService:
         if existing is not None:
             raise DuplicateScanException(student_id, session_id)
 
-    def _validate_geofence(self, session: Session, gps: GPSInput) -> None:
+    async def _require_face_enrollment(self, student: Student) -> None:
+        """Block scans when the student has no face enrollment on record.
+
+        Runs unconditionally (also under benchmark mode) so the gate cannot be
+        bypassed by direct API calls or benchmark scans.
+        """
+        if student.face_embedding is None:
+            raise FaceNotEnrolledException(student.id)
+
+    def _validate_geofence(self, session: Session, gps: GPSInput | None) -> None:
+        if not getattr(session, "geofence_enabled", True):
+            return
+
         if session.classroom_lat is None or session.classroom_lng is None:
             return
+
+        # A session that requires a geofence cannot be validated without a
+        # position; treat a missing fix as "outside" rather than crashing.
+        if gps is None:
+            raise OutsideGeofenceException(
+                float("inf"), session.classroom_radius_meters
+            )
 
         distance: float = _haversine_distance(
             gps.lat, gps.lng, session.classroom_lat, session.classroom_lng
@@ -567,13 +591,15 @@ class AttendanceService:
             student_id=student_id,
             session_id=session_id,
             timestamp=scanned_at,
-            gps_lat=payload.gps.lat,
-            gps_lng=payload.gps.lng,
+            gps_lat=(payload.gps.lat if payload.gps is not None else None),
+            gps_lng=(payload.gps.lng if payload.gps is not None else None),
             validation_status=status,
             original_status=original_status,
             sync_status=SyncStatus.SYNCED.value,
             liveness_evidence=self._build_evidence(
-                payload.liveness_evidence, payload.gps.accuracy, review
+                payload.liveness_evidence,
+                (payload.gps.accuracy if payload.gps is not None else 0.0),
+                review,
             ),
             face_match_score=Decimal(str(payload.face_match_score)),
             scanned_via=payload.scanned_via.value,

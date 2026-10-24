@@ -4,54 +4,55 @@
 
 ## 1. Overview
 
-Face verification is an admin-enrolled, client-verified biometric layer that ensures
-the student physically present during a scan session matches the enrolled identity.
-It is **not** the primary authentication method — it is a spoof-mitigation factor
-(D27 step 4) layered on top of session-code + student-ID-QR + geofence checks.
+Face enrollment is an admin-captured flow; the scan currently runs a liveness
+challenge and accepts a client-asserted match score. **Server-side embedding
+comparison is not implemented** — see §4.2 and §7. It is **not** the primary
+authentication method: student identity comes from the authenticated account,
+and the biometric step is a spoof-mitigation signal layered on top of the
+session code, ID confirmation, and geofence checks.
 
 Key properties:
 
-- **Admin-enrolled, not self-enrolled** (D28): only administrators may capture face
-  photos and generate embeddings. Students cannot upload their own face data.
+- **Admin-enrolled, not self-enrolled** (D28): only administrators may upload face
+  photos. Students cannot upload their own face data. Real embedding generation
+  is not implemented; enrollment stores a placeholder.
 - **3-photo enrollment** (D43): front, left, right — chosen over 1 (too brittle) and
   5 (diminishing returns).
 - **Pull-on-login distribution** (D29): devices fetch the latest embedding on login
   by comparing a version integer; no push/WebSocket infrastructure required.
-- **Offline-capable** (D30): cached embeddings enable client-side cosine comparison
-  when the device is offline. Only scores and evidence sync to the server.
+- **Offline-capable** (D30): the queue stores liveness evidence; no embedding
+  comparison is implemented on either side, so only evidence and the submitted
+  score sync to the server.
 
 ---
 
 ## 2. Enrollment Flow (Admin)
 
 ```
-Admin picks student → Face Enrollment Modal opens
+Admin picks student → Student Management → Enroll face modal
         │
         ▼
 ┌─────────────────────────────────┐
-│  Capture 3 photos sequentially  │
-│  1. Front (facing camera)       │
+│  Select 3 image files           │
+│  1. Front                       │
 │  2. Left profile                │
 │  3. Right profile               │
 └────────────┬────────────────────┘
              │
              ▼
-    Quality gates (per photo)
+    Server validates non-empty, size, image/*
         │
-        ├─ FAIL → reject, show reason, retry same angle
-        │
-        ▼
-    All 3 pass
+        ├─ FAIL → 400 invalid_image, show reason
         │
         ▼
-Server generates 128-d embedding per photo (recognition model — none installed, D28)
-        │  ⚠ NOT IMPLEMENTED — no inference runs, and no face-recognition model
-        │  exists in the repository. The only model the project ships is MediaPipe
-        │  FaceLandmarker (`frontend/static/models/face_landmarker.task`), which
-        │  produces landmarks and blendshapes, not identity embeddings. The server
-        │  writes a zero-filled placeholder from `_stub_embedding_blob` ("mean" and
-        │  all three angle vectors 0.0, "stub": true), matching the shape below so
-        │  that swapping in the real pipeline only changes that one builder.
+    All 3 valid
+        │
+        ▼
+Design: server generates 128-d embedding per photo (face-api.js ResNet, D28)
+        │  ⚠ NOT IMPLEMENTED — no inference runs. The server writes a zero-filled
+        │  placeholder from `_stub_embedding_blob` ("mean" and all three angle
+        │  vectors 0.0, "stub": true), matching the shape below so that swapping
+        │  in the real pipeline only changes that one builder.
         ▼
 Stores ONE JSON blob in students.face_embedding BYTEA (plaintext today)
         │
@@ -60,27 +61,22 @@ Stores ONE JSON blob in students.face_embedding BYTEA (plaintext today)
         ├─ Overwrites any previous enrollment (supersedes old vectors)
         │
         ▼
-Student can now use face verification in scan sessions
+Enrollment is recorded; the scan still runs liveness only (no face match)
 ```
 
-### 2.1 Quality Gates
+### 2.1 Quality Gates — Not Implemented
 
-⚠ **Enforcement point: nowhere, today.** These six gates are **specified but not
-implemented on either side**. The admin upload UI validates file extension, non-emptiness
-and a 5 MB cap (`frontend/src/lib/features/admin/schema.ts:70-77`); the server validates
-`content_type`, size, and that the bytes are non-empty
-(`face_enrollment/service.py:41-60`) — nothing more. There is no camera capture flow and
-no biometric analysis in the browser: the photos are uploaded as files.
+⚠ **Design only.** The shipped admin UI uploads three selected files; neither the
+browser nor the server runs brightness, face-size, single-face, centering,
+sharpness, or eyes-open checks. The server validates `content_type`, size, and
+non-empty bytes (`face_enrollment/service.py:41-60`); the UI filters by extension
+and 5 MB (`frontend/src/lib/features/admin/schema.ts`).
 
 Consequently `no_face_detected`, `multiple_faces` and `quality_too_low` appear in
 `api-contracts.md` but have **no exception class in the tree**
-(`face_enrollment/exceptions.py` defines only `InvalidImageException`) and **no
-implementation that could raise them**. The thresholds below are the design; implementing
-them client-side (MediaPipe can supply face count, face size and centring) is the work
-that is still to do.
-
-Each captured photo must pass **all** of the following before the next angle is
-accepted:
+(`face_enrollment/exceptions.py` defines only `InvalidImageException`), and the
+server never raises them. The table below is the design specification, not the
+build:
 
 | Gate          | Condition                                                        | Error Message                                                |
 | ------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -94,7 +90,8 @@ accepted:
 ### 2.2 Storage Format
 
 A single JSON blob stored in `students.face_embedding` (BYTEA column) — **plaintext today**,
-with AES-256-GCM as the D28 design (§2.2):
+with AES-256-GCM as the D28 design (see §5). The values below are illustrative; the
+shipped blob is zero-filled.
 
 ```json
 {
@@ -107,14 +104,9 @@ with AES-256-GCM as the D28 design (§2.2):
 }
 ```
 
-- ⚠ **No producer.** The vectors above have **no generator**: no face-recognition model
-  is installed in this repository. The only model the project ships is MediaPipe
-  FaceLandmarker (`frontend/static/models/face_landmarker.task`), which yields landmarks
-  and blendshapes — not identity embeddings. Producing them means adding a recognition
-  model (e.g. an ArcFace/InsightFace ONNX model) that can also run in the browser, so the
-  offline path keeps working.
-- **`mean`** (128 floats): element-wise average of the three angle vectors. Used as
-  the **primary comparison target** during verification (D28).
+- **`mean`** (128 floats): shape-only placeholder; in the D28 design it would be
+  the **primary comparison target** during verification. No comparison exists in
+  the current build.
 - **`angles`** (3 × 128 floats): per-angle vectors, part of the D28 design for
   **tie-breaking** when the mean score falls in the review band (0.65–0.70).
   ⚠ **Not implemented.** The stub writes three zero vectors for shape parity, and
@@ -134,7 +126,7 @@ with AES-256-GCM as the D28 design (§2.2):
 
 | Column                            | Type             | Purpose                                       |
 | --------------------------------- | ---------------- | --------------------------------------------- |
-| `students.face_embedding`         | BYTEA NULL       | Encrypted embedding blob                      |
+| `students.face_embedding`         | BYTEA NULL       | Placeholder blob (encryption not implemented) |
 | `students.face_enrolled_at`       | TIMESTAMPTZ NULL | Timestamp of last enrollment                  |
 | `students.face_embedding_version` | INT DEFAULT 0    | Monotonic version; incremented on every write |
 
@@ -151,7 +143,7 @@ Student logs in
 Client checks cached version (IndexedDB)
     │
     ├─ Cache miss → GET /student/me/face-embedding
-    │                 Server returns { embedding: <encrypted>, version: N }
+    │                 Server returns { embedding: <base64 placeholder>, version: N }
     │                 Client stores in IndexedDB, encrypted with device WebCrypto key
     │
     ├─ Cache hit, version == N → no-op
@@ -166,7 +158,7 @@ Stored in IndexedDB (encrypted at rest via WebCrypto device key):
 
 ```json
 {
-  "embedding": "<base64-encoded blob — plaintext today, encrypted under D28>",
+  "embedding": "<base64 iv+ciphertext; server blob is plaintext>",
   "version": 42,
   "cached_at": "2026-08-25T10:30:00Z"
 }
@@ -184,13 +176,13 @@ Decryption is client-side only; the raw embedding never touches localStorage une
 
 ### 3.2 Re-enrollment Policy
 
-- When an admin re-enrolls a student (new 3-photo capture), the server
+- When an admin re-enrolls a student (new 3-photo upload), the server
   **overwrites** the existing embedding blob and increments
   `face_embedding_version`.
 - The next time the student logs in, the pull-on-login handshake detects the
   version bump and re-downloads the new embedding.
-- Historical attendance records retain the `face_match_score` captured at scan
-  time; re-enrollment does not retroactively alter past verification scores.
+- Historical attendance records retain the `face_match_score` submitted at scan
+  time; re-enrollment does not retroactively alter past scores.
 
 ### 3.3 Revocation Policy
 
@@ -204,7 +196,8 @@ Both triggers increment the version rather than leaving it alone: that is what i
 cached copy on the device. The original row claiming the version is "NOT reset" was wrong —
 archive bumps it, same as the revoke path it was contrasted with.
 
-When `face_embedding IS NULL`, the scan flow (D27) skips step 4 (face check).
+When `face_embedding IS NULL`, the scan flow does not check it at all — there is
+no face-match gate to skip, and step 4 (liveness) runs regardless.
 ⚠ **The `liveness_evidence: "face_not_enrolled"` branch below does not exist** — that string is
 in no source file. The student is not blocked, but the "flagged in the liveness review queue"
 outcome is likewise unverified: the review queue is read by the admin liveness dashboard from
@@ -215,13 +208,13 @@ row as specified-but-unimplemented.
 
 ## 4. Verification Flow (During Scan)
 
-Per D27, face verification is step 4 of the 5-step scan sequence:
+The current scan integration is D27 step 4 as amended by ADR-083:
 
 ```
 Step 1: Verify session code → session config fetched
-Step 2: Scan student-ID QR → student record fetched (incl. face_embedding)
-Step 3: GPS geofence validation (parallel)
-Step 4: Face liveness challenge + embedding comparison
+Step 2: Confirm student ID → resolved from the authenticated account (no QR)
+Step 3: GPS geofence validation (client pre-check; server re-validates)
+Step 4: Face liveness challenge; client submits evidence + placeholder score
 Step 5: Write attendance record
 ```
 
@@ -249,53 +242,51 @@ generates:
 ```
 
 This evidence bundle is sent to the server with the scan request. Server-side
-grading validates the heuristic signals (EAR thresholds, PnP rotation angles)
-to confirm the liveness proof is genuine.
+grading checks the submitted heuristic signals (three booleans, the EAR mean,
+and non-empty PnP evidence); it does not observe the user. See
+[security-model.md](security-model.md) *Client-Asserted Biometrics*.
 
-### 4.2 Embedding Comparison
+### 4.2 Embedding Comparison — Not Implemented
 
-After liveness passes, the client compares the live camera frame's embedding
-against the cached enrolled embedding using **cosine similarity**:
-
-```
-score = cosine_similarity(live_embedding, enrolled_embedding)
-```
-
-The live embedding is generated client-side using the same recognition model
-(128-d output). ⚠ **No recognition model ships today** — the browser only has
-MediaPipe FaceLandmarker, which produces landmarks, not embeddings. The comparison
-below therefore has nothing to run against; see §2.2 for what the server actually
-stores.
+No embedding comparison exists. The enrollment path stores a zero-filled
+placeholder blob (`_stub_embedding_blob`), and the scan path never reads the
+stored embedding. The client sends `face_match_score`; the shipped client sends
+the placeholder `1.0`. The server only applies the thresholds below to that
+number. A future implementation must generate real embeddings and move the
+comparison server-side.
 
 ### 4.3 Score Bands & Outcomes
+
+These bands apply to the **submitted** `face_match_score`, not to a measured
+similarity:
 
 | Score Range                            | Outcome         | Action                                                                                                                                                                                                                          |
 | -------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ≥ `FACE_MATCH_THRESHOLD` (0.70)        | **Pass**        | Proceed to step 5; record `face_match_score`                                                                                                                                                                                    |
-| `FACE_REVIEW_BAND_LOW` (0.65) – 0.70 | **Review flag** | Proceed to step 5 (record saved), but the attendance record is flagged in `liveness_review` for admin manual review. Tie-break: re-check against individual angle vectors; if any angle ≥ `FACE_MATCH_THRESHOLD`, auto-approve. |
-| < `FACE_REVIEW_BAND_LOW` (0.65)        | **Fail**        | Scan **rejected**; `rejection_reason = 'face_mismatch'` is recorded inside the `liveness_evidence` JSONB bundle (not a dedicated column); student may retry. |
+| `FACE_REVIEW_BAND_LOW` (0.65) – 0.70 | **Review flag** | Proceed to step 5 (record saved) and route the record to the admin liveness review queue. There is no per-angle re-check. |
+| < `FACE_REVIEW_BAND_LOW` (0.65)        | **Fail**        | Scan **rejected** with `403 face_mismatch`; no attendance row is written; student may retry. |
 
 Thresholds are configurable via environment variables:
 
 | Variable                 | Default | Description                                            |
 | ------------------------ | ------- | ------------------------------------------------------ |
-| `FACE_MATCH_THRESHOLD`   | `0.70`  | Minimum cosine similarity for auto-pass                |
-| `FACE_REVIEW_BAND_LOW`   | `0.65`  | Lower bound of review-flag band                        |
+| `FACE_MATCH_THRESHOLD`   | `0.70`  | Score at or above which the submitted value auto-passes |
+| `FACE_REVIEW_BAND_LOW`   | `0.65`  | Lower bound of the review band                         |
 | `FACE_EMBEDDING_VERSION` | `1`     | Embedding format version (for future model migrations) |
 
 ### 4.4 Offline Verification (D30)
 
 When the device is offline:
 
-1. The client performs liveness challenge + embedding comparison locally using the
-   cached embedding from IndexedDB.
-2. The computed `face_match_score` and `liveness_evidence` are stored in the local
-   sync queue.
-3. On sync, the server validates the evidence bundle (re-checks EAR/PnP heuristics
-   server-side) and records the score. The server does **not** re-run the embedding
-   comparison — it trusts the client's score but validates the liveness proof.
-4. If the enrolled embedding was revoked/updated between the offline scan and sync,
-   the server marks the record with a `liveness_review` flag for manual inspection.
+1. The client performs the liveness challenge; no embedding comparison is
+   performed.
+2. `liveness_evidence` is stored in the local sync queue. The replay path
+   supplies the same placeholder `face_match_score`.
+3. On sync, the server resolves the student from the token and grades the
+   evidence (re-checks the submitted EAR/PnP signals). It does **not** re-run an
+   embedding comparison.
+4. There is no enrolled-embedding version check in the scan path today; a future
+   implementation must add one before claiming offline biometric verification.
 
 ---
 
@@ -321,11 +312,16 @@ Submitted with every scan request (online or queued offline):
       "yaw": 12.5
     }
   },
-  "face_match_score": 0.8234,
+  "face_match_score": 1.0,
   "scanned_via": "qr_camera",
   "scanned_at": "2026-08-25T07:12:33Z"
 }
 ```
+
+`student_number` is a confirmation check only — the server resolves the student
+from the bearer token. `scanned_via` defaults to `qr_camera` because the SPA does
+not send it today. `face_match_score` is the client placeholder, not a measured
+similarity.
 
 The server stores the full bundle in `attendance_records.liveness_evidence`
 (JSONB) and the numeric score in `attendance_records.face_match_score`
@@ -338,7 +334,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 
 | Method | Path                                         | Role    | Description                                                                               |
 | ------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
-| POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server generates + stores embedding                          |
+| POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server stores a placeholder embedding (no generation)         |
 | GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
 
@@ -357,9 +353,10 @@ codes with no implementation anywhere.
 
 | Limitation         | Status                | Notes                                                                                                                                                                                                                      |
 | ------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sibling confusion  | **Accepted** (D31)    | Siblings may have similar embeddings; treated as a known limitation per instructor guidance. Future work: PAD CNN for anti-spoofing (out of scope).                                                                        |
-| Photo/video replay | Mitigated by liveness | Fixed-sequence blink + turn challenges make static-photo replay infeasible. Video replay of a live person remains a theoretical vector (acknowledged).                                                                     |
-| Model staleness    | Version migration     | If the recognition model is updated (changing embedding dimensions), `FACE_EMBEDDING_VERSION` is bumped and all students must be re-enrolled. The pull-on-login handshake detects version mismatch and forces re-download. ⚠ The mismatch is detected against the **per-student** `students.face_embedding_version` column (`student/service.py:333`), not the `FACE_EMBEDDING_VERSION` env var — the env var is the format the server writes at enrollment time, and the two are compared via that column. |
+| Server-side face matching | **Not implemented** | No embedding comparison exists anywhere. The stored embedding is a zero-filled placeholder (`_stub_embedding_blob`), the scan never reads it, and `face_match_score` is a client-supplied value. The shipped client sends `1.0`. |
+| Sibling confusion  | **Not applicable today** | Siblings may have similar embeddings, but no comparison exists, so the risk is not currently exercised. Future work: server-side matching + PAD CNN (out of scope).                                                    |
+| Photo/video replay | Partially mitigated   | The fixed blink + turn challenge raises the cost of casual replay, but the evidence is client-asserted; a modified client can forge it. Video replay remains a theoretical vector (acknowledged).                          |
+| Model staleness    | Design only           | The current enrollment path writes a stub, so there is no model-generated embedding to migrate. If a real face-api.js/MediaPipe pipeline is added, bump `FACE_EMBEDDING_VERSION` and re-enroll the roster.                  |
 
 ---
 

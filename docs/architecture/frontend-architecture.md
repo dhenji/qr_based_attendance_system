@@ -84,11 +84,11 @@ frontend/
     │   │   │   └── mock.ts                       # seeded attendance (78% rate)
     │   │   │
     │   │   ├── liveness/                        # ───────── mockup ─────────
-    │   │   │   ├── store.svelte.ts               # scan state machine (idle→qr→gps→face→done)
+    │   │   │   ├── store.svelte.ts               # scan state machine (entry→id→qr→liveness→result)
     │   │   │   ├── bundle.ts                     # evidence-bundle builder (nonce, timestamp, scores)
     │   │   │   ├── schema.ts                     # zod: evidence bundle validation
     │   │   │   └── components/
-    │   │   │       ├── QRScanner.svelte          # real html5-qrcode camera scan
+    │   │   │       ├── QRScanner.svelte          # real html5-qrcode camera scan (session code only)
     │   │   │       ├── SessionCodeInput.svelte
     │   │   │       ├── GPSStatus.svelte          # GPS read + geofence pill
     │   │   │       ├── FaceChallenge.svelte      # challenge overlay (simulated pass)

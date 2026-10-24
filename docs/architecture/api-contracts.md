@@ -85,7 +85,11 @@ DTO field names below are canonical and exotic DB column names are mapped where 
 
 ## Session QR Payload (D18)
 
-Scanned by students. Server generates HMAC-signed JSON.
+Returned by the session-open API. The payload is JSON containing the
+HMAC-derived session code; it is **not signed**. The current professor UI
+displays only the code (no QR image), and the scan page posts whatever string
+it decodes as `code` — so only a QR encoding the bare session code can be
+verified today.
 
 ```json
 {
@@ -107,7 +111,7 @@ Scanned by students. Server generates HMAC-signed JSON.
 | `pw`       | int    | Present window minutes                 |
 | `lw`       | int    | Late window minutes                    |
 
-**Note:** The HMAC payload uses compact keys. On verify, they map to DB columns:
+**Note:** The payload uses compact keys. On verify, they map to DB columns:
 `code` → `sessions.session_code`, `offering` → `sessions.offering_id`,
 `radius` → `sessions.classroom_radius_meters`, `pw` → `present_window_minutes`,
 `lw` → `late_window_minutes`. The `radius:30` sample above is illustrative —
@@ -537,13 +541,13 @@ filters on professor screens and the active-session "Enrolled" count).
 
 #### `POST /admin/face-enrollment/{student_id}`
 
-Upload 3 photos (front, left, right) for face embedding generation.
+Upload 3 photos (front, left, right). The server validates the uploads and stores a zero-filled **placeholder** embedding; real vector generation is not implemented.
 
 |                  |                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | **Request**      | `multipart/form-data: front=Image, left=Image, right=Image`                                 |
 | **Response 201** | `{ student_id, face_enrolled_at, face_embedding_version: int }`                             |
-| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 400 `multiple_faces` · 422 `quality_too_low` · 404 `student_not_found` |
+| **Errors**       | 400 `invalid_image` · 404 `student_not_found`; `no_face_detected` / `multiple_faces` / `quality_too_low` are documented but never raised |
 
 #### `GET /admin/face-enrollment/{student_id}`
 
@@ -1141,7 +1145,7 @@ Open a new attendance session.
 
 |                  |                                                                                                                                                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ offering_id: int, session_type?: "lecture" \| "lab" (default "lecture"), is_remote?: boolean (default false), duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, session_date?: "YYYY-MM-DD", start_time?: "HH:MM[:SS]", override_reason?: string }` |
+| **Request**      | `{ offering_id: int, session_type?: "lecture" \| "lab" (default "lecture"), is_remote?: boolean (default false), geofence_enabled?: boolean (default true), duration_minutes?: int, present_window_minutes?: int, late_window_minutes?: int, classroom_radius_meters?: int, classroom_name?: string, classroom_lat?: numeric, classroom_lng?: numeric, session_date?: "YYYY-MM-DD", start_time?: "HH:MM[:SS]", override_reason?: string }` |
 | **Response 201** | `{ id, session_code, offering_id, session_type, qr_payload: QRPayload, expires_at, scheduled_start_time, scheduled_end_time, schedule_overridden, plan_source, actual_start_time, original_scheduled_start_time, override_reason, created_at }` |
 | **Errors**       | 409 `session_already_active` · 422 `windows_exceed_duration` · 422 `lab_coordinates_required` · 422 `remote_not_allowed_for_lab` · 422 `offering_schedule_mismatch` · 422 `session_date_in_past` · 422 `scheduled_start_in_past` · 422 `invalid_session_time` · 422 `session_outside_scheduled_time` · 422 `session_type_not_configured` · 403 `not_assigned` · 404 `offering_not_found` |
 | **Notes**        | Session created against a course offering. The session inherits the offering's **plan** (D93): the meeting it belongs to (the offering's active component for the requested type, else the offering's own schedule columns when it has no components at all), the **next occurrence** of that meeting, the attendance windows, the classroom and the geofence radius. `scheduled_start_time` / `scheduled_end_time` carry that plan — not the moment of the request. `duration_minutes` defaults to the meeting's length, then to `courses.session_duration_hours × 60`, then 60. `expires_at = min(created_at + duration_minutes, scheduled_end_time)` computed in service layer (D12, D49), with the class-end cap binding only while the class is still ahead — a session opened long after its class ended is not born expired. The classroom falls back payload → matching active component of the same type → offering. The radius falls back payload → offering → the `geofence_default_radius` app setting → the environment default. Laboratory sessions always enforce the geofence, so a lab open that resolves to no coordinates is rejected with `lab_coordinates_required` **unless** `is_remote` is true, in which case the geofence is skipped by policy; lecture sessions keep coordinates optional. `is_remote` records the session as remote/online for audit and reporting. `session_date` / `start_time` are the **schedule exception** (D93): wall-clock values in the institution's timezone (`INSTITUTION_TIMEZONE`), either of which marks the session `schedule_overridden`. The meeting keeps its length, and the offering's recurring schedule is never touched. A date in the past is refused with `session_date_in_past`, a start more than an hour gone with `scheduled_start_in_past`. Opening additionally requires the merged meeting total to equal the course units requirement (D82) — 422 `offering_schedule_mismatch` otherwise — except when no meetings are configured at all, which is exempt as legacy. Closing is never gated. |
@@ -1346,7 +1350,7 @@ Change password.
 
 #### `POST /student/sessions/verify-code`
 
-Verify a typed session code or scan session QR.
+Verify a typed session code. The scan page also posts raw decoded QR text as `code`; the JSON `qr_payload` is not parsed.
 
 |                  |                                                                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1366,17 +1370,18 @@ Submit attendance scan (online or queued for offline sync).
 
 |                  |                                                                                                                                                                                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
+| **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
 | **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
-| **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): `"qr_camera"` when submitted from a QR scan of the session/student-ID QR, `"manual_code"` when the session code was typed via verify-code. |
+| **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
 
 #### `POST /student/attendance/precheck`
 
-Scan Step 2 gate (wireframes.md 2.2b) — resolves the student and checks enrollment +
-duplicate BEFORE GPS/face are captured. **Never writes attendance.**
+Student-ID confirmation gate (wireframes.md 2.2b) — resolves the student from
+the authenticated account and checks enrollment + duplicate BEFORE GPS/face are
+captured. **Never writes attendance.**
 
 |                  |                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------- |
@@ -1460,7 +1465,7 @@ Pull face embedding (version-gated, D29).
 |                  |                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?current_version=0`                                                                                               |
-| **Response 200** | `{ version: int, embedding: string (base64-encoded encrypted blob) }` — only if `current_version < server_version` |
+| **Response 200** | `{ version: int, embedding: string (base64-encoded placeholder blob; not encrypted) }` — only if `current_version < server_version` |
 | **Response 204** | No content (version matches, no update needed)                                                                     |
 
 ---

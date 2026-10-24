@@ -46,6 +46,14 @@ class SessionCreate(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
+    # Whether the professor explicitly overrode the offering's classroom. When
+    # True, the payload's classroom fields are used as-is (including None),
+    # so an intentionally cleared room is not replaced by the offering's
+    # default. When False (the default), omitted fields inherit the plan.
+    classroom_override: bool = False
     duration_minutes: int | None = Field(
         default=None, ge=DURATION_MINUTES_MIN, le=DURATION_MINUTES_MAX
     )
@@ -107,6 +115,9 @@ class SessionRead(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     qr_payload: QRPayload
     expires_at: datetime | None = None
     # The scheduled window (D93): the offering's plan, or the override the
@@ -165,6 +176,9 @@ class SessionPlanRead(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     source: str = "none"
     # The next occurrence, in the institution's local terms and as UTC.
     session_date: date | None = None
@@ -217,6 +231,9 @@ class SessionListItem(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     session_code: str
     created_at: datetime
     expires_at: datetime | None = None
@@ -260,6 +277,9 @@ class SessionActiveResponse(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     session_code: str
     scan_window_remaining: int = Field(
         description=(
@@ -295,6 +315,9 @@ class ProfessorAttendanceItem(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     status: ValidationStatus
     original_status: ValidationStatus | None = None
     scanned_at: datetime
@@ -335,6 +358,9 @@ class VerifyCodeResponse(BaseModel):
     # Remote/online session: skips the geofence (no classroom coordinates
     # required) and is recorded as remote for audit/reporting purposes.
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
     course_code: str
     course_name: str
     program_code: str
@@ -346,3 +372,6 @@ class VerifyCodeResponse(BaseModel):
     late_window_minutes: int
     classroom_name: str | None = None
     is_remote: bool = False
+    # Whether the geofence is enforced for this session. Defaults to True;
+    # set False for an in-person session with no known classroom.
+    geofence_enabled: bool = True
