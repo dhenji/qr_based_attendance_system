@@ -82,6 +82,13 @@
 
 	onMount(async () => {
 		if (!container) return;
+		if (!document.querySelector('link[data-leaflet-css]')) {
+			const link = document.createElement('link');
+			link.rel = 'stylesheet';
+			link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+			link.dataset.leafletCss = 'true';
+			document.head.appendChild(link);
+		}
 		const L = (await import('leaflet')).default;
 		leaflet = L;
 
@@ -147,12 +154,6 @@
 	});
 </script>
 
-<svelte:head>
-	<link
-		rel="stylesheet"
-		href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-	/>
-</svelte:head>
 
 <div class="map-picker" style="height: {effectiveHeight};">
 	<div class="map-search">

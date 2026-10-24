@@ -11,7 +11,6 @@
 	// Show/hide of the camera view is driven by the `active` prop; every
 	// successful decode hands the raw code back via the `onScanned` callback.
 	import { onDestroy } from 'svelte';
-	import { Html5Qrcode } from 'html5-qrcode';
 
 	let { active, onScanned, id: idProp }: {
 		active: boolean;
@@ -27,7 +26,7 @@
 	const readerId = $derived(idProp ?? fallbackId);
 
 	let scanError = $state<string | null>(null);
-	let qrCode: Html5Qrcode | null = null;
+	let qrCode: any = null;
 	// Epoch + timer handle make the delayed start cancellable: a Stop,
 	// effect re-run, or destroy invalidates any pending start so the camera
 	// can never start after teardown.
@@ -67,6 +66,7 @@
 
 		try {
 			if (!qrCode) {
+				const { Html5Qrcode } = await import('html5-qrcode');
 				qrCode = new Html5Qrcode(readerId);
 			}
 			// Rear camera, 10fps, 250x250 scan box. The first decoded string
@@ -74,7 +74,7 @@
 			await qrCode.start(
 				{ facingMode: 'environment' },
 				{ fps: 10, qrbox: { width: 250, height: 250 } },
-				(decodedText) => {
+				(decodedText: string) => {
 					// Release the camera first, then hand the code back — liveness
 					// only mounts once the QR stream is fully closed.
 					void stopScanning().finally(() => onScanned(decodedText));
