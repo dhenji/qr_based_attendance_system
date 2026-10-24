@@ -156,9 +156,16 @@ at-rest protection and only ever compares against it locally.
 | `session_expired`  | `scanned_at` after `expires_at`     | D16        |
 | `outside_geofence` | GPS outside radius                  | D17, D27   |
 | `liveness_failed`  | Liveness checks fail                | D31        |
+<<<<<<< HEAD
 | `face_mismatch`    | Submitted score < 0.65; no cosine comparison | ADR-068 |
 | `not_enrolled`     | Student not in course roster        | D27        |
 | `duplicate_scan`   | Student already scanned for session | D15        |
+=======
+| `face_mismatch`    | Cosine similarity < threshold       | D27 step 4 |
+| `face_not_enrolled`| Student has no face enrollment      | D27 submit |
+| `not_enrolled`     | Student not in course roster        | D27 step 2 |
+| `duplicate_scan`   | Student already scanned for session | D27 step 2 |
+>>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
 
 ### Exponential Backoff
 

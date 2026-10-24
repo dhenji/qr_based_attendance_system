@@ -59,10 +59,18 @@ sequenceDiagram
     API->>API: 2. Verify session exists & is active + not expired
     API->>API: 3. Resolve student by token user_id; compare student_number
     API->>API: 4. Check enrollment (students.id → enrollments)
+<<<<<<< HEAD
     API->>API: 5. Check duplicate scan
     API->>API: 6. Validate geofence (server-side Haversine)
     API->>API: 7. Grade liveness evidence (booleans + EAR mean + PnP presence)
     API->>API: 8. Apply score band to the submitted face_match_score<br>(< 0.65 → 403 face_mismatch; 0.65–0.70 → pending review)
+=======
+    API->>API: 5. Check face enrollment (students.face_embedding NOT NULL) → 403 face_not_enrolled
+    API->>API: 6. Check duplicate scan
+    API->>API: 7. Validate geofence (server-side Haversine)
+    API->>API: 8. Validate liveness evidence
+    API->>API: 9. Validate face_match_score ≥ FACE_MATCH_THRESHOLD
+>>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
 
     API->>API: 9. Compute status (elapsed since session.created_at):<br>elapsed ≤ present_window → present<br>elapsed ≤ present_window + late_window → late<br>else → rejected
 

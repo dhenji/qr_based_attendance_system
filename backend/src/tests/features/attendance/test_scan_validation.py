@@ -49,6 +49,7 @@ from features.session.exceptions import (
 from features.session.model import Session
 from features.session.service import SessionService
 from features.student.exceptions import (
+    FaceNotEnrolledException,
     NotEnrolledException,
     StudentNotFoundException,
 )
@@ -118,6 +119,7 @@ async def seed(
     stack["session"].classroom_radius_meters = 50
     stack["offering"].classroom_lat = CLASSROOM_LAT
     stack["offering"].classroom_lng = CLASSROOM_LNG
+    stack["student"].face_embedding = b"stored-blob"
     return stack
 
 
@@ -392,6 +394,7 @@ async def test_session_without_classroom_coords_skips_geofence(
     """A session with no geofence set must not reject an arbitrary position."""
 
     stack: dict[str, Any] = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
@@ -416,6 +419,7 @@ async def test_scan_without_gps_succeeds_when_geofence_disabled(
     """A session with geofencing disabled must accept a scan with no GPS."""
 
     stack: dict[str, Any] = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     student = stack["student"]
     session = stack["session"]
     session.geofence_enabled = False
@@ -861,6 +865,7 @@ async def test_fresh_scan_writes_no_sync_queue_row(
     """A scan within `SYNC_STALE_SECONDS` of now is live, not an offline replay."""
 
     stack: dict[str, Any] = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
@@ -884,6 +889,7 @@ async def test_stale_offline_scan_queues_a_sync_record(
     now: datetime,
 ) -> None:
     stack = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
     scanned_at = now - timedelta(seconds=SYNC_STALE_SECONDS + 30)
@@ -923,6 +929,7 @@ async def test_a_stale_scan_raises_the_active_session_pending_count(
     not having the counter at all.
     """
     stack = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
     live = SessionService(test_db_session, settings)
@@ -956,6 +963,7 @@ async def test_a_live_scan_leaves_the_pending_count_flat(
 ) -> None:
     """Only an offline replay belongs in the backlog."""
     stack = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     service = AttendanceService(test_db_session, settings)
     live = SessionService(test_db_session, settings)
 
@@ -1013,6 +1021,7 @@ async def test_session_created_at_anchors_the_window_not_the_schedule(
     """
 
     stack: dict[str, Any] = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
     student = stack["student"]
     session = stack["session"]
     # Scheduled an hour ago, but only opened two minutes ago.
@@ -1382,3 +1391,78 @@ async def test_normal_mode_still_enforces_geofence(
                 gps=OUTSIDE_GPS,
             ),
         )
+
+
+async def test_submit_scan_blocked_when_face_not_enrolled(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    """A student with `face_embedding IS NULL` cannot complete a scan."""
+    stack: dict[str, Any] = await factories.full_stack()
+    service = AttendanceService(test_db_session, settings)
+
+    with pytest.raises(FaceNotEnrolledException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                stack["student"].student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=2),
+            ),
+        )
+
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.code == "face_not_enrolled"
+
+
+async def test_submit_scan_allowed_when_face_enrolled(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    """A student with face data on record completes the scan normally."""
+    stack: dict[str, Any] = await factories.full_stack()
+    stack["student"].face_embedding = b"stored-blob"
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    result = await service.submit_scan(
+        user_id=student.user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=2),
+        ),
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
+
+
+async def test_face_check_runs_before_geofence_and_liveness(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    """The face-enrollment gate precedes geofence/liveness so a student without
+    face data cannot reach those checks even with an invalid position."""
+    stack: dict[str, Any] = await factories.full_stack()
+    service = AttendanceService(test_db_session, settings)
+
+    with pytest.raises(FaceNotEnrolledException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                stack["student"].student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=2),
+                gps=OUTSIDE_GPS,
+                liveness_evidence=valid_evidence(blink_detected=False),
+            ),
+        )
+
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.code == "face_not_enrolled"

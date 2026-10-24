@@ -23,6 +23,7 @@ A web application that:
 
 ## Security & Anti-Spoofing
 
+<<<<<<< HEAD
 The attendance flow applies these layers in order. D27's original step 2
 (student-ID QR) is now a typed/prefilled confirmation gate — see
 [ADR-083](docs/project/decision-log.md).
@@ -50,6 +51,21 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > face enrollment is not required to scan. Server-side face matching is not
 > implemented — see the [security model](docs/architecture/security-model.md)
 > and ADR-068.
+=======
+Every attendance submission follows the canonical **5-step scan flow (D27)**:
+`session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
+Any single failure rejects the record with one of the canonical D15 rejection
+reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
+`face_not_enrolled`, `not_enrolled`, `session_expired`.
+
+| #   | Layer                   | What It Prevents                           | CS Concept                                  |
+| --- | ----------------------- | ------------------------------------------ | ------------------------------------------- |
+| 1   | Session Entry (code/QR) | Outsiders submitting attendance            | HMAC-SHA256                                 |
+| 2   | Student-ID QR           | Wrong identity / unattended devices        | QR payload = student number                 |
+| 3   | GPS Geofencing          | Remote/fake submissions                    | Haversine Algorithm                         |
+| 4   | Face Liveness + Match   | Photos, replay & distortion tricks; requires prior face enrollment       | Blink/turn challenge + embedding similarity |
+| 5   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students                               | DB Constraint + FK Check                    |
+>>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
 
 ## Features
 

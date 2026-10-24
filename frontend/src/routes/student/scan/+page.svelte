@@ -99,6 +99,7 @@
 		outside_geofence: 'You are outside the attendance geofence.',
 		liveness_failed: 'Liveness check failed. Please try again in good lighting.',
 		face_mismatch: 'Face did not match the enrolled record. Please try again.',
+		face_not_enrolled: 'Face enrollment is required before you can proceed with attendance. Please contact your administrator to complete your face enrollment.',
 		not_enrolled: 'You are not enrolled in this course offering.',
 		student_number_mismatch: 'That ID number does not match your account.',
 		student_not_found: 'No student record found for your account. Contact an administrator.',
@@ -341,6 +342,12 @@
 				precheckFailed = true;
 				alreadyScannedStop = true;
 				rejectionReason = SCAN_ERROR_MESSAGES.duplicate_scan;
+				showFailure = true;
+				return;
+			}
+			if (!isMockMode() && studentState.student?.faceEnrolled === false) {
+				precheckFailed = true;
+				rejectionReason = SCAN_ERROR_MESSAGES.face_not_enrolled;
 				showFailure = true;
 				return;
 			}

@@ -232,6 +232,7 @@ async def test_student_scans_a_live_session_over_http(
     year_level = await factories.year_level(program)
     user = await factories.user(role=UserRole.STUDENT.value)
     student = await factories.student(year_level, user=user)
+    student.face_embedding = b"stored-blob"
     professor = await factories.professor()
     admin = await factories.user(role=UserRole.ADMIN.value)
     course = await factories.course()
@@ -285,6 +286,7 @@ async def test_scan_outside_the_geofence_returns_403(
     year_level = await factories.year_level(program)
     user = await factories.user(role=UserRole.STUDENT.value)
     student = await factories.student(year_level, user=user)
+    student.face_embedding = b"stored-blob"
     professor = await factories.professor()
     admin = await factories.user(role=UserRole.ADMIN.value)
     course = await factories.course()
@@ -330,6 +332,7 @@ async def test_idempotency_header_makes_a_resubmission_a_replay(
     year_level = await factories.year_level(program)
     user = await factories.user(role=UserRole.STUDENT.value)
     student = await factories.student(year_level, user=user)
+    student.face_embedding = b"stored-blob"
     professor = await factories.professor()
     admin = await factories.user(role=UserRole.ADMIN.value)
     course = await factories.course()
