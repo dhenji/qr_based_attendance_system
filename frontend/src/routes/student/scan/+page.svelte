@@ -3,7 +3,6 @@
 	import { goto } from '$app/navigation';
 	import { initFaceModel } from '$lib/features/liveness/model';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
-	import { Html5Qrcode } from 'html5-qrcode';
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import {
@@ -301,6 +300,7 @@
 		uploading = true;
 		scanError = null;
 		try {
+			const { Html5Qrcode } = await import('html5-qrcode');
 			const scanner = new Html5Qrcode('upload-qr-reader');
 			const decoded = await scanner.scanFile(file, false);
 			try { scanner.clear(); } catch { /* ignore */ }

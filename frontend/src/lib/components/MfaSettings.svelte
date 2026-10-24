@@ -14,7 +14,6 @@
 	// flag. Reading `authState.user.mfaEnabled` to decide which buttons to show
 	// is fine; writing it is not, and the store actions own that.
 	import { browser } from '$app/environment';
-	import QRCode from 'qrcode';
 	import { APIError } from '$lib/api/client';
 	import {
 		authState,
@@ -76,6 +75,7 @@
 	const renderQr = async (uri: string) => {
 		if (!browser) return;
 		try {
+			const { default: QRCode } = await import('qrcode');
 			qrDataUrl = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
 		} catch {
 			qrDataUrl = null;
