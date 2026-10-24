@@ -22,7 +22,9 @@ export type QueuedScanPayload = {
 	sessionId: number;
 	sessionCode: string;
 	studentNumber: string;
-	gps: { lat: number; lng: number; accuracy: number };
+	// Location is optional: scans against sessions with no geofence (remote,
+	// disabled, or no classroom coordinates) do not collect GPS.
+	gps: { lat: number; lng: number; accuracy: number } | null;
 	livenessEvidence: LivenessEvidence;
 	faceMatchScore?: number;
 	scannedAt: string;
@@ -52,6 +54,10 @@ export type CachedSession = {
 	// Center null = no classroom coordinates (mirrors VerifyGeofence); the
 	// scan pre-check skips geofence in that case, same as the server.
 	geofence: { radius: number; lat: number | null; lng: number | null };
+	// Cached so the offline path can decide whether location is required
+	// without re-deriving it from the (possibly stale) geofence center.
+	geofenceEnabled?: boolean;
+	isRemote?: boolean;
 	cached_at: string;
 };
 

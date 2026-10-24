@@ -125,7 +125,9 @@ export const FACE_MATCH_SCORE_PLACEHOLDER = 1;
 export const submitAttendanceScan = async (input: {
 	sessionId: number;
 	studentNumber: string;
-	gps: { lat: number; lng: number; accuracy: number };
+	// Location is optional: scans against sessions with no geofence (remote,
+	// disabled, or no classroom coordinates) do not collect GPS.
+	gps?: { lat: number; lng: number; accuracy: number } | null;
 	livenessEvidence: LivenessEvidence;
 	faceMatchScore?: number;
 	scannedAt: string;
@@ -140,7 +142,7 @@ export const submitAttendanceScan = async (input: {
 		{
 			session_id: input.sessionId,
 			student_number: input.studentNumber,
-			gps: input.gps,
+			gps: input.gps ?? null,
 			liveness_evidence: {
 				blink_detected: input.livenessEvidence.blinkDetected,
 				head_turn_left: input.livenessEvidence.headTurnLeft,

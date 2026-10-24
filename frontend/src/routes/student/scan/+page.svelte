@@ -235,7 +235,9 @@
 				course_code: verifiedSession.courseCode,
 				course_name: verifiedSession.courseName,
 				expires_at: verifiedSession.expiresAt,
-				geofence: verifiedSession.geofence
+				geofence: verifiedSession.geofence,
+				geofenceEnabled: verifiedSession.geofenceEnabled,
+				isRemote: verifiedSession.isRemote
 			}).catch(() => undefined);
 			showFailure = false;
 			rejectionReason = '';
@@ -259,6 +261,8 @@
 						courseName: cached.course_name,
 						expiresAt: cached.expires_at,
 						geofence: cached.geofence,
+						geofenceEnabled: cached.geofenceEnabled,
+						isRemote: cached.isRemote,
 						scheduledEndTime: cached.expires_at
 					};
 					showFailure = false;
@@ -510,25 +514,31 @@
 		let gps: { lat: number; lng: number; accuracy: number } | null = null;
 		let reachedSubmit = false;
 		try {
-			gps = await getCurrentPosition();
-			// The contract allows a null center (session/schema.py VerifyGeofence),
-			// and the server skips its check in that case — so does this pre-check.
-			// Without the guard, null coerces to 0 in the Haversine math and every
-			// scan reads as thousands of km "outside" a center that was never set.
-			const hasGeofenceCenter =
+			// Location is only required when the session actually enforces a
+			// geofence. Requesting it otherwise (no classroom, disabled, or
+			// remote) would prompt for permission without a feature needing it.
+			const geofenceRequired =
+				session.geofenceEnabled !== false &&
+				session.isRemote !== true &&
 				session.geofence.lat !== null &&
 				session.geofence.lng !== null;
-			if (
-				hasGeofenceCenter &&
-				!validateGPS(
-					gps.lat,
-					gps.lng,
-					session.geofence.lat as number,
-					session.geofence.lng as number,
-					session.geofence.radius
-				)
-			) {
-				throw new Error('You are outside the attendance geofence');
+			if (geofenceRequired) {
+				gps = await getCurrentPosition();
+				// The contract allows a null center (session/schema.py VerifyGeofence),
+				// and the server skips its check in that case — so does this pre-check.
+				// Without the guard, null coerces to 0 in the Haversine math and every
+				// scan reads as thousands of km "outside" a center that was never set.
+				if (
+					!validateGPS(
+						gps.lat,
+						gps.lng,
+						session.geofence.lat as number,
+						session.geofence.lng as number,
+						session.geofence.radius
+					)
+				) {
+					throw new Error('You are outside the attendance geofence');
+				}
 			}
 
 			reachedSubmit = true;
@@ -564,7 +574,7 @@
 			// queue the evidence (device-time scanned_at) for automatic sync.
 			// Anything before the POST — GPS, geofence, server rejections —
 			// keeps the failure overlay, since there is nothing valid to queue.
-			if (reachedSubmit && gps && session && isNetworkError(error)) {
+			if (reachedSubmit && session && isNetworkError(error)) {
 				try {
 					await queue.enqueue({
 						type: 'attendance_scan',

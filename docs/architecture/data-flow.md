@@ -25,12 +25,16 @@ sequenceDiagram
     S->>S: Camera scans student-ID QR → resolves student_number "24-2111"
     S->>API: (implicit in scan POST) Student number resolves to student_id
 
-    Note over S,DB: Step 3 — GPS Geofence (D27.3)
+    Note over S,DB: Step 3 — GPS Geofence (D27.3, conditional)
 
-    S->>S: navigator.geolocation.getCurrentPosition()
-    S->>S: Haversine(student_gps, session_gps) ≤ radius?
-    alt Outside geofence
-        S-->>S: Show error "Outside geofence"
+    alt Session requires a geofence (geofence_enabled and classroom coordinates present)
+        S->>S: navigator.geolocation.getCurrentPosition()
+        S->>S: Haversine(student_gps, session_gps) ≤ radius?
+        alt Outside geofence
+            S-->>S: Show error "Outside geofence"
+        end
+    else No geofence required (remote, disabled, or no classroom)
+        S->>S: Skip location acquisition (no permission prompt)
     end
 
     Note over S,DB: Step 4 — Face Liveness (D27.4)
