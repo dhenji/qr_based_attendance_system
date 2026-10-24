@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +23,17 @@ from features.attendance.model import Attendance
 from features.auth.model import User
 from features.program.model import YearLevel
 from shared.enums import UserRole, ValidationStatus
+from shared.face_embeddings import embedding_to_base64, serialize_embedding
 from tests.conftest import Factories
+
+
+def _make_live_emb_fix() -> str:
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+    live = live / np.linalg.norm(live)
+    return embedding_to_base64(live)
+
 
 CLASSROOM_LAT = 14.0
 CLASSROOM_LNG = 121.0
@@ -232,7 +243,9 @@ async def test_student_scans_a_live_session_over_http(
     year_level = await factories.year_level(program)
     user = await factories.user(role=UserRole.STUDENT.value)
     student = await factories.student(year_level, user=user)
-    student.face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    student.face_embedding = serialize_embedding(ref)
     professor = await factories.professor()
     admin = await factories.user(role=UserRole.ADMIN.value)
     course = await factories.course()
@@ -261,7 +274,7 @@ async def test_student_scans_a_live_session_over_http(
                 "ear_samples": [0.2, 0.21],
                 "pnp_evidence": {"depth_mean": 0.4},
             },
-            "face_match_score": 0.93,
+            "live_face_embedding": _make_live_emb_fix(),
             "scanned_at": session.created_at.isoformat(),
             "scanned_via": "qr_camera",
         },
@@ -286,7 +299,9 @@ async def test_scan_outside_the_geofence_returns_403(
     year_level = await factories.year_level(program)
     user = await factories.user(role=UserRole.STUDENT.value)
     student = await factories.student(year_level, user=user)
-    student.face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    student.face_embedding = serialize_embedding(ref)
     professor = await factories.professor()
     admin = await factories.user(role=UserRole.ADMIN.value)
     course = await factories.course()
@@ -314,7 +329,7 @@ async def test_scan_outside_the_geofence_returns_403(
                 "ear_samples": [0.2],
                 "pnp_evidence": {"depth_mean": 0.4},
             },
-            "face_match_score": 0.93,
+            "live_face_embedding": _make_live_emb_fix(),
             "scanned_at": session.created_at.isoformat(),
             "scanned_via": "qr_camera",
         },
@@ -332,7 +347,9 @@ async def test_idempotency_header_makes_a_resubmission_a_replay(
     year_level = await factories.year_level(program)
     user = await factories.user(role=UserRole.STUDENT.value)
     student = await factories.student(year_level, user=user)
-    student.face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    student.face_embedding = serialize_embedding(ref)
     professor = await factories.professor()
     admin = await factories.user(role=UserRole.ADMIN.value)
     course = await factories.course()
@@ -349,10 +366,10 @@ async def test_idempotency_header_makes_a_resubmission_a_replay(
             "blink_detected": True,
             "head_turn_left": True,
             "head_turn_right": True,
-            "ear_samples": [0.2],
+            "ear_samples": [0.2, 0.21],
             "pnp_evidence": {"depth_mean": 0.4},
         },
-        "face_match_score": 0.93,
+        "live_face_embedding": _make_live_emb_fix(),
         "scanned_at": session.created_at.isoformat(),
         "scanned_via": "qr_camera",
     }

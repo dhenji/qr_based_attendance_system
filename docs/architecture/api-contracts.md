@@ -63,7 +63,7 @@ They are kept rather than deleted because each is a plausible future guard, and 
 unused exception class is not a defect. If one is ever raised, the guard test fails
 and the row gets added.
 
-Conversely, `no_face_detected`, `multiple_faces`, `quality_too_low` and `invalid_image`
+Conversely, `multiple_faces`, `quality_too_low` and `invalid_image`
 are documented below but not yet raised: face detection is stubbed by
 `_stub_embedding_blob` pending the MediaPipe pipeline. `validation_error` is the
 generic 422 produced by FastAPI request validation, not a custom exception.
@@ -547,7 +547,7 @@ Upload 3 photos (front, left, right). The server validates the uploads and store
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | **Request**      | `multipart/form-data: front=Image, left=Image, right=Image`                                 |
 | **Response 201** | `{ student_id, face_enrolled_at, face_embedding_version: int }`                             |
-| **Errors**       | 400 `invalid_image` · 404 `student_not_found`; `no_face_detected` / `multiple_faces` / `quality_too_low` are documented but never raised |
+| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 404 `student_not_found`; `multiple_faces` / `quality_too_low` are documented but never raised |
 
 #### `GET /admin/face-enrollment/{student_id}`
 
@@ -1370,9 +1370,9 @@ Submit attendance scan (online or queued for offline sync).
 
 |                  |                                                                                                                                                                                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
-| **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
-| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
+| **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, live_face_embedding: string, scanned_at: ISO-8601 }` |
+| **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "pending" | "rejected", scanned_at, expires_at }` |
+| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
 | **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |

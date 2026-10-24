@@ -99,6 +99,7 @@
 	let earBaseline: number | null = null;
 	let idleFrames = 0;
 	let blinkMinEar = 1;
+	let lastFaceLandmarks: any[] = [];
 
 	interface FaceResult {
 		faceLandmarks?: NormalizedLandmark[][];
@@ -733,6 +734,7 @@
 						peak_right_yaw: Number(peakRightYaw.toFixed(2)),
 						yaw_samples: [...yawSamples],
 					},
+					faceLandmarks: lastFaceLandmarks,
 				});
 			}
 		}

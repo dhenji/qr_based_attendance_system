@@ -13,6 +13,7 @@
 		verifySessionCode,
 		type SessionVerification
 	} from '$lib/features/liveness/service';
+	import { generateEmbeddingFromLandmarks, serializeFaceEmbedding } from '$lib/shared/utils/face-embedding';
 	import {
 		cacheSession,
 		flushQueue,
@@ -554,6 +555,7 @@
 				studentNumber: submitNumber,
 				gps,
 				livenessEvidence,
+				liveFaceEmbedding: serializeFaceEmbedding(generateEmbeddingFromLandmarks((livenessEvidence as any).faceLandmarks || [])),
 				scannedAt: new Date().toISOString(),
 				idempotencyKey,
 			});
@@ -565,7 +567,7 @@
 				return;
 			}
 
-			resultStatus = result.status;
+			resultStatus = result.status === 'pending' ? 'present' : result.status;
 			scannedAt = result.scannedAt;
 			showSuccess = true;
 			clearCountdown();
@@ -591,6 +593,7 @@
 							studentNumber: submitNumber,
 							gps,
 							livenessEvidence,
+							liveFaceEmbedding: serializeFaceEmbedding(generateEmbeddingFromLandmarks((livenessEvidence as any).faceLandmarks || [])),
 							scannedAt: new Date().toISOString(),
 							idempotencyKey
 						}
