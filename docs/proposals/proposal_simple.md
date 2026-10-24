@@ -1,5 +1,10 @@
 # Project Proposal: QR-Based Attendance System
 
+> **Historical document (2026-10-24):** this proposal describes the original
+> student-ID QR design. The shipped system resolves identity from the signed-in
+> account and has no student-ID QR scan
+> ([ADR-083](../project/decision-log.md)); face matching is not implemented.
+
 **Course**: Software Engineering 1
 
 ---

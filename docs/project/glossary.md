@@ -8,15 +8,15 @@
 
 ### Session
 
-A single class meeting instance opened by a professor. Carries a unique HMAC-signed **session code**, configurable scan windows, duration, and optional classroom override. Stored in `sessions` table. Routes: `POST /professor/sessions`, `GET /professor/sessions/active/{id}`.
+A single class meeting instance opened by a professor. Carries a unique HMAC-derived **session code**, configurable scan windows, duration, and optional classroom override. Stored in `sessions` table. Routes: `POST /professor/sessions`, `GET /professor/sessions/active/{id}`.
 
 ### Session Code (HMAC)
 
-A 6â€“8 character code derived from an HMAC of the session ID + secret, used by students to join a session manually (alternative to scanning the Session QR). Verified via `POST /student/sessions/verify-code`.
+A 6â€“8 character code derived from an HMAC of the session ID + secret, used by students to join a session. Verified via `POST /student/sessions/verify-code`; the current professor UI displays this code rather than a QR image.
 
 ### Session QR
 
-A projected QR code containing a versioned JSON payload: `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}`. Scanned by students in Step 1 of the scan flow. Version `v` enables future migration.
+A versioned JSON payload returned by the session-open API: `{"v":1,"code":"A7X-9K2M","offering":123,"radius":30,"pw":5,"lw":10}`. The payload is **not signed**, and the current professor UI does not render it as a QR image; the scan page posts raw decoded text as the session code. Version `v` enables future migration.
 
 ### Enrollment (Course-Taking)
 
@@ -72,7 +72,7 @@ The offering's scheduled class end time (`course_offerings.schedule_end_time`) c
 
 ### Geofence
 
-Circular GPS boundary centered on classroom coordinates (offering default from `course_offerings` or session override) with `classroom_radius_meters`. Validation uses Haversine distance. Runs in parallel with face check (Step 3 of scan flow).
+Circular GPS boundary centered on classroom coordinates (offering default from `course_offerings` or session override) with `classroom_radius_meters`. Validation uses Haversine distance. The shipped client captures GPS after the liveness challenge, and the server re-checks it on submit.
 
 ### Liveness
 
@@ -88,11 +88,11 @@ Head-pose estimation from facial landmarks to detect left/right turns. Part of l
 
 ### Embedding
 
-A 128-dimensional face vector (face-api.js compatible ResNet) generated from 3 enrollment photos (front, left, right). Stored encrypted in `students.face_embedding BYTEA` as JSON: `{"mean": [...], "angles": {"front": [...], "left": [...], "right": [...]}}`. Versioned via `face_embedding_version`.
+A 128-dimensional face vector reserved by the schema. The current build stores a zero-filled placeholder in `students.face_embedding` (`_stub_embedding_blob`); real vector generation and encryption are **not implemented**, and no scan reads it. Versioned via `face_embedding_version`.
 
 ### Evidence Bundle
 
-JSON object attached to an attendance record (offline or online) containing: `gps{lat, lng, accuracy}`, `liveness_evidence{blink_detected, head_turn_left, head_turn_right, ear_samples, pnp_evidence}`, `face_match_score`, `scanned_via`, `scanned_at`. Stored in `attendance_records.liveness_evidence JSONB`. Used for audit and server-side re-validation on sync.
+JSON object attached to an attendance record containing `liveness_evidence{blink_detected, head_turn_left, head_turn_right, ear_samples, pnp_evidence}`, the GPS `accuracy`, and a `review` flag. Stored in `attendance_records.liveness_evidence JSONB`; `face_match_score`, `scanned_via`, and the timestamp are separate columns. Used for audit and server-side re-validation on sync.
 
 ### Excuse Request
 
@@ -134,10 +134,10 @@ Account activation flow where a student/professor enters their official email â†
 
 | Value              | Meaning                                    |
 | ------------------ | ------------------------------------------ |
-| `duplicate`        | Student already scanned for this session   |
+| `duplicate_scan`   | Student already scanned for this session   |
 | `outside_geofence` | GPS distance > radius                      |
 | `liveness_failed`  | Liveness challenge failed (EAR/PnP)        |
-| `face_mismatch`    | Cosine similarity < `FACE_MATCH_THRESHOLD` |
+| `face_mismatch`    | Submitted `face_match_score` < 0.65 (no cosine comparison exists) |
 | `not_enrolled`     | Student not enrolled in session's offering |
 | `session_expired`  | `scanned_at` > `expires_at` (offline sync) |
 
@@ -231,6 +231,6 @@ Account activation flow where a student/professor enters their official email â†
 
 | Value         | Meaning                    |
 | ------------- | -------------------------- |
-| `qr_camera`   | Student scanned session QR |
+| `qr_camera`   | Default value; the SPA does not send `scanned_via` |
 | `manual_code` | Student typed session code |
 

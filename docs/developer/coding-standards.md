@@ -540,7 +540,7 @@ Filenames are **unprefixed** — the directory already namespaces the slice, so 
 | Types/Interfaces | PascalCase            | `StudentProfile`, `SessionConfig` |
 | Functions        | camelCase             | `formatDate()`                    |
 | CSS classes      | kebab-case            | `scan-progress`, `status-badge`   |
-| Routes           | lowercase, kebab-case | `/student/scan/step/1`            |
+| Routes           | lowercase, kebab-case | `/student/scan`                   |
 | Env vars         | PUBLIC_ prefix        | `PUBLIC_API_URL`                  |
 
 ---

@@ -10,9 +10,9 @@
 
 | #   | Threat                                                     | Severity | Mitigation                                                                                                                                                                                                                          | Decision                                 |
 | --- | ---------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential 5-step scan: session code → student-ID QR → GPS geofence → face liveness → face match. Steps 1–3 are verified server-side; **steps 4–5 are client-asserted** and the server only range-checks them — see *Client-Asserted Biometrics*. No shortcut through steps 1–3.                                                                             | D27, D31                                 |
+| T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential scan: authenticated identity (JWT) → session code → student-ID confirmation → GPS geofence → liveness. Identity, session, and geofence are server-enforced; `student_number` is comparison-only, and liveness evidence is server-graded but client-generated. Face matching is **not implemented** — see *Client-Asserted Biometrics*. No shortcut through auth, session, or geofence. | D27, D31, ADR-083 |
 | T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe Face Mesh WASM in the client. The server grades the *submitted* evidence, not a measurement — see *Client-Asserted Biometrics*. This stops an honest client from being tricked, not a determined one. | D31                                      |
-| T3  | **QR relay** — student sends session QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
+| T3  | **QR relay** — student sends session code/QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
 | T4  | **Sibling confusion** — twin/brother scans                 | Low      | **Not implemented.** No embedding comparison exists: there is no cosine-similarity code in the backend, and `face_enrollment` stores a zero-filled placeholder blob (`_stub_embedding_blob`), so there is nothing to compare against. The 0.70 threshold in `core/config.py` is applied to the score the *client* submits. Acknowledged by instructor as accepted risk; no PAD CNN in scope. | D31, ADR-068                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
 | T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP, revocable by the user. Argon2id for password hashing. Account lockout after failed attempts. A stolen 7-day refresh token outlives an MFA disable — see *Password & Account Security*. | D32                                      |
@@ -43,7 +43,7 @@ Stored in sessions.session_code (unique, indexed)
 QR payload = unsigned JSON {v, code, offering, radius, pw, lw}
    │          (the HMAC above produced `code`; the payload is not signed)
    ▼
-Student scans QR or types code → server verifies
+Student enters session code (or scans a session QR if one is available) → server verifies
 ```
 
 **Properties:**
@@ -143,19 +143,20 @@ Server:
   → Store BYTEA in students.face_embedding
 
 Client:
-  Pull encrypted blob on login (version-gated)
-  → Decrypt with device key (WebCrypto, non-extractable)
-  → Cache in IndexedDB (encrypted at rest)
-  → Use for offline face comparison
+  Pull plaintext blob on login (version-gated)
+  → Encrypt with a device-generated WebCrypto key
+  → Cache ciphertext in IndexedDB
+  → Not used for face comparison
 ```
 
-The last line — *use for offline face comparison* — has no server-side counterpart
-either: no comparison is performed on either side today. See *Client-Asserted
-Biometrics*.
+The last line — *use for offline face comparison* — has no counterpart on either
+side today: the server sends plaintext, the client encrypts its local cache, and
+no comparison is performed. See *Client-Asserted Biometrics*.
 
-**Thresholds:**
+**Thresholds** (applied to the client-submitted `face_match_score`, not to a
+measured similarity):
 
-- ≥ 0.70: Pass (high confidence match)
+- ≥ 0.70: Pass
 - 0.65–0.70: Review flag → routed to liveness review queue
 - < 0.65: Fail
 
@@ -176,6 +177,16 @@ enforced — see *Client-Asserted Biometrics* below.
 
 All processing client-side (MediaPipe Face Mesh WASM). Only scores/evidence
 sync to server for audit. Server re-validates evidence plausibility.
+
+### Identity Resolution (ADR-083)
+
+Student attendance endpoints resolve the student from the bearer token
+(`users.id → students.user_id`), never from `payload.student_number`. The
+submitted number is compared case-insensitively to the resolved row; a mismatch
+is `403 student_number_mismatch` and no attendance row is written. The
+student-ID QR scan is not part of the flow — the only QR step reads the session
+code. Regression guards: `test_routes_http.py` (precheck/scan as another
+student) and `test_scan_validation.py` (service-level mismatch).
 
 ### Client-Asserted Biometrics
 
@@ -206,14 +217,15 @@ to compare against even in principle. That placeholder is why
 raised — it is the one of the four that exists, as
 `InvalidImageException`.)
 
-**What this does and does not protect.** Steps 1-3 of the scan — session code,
-student-ID QR, GPS geofence — are genuinely server-enforced, which is why T3, T5
-and T8 remain accurate: those inputs are re-validated on sync. Steps 4-5 stop an
-honest client from being tricked with a photo or coerced into a lazy blink. They
-are an integrity signal recorded in the trail, **not an access control** against
-a modified client. Recorded as an accepted MVP gap in ADR-068 rather than left
-as an apparent oversight; treating `face_match_score` as a measurement is the
-mistake that section exists to prevent.
+**What this does and does not protect.** The server-enforced parts of the scan —
+session code, authenticated identity + student-ID confirmation, GPS geofence —
+are what make T3, T5 and T8 accurate: those inputs are re-validated on sync.
+Liveness and the submitted face score stop an honest client from being tricked
+with a photo or coerced into a lazy blink. They are an integrity signal recorded
+in the trail, **not an access control** against a modified client. Recorded as
+an accepted MVP gap in ADR-068 rather than left as an apparent oversight;
+treating `face_match_score` as a measurement is the mistake that section exists
+to prevent.
 
 One consequence worth stating for anyone reasoning about the scan pipeline: the
 geofence check (`outside_geofence`) is the only *biometric-adjacent* step that can
@@ -357,10 +369,10 @@ These are **explicitly out of scope** for this system:
 | D18      | Session code derivation — HMAC-SHA256 over `session_id`, 8 base62 chars; QR payload is versioned (`v: 1`) but unsigned |
 | D25      | Never security-disabled sessions                    |
 | D26      | Liveness mandatory even for remote classes          |
-| D27      | 5-step sequential scan flow                         |
+| D27      | Scan flow (amended by ADR-083 — typed ID confirmation, no student-ID QR) |
 | D28      | Face embedding encryption at rest                   |
 | D29      | Embedding pull-on-login (version-gated)             |
-| D30      | Offline verification uses cached embedding          |
+| D30      | Offline verification decision — no embedding comparison is implemented |
 | D31      | Liveness protocol (fixed sequence, EAR + PnP)       |
 | D32      | Profile read-only (identity admin-managed)          |
 | D39      | Backup encryption (AES-256-GCM)                     |

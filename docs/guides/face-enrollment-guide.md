@@ -2,11 +2,17 @@
 
 > QR-Based Attendance System — Operator Guide for Face Enrollment
 >
-> Covers: 3-photo capture operator script, common failures, privacy considerations.
+> Covers: 3-photo upload, enrollment status, current limitations, privacy wording.
 >
 > **Glossary**: All italicized terms are defined in the [Glossary](../project/glossary.md).
 >
-> **Route**: `/admin/face-enrollment/{student_id}` ([D28](../project/decision-log.md), [D43](../project/decision-log.md))
+> **Route**: `/admin/students` → **Enroll face** modal ([D28](../project/decision-log.md), [D43](../project/decision-log.md)). There is no dedicated `/admin/face-enrollment/{student_id}` page.
+
+> **Current build status (2026-10-24):** enrollment records three uploaded
+> photos, but **no face embedding is generated**. The server stores a
+> zero-filled placeholder blob, does not encrypt it, and no scan compares it.
+> Attendance runs the liveness challenge only. See
+> [face-enrollment.md](../architecture/face-enrollment.md) §4.2 and ADR-068.
 
 ---
 
@@ -15,8 +21,8 @@
 1. [Overview](#1-overview)
 2. [Prerequisites](#2-prerequisites)
 3. [Step-by-Step Operator Script](#3-step-by-step-operator-script)
-4. [Quality Gates & Common Failures](#4-quality-gates--common-failures)
-5. [What Happens After Capture](#5-what-happens-after-capture)
+4. [Validation & Common Failures](#4-validation--common-failures)
+5. [What Happens After Upload](#5-what-happens-after-upload)
 6. [Re-Enrollment Policy](#6-re-enrollment-policy)
 7. [Privacy Script for Students](#7-privacy-script-for-students)
 8. [Troubleshooting](#8-troubleshooting)
@@ -25,24 +31,36 @@
 
 ## 1. Overview
 
-Face enrollment captures **3 photos** (front, left, right) per student ([D43](../project/decision-log.md)). The server generates a **128-dimensional face embedding** from each photo using a pretrained face-api.js ResNet model. The three vectors are stored as a single encrypted JSON blob in `students.face_embedding BYTEA` ([D28](../project/decision-log.md)):
+Face enrollment accepts **3 image files** (front, left, right) per student
+([D43](../project/decision-log.md)). The current server writes a single
+placeholder JSON blob to `students.face_embedding` ([D28](../project/decision-log.md)):
 
 ```json
 {
-  "mean": [128 floats],
+  "mean": [0.0, "... 128 floats"],
   "angles": {
-    "front": [128 floats],
-    "left": [128 floats],
-    "right": [128 floats]
-  }
+    "front": [0.0, "... 128 floats"],
+    "left": [0.0, "... 128 floats"],
+    "right": [0.0, "... 128 floats"]
+  },
+  "stub": true,
+  "version": 1
 }
 ```
 
-- **`mean`**: Average of the three vectors — used for primary comparison during scan
-- **`angles`**: Per-angle vectors — used for tie-breaking in borderline cases
-- **Version**: `face_embedding_version` bumps on every write
+- **`mean` / `angles`**: Shape-compatible placeholders only — there is no
+  face-api.js ResNet inference and no real vector.
+- **Version**: the `students.face_embedding_version` column increments on every
+  upload; the blob's `"version"` field is the format version
+  (`FACE_EMBEDDING_VERSION`, currently `1`).
+- **Encryption**: The database blob is plaintext JSON today. The student's
+  browser caches a pulled copy with AES-GCM in IndexedDB, but that cache is not
+  used for matching.
 
-> **Enrollment is mandatory** for face-based liveness verification. Students without an enrolled embedding cannot complete Step 4 of the scan flow.
+> **Enrollment is not required to scan.** Students without an enrollment can
+> complete liveness and submit attendance. The scan never reads
+> `students.face_embedding`, so do not tell students that their face is being
+> compared.
 
 ---
 
@@ -52,123 +70,107 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
 | ----------------------- | ---------------------------------------------------------- |
 | **Admin access**        | You must have an admin or super_admin role                 |
 | **Student record**      | The student must exist in the system with `is_active=true` |
-| **Camera**              | Device camera (front-facing preferred) or USB webcam       |
-| **Lighting**            | Well-lit room; face should not be in shadow                |
-| **Student cooperation** | Student must be present and willing                        |
+| **Three image files**   | Front, left, and right photos (`.jpg`, `.jpeg`, `.png`, or `.webp`) |
+| **File size**           | Each file must be below `ATTACHMENTS_MAX_BYTES`            |
+| **Student cooperation** | Student must consent to the upload                         |
+
+No camera or in-browser capture step exists in the current admin UI — the
+operator selects three files from disk.
 
 ---
 
 ## 3. Step-by-Step Operator Script
 
-### 3.1 Open the Enrollment Screen
+### 3.1 Open the Enrollment Modal
 
-1. Navigate to **Admin Portal** → **Student Management** (`/admin/students`)
-2. Search for the student by name or ID
-3. Click the student row → **Student Detail**
-4. Click **[📷 Enroll Face]** or navigate to `/admin/face-enrollment/{student_id}`
+1. Navigate to **Admin Portal** → **Student Management** (`/admin/students`).
+2. Search for the student by name or ID.
+3. Click **[📷 Enroll face]** (or **[Re-enroll face]** if already enrolled).
+4. The enrollment modal shows the current status (enrolled date and version)
+   and three file inputs.
 
-[FIG: Face Enrollment screen with student name/ID header, three capture slots (Front, Left, Right), camera preview area, quality indicators, [Capture] button, [Save Enrollment] button]
+[FIG: Enroll Face modal with Front / Left / Right file inputs, current status, error/note area, and Upload enrollment button]
 
-### 3.2 Capture Position 1: Front
+### 3.2 Select the Photos
 
-1. Instruct the student to:
-   - Face the camera directly
-   - Keep eyes open, neutral expression
-   - Remove glasses if possible (or keep them on — system accommodates)
-   - Ensure forehead and chin are visible
-2. Click **[Capture]** when the quality gate passes:
-   - ✅ Brightness: adequate
-   - ✅ Face size: fills >30% of frame
-   - ✅ Single face detected
-3. The photo is stored as `front`
+1. **Front**: a straight-on photo.
+2. **Left**: the student's head turned to their left.
+3. **Right**: the student's head turned to their right.
+4. The UI accepts JPG, JPEG, PNG, and WebP files only.
 
-### 3.3 Capture Position 2: Left
+> The current server does **not** run brightness, face-size, single-face, pose,
+> or eye-open checks. These quality gates are design-only. Bad photos can still
+> be uploaded; they simply produce the same placeholder blob.
 
-1. Instruct the student to:
-   - Turn head ~30–45 degrees to their **left**
-   - Keep eyes open
-   - Maintain same distance from camera
-2. Click **[Capture]** when quality gates pass
-3. The photo is stored as `left`
+### 3.3 Upload & Verify
 
-### 3.4 Capture Position 3: Right
+1. Click **[Upload enrollment]**.
+2. The server validates that each file is non-empty, within the size limit, and
+   has an `image/*` content type.
+3. On success, the modal shows `Enrolled (vN)` and the roster **Face** column
+   updates after refresh.
+4. The student's Profile (`/student/profile`) and Settings
+   (`/student/settings`) show **Enrolled** and the version.
 
-1. Instruct the student to:
-   - Turn head ~30–45 degrees to their **right**
-   - Keep eyes open
-   - Maintain same distance from camera
-2. Click **[Capture]** when quality gates pass
-3. The photo is stored as `right`
-
-### 3.5 Review & Save
-
-1. Review all three captured photos (thumbnail previews)
-2. If any photo looks poor, click **[Retake]** for that position
-3. Click **[Save Enrollment]**
-4. Server generates embeddings → stores encrypted blob → bumps `face_embedding_version`
-5. Student sees "✅ Enrolled" status on their Profile (`/student/profile`)
-
-> **Distribution**: The student's device will pull the new embedding on their next login ([D29](../project/decision-log.md) — pull-on-login, version-gated, cached encrypted in IndexedDB).
+> **Distribution**: The student's browser can pull the blob on login
+> ([D29](../project/decision-log.md) — pull-on-login, version-gated) and caches
+> it encrypted in IndexedDB. Nothing compares it.
 
 ---
 
-## 4. Quality Gates & Common Failures
+## 4. Validation & Common Failures
 
-### 4.1 Quality Gate Criteria
+### 4.1 What the Server Checks
 
-| Gate            | Threshold                                                       | How to Fix                                  |
-| --------------- | --------------------------------------------------------------- | ------------------------------------------- |
-| **Brightness**  | Face region must be adequately lit (not over/under-exposed)     | Move to better lighting; avoid backlighting |
-| **Face Size**   | Face must occupy >30% of the frame                              | Move student closer to camera               |
-| **Single Face** | Only one face detected in frame                                 | Ensure no one else is in the shot           |
-| **Pose**        | Head not turned beyond acceptable angle for the target position | Adjust head position                        |
-| **Eyes Open**   | Both eyes must be open (EAR threshold)                          | Ask student to open eyes fully              |
+| Check             | Current behavior                                      |
+| ----------------- | ----------------------------------------------------- |
+| **Non-empty file**| Rejected with 400 `invalid_image`                     |
+| **Size limit**    | Rejected with 400 `invalid_image` when over the limit |
+| **Content type**  | Must start with `image/`; otherwise 400 `invalid_image` |
+| **Student exists**| 404 `student_not_found`                               |
+| **Face detection**| **Not implemented** — `no_face_detected` is never raised |
+| **Multiple faces**| **Not implemented** — `multiple_faces` is never raised |
+| **Quality/pose**  | **Not implemented** — `quality_too_low` is never raised |
 
 ### 4.2 Common Failures & Solutions
 
 | Failure                   | Cause                                              | Solution                                              |
 | ------------------------- | -------------------------------------------------- | ----------------------------------------------------- |
-| "Face not detected"       | Face too small; poor lighting; face angled too far | Reposition; improve lighting; ensure face is centered |
-| "Multiple faces detected" | Another person in frame                            | Ensure only the student is in the shot                |
-| "Image too dark"          | Under-lit room                                     | Move to brighter area; use additional lighting        |
-| "Image too bright"        | Over-exposed; direct sunlight                      | Avoid direct sunlight; use diffused lighting          |
-| "Eyes appear closed"      | Blinking; low eyelid opening                       | Ask student to keep eyes open; capture again          |
-| "Pose mismatch"           | Head angle doesn't match target position           | Adjust head angle; refer to guide illustrations       |
-| "Blur detected"           | Motion blur; out of focus                          | Hold still; ensure camera is focused on face          |
-
-### 4.3 Retry Policy
-
-- No limit on retakes per position — quality gates must pass before saving
-- If a student repeatedly fails (e.g., due to medical condition), note this in the admin audit log and contact development team for manual embedding generation
+| "Upload failed"           | Network error; file too large; wrong content type  | Retry; check file size and that it is JPG/PNG/WebP    |
+| "Student not found"       | Wrong student ID; archived student                 | Verify the student is active                          |
+| "Photo is empty"          | Selected file has no content                       | Re-select a valid image                               |
+| Faculty reports no match  | **No matching exists in this build**               | Explain that only liveness runs; escalate as a product gap |
 
 ---
 
-## 5. What Happens After Capture
+## 5. What Happens After Upload
 
-### 5.1 Embedding Generation (Server-Side)
+### 5.1 Server-Side Processing
 
-1. Three photos uploaded as multipart form data
-2. Server runs each through **pretrained face-api.js ResNet** model (we train nothing — [D43](../project/decision-log.md))
-3. Generates 128-dimensional vector per photo
-4. Computes `mean` (average of three vectors)
-5. Stores encrypted JSON blob in `students.face_embedding BYTEA`
-6. Sets `face_enrolled_at` timestamp
-7. Increments `face_embedding_version`
+1. Three files arrive as multipart form data.
+2. The server validates non-empty content, size, and `image/*` content type.
+3. **No ResNet inference runs.** `_stub_embedding_blob` writes the zero-filled
+   JSON shown in §1.
+4. Sets `face_enrolled_at` and increments `face_embedding_version`.
+5. Writes an audit row for the enrollment metadata. The blob itself is excluded
+   from the audit snapshot.
 
-### 5.2 Embedding Distribution
+### 5.2 Distribution & Use
 
 | Step                  | What Happens                                                    |
 | --------------------- | --------------------------------------------------------------- |
-| Student logs in       | Device checks `face_embedding_version` against cached version   |
-| New version available | Device downloads embedding via `GET /student/me/face-embedding` |
-| Cached in IndexedDB   | Stored encrypted with device-specific WebCrypto key             |
-| Used in Step 4        | Local comparison for offline verification                       |
+| Student logs in       | Device checks `face_embedding_version` against its cached version |
+| New version available | Device downloads the blob via `GET /student/me/face-embedding`   |
+| Cached in IndexedDB   | Stored with a device-specific WebCrypto AES-GCM key              |
+| Used in the scan      | **No** — the scan never reads the cached blob                    |
 
 ### 5.3 Encryption
 
-- **At rest**: Stored as BYTEA in PostgreSQL (encrypted at the application level)
-- **On device**: Cached encrypted in IndexedDB (WebCrypto device key)
-- **In transit**: HTTPS only
+- **Server at rest**: Plaintext JSON placeholder; application-level encryption
+  is **not implemented**.
+- **On device**: The cached copy is AES-GCM encrypted with a non-extractable
+  device key.
+- **In transit**: HTTPS in production.
 
 ---
 
@@ -178,49 +180,61 @@ Face enrollment captures **3 photos** (front, left, right) per student ([D43](..
 
 | Trigger                           | Action                                                                              |
 | --------------------------------- | ----------------------------------------------------------------------------------- |
-| **Student requests**              | Admin initiates new enrollment — supersedes old vectors                             |
-| **Significant appearance change** | Admin re-enrolls — old embedding replaced                                           |
-| **Admin archive**                 | Embedding revoked (student deactivated/archived)                                    |
-| **Version bump**                  | Every re-enrollment increments `face_embedding_version`; devices pull on next login |
+| **Student requests**              | Admin opens the same modal and uploads three new files                              |
+| **Significant appearance change** | Re-upload — the placeholder is replaced                                             |
+| **Admin archive**                 | Blob is cleared and the student is deactivated                                      |
+| **Version bump**                  | Every upload increments `face_embedding_version`; devices may pull on next login    |
 
 ### 6.2 How to Re-Enroll
 
-1. Navigate to `/admin/face-enrollment/{student_id}`
-2. Existing enrollment status is shown (enrolled date, version)
-3. Click **[Re-Enroll]** — this will **replace** the old embedding
-4. Capture 3 new photos following the standard script
-5. Save → old vectors are discarded; new blob stored; version bumped
+1. Navigate to `/admin/students`.
+2. Open the student's **[Re-enroll face]** action.
+3. Upload three new images.
+4. Submit — the old placeholder is discarded and the version is bumped.
 
-> **No rollback**: Re-enrollment permanently replaces the old embedding. Previous scan records retain their original `face_match_score` values.
+> **No rollback**: Re-enrollment replaces the stored blob. Previous attendance
+> records are unaffected (and contain no embedding comparison).
 
 ---
 
 ## 7. Privacy Script for Students
 
-Use this script when explaining face enrollment to students:
+Use this script when explaining enrollment to students:
 
 ---
 
-> **What we collect**: Three photos of your face (front, left, right) during enrollment. These are converted into a mathematical representation (a face embedding) and stored encrypted in our database.
+> **What we collect**: Three photos of your face (front, left, right) are
+> uploaded for enrollment.
 >
-> **What we do with it**: During attendance scanning, the system compares your live face against this stored representation to verify your identity. This prevents someone else from scanning on your behalf.
+> **What we store today**: The current build does **not** generate or keep a
+> real face embedding. It records that enrollment happened, stores a
+> zero-filled placeholder in the database, and keeps the enrollment date and
+> version. The uploaded photos are not retained by the application.
+>
+> **What we do with it**: The scan does **not** compare your face with an
+> enrolled photo. Attendance uses a liveness challenge (blink and head turns)
+> and GPS. Face matching is planned but not implemented.
 >
 > **What we do NOT do**:
 >
-> - We do **not** store the raw photos after enrollment — only the mathematical embedding
+> - We do **not** store the raw photos after the upload request completes
+> - We do **not** compare your live face to an enrolled embedding in this build
 > - We do **not** share your face data with any third party
-> - We do **not** use your face data for any purpose other than attendance verification
 > - We do **not** track your face outside of scan sessions
 >
 > **Your rights**:
 >
 > - You may request re-enrollment at any time (contact admin)
-> - Your embedding is removed if you are deactivated or archived
-> - All data is encrypted at rest and in transit
+> - Your enrollment is cleared if your account is archived (not merely toggled inactive)
+> - The device cache is encrypted in transit and at rest in IndexedDB
 >
-> **Storage**: Embeddings are stored encrypted in `students.face_embedding` (BYTEA). Your device caches a copy encrypted in IndexedDB for offline verification. Both copies are encrypted with industry-standard AES-256-GCM.
+> **Storage**: The server holds a zero-filled placeholder in
+> `students.face_embedding` (plaintext today). Your browser may cache a pulled
+> copy encrypted with AES-GCM, but it is not used for matching.
 >
-> **Questions?** Contact your administrator or refer to the [Face Enrollment Architecture](../architecture/face-enrollment.md) for technical details.
+> **Questions?** Contact your administrator or refer to the
+> [Face Enrollment Architecture](../architecture/face-enrollment.md) for
+> technical details.
 
 ---
 
@@ -228,12 +242,12 @@ Use this script when explaining face enrollment to students:
 
 | Issue                                    | Cause                                                | Solution                                              |
 | ---------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
-| Camera not working                       | Browser permissions                                  | Grant camera permission; check browser settings       |
-| "Upload failed"                          | Network error; file too large                        | Retry; ensure stable connection; check file size      |
-| "Student not found"                      | Wrong student ID                                     | Verify student ID; check student is active            |
-| Embedding not updating on student device | Version mismatch; student hasn't logged in           | Ask student to log out and back in; check version     |
-| Borderline score (0.65–0.70) in scan     | Embedding may need refresh                           | Re-enroll the student with updated photos             |
-| Sibling confusion                        | Known limitation ([D31](../project/decision-log.md)) | Not currently solved; acknowledge as known limitation |
+| "Upload failed"                          | Network error; file too large; wrong content type    | Retry; check file size and image type                 |
+| "Student not found"                      | Wrong student ID; archived student                   | Verify student ID; check the student is active        |
+| Enrollment status not visible            | Roster not refreshed                                 | Refresh the students page                             |
+| Student device has an old version        | Version mismatch; student has not logged in          | Ask the student to log out and back in                |
+| Faculty expects a face match             | **Not implemented** in this build                    | Explain the gap; do not promise biometric matching    |
+| "Face not detected" / "too many faces"   | Those errors are never raised by the current server  | Check the upload validation instead                   |
 
 ---
 
@@ -241,7 +255,7 @@ Use this script when explaining face enrollment to students:
 
 | Task                         | Route / Endpoint                                                   |
 | ---------------------------- | ------------------------------------------------------------------ |
-| Admin: Enroll Face           | `/admin/face-enrollment/{student_id}` (UI)                         |
+| Admin: Enroll Face           | `/admin/students` → **Enroll face** modal (no dedicated page)      |
 | API: Upload 3 photos         | `POST /admin/face-enrollment/{student_id}` (multipart)             |
 | API: Check enrollment status | `GET /admin/face-enrollment/{student_id}`                          |
 | Student: Pull embedding      | `GET /student/me/face-embedding` (version-gated)                   |
@@ -249,5 +263,6 @@ Use this script when explaining face enrollment to students:
 
 ---
 
-_For the full technical specification of the embedding format, verification thresholds, and evidence bundle schema, see the [Face Enrollment Architecture](../architecture/face-enrollment.md) and [Security Model](../architecture/security-model.md)._
-
+_For the placeholder format, current limitations, and the unimplemented
+matching pipeline, see the [Face Enrollment Architecture](../architecture/face-enrollment.md)
+and [Security Model](../architecture/security-model.md)._

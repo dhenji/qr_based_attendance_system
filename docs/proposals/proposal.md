@@ -1,5 +1,10 @@
 # Project Proposal: QR-Code Based Offline-Capable Attendance System with Anti-Spoofing
 
+> **Historical document (2026-10-24):** this proposal describes the original
+> student-ID QR design. The shipped system resolves identity from the signed-in
+> account and has no student-ID QR scan
+> ([ADR-083](../project/decision-log.md)); face matching is not implemented.
+>
 > **Note:** Schema design has evolved since this proposal was submitted. See `docs/architecture/migration-strategy.md` for the current target schema (a `course_offerings` table now decouples courses from program/year/schedule, and professor assignments/enrollments reference offerings).
 
 ---

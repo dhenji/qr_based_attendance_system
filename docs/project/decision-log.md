@@ -140,6 +140,9 @@
 - **Context:** Current enum (`valid`, `pending`, `rejected`) is insufficient for compliance reporting and excuse workflow.
 - **Consequences:** Migration must map existing values: `valid → present`, keep `pending`, `rejected → rejected` (with reason). New `ValidationStatus` enum in code.
 
+> **Implementation note:** the duplicate-scan API error is `duplicate_scan`;
+> the `duplicate` label above predates the exception code.
+
 ### ADR-016: Offline Scans — Server Validates `scanned_at`
 
 - **Decision (D16):** Offline scans are stored with device `scanned_at`; on sync the server validates `scanned_at` against the session window. Expired-window offline scans → `rejected` with reason `session_expired`.
@@ -171,6 +174,10 @@
 - **Status:** Accepted
 - **Context:** Simplifies ID card printing; security — course context bound to active session.
 - **Consequences:** QR payload is just `student_id` string. Scan flow: verify session first, then scan ID QR.
+
+> **Superseded in practice by ADR-083 (2026-10-24):** the ID-card QR is not
+> scanned. Identity comes from the authenticated account, and `student_number`
+> is a comparison-only field.
 
 ---
 
@@ -256,6 +263,12 @@
 - **Context:** Security requires ordered verification. Each step gates the next.
 - **Consequences:** Student app has 5 sub-screens (`/student/scan/step/[1-5]`). Offline mode queues at step 5.
 
+> **Amended by ADR-083 (2026-10-24):** Step 2 is a typed/prefilled student-ID
+> confirmation resolved from the authenticated account, not a student-ID QR
+> scan. The scan page's only QR step reads the session code. The
+> `/student/scan/step/[1-5]` sub-screens were never implemented; the current
+> page is a single `/student/scan` state machine.
+
 ### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
 
 - **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 128-d embeddings (face-api.js-compatible), stores encrypted (`students.face_embedding BYTEA`) + `face_enrolled_at` + `face_embedding_version`.
@@ -279,6 +292,11 @@
 - **Status:** Accepted
 - **Context:** Embedding never leaves device in offline mode. Server re-verifies on sync? No — server trusts client score but validates liveness evidence.
 - **Consequences:** Offline queue item includes `face_match_score`, `liveness_evidence`. Server validates evidence, not embedding.
+
+> **Implementation status (ADR-068, 2026-10-24):** D28's real embedding
+> generation/encryption and D30's offline comparison are **not implemented**.
+> Enrollment stores a zero-filled placeholder, the scan never reads it, and
+> `face_match_score` is client-supplied (the shipped client sends `1.0`).
 
 ### ADR-031: Fixed Liveness Sequence — Blink → Left → Right
 
@@ -447,6 +465,10 @@
 - **Status:** Accepted
 - **Context:** Threshold tuned to reduce false rejects; session lifecycle state is fully derivable from `sessions.expires_at`, so persisting a separate status column would risk drift.
 - **Consequences:** `face_match_score >= 0.70` passes (below → `face_mismatch` rejection); `FACE_REVIEW_BAND_LOW` (0.65) still flags borderline scans for manual review. `sessions.status` (`active`/`closed`) is derived during serialization.
+
+> **Implementation note (ADR-068):** this threshold bands the client-submitted
+> `face_match_score`. No embedding comparison exists, and the shipped client
+> always sends `1.0`.
 
 ### ADR-049: Session expires_at Computed in Application Layer
 
@@ -1510,14 +1532,15 @@
   cheapest real improvement if this gap is ever taken seriously.
   (3) *Delete the biometric steps.* Rejected: they raise the cost of the casual
   attack, which is the attack that actually happens.
-- **Consequences:** Steps 1-3 of the scan (session code, student-ID QR, GPS
-  geofence) are genuinely server-enforced, and T3/T5/T8 remain accurate because
-  those inputs *are* re-validated on sync. Steps 4-5 are an integrity signal
-  recorded in the audit trail, not an access control. Anyone reading
-  `attendance_records.face_match_score` as a measurement should read
-  `security-model.md` *Client-Asserted Biometrics* first. The same placeholder
-  is why `api-contracts.md` records `no_face_detected`, `multiple_faces`,
-  `quality_too_low` and `invalid_image` as documented-but-never-raised.
+- **Consequences:** Steps 1-3 of the scan (session code, authenticated student
+  identity + ID confirmation, GPS geofence) are genuinely server-enforced, and
+  T3/T5/T8 remain accurate because those inputs *are* re-validated on sync.
+  Steps 4-5 are an integrity signal recorded in the audit trail, not an access
+  control. Anyone reading `attendance_records.face_match_score` as a measurement
+  should read `security-model.md` *Client-Asserted Biometrics* first. The same
+  placeholder is why `api-contracts.md` records `no_face_detected`,
+  `multiple_faces`, `quality_too_low` and `invalid_image` as
+  documented-but-never-raised.
 
 ### ADR-069: CI Runs Three Gates, and the Migration Check Is the One That Matters
 
@@ -2135,3 +2158,39 @@
   tests in `tests/features/course/test_weekly_hours.py`,
   `tests/features/session/test_schedule_requirement.py`, and
   `tests/features/professor/test_schedule_flag.py`.
+
+### ADR-083: Student Identity from the Authenticated Account
+
+- **Decision (D83):** Student-facing attendance endpoints resolve the
+  `Student` through `users.id → students.user_id`; the student never comes
+  from `payload.student_number` or a scanned ID-card QR. `student_number`
+  remains in the `ScanRequest`/`PrecheckRequest` contract as a confirmation
+  check only: it is compared case-insensitively to the resolved row, and a
+  mismatch returns **403 `student_number_mismatch`** without writing an
+  attendance row. D27 step 2 is therefore a typed/prefilled confirmation
+  gate, not a QR scan. The only QR step in the SPA reads a session code.
+- **Date:** 2026-10-24
+- **Status:** Accepted
+- **Context:** D27/D19 specified a student-ID QR scan, but the SPA never
+  implemented one — it used the signed-in profile's number. Until
+  `f417e6e` (2026-09-30) the backend selected the student by
+  `payload.student_number`, which allowed any authenticated student to
+  submit as somebody else; that commit switched the lookup to
+  `Student.user_id` and added the 403 mismatch guard. `5a43ce1`
+  (2026-10-03) added the explicit precheck ID step. The docs had continued
+  to describe the proposal-era QR flow.
+- **Alternatives considered:**
+  (1) *Keep a student-ID QR scan.* Rejected: it adds no identity assurance
+  over the JWT, can be photographed or shared, and the client already knows
+  the authenticated student.
+  (2) *Remove `student_number` from the request schema.* Rejected for now:
+  it is a published contract field and the confirmation gate gives a clear
+  early error; removal would be a separate API break.
+  (3) *Taken:* token-derived identity + comparison-only number.
+- **Consequences:** `student_number` must never be used to select a student
+  in new code; any new student-facing endpoint taking an ID follows the same
+  rule. Regression guards:
+  `tests/features/attendance/test_routes_http.py` (precheck/scan as another
+  student) and `test_scan_validation.py` (service-level mismatch). The
+  session QR payload remains session discovery only. Face matching is still
+  client-asserted (ADR-068) and is not changed by this decision.

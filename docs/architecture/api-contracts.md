@@ -82,7 +82,11 @@ DTO field names below are canonical and exotic DB column names are mapped where 
 
 ## Session QR Payload (D18)
 
-Scanned by students. Server generates HMAC-signed JSON.
+Returned by the session-open API. The payload is JSON containing the
+HMAC-derived session code; it is **not signed**. The current professor UI
+displays only the code (no QR image), and the scan page posts whatever string
+it decodes as `code` — so only a QR encoding the bare session code can be
+verified today.
 
 ```json
 {
@@ -104,7 +108,7 @@ Scanned by students. Server generates HMAC-signed JSON.
 | `pw`       | int    | Present window minutes                 |
 | `lw`       | int    | Late window minutes                    |
 
-**Note:** The HMAC payload uses compact keys. On verify, they map to DB columns:
+**Note:** The payload uses compact keys. On verify, they map to DB columns:
 `code` → `sessions.session_code`, `offering` → `sessions.offering_id`,
 `radius` → `sessions.classroom_radius_meters`, `pw` → `present_window_minutes`,
 `lw` → `late_window_minutes`. The `radius:30` sample above is illustrative —
@@ -476,13 +480,13 @@ filters on professor screens and the active-session "Enrolled" count).
 
 #### `POST /admin/face-enrollment/{student_id}`
 
-Upload 3 photos (front, left, right) for face embedding generation.
+Upload 3 photos (front, left, right). The server validates the uploads and stores a zero-filled **placeholder** embedding; real vector generation is not implemented.
 
 |                  |                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | **Request**      | `multipart/form-data: front=Image, left=Image, right=Image`                                 |
 | **Response 201** | `{ student_id, face_enrolled_at, face_embedding_version: int }`                             |
-| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 400 `multiple_faces` · 422 `quality_too_low` · 404 `student_not_found` |
+| **Errors**       | 400 `invalid_image` · 404 `student_not_found`; `no_face_detected` / `multiple_faces` / `quality_too_low` are documented but never raised |
 
 #### `GET /admin/face-enrollment/{student_id}`
 
@@ -1200,7 +1204,7 @@ Change password.
 
 #### `POST /student/sessions/verify-code`
 
-Verify a typed session code or scan session QR.
+Verify a typed session code. The scan page also posts raw decoded QR text as `code`; the JSON `qr_payload` is not parsed.
 
 |                  |                                                                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1223,14 +1227,15 @@ Submit attendance scan (online or queued for offline sync).
 | **Request**      | `{ session_id: int, student_number: string, gps: { lat: number, lng: number, accuracy: number }, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, face_match_score: number, scanned_at: ISO-8601 }` |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "rejected", scanned_at, expires_at }` |
 | **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
-| **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): `"qr_camera"` when submitted from a QR scan of the session/student-ID QR, `"manual_code"` when the session code was typed via verify-code. |
+| **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
 
 #### `POST /student/attendance/precheck`
 
-Scan Step 2 gate (wireframes.md 2.2b) — resolves the student and checks enrollment +
-duplicate BEFORE GPS/face are captured. **Never writes attendance.**
+Student-ID confirmation gate (wireframes.md 2.2b) — resolves the student from
+the authenticated account and checks enrollment + duplicate BEFORE GPS/face are
+captured. **Never writes attendance.**
 
 |                  |                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------- |
@@ -1314,7 +1319,7 @@ Pull face embedding (version-gated, D29).
 |                  |                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?current_version=0`                                                                                               |
-| **Response 200** | `{ version: int, embedding: string (base64-encoded encrypted blob) }` — only if `current_version < server_version` |
+| **Response 200** | `{ version: int, embedding: string (base64-encoded placeholder blob; not encrypted) }` — only if `current_version < server_version` |
 | **Response 204** | No content (version matches, no update needed)                                                                     |
 
 ---

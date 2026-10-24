@@ -121,7 +121,7 @@ attendance-system/
 │   │   ├── frontend-architecture.md  # Production SvelteKit structure
 │   │   ├── project-structure.md      # This file
 │   │   ├── api-contracts.md          # Endpoint schemas & conventions
-│   │   ├── offline-first.md          # IndexedDB, sync algorithm, embedding pull
+│   │   ├── offline-first.md          # IndexedDB, sync algorithm, embedding pull (stub; no comparison)
 │   │   ├── security-model.md         # Threat model & mitigations
 │   │   ├── data-flow.md              # Mermaid sequence diagrams
 │   │   └── migration-strategy.md     # Alembic migration plan
@@ -165,20 +165,20 @@ attendance-system/
 | `frontend/src/lib/features/sync/service.ts` (+ planned `db.ts`/`engine.ts`; service-worker deferred) | Offline-First Architecture                                                                                             |
 | `backend/src/features/session/` + `backend/src/core/security.py`                              | HMAC-based Session Auth                                                                                                     |
 | `frontend/src/lib/shared/utils/geo.ts` + `backend/src/features/attendance/` (service.py planned) | Geolocation Proximity (Haversine)                                                                                         |
-| `frontend/src/lib/features/liveness/components/QRScanner.svelte`                              | QR Code Detection (student-ID & session codes)                                                                              |
+| `frontend/src/lib/features/liveness/components/QRScanner.svelte`                              | QR Code Detection (session code only; no student-ID QR)                                                                     |
 | `frontend/src/lib/features/liveness/` (components/ + service.ts)                              | Liveness Protocol: challenge-response, nonce anti-replay, evidence bundle (`gps_lat`/`gps_lng`/`liveness_evidence`), risk fusion |
 | `backend/src/features/analytics/` (model.py; aggregation service + nightly `tasks.py` planned) | Data Mining: descriptive/diagnostic aggregation, heuristic at-risk scoring, prescriptive rules, nightly batch scheduling    |
 | `backend/src/features/*/model.py`                                                             | Database Design & Normalization (3NF)                                                                                       |
 | `frontend/src/lib/features/sync/service.ts` + `backend/src/features/sync/` (router/service planned) | Offline Sync / Eventual Consistency                                                                                    |
 | `backend/src/features/program/` + `backend/src/features/course/`                              | Academic Hierarchy: Program → Year Level → CourseOffering (courses = templates)                                             |
-| `backend/src/features/student/` (face columns; admin face-enrollment service/router planned)  | Biometrics: face embedding generation (pretrained ResNet), template protection (AES-GCM encryption), versioned distribution |
+| `backend/src/features/student/` + `backend/src/features/face_enrollment/`                      | Biometrics: enrollment service/router (placeholder embedding; real generation/encryption not implemented)                    |
 | `backend/src/features/excuse/` (model.py; service/router planned)                             | State Machine: excuse request lifecycle (pending→approved/rejected), permission matrix, audit trail                         |
 | `backend/src/features/system/`                                                                | DevOps: backup pipeline (pg_dump→encrypt→store→prune), academic-structure CRUD, system settings                             |
 | `frontend/src/lib/features/analytics/components/` (planned)                                   | Data Visualization: Chart.js wrapper for analytics dashboards                                                               |
 | `frontend/src/lib/features/session/components/calendar/` (planned)                            | Calendar UI: month/week grid views, day detail sheets                                                                       |
-| `frontend/src/routes/student/scan/` + `frontend/src/lib/features/{student,liveness}/components/` | Sequential UI Pattern: guided 5-step scan flow with state machine                                                          |
+| `frontend/src/routes/student/scan/` + `frontend/src/lib/features/{student,liveness}/components/` | Sequential UI Pattern: guided scan flow (entry→ID→QR→liveness) with state machine                                          |
 | `frontend/src/lib/features/excuse/components/` (planned)                                      | Workflow UI: excuse modals, request forms, review lists                                                                     |
-| `frontend/src/lib/features/student/components/FaceEnrollmentModal.svelte` (planned)          | Capture UI: 3-photo quality gates, live preview                                                                             |
+| `frontend/src/routes/admin/students/+page.svelte` (inline modal)                              | Enrollment UI: 3-photo file upload (no quality gates; placeholder embedding)                                                |
 
 ---
 

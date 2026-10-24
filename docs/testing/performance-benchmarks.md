@@ -26,11 +26,11 @@ latency measured from client action to next-screen-ready.
 | Step                       | Description                                     | Target (p50) | Target (p95) | Target (p99) | Measurement Method                                                                                            |
 | -------------------------- | ----------------------------------------------- | ------------ | ------------ | ------------ | ------------------------------------------------------------------------------------------------------------- |
 | 1a                         | Session code verify (manual entry)              | <200ms       | <500ms       | <800ms       | Client performance.mark/measure; API `POST /student/sessions/verify-code` duration logged server-side         |
-| 1b                         | Session QR scan → decode → verify               | <300ms       | <600ms       | <1000ms      | Client-side camera decode time + API verify-code latency                                                      |
-| 2                          | Student-ID QR scan → resolve → fetch record     | <300ms       | <600ms       | <1000ms      | API `POST /student/attendance/scan` (student_id resolution + enrollment check + duplicate check)              |
+| 1b                         | Session QR scan → decode → verify (if a QR is provided) | <300ms | <600ms | <1000ms | Client-side camera decode time + API verify-code latency; the professor UI does not currently render a QR |
+| 2                          | Student-number confirmation → precheck         | <300ms       | <600ms       | <1000ms      | API `POST /student/attendance/precheck` (token-derived student + number comparison + enrollment + duplicate)  |
 | 3                          | GPS geofence validation                         | <50ms        | <100ms       | <150ms       | Haversine computation is local; GPS position fix time excluded (hardware-dependent)                           |
 | 4a                         | Face liveness challenge (client-side MediaPipe) | <5000ms      | <8000ms      | <12000ms     | Client-side: start challenge to all 3 steps confirmed. Includes blink detection + turn detection              |
-| 4b                         | Face embedding comparison (server)              | <100ms       | <200ms       | <300ms       | Cosine similarity computation; embedding fetched from cache/DB                                                |
+| 4b                         | Face-score band check (server)                  | <10ms        | <25ms        | <50ms        | Threshold comparison on the client-submitted score; **no embedding comparison** exists                        |
 | 5                          | Attendance record write + response              | <100ms       | <250ms       | <500ms       | DB insert + response delivery                                                                                 |
 | **Full scan (happy path)** | **Steps 1a→5 end-to-end**                       | **<6s**      | **<10s**     | **<15s**     | **Client-to-client measurement (excludes GPS fix time and liveness challenge time which are user-dependent)** |
 
@@ -180,7 +180,7 @@ General API endpoint performance under normal load (not peak).
 | Auth (login, OTP)                  | <300ms       | <1s          | Includes Argon2id verification |
 | CRUD (programs, courses, students) | <100ms       | <300ms       | Standard ORM operations        |
 | Session creation                   | <200ms       | <500ms       | Includes HMAC generation       |
-| Attendance submit (online)         | <300ms       | <800ms       | Includes face score validation |
+| Attendance submit (online)         | <300ms       | <800ms       | Includes liveness grading + score band |
 | Attendance submit (offline sync)   | <200ms       | <500ms       | Per-item in batch              |
 | Analytics queries                  | <500ms       | <2s          | Aggregation over filtered data |
 | Report generation (CSV/PDF)        | <2s          | <5s          | Depends on data volume         |
@@ -197,7 +197,7 @@ General API endpoint performance under normal load (not peak).
 | Time to Interactive (TTI)            | <3.0s  | Lighthouse CI                                           |
 | Cumulative Layout Shift (CLS)        | <0.1   | Lighthouse CI                                           |
 | Camera initialization (scanner page) | <2s    | `performance.mark('camera-start')` to first frame       |
-| IndexedDB read (cached embedding)    | <50ms  | `performance.measure()` around DB transaction           |
+| IndexedDB read (session config/queue) | <50ms | `performance.measure()` around DB transaction          |
 | Chart.js render (analytics page)     | <500ms | `performance.measure()` from data fetch to canvas paint |
 
 ---
@@ -266,8 +266,8 @@ editing the defaults; a run measured on slower hardware then still gates.
 ### Environment Variables for Benchmarking
 
 ```bash
-# Disable face verification in benchmarks (isolates API performance)
-FACE_MATCH_THRESHOLD=0.0          # accept all scores in bench mode
+# Skip score-band and liveness checks in benchmarks (isolates API performance)
+FACE_MATCH_THRESHOLD=0.0          # accept all submitted scores in bench mode
 BENCHMARK_MODE=true               # skip geofence, liveness checks
 
 # Risk batch tuning

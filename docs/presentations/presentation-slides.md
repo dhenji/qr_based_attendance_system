@@ -1,5 +1,10 @@
 # QR-Code Based Offline-Capable Attendance System with Anti-Spoofing
 
+> **Status (2026-10-24):** this is the original proposal deck. The shipped flow
+> derives student identity from the signed-in account (no student-ID QR), and
+> face matching against an enrolled embedding is not implemented. The slides
+> below have been corrected where they described those as current behavior.
+
 **Presenters:** Allan Acosta · Kharl Bugarin · Luigi Navero
 
 **Course & Section:** `BSCS 3`
@@ -12,7 +17,7 @@
 
 **What is this project?**
 
-An attendance system that uses the QR codes already printed on student ID cards. Instead of manual roll call, students scan their ID card QR using their phone — attendance is recorded instantly.
+An attendance system that replaces manual roll call with a professor-issued session code, a signed-in student account, GPS geofencing, and a face-liveness check. Students confirm their student ID from their profile — no ID-card QR scan is required.
 
 **Why is it important?**
 
@@ -33,7 +38,7 @@ An attendance system that uses the QR codes already printed on student ID cards.
 **The Real-World Problem**
 
 - **Slow process** — Calling names one by one takes too long
-- **Fraud** — Students sign for absent classmates or share QR photos
+- **Fraud** — Students sign for absent classmates or share session codes
 - **Unreliable internet** — Campus connectivity is not always stable
 - **Lost records** — Paper sheets get misplaced
 
@@ -53,22 +58,21 @@ An attendance system that uses the QR codes already printed on student ID cards.
 
 A Progressive Web Application (PWA) that:
 
-1. Scans the QR code from existing campus ID cards
-2. Extracts the student ID number embedded in the QR
+1. Verifies the session code shown by the professor
+2. Resolves the student from their signed-in account and confirms the student number
 3. Validates attendance through **multi-layer anti-spoofing**
-4. Works **offline** by storing records locally and auto-syncing later
+4. Works **offline** by storing evidence locally and auto-syncing later
 5. Provides **dashboards and reports** for professors
 
 **Main Features**
 
 | Feature            | Purpose                                                             |
 | ------------------ | ------------------------------------------------------------------- |
-| QR Scanning        | Decode student ID from ID card QR                                   |
-| Session Codes      | Professor shares a time-limited code                                |
+| Session Entry      | Professor shares a time-limited code; a QR payload exists but is not rendered yet |
+| Student ID Check   | Prefilled number confirmed against the signed-in account            |
 | GPS Verification   | Ensures student is in the classroom                                 |
-| Liveness Detection | Distinguishes physical card from a photo                            |
-| Face Liveness      | Blink/head-turn challenges block photo, replay & distortion attacks |
-| Offline Mode       | Stores attendance when no internet                                  |
+| Face Liveness      | Blink/head-turn evidence raises the cost of photo/replay attacks; face matching is not implemented |
+| Offline Mode       | Stores attendance evidence when no internet                         |
 | Dashboard          | Real-time attendance view & reports                                 |
 | Analytics          | At-risk forecasting + recommendations                               |
 
@@ -85,7 +89,7 @@ A Progressive Web Application (PWA) that:
 | User               | Role                                                           |
 | ------------------ | -------------------------------------------------------------- |
 | **Professors**     | Open sessions, view real-time attendance, generate reports     |
-| **Students**       | Scan own ID card QR, mark attendance via a single 5-step flow, no app needed |
+| **Students**       | Sign in, enter the session code, confirm student number, complete liveness — no app install needed |
 | **Administrators** | Import rosters from CSV, manage courses, export reports        |
 
 ---
@@ -103,29 +107,27 @@ sequenceDiagram
     Professor->>Server: Login
     Professor->>Server: Select course
     Professor->>Server: Click "Open Session"
-    Server->>Server: Generate HMAC-signed code
+    Server->>Server: Generate HMAC-derived code
     Server-->>Professor: Session code
     Professor-->>Student: Code on projector
 
-Student->>Student: Enter session code
-    Student->>Student: Scan QR on ID card
+    Student->>Student: Enter session code
+    Student->>Student: Confirm student number (prefilled from account)
+    Student->>Student: Complete face-liveness challenge
     Student->>Student: Capture GPS
-    Student->>Student: Face liveness challenge (fixed blink-left-right)
-    Student->>Student: Submit result (scan status: qr_ok / out-of-range / liveness_ok)
+    Student->>Student: Submit evidence (placeholder face score 1.0)
 
-    Server->>Server: 1. Session HMAC verification (invalid / session_expired)
-    Server->>Server: 2. Duplicate check (qr_ok: auto-marked)
-    Server->>Server: 3. GPS geofencing (Haversine → out-of-range: flagged)
-    Server->>Server: 4. Face liveness + face match (liveness_failed / <0.65: rejected)
-    Server->>Server: 5. Enrollment check (not_enrolled)
+    Server->>Server: 1. Verify session code + expiry
+    Server->>Server: 2. Resolve student from token; compare student_number
+    Server->>Server: 3. Check enrollment + duplicate scan
+    Server->>Server: 4. Validate GPS geofence (Haversine)
+    Server->>Server: 5. Grade liveness evidence + score band (no embedding match)
 
     alt All checks pass
         Server-->>Student: ✅ Attendance recorded
-        Server-->>Student: Professor sees student present
-    else Face match in review band (0.65–0.70)
-        Server-->>Student: ⏳ Flagged for manual review
+        Server-->>Professor: Student appears present
     else Any check fails
-        Server-->>Student: ❌ Attendance rejected
+        Server-->>Student: ❌ Attendance rejected with reason
     end
 ```
 
@@ -133,16 +135,15 @@ Student->>Student: Enter session code
 
 ```mermaid
 flowchart TD
-    A[Internet Down] --> B[Student scans QR + answers face challenge]
+    A[Internet Down] --> B[Student completes liveness + GPS]
     B --> C[Server unreachable]
     C --> D[Evidence bundle saved to local IndexedDB]
-    D --> E[Status: Pending Liveness]
+    D --> E[Status: Pending sync]
     E --> F[Internet Restored]
-    F --> G[Service Worker detects connectivity]
-    G --> H[Auto-sync pending evidence bundles]
-    H --> I{Server re-validates + nonce anti-replay}
+    F --> G[App detects connectivity]
+    G --> H[Auto-sync queued evidence]
+    H --> I{Server re-validates scanned_at, geofence, liveness}
     I -->|Valid| J[Attendance confirmed]
-    I -->|Borderline| K[Flagged for review]
     I -->|Invalid| L[Rejected + student notified]
 ```
 
@@ -150,26 +151,26 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A[Student submits<br>evidence bundle] --> B{Session Code<br>HMAC-SHA256}
-    B -->|Valid| C{GPS Geofencing<br>Haversine}
+    A[Student submits<br>evidence bundle] --> B{Session Code<br>HMAC-derived}
+    B -->|Valid| C{Student Identity<br>Token + number}
     B -->|Invalid| X[Rejected ❌]
-    C -->|Within range| E{Face Liveness<br>Challenge-response}
-    C -->|Outside range| X
-    E -->|Challenges passed| F{Nonce Anti-Replay<br>+ Uniqueness}
-    E -->|Photo / replay / print| X
-    F -->|Fresh + first scan| G{Enrollment<br>Check}
-    F -->|Replay or duplicate| X
-    G -->|Enrolled| H[✅ Attendance Recorded]
-    G -->|Not enrolled| X
+    C -->|Match| D{GPS Geofencing<br>Haversine}
+    C -->|Mismatch| X
+    D -->|Within range| E{Face Liveness<br>Challenge-response}
+    D -->|Outside range| X
+    E -->|Challenges passed| F{Uniqueness<br>+ Enrollment}
+    E -->|Photo / failed challenge| X
+    F -->|First scan + enrolled| H[✅ Attendance Recorded]
+    F -->|Duplicate / not enrolled| X
 ```
 
 ### Input → Process → Output
 
 | Input               | Process                    | Output                       |
 | ------------------- | -------------------------- | ---------------------------- |
-| QR code scan        | Decode student ID from QR  | Student identified           |
+| Student number      | Compared to authenticated account | Identity confirmed     |
 | GPS coordinates     | Haversine distance formula | Location verified ✅/❌      |
-| Session code        | HMAC-SHA256 verification   | Session valid ✅/❌          |
+| Session code        | HMAC verification          | Session valid ✅/❌          |
 | All inputs combined | Multi-layer validation     | Attendance recorded/rejected |
 
 ---
@@ -180,14 +181,14 @@ flowchart LR
 
 | Layer          | Borrowed model            | Our contribution                                                                                           |
 | -------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| QR decoding    | `html5-qrcode`            | Session binding + one-scan-per-session duplicate rejection (D15 `duplicate`)       |
-| Face liveness  | MediaPipe landmarks       | Fixed challenge sequence (blink → left → right), EAR + head-pose scoring (0.65–0.70 review band)          |
-| Offline safety | —                         | **Offline evidence protocol**: HMAC evidence bundles, nonce anti-replay, deferred re-validation            |
-| Decision logic | —                         | **Per-scan checks** (HMAC, dupe, geofence, face, enrollment) + nightly batch risk scoring                  |
+| QR decoding    | `html5-qrcode`            | Session binding + one-scan-per-session duplicate rejection (D15 `duplicate_scan`)  |
+| Face liveness  | MediaPipe landmarks       | Fixed challenge sequence (blink → left → right); EAR + head-pose evidence is re-checked server-side. No embedding comparison. |
+| Offline safety | —                         | **Offline evidence protocol**: IndexedDB queue, idempotency keys, deferred server re-validation            |
+| Decision logic | —                         | **Per-scan checks** (session, identity, duplicate, geofence, liveness, enrollment) + nightly batch risk scoring |
 | Risk analytics | — (heuristic rule engine) | At-risk detection (absence rate, streak, sync lag, trend) adapted to sparse, sync-gapped data              |
-| Verification   | —                         | Empirical PAD evaluation: self-built attack corpus, APCER/BPCER metrics                                    |
+| Verification   | —                         | Empirical PAD evaluation (proposed): self-built attack corpus, APCER/BPCER metrics                         |
 
-**Attack parameters we defend against:** image/photo · screen recorder · video replay · distortion · offline replay · identical twins (documented limitation, mitigated via cross-modal fusion)
+**Attack parameters we defend against:** casual photo/replay · geofence bypass · offline replay · duplicate submission. Face matching and identical-twin detection are **not implemented**.
 
 **Data analysis levels:** descriptive (what happened) · diagnostic (why) · predictive (what's next) · prescriptive (what to do)
 
@@ -200,24 +201,24 @@ flowchart LR
 This project proposes a QR-based attendance system that:
 
 - Automates the entire attendance process
-- Prevents fraud through session codes, GPS, and face liveness
+- Prevents fraud through signed-in identity, session codes, GPS, and face liveness
 - Extends anti-spoofing to offline environments via deferred evidence validation
 - Provides predictive-prescriptive attendance analytics
 - Works with or without internet
-- Uses existing student ID cards — no new hardware needed
+- Uses existing phones and browsers — no new hardware needed
 
 **Expected Benefits**
 
 | Benefit     | Impact                                  |
 | ----------- | --------------------------------------- |
 | Speed       | Scan-to-confirm: p50 < 6s, p95 < 8s (target per benchmarking) |
-| Accuracy    | Blocks QR/photo/replay/geo-bypass; identical twins remain a documented limitation |
+| Accuracy    | Blocks casual photo/replay and geofence bypass; face matching and identical-twin detection are not implemented |
 | Convenience | No app to install, works in any browser |
 | Reliability | Works even when internet is down        |
 
 **Why it should be developed**
 
-Manual attendance is a daily problem in every classroom. This system solves it using resources already available (student ID QR codes) with modern anti-spoofing techniques — saving time, preventing fraud, and providing reliable data for the entire institution.
+Manual attendance is a daily problem in every classroom. This system solves it using resources already available (students' phones and browsers) with modern anti-spoofing techniques — saving time, preventing fraud, and providing reliable data for the entire institution.
 
 ---
 

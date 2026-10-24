@@ -96,7 +96,7 @@ GROUP BY day ORDER BY day;
 | --------- | -------- | ------------------------------------------------------------------------- |
 | ≥ 95%     | Healthy  | —                                                                         |
 | 85–94%    | Warning  | Check for common rejection reasons                                        |
-| < 85%     | Critical | Investigate: geofence too tight? liveness failures? face matching issues? |
+| < 85%     | Critical | Investigate: geofence too tight? liveness failures? sync backlog?        |
 
 ### 2. Sync Backlog Depth
 

@@ -1,5 +1,11 @@
 # Models Used
 
+> **Implementation status (2026-10-24):** the only shipped biometric step is
+> client-side MediaPipe liveness with server-side evidence grading. The
+> enrolled-face matching and embedding-generation rows below are **design
+> only** — real vectors are not generated, enrollment stores a placeholder, and
+> no scan compares an embedding. See ADR-068 and ADR-083.
+
 This document catalogs every model the system relies on. Honest summary: **zero trained models are introduced for anti-spoofing** — the security core is pretrained landmark tracking plus geometric/statistical heuristics that run fully offline and produce auditable evidence. **Zero trained models are used for analytics in the MVP** — at-risk prediction starts as heuristic thresholds (env-configurable); ML (logistic regression) is a planned upgrade using the identical feature vector. The face embedding pipeline uses pretrained models exclusively; we train nothing.
 
 | Component                     | Model / Library                                          | Type                                                              | Where it runs                  | Trained by us?      |

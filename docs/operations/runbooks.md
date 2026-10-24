@@ -190,13 +190,12 @@
 
 ## Runbook 4: Re-enroll Failed Faces
 
-**Purpose:** Re-capture face embeddings for a student whose enrollment failed or whose embeddings are corrupted.
+**Purpose:** Replace a student's face-enrollment record when the placeholder needs to be reset (no real embeddings are generated in this build).
 
 ### Preconditions
 
-- Admin access to the face enrollment section
-- Student physically present (for 3-photo capture)
-- Camera functional on admin device
+- Admin access to Student Management (`/admin/students`)
+- Three image files (front, left, right) available for upload
 - Student not archived (`is_active = true`)
 
 ### Steps
@@ -211,32 +210,33 @@
    WHERE s.student_id = '24-2111';
    ```
 
-2. **Navigate to Face Enrollment** in the admin portal:
-   - Route: `/admin/face-enrollment`
-   - Search for the student by student number
+2. **Open the enrollment modal** in the admin portal:
+   - Route: `/admin/students` → **[Enroll face]** / **[Re-enroll face]**
+   - There is no dedicated `/admin/face-enrollment/{id}` page
 
-3. **Capture 3 photos** (front, left, right):
-   - Ensure good lighting, single face in frame
-   - Quality gates auto-validate: brightness, face-size, single-face
-   - System rejects blurry or multiple-face captures
+3. **Upload 3 photos** (front, left, right):
+   - The current UI accepts JPG/JPEG/PNG/WebP files
+   - No camera capture and no face-quality gates exist; the server only
+     validates non-empty content, size, and `image/*` content type
 
-4. **Server generates embeddings:**
-   - 128-d embedding per photo using face-api.js-compatible ResNet
-   - Stored as encrypted JSON blob in `students.face_embedding` (BYTEA)
-   - `face_embedding_version` incremented
-   - `face_enrolled_at` updated
+4. **Server stores the enrollment:**
+   - It writes a zero-filled placeholder JSON blob; no ResNet inference runs
+   - The blob is **plaintext** in `students.face_embedding` (BYTEA); encryption
+     is not implemented
+   - `face_embedding_version` is incremented and `face_enrolled_at` updated
 
-5. **If re-enrollment is for a different student** (replace old embeddings):
-   - New embeddings completely supersede old vectors
-   - Version bump triggers re-download on next student login
+5. **If re-enrollment is for a different student** (replace old enrollment):
+   - The new placeholder supersedes the old blob
+   - Version bump makes the client pull the new blob on next login; it is not
+     used for matching
 
 ### Verification
 
-- [ ] `face_embedding` is NOT NULL and contains valid JSON
-- [ ] `face_enrolled_at` reflects the new capture time
+- [ ] `face_embedding` is NOT NULL and contains the placeholder blob (real vectors are not generated in this build)
+- [ ] `face_enrolled_at` reflects the new upload time
 - [ ] `face_embedding_version` is incremented
-- [ ] Student can complete the 5-step scan flow (face check passes)
-- [ ] Student's device downloads new embedding on next login (version-gated pull)
+- [ ] Student can complete the scan flow (session code → ID confirmation → liveness)
+- [ ] Student's device can pull the versioned blob on next login; it is not used for matching
 
 ---
 
