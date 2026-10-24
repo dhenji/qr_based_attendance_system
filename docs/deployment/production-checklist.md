@@ -35,7 +35,7 @@
 | `JWT_ALGORITHM`                  | Yes      | `HS256`                    | Default                                                       |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`    | Yes      | `15`                       | Or per policy                                                 |
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | Yes      | `7`                        | Or per policy                                                 |
-| `HMAC_SECRET_KEY`                | Yes      | `openssl rand -base64 32`  | For session code signing                                      |
+| `HMAC_SECRET_KEY`                | Yes      | `openssl rand -base64 32`  | For session-code derivation                                   |
 | `CORS_ORIGINS`                   | Yes      | Vercel frontend URL        | `https://attendance-system.vercel.app`                                 |
 | `TRUSTED_PROXY_CIDRS`          | If behind proxy | LB/ingress CIDRs, comma-separated | Empty = trust nothing (dev default). Behind an ingress with this empty, every IP-keyed rate limit is shared deployment-wide — see §3 |
 | `BACKUP_ENCRYPTION_KEY`          | Yes      | `openssl rand -base64 32`  | AES-256-GCM key                                               |
@@ -47,9 +47,9 @@
 | `BACKUP_S3_PREFIX`               | If s3    | `backups/`                 |                                                               |
 | `BACKUP_RETENTION_DAILY`         | Yes      | `30`                       | Default                                                       |
 | `BACKUP_RETENTION_MONTHLY`       | Yes      | `12`                       | Default                                                       |
-| `FACE_MATCH_THRESHOLD`           | Yes      | `0.7`                      | Cosine similarity threshold                                   |
-| `FACE_REVIEW_BAND_LOW`           | Yes      | `0.65`                     | Score band for manual review                                  |
-| `FACE_EMBEDDING_VERSION`         | Yes      | `1`                        | Increment on model change                                     |
+| `FACE_MATCH_THRESHOLD`           | Yes      | `0.7`                      | Band threshold for the client-submitted score (no cosine comparison) |
+| `FACE_REVIEW_BAND_LOW`           | Yes      | `0.65`                     | Lower bound of the manual-review band                         |
+| `FACE_EMBEDDING_VERSION`         | Yes      | `1`                        | Placeholder embedding format version                          |
 | `DEFAULT_PRESENT_WINDOW_MINUTES` | Yes      | `5`                        | Course default                                                |
 | `DEFAULT_LATE_WINDOW_MINUTES`    | Yes      | `10`                       | Course default                                                |
 | `RISK_ABSENCE_RATE_HIGH`         | Yes      | `0.30`                     | D35                                                           |
@@ -209,8 +209,8 @@ logins/min and 15 OTP failures/5 min **deployment-wide**. The per-email caps
 
 | Item                   | Check                                                        |
 | ---------------------- | ------------------------------------------------------------ |
-| `FACE_MATCH_THRESHOLD` | Set to `0.7` (default)                                       |
-| Embedding encryption   | Verify `face_embedding` column stores encrypted data (BYTEA) |
+| `FACE_MATCH_THRESHOLD` | Set to `0.7` (default); bands the client-submitted score only — the shipped client sends `1.0`, so it never triggers a mismatch |
+| Embedding encryption   | **Not implemented** — `face_embedding` stores a plaintext zero-filled placeholder; do not claim encryption at rest |
 | Version gating         | Student device downloads embedding only when version changes |
 
 ### Verification
@@ -221,7 +221,7 @@ curl http://localhost:8000/health  # Should work without auth
 
 # Test invalid token rejection
 curl -H "Authorization: Bearer invalid_token" \
-    http://localhost:8000/admin/students
+    http://localhost:8000/api/admin/students
 # Expected: 401 Unauthorized
 ```
 
@@ -301,9 +301,11 @@ AND contype = 'c';
 # Test S3 write
 aws s3 ls s3://$BACKUP_S3_BUCKET/ --recursive | head -5
 
-# Test presigned URL (after API is running)
-curl -X POST http://localhost:8000/admin/face-enrollment/test-student \
-    -F "photo=@test.jpg" \
+# Test face enrollment upload (placeholder blob; front/left/right are required)
+curl -X POST http://localhost:8000/api/admin/face-enrollment/1 \
+    -F "front=@front.jpg" \
+    -F "left=@left.jpg" \
+    -F "right=@right.jpg" \
     -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

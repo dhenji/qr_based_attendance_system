@@ -139,8 +139,8 @@ expires in 5 min, resend allowed) → account created.
 > sent to that email** to prove ownership; once verified, the account is
 > created and linked to the seeded record — name, course and section are
 > pulled from the record, **nothing is typed**. Email is both the
-> registration lookup key and the login identity. The **Student ID is never
-> entered at registration** — it exists only as the QR/attendance key.
+> registration lookup key and the login identity. The **student number is never
+> entered at registration** — it is the roster/attendance key, not a QR code.
 > **Admin accounts are never self-registered**: the first admin is seeded at
 > deployment (env/seed script) and additional admins are created by an
 > existing admin on the Admin Users screen (4.13). **Password policy**:
@@ -360,12 +360,15 @@ Four-step flow. Each step advances after verification.
 
 ### 2.2 QR Scanner — `/student/scan`
 
-> **2.2 is replaced by five sequential sub-screens (2.2a–2.2e).**
-> Routes: `/student/scan/step/1` through `/student/scan/step/5`.
-> The scan flow is strictly sequential per D27: (1) session code/QR →
-> (2) student-ID QR → (3) GPS check → (4) face liveness → (5) result.
+> **Implementation status (2026-10-24):** the shipped scan is a single page
+> with stages `entry → id → qr → liveness` plus result overlays. The
+> `/student/scan/step/*` routes in this section are the original design and
+> were not implemented. The ID step is a prefilled confirmation, not a
+> student-ID QR scan ([ADR-083](../project/decision-log.md)); the only QR step
+> reads the session code. The professor UI currently displays the session code,
+> not a rendered QR.
 
-#### 2.2a Session Entry — `/student/scan/step/1`
+#### 2.2a Session Entry — `/student/scan` (entry stage)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -373,10 +376,9 @@ Four-step flow. Each step advances after verification.
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │                   ──── Join Session ────                        │
-│                   Two options — pick one:                       │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  OPTION A: Type Session Code                              │  │
+│  │  Session Code (manual entry)                              │  │
 │  │                                                           │  │
 │  │  ┌──────────────────────────────┐  ┌─────────────────┐    │  │
 │  │  │ Enter code from projector    │  │   Verify Code   │    │  │
@@ -384,22 +386,8 @@ Four-step flow. Each step advances after verification.
 │  │  └──────────────────────────────┘                         │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│                     ──── OR ────                                │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  OPTION B: Scan Session QR                                │  │
-│  │                                                           │  │
-│  │              ┌── Camera Preview ──┐                       │  │
-│  │              │                    │                       │  │
-│  │              │  ┌──────────────┐  │                       │  │
-│  │              │  │  Align QR    │  │                       │  │
-│  │              │  │  code here   │  │                       │  │
-│  │              │  └──────────────┘  │                       │  │
-│  │              └────────────────────┘                       │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
 │  ──── Verifying ──── (spinner after input)                      │
-│  ✅ Session found → proceeds to Step 2                          │
+│  ✅ Session found → proceeds to ID confirmation                 │
 │  ❌ Invalid / expired / wrong program → error (no detail leak)  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -407,11 +395,11 @@ Four-step flow. Each step advances after verification.
 > **Session QR payload** (D18): `{\"v\":1,\"code\":\"A7X-9K2M\",\"offering\":123,
 > \"radius\":30,\"pw\":5,\"lw\":10}` — **illustrative** values only. `radius` mirrors
 > the session's `classroom_radius_meters`; the system default is **50 m** (DB default),
-> configurable per offering/session.
-> Student ID-card QR contains **student number only** (D19); course
-> context always comes from the verified session.
+> configurable per offering/session. The API returns this payload, but the current
+> professor UI does not render it as a QR image.
+> No student-ID QR is used; the number is prefilled from the signed-in profile.
 
-#### 2.2b ID Scan — `/student/scan/step/2`
+#### 2.2b ID Confirmation — `/student/scan` (id stage)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -425,26 +413,28 @@ Four-step flow. Each step advances after verification.
 │  │ Expires at: 10:15 AM                                      │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  ──── Step 2: Scan Your Student ID ────                         │
+│  ──── Step 2: Confirm Your Student ID ────                      │
 │                                                                 │
-│              ┌── Camera Preview ──┐                             │
-│              │                    │                             │
-│              │  ┌──────────────┐  │                             │
-│              │  │ Scan your    │  │                             │
-│              │  │ student ID   │  │                             │
-│              │  │ QR code      │  │                             │
-│              │  └──────────────┘  │                             │
-│              └────────────────────┘                             │
+│  ┌──────────────────────────────┐  ┌─────────────────┐          │
+│  │ 24-2111 (prefilled)          │  │      Check      │          │
+│  └──────────────────────────────┘  └─────────────────┘          │
 │                                                                 │
-│  Resolves student number → \"Fetching your record…\"            │
-│  Checks: enrollment for this course + duplicate-scan            │
+│  Prefilled from your signed-in profile — correct it if needed.  │
+│  The server resolves the student from the account, not this      │
+│  field, and compares the number case-insensitively.              │
+│  Checks: enrollment for this course + duplicate-scan             │
 │                                                                 │
-│  ✅ Record found → proceeds to Step 3                           │
-│  ❌ Not enrolled / already scanned → error shown                │
+│  ✅ Match → session-QR camera stage                              │
+│  ❌ Mismatch / not enrolled / already scanned → error shown      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-#### 2.2c Location Check — `/student/scan/step/3`
+> After ID confirmation the shipped page opens a **session-QR camera** stage.
+> The professor screen shows the code only, so this is a known UI gap; the API
+> accepts a typed session code, and the QR step is session discovery, never
+> student identity.
+
+#### 2.2c Location Check — `/student/scan/step/3` (design route, not shipped)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -453,8 +443,8 @@ Four-step flow. Each step advances after verification.
 │                                                                 │
 │         ✅ Session verified · ✅ Student identified             │
 │                                                                 │
-│               ──── Step 3: Location Check ────                  │
-│         (runs automatically in parallel with Step 2)            │
+│               ──── Location Check ────                          │
+│         (server re-validates on submit)                         │
 │                                                                 │
 │              ┌─────────────────────────────┐                    │
 │              │       📍 GPS                │                    │
@@ -470,7 +460,7 @@ Four-step flow. Each step advances after verification.
 │                                                                 │
 │                    [Retry Location]                             │
 │                                                                 │
-│               Proceeding to face verification…                  │
+│               Proceeding…                                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -478,8 +468,10 @@ Four-step flow. Each step advances after verification.
 > override coordinates (D17), those are used; otherwise offering defaults.
 > `Required radius: 30m` in the mock is an example professor setting — the system
 > default (`classroom_radius_meters`) is **50 m** (configurable when opening a session).
+> In the shipped UI, the client captures GPS after the liveness challenge and the
+> server repeats the geofence check on submit.
 
-#### 2.2d Face Check — `/student/scan/step/4`
+#### 2.2d Face Liveness — `/student/scan/step/4` (design route, not shipped)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -488,7 +480,7 @@ Four-step flow. Each step advances after verification.
 │                                                                 │
 │  ✅ Session verified · ✅ Student identified · ✅ Location OK   │
 │                                                                 │
-│  ──── Step 4: Face Verification ────                            │
+│  ──── Step 4: Face Liveness ────                                │
 │                                                                 │
 │                          🎥 (live)                              │
 │                          Face detected ✔                        │
@@ -503,24 +495,25 @@ Four-step flow. Each step advances after verification.
 │  │  Challenge 1 of 3 · auto-advances on success │               │
 │  └──────────────────────────────────────────────┘               │
 │                                                                 │
-│  ──── Verifying identity… ────                                  │
-│  Comparing face embedding (cosine similarity ≥ 0.70)            │
+│  ──── Submitting evidence… ────                                 │
+│  Server re-checks the liveness signals.                         │
+│  No face-embedding comparison is performed.                     │
 │                                                                 │
-│  ✅ Match (score: 0.82) → proceeds to Step 5                    │
-│  ⚠ Review (score: 0.65–0.70) → flagged for admin review         │
-│  ❌ Fail (score < 0.65) → rejection                             │
+│  ✅ Evidence accepted → result overlay                          │
+│  ❌ Liveness check fails → rejection                            │
 │                                                                 │
 │  📱 Offline badge: \"Evidence saved — will verify after sync\"  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 > **Liveness sequence is fixed** (blink → turn left → turn right, D31).
-> MediaPipe FaceLandmarker runs WASM client-side. EAR + PnP heuristics
-> graded server-side. Sibling-confusion risk is a known limitation.
-> Embedding is pulled on login (D29) and cached encrypted in IndexedDB.
-> Offline verification compares against cached embedding locally (D30).
+> MediaPipe Face Mesh runs WASM client-side, and the server re-checks the
+> submitted EAR/PnP signals. **Face matching is not implemented**: the client
+> sends a placeholder `face_match_score` of `1.0`, and the stored enrollment
+> embedding is a stub. There is no offline embedding comparison (D30 is design
+> only). See [face-enrollment.md](../architecture/face-enrollment.md) §4.2.
 
-#### 2.2e Result — `/student/scan/step/5`
+#### 2.2e Result — `/student/scan/step/5` (design route, not shipped)
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -535,7 +528,7 @@ Four-step flow. Each step advances after verification.
 │  │                                        │                    │
 │  │    CS101 — Software Eng                │                    │
 │  │    BSCS·Y1 🔒                          │                    │
-│  │    Live · GPS + Face verified          │                    │
+│  │    Live · GPS + Liveness verified      │                    │
 │  │                                        │                    │
 │  └────────────────────────────────────────┘                    │
 │                                                                │
@@ -546,9 +539,9 @@ Four-step flow. Each step advances after verification.
 │  │         Attendance Rejected            │                    │
 │  │                                        │                    │
 │  │    Reason: outside_geofence            │                    │
-│  │    (or: duplicate, liveness_failed,    │                    │
-│  │     face_mismatch, not_enrolled,       │                    │
-│  │     session_expired)                   │                    │
+│  │    (or: duplicate_scan,               │                    │
+│  │     liveness_failed, face_mismatch,   │                    │
+│  │     not_enrolled, session_expired)    │                    │
 │  │                                        │                    │
 │  │    ┌──────────┐ ┌───────────────┐      │                    │
 │  │    │Try Again │ │Request Excuse │      │                    │
@@ -753,7 +746,8 @@ Four-step flow. Each step advances after verification.
 > **Read-only profile** (D32): all identity fields are admin-managed.
 > No edit button — note says \"Changes handled by Admin.\"
 > **Face enrollment status** (D28): shows enrolled/not enrolled with
-> enrollment date. **QR tile** shows the student number QR (D19).
+> enrollment date. **QR tile** shows the student number QR (D19); it is a
+> display-only profile tile and is never scanned during attendance.
 
 ### 2.11 Student Settings — `/student/settings`
 
@@ -1683,12 +1677,15 @@ deployment; this screen manages all subsequent ones.
 > search + category filters, deactivate instead of delete, archive, and
 > admin password reset. Only a Super Admin can manage other admins.
 
-### 4.14 Admin Face Enrollment — `/admin/face-enrollment/{student_id}`
+### 4.14 Admin Face Enrollment — `/admin/students` (modal)
 
-> **Dedicated admin section** for enrolling student face embeddings (D28).
-> Enrollment captures **3 photos** (front, left, right) with quality gates
-> (brightness, face-size, single-face). Server generates 128-d embeddings,
-> stores encrypted in `students.face_embedding BYTEA`.
+> **Design mockup** for the admin face-enrollment flow (D28). The shipped UI is
+> a modal on `/admin/students`, not a dedicated route. It accepts **3 photos**
+> (front, left, right) as file uploads; the camera preview and quality-gate flow
+> below is design-only. The server stores a zero-filled placeholder in
+> `students.face_embedding` — real 128-d generation and AES-GCM encryption are
+> **not implemented**. See
+> [face-enrollment.md](../architecture/face-enrollment.md) §4.2.
 
 ```
 ┌────────────┬────────────────────────────────────────────────────┐
@@ -1717,20 +1714,22 @@ deployment; this screen manages all subsequent ones.
 │            │  │  (same camera preview)                       │  │
 │            │  └──────────────────────────────────────────────┘  │
 │            │                                                    │
-│            │  Step 2: Generate Embedding                        │
-│            │  [🔄 Generate 128-d Embedding]                     │
-│            │  Status: Not generated                             │
+│            │  Step 2: Prepare Enrollment                        │
+│            │  [🔄 Prepare Enrollment Record]                    │
+│            │  Status: Not prepared                              │
 │            │                                                    │
 │            │  Step 3: Save & Enroll                             │
-│            │  [💾 Save Encrypted Embedding]                     │
-│            │  Embedding will be stored encrypted (AES-256)      │
-│            │  and pulled by student on next login (D29).        │
+│            │  [💾 Save Enrollment]                              │
+│            │  Current build stores a placeholder embedding;     │
+│            │  no real vector is generated or encrypted.         │
 │            └────────────────────────────────────────────────────┘
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> **Re-enrollment**: generates new vectors, supersedes old. **Revocation** on archive.
-> **Thresholds**: FACE_MATCH_THRESHOLD=0.7 cosine; score bands per §8.
+> **Re-enrollment**: replaces the stored placeholder and bumps the version. **Revocation** on archive.
+> **Thresholds**: the server applies `FACE_MATCH_THRESHOLD` (0.70) and the
+> 0.65 review band to the client-submitted `face_match_score`; no cosine
+> comparison exists.
 
 ---
 
@@ -1859,11 +1858,11 @@ Partial failure:
 | 5   | MFA Setup                | `/settings/security`                        | All       |
 | 6   | MFA Verification         | `/login/mfa`                                | Public    |
 | 7   | Dashboard                | `/student/dashboard`                        | Student   |
-| 8   | Scan — Session Entry     | `/student/scan/step/1`                      | Student   |
-| 9   | Scan — ID Scan           | `/student/scan/step/2`                      | Student   |
-| 10  | Scan — Location Check    | `/student/scan/step/3`                      | Student   |
-| 11  | Scan — Face Check        | `/student/scan/step/4`                      | Student   |
-| 12  | Scan — Result            | `/student/scan/step/5`                      | Student   |
+| 8   | Scan — Session Entry     | `/student/scan`                             | Student   |
+| 9   | Scan — ID Confirmation   | `/student/scan`                             | Student   |
+| 10  | Scan — Session QR        | `/student/scan`                             | Student   |
+| 11  | Scan — Liveness          | `/student/scan`                             | Student   |
+| 12  | Scan — Result            | `/student/scan`                             | Student   |
 | 13  | History                  | `/student/history`                          | Student   |
 | 14  | Schedule                 | `/student/schedule`                         | Student   |
 | 15  | Notifications            | `/student/notifications`                    | Student   |
@@ -1896,7 +1895,7 @@ Partial failure:
 | 42  | Profile                  | `/admin/profile`                            | Admin     |
 | 43  | Attendance Review        | `/admin/attendance`                         | Admin     |
 | 44  | Admin Users              | `/admin/users`                              | Admin     |
-| 45  | Face Enrollment          | `/admin/face-enrollment/{student_id}`       | Admin     |
+| 45  | Face Enrollment          | `/admin/students` (modal)                   | Admin     |
 | 46  | 404 Error                | `/+error`                                   | Global    |
 | 47  | Offline Sync Banner      | (floating overlay)                          | Global    |
 
@@ -1920,15 +1919,15 @@ Partial failure:
 - **Sortable tables**: every data table (2.7, 3.4, 3.5, 3.8, 4.2, 4.6, 4.7, 4.8, 4.10, 4.13) has clickable column headers that toggle ascending/descending with an ▲/▼ indicator, plus **category + date-range filters** and **Print / CSV / PDF** actions
 - **Password policy** (all accounts, incl. reset & admin reset): minimum 8 characters with at least 1 uppercase, 1 lowercase, 1 number and 1 symbol (alphanumeric + symbol)
 - **Account security**: login is protected by **Cloudflare Turnstile** (free, invisible captcha); optional **MFA (OTP)** via authenticator app; **Forgot Password** is a 4-step flow (email + Turnstile → security question w/ 3-attempt limit → OTP → new/confirm password); accounts lock temporarily after 5 failed logins; OTP codes are stored in a dedicated `otp_codes` table (Argon2id-hashed, single-use, 5-min TTL)
-- **Claim-based registration**: students and professors self-register with email + password; the email must match an **admin-seeded record** (roster CSV / professor management), and an **OTP sent to that email** proves ownership before the account is linked. Nothing is typed — name/course/section come from the seeded record. Student ID is only the QR/attendance key, never entered at registration
+- **Claim-based registration**: students and professors self-register with email + password; the email must match an **admin-seeded record** (roster CSV / professor management), and an **OTP sent to that email** proves ownership before the account is linked. Nothing is typed — name/course/section come from the seeded record. The student number is the roster/attendance key; it is not entered at registration and is not read from a QR
 - **Soft delete / deactivate**: records are deactivated (`is_active=false`) rather than deleted; permanent deletion only from the Archive screen
 - **Admin reset**: admins can reset any user's password (temp password set; user prompted to change on next login)
 - **Admin provisioning**: no public admin registration — the first admin is seeded at deployment as **Super Admin**; additional admins are managed on the Admin Users screen (4.13, Super Admin only)
 - **Academic structure updates**: admin-managed through Program Management (4.5) — add/rename year levels, adjust term structures, move courses. All changes audited (D38)
 - **Excuse workflow**: three initiation paths (D21) — prof quick-excuse, prof-initiated with evidence, student-initiated request; bulk Excuse All Absent per session (D23)
-- **Scan flow**: strictly sequential 5-step flow (D27) — session code/QR → student-ID QR → GPS geofence → face liveness (fixed blink-left-right) → result overlay
+- **Scan flow**: strictly sequential single-page flow (D27 as amended by ADR-083) - session code → student-ID confirmation → session-QR camera → liveness → GPS → result overlay. No student-ID QR is scanned, and the professor UI does not render the session QR yet.
 - **Embedded conventions**: locked fields (§9), window math blocks, dual timers, full status legend, cohort badges, filter rails, lettered sub-screens (2.2a, 4.5b, etc.)
-- **Admin face enrollment** (4.14): dedicated admin section for enrolling student face embeddings (D28); captures 3 photos (front/left/right), generates 128-d embeddings, stores encrypted
+- **Admin face enrollment** (4.14): modal on the Student Management page for enrolling student faces (D28); uploads 3 photos (front/left/right) and records enrollment. Real embedding generation and encryption are **not implemented** in this build — the stored blob is a zero-filled placeholder.
 - **Session History breakdown** (3.5): Present/Late/Absent counts per session for quick overview
 
 ---

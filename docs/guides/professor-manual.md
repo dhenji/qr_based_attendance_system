@@ -121,10 +121,10 @@ Constraint: `present_window_minutes + late_window_minutes ≤ duration_minutes` 
 ### 3.4 After Generating the Session
 
 1. **Session Code** appears (e.g., `A7X-9K2M`) — display this on the projector
-2. **Session QR** is also generated (payload includes code, _course_ ID, radius, windows) — students can scan instead of typing
+2. The API also returns a **session QR payload** (code, _course_ ID, radius, windows). The current active-session screen displays the code only, not a QR image — students enter the code.
 3. The session is now **Active** and appears in [Live Monitoring](#4-live-session-monitoring)
 
-> **Tip**: The _session code_ is HMAC-signed and time-bound. It cannot be guessed or reused across sessions.
+> **Tip**: The _session code_ is HMAC-derived and time-bound. It cannot be guessed or reused across sessions.
 
 ---
 
@@ -370,7 +370,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 ---
 
-_For technical details on the scan flow, offline-first sync, or face verification, see the [Architecture Docs](../architecture/)._
+_For technical details on the scan flow, offline-first sync, or the current biometric limitations, see the [Architecture Docs](../architecture/)._
 
 
 ## Remote / online sessions

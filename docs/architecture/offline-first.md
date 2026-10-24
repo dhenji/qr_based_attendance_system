@@ -28,10 +28,10 @@ Stores pending scan submissions.
 | `id`                | UUID     | Auto-generated client ID                                     |
 | `session_id`        | int      | FK to server session                                         |
 | `session_code`      | string   | For display/debug                                            |
-| `student_number`    | string   | Student number from ID QR                                    |
+| `student_number`    | string   | Student number from the signed-in profile; confirmation check only |
 | `payload.gps`       | object   | `{lat, lng, accuracy}` nested, not flat columns              |
 | `payload.liveness_evidence` | JSON | blink, head turns, EAR, PnP                            |
-| `payload.face_match_score` | float | Selfie-vs-embedding similarity               |
+| `payload.face_match_score` | float (optional) | Placeholder supplied by the replay path; never compared to an embedding |
 | `payload.scanned_at` | ISO-8601 | **Device timestamp at scan** (validated server-side per D16) |
 | `status`            | enum     | `pending` → `syncing` → `synced` / `rejected` — **client-local queue states** (NOT DB enums; server uses `SyncStatus` = `synced`/`pending`/`failed` and `QueueStatus` = `pending`/`processing`/`done`/`failed`) |
 | `attempts`          | int      | Retry counter, incremented per failure, never reset           |
@@ -154,11 +154,11 @@ at-rest protection and only ever compares against it locally.
 | Reason             | When                                | Decision   |
 | ------------------ | ----------------------------------- | ---------- |
 | `session_expired`  | `scanned_at` after `expires_at`     | D16        |
-| `outside_geofence` | GPS outside radius                  | D27 step 3 |
+| `outside_geofence` | GPS outside radius                  | D17, D27   |
 | `liveness_failed`  | Liveness checks fail                | D31        |
-| `face_mismatch`    | Cosine similarity < threshold       | D27 step 4 |
-| `not_enrolled`     | Student not in course roster        | D27 step 2 |
-| `duplicate_scan`   | Student already scanned for session | D27 step 2 |
+| `face_mismatch`    | Submitted score < 0.65; no cosine comparison | ADR-068 |
+| `not_enrolled`     | Student not in course roster        | D27        |
+| `duplicate_scan`   | Student already scanned for session | D15        |
 
 ### Exponential Backoff
 
@@ -266,17 +266,18 @@ sequenceDiagram
     DB-->>API: Session + course config
     API-->>S: 200 {session_id, geofence, windows, ...}
 
-    S->>S: Scan student-ID QR → resolve number
+    S->>S: Confirm student number from the signed-in profile (precheck)
     S->>S: GPS geofence check (Haversine)
     S->>S: Face liveness challenge (blink→left→right)
-    S->>S: Face match vs cached embedding
+    S->>S: face_match_score = placeholder 1.0 (no embedding comparison)
 
-    S->>API: POST /student/attendance/scan {session_id, gps {lat, lng, accuracy}, liveness_evidence, face_match_score, scanned_at}
+    S->>API: POST /student/attendance/scan {session_id, student_number, gps {lat, lng, accuracy}, liveness_evidence, face_match_score, scanned_at}
     API->>DB: Check idempotency key
     API->>API: Validate scanned_at vs window
+    API->>API: Resolve student by token user_id; compare student_number
     API->>API: Validate geofence
-    API->>API: Validate liveness
-    API->>API: Validate face score
+    API->>API: Grade liveness evidence
+    API->>API: Apply score band to the submitted face score
     API->>API: Check enrollment + duplicate
     API->>API: Compute status (present/late/rejected)
     API->>DB: INSERT attendance_records
@@ -294,11 +295,11 @@ sequenceDiagram
 
     Note over S: No network connectivity
 
-    S->>S: Scan student-ID QR → resolve number
+    S->>S: Confirm student number from the signed-in profile
     S->>S: GPS geofence check (local cache)
     S->>S: Face liveness challenge
-    S->>S: Face match vs cached embedding (offline)
-    S->>Q: Enqueue {session_id, gps_lat, gps_lng, liveness_evidence, face_match_score, scanned_at}
+    S->>S: No embedding comparison is performed; the server grades the evidence later
+    S->>Q: Enqueue {session_id, session_code, student_number, gps, liveness_evidence, scanned_at}
     Q-->>S: "Evidence saved — will verify after sync"
 
     Note over S: Network restored
@@ -308,6 +309,7 @@ sequenceDiagram
 
     S->>API: POST /student/attendance/scan + X-Idempotency-Key
     API->>DB: Check idempotency
+    API->>API: Resolve student by token user_id; compare student_number
     API->>API: Validate scanned_at vs expires_at (D16)
 
     alt scanned_at > expires_at
@@ -358,11 +360,11 @@ Checks performed locally before queuing:
 | Check                   | Source                             | Offline Available           |
 | ----------------------- | ---------------------------------- | --------------------------- |
 | Session code validity   | Cached session config              | Yes (if previously fetched) |
-| Student number format   | Free-form ID as printed on the card (3–50 chars, upper-cased; the conventional `YY-NNNN` shape is not validated) | Yes |
+| Student number format   | Profile value (3–50 chars, upper-cased; the conventional `YY-NNNN` shape is not validated) | Yes |
 | GPS within geofence     | Haversine vs cached session coords | Yes                         |
 | Liveness (blink, turns) | MediaPipe WASM                     | Yes                         |
-| Face match score        | ⚠ Not computed — the client sends the placeholder `1` and the server band-checks that number without ever comparing it to the stored blob | No |
-| Duplicate scan          | Local queue check                  | Yes                         |
+| Face match score        | Not applicable — no embedding comparison is implemented | No              |
+| Duplicate scan          | Deferred to the server on sync     | No                          |
 
 Server re-validates **all** checks on sync. Client validation is UX-only
 (faster feedback) — never trust-only.

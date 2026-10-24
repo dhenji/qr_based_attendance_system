@@ -367,10 +367,9 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | **Attendance Snapshot**  | `/admin/analytics?tab=attendance`     | Cross-course attendance summary (Analytics → Attendance tab) |
 | **Audit Logs**           | `/admin/audit-logs`                   | System-wide action log with filters                   |
 | **Archive**              | `/admin/students/archive`             | View/restore/permanently delete archived students     |
-| **Attendance Review**    | `/admin/attendance`                   | Manual review of flagged scans (GPS/face review band) |
+| **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged scans (GPS / submitted score band) |
 | **Admin Users**          | `/admin/users`                        | Manage admin accounts (Super Admin only)              |
-| **Admin Profile**        | `/admin/profile`                      | Identity (read-only), MFA, change password, device theme (Light/Dark) |
-| **Face Enrollment**      | `/admin/face-enrollment/{student_id}` | Capture 3-angle photos for _embedding_ generation     |
+| **Face Enrollment**      | `/admin/students` → **Enroll face**   | Upload 3 photos for enrollment (modal; placeholder embedding) |
 
 ---
 
@@ -388,7 +387,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | Attendance Review   | `/admin/attendance`                         |
 | System Settings     | `/admin/system/settings`                    |
 | Audit Logs          | `/admin/audit-logs`                         |
-| Face Enrollment     | `/admin/face-enrollment/{student_id}`       |
+| Face Enrollment     | `/admin/students` → **Enroll face** (modal) |
 
 ---
 

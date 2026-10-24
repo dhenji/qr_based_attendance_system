@@ -5,13 +5,18 @@
 
 ---
 
-## 1. Full Online Scan (D27)
+## 1. Full Online Scan (D27, amended by ADR-083)
 
 ```mermaid
 sequenceDiagram
     participant S as Student Client
     participant API as Server API
     participant DB as Database
+
+    Note over S,DB: Step 0 — Authenticated Identity (ADR-083)
+
+    S->>API: POST /auth/login
+    API-->>S: 200 {access_token, ...} (student role)
 
     Note over S,DB: Step 1 — Session Entry (D27.1)
 
@@ -20,46 +25,44 @@ sequenceDiagram
     DB-->>API: Session row + offering context
     API-->>S: 200 {session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label,<br>expires_at, scheduled_end_time, classroom_name, geofence: {radius, lat, lng},<br>present_window_minutes, late_window_minutes}
 
-    Note over S,DB: Step 2 — Student-ID QR Scan (D27.2)
+    Note over S,DB: Step 2 — Student-ID Confirmation (D27.2 as amended)
 
-    S->>S: Camera scans student-ID QR → resolves student_number "24-2111"
-    S->>API: (implicit in scan POST) Student number resolves to student_id
+    S->>S: Prefill student number from the signed-in profile
+    S->>API: POST /student/attendance/precheck {session_id, student_number}
+    API->>API: Resolve Student WHERE Student.user_id = token user_id
+    API->>API: Compare student_number case-insensitively → 403 student_number_mismatch on mismatch
+    API->>DB: Check enrollment + duplicate scan
+    API-->>S: 200 {enrolled, already_scanned, student}
 
-    Note over S,DB: Step 3 — GPS Geofence (D27.3, conditional)
+    Note over S,DB: Step 3 — Session QR Camera (current UI)
 
-    alt Session requires a geofence (geofence_enabled and classroom coordinates present)
-        S->>S: navigator.geolocation.getCurrentPosition()
-        S->>S: Haversine(student_gps, session_gps) ≤ radius?
-        alt Outside geofence
-            S-->>S: Show error "Outside geofence"
-        end
-    else No geofence required (remote, disabled, or no classroom)
-        S->>S: Skip location acquisition (no permission prompt)
-    end
+    S->>S: QRScanner reads the session code
+    S->>API: POST /student/sessions/verify-code {code}
+    Note right of S: Session discovery only — it never reads a student ID.<br>The professor UI currently shows the session code, not a rendered QR.
 
-    Note over S,DB: Step 4 — Face Liveness (D27.4)
+    Note over S,DB: Step 4 — GPS + Face Liveness (D27.3–D27.4)
 
     S->>S: MediaPipe FaceLandmarker WASM
     S->>S: Challenge: Blink → Turn Left → Turn Right
     S->>S: EAR check (blink), PnP check (head turns)
-    S->>S: Embedding comparison vs cached face_embedding
-    S->>S: face_match_score = selfie-vs-embedding similarity (submitted to server)
-    alt Face check failed
-        S-->>S: Show error with specific reason
+    S->>S: face_match_score = placeholder 1.0 (no embedding comparison)
+    S->>S: navigator.geolocation.getCurrentPosition() + Haversine pre-check
+    alt Outside geofence
+        S-->>S: Show error "Outside geofence"
     end
 
     Note over S,DB: Step 5 — Submit Attendance
 
-    S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>face_match_score: 0.82,<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
+    S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>face_match_score: 1.0,<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
 
     API->>API: 1. Check idempotency key → return prior result<br>(key = "user_id:session_id:X-Idempotency-Key", 15-min TTL)
     API->>API: 2. Verify session exists & is active + not expired
-    API->>API: 3. Resolve student & match student_number
+    API->>API: 3. Resolve student by token user_id; compare student_number
     API->>API: 4. Check enrollment (students.id → enrollments)
     API->>API: 5. Check duplicate scan
     API->>API: 6. Validate geofence (server-side Haversine)
-    API->>API: 7. Validate liveness evidence
-    API->>API: 8. Validate face_match_score ≥ FACE_MATCH_THRESHOLD
+    API->>API: 7. Grade liveness evidence (booleans + EAR mean + PnP presence)
+    API->>API: 8. Apply score band to the submitted face_match_score<br>(< 0.65 → 403 face_mismatch; 0.65–0.70 → pending review)
 
     API->>API: 9. Compute status (elapsed since session.created_at):<br>elapsed ≤ present_window → present<br>elapsed ≤ present_window + late_window → late<br>else → rejected
 
@@ -68,6 +71,11 @@ sequenceDiagram
 
     API-->>S: 200 {id: 789, status: "present",<br>scanned_at, expires_at}
 ```
+
+> **Identity note:** `student_number` is a confirmation check only. The student
+> row is selected by `Student.user_id`, so a client cannot submit as somebody
+> else. `face_match_score` is a client-supplied value; the server never compares
+> embeddings (ADR-068). The shipped client sends `1.0`.
 
 ---
 
@@ -82,11 +90,13 @@ sequenceDiagram
 
     Note over S,IDB: Offline scan captured
 
-    S->>S: Steps 1–4 same as online scan
+    S->>S: Steps 1–4 same as online scan (session code, ID confirmation, liveness, GPS)
     S->>S: Local validation passes
-    S->>IDB: INSERT INTO attendance_queue<br>{id: UUID, session_id, payload: {gps, liveness_evidence,<br>face_match_score, scanned_at},<br>status: "pending" (client queue state), attempts: 0}
+    S->>IDB: INSERT INTO attendance_queue<br>{id: UUID, session_id, session_code, student_number,<br>payload: {gps, liveness_evidence, scanned_at},<br>status: "pending" (client queue state), attempts: 0}
     IDB-->>S: Stored locally
     S-->>S: Show "Evidence saved — will verify after sync"
+
+    Note over S,IDB: `student_number` is queued for the confirmation check only;<br>the server re-resolves the student from the sync token.<br>The replay path supplies the same placeholder `face_match_score`.
 
     Note over S,DB: Network restored — background sync
 

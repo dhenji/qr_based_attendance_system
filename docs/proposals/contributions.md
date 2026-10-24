@@ -1,6 +1,11 @@
 # CS Contributions
 
-This document states the project's contributions to computer science honestly. The framing is **systems and security-protocol engineering plus empirical evaluation** — not novel machine learning. The system uses zero trained models for anti-spoofing; liveness grading is built on open landmark tracking (MediaPipe FaceLandmarker) and geometric/statistical heuristics, chosen deliberately for offline capability, transparency, and auditability.
+> **Implementation status (2026-10-24):** the offline liveness protocol is
+> partially implemented (IndexedDB queue + deferred server re-validation).
+> Nonce anti-replay, HMAC-signed evidence bundles, and face-embedding
+> comparison are **not implemented**; see ADR-068.
+
+This document states the project's contributions to computer science honestly. The framing is **systems and security-protocol engineering plus empirical evaluation** — not novel machine learning. The system uses zero trained models for anti-spoofing; liveness grading is built on open landmark tracking (MediaPipe Face Mesh) and geometric/statistical heuristics, chosen deliberately for offline capability, transparency, and auditability.
 
 Every claim below is written against the code that ships. Where a mechanism is designed but not built, it is labelled **Planned** and is not a claim the project can defend today.
 

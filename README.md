@@ -1,6 +1,6 @@
 # QR-Based Attendance System
 
-A QR-code based, offline-capable attendance system with anti-spoofing. Students scan the QR code already printed on their ID cards using their phone; professors open class sessions with a code; the system records who is present, who is absent, and generates reports.
+A QR-code based, offline-capable attendance system with anti-spoofing. Students sign in to their own account, enter the session code shown by the professor, and confirm their student ID; the system verifies location and liveness, records who is present, who is absent, and generates reports. Student identity is always derived from the authenticated account — the attendance flow does not scan a student-ID QR code.
 
 Built for **Software Engineering 1**. Full proposal: [`docs/proposals/proposal.md`](docs/proposals/proposal.md).
 
@@ -15,42 +15,57 @@ Built for **Software Engineering 1**. Full proposal: [`docs/proposals/proposal.m
 
 A web application that:
 
-- Scans the QR code on student IDs to identify the student
+- Derives the student from their signed-in account, with a student-ID confirmation gate
 - Uses a session code (shown by the professor) + GPS location to prevent cheating
+- Grades face-liveness evidence before recording attendance
 - Works without internet by saving attendance locally and uploading later
 - Automatically updates student year levels and sections each school year
 
 ## Security & Anti-Spoofing
 
-Every attendance submission follows the canonical **5-step scan flow (D27)**:
-`session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
-Any single failure rejects the record with one of the canonical D15 rejection
-reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
-`not_enrolled`, `session_expired`.
+The attendance flow applies these layers in order. D27's original step 2
+(student-ID QR) is now a typed/prefilled confirmation gate — see
+[ADR-083](docs/project/decision-log.md).
 
-| #   | Layer                   | What It Prevents                           | CS Concept                                  |
-| --- | ----------------------- | ------------------------------------------ | ------------------------------------------- |
-| 1   | Session Entry (code/QR) | Outsiders submitting attendance            | HMAC-SHA256                                 |
-| 2   | Student-ID QR           | Wrong identity / unattended devices        | QR payload = student number                 |
-| 3   | GPS Geofencing          | Remote/fake submissions                    | Haversine Algorithm                         |
-| 4   | Face Liveness + Match   | Photos, replay & distortion tricks         | Blink/turn challenge + embedding similarity |
-| 5   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students | DB Constraint + FK Check                    |
+`authenticated identity → session entry → student-ID confirmation → GPS geofence → face liveness → uniqueness/enrollment check`
+
+Identity is resolved from the bearer token, never from the request body. A body
+naming a different student is rejected with `403 student_number_mismatch` and
+writes no attendance row. Any single failure rejects the record with one of the
+canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
+`liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`.
+
+| #   | Layer                   | What It Prevents                           | CS Concept                                       |
+| --- | ----------------------- | ------------------------------------------ | ------------------------------------------------ |
+| 1   | Authenticated Identity  | Impersonation / forged client identifiers  | JWT → `users.id` → `students.user_id`             |
+| 2   | Session Entry (code/QR) | Outsiders submitting attendance            | HMAC-derived session code + expiry                |
+| 3   | Student-ID Confirmation | Wrong account / mistyped roster number     | Case-insensitive precheck + 403 mismatch          |
+| 4   | GPS Geofencing          | Remote/fake submissions                    | Haversine Algorithm                              |
+| 5   | Face Liveness           | Casual photo/replay attempts (client-asserted) | Blink/turn challenge; server-graded evidence     |
+| 6   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students | DB Constraint + FK Check                         |
+
+> **Current biometric limitation:** the server grades the client's liveness
+> evidence, but it does **not** compare a face embedding. `face_match_score` is
+> a client-supplied value (the shipped client sends a placeholder `1.0`), and
+> face enrollment is not required to scan. Server-side face matching is not
+> implemented — see the [security model](docs/architecture/security-model.md)
+> and ADR-068.
 
 ## Features
 
 | Feature          | Purpose                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| QR Code Scanning | Scan student ID card QR using phone camera                                                                             |
-| Session Code     | Professor shares a code; required to submit attendance                                                                 |
+| Session Entry    | Professor shows a session code; students enter it (the scan page also accepts a session QR where one is available)      |
+| Student ID Check | Prefilled from the signed-in profile; the server rejects a number that does not match the account                      |
 | GPS Verification | Ensures student is inside the classroom                                                                                |
-| Face Liveness    | Blink/head-turn challenges to block photo, replay & distortion tricks                                                  |
+| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts                                  |
 | Offline Mode     | Saves attendance locally when no internet; auto-uploads later                                                          |
 | Student Roster   | Import student from CSV file (with official email)                                                                     |
 | Dashboard        | View attendance in real time                                                                                           |
 | Analytics        | At-risk forecasting and recommendations for professors                                                                 |
 | Reports          | Download attendance reports (CSV/PDF/Print)                                                                            |
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                         |
-| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (key-gated, opt-in) |
+| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -67,7 +82,7 @@ reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 | Frontend  | SvelteKit 2 (Svelte 5 runes) + TypeScript (strict)           |
 | Database  | PostgreSQL 16                                                |
 | Platform  | Progressive Web App (works on any device; planned)           |
-| Tooling   | Docker / docker-compose, html5-qrcode, qrcode, zod, @mediapipe/tasks-vision |
+| Tooling   | Docker / docker-compose, html5-qrcode (session QR), qrcode, zod, @mediapipe/tasks-vision |
 
 The MediaPipe face-landmark model and its WASM runtime are vendored under
 `frontend/static/` (`models/`, `wasm/`), so face enrollment needs no CDN.
@@ -89,9 +104,9 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
  │   ├── src/routes/       # 50 +page.svelte files (49 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings), admin (dashboard/setup-wizard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
 │   └── src/lib/
 │       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (named typed EndpointDefs with mock fixtures, collected into an `endpoints` registry)
- │       ├── components/   # 13 shared: AppIcon, CsvImportPage, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, Modal, NotificationBell, OtpCodeRow, OtpCountdown, OtpInput, TempPasswordModal, Turnstile
- │       ├── features/     # 12 top-level dirs (+ analytics under admin = 13th conceptual slice): admin (9 sub-slices: analytics/audit/courses/excuses/liveness/offerings/programs/settings/setup-wizard), liveness, attendance (professor ledger, real API), auth, excuse, notifications (poll.ts only), professor, report, session, settings (theme), student, sync — services + runes stores (auth, student, professor, admin) + 11 feature components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart, DayPicker, MeetingRowsEditor, TermRowsEditor, StepProgram, StepStructure, StepOffering)
- │       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user + index.ts), constants/ (days/roles/routes/status/terms), utils/ (deleteErrors/entityEvents/format/gen/geo/password/revalidateOnFocus/schedule/timing), actions/ (focusTrap), theme.css (light + [data-theme="dark"])
+ │       ├── components/   # AppIcon, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, Modal, TempPasswordModal (7 shared)
+ │       ├── features/     # 12 top-level dirs (+ analytics under admin = 13th conceptual slice): admin (8 sub-slices: analytics/audit/courses/excuses/liveness/offerings/programs/settings), liveness, attendance (professor ledger, real API), auth, excuse, notifications (poll.ts only), professor, report, session, settings, student, sync — services + runes stores (auth, student, admin) + 5 feature components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart)
+ │       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user + index.ts), constants/ (roles/routes/status/terms), utils/ (format/gen/geo/timing), actions/ (focusTrap), theme.css
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot + cron scheduler, AppException handler)
@@ -211,12 +226,12 @@ Backend (`backend/.env.example`):
 | `REFRESH_TOKEN_EXPIRE_DAYS`      | `7`                                                                    | Refresh token TTL                                                   |
 | `LOCKOUT_ATTEMPTS`               | `5`                                                                    | Failed login attempts before lockout                                |
 | `LOCKOUT_DURATION_MINUTES`       | `15`                                                                   | Lockout duration after failed attempts                              |
-| `FACE_MATCH_THRESHOLD`           | `0.70`                                                                 | Face-match similarity threshold                                     |
-| `FACE_REVIEW_BAND_LOW`           | `0.65`                                                                 | Lower band requiring manual review                                  |
-| `FACE_EMBEDDING_VERSION`         | `1`                                                                    | Face embedding format version                                       |
-| `DEFAULT_PRESENT_WINDOW_MINUTES` | `5`                                                                    | Fallback present window (an offering may override it)              |
-| `DEFAULT_LATE_WINDOW_MINUTES`    | `10`                                                                   | Fallback late window (an offering may override it)                 |
-| `DEFAULT_GEOFENCE_RADIUS_METERS` | `50`                                                                   | Fallback classroom geofence radius (an offering may override it)    |
+| `FACE_MATCH_THRESHOLD`           | `0.70`                                                                 | Band threshold for the client-submitted score (no comparison)       |
+| `FACE_REVIEW_BAND_LOW`           | `0.65`                                                                 | Lower bound of the review band                                      |
+| `FACE_EMBEDDING_VERSION`         | `1`                                                                    | Placeholder embedding format version                                |
+| `DEFAULT_PRESENT_WINDOW_MINUTES` | `5`                                                                    | Default present window for sessions                                 |
+| `DEFAULT_LATE_WINDOW_MINUTES`    | `10`                                                                   | Default late window for sessions                                    |
+| `DEFAULT_GEOFENCE_RADIUS_METERS` | `50`                                                                   | Default classroom geofence radius                                   |
 | `OTP_EXPIRES_MINUTES`            | `5`                                                                    | OTP code TTL                                                        |
 | `BACKUP_STORAGE_TYPE`            | `local`                                                                | Backup backend: `local` or `s3`                                     |
 | `BACKUP_LOCAL_DIR`               | `./backups`                                                            | Local backup directory                                              |
@@ -397,7 +412,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/architecture/security-model.md`](docs/architecture/security-model.md) — threat model & mitigations
 - [`docs/architecture/data-flow.md`](docs/architecture/data-flow.md) — sequence diagrams for all major flows
 - [`docs/architecture/migration-strategy.md`](docs/architecture/migration-strategy.md) — Alembic migration plan
-- [`docs/architecture/face-enrollment.md`](docs/architecture/face-enrollment.md) — 3-photo enrollment & embedding pipeline
+- [`docs/architecture/face-enrollment.md`](docs/architecture/face-enrollment.md) — face enrollment flow & current verification limitations
 - [`docs/architecture/excuse-workflow.md`](docs/architecture/excuse-workflow.md) — state machine & permission matrix
 - [`docs/architecture/risk-model.md`](docs/architecture/risk-model.md) — at-risk prediction & batch job spec
 
@@ -424,8 +439,8 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 - [`docs/guides/admin-manual.md`](docs/guides/admin-manual.md) — program setup, imports, assignment, analytics, backup
 - [`docs/guides/professor-manual.md`](docs/guides/professor-manual.md) — sessions, windows, excuses, reports
-- [`docs/guides/student-manual.md`](docs/guides/student-manual.md) — 5-step scan, offline, excuses, calendar
-- [`docs/guides/face-enrollment-guide.md`](docs/guides/face-enrollment-guide.md) — 3-photo capture script & privacy notes
+- [`docs/guides/student-manual.md`](docs/guides/student-manual.md) — scan flow, offline, excuses, calendar
+- [`docs/guides/face-enrollment-guide.md`](docs/guides/face-enrollment-guide.md) — 3-photo upload script, current limitations & privacy notes
 
 ### Operations
 
@@ -436,7 +451,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12; 0, 9 and 12 marked `[Done]`)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D82, ADR-001–ADR-082; two entries share the D75/ADR-075 number)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D83, ADR-001–ADR-083)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing

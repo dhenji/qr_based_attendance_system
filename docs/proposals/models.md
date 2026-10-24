@@ -1,25 +1,23 @@
 # Models Used
 
-This document catalogs every model the system relies on — **as built, not as proposed**. Honest summary: **zero trained models are introduced for anti-spoofing** — the security core is pretrained landmark tracking plus geometric/statistical heuristics that run fully offline and produce auditable evidence. **Zero trained models are used for analytics in the MVP** — at-risk prediction starts as heuristic thresholds (env-configurable); ML (logistic regression) is a planned upgrade using the identical feature vector.
+> **Implementation status (2026-10-24):** the only shipped biometric step is
+> client-side MediaPipe liveness with server-side evidence grading. The
+> enrolled-face matching and embedding-generation rows below are **design
+> only** — real vectors are not generated, enrollment stores a placeholder, and
+> no scan compares an embedding. See ADR-068 and ADR-083.
 
-**The system ships exactly one model.** MediaPipe FaceLandmarker, running client-side in the browser through WebAssembly. There is **no face-recognition or face-embedding model** anywhere in the repository — not face-api.js, not ResNet, not ArcFace, not InsightFace. The 128-d "face embedding" the server stores is a zero-filled placeholder (see §3).
+This document catalogs every model the system relies on. Honest summary: **zero trained models are introduced for anti-spoofing** — the security core is pretrained landmark tracking plus geometric/statistical heuristics that run fully offline and produce auditable evidence. **Zero trained models are used for analytics in the MVP** — at-risk prediction starts as heuristic thresholds (env-configurable); ML (logistic regression) is a planned upgrade using the identical feature vector. The face embedding pipeline uses pretrained models exclusively; we train nothing.
 
-| Component                     | Model / library (as shipped)                                                                                                                                                       | Type                                                              | Where it runs                  | Status                    |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------ | ------------------------- |
-| Face detection + landmarks    | MediaPipe FaceLandmarker — `face_landmarker.task` (BlazeFace short-range detector + 478-landmark landmark model + canonical face geometry)                                          | Pretrained deep regression                                        | Client browser (WASM)          | **Shipped**               |
-| Face liveness grading         | EAR + Perspective-n-Point (PnP) heuristics                                                                                                                                          | Geometric/statistical algorithm                                   | Client captures, server grades | **Shipped**               |
-| Face embedding generation     | **None.** The server stores a zero-filled placeholder (`_stub_embedding_blob`)                                                                                                       | —                                                                  | —                              | **Not implemented** (D28)  |
-| Enrolled-face matching        | **None.** `face_match_score` is a client-asserted float (`FACE_MATCH_SCORE_PLACEHOLDER = 1`)                                                                                          | —                                                                  | —                              | **Not implemented**        |
-| At-risk forecasting (MVP)     | Heuristic thresholds (env-configurable)                                                                                                                                             | Rule-based scoring (absence_rate, streak, sync_lag, trend_slope)  | Server (Python)                | **Shipped**               |
-| At-risk forecasting (upgrade) | Logistic regression (scikit-learn)                                                                                                                                                  | Classical ML, interpretable                                       | Server (Python)                | **Planned** (future)      |
-| Analytics visualization       | Hand-rolled SVG components — `ReportTrendChart.svelte`, `ReportBarChart.svelte`                                                                                                      | Non-ML charting                                                   | Client browser                 | **Shipped**               |
-| QR decoding                   | html5-qrcode                                                                                                                                                                       | Decoder (non-ML)                                                  | Client browser                 | **Shipped**               |
-
-> **Note on the earlier draft of this document.** It named *face-api.js Face Recognition
-> (ResNet-34-like)* for embedding generation and matching, and *Chart.js* for visualization.
-> Neither library is a dependency of this project (`frontend/package.json`,
-> `backend/requirements.txt`), neither was ever installed, and no model file for either
-> exists in the repository. ADR-091 records the same divergence for the chart library.
+| Component                     | Model / Library                                          | Type                                                              | Where it runs                  | Trained by us?      |
+| ----------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------ | ------------------- |
+| Face landmark tracking        | MediaPipe Face Mesh                                      | Pretrained deep regression (468 landmarks)                        | Client browser (WASM)          | No                  |
+| Face liveness grading         | EAR + Perspective-n-Point (PnP) heuristics               | Geometric/statistical algorithm                                   | Client captures, server grades | No (designed by us) |
+| Enrolled-face matching        | face-api.js Face Recognition (ResNet-34-like embeddings) | Pretrained face embedding net                                     | Client / server                | No                  |
+| Face embedding generation     | face-api.js (pretrained ResNet-34-like)                  | Pretrained 128-d embedding from 3-angle photos (front/left/right) | Server                         | No                  |
+| At-risk forecasting (MVP)     | Heuristic thresholds (env-configurable)                  | Rule-based scoring (absence_rate, streak, sync_lag, trend_slope)  | Server (Python)                | No (rule-based)     |
+| At-risk forecasting (upgrade) | Logistic regression (scikit-learn)                       | Classical ML, interpretable                                       | Server (Python)                | Planned (future)    |
+| Analytics visualization       | Chart.js (+ date client adapter)                         | Non-ML charting library                                           | Client browser                 | No                  |
+| QR decoding                   | html5-qrcode                                             | Decoder (non-ML)                                                  | Client browser                 | No                  |
 
 ---
 
