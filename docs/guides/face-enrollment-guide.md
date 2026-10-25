@@ -110,11 +110,13 @@ front, left, and right angles automatically.
    automatically. Use **[Capture now]** to capture manually when aligned.
 5. After all three angles are captured the modal returns to the file view with
    the three images populated and uploads them through the same endpoint.
+   The live preview is mirrored for natural selfie framing; captured images
+   are stored unmirrored.
 6. Use **[Upload files]** to switch back to manual selection at any time.
 
-> The current server does **not** run brightness, face-size, single-face, pose,
-> or eye-open checks. These quality gates are design-only. Bad photos can still
-> be uploaded; they simply produce the same placeholder blob.
+> The server now runs brightness, face-size, single-face, centering, sharpness,
+> and eyes-open checks via `shared/face_quality.py`. Bad photos are rejected with
+> `invalid_image`, `no_face_detected`, `multiple_faces`, or `quality_too_low`.
 
 ### 3.3 Upload & Verify
 
@@ -143,9 +145,9 @@ front, left, and right angles automatically.
 | **Size limit**    | Rejected with 400 `invalid_image` when over the limit |
 | **Content type**  | Must start with `image/`; otherwise 400 `invalid_image` |
 | **Student exists**| 404 `student_not_found`                               |
-| **Face detection**| **Not implemented** — `no_face_detected` is never raised |
-| **Multiple faces**| **Not implemented** — `multiple_faces` is never raised |
-| **Quality/pose**  | **Not implemented** — `quality_too_low` is never raised |
+| **Face detection**| 400 `no_face_detected` when no face is found |
+| **Multiple faces**| 400 `multiple_faces` when more than one face is found |
+| **Quality/pose**  | 422 `quality_too_low` for brightness, size, centering, sharpness, or eyes-open failures |
 
 ### 4.2 Common Failures & Solutions
 

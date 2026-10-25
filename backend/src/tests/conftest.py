@@ -652,6 +652,7 @@ def reset_process_globals() -> Any:
     from features.attendance import service as attendance_service
     from features.auth import service as auth_service
     from shared import cache, email, rate_limit
+    from shared import face_quality
 
     def _clear() -> None:
         attendance_service._IDEMPOTENCY_STORE.clear()
@@ -662,6 +663,8 @@ def reset_process_globals() -> Any:
         cache._cache._store.clear()
         email._PENDING.clear()
         core_scheduler.reset_scheduler()
+        face_quality._landmarker = None
+        face_quality._landmarker_failed = False
 
     _clear()
     yield

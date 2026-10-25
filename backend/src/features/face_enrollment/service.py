@@ -6,8 +6,14 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
-from features.face_enrollment.exceptions import InvalidImageException, NoFaceDetectedException
+from features.face_enrollment.exceptions import (
+    InvalidImageException,
+    MultipleFacesException,
+    NoFaceDetectedException,
+    QualityTooLowException,
+)
 from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
+from shared.face_quality import assess_image_bytes
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from shared.audit import record_audit
@@ -32,11 +38,9 @@ def _validate_photo(
             f"{name} photo exceeds {max_bytes} bytes ({len(content)} received)"
         )
 
-    if content_type is None or not content_type.startswith("image/"):
-        raise InvalidImageException(
-            f"{name} photo must be an image upload "
-            f"(received content type {content_type!r})"
-        )
+    # Content type is client-provided metadata and is not trusted. The actual
+    # image format is verified by decoding the bytes in assess_image_bytes below;
+    # a missing/mismatched content type is only rejected when decoding fails.
 
 
 class FaceEnrollmentService:
@@ -96,6 +100,18 @@ class FaceEnrollmentService:
                 content_type=content_type,
                 max_bytes=self._settings.attachments_max_bytes,
             )
+
+            result = assess_image_bytes(content)
+            if not result.ok:
+                detail = f"{name}: {result.message or result.code}"
+                code = result.code
+                if code == "invalid_image":
+                    raise InvalidImageException(detail)
+                if code == "no_face_detected":
+                    raise NoFaceDetectedException(detail)
+                if code == "multiple_faces":
+                    raise MultipleFacesException(detail)
+                raise QualityTooLowException(detail)
 
         old_value: dict[str, Any] = self._face_snapshot(student)
         try:

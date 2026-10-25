@@ -216,8 +216,10 @@
 
 3. **Upload 3 photos** (front, left, right):
    - The current UI accepts JPG/JPEG/PNG/WebP files
-   - No camera capture and no face-quality gates exist; the server only
-     validates non-empty content, size, and `image/*` content type
+   - Camera capture exists and the server now runs the six biometric quality
+     gates (brightness, face size, single face, centering, sharpness, eyes-open)
+     via `shared/face_quality.py`; failures return `invalid_image`,
+     `no_face_detected`, `multiple_faces`, or `quality_too_low`
 
 4. **Server stores the enrollment:**
    - It writes a zero-filled placeholder JSON blob; no ResNet inference runs

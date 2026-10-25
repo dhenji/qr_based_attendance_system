@@ -7,6 +7,7 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import FaceEnrollmentCamera from '$lib/features/admin/enrollment/FaceEnrollmentCamera.svelte';
+	import { validateFacePhoto } from '$lib/features/admin/enrollment/quality';
 	import {
 		adminStudentsState,
 		deleteArchivedStudent,
@@ -145,12 +146,20 @@
 	let faceFront = $state<File | null>(null);
 	let faceLeft = $state<File | null>(null);
 	let faceRight = $state<File | null>(null);
+	let frontInput = $state<HTMLInputElement>();
+	let leftInput = $state<HTMLInputElement>();
+	let rightInput = $state<HTMLInputElement>();
+	const faceFrontPreview = $derived(faceFront ? URL.createObjectURL(faceFront) : null);
+	const faceLeftPreview = $derived(faceLeft ? URL.createObjectURL(faceLeft) : null);
+	const faceRightPreview = $derived(faceRight ? URL.createObjectURL(faceRight) : null);
 	let faceError = $state<string | null>(null);
 	let faceBusy = $state(false);
 	let faceRevokeBusy = $state(false);
 	let faceNote = $state<string | null>(null);
 	let faceCameraMode = $state(false);
 	let faceCameraActive = $state(false);
+	let faceCameraSingleSlot = $state<'front' | 'left' | 'right' | null>(null);
+	let faceRetakeSlot = $state<'front' | 'left' | 'right' | null>(null);
 	let faceConfirm = $state<'save' | 'remove' | null>(null);
 
 	const FACE_ERROR_MESSAGES: Record<string, string> = {
@@ -189,12 +198,17 @@
 			});
 	};
 
-	const pickFacePhoto = (slot: 'front' | 'left' | 'right', list: FileList | null) => {
+	const pickFacePhoto = async (slot: 'front' | 'left' | 'right', list: FileList | null) => {
 		const file = list?.[0] ?? null;
 		if (!file) return;
 		const parsed = facePhotoSchema.safeParse(file);
 		if (!parsed.success) {
 			faceError = parsed.error.issues[0]?.message ?? 'Photo rejected.';
+			return;
+		}
+		const quality = await validateFacePhoto(file);
+		if (!quality.ok) {
+			faceError = quality.reason ?? 'Photo rejected.';
 			return;
 		}
 		faceError = null;
@@ -209,7 +223,16 @@
 		faceRight = photos.right;
 		faceCameraActive = false;
 		faceCameraMode = false;
+		faceCameraSingleSlot = null;
 		faceConfirm = 'save';
+	};
+
+	const handleSingleCapture = (slot: 'front' | 'left' | 'right', file: File) => {
+		if (slot === 'front') faceFront = file;
+		else if (slot === 'left') faceLeft = file;
+		else faceRight = file;
+		faceCameraActive = false;
+		faceCameraSingleSlot = null;
 	};
 
 	const performUploadFace = async () => {
@@ -236,10 +259,13 @@
 			await refreshAdminStudents();
 			notifyEntityChanged('students');
 		} catch (e: unknown) {
-			faceError =
-				e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
-					? FACE_ERROR_MESSAGES[e.code]
-					: (e instanceof Error && e.message ? e.message : 'Upload failed. Try again.');
+			if (e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code] && e.message) {
+				// Prefer the backend detail, which names the failing photo and gate.
+				faceError = e.message;
+			} else {
+				faceError =
+					e instanceof Error && e.message ? e.message : 'Upload failed. Try again.';
+			}
 		} finally {
 			faceBusy = false;
 		}
@@ -975,24 +1001,62 @@
 			{/if}
 			<div class="face-mode-toggle">
 				<button class="btn btn-secondary" class:active={!faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = false; faceCameraActive = false; }}>Upload files</button>
-				<button class="btn btn-secondary" class:active={faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = true; faceCameraActive = true; faceFront = null; faceLeft = null; faceRight = null; }}>Use camera</button>
+				<button class="btn btn-secondary" class:active={faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = true; faceCameraActive = true; faceCameraSingleSlot = null; faceFront = null; faceLeft = null; faceRight = null; }}>Use camera</button>
 			</div>
 
 			{#if faceCameraMode}
 				<FaceEnrollmentCamera
 					active={faceCameraActive}
+					singleSlot={faceCameraSingleSlot}
 					onComplete={handleFaceCameraComplete}
-					onCancel={() => { faceCameraActive = false; faceCameraMode = false; }}
+					onCapture={handleSingleCapture}
+					onCancel={() => { faceCameraActive = false; faceCameraMode = false; faceCameraSingleSlot = null; }}
 				/>
 			{:else}
 				<div class="form">
-					<label>Front photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
+					<label>Front photo<input bind:this={frontInput} class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
+					{#if faceFrontPreview}
+						<div class="face-preview">
+							<img src={faceFrontPreview} alt="Front preview" />
+							<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = 'front')}>Retake</button>
+						</div>
+					{/if}
 					{#if faceFront}<p class="muted">{faceFront.name} · {(faceFront.size / 1024).toFixed(0)} KB</p>{/if}
-					<label>Left photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
+					<label>Left photo<input bind:this={leftInput} class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
+					{#if faceLeftPreview}
+						<div class="face-preview">
+							<img src={faceLeftPreview} alt="Left preview" />
+							<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = 'left')}>Retake</button>
+						</div>
+					{/if}
 					{#if faceLeft}<p class="muted">{faceLeft.name} · {(faceLeft.size / 1024).toFixed(0)} KB</p>{/if}
-					<label>Right photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
+					<label>Right photo<input bind:this={rightInput} class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
+					{#if faceRightPreview}
+						<div class="face-preview">
+							<img src={faceRightPreview} alt="Right preview" />
+							<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = 'right')}>Retake</button>
+						</div>
+					{/if}
 					{#if faceRight}<p class="muted">{faceRight.name} · {(faceRight.size / 1024).toFixed(0)} KB</p>{/if}
 				</div>
+				{#if faceRetakeSlot}
+					<div class="retake-chooser">
+						<p class="muted">Retake {faceRetakeSlot} photo:</p>
+						<button type="button" class="btn" disabled={faceBusy} onclick={() => {
+							if (faceRetakeSlot === 'front') frontInput?.click();
+							else if (faceRetakeSlot === 'left') leftInput?.click();
+							else rightInput?.click();
+							faceRetakeSlot = null;
+						}}>Upload file</button>
+						<button type="button" class="btn" disabled={faceBusy} onclick={() => {
+							faceCameraSingleSlot = faceRetakeSlot;
+							faceCameraMode = true;
+							faceCameraActive = true;
+							faceRetakeSlot = null;
+						}}>Use camera</button>
+						<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = null)}>Cancel</button>
+					</div>
+				{/if}
 				{#if faceConfirm}
 					<div class="confirm-panel">
 						<p class="modal-text">
@@ -1358,4 +1422,28 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}
+	.face-preview {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0.5rem 0;
+	}
+
+	.face-preview img {
+		width: 96px;
+		height: 96px;
+		object-fit: cover;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong, #cbd5e1);
+		transform: scaleX(-1);
+	}
+
+	.retake-chooser {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		margin: 0.5rem 0;
+	}
+
 </style>

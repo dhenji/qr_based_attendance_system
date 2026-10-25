@@ -547,7 +547,7 @@ Upload 3 photos (front, left, right). The server validates the uploads and store
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | **Request**      | `multipart/form-data: front=Image, left=Image, right=Image`                                 |
 | **Response 201** | `{ student_id, face_enrolled_at, face_embedding_version: int }`                             |
-| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 404 `student_not_found`; `multiple_faces` / `quality_too_low` are documented but never raised |
+| **Errors**       | 400 `invalid_image` · 400 `no_face_detected` · 400 `multiple_faces` · 422 `quality_too_low` · 404 `student_not_found` |
 
 #### `GET /admin/face-enrollment/{student_id}`
 

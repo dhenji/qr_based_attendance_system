@@ -12,12 +12,14 @@
 		active: boolean;
 		onComplete: (photos: { front: File; left: File; right: File }) => void;
 		onCancel?: () => void;
+		singleSlot?: 'front' | 'left' | 'right' | null;
+		onCapture?: (slot: 'front' | 'left' | 'right', file: File) => void;
 	}
 
-	let { active, onComplete, onCancel }: Props = $props();
+	let { active, onComplete, onCancel, singleSlot = null, onCapture }: Props = $props();
 
 	type Step = 'front' | 'left' | 'right';
-	type FaceStatus = 'initializing' | 'no_face' | 'too_far' | 'center_face' | 'ready' | 'captured';
+	type FaceStatus = 'initializing' | 'no_face' | 'multiple_faces' | 'too_far' | 'center_face' | 'too_dark' | 'too_bright' | 'blurry' | 'eyes_closed' | 'ready' | 'captured';
 
 	let stage: HTMLDivElement;
 	let video: HTMLVideoElement;
@@ -41,6 +43,13 @@
 	const FRONT_CAM_HFOV_DEG = 70;
 	const MAX_FACE_DISTANCE_M = 0.5;
 	const HOLD_FRAMES = 8;
+
+	const BRIGHTNESS_MIN = 40;
+	const BRIGHTNESS_MAX = 220;
+	const SHARPNESS_MIN = 50;
+	const EAR_MIN = 0.2;
+	const LEFT_EYE_IDX = [33, 160, 158, 133, 153, 144] as const;
+	const RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380] as const;
 
 	let landmarker: LoadedFaceModel['landmarker'] | null = null;
 	let drawing: InstanceType<LoadedFaceModel['DrawingUtils']> | null = null;
@@ -90,6 +99,93 @@
 		const eyeSpread = Math.abs(lm[263].x - lm[33].x);
 		const halfFovRad = (FRONT_CAM_HFOV_DEG * Math.PI) / 360;
 		return IPD_M / (2 * eyeSpread * Math.tan(halfFovRad));
+	};
+
+	let metricCanvas: HTMLCanvasElement | null = null;
+	let metricCtx: CanvasRenderingContext2D | null = null;
+
+	const earFor = (lm: Array<{ x: number; y: number }>, idx: readonly number[]) => {
+		const pt = (i: number) => ({ x: lm[idx[i]].x, y: lm[idx[i]].y });
+		const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+			Math.hypot(a.x - b.x, a.y - b.y);
+		const vertical1 = dist(pt(1), pt(4));
+		const vertical2 = dist(pt(2), pt(5));
+		const horizontal = dist(pt(0), pt(3));
+		if (horizontal <= 1e-9) return 0;
+		return (vertical1 + vertical2) / (2 * horizontal);
+	};
+
+	const facePixelBox = (lm: Array<{ x: number; y: number }>, w: number, h: number) => {
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		for (const p of lm) {
+			const x = p.x * w;
+			const y = p.y * h;
+			if (x < minX) minX = x;
+			if (y < minY) minY = y;
+			if (x > maxX) maxX = x;
+			if (y > maxY) maxY = y;
+		}
+		return {
+			x: Math.max(0, Math.floor(minX)),
+			y: Math.max(0, Math.floor(minY)),
+			w: Math.min(w, Math.ceil(maxX - minX)),
+			h: Math.min(h, Math.ceil(maxY - minY)),
+		};
+	};
+
+	const regionBrightness = (lm: Array<{ x: number; y: number }>) => {
+		if (!video || !metricCtx || !metricCanvas) return 255;
+		const w = video.videoWidth;
+		const h = video.videoHeight;
+		if (!w || !h) return 255;
+		metricCanvas.width = w;
+		metricCanvas.height = h;
+		metricCtx.drawImage(video, 0, 0, w, h);
+		const box = facePixelBox(lm, w, h);
+		if (box.w <= 0 || box.h <= 0) return 255;
+		const data = metricCtx.getImageData(box.x, box.y, box.w, box.h).data;
+		let sum = 0;
+		const n = data.length / 4;
+		for (let i = 0; i < data.length; i += 4) {
+			const r = data[i], g = data[i + 1], b = data[i + 2];
+			sum += 0.299 * r + 0.587 * g + 0.114 * b;
+		}
+		return n > 0 ? sum / n : 255;
+	};
+
+	const regionSharpness = (lm: Array<{ x: number; y: number }>) => {
+		if (!video || !metricCtx || !metricCanvas) return 999;
+		const w = video.videoWidth;
+		const h = video.videoHeight;
+		if (!w || !h) return 999;
+		metricCanvas.width = w;
+		metricCanvas.height = h;
+		metricCtx.drawImage(video, 0, 0, w, h);
+		const box = facePixelBox(lm, w, h);
+		if (box.w < 3 || box.h < 3) return 999;
+		const data = metricCtx.getImageData(box.x, box.y, box.w, box.h).data;
+		// grayscale
+		const gray = new Float32Array(box.w * box.h);
+		for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+			gray[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+		}
+		// Laplacian variance
+		let sum = 0;
+		let sumSq = 0;
+		let count = 0;
+		for (let y = 1; y < box.h - 1; y++) {
+			for (let x = 1; x < box.w - 1; x++) {
+				const idx = y * box.w + x;
+				const lap =
+					gray[idx - box.w] + gray[idx + box.w] + gray[idx - 1] + gray[idx + 1] - 4 * gray[idx];
+				sum += lap;
+				sumSq += lap * lap;
+				count++;
+			}
+		}
+		if (count === 0) return 999;
+		const mean = sum / count;
+		return sumSq / count - mean * mean;
 	};
 
 	const yawFromMatrix = (matrix: Matrix | undefined) => {
@@ -155,7 +251,8 @@
 		return await new Promise<File | null>((resolve) => {
 			canvas.toBlob((blob) => {
 				if (!blob) { resolve(null); return; }
-				resolve(new File([blob], `${step}.jpg`, { type: 'image/jpeg' }));
+				const file = new File([blob], `${step}.jpg`, { type: 'image/jpeg' });
+				resolve(file);
 			}, 'image/jpeg', 0.92);
 		});
 	};
@@ -179,6 +276,8 @@
 		rightEye = [];
 		yawBaseline = null;
 		yawSource = null;
+		metricCanvas = null;
+		metricCtx = null;
 		status = 'initializing';
 		holdFrames = 0;
 		frameCount = 0;
@@ -191,6 +290,7 @@
 		status = 'initializing';
 		holdFrames = 0;
 		frameCount = 0;
+		step = singleSlot ?? 'front';
 		clearView();
 		try {
 			const loaded = await initFaceModel();
@@ -200,6 +300,8 @@
 			leftEye = loaded.connections.leftEye;
 			rightEye = loaded.connections.rightEye;
 			drawingCtor = loaded.DrawingUtils;
+			metricCanvas = document.createElement('canvas');
+			metricCtx = metricCanvas.getContext('2d');
 
 			stream = await navigator.mediaDevices.getUserMedia({
 				video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
@@ -255,7 +357,7 @@
 		}
 		if (result.faceLandmarks.length > 1) {
 			holdFrames = 0;
-			status = 'center_face';
+			status = 'multiple_faces';
 			return;
 		}
 		const lm = result.faceLandmarks[0];
@@ -269,15 +371,40 @@
 			status = 'too_far';
 			return;
 		}
+		const brightness = regionBrightness(lm);
+		if (brightness < BRIGHTNESS_MIN) {
+			holdFrames = 0;
+			status = 'too_dark';
+			return;
+		}
+		if (brightness > BRIGHTNESS_MAX) {
+			holdFrames = 0;
+			status = 'too_bright';
+			return;
+		}
+		const sharpness = regionSharpness(lm);
+		if (sharpness < SHARPNESS_MIN) {
+			holdFrames = 0;
+			status = 'blurry';
+			return;
+		}
+		const leftEar = earFor(lm, LEFT_EYE_IDX);
+		const rightEar = earFor(lm, RIGHT_EYE_IDX);
+		if (leftEar <= EAR_MIN || rightEar <= EAR_MIN) {
+			holdFrames = 0;
+			status = 'eyes_closed';
+			return;
+		}
 		const yaw = relativeYaw(result, lm);
-		status = 'ready';
 		if (conditionMet(yaw, lm)) {
+			status = 'ready';
 			holdFrames += 1;
 			if (holdFrames >= HOLD_FRAMES) {
 				void doCapture();
 			}
 		} else {
 			holdFrames = 0;
+			status = 'center_face';
 		}
 	};
 
@@ -287,6 +414,11 @@
 		const file = await captureFrame();
 		capturing = false;
 		if (!file) return;
+		if (singleSlot) {
+			onCapture?.(singleSlot, file);
+			stop();
+			return;
+		}
 		const nextCaptured = { ...captured, [step]: file } as Partial<Record<Step, File>>;
 		captured = nextCaptured;
 		holdFrames = 0;
@@ -300,7 +432,7 @@
 
 	const retry = () => {
 		error = null;
-		step = 'front';
+		step = singleSlot ?? 'front';
 		captured = {};
 		holdFrames = 0;
 		void start();
@@ -343,8 +475,13 @@
 		<p class="status">
 			{#if status === 'initializing'}Loading camera…
 			{:else if status === 'no_face'}No face detected
+			{:else if status === 'multiple_faces'}Only one face allowed
 			{:else if status === 'too_far'}Move closer
 			{:else if status === 'center_face'}Center your face in the oval
+			{:else if status === 'too_dark'}Image too dark — improve lighting
+			{:else if status === 'too_bright'}Image too bright — reduce lighting
+			{:else if status === 'blurry'}Image blurry — hold still
+			{:else if status === 'eyes_closed'}Keep your eyes open
 			{:else if status === 'ready'}Hold still…
 			{:else}Captured{/if}
 		</p>
@@ -360,7 +497,7 @@
 <style>
 	.cam { display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
 	.stage { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #0f172a; border-radius: 10px; overflow: hidden; }
-	video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+	video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; transform: scaleX(-1); }
 	.face-guide { position: absolute; left: 50%; top: 50%; width: 55%; height: 80%; transform: translate(-50%, -50%); border-radius: 50%; border: 2px dashed rgba(148,163,184,0.75); pointer-events: none; transition: border-color .2s, background .2s; }
 	.face-guide.aligned { border-color: rgba(34,197,94,0.9); background: rgba(34,197,94,0.08); }
 	.hint { position: absolute; left: 0; right: 0; bottom: 0.75rem; text-align: center; color: rgba(255,255,255,0.9); background: rgba(15,23,42,0.6); padding: 0.375rem 0.875rem; font-size: 0.8125rem; border-radius: 99px; width: fit-content; margin: 0 auto; pointer-events: none; }
