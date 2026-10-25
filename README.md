@@ -453,7 +453,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/guides/admin-manual.md`](docs/guides/admin-manual.md) — program setup, imports, assignment, analytics, backup
 - [`docs/guides/professor-manual.md`](docs/guides/professor-manual.md) — sessions, windows, excuses, reports
 - [`docs/guides/student-manual.md`](docs/guides/student-manual.md) — scan flow, offline, excuses, calendar
-- [`docs/guides/face-enrollment-guide.md`](docs/guides/face-enrollment-guide.md) — 3-photo upload script, current limitations & privacy notes
+- [`docs/guides/face-enrollment-guide.md`](docs/guides/face-enrollment-guide.md) — 3-photo upload or live-camera capture script, current limitations & privacy notes
 
 ### Operations
 

@@ -244,11 +244,14 @@ def test_router_prefix_and_routes() -> None:
     by_path = {(r.path, next(iter(r.methods))): r for r in face_router.router.routes}
     get_route = by_path.get(("/admin/face-enrollment/{student_id}", "GET"))
     post_route = by_path.get(("/admin/face-enrollment/{student_id}", "POST"))
+    delete_route = by_path.get(("/admin/face-enrollment/{student_id}", "DELETE"))
 
     assert get_route is not None
     assert post_route is not None
+    assert delete_route is not None
     assert post_route.methods == {"POST"}
     assert 201 in (post_route.status_code, getattr(post_route, "status_code", None))
+    assert 204 in (delete_route.status_code, getattr(delete_route, "status_code", None))
 
     paths = [r.path for r in face_router.router.routes]
     assert not any(p.endswith("/status") for p in paths)

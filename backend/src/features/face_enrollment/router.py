@@ -59,3 +59,16 @@ async def enroll_face(
         right_content_type=right.content_type,
         actor_id=user.id,
     )
+
+
+@router.delete(
+    "/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke face enrollment",
+)
+async def revoke_face_enrollment(
+    student_id: int,
+    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    service: FaceEnrollmentServiceDep,
+) -> None:
+    await service.revoke_face_enrollment(student_id=student_id, actor_id=user.id)

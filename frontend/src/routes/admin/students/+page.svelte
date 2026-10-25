@@ -6,6 +6,7 @@
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
+	import FaceEnrollmentCamera from '$lib/features/admin/enrollment/FaceEnrollmentCamera.svelte';
 	import {
 		adminStudentsState,
 		deleteArchivedStudent,
@@ -17,6 +18,7 @@
 		createStudent,
 		getFaceEnrollmentStatus,
 		resetStudentPassword,
+		revokeFaceEnrollment,
 		updateStudent,
 		uploadFaceEnrollment,
 		type FaceEnrollmentStatus,
@@ -33,6 +35,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes, adminStudent } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { initFaceModel } from '$lib/features/liveness/model';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Student Management (wireframe 4.2): search + sortable table + pagination
@@ -144,7 +147,11 @@
 	let faceRight = $state<File | null>(null);
 	let faceError = $state<string | null>(null);
 	let faceBusy = $state(false);
+	let faceRevokeBusy = $state(false);
 	let faceNote = $state<string | null>(null);
+	let faceCameraMode = $state(false);
+	let faceCameraActive = $state(false);
+	let faceConfirm = $state<'save' | 'remove' | null>(null);
 
 	const FACE_ERROR_MESSAGES: Record<string, string> = {
 		invalid_image: 'One of the photos could not be read. Use clear JPG, PNG, or WebP images.',
@@ -162,6 +169,9 @@
 		faceRight = null;
 		faceError = null;
 		faceNote = null;
+		faceCameraMode = false;
+		faceCameraActive = false;
+		faceConfirm = null;
 		faceLoading = true;
 		void getFaceEnrollmentStatus(row.id)
 			.then((status) => {
@@ -193,7 +203,16 @@
 		else faceRight = file;
 	};
 
-	const uploadFace = async () => {
+	const handleFaceCameraComplete = (photos: { front: File; left: File; right: File }) => {
+		faceFront = photos.front;
+		faceLeft = photos.left;
+		faceRight = photos.right;
+		faceCameraActive = false;
+		faceCameraMode = false;
+		faceConfirm = 'save';
+	};
+
+	const performUploadFace = async () => {
 		if (!faceTarget || faceBusy) return;
 		if (!faceFront || !faceLeft || !faceRight) {
 			faceError = 'Choose front, left, and right photos to enroll.';
@@ -223,6 +242,57 @@
 					: (e instanceof Error && e.message ? e.message : 'Upload failed. Try again.');
 		} finally {
 			faceBusy = false;
+		}
+	};
+
+	const performRevokeFace = async () => {
+		if (!faceTarget || faceRevokeBusy) return;
+		faceRevokeBusy = true;
+		faceError = null;
+		faceNote = null;
+		try {
+			await revokeFaceEnrollment(faceTarget.id);
+			faceStatus = { enrolled: false };
+			faceFront = null;
+			faceLeft = null;
+			faceRight = null;
+			faceNote = 'Enrollment removed.';
+			await refreshAdminStudents();
+			notifyEntityChanged('students');
+		} catch (e: unknown) {
+			faceError =
+				e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
+					? FACE_ERROR_MESSAGES[e.code]
+					: (e instanceof Error && e.message ? e.message : 'Removal failed. Try again.');
+		} finally {
+			faceRevokeBusy = false;
+		}
+	};
+
+	const requestUploadFace = () => {
+		if (!faceTarget || faceBusy || faceRevokeBusy) return;
+		if (!faceFront || !faceLeft || !faceRight) {
+			faceError = 'Choose front, left, and right photos to enroll.';
+			return;
+		}
+		faceError = null;
+		faceConfirm = 'save';
+	};
+
+	const requestRevokeFace = () => {
+		if (!faceTarget || faceRevokeBusy || faceBusy) return;
+		if (!faceStatus?.enrolled) return;
+		faceError = null;
+		faceConfirm = 'remove';
+	};
+
+	const confirmFaceAction = () => {
+		if (faceConfirm === 'save') {
+			faceConfirm = null;
+			void performUploadFace();
+		} else if (faceConfirm === 'remove') {
+			faceConfirm = null;
+			void performRevokeFace();
 		}
 	};
 
@@ -303,6 +373,7 @@
 	};
 
 	onMount(() => {
+		void initFaceModel();
 		void loadProgramOptions();
 		load(1);
 		// Own entity -> refresh the table; lookup entity -> reload picker
@@ -902,20 +973,63 @@
 			{#if faceNote}
 				<p class="note" role="status">{faceNote}</p>
 			{/if}
-			<div class="form">
-				<label>Front photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
-				{#if faceFront}<p class="muted">{faceFront.name} · {(faceFront.size / 1024).toFixed(0)} KB</p>{/if}
-				<label>Left photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
-				{#if faceLeft}<p class="muted">{faceLeft.name} · {(faceLeft.size / 1024).toFixed(0)} KB</p>{/if}
-				<label>Right photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
-				{#if faceRight}<p class="muted">{faceRight.name} · {(faceRight.size / 1024).toFixed(0)} KB</p>{/if}
+			<div class="face-mode-toggle">
+				<button class="btn btn-secondary" class:active={!faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = false; faceCameraActive = false; }}>Upload files</button>
+				<button class="btn btn-secondary" class:active={faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = true; faceCameraActive = true; faceFront = null; faceLeft = null; faceRight = null; }}>Use camera</button>
 			</div>
-			<div class="modal-actions">
-				<button class="btn btn-ghost" onclick={() => (faceTarget = null)}>Close</button>
-				<button class="btn btn-primary" aria-busy={faceBusy} disabled={faceBusy} onclick={() => void uploadFace()}>
-					{faceBusy ? 'Uploading…' : 'Upload enrollment'}
-				</button>
-			</div>
+
+			{#if faceCameraMode}
+				<FaceEnrollmentCamera
+					active={faceCameraActive}
+					onComplete={handleFaceCameraComplete}
+					onCancel={() => { faceCameraActive = false; faceCameraMode = false; }}
+				/>
+			{:else}
+				<div class="form">
+					<label>Front photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
+					{#if faceFront}<p class="muted">{faceFront.name} · {(faceFront.size / 1024).toFixed(0)} KB</p>{/if}
+					<label>Left photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
+					{#if faceLeft}<p class="muted">{faceLeft.name} · {(faceLeft.size / 1024).toFixed(0)} KB</p>{/if}
+					<label>Right photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
+					{#if faceRight}<p class="muted">{faceRight.name} · {(faceRight.size / 1024).toFixed(0)} KB</p>{/if}
+				</div>
+				{#if faceConfirm}
+					<div class="confirm-panel">
+						<p class="modal-text">
+							{faceConfirm === 'save'
+								? 'Save this face enrollment?'
+								: 'Remove this student\u2019s face enrollment? This cannot be undone.'}
+						</p>
+						<div class="modal-actions">
+							<button class="btn btn-ghost" disabled={faceBusy || faceRevokeBusy} onclick={() => (faceConfirm = null)}>Cancel</button>
+							<button
+								class={faceConfirm === 'save' ? 'btn btn-primary' : 'btn btn-danger'}
+								aria-busy={faceConfirm === 'save' ? faceBusy : faceRevokeBusy}
+								disabled={faceBusy || faceRevokeBusy}
+								onclick={() => void confirmFaceAction()}
+							>
+								{#if faceConfirm === 'save'}
+									{faceBusy ? 'Saving…' : 'Save'}
+								{:else}
+									{faceRevokeBusy ? 'Removing…' : 'Remove'}
+								{/if}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<div class="modal-actions">
+						<button class="btn btn-ghost" onclick={() => (faceTarget = null)}>Close</button>
+						{#if faceStatus?.enrolled}
+							<button class="btn btn-danger" disabled={faceBusy || faceRevokeBusy} onclick={() => void requestRevokeFace()}>
+								Remove enrollment
+							</button>
+						{/if}
+						<button class="btn btn-primary" disabled={faceBusy || faceRevokeBusy} onclick={() => void requestUploadFace()}>
+							Upload enrollment
+						</button>
+					</div>
+				{/if}
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -1039,6 +1153,18 @@
 		font-variant-numeric: tabular-nums;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+
+	.face-mode-toggle {
+		display: flex;
+		gap: 0.5rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.face-mode-toggle .active {
+		background: var(--brand, #1e3a5f);
+		color: var(--on-brand, #fff);
+		border-color: var(--brand, #1e3a5f);
 	}
 
 	.row-actions {
