@@ -76,6 +76,10 @@ def deserialize_embedding(blob: bytes) -> tuple[np.ndarray, str, int]:
                 raise FaceEmbeddingError("invalid header")
             algo = blob[offset : offset + algo_len].decode("utf-8")
             offset += algo_len
+            if dim != EMBEDDING_DIM:
+                raise FaceEmbeddingError(
+                    f"unexpected embedding dimension {dim}, expected {EMBEDDING_DIM}"
+                )
             data = blob[offset : offset + dim * 4]
             emb = np.frombuffer(data, dtype=np.float32).copy()
             return emb, algo, ver

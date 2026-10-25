@@ -117,6 +117,7 @@ export const submitAttendanceScan = async (input: {
 				head_turn_right: input.livenessEvidence.headTurnRight,
 				ear_samples: input.livenessEvidence.earSamples,
 				pnp_evidence: input.livenessEvidence.pnpEvidence,
+				face_count: input.livenessEvidence.faceCount ?? 1,
 			},
 			live_face_embedding: input.liveFaceEmbedding,
 			scanned_at: input.scannedAt,
