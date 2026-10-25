@@ -89,6 +89,7 @@ from shared.enums import (
 from shared.face_embeddings import (
     FaceEmbeddingError,
     cosine_similarity,
+    deserialize_embedding,
     embedding_from_base64,
     is_stub_embedding,
 )
@@ -156,7 +157,13 @@ def _haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> f
 
 
 def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
-    """Grade the fixed blink -> left -> right challenge (D31)."""
+    """Grade the fixed blink -> left -> right challenge (D31).
+
+    The yaw/face-count checks are applied only when the client supplies the
+    corresponding evidence, so legacy payloads keep working; a client that
+    does supply them cannot pass with out-of-range values.
+    """
+
     if not (
         evidence.blink_detected and evidence.head_turn_left and evidence.head_turn_right
     ):
@@ -170,7 +177,29 @@ def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
     if not EAR_MEAN_MIN <= mean_ear <= EAR_MEAN_MAX:
         return False
 
-    return bool(evidence.pnp_evidence)
+    if not evidence.pnp_evidence:
+        return False
+
+    # Multiple faces in the frame are not safe to verify.
+    if getattr(evidence, "face_count", 1) != 1:
+        return False
+
+    pnp = evidence.pnp_evidence
+    if isinstance(pnp, dict):
+        if "peak_left_yaw" in pnp:
+            try:
+                if float(pnp["peak_left_yaw"]) > -15:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        if "peak_right_yaw" in pnp:
+            try:
+                if float(pnp["peak_right_yaw"]) < 15:
+                    return False
+            except (TypeError, ValueError):
+                return False
+
+    return True
 
 
 def _idempotency_key_for(user_id: int, session_id: int, key: str | None) -> str | None:
@@ -376,7 +405,7 @@ class AttendanceService:
 
         try:
             live_emb = embedding_from_base64(payload.live_face_embedding)
-            ref_emb, _algo, _ver = __import__("shared.face_embeddings", fromlist=["deserialize_embedding"]).deserialize_embedding(student.face_embedding)
+            ref_emb, _algo, _ver = deserialize_embedding(student.face_embedding)
         except FaceEmbeddingError as e:
             raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
 

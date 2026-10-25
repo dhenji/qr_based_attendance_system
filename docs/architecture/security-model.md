@@ -10,10 +10,10 @@
 
 | #   | Threat                                                     | Severity | Mitigation                                                                                                                                                                                                                          | Decision                                 |
 | --- | ---------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential scan: authenticated identity (JWT) → session code → student-ID confirmation → GPS geofence → liveness. Identity, session, and geofence are server-enforced; `student_number` is comparison-only, and liveness evidence is server-graded but client-generated. Face matching is **not implemented** — see *Client-Asserted Biometrics*. No shortcut through auth, session, or geofence. | D27, D31, ADR-083 |
-| T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe Face Mesh WASM in the client. The server grades the *submitted* evidence, not a measurement — see *Client-Asserted Biometrics*. This stops an honest client from being tricked, not a determined one. | D31                                      |
+| T1  | **Buddy punching** — student scans for absent friend       | High     | Sequential scan: authenticated identity (JWT) → session code → student-ID confirmation → GPS geofence → liveness → server-side face match. Identity, session, geofence, and embedding comparison are server-enforced; `student_number` is comparison-only. Liveness evidence is client-generated but server-graded. | D27, D31, ADR-083 |
+| T2  | **Photo/video replay** — student shows phone photo of face | High     | Liveness challenge (blink → turn left → turn right) with MediaPipe FaceLandmarker WASM in the client. The server grades the *submitted* evidence and compares the live embedding to the enrolled template. This stops an honest client from being tricked, not a determined one. | D31                                      |
 | T3  | **QR relay** — student sends session code/QR to off-site friend | Medium   | GPS geofence (Haversine) validates student device location against course/session coordinates. Offline scans validated on sync; `session_expired` rejection for late submissions.                                                   | D12, D16, D27                            |
-| T4  | **Sibling confusion** — twin/brother scans                 | Low      | **Not implemented.** No embedding comparison exists: there is no cosine-similarity code in the backend, and `face_enrollment` stores a zero-filled placeholder blob (`_stub_embedding_blob`), so there is nothing to compare against. The 0.70 threshold in `core/config.py` is applied to the score the *client* submits. Acknowledged by instructor as accepted risk; no PAD CNN in scope. | D31, ADR-068                      |
+| T4  | **Sibling confusion** — twin/brother scans                 | Low      | Partially mitigated. Server-side cosine similarity now runs against the enrolled embedding, but no PAD CNN and provenance remains client-asserted. Acknowledged by instructor as accepted risk. | D31, ADR-068                      |
 | T5  | **GPS spoof** — fake GPS coordinates                       | Medium   | Client-side GPS validation is UX-only; server re-validates on sync. Device integrity attestation (future). Known gap: spoofed GPS passes server check if `scanned_at` is valid. Accepted for MVP.                                   | — (no formal decision; MVP-accepted gap) |
 | T6  | **Token theft** — JWT stolen                               | High     | Short-lived JWTs (15 min access, 7 day refresh). MFA available via TOTP, revocable by the user. Argon2id for password hashing. Account lockout after failed attempts. A stolen 7-day refresh token outlives an MFA disable — see *Password & Account Security*. | D32                                      |
 | T7  | **Session code brute-force**                               | Medium   | HMAC-derived 8-char codes from a server-only secret. 62^8 ≈ 2.18 × 10^14 possibilities. The verify endpoint is rate-limited at 10 attempts/min per IP (`VERIFY_CODE_RATE_LIMIT_*`, `student/router.py`). Codes expire with the session. | D18 |
@@ -126,15 +126,19 @@ exposure; it is not a way to kick an existing session out.
 
 ### Face Embedding Encryption (D28)
 
-> **Status: designed, not implemented.** What the server stores today is a
-> zero-filled placeholder from `_stub_embedding_blob` — a plain JSON blob with
-> `"mean"` and all three angle vectors set to `0.0` and `"stub": true`. There is
-> no embedding inference, no AES-GCM step and no encryption code in the feature,
-> and no recognition model is installed anywhere in the repository. The
-> pipeline below is the design D28 records. The blob's *shape* is already the
-> documented one so swapping the builder is the only change a real pipeline
-> needs. The audit-trail exclusion in `_face_snapshot` is implemented and holds
-> regardless.
+> **Status: partially implemented (2026-10-25).** Enrollment now generates a real
+> 128-d embedding from the admin-uploaded photos using MediaPipe FaceLandmarker
+> when the model is available (stored as a `FACEEMB1` binary blob via
+> `shared/face_embeddings.serialize_embedding`); otherwise it falls back to a
+> byte-seeded deterministic vector. AES-256-GCM encryption at rest is still
+> **not implemented** — the BYTEA column holds the plaintext blob. The
+> audit-trail exclusion in `_face_snapshot` is implemented and holds regardless.
+>
+> Scan verification now computes `cosine_similarity(stored_embedding,
+> live_face_embedding)` server-side (`attendance/service.py::submit_scan`) and
+> applies `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). The
+> client supplies `live_face_embedding`, derived from MediaPipe landmarks
+> captured during the liveness challenge, so provenance remains client-asserted.
 
 ```
 Server:
@@ -154,8 +158,8 @@ The last line — *use for offline face comparison* — has no counterpart on ei
 side today: the server sends plaintext, the client encrypts its local cache, and
 no comparison is performed. See *Client-Asserted Biometrics*.
 
-**Thresholds** (applied to the client-submitted `face_match_score`, not to a
-measured similarity):
+**Thresholds** (applied to the server-computed similarity between the enrolled
+and live embeddings):
 
 - ≥ 0.70: Pass
 - 0.65–0.70: Review flag → routed to liveness review queue
@@ -168,8 +172,9 @@ Fixed sequence: **blink → turn left → turn right**
 | Check      | Client-side method                     | Evidence submitted   | Server-side check |
 | ---------- | -------------------------------------- | -------------------- | ----------------- |
 | Blink      | EAR (Eye Aspect Ratio) per frame       | `ear_samples` array  | mean within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5), ≥ 1 sample |
-| Turn left  | PnP head pose yaw < -15°               | `pnp_evidence.yaw`   | `head_turn_left` true, `pnp_evidence` non-empty |
-| Turn right | PnP head pose yaw > +15°               | `pnp_evidence.yaw`   | `head_turn_right` true, `pnp_evidence` non-empty |
+| Turn left  | PnP head pose yaw < -15°               | `pnp_evidence` (incl. `peak_left_yaw`) | `head_turn_left` true, `pnp_evidence` non-empty; `peak_left_yaw <= -15` when supplied |
+| Turn right | PnP head pose yaw > +15°               | `pnp_evidence` (incl. `peak_right_yaw`) | `head_turn_right` true, `pnp_evidence` non-empty; `peak_right_yaw >= 15` when supplied |
+| Multi-face | MediaPipe `numFaces=2`                 | `face_count`         | `face_count == 1` |
 
 The thresholds in the left column are what the *client* is expected to apply; the
 right column is all the server enforces. An earlier version of this table claimed
@@ -197,18 +202,21 @@ though the server verifies biometrics. It does not.
 
 | Input | Who computes it | What the server checks |
 | --- | --- | --- |
-| `liveness_evidence` | client (MediaPipe WASM) | three booleans true; `ear_samples` non-empty; their **mean** within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5); `pnp_evidence` non-empty |
-| `face_match_score` | client | within `face_review_band_low` (0.65) and `face_match_threshold` (0.70), both applied to the submitted number |
+| `liveness_evidence` | client (MediaPipe WASM) | three booleans true; `ear_samples` non-empty; their **mean** within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5); `pnp_evidence` non-empty; `face_count == 1`; yaw peaks validated when supplied (`peak_left_yaw <= -15`, `peak_right_yaw >= 15`) |
+| `live_face_embedding` | client (MediaPipe landmarks) | deserialized as `FACEEMB1`; cosine similarity against the enrolled embedding must be ≥ `face_review_band_low` (0.65); embedding dimension must be 128 |
 
-Both are body fields on `POST /student/attendance/scan`. The server's checks are
-arithmetic and truthiness over values the client sent — no measurement, no
-image, no embedding comparison. Two specifics worth stating plainly:
+The liveness evidence and embedding are still client-asserted, but the server now
+performs a real embedding comparison against the enrolled template instead of
+trusting a submitted score. Provenance (that the embedding came from the frames
+that passed liveness) is not cryptographically bound. Two specifics worth
+stating plainly:
 
 - `EAR_SAMPLES_MIN_COUNT` is **1**, so the three-step challenge is satisfiable
   with a single asserted sample per position.
-- A client submitting `face_match_score=0.99` always passes and is never routed
-  to the liveness review queue. The review band only catches scores a client
-  volunteers.
+- A client can still forge both fields; the server validates plausibility and
+  performs the comparison, but cannot observe the user. This remains an
+  integrity signal recorded in the trail, not an access control against a
+  modified client (ADR-068).
 
 There is also no face *enrollment* pipeline yet: `face_enrollment` stores a
 zero-filled placeholder from `_stub_embedding_blob`, so there is no stored vector

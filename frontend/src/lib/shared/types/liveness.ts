@@ -8,4 +8,5 @@ export interface LivenessEvidence {
   earSamples: number[];
   pnpEvidence: object;
   faceLandmarks?: any[];
+  faceCount?: number;
 }

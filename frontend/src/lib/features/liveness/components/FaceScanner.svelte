@@ -478,6 +478,7 @@
 		stageStartedAt = 0;
 		completionSent = false;
 		lastVideoTime = -1;
+		lastFaceLandmarks = [];
 		status = 'initializing';
 		beginDetection = false;
 		clearCountdown();
@@ -583,10 +584,15 @@
 			idleFrames = 0;
 			poseHoldFrames = 0;
 			centerHoldFrames = 0;
+			lastFaceLandmarks = [];
 			status = 'no_face';
 			return;
 		}
 		const lm = result.faceLandmarks[0];
+		// Keep the landmarks from the frame currently being graded so the
+		// scan submission's embedding comes from the same face that is
+		// passing liveness (see scan/+page.svelte liveFaceEmbedding).
+		lastFaceLandmarks = result.faceLandmarks;
 		const guideScale = challengeStage === 'blink' ? 1 : 1.25;
 		if (!isInsideGuide(lm, guideScale)) {
 			closedFrames = 0;
@@ -726,6 +732,7 @@
 					headTurnLeft: true,
 					headTurnRight: true,
 					earSamples: [...earSamples],
+					faceCount: lastFaceLandmarks?.length || 1,
 					pnpEvidence: {
 						source: yawSource ?? 'landmarks',
 						baseline_yaw: Number((yawBaseline ?? 0).toFixed(2)),
@@ -774,6 +781,7 @@
 		stageStartedAt = 0;
 		completionSent = false;
 		lastVideoTime = -1;
+		lastFaceLandmarks = [];
 		clearView();
 		stream?.getTracks().forEach((t) => t.stop());
 		stream = null;

@@ -46,6 +46,7 @@ class LivenessEvidence(BaseModel):
         min_length=EAR_SAMPLES_MIN_COUNT, max_length=EAR_SAMPLES_MAX_COUNT
     )
     pnp_evidence: dict[str, Any] = Field(default_factory=dict)
+    face_count: int = Field(default=1, ge=1, le=10)
 
     @field_validator("ear_samples")
     @classmethod
