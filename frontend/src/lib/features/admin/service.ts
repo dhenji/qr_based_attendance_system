@@ -208,6 +208,10 @@ export const uploadFaceEnrollment = async (
 	};
 };
 
+export const revokeFaceEnrollment = async (studentId: number): Promise<void> => {
+	await del<void>('adminFaceEnrollmentRevoke', undefined, `/${studentId}`);
+};
+
 // Roster CSV template. Server text in live mode; the static header keeps
 // mock-mode/offline imports working when the template route is unreachable.
 const STUDENT_TEMPLATE_FALLBACK =

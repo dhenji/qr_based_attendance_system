@@ -32,7 +32,7 @@ Admin picks student → Student Management → Enroll face modal
         │
         ▼
 ┌─────────────────────────────────┐
-│  Select 3 image files           │
+│  Capture 3 images (file or cam) │
 │  1. Front                       │
 │  2. Left profile                │
 │  3. Right profile               │
@@ -63,9 +63,11 @@ Enrollment is recorded; the scan still runs liveness only (no face match)
 
 ### 2.1 Quality Gates — Not Implemented
 
-⚠ **Design only.** The shipped admin UI uploads three selected files; neither the
-browser nor the server runs brightness, face-size, single-face, centering,
-sharpness, or eyes-open checks. The server validates `content_type`, size, and
+⚠ **Design only (biometric gates).** The admin UI now also supports live camera
+capture, which performs best-effort alignment (face in guide, distance, yaw) but
+still runs no brightness, face-size, single-face, sharpness, or eyes-open checks.
+The server validates `content_type`, size, and non-empty bytes only
+(`face_enrollment/service.py:41-60`). The server validates `content_type`, size, and
 non-empty bytes (`face_enrollment/service.py:41-60`); the UI filters by extension
 and 5 MB (`frontend/src/lib/features/admin/schema.ts`).
 
@@ -186,7 +188,7 @@ Decryption is client-side only; the raw embedding never touches localStorage une
 | Trigger                                | Action                                                    |
 | -------------------------------------- | --------------------------------------------------------- |
 | Student archived (`is_active = false`) | `face_embedding` set to NULL **and `face_embedding_version` incremented** (`student/service.py:571-574`) |
-| Admin manually revokes face data       | ⚠ **Not reachable.** `revoke_face_enrollment` exists as a service method, but no route exposes it, so no admin can trigger this today |
+| Admin manually revokes face data       | **Reachable** via `DELETE /admin/face-enrollment/{student_id}` (clears blob, bumps version) |
 | Student graduates / transfers out      | Handled by archive flow above                             |
 
 Both triggers increment the version rather than leaving it alone: that is what invalidates a
@@ -333,6 +335,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 | ------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
 | POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server stores a placeholder embedding (no generation)         |
 | GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
+| DELETE | `/admin/face-enrollment/{student_id}`       | Admin   | Revoke enrollment: clears the blob, nulls `face_enrolled_at`, bumps `face_embedding_version` (204) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
 
 `GET /student/me/face-embedding` returns **404 `face_embedding_not_found`** when the student has

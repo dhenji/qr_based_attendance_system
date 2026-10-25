@@ -369,7 +369,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | **Archive**              | `/admin/students/archive`             | View/restore/permanently delete archived students     |
 | **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged scans (GPS / submitted score band) |
 | **Admin Users**          | `/admin/users`                        | Manage admin accounts (Super Admin only)              |
-| **Face Enrollment**      | `/admin/students` → **Enroll face**   | Upload 3 photos for enrollment (modal; placeholder embedding) |
+| **Face Enrollment**      | `/admin/students` → **Enroll face**   | Upload 3 photos or capture them via live camera; remove an existing enrollment (modal; placeholder embedding) |
 
 ---
 
