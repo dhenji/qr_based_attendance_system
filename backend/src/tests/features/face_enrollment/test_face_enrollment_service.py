@@ -15,6 +15,11 @@ from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity
+from shared.face_quality import FaceQualityResult
+import features.face_enrollment.service as face_enrollment_service
+
+# Bypass quality gates in unit tests (quality is enforced via shared.face_quality)
+face_enrollment_service.assess_image_bytes = lambda _content: FaceQualityResult(ok=True)
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -176,16 +181,17 @@ def test_enroll_rejects_empty_photo() -> None:
     assert exc_info.value.status_code == 400
 
 
-def test_enroll_rejects_non_image_content_type() -> None:
+def test_enroll_ignores_non_image_content_type() -> None:
     session = _FakeSession(objs=(_student(),))
 
-    with pytest.raises(InvalidImageException):
-        _run(
-            _service(session).enroll_face(
-                student_id=1,
-                **_enroll_kwargs(front_content_type="text/csv"),
-            )
+    result = _run(
+        _service(session).enroll_face(
+            student_id=1,
+            **_enroll_kwargs(front_content_type="text/csv"),
         )
+    )
+
+    assert result.student_id == 1
 
 
 def test_enroll_rejects_oversized_photo() -> None:

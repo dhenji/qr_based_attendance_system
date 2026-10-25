@@ -61,21 +61,20 @@ Stores ONE JSON blob in students.face_embedding BYTEA (plaintext today)
 Enrollment is recorded; the scan still runs liveness only (no face match)
 ```
 
-### 2.1 Quality Gates — Not Implemented
+### 2.1 Quality Gates — Implemented
 
-⚠ **Design only (biometric gates).** The admin UI now also supports live camera
-capture, which performs best-effort alignment (face in guide, distance, yaw) but
-still runs no brightness, face-size, single-face, sharpness, or eyes-open checks.
-The server validates `content_type`, size, and non-empty bytes only
-(`face_enrollment/service.py:41-60`). The server validates `content_type`, size, and
-non-empty bytes (`face_enrollment/service.py:41-60`); the UI filters by extension
-and 5 MB (`frontend/src/lib/features/admin/schema.ts`).
+The six biometric gates now run on both sides. The server is authoritative:
+`shared/face_quality.py::assess_image_bytes` decodes the upload and runs detection
+then brightness, face-size, centering, sharpness, and eyes-open checks, returning
+`FaceQualityResult`. The service raises `InvalidImageException` (400),
+`NoFaceDetectedException` (400), `MultipleFacesException` (400), or
+`QualityTooLowException` (422) accordingly. The client mirrors the thresholds for
+usability (`FaceEnrollmentCamera.svelte`, `features/admin/enrollment/quality.ts`)
+but the backend re-validates every upload.
 
-Consequently `no_face_detected`, `multiple_faces` and `quality_too_low` appear in
-`api-contracts.md` but have **no exception class in the tree**
-(`face_enrollment/exceptions.py` defines only `InvalidImageException`), and the
-server never raises them. The table below is the design specification, not the
-build:
+The frontend validates file extension/size via `facePhotoSchema` and now also runs
+canvas-based brightness/sharpness/dimension checks before upload; the live camera
+flow only auto-captures when all gates pass.
 
 | Gate          | Condition                                                        | Error Message                                                |
 | ------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |

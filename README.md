@@ -49,8 +49,13 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > a client-supplied value (the shipped client sends a placeholder `1.0`), and
 > face enrollment is not required to scan. Server-side face matching is not
 > implemented — see the [security model](docs/architecture/security-model.md)
-> and ADR-068.
-> Every attendance submission follows the canonical **5-step scan flow (D27)**:
+> and ADR-068. Face enrollment runs six biometric quality gates
+> (brightness 40–220, face size ≥15% of frame, single face, centering ≤30% offset,
+> sharpness/Laplacian variance ≥50, eyes open EAR ≥0.2) via
+> `shared/face_quality.py` using MediaPipe FaceLandmarker before storing the
+> placeholder embedding. The backend enforces gates authoritatively; the
+> admin camera UI provides live guidance and retakes. Every attendance
+> submission follows the canonical **5-step scan flow (D27)**:
 > `session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
 > Any single failure rejects the record with one of the canonical D15 rejection
 > reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,

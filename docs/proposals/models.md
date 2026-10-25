@@ -109,10 +109,10 @@ This is the honest state of the biometric identity layer.
   (`frontend/src/lib/features/liveness/service.ts:109`).
 - **No offline local compare** — explicitly deferred in the client for the same reason
   (`face.svelte.ts:15-17`).
-- **No client-side biometric quality gates.** The six documented gates (brightness, face
-  size, single face, centred, sharpness, eyes open) are implemented nowhere; the client
-  validates file extension and size, and the server validates content type, size and
-  non-empty.
+- **Client- and server-side biometric quality gates are now implemented.** The six
+  documented gates (brightness, face size, single face, centred, sharpness, eyes
+  open) run in `shared/face_quality.py` on the server and are mirrored in the
+  client (`FaceEnrollmentCamera.svelte`, `features/admin/enrollment/quality.ts`).
 
 **What a real pipeline needs:** a recognition model; a documented decrypt scheme for the
 cached blob; AES-256-GCM at rest with a server-side key; and the comparison itself —

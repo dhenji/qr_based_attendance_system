@@ -994,17 +994,16 @@
   the status change is test-safe. Two `size: 50` values remain in mock-fixture
   response bodies in `frontend/src/lib/api/endpoints.ts` — cosmetic, since wire
   requests already send `20`.
-- **Deferred:** Three groups of contract-documented behavior remain unimplemented
+- **Deferred:** Two groups of contract-documented behavior remain unimplemented
   and are reported rather than fixed, since closing them would mean adding new
-  exception classes: face enrollment's `400 no_face_detected`, `400 multiple_faces`,
-  and `422 quality_too_low` (contract line 333 — detection runs client-side via
-  MediaPipe, so the backend has no detector to fail); bulk enroll's
-  `422 validation_error` (line 309 — per-row errors are folded into the 201 body
-  instead); and the three admin reset-password endpoints
-  `POST /admin/users/{id}/reset-password`,
+  exception classes: bulk enroll's `422 validation_error` (line 309 — per-row
+  errors are folded into the 201 body instead); and the three admin
+  reset-password endpoints `POST /admin/users/{id}/reset-password`,
   `POST /admin/students/{id}/reset-password`, and
   `POST /admin/professors/{id}/reset-password` (lines 674-676 — only
-  `/auth/reset-password` ships). A fourth: `resolve_review` raises
+  `/auth/reset-password` ships). Face enrollment's `no_face_detected`,
+  `multiple_faces`, and `quality_too_low` are now implemented via
+  `shared/face_quality.py`. A fourth: `resolve_review` raises
   `AttendanceDomainException(code="invalid_decision")` inline, with no class in
   `exceptions.py` and no `api-contracts.md` entry, which breaks §1.6's "codes
   come from the contract and are never invented" rule the same way ADR-060

@@ -218,13 +218,10 @@ stating plainly:
   integrity signal recorded in the trail, not an access control against a
   modified client (ADR-068).
 
-There is also no face *enrollment* pipeline yet: `face_enrollment` stores a
-zero-filled placeholder from `_stub_embedding_blob`, so there is no stored vector
-to compare against even in principle. That placeholder is why
-`api-contracts.md` lists `no_face_detected`, `multiple_faces` and
-`quality_too_low` as documented but never raised. (`invalid_image` **is**
-raised — it is the one of the four that exists, as
-`InvalidImageException`.)
+Face enrollment now validates uploads through `shared/face_quality.py` and raises
+`invalid_image`, `no_face_detected`, `multiple_faces`, and `quality_too_low` as
+documented. The stored vector is still a placeholder (`_stub_embedding_blob`);
+real generation/encryption remains unimplemented.
 
 **What this does and does not protect.** The server-enforced parts of the scan —
 session code, authenticated identity + student-ID confirmation, GPS geofence —
