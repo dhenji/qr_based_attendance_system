@@ -228,20 +228,52 @@ def test_create_session_copies_offering_defaults() -> None:
     assert abs(read.expires_at - expected) < timedelta(seconds=1)
 
 
+def _active_session(**overrides: Any) -> Session:
+    values: dict[str, Any] = {
+        "id": 100,
+        "offering_id": 10,
+        "professor_id": 3,
+        "session_code": "A7X-9K2M",
+        "duration_minutes": 60,
+        "present_window_minutes": 5,
+        "late_window_minutes": 10,
+        "scheduled_start_time": NOW - timedelta(minutes=10),
+        "scheduled_end_time": NOW + timedelta(minutes=50),
+        "expires_at": NOW + timedelta(minutes=50),
+        "classroom_radius_meters": 50,
+        "classroom_name": "Room 101",
+        "classroom_lat": 14.5,
+        "classroom_lng": 121.0,
+        "session_type": "lecture",
+        "is_remote": False,
+        "geofence_enabled": True,
+        "created_at": NOW,
+    }
+    values.update(overrides)
+    return Session(**values)
+
+
 def test_create_session_rejects_second_active() -> None:
     session = _FakeSession(
         objs=(_offering(), _course()),
         rows={CourseProfessor: [_assignment()]},
-        counts=[50],
+        counts=[_active_session()],
     )
     service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
 
-    with pytest.raises(SessionAlreadyActiveException):
+    with pytest.raises(SessionAlreadyActiveException) as excinfo:
         _run(
             service.create_session(
                 professor_id=3, payload=SessionCreate(offering_id=10)
             )
         )
+
+    # D96: the message names the course and the active session's window
+    # rather than the offering id, so a professor sees why instead of
+    # decoding a number.
+    assert "CS101" in excinfo.value.message
+    assert "08:" in excinfo.value.message
+    assert "–" in excinfo.value.message
 
 
 def test_create_session_rejects_windows_exceeding_duration() -> None:
