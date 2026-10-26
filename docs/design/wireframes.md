@@ -890,7 +890,7 @@ duration_minutes, scheduled_end_time)`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ ← Back          Active: CS101 — Software Eng        [Close]     │
+│ ← Back          {session.status === 'closed' ? 'Closed' : 'Active'}: CS101 — Software Eng        [Close]     │
 │                  BSCS·Y1 · Section A                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
@@ -945,6 +945,13 @@ duration_minutes, scheduled_end_time)`.
 > students (D21 path a). **[Excuse All Absent]** (D23) applies bulk
 > excuse with required reason. **After duration expiry** (D12): banner
 > shows "Scanning closed" while waiting for offline syncs.
+>
+> **Closed-session behavior** (session.status === 'closed'): the header
+> label reads "Closed:" instead of "Active:", the scan-window countdown
+> freezes at 00:00:00 and the class-end timer shows the actual end time
+> from `expires_at` (falls back to scheduled end time) instead of a
+> running countdown, the [Close] button is disabled, and the skeleton
+> gate no longer blocks rendering on `classRemainingSeconds`.
 
 ### 3.4 Professor Attendance List — `/professor/attendance`
 
