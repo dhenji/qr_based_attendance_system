@@ -555,7 +555,7 @@
 				studentNumber: submitNumber,
 				gps,
 				livenessEvidence,
-				liveFaceEmbedding: serializeFaceEmbedding(generateEmbeddingFromLandmarks((livenessEvidence as any).faceLandmarks || [])),
+				liveFaceImage: (livenessEvidence as any).faceImage,
 				scannedAt: new Date().toISOString(),
 				idempotencyKey,
 			});
@@ -593,7 +593,7 @@
 							studentNumber: submitNumber,
 							gps,
 							livenessEvidence,
-							liveFaceEmbedding: serializeFaceEmbedding(generateEmbeddingFromLandmarks((livenessEvidence as any).faceLandmarks || [])),
+							liveFaceImage: (livenessEvidence as any).faceImage,
 							scannedAt: new Date().toISOString(),
 							idempotencyKey
 						}

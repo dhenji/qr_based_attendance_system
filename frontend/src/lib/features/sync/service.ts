@@ -26,7 +26,8 @@ export type QueuedScanPayload = {
 	// disabled, or no classroom coordinates) do not collect GPS.
 	gps: { lat: number; lng: number; accuracy: number } | null;
 	livenessEvidence: LivenessEvidence;
-	liveFaceEmbedding: string;
+	liveFaceEmbedding?: string;
+	liveFaceImage?: string;
 	scannedAt: string;
 	idempotencyKey?: string;
 };
@@ -338,6 +339,7 @@ const toScanBody = (payload: QueuedScanPayload) => ({
 	gps: payload.gps ?? null,
 	livenessEvidence: payload.livenessEvidence,
 	liveFaceEmbedding: payload.liveFaceEmbedding,
+	liveFaceImage: payload.liveFaceImage,
 	scannedAt: payload.scannedAt,
 });
 

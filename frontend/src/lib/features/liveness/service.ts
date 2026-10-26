@@ -99,7 +99,8 @@ export const submitAttendanceScan = async (input: {
 	// disabled, or no classroom coordinates) do not collect GPS.
 	gps?: { lat: number; lng: number; accuracy: number } | null;
 	livenessEvidence: LivenessEvidence;
-	liveFaceEmbedding: string;
+	liveFaceEmbedding?: string;
+	liveFaceImage?: string;
 	scannedAt: string;
 	// Queue replay id: sent as X-Idempotency-Key so a retried offline scan
 	// can never double-record (docs/architecture/offline-first.md).
@@ -119,7 +120,8 @@ export const submitAttendanceScan = async (input: {
 				pnp_evidence: input.livenessEvidence.pnpEvidence,
 				face_count: input.livenessEvidence.faceCount ?? 1,
 			},
-			live_face_embedding: input.liveFaceEmbedding,
+			live_face_embedding: input.liveFaceEmbedding ?? null,
+		live_face_image: input.liveFaceImage ?? null,
 			scanned_at: input.scannedAt,
 		},
 		undefined,

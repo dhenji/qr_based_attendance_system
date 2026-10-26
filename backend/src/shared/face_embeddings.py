@@ -9,6 +9,7 @@ import numpy as np
 
 
 EMBEDDING_DIM = 128
+ALLOWED_DIMS = {128, 512}
 HEADER_MAGIC = b"FACEEMB1"
 HEADER_STRUCT = struct.Struct(">8sBHI")  # magic, version, algorithm_len, dim
 
@@ -57,9 +58,11 @@ def serialize_embedding(
     version: int = 1,
 ) -> bytes:
     embedding = embedding.astype(np.float32).flatten()
-    if embedding.size != EMBEDDING_DIM and embedding.size != 128:  # be flexible
-        # try to resize/pad if needed? but better to enforce
-        pass
+    if embedding.size not in ALLOWED_DIMS:
+        raise FaceEmbeddingError(
+            f"unsupported embedding dimension {embedding.size}, "
+            f"expected one of {sorted(ALLOWED_DIMS)}"
+        )
     algo_bytes = algorithm.encode("utf-8")
     header = HEADER_STRUCT.pack(HEADER_MAGIC, version & 0xFF, len(algo_bytes), embedding.size)
     return header + algo_bytes + embedding.tobytes()
@@ -76,9 +79,10 @@ def deserialize_embedding(blob: bytes) -> tuple[np.ndarray, str, int]:
                 raise FaceEmbeddingError("invalid header")
             algo = blob[offset : offset + algo_len].decode("utf-8")
             offset += algo_len
-            if dim != EMBEDDING_DIM:
+            if dim not in ALLOWED_DIMS:
                 raise FaceEmbeddingError(
-                    f"unexpected embedding dimension {dim}, expected {EMBEDDING_DIM}"
+                    f"unexpected embedding dimension {dim}, "
+                    f"expected one of {sorted(ALLOWED_DIMS)}"
                 )
             data = blob[offset : offset + dim * 4]
             emb = np.frombuffer(data, dtype=np.float32).copy()

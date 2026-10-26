@@ -115,11 +115,15 @@ class FaceEnrollmentService:
 
         old_value: dict[str, Any] = self._face_snapshot(student)
         try:
+            model = getattr(self._settings, "face_embedding_model", "mobilefacenet")
+            preferred_algorithm = (
+                "mobilefacenet-v1" if model == "mobilefacenet" else "mediapipe-v1"
+            )
             embedding_blob, algorithm = generate_embedding_from_images(
                 front,
                 left,
                 right,
-                algorithm=getattr(self._settings, "face_embedding_algorithm", "mediapipe-v1"),
+                algorithm=preferred_algorithm,
             )
         except FaceEmbeddingGenerationError as e:
             from features.face_enrollment.exceptions import NoFaceDetectedException

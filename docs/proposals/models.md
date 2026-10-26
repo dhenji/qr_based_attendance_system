@@ -71,7 +71,13 @@ A scan passes only if the landmark transcript satisfies the **fixed** challenge 
 
 **What the server actually enforces** (`backend/src/features/attendance/service.py:147-162`): all three challenge booleans are true, `ear_samples` is non-empty, the **mean** EAR sits inside `[0.05, 0.50]`, and `pnp_evidence` is non-empty. Four checks — the yaw values inside `pnp_evidence` are never inspected, and the blob is a free-form dict, so `{"x": 1}` satisfies the last one.
 
-## 3. Face embedding generation and matching — **not implemented**
+## 3. Face embedding generation and matching — **partially implemented (MobileFaceNet ONNX, server-side)**
+
+Shipped asset:
+
+| File | Size | sha256 | License |
+|------|------|--------|---------|
+| `backend/models/mobilefacenet.onnx` | 13 MB | `9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e815e5c4a02b319eb4f` | InsightFace model zoo (research/non-commercial) |
 
 This is the honest state of the biometric identity layer.
 
@@ -154,7 +160,7 @@ embedding format changes.
 
 ## What Is NOT Used
 
-- **No face recognition or embedding model.** The only model in the repository is `face_landmarker.task` (detection + landmarks). No face-api.js, no ResNet, no ArcFace, no InsightFace, no dlib, no TensorFlow.js.
+- **Face recognition embedding model now shipped:** `backend/models/mobilefacenet.onnx` (OpenCV SFace, Apache-2.0, 112×112 → 128-d). Still no face-api.js, ResNet, ArcFace, InsightFace, dlib, or TensorFlow.js.
 - No trained presentation-attack-detection (anti-spoofing) model — no Silent-Face-Anti-Spoofing or similar CNN; liveness is protocol-based (see section 2).
 - No trained at-risk model in the MVP — prediction uses heuristic thresholds (section 4); logistic regression is a planned upgrade, not yet implemented.
 - No deep forecasting models — accuracy-vs-interpretability tradeoff resolved in favor of the latter.

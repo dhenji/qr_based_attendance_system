@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     face_review_band_low: float = 0.65
     face_embedding_version: int = 1
     face_embedding_algorithm: str = "mediapipe-v1"
+    # Face embedding model selection. "mobilefacenet" runs a local ONNX
+    # MobileFaceNet (112x112) on the server; falls back to the landmark
+    # pipeline only when the model is missing or fails to load.
+    face_embedding_model: str = "mobilefacenet"
+    mobilefacenet_model_path: str | None = None
+    face_embedding_dim: int = 512
+    face_input_size: int = 112
+    face_embedding_normalize: str = "minus_one_one"
 
     # Backup-attachment fields
     backup_storage_type: str = "local"
