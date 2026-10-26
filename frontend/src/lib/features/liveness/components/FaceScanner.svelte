@@ -726,6 +726,22 @@
 			challengeStage = 'complete';
 			status = 'passed';
 			if (!completionSent) {
+				let faceImage: string | undefined;
+				try {
+					if (video && video.videoWidth && video.videoHeight) {
+						const c = document.createElement('canvas');
+						c.width = video.videoWidth;
+						c.height = video.videoHeight;
+						const ctx = c.getContext('2d');
+						if (ctx) {
+							ctx.drawImage(video, 0, 0, c.width, c.height);
+							const dataUrl = c.toDataURL('image/jpeg', 0.8);
+							faceImage = dataUrl.split(',')[1];
+						}
+					}
+				} catch {
+					faceImage = undefined;
+				}
 				completionSent = true;
 				onComplete({
 					blinkDetected: true,
@@ -742,6 +758,7 @@
 						yaw_samples: [...yawSamples],
 					},
 					faceLandmarks: lastFaceLandmarks,
+					faceImage,
 				});
 			}
 		}

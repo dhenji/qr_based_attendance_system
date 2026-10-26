@@ -86,12 +86,18 @@ from shared.enums import (
     SyncStatus,
     ValidationStatus,
 )
+import base64
+
 from shared.face_embeddings import (
     FaceEmbeddingError,
     cosine_similarity,
     deserialize_embedding,
     embedding_from_base64,
     is_stub_embedding,
+)
+from shared.face_embedding_generator import (
+    FaceEmbeddingGenerationError,
+    generate_embedding_from_image,
 )
 from shared.pagination import (
     DEFAULT_PAGE,
@@ -404,12 +410,22 @@ class AttendanceService:
             raise StubEmbeddingException("Face enrollment requires re-enrollment")
 
         try:
-            live_emb = embedding_from_base64(payload.live_face_embedding)
+            if getattr(payload, "live_face_image", None):
+                raw = payload.live_face_image
+                if "," in raw and raw.strip().lower().startswith("data:"):
+                    raw = raw.split(",", 1)[1]
+                content = base64.b64decode(raw)
+                live_emb = generate_embedding_from_image(content)
+            else:
+                live_emb = embedding_from_base64(payload.live_face_embedding)  # type: ignore[arg-type]
             ref_emb, _algo, _ver = deserialize_embedding(student.face_embedding)
-        except FaceEmbeddingError as e:
+        except (FaceEmbeddingError, FaceEmbeddingGenerationError, ValueError) as e:
             raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
 
-        score = cosine_similarity(ref_emb, live_emb)
+        try:
+            score = cosine_similarity(ref_emb, live_emb)
+        except ValueError as e:
+            raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
         threshold = self._settings.face_match_threshold
         review_low = self._settings.face_review_band_low
         if score < review_low:

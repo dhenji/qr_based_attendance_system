@@ -9,4 +9,5 @@ export interface LivenessEvidence {
   pnpEvidence: object;
   faceLandmarks?: any[];
   faceCount?: number;
+  faceImage?: string;
 }

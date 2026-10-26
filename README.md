@@ -244,9 +244,14 @@ Backend (`backend/.env.example`):
 | `REFRESH_TOKEN_EXPIRE_DAYS`       | `7`                                                                    | Refresh token TTL                                                             |
 | `LOCKOUT_ATTEMPTS`                | `5`                                                                    | Failed login attempts before lockout                                          |
 | `LOCKOUT_DURATION_MINUTES`        | `15`                                                                   | Lockout duration after failed attempts                                        |
-| `FACE_MATCH_THRESHOLD`            | `0.70`                                                                 | Band threshold for the client-submitted score (no comparison)                 |
-| `FACE_REVIEW_BAND_LOW`            | `0.65`                                                                 | Lower bound of the review band                                                |
-| `FACE_EMBEDDING_VERSION`          | `1`                                                                    | Placeholder embedding format version                                          |
+| `FACE_MATCH_THRESHOLD`            | `0.50`                                                                 | Cosine threshold for server-side face matching                                |
+| `FACE_REVIEW_BAND_LOW`            | `0.45`                                                                 | Lower bound of the review band                                                |
+| `FACE_EMBEDDING_VERSION`          | `1`                                                                    | Embedding format version; bump to force re-enrollment                         |
+| `FACE_EMBEDDING_MODEL`            | `mobilefacenet`                                                        | `mobilefacenet` (local ONNX) or fallback to landmarks                        |
+| `MOBILEFACENET_MODEL_PATH`        | _(empty)_                                                              | Optional override path to the ONNX model                                      |
+| `FACE_EMBEDDING_DIM`              | `512`                                                                  | Expected embedding dimension (128 or 512)                                    |
+| `FACE_INPUT_SIZE`                 | `112`                                                                  | Aligned face size in pixels                                                  |
+| `FACE_EMBEDDING_NORMALIZE`        | `minus_one_one`                                                        | Normalization mode for aligned faces                                          |
 | `DEFAULT_PRESENT_WINDOW_MINUTES`  | `5`                                                                    | Default present window for sessions                                           |
 | `DEFAULT_LATE_WINDOW_MINUTES`     | `10`                                                                   | Default late window for sessions                                              |
 | `DEFAULT_GEOFENCE_RADIUS_METERS`  | `50`                                                                   | Default classroom geofence radius                                             |

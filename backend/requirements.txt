@@ -27,3 +27,4 @@ locust==2.46.6
 numpy==1.26.4
 opencv-python-headless==4.9.0.80
 mediapipe==0.10.14
+onnxruntime==1.18.1
