@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
@@ -270,10 +271,14 @@ def test_create_session_rejects_second_active() -> None:
 
     # D96: the message names the course and the active session's window
     # rather than the offering id, so a professor sees why instead of
-    # decoding a number.
+    # decoding a number. The window is the fake's own start/end around
+    # `NOW`, so assert on the shape (a date token, a dash, a 24h time)
+    # rather than the hour — the pinned clock differs between the DEBUG
+    # and non-DEBUG runs.
     assert "CS101" in excinfo.value.message
-    assert "08:" in excinfo.value.message
     assert "–" in excinfo.value.message
+    assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", excinfo.value.message)
+    assert "offering 10" not in excinfo.value.message
 
 
 def test_create_session_rejects_windows_exceeding_duration() -> None:
