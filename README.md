@@ -33,7 +33,8 @@ Identity is resolved from the bearer token, never from the request body. A body
 naming a different student is rejected with `403 student_number_mismatch` and
 writes no attendance row. Any single failure rejects the record with one of the
 canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
-`liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`.
+`liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`,
+`stub_embedding`.
 
 | #   | Layer                   | What It Prevents                               | CS Concept                                   |
 | --- | ----------------------- | ---------------------------------------------- | -------------------------------------------- |
@@ -59,7 +60,7 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > `session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
 > Any single failure rejects the record with one of the canonical D15 rejection
 > reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
-> `face_not_enrolled`, `not_enrolled`, `session_expired`.
+> `face_not_enrolled`, `not_enrolled`, `session_expired`, `stub_embedding`.
 
 | #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
 | --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
