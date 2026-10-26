@@ -105,6 +105,7 @@
 		student_not_found: 'No student record found for your account. Contact an administrator.',
 		session_expired: 'This session has closed for scanning.',
 		session_not_found: 'Session not found. Check the code and try again.',
+		stub_embedding: 'Your face enrollment needs to be updated. Please contact your administrator to re-enroll.',
 	};
 
 	const toUserMessage = (error: unknown, fallback: string): string => {
@@ -113,6 +114,9 @@
 		}
 		if (error instanceof APIError && error.status === 410) {
 			return 'This session has closed for scanning.';
+		}
+		if (error instanceof APIError) {
+			return fallback;
 		}
 		return getErrorMessage(error, fallback);
 	};
@@ -545,7 +549,7 @@
 						session.geofence.radius
 					)
 				) {
-					throw new Error('You are outside the attendance geofence');
+					throw new APIError('outside_geofence', 'You are outside the attendance geofence. Move closer to the classroom and try again.');
 				}
 			}
 
@@ -561,8 +565,7 @@
 			});
 
 			if (result.status === 'rejected') {
-				rejectionReason =
-					'The attendance scan was rejected. Check your enrollment, location, and lighting, then try again.';
+				rejectionReason = 'This session is no longer accepting attendance.';
 				showFailure = true;
 				return;
 			}
