@@ -205,7 +205,7 @@ class SessionService:
         await self._require_assignment(
             offering_id=offering.id, professor_id=professor_id
         )
-        await self._require_no_active_session(offering_id=offering.id, now=moment)
+        await self._require_no_active_session(offering=offering, now=moment)
 
         # One read of the offering's active meetings, shared by the
         # weekly-hours gate, the type gate and the session plan.
@@ -496,19 +496,41 @@ class SessionService:
         return scheduled_start, scheduled_end, True
 
     async def _require_no_active_session(
-        self, *, offering_id: int, now: datetime
+        self, *, offering: CourseOffering, now: datetime
     ) -> None:
-        active_id: int | None = await self._session.scalar(
-            select(Session.id)
+        active: Session | None = await self._session.scalar(
+            select(Session)
             .where(
-                Session.offering_id == offering_id,
+                Session.offering_id == offering.id,
                 Session.expires_at > now,
             )
+            .order_by(Session.created_at.desc())
             .limit(1)
         )
 
-        if active_id is not None:
-            raise SessionAlreadyActiveException(offering_id)
+        if active is None:
+            return
+
+        # The active session's course and window, so the message names what is
+        # open rather than the offering id a professor would have to decode.
+        course: Course | None = await self._session.get(
+            Course, offering.course_id
+        )
+        course_code: str = (
+            course.course_code if course is not None else f"offering {offering.id}"
+        )
+
+        zone = resolve_timezone(self._settings.institution_timezone)
+        scheduled_start = active.scheduled_start_time.astimezone(zone)
+        scheduled_end = active.scheduled_end_time.astimezone(zone)
+        start_text = scheduled_start.strftime("%Y-%m-%d %H:%M")
+        end_text = scheduled_end.strftime("%H:%M")
+
+        raise SessionAlreadyActiveException(
+            course_code=course_code,
+            scheduled_start=start_text,
+            scheduled_end=end_text,
+        )
 
     async def _require_schedule_requirement(
         self, offering: CourseOffering, components: Sequence[OfferingComponent]

@@ -2217,3 +2217,46 @@
   student) and `test_scan_validation.py` (service-level mismatch). The
   session QR payload remains session discovery only. Face matching is still
   client-asserted (ADR-068) and is not changed by this decision.
+
+### ADR-084: Session Creation Confirmation
+
+- **Decision (D96):** A successful `openSession()` no longer navigates straight
+  to `/professor/sessions/active/{id}`. The create form holds the professor on
+  the form with a confirmation panel showing the generated session code, the
+  scheduled window and the scan-window close; the live session is reached only
+  after the professor confirms it ("Open Live Session"). Dismissing the panel
+  ("Stay on this form") returns to the form with the code still shown.
+- **Date:** 2026-10-26
+- **Status:** Accepted
+- **Context:** The prior behavior auto-navigated on success, so a professor who
+  wanted to regenerate, reconfigure, or simply double-check the code had no way
+  to stay. The generated code is a projector affordance, and a session that is
+  open is not easily undone — a confirmation step is the cheapest guard against
+  leaving the form by accident.
+- **Consequences:** The create page gains a `confirmCreated` state, a
+  `Session created` `Modal` with a success-tinted icon, and two actions
+  (`openLiveSession`, `dismissCreated`). The `View Live Session` button below
+  the form is unchanged and still reaches the same destination. The
+  `SessionAlreadyActiveException` message was improved at the same time: it now
+  names the course code and the active session's scheduled window
+  (`2026-10-26 08:03–09:03`) instead of the raw offering id, so a professor
+  who opens the same course twice sees why rather than decoding a number.
+  `SessionService._require_no_active_session` now returns the active `Session`
+  row (most recent by `created_at`) and resolves the course code through
+  `Course` via the offering's `course_id`, using the institution timezone.
+  A second confirmation sits on the generate button itself: `requestGenerate`
+  opens a `Generate session code?` modal that restates the course, type,
+  scheduled time and duration and flags any override, and only `confirmGenerateAction`
+  calls the open. A session code is minted server-side and cannot be undone,
+  so a stray click on a half-configured form does not reach it.
+- **Alternatives considered:**
+  (1) *Keep auto-navigation.* Rejected: no way to stay on the form after
+  success, and the generated code is the thing the professor is about to put on
+  a projector.
+  (2) *Show the code inline and add a separate "Open live session" button.*
+  Rejected: the same outcome, with the code competing for attention inside the
+  form rather than in a dedicated success panel.
+  (3) *Navigate only when the professor clicks the existing "View Live
+  Session" button.* Rejected: that button is disabled until a code exists, so
+  the flow would still be "generate → enable → click", which is the same as a
+  confirmation panel with extra steps.

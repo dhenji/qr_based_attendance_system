@@ -40,14 +40,29 @@ class SessionExpiredException(SessionDomainException):
 
 
 class SessionAlreadyActiveException(SessionDomainException):
-    """409 - offering already has an active session open."""
+    """409 - offering already has an active session open.
+
+    The message names the course and the active session's scheduled window
+    rather than the offering id, so a professor who opens the same course
+    twice sees why instead of decoding a number.
+    """
 
     status_code: int = 409
     code: str = "session_already_active"
 
-    def __init__(self, offering_id: int) -> None:
+    def __init__(
+        self,
+        *,
+        course_code: str,
+        scheduled_start: str,
+        scheduled_end: str,
+    ) -> None:
         super().__init__(
-            message=f"Offering {offering_id} already has an active session"
+            message=(
+                f"An active session is already open for {course_code} "
+                f"({scheduled_start}–{scheduled_end}). Close it or wait for it "
+                "to expire before opening another."
+            )
         )
 
 
