@@ -6,6 +6,8 @@
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
+	import FaceEnrollmentCamera from '$lib/features/admin/enrollment/FaceEnrollmentCamera.svelte';
+	import { validateFacePhoto } from '$lib/features/admin/enrollment/quality';
 	import {
 		adminStudentsState,
 		deleteArchivedStudent,
@@ -17,6 +19,7 @@
 		createStudent,
 		getFaceEnrollmentStatus,
 		resetStudentPassword,
+		revokeFaceEnrollment,
 		updateStudent,
 		uploadFaceEnrollment,
 		type FaceEnrollmentStatus,
@@ -33,6 +36,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { Routes, adminStudent } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { initFaceModel } from '$lib/features/liveness/model';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Student Management (wireframe 4.2): search + sortable table + pagination
@@ -142,9 +146,21 @@
 	let faceFront = $state<File | null>(null);
 	let faceLeft = $state<File | null>(null);
 	let faceRight = $state<File | null>(null);
+	let frontInput = $state<HTMLInputElement>();
+	let leftInput = $state<HTMLInputElement>();
+	let rightInput = $state<HTMLInputElement>();
+	const faceFrontPreview = $derived(faceFront ? URL.createObjectURL(faceFront) : null);
+	const faceLeftPreview = $derived(faceLeft ? URL.createObjectURL(faceLeft) : null);
+	const faceRightPreview = $derived(faceRight ? URL.createObjectURL(faceRight) : null);
 	let faceError = $state<string | null>(null);
 	let faceBusy = $state(false);
+	let faceRevokeBusy = $state(false);
 	let faceNote = $state<string | null>(null);
+	let faceCameraMode = $state(false);
+	let faceCameraActive = $state(false);
+	let faceCameraSingleSlot = $state<'front' | 'left' | 'right' | null>(null);
+	let faceRetakeSlot = $state<'front' | 'left' | 'right' | null>(null);
+	let faceConfirm = $state<'save' | 'remove' | null>(null);
 
 	const FACE_ERROR_MESSAGES: Record<string, string> = {
 		invalid_image: 'One of the photos could not be read. Use clear JPG, PNG, or WebP images.',
@@ -162,6 +178,9 @@
 		faceRight = null;
 		faceError = null;
 		faceNote = null;
+		faceCameraMode = false;
+		faceCameraActive = false;
+		faceConfirm = null;
 		faceLoading = true;
 		void getFaceEnrollmentStatus(row.id)
 			.then((status) => {
@@ -179,12 +198,17 @@
 			});
 	};
 
-	const pickFacePhoto = (slot: 'front' | 'left' | 'right', list: FileList | null) => {
+	const pickFacePhoto = async (slot: 'front' | 'left' | 'right', list: FileList | null) => {
 		const file = list?.[0] ?? null;
 		if (!file) return;
 		const parsed = facePhotoSchema.safeParse(file);
 		if (!parsed.success) {
 			faceError = parsed.error.issues[0]?.message ?? 'Photo rejected.';
+			return;
+		}
+		const quality = await validateFacePhoto(file);
+		if (!quality.ok) {
+			faceError = quality.reason ?? 'Photo rejected.';
 			return;
 		}
 		faceError = null;
@@ -193,7 +217,25 @@
 		else faceRight = file;
 	};
 
-	const uploadFace = async () => {
+	const handleFaceCameraComplete = (photos: { front: File; left: File; right: File }) => {
+		faceFront = photos.front;
+		faceLeft = photos.left;
+		faceRight = photos.right;
+		faceCameraActive = false;
+		faceCameraMode = false;
+		faceCameraSingleSlot = null;
+		faceConfirm = 'save';
+	};
+
+	const handleSingleCapture = (slot: 'front' | 'left' | 'right', file: File) => {
+		if (slot === 'front') faceFront = file;
+		else if (slot === 'left') faceLeft = file;
+		else faceRight = file;
+		faceCameraActive = false;
+		faceCameraSingleSlot = null;
+	};
+
+	const performUploadFace = async () => {
 		if (!faceTarget || faceBusy) return;
 		if (!faceFront || !faceLeft || !faceRight) {
 			faceError = 'Choose front, left, and right photos to enroll.';
@@ -217,12 +259,66 @@
 			await refreshAdminStudents();
 			notifyEntityChanged('students');
 		} catch (e: unknown) {
+			if (e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code] && e.message) {
+				// Prefer the backend detail, which names the failing photo and gate.
+				faceError = e.message;
+			} else {
+				faceError =
+					e instanceof Error && e.message ? e.message : 'Upload failed. Try again.';
+			}
+		} finally {
+			faceBusy = false;
+		}
+	};
+
+	const performRevokeFace = async () => {
+		if (!faceTarget || faceRevokeBusy) return;
+		faceRevokeBusy = true;
+		faceError = null;
+		faceNote = null;
+		try {
+			await revokeFaceEnrollment(faceTarget.id);
+			faceStatus = { enrolled: false };
+			faceFront = null;
+			faceLeft = null;
+			faceRight = null;
+			faceNote = 'Enrollment removed.';
+			await refreshAdminStudents();
+			notifyEntityChanged('students');
+		} catch (e: unknown) {
 			faceError =
 				e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
 					? FACE_ERROR_MESSAGES[e.code]
-					: (e instanceof Error && e.message ? e.message : 'Upload failed. Try again.');
+					: (e instanceof Error && e.message ? e.message : 'Removal failed. Try again.');
 		} finally {
-			faceBusy = false;
+			faceRevokeBusy = false;
+		}
+	};
+
+	const requestUploadFace = () => {
+		if (!faceTarget || faceBusy || faceRevokeBusy) return;
+		if (!faceFront || !faceLeft || !faceRight) {
+			faceError = 'Choose front, left, and right photos to enroll.';
+			return;
+		}
+		faceError = null;
+		faceConfirm = 'save';
+	};
+
+	const requestRevokeFace = () => {
+		if (!faceTarget || faceRevokeBusy || faceBusy) return;
+		if (!faceStatus?.enrolled) return;
+		faceError = null;
+		faceConfirm = 'remove';
+	};
+
+	const confirmFaceAction = () => {
+		if (faceConfirm === 'save') {
+			faceConfirm = null;
+			void performUploadFace();
+		} else if (faceConfirm === 'remove') {
+			faceConfirm = null;
+			void performRevokeFace();
 		}
 	};
 
@@ -303,6 +399,7 @@
 	};
 
 	onMount(() => {
+		void initFaceModel();
 		void loadProgramOptions();
 		load(1);
 		// Own entity -> refresh the table; lookup entity -> reload picker
@@ -902,20 +999,101 @@
 			{#if faceNote}
 				<p class="note" role="status">{faceNote}</p>
 			{/if}
-			<div class="form">
-				<label>Front photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
-				{#if faceFront}<p class="muted">{faceFront.name} · {(faceFront.size / 1024).toFixed(0)} KB</p>{/if}
-				<label>Left photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
-				{#if faceLeft}<p class="muted">{faceLeft.name} · {(faceLeft.size / 1024).toFixed(0)} KB</p>{/if}
-				<label>Right photo<input class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
-				{#if faceRight}<p class="muted">{faceRight.name} · {(faceRight.size / 1024).toFixed(0)} KB</p>{/if}
+			<div class="face-mode-toggle">
+				<button class="btn btn-secondary" class:active={!faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = false; faceCameraActive = false; }}>Upload files</button>
+				<button class="btn btn-secondary" class:active={faceCameraMode} disabled={faceBusy} onclick={() => { faceCameraMode = true; faceCameraActive = true; faceCameraSingleSlot = null; faceFront = null; faceLeft = null; faceRight = null; }}>Use camera</button>
 			</div>
-			<div class="modal-actions">
-				<button class="btn btn-ghost" onclick={() => (faceTarget = null)}>Close</button>
-				<button class="btn btn-primary" aria-busy={faceBusy} disabled={faceBusy} onclick={() => void uploadFace()}>
-					{faceBusy ? 'Uploading…' : 'Upload enrollment'}
-				</button>
-			</div>
+
+			{#if faceCameraMode}
+				<FaceEnrollmentCamera
+					active={faceCameraActive}
+					singleSlot={faceCameraSingleSlot}
+					onComplete={handleFaceCameraComplete}
+					onCapture={handleSingleCapture}
+					onCancel={() => { faceCameraActive = false; faceCameraMode = false; faceCameraSingleSlot = null; }}
+				/>
+			{:else}
+				<div class="form">
+					<label>Front photo<input bind:this={frontInput} class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('front', e.currentTarget.files)} /></label>
+					{#if faceFrontPreview}
+						<div class="face-preview">
+							<img src={faceFrontPreview} alt="Front preview" />
+							<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = 'front')}>Retake</button>
+						</div>
+					{/if}
+					{#if faceFront}<p class="muted">{faceFront.name} · {(faceFront.size / 1024).toFixed(0)} KB</p>{/if}
+					<label>Left photo<input bind:this={leftInput} class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('left', e.currentTarget.files)} /></label>
+					{#if faceLeftPreview}
+						<div class="face-preview">
+							<img src={faceLeftPreview} alt="Left preview" />
+							<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = 'left')}>Retake</button>
+						</div>
+					{/if}
+					{#if faceLeft}<p class="muted">{faceLeft.name} · {(faceLeft.size / 1024).toFixed(0)} KB</p>{/if}
+					<label>Right photo<input bind:this={rightInput} class="input" type="file" accept=".jpg,.jpeg,.png,.webp" disabled={faceBusy} onchange={(e) => pickFacePhoto('right', e.currentTarget.files)} /></label>
+					{#if faceRightPreview}
+						<div class="face-preview">
+							<img src={faceRightPreview} alt="Right preview" />
+							<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = 'right')}>Retake</button>
+						</div>
+					{/if}
+					{#if faceRight}<p class="muted">{faceRight.name} · {(faceRight.size / 1024).toFixed(0)} KB</p>{/if}
+				</div>
+				{#if faceRetakeSlot}
+					<div class="retake-chooser">
+						<p class="muted">Retake {faceRetakeSlot} photo:</p>
+						<button type="button" class="btn" disabled={faceBusy} onclick={() => {
+							if (faceRetakeSlot === 'front') frontInput?.click();
+							else if (faceRetakeSlot === 'left') leftInput?.click();
+							else rightInput?.click();
+							faceRetakeSlot = null;
+						}}>Upload file</button>
+						<button type="button" class="btn" disabled={faceBusy} onclick={() => {
+							faceCameraSingleSlot = faceRetakeSlot;
+							faceCameraMode = true;
+							faceCameraActive = true;
+							faceRetakeSlot = null;
+						}}>Use camera</button>
+						<button type="button" class="btn ghost" disabled={faceBusy} onclick={() => (faceRetakeSlot = null)}>Cancel</button>
+					</div>
+				{/if}
+				{#if faceConfirm}
+					<div class="confirm-panel">
+						<p class="modal-text">
+							{faceConfirm === 'save'
+								? 'Save this face enrollment?'
+								: 'Remove this student\u2019s face enrollment? This cannot be undone.'}
+						</p>
+						<div class="modal-actions">
+							<button class="btn btn-ghost" disabled={faceBusy || faceRevokeBusy} onclick={() => (faceConfirm = null)}>Cancel</button>
+							<button
+								class={faceConfirm === 'save' ? 'btn btn-primary' : 'btn btn-danger'}
+								aria-busy={faceConfirm === 'save' ? faceBusy : faceRevokeBusy}
+								disabled={faceBusy || faceRevokeBusy}
+								onclick={() => void confirmFaceAction()}
+							>
+								{#if faceConfirm === 'save'}
+									{faceBusy ? 'Saving…' : 'Save'}
+								{:else}
+									{faceRevokeBusy ? 'Removing…' : 'Remove'}
+								{/if}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<div class="modal-actions">
+						<button class="btn btn-ghost" onclick={() => (faceTarget = null)}>Close</button>
+						{#if faceStatus?.enrolled}
+							<button class="btn btn-danger" disabled={faceBusy || faceRevokeBusy} onclick={() => void requestRevokeFace()}>
+								Remove enrollment
+							</button>
+						{/if}
+						<button class="btn btn-primary" disabled={faceBusy || faceRevokeBusy} onclick={() => void requestUploadFace()}>
+							Upload enrollment
+						</button>
+					</div>
+				{/if}
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -1039,6 +1217,18 @@
 		font-variant-numeric: tabular-nums;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+
+	.face-mode-toggle {
+		display: flex;
+		gap: 0.5rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.face-mode-toggle .active {
+		background: var(--brand, #1e3a5f);
+		color: var(--on-brand, #fff);
+		border-color: var(--brand, #1e3a5f);
 	}
 
 	.row-actions {
@@ -1232,4 +1422,28 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}
+	.face-preview {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0.5rem 0;
+	}
+
+	.face-preview img {
+		width: 96px;
+		height: 96px;
+		object-fit: cover;
+		border-radius: 8px;
+		border: 1px solid var(--border-strong, #cbd5e1);
+		transform: scaleX(-1);
+	}
+
+	.retake-chooser {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		margin: 0.5rem 0;
+	}
+
 </style>

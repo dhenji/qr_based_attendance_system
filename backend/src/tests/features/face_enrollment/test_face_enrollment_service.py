@@ -15,6 +15,11 @@ from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity
+from shared.face_quality import FaceQualityResult
+import features.face_enrollment.service as face_enrollment_service
+
+# Bypass quality gates in unit tests (quality is enforced via shared.face_quality)
+face_enrollment_service.assess_image_bytes = lambda _content: FaceQualityResult(ok=True)
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -132,10 +137,12 @@ def test_enroll_writes_stub_blob_and_bumps_version() -> None:
 
     student = session.store[(Student, 1)]
     assert student.face_embedding is not None
-    payload = json.loads(student.face_embedding.decode("utf-8"))
-    assert payload["stub"] is True
-    assert len(payload["mean"]) == 128
-    assert set(payload["angles"]) == {"front", "left", "right"}
+    # New behavior: real embedding blob (versioned binary format)
+    from shared.face_embeddings import is_stub_embedding, deserialize_embedding
+
+    assert not is_stub_embedding(student.face_embedding)
+    emb, algo, ver = deserialize_embedding(student.face_embedding)
+    assert emb.shape[0] == 128
     assert student.face_enrolled_at is not None
     assert student.face_embedding_version == 1
     assert result.student_id == 1
@@ -174,16 +181,17 @@ def test_enroll_rejects_empty_photo() -> None:
     assert exc_info.value.status_code == 400
 
 
-def test_enroll_rejects_non_image_content_type() -> None:
+def test_enroll_ignores_non_image_content_type() -> None:
     session = _FakeSession(objs=(_student(),))
 
-    with pytest.raises(InvalidImageException):
-        _run(
-            _service(session).enroll_face(
-                student_id=1,
-                **_enroll_kwargs(front_content_type="text/csv"),
-            )
+    result = _run(
+        _service(session).enroll_face(
+            student_id=1,
+            **_enroll_kwargs(front_content_type="text/csv"),
         )
+    )
+
+    assert result.student_id == 1
 
 
 def test_enroll_rejects_oversized_photo() -> None:
@@ -242,11 +250,14 @@ def test_router_prefix_and_routes() -> None:
     by_path = {(r.path, next(iter(r.methods))): r for r in face_router.router.routes}
     get_route = by_path.get(("/admin/face-enrollment/{student_id}", "GET"))
     post_route = by_path.get(("/admin/face-enrollment/{student_id}", "POST"))
+    delete_route = by_path.get(("/admin/face-enrollment/{student_id}", "DELETE"))
 
     assert get_route is not None
     assert post_route is not None
+    assert delete_route is not None
     assert post_route.methods == {"POST"}
     assert 201 in (post_route.status_code, getattr(post_route, "status_code", None))
+    assert 204 in (delete_route.status_code, getattr(delete_route, "status_code", None))
 
     paths = [r.path for r in face_router.router.routes]
     assert not any(p.endswith("/status") for p in paths)

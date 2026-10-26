@@ -2,7 +2,7 @@
 
 > QR-Based Attendance System — Operator Guide for Face Enrollment
 >
-> Covers: 3-photo upload, enrollment status, current limitations, privacy wording.
+> Covers: 3-photo upload or live-camera capture, enrollment status, current limitations, privacy wording.
 >
 > **Glossary**: All italicized terms are defined in the [Glossary](../project/glossary.md).
 >
@@ -73,9 +73,11 @@ placeholder JSON blob to `students.face_embedding` ([D28](../project/decision-lo
 | **Three image files**   | Front, left, and right photos (`.jpg`, `.jpeg`, `.png`, or `.webp`) |
 | **File size**           | Each file must be below `ATTACHMENTS_MAX_BYTES`            |
 | **Student cooperation** | Student must consent to the upload                         |
+| **Camera (optional)**   | For the live-capture mode the operator's browser needs camera permission and a secure context (HTTPS or localhost) |
 
-No camera or in-browser capture step exists in the current admin UI — the
-operator selects three files from disk.
+The admin UI supports two capture methods: selecting three files from disk, or
+opening the live camera and following guided on-screen prompts to capture the
+front, left, and right angles automatically.
 
 ---
 
@@ -89,22 +91,37 @@ operator selects three files from disk.
 4. The enrollment modal shows the current status (enrolled date and version)
    and three file inputs.
 
-[FIG: Enroll Face modal with Front / Left / Right file inputs, current status, error/note area, and Upload enrollment button]
+[FIG: Enroll Face modal with Front / Left / Right file inputs or live camera view, mode toggle, current status, error/note area, and Upload enrollment button]
 
-### 3.2 Select the Photos
+### 3.2 Select the Photos (file upload)
 
 1. **Front**: a straight-on photo.
 2. **Left**: the student's head turned to their left.
 3. **Right**: the student's head turned to their right.
 4. The UI accepts JPG, JPEG, PNG, and WebP files only.
 
-> The current server does **not** run brightness, face-size, single-face, pose,
-> or eye-open checks. These quality gates are design-only. Bad photos can still
-> be uploaded; they simply produce the same placeholder blob.
+### 3.2a Live camera capture (alternative)
+
+1. In the enrollment modal click **[Use camera]** instead of **[Upload files]**.
+2. Allow camera access when prompted.
+3. The camera opens with a guide oval and an on-screen instruction for the
+   current angle (front → left → right).
+4. Hold the pose until the progress bar fills; the frame is captured
+   automatically. Use **[Capture now]** to capture manually when aligned.
+5. After all three angles are captured the modal returns to the file view with
+   the three images populated and uploads them through the same endpoint.
+   The live preview is mirrored for natural selfie framing; captured images
+   are stored unmirrored.
+6. Use **[Upload files]** to switch back to manual selection at any time.
+
+> The server now runs brightness, face-size, single-face, centering, sharpness,
+> and eyes-open checks via `shared/face_quality.py`. Bad photos are rejected with
+> `invalid_image`, `no_face_detected`, `multiple_faces`, or `quality_too_low`.
 
 ### 3.3 Upload & Verify
 
-1. Click **[Upload enrollment]**.
+1. Click **[Upload enrollment]** (or finish a camera capture) and confirm the
+   prompt.
 2. The server validates that each file is non-empty, within the size limit, and
    has an `image/*` content type.
 3. On success, the modal shows `Enrolled (vN)` and the roster **Face** column
@@ -128,9 +145,9 @@ operator selects three files from disk.
 | **Size limit**    | Rejected with 400 `invalid_image` when over the limit |
 | **Content type**  | Must start with `image/`; otherwise 400 `invalid_image` |
 | **Student exists**| 404 `student_not_found`                               |
-| **Face detection**| **Not implemented** — `no_face_detected` is never raised |
-| **Multiple faces**| **Not implemented** — `multiple_faces` is never raised |
-| **Quality/pose**  | **Not implemented** — `quality_too_low` is never raised |
+| **Face detection**| 400 `no_face_detected` when no face is found |
+| **Multiple faces**| 400 `multiple_faces` when more than one face is found |
+| **Quality/pose**  | 422 `quality_too_low` for brightness, size, centering, sharpness, or eyes-open failures |
 
 ### 4.2 Common Failures & Solutions
 
@@ -189,8 +206,16 @@ operator selects three files from disk.
 
 1. Navigate to `/admin/students`.
 2. Open the student's **[Re-enroll face]** action.
-3. Upload three new images.
+3. Upload three new images (or capture them via the live camera).
 4. Submit — the old placeholder is discarded and the version is bumped.
+
+### 6.3 How to Remove an Enrollment
+
+1. Open the student's **[Enroll face]** / **[Re-enroll face]** modal.
+2. If the student is currently enrolled, click **[Remove enrollment]**.
+3. Confirm the prompt. The stored blob is cleared, `face_enrolled_at` is
+   nulled, and `face_embedding_version` is incremented so device caches drop
+   their copy.
 
 > **No rollback**: Re-enrollment replaces the stored blob. Previous attendance
 > records are unaffected (and contain no embedding comparison).

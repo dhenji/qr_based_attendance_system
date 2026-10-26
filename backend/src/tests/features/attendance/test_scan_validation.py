@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
+import numpy as np
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +56,23 @@ from features.student.exceptions import (
 )
 from features.sync.model import SyncQueue
 from shared.enums import QueueStatus, ScannedVia, UserRole, ValidationStatus
+from shared.face_embeddings import embedding_to_base64, serialize_embedding
 from tests.conftest import Factories
+
+
+def _make_live_emb(score: float = 0.9) -> str:
+    # Create a reference embedding
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    # Create live embedding close to ref for high score
+    if score >= 0.8:
+        live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+    elif score >= 0.65:
+        live = ref * 0.8 + np.random.RandomState(123).randn(128).astype(np.float32) * 0.1
+    else:
+        live = np.random.RandomState(999).randn(128).astype(np.float32)
+    return embedding_to_base64(live)
+
 
 # Somewhere inside the default radius of the fixture classroom.
 INSIDE_GPS = GPSInput(lat=14.0001, lng=121.0001, accuracy=5.0)
@@ -64,12 +81,11 @@ OUTSIDE_GPS = GPSInput(lat=14.02, lng=121.0, accuracy=5.0)
 CLASSROOM_LAT = 14.0
 CLASSROOM_LNG = 121.0
 
-# Comfortably above `face_match_threshold` (0.70) so a score is unambiguous.
+
 HIGH_SCORE = 0.92
-# Inside the review band: `face_review_band_low` <= score < `face_match_threshold`.
 REVIEW_BAND_SCORE = 0.68
-# Below `face_review_band_low` (0.65).
 MISMATCH_SCORE = 0.40
+
 
 SYNC_STALE_SECONDS = 60
 
@@ -100,7 +116,7 @@ def scan_request(
         "student_number": student_number,
         "gps": INSIDE_GPS,
         "liveness_evidence": valid_evidence(),
-        "face_match_score": HIGH_SCORE,
+        "live_face_embedding": _make_live_emb(0.92),
         "scanned_at": scanned_at,
         "scanned_via": ScannedVia.QR_CAMERA,
     }
@@ -119,7 +135,11 @@ async def seed(
     stack["session"].classroom_radius_meters = 50
     stack["offering"].classroom_lat = CLASSROOM_LAT
     stack["offering"].classroom_lng = CLASSROOM_LNG
-    stack["student"].face_embedding = b"stored-blob"
+    # Set a real embedding
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
+    stack["student"].face_embedding_algorithm = "mediapipe-v1"
     return stack
 
 
@@ -254,13 +274,29 @@ async def test_score_in_review_band_is_pending_with_original_status(
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
+    # Create live embedding that gives score in review band
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    live = ref * 0.605 + np.random.RandomState(27).randn(128).astype(np.float32) * 0.079
+    live = live / np.linalg.norm(live)
+    # Compute expected score
+    from shared.face_embeddings import cosine_similarity, deserialize_embedding
+
+    r, _, _ = deserialize_embedding(stack["student"].face_embedding)
+    score = cosine_similarity(r, live)
+    if not (0.65 <= score < 0.70):
+        live = ref * 0.6 + np.random.RandomState(33).randn(128).astype(np.float32) * 0.08
+        live = live / np.linalg.norm(live)
+        score = cosine_similarity(r, live)
+    assert 0.65 <= score < 0.70
+
     result = await service.submit_scan(
         user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
-            face_match_score=REVIEW_BAND_SCORE,
+            live_face_embedding=embedding_to_base64(live),
         )
     )
 
@@ -277,7 +313,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
     assert row.validation_status == ValidationStatus.PENDING.value
     assert row.liveness_evidence is not None
     assert row.liveness_evidence["review"] is True
-    assert Decimal(str(REVIEW_BAND_SCORE)) == row.face_match_score
+    assert abs(float(row.face_match_score) - score) < 0.001
 
 
 async def test_review_band_preserves_late_as_original_status(
@@ -289,13 +325,18 @@ async def test_review_band_preserves_late_as_original_status(
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    live = ref * 0.69 + np.random.RandomState(7).randn(128).astype(np.float32) * 0.07
+    live = live / np.linalg.norm(live)
+
     result = await service.submit_scan(
         user_id=stack["student"].user_id,
         payload=scan_request(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=8),
-            face_match_score=REVIEW_BAND_SCORE,
+            live_face_embedding=embedding_to_base64(live),
         )
     )
 
@@ -318,6 +359,9 @@ async def test_score_below_review_band_raises_face_mismatch(
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
+    live = np.random.RandomState(12345).randn(128).astype(np.float32)
+    live = live / np.linalg.norm(live)
+
     with pytest.raises(FaceMismatchException) as excinfo:
         await service.submit_scan(
             user_id=stack["student"].user_id,
@@ -325,7 +369,7 @@ async def test_score_below_review_band_raises_face_mismatch(
                 stack["session"],
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
-                face_match_score=MISMATCH_SCORE,
+                live_face_embedding=embedding_to_base64(live),
             )
         )
 
@@ -342,6 +386,9 @@ async def test_rejected_score_writes_no_attendance_row(
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
+    live = np.random.RandomState(54321).randn(128).astype(np.float32)
+    live = live / np.linalg.norm(live)
+
     with pytest.raises(FaceMismatchException):
         await service.submit_scan(
             user_id=stack["student"].user_id,
@@ -349,7 +396,7 @@ async def test_rejected_score_writes_no_attendance_row(
                 stack["session"],
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
-                face_match_score=MISMATCH_SCORE,
+                live_face_embedding=embedding_to_base64(live),
             )
         )
 
@@ -394,7 +441,9 @@ async def test_session_without_classroom_coords_skips_geofence(
     """A session with no geofence set must not reject an arbitrary position."""
 
     stack: dict[str, Any] = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
@@ -419,7 +468,9 @@ async def test_scan_without_gps_succeeds_when_geofence_disabled(
     """A session with geofencing disabled must accept a scan with no GPS."""
 
     stack: dict[str, Any] = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     session = stack["session"]
     session.geofence_enabled = False
@@ -865,7 +916,9 @@ async def test_fresh_scan_writes_no_sync_queue_row(
     """A scan within `SYNC_STALE_SECONDS` of now is live, not an offline replay."""
 
     stack: dict[str, Any] = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 
@@ -889,7 +942,9 @@ async def test_stale_offline_scan_queues_a_sync_record(
     now: datetime,
 ) -> None:
     stack = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
     scanned_at = now - timedelta(seconds=SYNC_STALE_SECONDS + 30)
@@ -929,7 +984,9 @@ async def test_a_stale_scan_raises_the_active_session_pending_count(
     not having the counter at all.
     """
     stack = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
     live = SessionService(test_db_session, settings)
@@ -963,7 +1020,9 @@ async def test_a_live_scan_leaves_the_pending_count_flat(
 ) -> None:
     """Only an offline replay belongs in the backlog."""
     stack = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     service = AttendanceService(test_db_session, settings)
     live = SessionService(test_db_session, settings)
 
@@ -1021,7 +1080,9 @@ async def test_session_created_at_anchors_the_window_not_the_schedule(
     """
 
     stack: dict[str, Any] = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     session = stack["session"]
     # Scheduled an hour ago, but only opened two minutes ago.
@@ -1425,7 +1486,9 @@ async def test_submit_scan_allowed_when_face_enrolled(
 ) -> None:
     """A student with face data on record completes the scan normally."""
     stack: dict[str, Any] = await factories.full_stack()
-    stack["student"].face_embedding = b"stored-blob"
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    stack["student"].face_embedding = serialize_embedding(ref)
     student = stack["student"]
     service = AttendanceService(test_db_session, settings)
 

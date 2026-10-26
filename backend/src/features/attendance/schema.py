@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from shared.constants import (
     LATITUDE_MAX,
@@ -46,6 +46,7 @@ class LivenessEvidence(BaseModel):
         min_length=EAR_SAMPLES_MIN_COUNT, max_length=EAR_SAMPLES_MAX_COUNT
     )
     pnp_evidence: dict[str, Any] = Field(default_factory=dict)
+    face_count: int = Field(default=1, ge=1, le=10)
 
     @field_validator("ear_samples")
     @classmethod
@@ -68,7 +69,11 @@ class ScanRequest(BaseModel):
     # disabled, or no classroom coordinates) must not be forced to supply GPS.
     gps: GPSInput | None = None
     liveness_evidence: LivenessEvidence
-    face_match_score: float = Field(ge=FACE_MATCH_SCORE_MIN, le=FACE_MATCH_SCORE_MAX)
+    # Either a client-computed embedding (legacy) or a captured scan frame
+    # (preferred; the server computes the embedding so enrollment and scan
+    # use the same model). At least one must be supplied.
+    live_face_embedding: str | None = None
+    live_face_image: str | None = None
     scanned_at: datetime
     scanned_via: ScannedVia = ScannedVia.QR_CAMERA
 
@@ -81,6 +86,12 @@ class ScanRequest(BaseModel):
             raise ValueError("student_number must not be blank")
 
         return v
+
+    @model_validator(mode="after")
+    def _require_live_face(self) -> "ScanRequest":
+        if not self.live_face_embedding and not self.live_face_image:
+            raise ValueError("live_face_embedding or live_face_image is required")
+        return self
 
 
 class ScanResponse(BaseModel):

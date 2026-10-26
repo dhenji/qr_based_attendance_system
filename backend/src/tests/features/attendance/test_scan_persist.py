@@ -23,10 +23,22 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import numpy as np
+
 from features.attendance.schema import GPSInput, LivenessEvidence, ScanRequest
 from features.attendance.service import AttendanceService
 from features.session.model import Session
 from shared.enums import ScannedVia
+from shared.face_embeddings import embedding_to_base64
+
+
+def _make_live_emb_p() -> str:
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+    live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+    live = live / np.linalg.norm(live)
+    return embedding_to_base64(live)
+
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 SESSION_EXPIRES_AT = NOW + timedelta(hours=2)
@@ -93,8 +105,9 @@ def _payload(face_match_score: float = 0.95) -> ScanRequest:
             head_turn_left=True,
             head_turn_right=True,
             ear_samples=[0.4, 0.6],
+            pnp_evidence={"depth_mean": 0.4},
         ),
-        face_match_score=face_match_score,
+        live_face_embedding=_make_live_emb_p(),
         scanned_at=NOW,
         scanned_via=ScannedVia.QR_CAMERA,
     )
@@ -117,6 +130,7 @@ def test_expires_at_comes_from_the_passed_session() -> None:
             now=NOW,
             cache_key=None,
             idempotency_key=None,
+            face_match_score=0.95,
         )
     )
 
@@ -144,6 +158,7 @@ def test_persisting_issues_no_queries() -> None:
             now=NOW,
             cache_key=None,
             idempotency_key=None,
+            face_match_score=0.95,
         )
     )
 
@@ -167,6 +182,7 @@ def test_session_id_is_written_from_the_passed_session() -> None:
             now=NOW,
             cache_key=None,
             idempotency_key=None,
+            face_match_score=0.95,
         )
     )
 

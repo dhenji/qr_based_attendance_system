@@ -120,11 +120,27 @@ Constraint: `present_window_minutes + late_window_minutes ≤ duration_minutes` 
 
 ### 3.4 After Generating the Session
 
+On a successful generation a confirmation panel appears on the form with the session code,
+scheduled time and scan-window close. It stays open until you either dismiss it (returning to the
+form with the code shown) or confirm it, which navigates to the live session view
+(`/professor/sessions/active/{id}`) for the exact newly created session. If the response is missing
+a valid session ID, an error is shown and you stay on the form.
+
+Before the code is generated, **Generate Session Code** asks once more: it shows the course, type,
+scheduled time and duration, and notes any override that differs from the offering's plan. Opening
+a session starts the scan window and cannot be undone, so a stray click on a half-configured form
+does not reach it.
+
 1. **Session Code** appears (e.g., `A7X-9K2M`) — display this on the projector
 2. The API also returns a **session QR payload** (code, _course_ ID, radius, windows). The current active-session screen displays the code only, not a QR image — students enter the code.
 3. The session is now **Active** and appears in [Live Monitoring](#4-live-session-monitoring)
 
 > **Tip**: The _session code_ is HMAC-derived and time-bound. It cannot be guessed or reused across sessions.
+
+> **Already open**: opening the same course while a session is still live returns **409
+> `session_already_active`** naming the course and the active session's scheduled window
+> (e.g. `CS101 2026-10-26 08:03–09:03`) rather than the offering id. Close the active session
+> or wait for it to expire before opening another.
 
 ---
 

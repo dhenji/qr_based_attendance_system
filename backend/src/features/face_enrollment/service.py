@@ -1,41 +1,26 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
-from features.face_enrollment.exceptions import InvalidImageException
+from features.face_enrollment.exceptions import (
+    InvalidImageException,
+    MultipleFacesException,
+    NoFaceDetectedException,
+    QualityTooLowException,
+)
 from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
+from shared.face_quality import assess_image_bytes
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from shared.audit import record_audit
 from shared.cache import invalidate_face_embedding
 from shared.enums import AuditAction, AuditEntity
-
-_EMBEDDING_DIM: int = 128
-
-
-def _stub_embedding_blob(*, version: int) -> bytes:
-    """Build the placeholder embedding blob stored until real generation lands.
-
-    Shape mirrors the documented storage format (mean + per-angle vectors)
-    so swapping in the real pipeline only changes this builder.
-    """
-
-    angles: dict[str, list[float]] = {
-        angle: [0.0] * _EMBEDDING_DIM for angle in ("front", "left", "right")
-    }
-    payload: dict[str, object] = {
-        "mean": [0.0] * _EMBEDDING_DIM,
-        "angles": angles,
-        "stub": True,
-        "version": version,
-    }
-
-    return json.dumps(payload).encode("utf-8")
+from shared.face_embedding_generator import FaceEmbeddingGenerationError, generate_embedding_from_images
+from shared.face_embeddings import is_stub_embedding
 
 
 def _validate_photo(
@@ -53,11 +38,9 @@ def _validate_photo(
             f"{name} photo exceeds {max_bytes} bytes ({len(content)} received)"
         )
 
-    if content_type is None or not content_type.startswith("image/"):
-        raise InvalidImageException(
-            f"{name} photo must be an image upload "
-            f"(received content type {content_type!r})"
-        )
+    # Content type is client-provided metadata and is not trusted. The actual
+    # image format is verified by decoding the bytes in assess_image_bytes below;
+    # a missing/mismatched content type is only rejected when decoding fails.
 
 
 class FaceEnrollmentService:
@@ -118,10 +101,37 @@ class FaceEnrollmentService:
                 max_bytes=self._settings.attachments_max_bytes,
             )
 
+            result = assess_image_bytes(content)
+            if not result.ok:
+                detail = f"{name}: {result.message or result.code}"
+                code = result.code
+                if code == "invalid_image":
+                    raise InvalidImageException(detail)
+                if code == "no_face_detected":
+                    raise NoFaceDetectedException(detail)
+                if code == "multiple_faces":
+                    raise MultipleFacesException(detail)
+                raise QualityTooLowException(detail)
+
         old_value: dict[str, Any] = self._face_snapshot(student)
-        student.face_embedding = _stub_embedding_blob(
-            version=self._settings.face_embedding_version
-        )
+        try:
+            model = getattr(self._settings, "face_embedding_model", "mobilefacenet")
+            preferred_algorithm = (
+                "mobilefacenet-v1" if model == "mobilefacenet" else "mediapipe-v1"
+            )
+            embedding_blob, algorithm = generate_embedding_from_images(
+                front,
+                left,
+                right,
+                algorithm=preferred_algorithm,
+            )
+        except FaceEmbeddingGenerationError as e:
+            from features.face_enrollment.exceptions import NoFaceDetectedException
+
+            raise NoFaceDetectedException(str(e)) from e
+
+        student.face_embedding = embedding_blob
+        student.face_embedding_algorithm = algorithm
         student.face_enrolled_at = datetime.now(timezone.utc)
         student.face_embedding_version = (student.face_embedding_version or 0) + 1
         await self._session.flush()
@@ -162,6 +172,7 @@ class FaceEnrollmentService:
 
         old_value: dict[str, Any] = self._face_snapshot(student)
         student.face_embedding = None
+        student.face_embedding_algorithm = None
         student.face_enrolled_at = None
         student.face_embedding_version = (student.face_embedding_version or 0) + 1
         await self._session.flush()

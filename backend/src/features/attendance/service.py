@@ -64,6 +64,7 @@ from features.attendance.schema import (
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
+from features.face_enrollment.exceptions import StubEmbeddingException
 from features.session.exceptions import (
     DuplicateScanException,
     SessionExpiredException,
@@ -84,6 +85,19 @@ from shared.enums import (
     QueueStatus,
     SyncStatus,
     ValidationStatus,
+)
+import base64
+
+from shared.face_embeddings import (
+    FaceEmbeddingError,
+    cosine_similarity,
+    deserialize_embedding,
+    embedding_from_base64,
+    is_stub_embedding,
+)
+from shared.face_embedding_generator import (
+    FaceEmbeddingGenerationError,
+    generate_embedding_from_image,
 )
 from shared.pagination import (
     DEFAULT_PAGE,
@@ -149,7 +163,13 @@ def _haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> f
 
 
 def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
-    """Grade the fixed blink -> left -> right challenge (D31)."""
+    """Grade the fixed blink -> left -> right challenge (D31).
+
+    The yaw/face-count checks are applied only when the client supplies the
+    corresponding evidence, so legacy payloads keep working; a client that
+    does supply them cannot pass with out-of-range values.
+    """
+
     if not (
         evidence.blink_detected and evidence.head_turn_left and evidence.head_turn_right
     ):
@@ -163,7 +183,29 @@ def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
     if not EAR_MEAN_MIN <= mean_ear <= EAR_MEAN_MAX:
         return False
 
-    return bool(evidence.pnp_evidence)
+    if not evidence.pnp_evidence:
+        return False
+
+    # Multiple faces in the frame are not safe to verify.
+    if getattr(evidence, "face_count", 1) != 1:
+        return False
+
+    pnp = evidence.pnp_evidence
+    if isinstance(pnp, dict):
+        if "peak_left_yaw" in pnp:
+            try:
+                if float(pnp["peak_left_yaw"]) > -15:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        if "peak_right_yaw" in pnp:
+            try:
+                if float(pnp["peak_right_yaw"]) < 15:
+                    return False
+            except (TypeError, ValueError):
+                return False
+
+    return True
 
 
 def _idempotency_key_for(user_id: int, session_id: int, key: str | None) -> str | None:
@@ -314,6 +356,7 @@ class AttendanceService:
         now: datetime,
         cache_key: str | None,
         idempotency_key: str | None,
+        face_match_score: float,
     ) -> ScanResponse:
         """Write the attendance row and build the response.
 
@@ -325,7 +368,7 @@ class AttendanceService:
         Session into the identity map.
         """
         row: Attendance = await self._write_attendance(
-            payload, student_id, db_session.id, scanned_at, status, review, original
+            payload, student_id, db_session.id, scanned_at, status, review, original, face_match_score
         )
         await self._maybe_record_sync(
             db_session.id, student_id, row.id, scanned_at, now, idempotency_key
@@ -363,14 +406,37 @@ class AttendanceService:
         )
         await self._require_face_enrollment(student)
 
+        if student.face_embedding is None or is_stub_embedding(student.face_embedding):
+            raise StubEmbeddingException("Face enrollment requires re-enrollment")
+
+        try:
+            if getattr(payload, "live_face_image", None):
+                raw = payload.live_face_image
+                if "," in raw and raw.strip().lower().startswith("data:"):
+                    raw = raw.split(",", 1)[1]
+                content = base64.b64decode(raw)
+                live_emb = generate_embedding_from_image(content)
+            else:
+                live_emb = embedding_from_base64(payload.live_face_embedding)  # type: ignore[arg-type]
+            ref_emb, _algo, _ver = deserialize_embedding(student.face_embedding)
+        except (FaceEmbeddingError, FaceEmbeddingGenerationError, ValueError) as e:
+            raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+
+        try:
+            score = cosine_similarity(ref_emb, live_emb)
+        except ValueError as e:
+            raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+        threshold = self._settings.face_match_threshold
+        review_low = self._settings.face_review_band_low
+        if score < review_low:
+            raise FaceMismatchException(score, threshold)
+
         if not self._settings.benchmark_mode:
-            # Load profile: skip the geofence + liveness gates so a benchmark
-            # run measures routing + persistence, not sensor checks.
             self._validate_geofence(db_session, payload.gps)
             self._validate_liveness(payload.liveness_evidence)
 
         status, original, review = self._decide_scan_outcome(
-            db_session, scanned_at, payload.face_match_score
+            db_session, scanned_at, score
         )
 
         return await self._persist_scan(
@@ -384,6 +450,7 @@ class AttendanceService:
             now,
             cache_key,
             idempotency_key,
+            score,
         )
 
     async def precheck_scan(
@@ -586,6 +653,7 @@ class AttendanceService:
         status: str,
         review: bool,
         original_status: str | None = None,
+        face_match_score: float = 0.0,
     ) -> Attendance:
         row = Attendance(
             student_id=student_id,
@@ -601,7 +669,7 @@ class AttendanceService:
                 (payload.gps.accuracy if payload.gps is not None else 0.0),
                 review,
             ),
-            face_match_score=Decimal(str(payload.face_match_score)),
+            face_match_score=Decimal(str(face_match_score)),
             scanned_via=payload.scanned_via.value,
         )
         self._session.add(row)

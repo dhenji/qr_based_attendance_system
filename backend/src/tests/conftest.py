@@ -173,7 +173,12 @@ apply_utc_datetimes()
 def settings() -> Settings:
     """Settings with a valid secret; `Settings()` alone raises under DEBUG=false."""
 
-    return Settings(debug=True, jwt_secret=TEST_JWT_SECRET)
+    return Settings(
+        debug=True,
+        jwt_secret=TEST_JWT_SECRET,
+        face_match_threshold=0.70,
+        face_review_band_low=0.65,
+    )
 
 
 @pytest.fixture
@@ -652,6 +657,7 @@ def reset_process_globals() -> Any:
     from features.attendance import service as attendance_service
     from features.auth import service as auth_service
     from shared import cache, email, rate_limit
+    from shared import face_embedding_generator, face_quality
 
     def _clear() -> None:
         attendance_service._IDEMPOTENCY_STORE.clear()
@@ -662,6 +668,10 @@ def reset_process_globals() -> Any:
         cache._cache._store.clear()
         email._PENDING.clear()
         core_scheduler.reset_scheduler()
+        face_quality._landmarker = None
+        face_quality._landmarker_failed = False
+        face_embedding_generator._onnx_session = None
+        face_embedding_generator._onnx_failed = False
 
     _clear()
     yield

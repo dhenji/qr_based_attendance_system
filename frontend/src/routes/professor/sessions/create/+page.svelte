@@ -452,6 +452,13 @@ let selectedOfferingId = $state<number | null>(null);
 	let generatedExpiry = $state<string | null>(null);
 	let generatedScheduled = $state<string | null>(null);
 	let generatedOverridden = $state(false);
+	// D96: the session was created and is awaiting the professor's confirmation
+	// before leaving the form. Auto-navigation is gone — the professor sees the
+	// code and scheduled time, and steps forward only on purpose.
+	let confirmCreated = $state(false);
+	// D96: the "Generate Session Code" button asks once more before opening the
+	// session, so a stray click on a half-configured form does not mint a code.
+	let confirmGenerate = $state(false);
 	let error = $state<string | null>(null);
 
 	const canSubmit = $derived(
@@ -506,7 +513,9 @@ let selectedOfferingId = $state<number | null>(null);
 		confirmedStart = `${overrideDate} ${overrideStart}`;
 	};
 
-	const handleGenerate = async () => {
+	// The actual open call. Split out so the confirmation panel and the
+	// programmatic path share one implementation (D96).
+	const doGenerate = async () => {
 		const course = selected;
 		if (course === null || !canSubmit) return;
 
@@ -567,6 +576,14 @@ let selectedOfferingId = $state<number | null>(null);
 			generatedScheduled = `${created.scheduledStartTime} → ${created.scheduledEndTime}`;
 			generatedOverridden = created.scheduleOverridden;
 			invalidateAttendanceDirectory();
+			// D96: creation succeeds — hold the professor on the form with a
+			// confirmation panel rather than navigating away. The live session
+			// is reached only after the professor confirms.
+			if (typeof created.id === 'number' && Number.isInteger(created.id) && created.id > 0) {
+				confirmCreated = true;
+				return;
+			}
+			error = 'Session created but session ID is missing from response.';
 		} catch (e) {
 			// D94: the backend refuses an open outside the class's scheduled
 			// time. That is not a failure to report — it is the window the
@@ -588,9 +605,42 @@ let selectedOfferingId = $state<number | null>(null);
 		}
 	};
 
+	// D96: the button asks once more before opening the session. A session
+	// code is minted server-side and cannot be undone, so a stray click on a
+	// half-configured form should not reach it.
+	const confirmGenerateAction = async () => {
+		confirmGenerate = false;
+		await doGenerate();
+	};
+
+	const dismissGenerate = () => {
+		confirmGenerate = false;
+	};
+
+	const requestGenerate = () => {
+		if (!canSubmit) return;
+		confirmGenerate = true;
+	};
+
 	const viewLiveSession = () => {
 		if (generatedSessionId === null) return;
 		void goto(professorActiveSession(generatedSessionId));
+	};
+
+	// D96: the professor steps out of the confirmation panel into the live
+	// session. The panel is dismissed first so the destination is the only
+	// thing left on screen.
+	const openLiveSession = () => {
+		confirmCreated = false;
+		if (generatedSessionId === null) return;
+		void goto(professorActiveSession(generatedSessionId));
+	};
+
+	// D96: dismissing the confirmation panel without opening the live session
+	// leaves the professor on the form with the generated code shown, so they
+	// can regenerate or simply navigate away.
+	const dismissCreated = () => {
+		confirmCreated = false;
 	};
 
 	const retryPlan = () => {
@@ -1213,7 +1263,7 @@ let selectedOfferingId = $state<number | null>(null);
 					class="btn btn-primary"
 					data-testid="generate-code"
 					disabled={!canSubmit}
-					onclick={handleGenerate}
+					onclick={requestGenerate}
 				>
 					<AppIcon name="qr" size={18} />
 					{submitting ? 'Generating…' : 'Generate Session Code'}
@@ -1255,6 +1305,106 @@ let selectedOfferingId = $state<number | null>(null);
 		{/snippet}
 	</Modal>
 {/if}
+
+{#if confirmCreated}
+		<Modal
+			title="Session created"
+			onclose={dismissCreated}
+			closeOnBackdrop={false}
+		>
+			<div class="confirm-created">
+				<div class="confirm-created-icon">
+					<AppIcon name="check" size={28} />
+				</div>
+				<p class="confirm-created-text">
+					Your session is active. Show the code on the projector for students to scan.
+				</p>
+				<div class="confirm-created-code">
+					<span class="preview-label">Session Code</span>
+					<span class="preview-code">{generatedCode}</span>
+				</div>
+				{#if generatedExpiry}
+					<p class="confirm-created-hint">
+						Scan window closes at {generatedExpiry}.
+					</p>
+				{/if}
+				{#if generatedScheduled}
+					<p class="confirm-created-hint">
+						Scheduled {generatedScheduled}
+						{#if generatedOverridden}
+							— overridden for this session.
+						{/if}
+					</p>
+				{/if}
+			</div>
+			{#snippet footer()}
+				<button class="leave-btn" type="button" onclick={dismissCreated}>
+					Stay on this form
+				</button>
+				<button class="leave-btn leave-primary" type="button" onclick={openLiveSession}>
+					<AppIcon name="shield" size={16} />
+					Open Live Session
+				</button>
+			{/snippet}
+		</Modal>
+	{/if}
+
+	{#if confirmGenerate}
+		<Modal
+			title="Generate session code?"
+			onclose={dismissGenerate}
+			closeOnBackdrop={false}
+		>
+			<div class="confirm-generate">
+				<div class="confirm-generate-icon">
+					<AppIcon name="qr" size={28} />
+				</div>
+				<p class="confirm-generate-text">
+					Opening this session starts the scan window and generates a new code. It cannot be
+					undone — students who scan before you are ready will be marked present.
+				</p>
+				<div class="confirm-generate-summary">
+					{#if selected}
+						<div class="confirm-generate-row">
+							<span class="confirm-generate-label">Course</span>
+							<span>{selected.courseCode} — {selected.courseName}</span>
+						</div>
+					{/if}
+					<div class="confirm-generate-row">
+						<span class="confirm-generate-label">Type</span>
+						<span>{sessionType === 'lab' ? 'Laboratory' : 'Lecture'}</span>
+					</div>
+					<div class="confirm-generate-row">
+						<span class="confirm-generate-label">Scheduled</span>
+						<span>
+							{scheduledDate || 'Now'}
+							{#if scheduledDate}
+								{scheduledStartTime}–{scheduledEndTime}
+							{/if}
+						</span>
+					</div>
+					<div class="confirm-generate-row">
+						<span class="confirm-generate-label">Duration</span>
+						<span>{durationMinutes} min</span>
+					</div>
+				</div>
+				{#if durationOverridden || presentOverridden || lateOverridden || radiusOverridden || locationOverride || scheduleOverride}
+					<p class="confirm-generate-hint">
+						These settings differ from the offering's plan and apply to this session only.
+					</p>
+				{/if}
+			</div>
+			{#snippet footer()}
+				<button class="leave-btn" type="button" onclick={dismissGenerate}>
+					Keep editing
+				</button>
+				<button class="leave-btn leave-primary" type="button" onclick={confirmGenerateAction}>
+					<AppIcon name="qr" size={16} />
+					Generate
+				</button>
+			{/snippet}
+		</Modal>
+	{/if}
 
 <style>
 	.create {
@@ -1885,6 +2035,111 @@ let selectedOfferingId = $state<number | null>(null);
 		background: var(--brand);
 		border-color: var(--brand);
 		color: var(--on-brand);
+	}
+
+	/* --- Session creation confirmation ---------------------------------------- */
+
+	/* The confirmation panel is a success moment, so the icon is tinted to
+	   match the generated-preview treatment rather than the neutral modal. */
+	.confirm-created {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		text-align: center;
+	}
+
+	.confirm-created-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 3rem;
+		height: 3rem;
+		border-radius: 50%;
+		background: var(--success-bg);
+		color: var(--success);
+	}
+
+	.confirm-created-text {
+		margin: 0;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+	}
+
+	.confirm-created-code {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 1rem;
+		width: 100%;
+		background: var(--bg-page);
+		border-radius: 8px;
+	}
+
+	.confirm-created-hint {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	/* --- Generate confirmation ------------------------------------------------ */
+
+	/* A pre-flight check before the irreversible open. The icon is tinted
+	   with the brand so the panel reads as "action about to happen" rather
+	   than a neutral prompt. */
+	.confirm-generate {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.confirm-generate-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 3rem;
+		height: 3rem;
+		border-radius: 50%;
+		background: var(--brand);
+		color: var(--on-brand);
+	}
+
+	.confirm-generate-text {
+		margin: 0;
+		font-size: 0.9375rem;
+		color: var(--text-secondary);
+		line-height: 1.4;
+	}
+
+	.confirm-generate-summary {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		padding: 0.875rem;
+		background: var(--bg-page);
+		border-radius: 8px;
+	}
+
+	.confirm-generate-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		font-size: 0.875rem;
+	}
+
+	.confirm-generate-label {
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		font-size: 0.75rem;
+		font-weight: 600;
+	}
+
+	.confirm-generate-hint {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--warning-text);
 	}
 
 	@media (max-width: 640px) {

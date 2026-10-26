@@ -99,6 +99,7 @@
 	let earBaseline: number | null = null;
 	let idleFrames = 0;
 	let blinkMinEar = 1;
+	let lastFaceLandmarks: any[] = [];
 
 	interface FaceResult {
 		faceLandmarks?: NormalizedLandmark[][];
@@ -477,6 +478,7 @@
 		stageStartedAt = 0;
 		completionSent = false;
 		lastVideoTime = -1;
+		lastFaceLandmarks = [];
 		status = 'initializing';
 		beginDetection = false;
 		clearCountdown();
@@ -582,10 +584,15 @@
 			idleFrames = 0;
 			poseHoldFrames = 0;
 			centerHoldFrames = 0;
+			lastFaceLandmarks = [];
 			status = 'no_face';
 			return;
 		}
 		const lm = result.faceLandmarks[0];
+		// Keep the landmarks from the frame currently being graded so the
+		// scan submission's embedding comes from the same face that is
+		// passing liveness (see scan/+page.svelte liveFaceEmbedding).
+		lastFaceLandmarks = result.faceLandmarks;
 		const guideScale = challengeStage === 'blink' ? 1 : 1.25;
 		if (!isInsideGuide(lm, guideScale)) {
 			closedFrames = 0;
@@ -719,12 +726,29 @@
 			challengeStage = 'complete';
 			status = 'passed';
 			if (!completionSent) {
+				let faceImage: string | undefined;
+				try {
+					if (video && video.videoWidth && video.videoHeight) {
+						const c = document.createElement('canvas');
+						c.width = video.videoWidth;
+						c.height = video.videoHeight;
+						const ctx = c.getContext('2d');
+						if (ctx) {
+							ctx.drawImage(video, 0, 0, c.width, c.height);
+							const dataUrl = c.toDataURL('image/jpeg', 0.8);
+							faceImage = dataUrl.split(',')[1];
+						}
+					}
+				} catch {
+					faceImage = undefined;
+				}
 				completionSent = true;
 				onComplete({
 					blinkDetected: true,
 					headTurnLeft: true,
 					headTurnRight: true,
 					earSamples: [...earSamples],
+					faceCount: lastFaceLandmarks?.length || 1,
 					pnpEvidence: {
 						source: yawSource ?? 'landmarks',
 						baseline_yaw: Number((yawBaseline ?? 0).toFixed(2)),
@@ -733,6 +757,8 @@
 						peak_right_yaw: Number(peakRightYaw.toFixed(2)),
 						yaw_samples: [...yawSamples],
 					},
+					faceLandmarks: lastFaceLandmarks,
+					faceImage,
 				});
 			}
 		}
@@ -772,6 +798,7 @@
 		stageStartedAt = 0;
 		completionSent = false;
 		lastVideoTime = -1;
+		lastFaceLandmarks = [];
 		clearView();
 		stream?.getTracks().forEach((t) => t.stop());
 		stream = null;

@@ -28,6 +28,7 @@ services:
       CORS_ORIGINS: "http://localhost:5173"
     volumes:
       - ./backend:/app
+      - ./frontend/static/models/face_landmarker.task:/app/face_landmarker.task:ro
     depends_on:
       db:
         condition: service_healthy
@@ -47,6 +48,7 @@ services:
       CORS_ORIGINS: "http://localhost:5173"
     volumes:
       - ./backend:/app
+      - ./frontend/static/models/face_landmarker.task:/app/face_landmarker.task:ro
     depends_on:
       db:
         condition: service_healthy
@@ -89,6 +91,7 @@ services:
       - ./backend/src:/app/src
       - ./backend/bench_timings.py:/app/bench_timings.py:ro
       - ./backend/locustfile.py:/app/locustfile.py:ro
+      - ./frontend/static/models/face_landmarker.task:/app/face_landmarker.task:ro
     depends_on:
       db:
         condition: service_healthy

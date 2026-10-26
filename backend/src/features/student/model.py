@@ -42,6 +42,7 @@ class Student(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     face_embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
+    face_embedding_algorithm: Mapped[str | None] = mapped_column(String(64))
     face_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     face_embedding_version: Mapped[int] = mapped_column(
         Integer, server_default=text("0")

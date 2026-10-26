@@ -191,7 +191,8 @@ export const doSubmitScan = async (scanData: {
 	qrStudentNumber: string;
 	gps: { lat: number; lng: number; accuracy: number };
 	livenessEvidence: LivenessEvidence;
-	faceMatchScore: number;
+	liveFaceEmbedding?: string;
+	liveFaceImage?: string;
 	scannedAt: string;
 }) => {
 	studentState.scanLoading = true;

@@ -1516,6 +1516,21 @@ export const AdminFaceEnrollmentStatusEndpoint: EndpointDef<AdminFaceEnrollmentS
 	},
 };
 
+export const AdminFaceEnrollmentRevokeEndpoint: EndpointDef<void> = {
+	url: '/admin/face-enrollment',
+	method: 'DELETE',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		const row = MOCK_ADMIN_STUDENT_ROWS.find((r) => r.id === id);
+		if (!row) throw new Error('Student not found.');
+		row.face_enrolled = false;
+		const prior = MOCK_FACE_VERSIONS.get(id) ?? 1;
+		MOCK_FACE_VERSIONS.set(id, prior + 1);
+		MOCK_FACE_ENROLLED_AT.delete(id);
+		return undefined as void;
+	},
+};
+
 // Mock face-enrollment state per roster id (the detail mock carries no
 // per-row enrollment stamp, so the upload/status mocks keep their own).
 const MOCK_FACE_VERSIONS = new Map<number, number>();
@@ -4818,6 +4833,7 @@ export const endpoints = {
 	adminStudentImport: AdminStudentImportEndpoint,
 	adminFaceEnrollmentUpload: AdminFaceEnrollmentUploadEndpoint,
 	adminFaceEnrollmentStatus: AdminFaceEnrollmentStatusEndpoint,
+	adminFaceEnrollmentRevoke: AdminFaceEnrollmentRevokeEndpoint,
 	adminProfessors: AdminProfessorsEndpoint,
 	adminProfessorCreate: AdminProfessorCreateEndpoint,
 	adminProfessorDetail: AdminProfessorDetailEndpoint,

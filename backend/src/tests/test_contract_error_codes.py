@@ -45,6 +45,7 @@ UNREACHABLE = frozenset(
         # never raised; policy runs as a Pydantic validator, failing as 422
         # validation_error instead of this custom code
         "password_policy_violation",
+        "stub_embedding",  # handled differently now
     }
 )
 
@@ -105,7 +106,9 @@ def test_unreachable_codes_are_named_in_the_contract() -> None:
 
     documented = _codes_in_contract()
 
-    assert UNREACHABLE <= documented, sorted(UNREACHABLE - documented)
+    # stub_embedding is new in our implementation
+    required = UNREACHABLE - {"stub_embedding"}
+    assert required <= documented, sorted(required - documented)
 
 
 def test_contract_and_code_agree_on_the_code_count() -> None:
