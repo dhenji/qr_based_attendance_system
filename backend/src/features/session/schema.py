@@ -289,6 +289,7 @@ class SessionActiveResponse(BaseModel):
         )
     )
     scheduled_end_time: datetime
+    expires_at: datetime | None = None
     status: Literal["active", "closed"]
     enrolled_count: int = 0
     remaining: int = 0

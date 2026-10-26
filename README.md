@@ -86,6 +86,8 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
+> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Closed:" / "Active:" from `session.status`, timers freeze when closed, and the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on closed sessions is enforced server-side via `expires_at`.
+
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
 > OTP ownership proof — names are never typed). Admin accounts are seeded at

@@ -313,6 +313,7 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 			session_code: mockSessions.get(id) ?? '7X-9K2M',
 			scan_window_remaining: 2400,
 			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+			expires_at: null,
 			status: 'active',
 			enrolled_count: 30,
 			remaining: 12,
