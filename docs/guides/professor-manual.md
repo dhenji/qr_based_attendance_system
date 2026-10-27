@@ -187,7 +187,15 @@ After _duration expiry_:
 - Offline scans sync in background; expired-window offline scans → _Rejected_ with reason `session_expired` ([D16](../project/decision-log.md))
 - You can still use **[Excuse All Absent]** or per-row excuses
 
-### 4.6 Closing a Session
+### 4.6 Closed-Session Header & Timer Behavior
+
+When `session.status` is `closed` (manually closed via **[Close]** or auto-expired at `expires_at`):
+
+- The header label reads **"Closed:"** instead of "Active:" (driven by `session.status`, not the URL).
+- The scan-window countdown freezes at `00:00:00`.
+- The class-end timer shows the **actual end time** from `expires_at` (falls back to the scheduled end time) instead of a running countdown.
+- The **[Close]** button is disabled.
+- The page still renders fully (attendance review remains available).
 
 Click **[Close]** in the header to formally end the session. This is optional — sessions auto-expire at `expires_at`.
 

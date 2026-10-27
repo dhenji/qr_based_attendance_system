@@ -261,7 +261,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		poll = window.setInterval(() => void load(false), POLL_MS);
 		tick = window.setInterval(() => {
 			// Frozen while hidden; resumes on visibilitychange refresh.
-			if (!cancelled && document.visibilityState === 'visible') now = Date.now();
+			// Stops ticking when the session is closed (expires_at in the past).
+			if (!cancelled && document.visibilityState === 'visible' && !isClosed) now = Date.now();
 		}, TICK_MS);
 		const handleVisible = () => {
 			if (document.visibilityState === 'visible') void load(false);
@@ -295,6 +296,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	const classEndsAt = $derived(session ? new Date(session.scheduledEndTime).getTime() : null);
 	const classRemainingSeconds = $derived.by(() => {
 		if (classEndsAt === null) return null;
+		if (isClosed) return 0;
 		return Math.max(0, Math.floor((classEndsAt - now) / 1000));
 	});
 	// A session opened after its class ended still runs, so the tile says so
@@ -474,7 +476,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		<button class="btn btn-ghost" type="button" onclick={goBack}>Back</button>
 		{#if session}
 			<div class="title">
-				<h1>Active: {session.offeringCode} — {session.offeringName}</h1>
+				<h1>{session.status === 'closed' ? 'Closed' : 'Active'}: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
 					Section {session.offeringSections} · Code <span class="mono-data">{session.sessionCode}</span> ·
 					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
@@ -506,7 +508,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				<button class="btn btn-secondary" type="button" onclick={retry}>Try again</button>
 			{/if}
 		</section>
-	{:else if isLoading || !session || scanRemainingSeconds === null || classRemainingSeconds === null}
+	{:else if isLoading || !session || scanRemainingSeconds === null}
 		<SkeletonCards count={3} label="Loading live session…" />
 		<SkeletonTable rows={5} cols={5} />
 	{:else}
@@ -527,8 +529,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				</div>
 				<div class="timer" class:urgent={classEnded}>
 					<span class="timer-label">{classEnded ? 'Class ended' : 'Class ends in'}</span>
-					<span class="timer-value">{formatCountdown(classRemainingSeconds)}</span>
-					<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
+					<span class="timer-value">{isClosed ? formatClock(session.expiresAt ?? session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
+					{#if !isClosed}
+						<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
+					{/if}
 				</div>
 			</div>
 		</section>

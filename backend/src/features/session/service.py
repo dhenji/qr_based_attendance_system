@@ -674,6 +674,7 @@ class SessionService:
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_end_time=row.scheduled_end_time,
+            expires_at=row.expires_at,
             status=_session_status(row.expires_at, now),
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),

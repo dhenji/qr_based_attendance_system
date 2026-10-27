@@ -151,6 +151,7 @@ export interface SessionActiveResponse {
 	session_code: string;
 	scan_window_remaining: number;
 	scheduled_end_time: string;
+	expires_at: string | null;
 	status: SessionRowStatus;
 	enrolled_count: number;
 	remaining: number;
@@ -238,6 +239,7 @@ export interface LiveSession {
 	sessionCode: string;
 	scanWindowRemaining: number;
 	scheduledEndTime: string;
+	expiresAt: string | null;
 	status: SessionRowStatus;
 	enrolledCount: number;
 	remaining: number;
