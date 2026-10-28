@@ -729,6 +729,7 @@ class SessionService:
         records: Sequence[Attendance] = await self._attendance_rows(session_id)
         counts, scanned = _summarize(records)
         enrolled_count: int = len(students)
+        status: str = _session_status(row.expires_at, row.scheduled_start_time, now)
 
         return SessionActiveResponse(
             id=row.id,
@@ -741,11 +742,11 @@ class SessionService:
             scheduled_start_time=row.scheduled_start_time,
             scheduled_end_time=row.scheduled_end_time,
             expires_at=row.expires_at,
-            status=_session_status(row.expires_at, row.scheduled_start_time, now),
+            status=status,
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),
             pending_sync_count=await self._pending_sync_count(session_id),
-            students=self._active_student_items(students, records),
+            students=self._active_student_items(students, records, status),
             counts=counts,
         )
 
@@ -766,9 +767,12 @@ class SessionService:
 
     @staticmethod
     def _active_student_items(
-        students: Sequence[Student], records: Sequence[Attendance]
+        students: Sequence[Student],
+        records: Sequence[Attendance],
+        session_status: str = "closed",
     ) -> list[ActiveStudentItem]:
-        """One tile per enrolled student; unscanned reads as absent."""
+        """One tile per enrolled student; unscanned reads as pending while the
+        session is active/scheduled, absent once it is closed."""
         scanned_status: dict[int, ValidationStatus] = {
             r.student_id: ValidationStatus(r.validation_status) for r in records
         }
@@ -776,13 +780,18 @@ class SessionService:
         excuses: dict[int, str | None] = {
             r.student_id: r.excuse_reason for r in records
         }
+        default_status: ValidationStatus = (
+            ValidationStatus.PENDING
+            if session_status in ("scheduled", "active")
+            else ValidationStatus.ABSENT
+        )
 
         return [
             ActiveStudentItem(
                 student_number=student.student_id,
                 name=f"{student.first_name} {student.last_name}",
                 section=student.section,
-                status=scanned_status.get(student.id, ValidationStatus.ABSENT),
+                status=scanned_status.get(student.id, default_status),
                 scanned_at=scanned_at.get(student.id),
                 excuse_reason=excuses.get(student.id),
             )

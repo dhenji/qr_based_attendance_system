@@ -14,9 +14,11 @@
 		onCancel?: () => void;
 		singleSlot?: 'front' | 'left' | 'right' | null;
 		onCapture?: (slot: 'front' | 'left' | 'right', file: File) => void;
+		autoCaptureEnabled?: boolean;
 	}
 
-	let { active, onComplete, onCancel, singleSlot = null, onCapture }: Props = $props();
+	let { active, onComplete, onCancel, singleSlot = null, onCapture, autoCaptureEnabled = false }: Props = $props();
+	let autoCapture = $state(autoCaptureEnabled);
 
 	type Step = 'front' | 'left' | 'right';
 	type FaceStatus = 'initializing' | 'no_face' | 'multiple_faces' | 'too_far' | 'center_face' | 'too_dark' | 'too_bright' | 'blurry' | 'eyes_closed' | 'ready' | 'captured';
@@ -32,6 +34,9 @@
 	let frameCount = 0;
 	let captured = $state<Partial<Record<Step, File>>>({});
 	let capturing = $state(false);
+	let reviewFile = $state<File | null>(null);
+	let reviewPreview = $state<string | null>(null);
+	let reviewSlot = $state<Step | null>(null);
 
 	// Guide oval (normalized video space), matches FaceScanner.
 	const GUIDE_CX = 0.5;
@@ -218,7 +223,16 @@
 		// Landmark-only yaw: cheaper than matrix math and good enough for angle capture.
 		const rawYaw = yawFromLandmarks(lm);
 		if (rawYaw === null) return null;
+
+		// A single-slot retake starts directly on the requested angle, so there is
+		// no front-facing pose available to establish a relative baseline. Use the
+		// landmark yaw directly for left/right retakes.
+		if (singleSlot) return rawYaw;
+
 		if (yawSource !== 'landmarks') { yawSource = 'landmarks'; yawBaseline = null; }
+		// Calibrate from the initial front-facing pose and preserve that baseline
+		// while advancing through left and right. Resetting it at each angle makes
+		// the turned pose become its own baseline, so the angle condition never passes.
 		if (yawBaseline === null) yawBaseline = rawYaw;
 		return rawYaw - yawBaseline;
 	};
@@ -226,7 +240,8 @@
 	const conditionMet = (yaw: number | null, lm: Array<{ x: number; y: number }>) => {
 		if (yaw === null) return false;
 		if (!isInsideGuide(lm)) return false;
-		if (faceDistanceM(lm) > MAX_FACE_DISTANCE_M) return false;
+		// Eye-span distance estimation is unreliable when the head is turned.
+		if (step === 'front' && faceDistanceM(lm) > MAX_FACE_DISTANCE_M) return false;
 		if (step === 'front') return Math.abs(yaw) <= 8;
 		if (step === 'left') return yaw <= -15;
 		return yaw >= 15;
@@ -258,6 +273,7 @@
 	};
 
 	const stop = () => {
+		discardReview();
 		startToken += 1;
 		cancelAnimationFrame(rafId);
 		rafId = 0;
@@ -283,14 +299,14 @@
 		frameCount = 0;
 	};
 
-	const start = async () => {
+	const start = async (preserveCurrentStep = false) => {
 		startToken += 1;
 		const token = startToken;
 		error = null;
 		status = 'initializing';
 		holdFrames = 0;
 		frameCount = 0;
-		step = singleSlot ?? 'front';
+		if (!preserveCurrentStep) step = singleSlot ?? 'front';
 		clearView();
 		try {
 			const loaded = await initFaceModel();
@@ -317,24 +333,35 @@
 			if (token !== startToken) return;
 
 			const tick = () => {
-				if (!landmarker || video.readyState < 2) {
+				// Keep the preview alive independently of the current enrollment angle.
+				// Some browsers can pause the video element after a capture/review transition
+				// even while the camera track is still live.
+				if (video.paused && stream?.getVideoTracks().some((track) => track.readyState === 'live')) {
+					void video.play().catch(() => { /* retry on the next animation frame */ });
+				}
+				try {
+					if (landmarker && video.readyState >= 2) {
+						if (video.videoWidth && canvas.width !== video.videoWidth) {
+							canvas.width = video.videoWidth;
+							canvas.height = video.videoHeight;
+							stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+						}
+						if (!drawing && drawingCtor && canvas.width) {
+							drawing = new drawingCtor(canvas.getContext('2d') as CanvasRenderingContext2D);
+						}
+						if (video.currentTime !== lastVideoTime) {
+							lastVideoTime = video.currentTime;
+							const result = landmarker.detectForVideo(video, performance.now());
+							evaluate(result);
+						}
+					}
+				} catch (frameError) {
+					// A single inference error must not terminate the animation loop and
+					// leave the camera UI appearing frozen. The next frame can recover.
+					console.warn('Face enrollment frame processing failed; retrying.', frameError);
+				} finally {
 					rafId = requestAnimationFrame(tick);
-					return;
 				}
-				if (video.videoWidth && canvas.width !== video.videoWidth) {
-					canvas.width = video.videoWidth;
-					canvas.height = video.videoHeight;
-					stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-				}
-				if (!drawing && drawingCtor && canvas.width) {
-					drawing = new drawingCtor(canvas.getContext('2d') as CanvasRenderingContext2D);
-				}
-				if (video.currentTime !== lastVideoTime) {
-					lastVideoTime = video.currentTime;
-					const result = landmarker.detectForVideo(video, performance.now());
-					evaluate(result);
-				}
-				rafId = requestAnimationFrame(tick);
 			};
 			rafId = requestAnimationFrame(tick);
 			status = 'no_face';
@@ -349,7 +376,7 @@
 	};
 
 	const evaluate = (result: { faceLandmarks?: NormalizedLandmark[][]; facialTransformationMatrixes?: Matrix[] }) => {
-		if (capturing) return;
+		if (capturing || reviewFile) return;
 		if (!result.faceLandmarks?.length) {
 			holdFrames = 0;
 			status = 'no_face';
@@ -366,7 +393,9 @@
 			status = 'center_face';
 			return;
 		}
-		if (faceDistanceM(lm) > MAX_FACE_DISTANCE_M) {
+		// Enforce distance only for the front-facing pose; eye-span estimation
+		// becomes unreliable when the head is turned to either side.
+		if (step === 'front' && faceDistanceM(lm) > MAX_FACE_DISTANCE_M) {
 			holdFrames = 0;
 			status = 'too_far';
 			return;
@@ -399,7 +428,7 @@
 		if (conditionMet(yaw, lm)) {
 			status = 'ready';
 			holdFrames += 1;
-			if (holdFrames >= HOLD_FRAMES) {
+			if (autoCapture && holdFrames >= HOLD_FRAMES) {
 				void doCapture();
 			}
 		} else {
@@ -409,29 +438,83 @@
 	};
 
 	const doCapture = async () => {
-		if (capturing) return;
+		if (capturing || reviewFile) return;
 		capturing = true;
 		const file = await captureFrame();
 		capturing = false;
-		if (!file) return;
+		if (!file) {
+			error = 'Could not capture the photo. Please try again.';
+			return;
+		}
+		reviewFile = file;
+		reviewSlot = step;
+		reviewPreview = URL.createObjectURL(file);
+		holdFrames = 0;
+		status = 'captured';
+	};
+
+	const discardReview = () => {
+		if (reviewPreview) URL.revokeObjectURL(reviewPreview);
+		reviewPreview = null;
+		reviewFile = null;
+		reviewSlot = null;
+		holdFrames = 0;
+	};
+
+	const useReviewPhoto = () => {
+		if (!reviewFile || !reviewSlot) return;
+		const file = reviewFile;
+		const slot = reviewSlot;
+		discardReview();
+
 		if (singleSlot) {
 			onCapture?.(singleSlot, file);
 			stop();
 			return;
 		}
-		const nextCaptured = { ...captured, [step]: file } as Partial<Record<Step, File>>;
-		captured = nextCaptured;
-		holdFrames = 0;
-		// advance
-		if (step === 'front') step = 'left';
-		else if (step === 'left') step = 'right';
+
+		captured = { ...captured, [slot]: file };
+		let nextStep: Step;
+		if (slot === 'front') nextStep = 'left';
+		else if (slot === 'left') nextStep = 'right';
 		else {
-			onComplete(nextCaptured as { front: File; left: File; right: File });
+			onComplete(captured as { front: File; left: File; right: File });
+			return;
 		}
+
+		// Turn auto-capture off when advancing so the next angle is not captured
+		// before the user has repositioned their head.
+		autoCapture = false;
+
+		// Restart the camera stream when changing angles. Preserve the front yaw
+		// baseline so restarting does not make the next pose its own baseline.
+		const savedYawBaseline = yawBaseline;
+		const savedYawSource = yawSource;
+		stop();
+		yawBaseline = savedYawBaseline;
+		yawSource = savedYawSource;
+		step = nextStep;
+		void start(true);
+	};
+
+	const retakeReviewPhoto = () => {
+		discardReview();
+		autoCapture = false;
+		// Restart the camera stream cleanly so the retake starts from a fresh
+		// frame, mirroring what Use Photo does when advancing to the next angle.
+		// Preserve the current step/yaw baseline since we're re-capturing the
+		// same slot, not advancing.
+		const savedYawBaseline = yawBaseline;
+		const savedYawSource = yawSource;
+		stop();
+		yawBaseline = savedYawBaseline;
+		yawSource = savedYawSource;
+		void start(true);
 	};
 
 	const retry = () => {
 		error = null;
+		discardReview();
 		step = singleSlot ?? 'front';
 		captured = {};
 		holdFrames = 0;
@@ -456,7 +539,7 @@
 		<video bind:this={video} autoplay muted playsinline></video>
 		<canvas bind:this={canvas}></canvas>
 		<div class="face-guide" class:aligned={status === 'ready'} aria-hidden="true"></div>
-		{#if !error}
+		{#if !error && !reviewFile}
 			<div class="hint" role="status" aria-live="polite">{stepInstruction}</div>
 		{/if}
 		{#if holdFrames > 0}
@@ -468,7 +551,19 @@
 
 	<p class="step-label">Capturing: <strong>{stepLabel}</strong> ({Object.keys(captured).length}/3)</p>
 
-	{#if error}
+	{#if reviewFile && reviewPreview}
+		<div class="review" aria-label="Review captured photo">
+			<img src={reviewPreview} alt={`Review ${reviewSlot ?? step} photo`} />
+			<p class="status">Review this {reviewSlot ?? step} photo before using it.</p>
+			<div class="actions">
+				<button class="btn primary" onclick={useReviewPhoto}>Use Photo</button>
+				<button class="btn" onclick={retakeReviewPhoto}>Retake Photo</button>
+				{#if onCancel}
+					<button class="btn ghost" onclick={() => { discardReview(); onCancel?.(); }}>Cancel</button>
+				{/if}
+			</div>
+		</div>
+	{:else if error}
 		<p class="error" role="alert">{error}</p>
 		<button class="btn" onclick={retry}>Try again</button>
 	{:else}
@@ -482,9 +577,13 @@
 			{:else if status === 'too_bright'}Image too bright — reduce lighting
 			{:else if status === 'blurry'}Image blurry — hold still
 			{:else if status === 'eyes_closed'}Keep your eyes open
-			{:else if status === 'ready'}Hold still…
+			{:else if status === 'ready'}Face aligned — capture when ready
 			{:else}Captured{/if}
 		</p>
+		<label class="auto-toggle">
+			<input type="checkbox" bind:checked={autoCapture} />
+			Automatically capture when aligned
+		</label>
 		<div class="actions">
 			<button class="btn" onclick={manualCapture} disabled={capturing || status !== 'ready'}>Capture now</button>
 			{#if onCancel}
@@ -509,5 +608,10 @@
 	.btn { padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border-strong, #cbd5e1); background: var(--bg-card, #fff); color: var(--text-strong, #0f172a); font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
 	.btn:disabled { opacity: 0.6; cursor: not-allowed; }
 	.btn.ghost { background: transparent; }
+	.btn.primary { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
+	.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.review { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; width: 100%; }
+	.review img { display: block; width: 100%; max-width: 22rem; max-height: 45vh; object-fit: contain; border-radius: 10px; background: #0f172a; }
+	.auto-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-secondary, #475569); }
 	.error { color: var(--danger, #dc2626); font-size: 0.875rem; margin: 0; }
 </style>

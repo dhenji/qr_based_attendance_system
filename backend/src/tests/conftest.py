@@ -47,6 +47,7 @@ from typing import Any
 TEST_JWT_SECRET = "test-secret-0123456789abcdef-0123456789"
 os.environ["DEBUG"] = "true"
 os.environ["JWT_SECRET"] = TEST_JWT_SECRET
+os.environ["INSTITUTION_TIMEZONE"] = "UTC"
 
 import pytest  # noqa: E402
 from sqlalchemy import BigInteger, DateTime, event  # noqa: E402
@@ -178,6 +179,7 @@ def settings() -> Settings:
         jwt_secret=TEST_JWT_SECRET,
         face_match_threshold=0.70,
         face_review_band_low=0.65,
+        institution_timezone="UTC",
     )
 
 

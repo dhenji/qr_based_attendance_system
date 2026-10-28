@@ -36,6 +36,23 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 `liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`,
 `session_not_started`, `stub_embedding`.
 
+**Review-band face matches** (`review_low <= score < threshold`) store their
+computed status (`present`/`late`) as `validation_status` — not `pending`. The
+computed value is kept in `original_status` so an administrator can restore it
+via `POST /admin/attendance/review/{id}/resolve`. The review queue keys on the
+`evidence.review` flag (not `validation_status`), so a record whose match score
+is in the band reads as `present`/`late` everywhere (student history, professor
+active session, and admin queue alike).
+
+**Offline sync replays**: a queued scan submitted after its session has closed
+is still accepted when it carries an `X-Idempotency-Key` — the scan endpoint
+bypasses the expiry guard for idempotent replays. The record's server-decided
+status (`present`/`late`) is then visible on the professor's projector page.
+
+**Professor active session status tiles**: unscanned students read as `pending`
+while the session is `scheduled`/`active`, and flip to `absent` once the
+session is `closed`. Scanned students keep their server-decided status.
+
 | #   | Layer                   | What It Prevents                               | CS Concept                                   |
 | --- | ----------------------- | ---------------------------------------------- | -------------------------------------------- |
 | 1   | Authenticated Identity  | Impersonation / forged client identifiers      | JWT → `users.id` → `students.user_id`        |
@@ -55,7 +72,11 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > sharpness/Laplacian variance ≥50, eyes open EAR ≥0.2) via
 > `shared/face_quality.py` using MediaPipe FaceLandmarker before storing the
 > placeholder embedding. The backend enforces gates authoritatively; the
-> admin camera UI provides live guidance and retakes. Every attendance
+> admin camera UI provides live guidance and retakes. The admin modal opens a
+> confirmation overlay ("Confirm face enrollment upload" / "Remove face enrollment?")
+> before committing, and the live-capture flow reviews each photo ("Use Photo" /
+> "Retake Photo", with an "Automatically capture when aligned" toggle) before
+> advancing to the next angle. Every attendance
 > submission follows the canonical **5-step scan flow (D27)**:
 > `session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
 > Any single failure rejects the record with one of the canonical D15 rejection
@@ -87,7 +108,7 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
-> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). No migration needed — both columns already exist on `sessions`.
+> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column).
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +

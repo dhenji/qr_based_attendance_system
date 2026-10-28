@@ -27,7 +27,11 @@ from features.student.model import Student
 from features.sync.model import SyncQueue
 
 from tests.conftest import SESSION_TEST_NOW as NOW
-SETTINGS = Settings(debug=True, jwt_secret="test-secret-0123456789abcdef")
+SETTINGS = Settings(
+    debug=True,
+    jwt_secret="test-secret-0123456789abcdef",
+    institution_timezone="UTC",
+)
 
 
 class _FakeResult:
@@ -359,7 +363,7 @@ def test_get_active_session_counts_tiles_and_banner() -> None:
     by_number = {s.student_number: s for s in active.students}
     assert by_number["S001"].status == "present"
     assert by_number["S002"].status == "rejected"
-    assert by_number["S003"].status == "absent"
+    assert by_number["S003"].status == "pending"
 
 
 def test_get_active_session_rejects_a_professor_outside_the_team() -> None:

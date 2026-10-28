@@ -376,7 +376,7 @@ async def _flag_for_review(
 async def test_pending_rows_appear_in_the_default_queue(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
-    record, graph = await _flag_for_review(factories, status=PENDING, review=True)
+    record, graph = await _flag_for_review(factories, status=PENDING, review=True, original_status=PRESENT)
     assert record.id is not None
 
     page = await _service(test_db_session).list_liveness_review()
@@ -400,11 +400,10 @@ async def test_resolved_statuses_leave_the_pending_queue(
 ) -> None:
     """A settled row is not pending, so it is out of the default queue.
 
-    The `review` flag is *not* what removes it: the list filter keys on
-    `validation_status` alone.
+    The pending queue keys on `evidence.review`, not `validation_status`.
     """
     await _flag_for_review(
-        factories, status=PRESENT, review=True, original_status=ABSENT
+        factories, status=PRESENT, review=False, original_status=PRESENT
     )
 
     page = await _service(test_db_session).list_liveness_review()
@@ -452,7 +451,7 @@ async def test_approving_restores_the_original_late_status(
 ) -> None:
     """`original_status` is the answer whenever it is not PRESENT."""
     record, _graph = await _flag_for_review(
-        factories, status=PENDING, review=True, original_status=LATE
+        factories, status=PRESENT, review=True, original_status=LATE
     )
     assert record.id is not None
 
@@ -473,7 +472,7 @@ async def test_rejecting_marks_the_row_rejected(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
     record, _graph = await _flag_for_review(
-        factories, status=PENDING, review=True, original_status=PRESENT
+        factories, status=PRESENT, review=True, original_status=LATE
     )
     assert record.id is not None
 
@@ -599,17 +598,17 @@ async def test_resolving_a_missing_row_is_404(test_db_session: AsyncSession) -> 
 async def test_resolving_an_unflagged_pending_row_is_409(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
-    """The resolve gate is stricter than the list gate: it needs the flag."""
+    """A row without the review flag is neither listed nor resolvable."""
     record, _graph = await _flag_for_review(
         factories, status=PENDING, review=False, original_status=PRESENT
     )
     assert record.id is not None
 
-    # Visible in the queue...
+    # Not visible in the queue...
     listed = await _service(test_db_session).list_liveness_review()
-    assert listed.total == 1
+    assert listed.total == 0
 
-    # ...but not resolvable.
+    # ...and not resolvable.
     with pytest.raises(ReviewNotPendingException) as exc_info:
         await _service(test_db_session).resolve_review(
             record_id=record.id, decision="approve", actor_id=1
@@ -623,7 +622,7 @@ async def test_resolving_a_settled_row_is_409(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
     record, _graph = await _flag_for_review(
-        factories, status=PRESENT, review=True, original_status=ABSENT
+        factories, status=PRESENT, review=False, original_status=PRESENT
     )
     assert record.id is not None
 
@@ -639,7 +638,9 @@ async def test_resolving_a_settled_row_is_409(
 async def test_invalid_decision_is_rejected(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
-    record, _graph = await _flag_for_review(factories, status=PENDING, review=True)
+    record, _graph = await _flag_for_review(
+        factories, status=PRESENT, review=True, original_status=PRESENT
+    )
     assert record.id is not None
 
     with pytest.raises(Exception) as exc_info:
