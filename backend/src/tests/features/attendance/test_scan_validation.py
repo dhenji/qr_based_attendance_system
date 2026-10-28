@@ -300,7 +300,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
         )
     )
 
-    assert result.status == ValidationStatus.PENDING.value
+    assert result.status == ValidationStatus.PRESENT.value
 
     row: Attendance = (
         await test_db_session.scalars(
@@ -310,7 +310,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
 
     # The computed status is kept for the professor's approve/reject decision.
     assert row.original_status == ValidationStatus.PRESENT.value
-    assert row.validation_status == ValidationStatus.PENDING.value
+    assert row.validation_status == ValidationStatus.PRESENT.value
     assert row.liveness_evidence is not None
     assert row.liveness_evidence["review"] is True
     assert abs(float(row.face_match_score) - score) < 0.001
@@ -346,7 +346,7 @@ async def test_review_band_preserves_late_as_original_status(
         )
     ).one()
 
-    assert result.status == ValidationStatus.PENDING.value
+    assert result.status == ValidationStatus.LATE.value
     assert row.original_status == ValidationStatus.LATE.value
 
 

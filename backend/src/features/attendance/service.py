@@ -11,7 +11,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Boolean, Select, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -281,7 +281,7 @@ _HISTORY_COUNT_FIELDS: dict[str, str] = {
 
 
 def _pending_review_filter(stmt: Select[Any]) -> Select[Any]:
-    return stmt.where(Attendance.validation_status == ValidationStatus.PENDING.value)
+    return stmt.where(cast(Attendance.liveness_evidence["review"], Boolean) == True)
 
 
 def _approved_review_filter(stmt: Select[Any]) -> Select[Any]:
@@ -325,9 +325,10 @@ class AttendanceService:
         now: datetime,
         user_id: int,
         student_number: str,
+        allow_expired: bool = False,
     ) -> tuple[Session, Student]:
         db_session: Session = await self._get_active_session(
-            session_id, scanned_at, now
+            session_id, scanned_at, now, allow_expired=allow_expired
         )
         student: Student = await self._get_active_student(
             user_id, student_number, db_session.offering_id
@@ -341,9 +342,8 @@ class AttendanceService:
     ) -> tuple[str, str | None, bool]:
         review: bool = self._is_review_band(face_match_score)
         computed: str = self._compute_status(db_session, scanned_at)
-        status: str = ValidationStatus.PENDING.value if review else computed
         original: str | None = computed if review else None
-        return status, original, review
+        return computed, original, review
 
     async def _persist_scan(
         self,
@@ -403,7 +403,8 @@ class AttendanceService:
         scanned_at: datetime = _ensure_aware(payload.scanned_at)
 
         db_session, student = await self._resolve_scan_parties(
-            payload.session_id, scanned_at, now, user_id, payload.student_number
+            payload.session_id, scanned_at, now, user_id, payload.student_number,
+            allow_expired=idempotency_key is not None,
         )
         await self._require_face_enrollment(student)
 
@@ -492,7 +493,8 @@ class AttendanceService:
         )
 
     async def _get_active_session(
-        self, session_id: int, scanned_at: datetime, now: datetime
+        self, session_id: int, scanned_at: datetime, now: datetime,
+        allow_expired: bool = False,
     ) -> Session:
         row: Session | None = await self._session.get(Session, session_id)
 
@@ -501,7 +503,7 @@ class AttendanceService:
 
         expires_at: datetime | None = row.expires_at
 
-        if expires_at is None or _ensure_aware(expires_at) <= now:
+        if not allow_expired and (expires_at is None or _ensure_aware(expires_at) <= now):
             raise SessionExpiredException(row.id)
 
         if scanned_at > _ensure_aware(expires_at):
@@ -1150,9 +1152,7 @@ class AttendanceService:
             raise ReviewNotFoundException(record_id)
 
         evidence: dict = dict(row.liveness_evidence or {})
-        if row.validation_status != ValidationStatus.PENDING.value or not evidence.get(
-            "review", False
-        ):
+        if not evidence.get("review", False):
             raise ReviewNotPendingException(record_id)
 
         return row, evidence
