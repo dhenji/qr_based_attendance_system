@@ -189,7 +189,7 @@ repeats the geofence check on submit.
   - `session_expired` — scanned after `expires_at`
   - `student_number_mismatch` — the number does not match your account
   - `stub_embedding` — your face enrollment needs to be updated; contact an administrator to re-enroll
-- A scan whose `status` is `rejected` shows "This session is no longer accepting attendance."
+- A scan whose `status` is `rejected` shows "This attendance was submitted outside the permitted time window. Check the attendance schedule with your professor."
 - **[Try Again]** — restart from Stage 1
 - **[Request Excuse]** — opens the excuse request form (for `absent`/`rejected` paths)
 
