@@ -247,7 +247,52 @@ let selectedOfferingId = $state<number | null>(null);
 	// windows_exceed_duration (422) for the same condition.
 	const windowsFit = $derived(presentWindow + lateWindow <= durationMinutes);
 
-	const durationInvalid = $derived(durationMinutes <= 0);
+	const meetingEndMinutes = $derived.by(() => {
+		if (!plan?.end_time) return null;
+		const parts = plan.end_time.split(':');
+		if (parts.length < 2) return null;
+		const hours = Number(parts[0]);
+		const minutes = Number(parts[1]);
+		if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+		return hours * 60 + minutes;
+	});
+
+	const meetingStartMinutes = $derived.by(() => {
+		if (!plan?.start_time) return null;
+		const parts = plan.start_time.split(':');
+		if (parts.length < 2) return null;
+		const hours = Number(parts[0]);
+		const minutes = Number(parts[1]);
+		if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+		return hours * 60 + minutes;
+	});
+
+	const overrideStartMinutes = $derived.by(() => parseTimeToMinutes(overrideStart));
+
+	const maxDurationByWindow = $derived.by(() => {
+		if (!scheduleOverride) return null;
+		if (meetingEndMinutes === null || overrideStartMinutes === null) return null;
+		if (
+			meetingStartMinutes !== null &&
+			overrideStartMinutes >= meetingStartMinutes &&
+			overrideStartMinutes < meetingEndMinutes
+		) {
+			return Math.max(0, meetingEndMinutes - overrideStartMinutes);
+		}
+		return plan?.duration_minutes ?? null;
+	});
+
+	const effectiveMaxDuration = $derived.by(() => {
+		if (scheduleOverride) return maxDurationByWindow;
+		return plan?.duration_minutes ?? null;
+	});
+
+	const durationExceedsLimit = $derived.by(() => {
+		if (effectiveMaxDuration === null) return false;
+		return durationMinutes > effectiveMaxDuration;
+	});
+
+	const durationInvalid = $derived(durationMinutes <= 0 || durationExceedsLimit);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
 	// The scheduled window the session will carry: the plan's next
@@ -295,6 +340,29 @@ let selectedOfferingId = $state<number | null>(null);
 	// refuses the open either way.
 	const startWindow = $derived(plan?.start_window ?? null);
 	const outsideWindow = $derived(startWindow !== null && !startWindow.permitted);
+
+	const overrideStartInPast = $derived.by(() => {
+		if (!scheduleOverride || !overrideDateValid || !overrideTimeValid) return false;
+		const window = startWindow;
+		const nowIso = window?.current_time ?? null;
+		if (!nowIso) return false;
+		const zone =
+			window !== null && window.timezone !== ''
+				? window.timezone
+				: (plan?.timezone ?? 'UTC');
+		const nowDate = zonedDateInputValue(nowIso, zone);
+		const nowTime = zonedTimeInputValue(nowIso, zone);
+		if (!nowDate || !nowTime) return false;
+		// A previous calendar day is always past the grace window.
+		if (overrideDate < nowDate) return true;
+		if (overrideDate > nowDate) return false;
+		const toMinutes = (t: string): number => {
+			const [h, m] = t.split(':').map(Number);
+			return h * 60 + m;
+		};
+		const graceMinutes = 0; // OVERRIDE_PAST_GRACE_MINUTES
+		return toMinutes(overrideStart) < toMinutes(nowTime) - graceMinutes;
+	});
 	// Set when the backend refuses an open that the plan had permitted — a
 	// plan loaded a while ago, or a class that ended while the form was up.
 	let windowRefused = $state(false);
@@ -470,6 +538,7 @@ let selectedOfferingId = $state<number | null>(null);
 			!coordsInvalid &&
 			overrideDateValid &&
 			overrideTimeValid &&
+			!overrideStartInPast &&
 			// D94: outside the class's scheduled time the professor has to
 			// pick a different start time and confirm it. Inside it, the
 			// normal flow is unchanged.
@@ -492,10 +561,24 @@ let selectedOfferingId = $state<number | null>(null);
 		// The picker opens on the server's clock, read in the institution's
 		// zone: a professor who is late means "now", not the next class.
 		const window = startWindow;
+		const zone =
+			window !== null && window.timezone !== ''
+				? window.timezone
+				: (plan?.timezone ?? 'UTC');
+		let seeded = false;
 		if (window !== null && window.current_time !== null) {
-			const zone = window.timezone === '' ? 'UTC' : window.timezone;
 			const day = zonedDateInputValue(window.current_time, zone);
 			const time = zonedTimeInputValue(window.current_time, zone);
+			if (day !== '' && time !== '') {
+				overrideDate = day;
+				overrideStart = time;
+				seeded = true;
+			}
+		}
+		if (!seeded) {
+			const nowIso = new Date().toISOString();
+			const day = zonedDateInputValue(nowIso, zone);
+			const time = zonedTimeInputValue(nowIso, zone);
 			if (day !== '' && time !== '') {
 				overrideDate = day;
 				overrideStart = time;
@@ -510,6 +593,12 @@ let selectedOfferingId = $state<number | null>(null);
 	};
 
 	const confirmStartTime = () => {
+		// Guard: refuse to confirm a start time that is already past the
+		// allowed grace window, even if the disabled-state gate missed it.
+		if (overrideStartInPast) {
+			error = 'The selected start time is in the past. Choose the current or a future time.';
+			return;
+		}
 		confirmedStart = `${overrideDate} ${overrideStart}`;
 	};
 
@@ -854,19 +943,17 @@ let selectedOfferingId = $state<number | null>(null);
 					</div>
 				{/if}
 
-				<div class="field">
-					<label class="override-toggle">
-						<input
-							type="checkbox"
-							checked={scheduleOverride}
-							onchange={(e) => {
-								scheduleOverride = e.currentTarget.checked;
-								confirmedStart = '';
-							}}
-						/>
-						Start at a different time
-					</label>
-				</div>
+				{#if !blocked && !scheduleOverride}
+					<div class="field">
+						<button
+							class="btn btn-secondary"
+							type="button"
+							onclick={selectDifferentStartTime}
+						>
+							Start at a different time
+						</button>
+					</div>
+				{/if}
 				{#if scheduleOverride}
 					<div class="override-box">
 						<div class="field-row">
@@ -885,12 +972,17 @@ let selectedOfferingId = $state<number | null>(null);
 								<input
 									id="override-start"
 									class="form-input"
-									class:invalid={!overrideTimeValid}
+									class:invalid={!overrideTimeValid || overrideStartInPast}
 									type="time"
 									bind:value={overrideStart}
 								/>
 							</div>
 						</div>
+						{#if overrideStartInPast}
+							<p class="field-error">
+								Start time is in the past — pick the current time or a later one.
+							</p>
+						{/if}
 						<div class="field">
 							<label class="form-label" for="override-reason">Reason (optional)</label>
 							<input
@@ -907,7 +999,7 @@ let selectedOfferingId = $state<number | null>(null);
 								<button
 									class="btn btn-secondary"
 									type="button"
-									disabled={!overrideDateValid || !overrideTimeValid}
+									disabled={!overrideDateValid || !overrideTimeValid || overrideStartInPast}
 									onclick={confirmStartTime}
 								>
 									<AppIcon name="check" size={16} />
@@ -922,6 +1014,21 @@ let selectedOfferingId = $state<number | null>(null);
 							The session keeps the meeting's length and applies to this session only — the
 							offering's weekly schedule is not changed.
 						</p>
+						<div class="field">
+							<button
+								class="btn btn-secondary"
+								type="button"
+								onclick={() => {
+									scheduleOverride = false;
+									overrideDate = '';
+									overrideStart = '';
+									overrideReason = '';
+									confirmedStart = '';
+								}}
+							>
+								Cancel override
+							</button>
+						</div>
 					</div>
 				{/if}
 			{:else}
@@ -1059,6 +1166,12 @@ let selectedOfferingId = $state<number | null>(null);
 				{#if expiryPreview}
 					<p class="hint">
 						Scan window closes {dateTimeText(expiryPreview.at)} ({durationMinutes}m from now)
+					</p>
+				{/if}
+				{#if durationExceedsLimit}
+					<p class="field-error">
+						Duration exceeds the available meeting window
+						{#if effectiveMaxDuration !== null}({effectiveMaxDuration} min){/if}.
 					</p>
 				{/if}
 				{#if inherited !== null}

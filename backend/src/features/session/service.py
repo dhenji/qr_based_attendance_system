@@ -146,8 +146,22 @@ def _geofence_enabled_of(row: Session) -> bool:
 
 
 def _session_status(
-    expires_at: datetime | None, now: datetime
-) -> Literal["active", "closed"]:
+    expires_at: datetime | None,
+    scheduled_start_time: datetime | None,
+    now: datetime,
+) -> Literal["scheduled", "active", "closed"]:
+    # A session that has been opened for a future class is not scannable
+    # yet: it reads as "scheduled" until its start time is reached, even
+    # though its expiry (and therefore its scan window) lies in the future.
+    if scheduled_start_time is not None:
+        scheduled = (
+            scheduled_start_time
+            if scheduled_start_time.tzinfo is not None
+            else scheduled_start_time.replace(tzinfo=timezone.utc)
+        )
+        if now < scheduled:
+            return "scheduled"
+
     if expires_at is not None and expires_at > now:
         return "active"
 
@@ -239,6 +253,51 @@ class SessionService:
             late=payload.late_window_minutes or plan.late_window_minutes,
         )
         self._check_windows(windows, duration)
+
+        # Duration must fit the meeting window it belongs to. A session
+        # cannot run longer than the class it is opened against.
+        if payload.session_date is None and payload.start_time is None:
+            if plan.has_meeting and duration > plan.meeting_minutes:
+                raise InvalidSessionTimeException()
+        elif plan.has_meeting and plan.end_time is not None:
+            zone = resolve_timezone(
+                self._settings.institution_timezone, label="institution timezone"
+            )
+            local_now = moment.astimezone(zone) if moment.tzinfo is not None else moment.replace(
+                tzinfo=timezone.utc
+            ).astimezone(zone)
+            meeting_end_minutes = plan.end_time.hour * 60 + plan.end_time.minute
+            meeting_start_minutes = (
+                plan.start_time.hour * 60 + plan.start_time.minute
+                if plan.start_time is not None
+                else None
+            )
+            if payload.start_time is not None:
+                override_start_minutes = (
+                    payload.start_time.hour * 60 + payload.start_time.minute
+                )
+            elif plan.start_time is not None:
+                override_start_minutes = (
+                    plan.start_time.hour * 60 + plan.start_time.minute
+                )
+            else:
+                override_start_minutes = (
+                    local_now.hour * 60 + local_now.minute
+                )
+            # Only cap by the remaining window when the override starts
+            # inside the original meeting. Otherwise the full meeting
+            # duration is the limit.
+            if (
+                meeting_start_minutes is not None
+                and meeting_start_minutes
+                <= override_start_minutes
+                < meeting_end_minutes
+            ):
+                max_duration = meeting_end_minutes - override_start_minutes
+            else:
+                max_duration = plan.meeting_minutes or duration
+            if max_duration <= 0 or duration > max_duration:
+                raise InvalidSessionTimeException()
 
         radius: int = payload.classroom_radius_meters or plan.radius_meters
 
@@ -638,7 +697,13 @@ class SessionService:
         session that was born expired, and the "now + duration" reading of the
         cap would leave the scan window with nowhere to run.
         """
-        base: datetime = row.created_at or now
+        created: datetime = row.created_at or now
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        scheduled: datetime = row.scheduled_start_time
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        base: datetime = scheduled if scheduled > created else created
         candidate: datetime = base + timedelta(minutes=duration)
         row.expires_at = (
             min(candidate, row.scheduled_end_time)
@@ -673,9 +738,10 @@ class SessionService:
             geofence_enabled=_geofence_enabled_of(row),
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
+            scheduled_start_time=row.scheduled_start_time,
             scheduled_end_time=row.scheduled_end_time,
             expires_at=row.expires_at,
-            status=_session_status(row.expires_at, now),
+            status=_session_status(row.expires_at, row.scheduled_start_time, now),
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),
             pending_sync_count=await self._pending_sync_count(session_id),
@@ -838,6 +904,7 @@ class SessionService:
             program_code=program.code,
             year_level_label=year_level.label,
             expires_at=row.expires_at,
+            scheduled_start_time=row.scheduled_start_time,
             scheduled_end_time=row.scheduled_end_time,
             geofence=VerifyGeofence(
                 radius=row.classroom_radius_meters,
@@ -959,7 +1026,9 @@ class SessionService:
                 offering_id=row.offering_id,
                 scanned=scanned_by_session.get(row.id, 0),
                 enrolled=enrolled_by_offering.get(row.offering_id, 0),
-                status=_session_status(row.expires_at, moment),
+                status=_session_status(
+                    row.expires_at, row.scheduled_start_time, moment
+                ),
             )
             for row in rows
         ]
@@ -984,7 +1053,7 @@ class SessionService:
             present_count=counts.present,
             late_count=counts.late,
             absent_count=max(0, enrolled - scanned),
-            status=_session_status(row.expires_at, now),
+            status=_session_status(row.expires_at, row.scheduled_start_time, now),
         )
 
     async def get_session_history(
@@ -1063,7 +1132,7 @@ class SessionService:
             present_count=counts.present,
             late_count=counts.late,
             absent_count=max(0, enrolled - scanned),
-            status=_session_status(row.expires_at, now),
+            status=_session_status(row.expires_at, row.scheduled_start_time, now),
             compliance_rate=compliance,
             participation_rate=participation,
         )

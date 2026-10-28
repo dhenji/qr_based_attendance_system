@@ -1137,7 +1137,7 @@ passes. The same rule governs the excuse endpoints under `/professor`.
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?from?&to?&offering_id?&session_type=lecture\|lab?&page=1&size=20`                                                                                               |
 | **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
-| **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `active`/`closed` derived from `expires_at`/close time. `expires_at` is a regular column populated by service layer at creation (D49). |
+| **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `scheduled`/`active`/`closed`: `scheduled` while `now < scheduled_start_time` (session opened for a future class, not yet scannable), `active` while `expires_at > now`, otherwise `closed`. `expires_at` is a regular column populated by service layer at creation (D49). |
 
 #### `POST /professor/sessions`
 
@@ -1170,7 +1170,7 @@ Live session detail with dual timers.
 
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, offering, session_type, session_code, scan_window_remaining, scheduled_end_time, expires_at, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
+| **Response 200** | `{ id, offering, session_type, session_code, scan_window_remaining, scheduled_start_time, scheduled_end_time, expires_at, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
 | **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `expires_at` is the actual session expiry (nullable) and is shown as the end time when `status === closed`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). The client header label is driven by `status` (`Active:` / `Closed:`), and both countdown timers freeze when `status === closed`. |
 
 #### `POST /professor/sessions/{session_id}/close`
@@ -1356,7 +1356,7 @@ Verify a typed session code. The scan page also posts raw decoded QR text as `co
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
-| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_end_time, classroom_name, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
+| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_start_time, scheduled_end_time, classroom_name, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
 | **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` |
 
@@ -1372,7 +1372,7 @@ Submit attendance scan (online or queued for offline sync).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, live_face_embedding?: string | null, live_face_image?: string | null, scanned_at: ISO-8601 }` (at least one of `live_face_embedding` / `live_face_image` required) |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "pending" | "rejected", scanned_at, expires_at }` |
-| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 404 `student_not_found` |
+| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 422 `session_not_started` · 404 `student_not_found` |
 | **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
@@ -1388,7 +1388,7 @@ captured. **Never writes attendance.**
 | **Role**         | student                                                                               |
 | **Request**      | `{ session_id: int, student_number: string }`                                         |
 | **Response 200** | `{ enrolled: true, already_scanned: false, student: { student_id, name, section } }` |
-| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 403 `student_number_mismatch` · 404 `student_not_found` |
+| **Errors**       | 404 `session_not_found` · 410 `session_expired` · 422 `session_not_started` · 403 `student_number_mismatch` · 404 `student_not_found` |
 | **Notes**        | Read-only gate — the full submission still goes through `POST /student/attendance/scan`; duplicate-scan is re-checked atomically at submit time. `student_number` is checked against the authenticated account, not used to select the row (see the scan endpoint). `not_enrolled` and `duplicate_scan` are reported as `enrolled: false` / `already_scanned: true` in the 200 body rather than raised, so the client gets both flags in one round trip. |
 
 ---

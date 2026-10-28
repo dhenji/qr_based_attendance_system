@@ -83,6 +83,7 @@ export interface SessionVerificationResponse {
 	program_code: string;
 	year_level_label: string;
 	expires_at: string;
+	scheduled_start_time: string;
 	scheduled_end_time: string;
 	// Center is null when the session has no classroom coordinates — the
 	// backend skips its geofence check in that case (and so does the scan
@@ -143,6 +144,7 @@ export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 		program_code: 'BSCS',
 		year_level_label: 'Year 1',
 		expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+		scheduled_start_time: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
 		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
 		geofence: {
 			radius: 50,
@@ -312,6 +314,7 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 			session_type: 'lecture' as const,
 			session_code: mockSessions.get(id) ?? '7X-9K2M',
 			scan_window_remaining: 2400,
+			scheduled_start_time: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
 			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
 			expires_at: null,
 			status: 'active',

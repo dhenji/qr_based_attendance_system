@@ -111,6 +111,8 @@ _session_).
 - `not_enrolled` — you are not registered for this _course_
 - `duplicate_scan` — this _session_ is already recorded for you
 - `student_number_mismatch` — the number does not match your account
+- `session_not_started` — the session has not reached its scheduled start time yet
+- `session_expired` — the session's scan window has closed
 
 ### Stage 3: Session QR Camera
 

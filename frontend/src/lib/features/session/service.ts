@@ -283,6 +283,7 @@ export const getActiveSession = async (sessionId: number): Promise<LiveSession> 
 		offeringSections: sectionsFor(response.offering),
 		sessionCode: response.session_code,
 		scanWindowRemaining: response.scan_window_remaining,
+		scheduledStartTime: response.scheduled_start_time,
 		scheduledEndTime: response.scheduled_end_time,
 		expiresAt: response.expires_at ?? null,
 		status: response.status,

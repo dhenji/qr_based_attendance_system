@@ -18,6 +18,7 @@ export interface SessionVerification {
 	programCode?: string;
 	yearLevelLabel?: string;
 	sessionType?: 'lecture' | 'lab';
+	scheduledStartTime?: string;
 	scheduledEndTime?: string;
 	classroomName?: string | null;
 	isRemote?: boolean;
@@ -75,6 +76,7 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		programCode: response.program_code,
 		yearLevelLabel: response.year_level_label,
 		sessionType: response.session_type,
+		scheduledStartTime: response.scheduled_start_time,
 		scheduledEndTime: response.scheduled_end_time,
 		classroomName: response.classroom_name,
 		isRemote: response.is_remote,

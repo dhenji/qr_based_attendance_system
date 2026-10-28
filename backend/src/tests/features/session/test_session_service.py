@@ -26,7 +26,7 @@ from features.session.service import SessionService
 from features.student.model import Student
 from features.sync.model import SyncQueue
 
-NOW = datetime.now(timezone.utc)
+from tests.conftest import SESSION_TEST_NOW as NOW
 SETTINGS = Settings(debug=True, jwt_secret="test-secret-0123456789abcdef")
 
 

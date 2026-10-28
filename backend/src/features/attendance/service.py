@@ -69,6 +69,7 @@ from features.session.exceptions import (
     DuplicateScanException,
     SessionExpiredException,
     SessionNotFoundException,
+    SessionNotStartedException,
 )
 from features.session.model import Session
 from features.student.exceptions import (
@@ -506,6 +507,9 @@ class AttendanceService:
         if scanned_at > _ensure_aware(expires_at):
             raise SessionExpiredException(row.id)
 
+        if now < _ensure_aware(row.scheduled_start_time):
+            raise SessionNotStartedException(row.id)
+
         return row
 
     async def _get_active_student(
@@ -617,9 +621,12 @@ class AttendanceService:
         return score < threshold
 
     def _compute_status(self, session: Session, scanned_at: datetime) -> str:
-        anchor: datetime = _ensure_aware(
-            session.created_at or session.scheduled_start_time
-        )
+        created: datetime = _ensure_aware(session.created_at)
+        scheduled: datetime = _ensure_aware(session.scheduled_start_time)
+        # Measure from the actual class start, not the moment the session
+        # was opened — a session opened ahead of its scheduled start (or
+        # scheduled for the future) must not penalise early scans.
+        anchor: datetime = created if created > scheduled else scheduled
         elapsed_minutes: float = (scanned_at - anchor).total_seconds() / 60.0
 
         if elapsed_minutes <= session.present_window_minutes:

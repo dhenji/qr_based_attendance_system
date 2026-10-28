@@ -34,7 +34,7 @@ naming a different student is rejected with `403 student_number_mismatch` and
 writes no attendance row. Any single failure rejects the record with one of the
 canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 `liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`,
-`stub_embedding`.
+`session_not_started`, `stub_embedding`.
 
 | #   | Layer                   | What It Prevents                               | CS Concept                                   |
 | --- | ----------------------- | ---------------------------------------------- | -------------------------------------------- |
@@ -60,7 +60,8 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > `session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
 > Any single failure rejects the record with one of the canonical D15 rejection
 > reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
-> `face_not_enrolled`, `not_enrolled`, `session_expired`, `stub_embedding`.
+> `face_not_enrolled`, `not_enrolled`, `session_expired`, `session_not_started`,
+> `stub_embedding`.
 
 | #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
 | --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
@@ -86,7 +87,7 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
-> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Closed:" / "Active:" from `session.status`, timers freeze when closed, and the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on closed sessions is enforced server-side via `expires_at`.
+> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). No migration needed — both columns already exist on `sessions`.
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -319,7 +320,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**891 cases across 71 files**) against the dedicated
+This runs the suite (**1053 cases across 82 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at
@@ -381,8 +382,8 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite is 891 cases
-across 71 files (261 sync + 591 async test functions, plus parametrized expansions).
+There are no linters or formatters configured. The backend suite is 1053 cases
+across 82 files (282 sync + 647 async test functions, plus parametrized expansions).
 
 ### CI
 
