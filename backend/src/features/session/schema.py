@@ -219,7 +219,7 @@ class SessionOfferingTile(BaseModel):
     offering_id: int
     scanned: int
     enrolled: int
-    status: Literal["active", "closed"]
+    status: Literal["scheduled", "active", "closed"]
 
 
 class SessionListItem(BaseModel):
@@ -241,7 +241,7 @@ class SessionListItem(BaseModel):
     present_count: int = 0
     late_count: int = 0
     absent_count: int = 0
-    status: Literal["active", "closed"]
+    status: Literal["scheduled", "active", "closed"]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -288,9 +288,10 @@ class SessionActiveResponse(BaseModel):
             "late_window_minutes, which are minutes."
         )
     )
+    scheduled_start_time: datetime
     scheduled_end_time: datetime
     expires_at: datetime | None = None
-    status: Literal["active", "closed"]
+    status: Literal["scheduled", "active", "closed"]
     enrolled_count: int = 0
     remaining: int = 0
     pending_sync_count: int = 0
@@ -367,6 +368,7 @@ class VerifyCodeResponse(BaseModel):
     program_code: str
     year_level_label: str
     expires_at: datetime | None = None
+    scheduled_start_time: datetime
     scheduled_end_time: datetime
     geofence: VerifyGeofence
     present_window_minutes: int

@@ -24,7 +24,7 @@
 	// professor's offerings (summing per-offering enrollments double-counts
 	// anyone in two of their courses), and `avg_rate` is term-wide compliance
 	// taken from the same report figure the Reports page shows.
-	type SessionStatus = 'active' | 'closed';
+	type SessionStatus = 'scheduled' | 'active' | 'closed';
 
 	type DashboardSession = {
 		id: number;
@@ -41,6 +41,7 @@
 
 	// Status colours follow the wireframe status palette (docs/design/wireframes.md).
 	const STATUS_COLORS: Record<SessionStatus, string> = {
+		scheduled: '#2563eb',
 		active: '#16a34a',
 		closed: 'var(--text-muted)'
 	};

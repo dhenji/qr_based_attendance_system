@@ -104,6 +104,7 @@
 		student_number_mismatch: 'That ID number does not match your account.',
 		student_not_found: 'No student record found for your account. Contact an administrator.',
 		session_expired: 'This session has closed for scanning.',
+		session_not_started: 'This session has not started yet.',
 		session_not_found: 'Session not found. Check the code and try again.',
 		stub_embedding: 'Your face enrollment needs to be updated. Please contact your administrator to re-enroll.',
 	};

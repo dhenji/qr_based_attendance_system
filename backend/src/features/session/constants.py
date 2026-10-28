@@ -18,7 +18,10 @@ WINDOW_MINUTES_MAX: int = 480
 # this morning and is being opened at lunch is still that class — so this
 # grace applies to an explicit override only, where it catches a mistyped
 # time or a wrong day rather than a legitimate "it actually started earlier".
-OVERRIDE_PAST_GRACE_MINUTES: int = 60
+# No grace: an overridden start time may not point into the past. A
+# professor who opened the class late records the actual (past) start via
+# the un-overridden path, which has no grace limit (D93).
+OVERRIDE_PAST_GRACE_MINUTES: int = 0
 
 SESSION_CODE_MIN_LENGTH: int = 1
 SESSION_CODE_MAX_LENGTH: int = 50

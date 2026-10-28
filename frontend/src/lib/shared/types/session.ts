@@ -14,7 +14,7 @@
 
 import type { CourseType } from './admin';
 
-export type SessionRowStatus = 'active' | 'closed';
+export type SessionRowStatus = 'scheduled' | 'active' | 'closed';
 
 export type SessionTypeFilter = CourseType;
 
@@ -150,6 +150,7 @@ export interface SessionActiveResponse {
 	is_remote?: boolean;
 	session_code: string;
 	scan_window_remaining: number;
+	scheduled_start_time: string;
 	scheduled_end_time: string;
 	expires_at: string | null;
 	status: SessionRowStatus;
@@ -238,6 +239,7 @@ export interface LiveSession {
 	offeringSections: string;
 	sessionCode: string;
 	scanWindowRemaining: number;
+	scheduledStartTime: string;
 	scheduledEndTime: string;
 	expiresAt: string | null;
 	status: SessionRowStatus;

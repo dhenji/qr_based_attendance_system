@@ -242,6 +242,21 @@ class SessionOutsideScheduledTimeException(SessionDomainException):
         super().__init__(message=message)
 
 
+class SessionNotStartedException(SessionDomainException):
+    """422 - the session has not reached its scheduled start time yet."""
+
+    status_code: int = 422
+    code: str = "session_not_started"
+
+    def __init__(self, session_id: int | None = None) -> None:
+        message: str = "Session has not started yet"
+
+        if session_id is not None:
+            message = f"Session {session_id} has not started yet"
+
+        super().__init__(message=message)
+
+
 class RemoteNotAllowedForLabException(SessionDomainException):
     """422 - remote/online mode is only available for lectures."""
 
