@@ -34,7 +34,11 @@ naming a different student is rejected with `403 student_number_mismatch` and
 writes no attendance row. Any single failure rejects the record with one of the
 canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 `liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`,
-`session_not_started`, `stub_embedding`.
+`session_not_started`, `stub_embedding`. The student scan page maps each code
+(and client-side GPS failures) to a specific, actionable message via
+`frontend/src/lib/features/liveness/errors.ts` (`toScanMessage`); a scan whose
+`status` is `rejected` shows that it was submitted outside the permitted time
+window.
 
 **Review-band face matches** (`review_low <= score < threshold`) store their
 computed status (`present`/`late`) as `validation_status` — not `pending`. The
@@ -83,6 +87,12 @@ session is `closed`. Scanned students keep their server-decided status.
 > reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
 > `face_not_enrolled`, `not_enrolled`, `session_expired`, `session_not_started`,
 > `stub_embedding`.
+>
+> The student scan page maps each rejection code (and client-side GPS failures)
+> to a specific, actionable message via
+> `frontend/src/lib/features/liveness/errors.ts` (`toScanMessage`); a scan whose
+> `status` is `rejected` shows that it was submitted outside the permitted time
+> window.
 
 | #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
 | --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
