@@ -18,7 +18,7 @@ export const SCAN_ERROR_MESSAGES: Record<string, string> = {
 	student_number_mismatch: 'That ID number does not match your account.',
 	student_not_found: 'No student record found for your account. Contact an administrator.',
 	session_expired: 'This attendance session has expired. Ask your professor whether a new session is available.',
-	session_not_started: 'This attendance session has not started yet. Wait for your professor to start the session.',
+	session_not_started: 'This attendance session has not started yet. Please wait until the scheduled start time.',
 	session_not_found: 'We could not find the session associated with this QR code. Ask your professor to verify the session.',
 	offering_not_found: 'We could not find the session associated with this QR code. Ask your professor to verify the session.',
 	stub_embedding: 'Your face enrollment needs to be updated. Contact your administrator to re-enroll.',
