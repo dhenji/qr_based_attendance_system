@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { initFaceModel } from '$lib/features/liveness/model';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
@@ -145,7 +146,16 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 	onMount(() => {
 		void initFaceModel();
-		if (!studentState.student && !studentState.loading) {
+		const codeParam = page.url.searchParams.get('code');
+		if (codeParam) {
+			void (async () => {
+				if (!studentState.student && !studentState.loading) {
+					await initStudent();
+				}
+				sessionCode = codeParam;
+				void verifyCode(codeParam);
+			})();
+		} else if (!studentState.student && !studentState.loading) {
 			void initStudent();
 		}
 		const handleOnline = () => {
@@ -180,8 +190,28 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		};
 	});
 
+	const extractSessionCode = (input: string): string => {
+		const trimmed = input.trim();
+		try {
+			const url = new URL(trimmed);
+			const code = url.searchParams.get('code');
+			if (code) return code.trim();
+		} catch {
+			// not an absolute URL
+		}
+		const match = trimmed.match(/[?&]code=([^&]+)/);
+		if (match) {
+			try {
+				return decodeURIComponent(match[1]).trim();
+			} catch {
+				return match[1].trim();
+			}
+		}
+		return trimmed;
+	};
+
 	const verifyCode = async (code: string) => {
-		const normalizedCode = code.trim();
+		const normalizedCode = extractSessionCode(code);
 		if (!normalizedCode || verifying) return;
 
 		// Check if we're trying to scan a different session code than already verified
@@ -385,6 +415,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		verifiedNumber = '';
 		verifiedName = '';
 		session = null;
+		sessionCode = '';
 		scanError = null;
 		rejectionReason = '';
 		scannedAt = '';
