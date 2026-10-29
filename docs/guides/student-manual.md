@@ -132,6 +132,10 @@ challenge.
 
 [FIG: Live camera with face detected indicator, fixed liveness challenge stepper (Blink → Turn Left → Turn Right) with progress dots, offline badge variant]
 
+> The live camera preview is mirrored selfie-style, so "Turn Left"/"Turn Right"
+> instructions point in the direction you move on screen. The underlying
+> detection uses the original (unmirrored) frames.
+
 **Liveness Challenge** ([D31](../project/decision-log.md)):
 
 ```

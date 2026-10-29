@@ -109,7 +109,7 @@ session is `closed`. Scanned students keep their server-decided status.
 | Session Entry    | Professor shows a session code; students enter it (the scan page also accepts a session QR where one is available)          |
 | Student ID Check | Prefilled from the signed-in profile; the server rejects a number that does not match the account                           |
 | GPS Verification | Ensures student is inside the classroom                                                                                     |
-| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts                                    |
+| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts; live preview is mirrored selfie-style so left/right cues match on-screen movement (FaceScanner) |
 | Offline Mode     | Saves attendance locally when no internet; auto-uploads later                                                               |
 | Student Roster   | Import student from CSV file (with official email)                                                                          |
 | Dashboard        | View attendance in real time                                                                                                |
