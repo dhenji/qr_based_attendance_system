@@ -257,6 +257,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 - **Primary/Assistant**: Shows your role for this _offering_
 - **[🔐 Open Session]**: Opens Locked variant (Section 3.2)
 - **[📊 Reports]**: Deep-links to [Reports](#8-reports) pre-filtered to this _offering_
+- **[👥 Students]**: Opens the enrolled-student roster for this _offering_ (`/professor/courses/{offeringId}/students`), with search by name, student ID, or email
 
 ---
 

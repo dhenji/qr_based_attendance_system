@@ -398,6 +398,7 @@ export const reopenAssignment = async (
 const toRosterItem = (r: AdminRosterItemResponse): AdminRosterItem => ({
 	studentId: r.student_id,
 	name: r.name,
+	email: r.email ?? undefined,
 	section: r.section ?? undefined,
 	enrolledAt: r.enrolled_at,
 });
@@ -408,6 +409,7 @@ export const getRoster = async (
 ): Promise<{ items: AdminRosterItem[]; total: number; page: number; size: number }> => {
 	const params: Record<string, string> = {};
 	if (filters.section) params.section = filters.section;
+	if (filters.search) params.search = filters.search;
 	params.page = String(filters.page ?? 1);
 	params.size = String(filters.size ?? 20);
 	const response = await get<Paginated<AdminRosterItemResponse>>(
