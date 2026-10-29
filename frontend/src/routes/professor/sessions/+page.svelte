@@ -171,7 +171,7 @@
 								{session.courseCode} — {session.courseName} · Section {session.section}
 							</p>
 							<p class="muted">
-								Present {session.presentCount} · Late {session.lateCount} · Absent {session.absentCount}
+								Present {session.presentCount} · Late {session.lateCount} · Pending {session.pendingCount}
 							</p>
 							<button class="btn btn-primary" type="button" onclick={() => viewLive(session.id)}>
 								<AppIcon name="qr" size={18} />

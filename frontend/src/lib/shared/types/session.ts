@@ -30,6 +30,7 @@ export interface SessionListItemResponse {
 	present_count: number;
 	late_count: number;
 	absent_count: number;
+	pending_count?: number;
 	status: SessionRowStatus;
 }
 
@@ -153,6 +154,8 @@ export interface SessionActiveResponse {
 	scheduled_start_time: string;
 	scheduled_end_time: string;
 	expires_at: string | null;
+	program_code?: string | null;
+	year_level_label?: string | null;
 	status: SessionRowStatus;
 	enrolled_count: number;
 	remaining: number;
@@ -212,6 +215,7 @@ export interface SessionSummary {
 	presentCount: number;
 	lateCount: number;
 	absentCount: number;
+	pendingCount: number;
 	status: SessionRowStatus;
 }
 
@@ -237,6 +241,8 @@ export interface LiveSession {
 	offeringCode: string;
 	offeringName: string;
 	offeringSections: string;
+	offeringProgram: string | null;
+	offeringYearLevel: string | null;
 	sessionCode: string;
 	scanWindowRemaining: number;
 	scheduledStartTime: string;

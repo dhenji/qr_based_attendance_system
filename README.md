@@ -118,7 +118,7 @@ session is `closed`. Scanned students keep their server-decided status.
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
-> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column).
+> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual scheduled class end time (`scheduled_end_time`) instead of a running countdown. The header now shows the offering's **Program** and **Year Level** (no Section). Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). The Active Sessions list now carries `pending_count` alongside `absent_count`. No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column).
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -351,7 +351,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**1053 cases across 82 files**) against the dedicated
+This runs the suite (**1055 cases across 82 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at

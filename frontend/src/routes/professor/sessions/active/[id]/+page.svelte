@@ -498,7 +498,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<div class="title">
 				<h1>{session.status === 'scheduled' ? 'Scheduled' : session.status === 'closed' ? 'Closed' : 'Active'}: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offeringSections} · Code <span class="mono-data">{session.sessionCode}</span> ·
+					Program: {session.offeringProgram ?? '—'} · Year Level: {session.offeringYearLevel ?? '—'} ·
 					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
 						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
 					</span>
@@ -549,7 +549,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				</div>
 				<div class="timer" class:urgent={classEnded}>
 					<span class="timer-label">{isScheduled ? 'Class starts in' : classEnded ? 'Class ended' : 'Class ends in'}</span>
-					<span class="timer-value">{isScheduled ? formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000))) : isClosed ? formatClock(session.expiresAt ?? session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
+					<span class="timer-value">{isScheduled ? formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000))) : isClosed ? formatClock(session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
 					{#if !isClosed && !isScheduled}
 						<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
 					{/if}
