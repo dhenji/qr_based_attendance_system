@@ -1112,9 +1112,9 @@
 				</p>
 				{#if faceError}<p class="error" role="alert">{faceError}</p>{/if}
 				<div class="face-confirm-previews">
-					{#if faceFrontPreview}<figure><img src={faceFrontPreview} alt="Front photo to upload" /><figcaption>Front</figcaption></figure>{/if}
-					{#if faceLeftPreview}<figure><img src={faceLeftPreview} alt="Left photo to upload" /><figcaption>Left</figcaption></figure>{/if}
-					{#if faceRightPreview}<figure><img src={faceRightPreview} alt="Right photo to upload" /><figcaption>Right</figcaption></figure>{/if}
+					{#if faceFrontPreview}<figure><img src={faceFrontPreview} alt="" /><figcaption>Front</figcaption></figure>{/if}
+					{#if faceLeftPreview}<figure><img src={faceLeftPreview} alt="" /><figcaption>Left</figcaption></figure>{/if}
+					{#if faceRightPreview}<figure><img src={faceRightPreview} alt="" /><figcaption>Right</figcaption></figure>{/if}
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" disabled={faceBusy} onclick={() => (faceConfirm = null)}>Cancel</button>

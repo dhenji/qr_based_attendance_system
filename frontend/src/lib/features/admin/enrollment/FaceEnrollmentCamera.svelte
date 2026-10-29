@@ -4,7 +4,7 @@
 	// Reuses the shared MediaPipe FaceLandmarker (model.ts) and the camera
 	// boot sequence from FaceScanner.svelte. Produces three JPEG Files and
 	// hands them to the existing multipart enrollment endpoint unchanged.
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import type { Matrix, NormalizedLandmark } from '@mediapipe/tasks-vision';
 	import { initFaceModel, type LoadedFaceModel } from '$lib/features/liveness/model';
 
@@ -18,7 +18,7 @@
 	}
 
 	let { active, onComplete, onCancel, singleSlot = null, onCapture, autoCaptureEnabled = false }: Props = $props();
-	let autoCapture = $state(autoCaptureEnabled);
+	let autoCapture = $state(untrack(() => autoCaptureEnabled));
 
 	type Step = 'front' | 'left' | 'right';
 	type FaceStatus = 'initializing' | 'no_face' | 'multiple_faces' | 'too_far' | 'center_face' | 'too_dark' | 'too_bright' | 'blurry' | 'eyes_closed' | 'ready' | 'captured';
