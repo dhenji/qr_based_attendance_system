@@ -34,7 +34,28 @@ naming a different student is rejected with `403 student_number_mismatch` and
 writes no attendance row. Any single failure rejects the record with one of the
 canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 `liveness_failed`, `face_mismatch`, `not_enrolled`, `session_expired`,
-`stub_embedding`.
+`session_not_started`, `stub_embedding`. The student scan page maps each code
+(and client-side GPS failures) to a specific, actionable message via
+`frontend/src/lib/features/liveness/errors.ts` (`toScanMessage`); a scan whose
+`status` is `rejected` shows that it was submitted outside the permitted time
+window.
+
+**Review-band face matches** (`review_low <= score < threshold`) store their
+computed status (`present`/`late`) as `validation_status` — not `pending`. The
+computed value is kept in `original_status` so an administrator can restore it
+via `POST /admin/attendance/review/{id}/resolve`. The review queue keys on the
+`evidence.review` flag (not `validation_status`), so a record whose match score
+is in the band reads as `present`/`late` everywhere (student history, professor
+active session, and admin queue alike).
+
+**Offline sync replays**: a queued scan submitted after its session has closed
+is still accepted when it carries an `X-Idempotency-Key` — the scan endpoint
+bypasses the expiry guard for idempotent replays. The record's server-decided
+status (`present`/`late`) is then visible on the professor's projector page.
+
+**Professor active session status tiles**: unscanned students read as `pending`
+while the session is `scheduled`/`active`, and flip to `absent` once the
+session is `closed`. Scanned students keep their server-decided status.
 
 | #   | Layer                   | What It Prevents                               | CS Concept                                   |
 | --- | ----------------------- | ---------------------------------------------- | -------------------------------------------- |
@@ -55,12 +76,23 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 > sharpness/Laplacian variance ≥50, eyes open EAR ≥0.2) via
 > `shared/face_quality.py` using MediaPipe FaceLandmarker before storing the
 > placeholder embedding. The backend enforces gates authoritatively; the
-> admin camera UI provides live guidance and retakes. Every attendance
+> admin camera UI provides live guidance and retakes. The admin modal opens a
+> confirmation overlay ("Confirm face enrollment upload" / "Remove face enrollment?")
+> before committing, and the live-capture flow reviews each photo ("Use Photo" /
+> "Retake Photo", with an "Automatically capture when aligned" toggle) before
+> advancing to the next angle. Every attendance
 > submission follows the canonical **5-step scan flow (D27)**:
 > `session entry → student-ID QR → GPS geofence → face liveness + match → uniqueness/enrollment check`.
 > Any single failure rejects the record with one of the canonical D15 rejection
 > reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mismatch`,
-> `face_not_enrolled`, `not_enrolled`, `session_expired`, `stub_embedding`.
+> `face_not_enrolled`, `not_enrolled`, `session_expired`, `session_not_started`,
+> `stub_embedding`.
+>
+> The student scan page maps each rejection code (and client-side GPS failures)
+> to a specific, actionable message via
+> `frontend/src/lib/features/liveness/errors.ts` (`toScanMessage`); a scan whose
+> `status` is `rejected` shows that it was submitted outside the permitted time
+> window.
 
 | #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
 | --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
@@ -86,7 +118,7 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
 
-> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Closed:" / "Active:" from `session.status`, timers freeze when closed, and the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on closed sessions is enforced server-side via `expires_at`.
+> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column).
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -122,7 +154,7 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 │   ├── Dockerfile.dev    # Vite dev server on :5173 (node:22-alpine)
 │   ├── static/           # PWA manifest + icons, robots.txt, and vendored MediaPipe assets (models/face_landmarker.task, wasm/)
 │   ├── src/service-worker.ts # Offline cache for queued scans + notification polling
- │   ├── src/routes/       # 50 +page.svelte files (49 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings), admin (dashboard/setup-wizard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
+ │   ├── src/routes/       # 51 +page.svelte files (50 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings + courses/[offeringId]/students), admin (dashboard/setup-wizard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
 │   └── src/lib/
 │       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (named typed EndpointDefs with mock fixtures, collected into an `endpoints` registry)
  │       ├── components/   # AppIcon, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, Modal, TempPasswordModal (7 shared)
@@ -319,7 +351,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**891 cases across 71 files**) against the dedicated
+This runs the suite (**1053 cases across 82 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at
@@ -381,8 +413,8 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite is 891 cases
-across 71 files (261 sync + 591 async test functions, plus parametrized expansions).
+There are no linters or formatters configured. The backend suite is 1053 cases
+across 82 files (282 sync + 647 async test functions, plus parametrized expansions).
 
 ### CI
 
@@ -501,7 +533,7 @@ default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 | Area       | Status                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend    | 18 feature slices / 21 model classes / 21 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `e6f7a8b9c0d1` (17 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra                                               |
-| Frontend   | 50 +page.svelte files (49 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 11 feature components and 13 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
+| Frontend   | 51 +page.svelte files (50 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 11 feature components and 13 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
 | Schema     | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82)              |
 | Tests      | 891 backend cases in 71 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                                                                                                                                                                                                          |
 | Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |

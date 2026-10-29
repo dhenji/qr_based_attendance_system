@@ -684,7 +684,7 @@ async def test_active_view_marks_unscanned_students_absent(
     )
 
     assert active.remaining == 1
-    assert active.students[0].status == ValidationStatus.ABSENT
+    assert active.students[0].status == ValidationStatus.PENDING
 
 
 async def test_close_session_summarises_final_counts(

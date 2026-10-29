@@ -83,6 +83,7 @@ export interface SessionVerificationResponse {
 	program_code: string;
 	year_level_label: string;
 	expires_at: string;
+	scheduled_start_time: string;
 	scheduled_end_time: string;
 	// Center is null when the session has no classroom coordinates — the
 	// backend skips its geofence check in that case (and so does the scan
@@ -143,6 +144,7 @@ export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
 		program_code: 'BSCS',
 		year_level_label: 'Year 1',
 		expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+		scheduled_start_time: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
 		scheduled_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
 		geofence: {
 			radius: 50,
@@ -312,6 +314,7 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 			session_type: 'lecture' as const,
 			session_code: mockSessions.get(id) ?? '7X-9K2M',
 			scan_window_remaining: 2400,
+			scheduled_start_time: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
 			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
 			expires_at: null,
 			status: 'active',
@@ -985,6 +988,28 @@ export const SessionPlanEndpoint: EndpointDef<SessionPlanResponse> = {
 			late_open_minutes: 0,
 		},
 	}),
+};
+
+// GET /professor/offerings/{id}/students — enrolled roster for an offering
+// the signed-in professor is assigned to (professor-scoped, paginated).
+export const ProfessorOfferingStudentsEndpoint: EndpointDef<Paginated<AdminRosterItemResponse>> = {
+	url: '/professor/offerings',
+	method: 'GET',
+	mock: (params) => {
+		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+		const rows: AdminRosterItemResponse[] = [
+			{
+				student_id: 'S001',
+				name: 'Ada Lovelace',
+				email: 'ada@example.com',
+				section: 'A',
+				enrolled_at: new Date().toISOString(),
+			},
+		];
+		const total = rows.length;
+		const page = 1;
+		return { items: rows, total, page, size };
+	},
 };
 
 // GET /professor/courses — own active assignments, paginated. Since D93 the
@@ -4801,6 +4826,7 @@ export const endpoints = {
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
+	professorOfferingStudents: ProfessorOfferingStudentsEndpoint,
 	// Professor excuse queue (list + review live; quick/edit/revoke/bulk live
 	// by integer id — only the typed-number quick flow stays in-memory; the
 	// quick modal collects evidence via the D24 presigned flow)

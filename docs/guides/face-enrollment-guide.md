@@ -108,11 +108,19 @@ front, left, and right angles automatically.
    current angle (front → left → right).
 4. Hold the pose until the progress bar fills; the frame is captured
    automatically. Use **[Capture now]** to capture manually when aligned.
-5. After all three angles are captured the modal returns to the file view with
+5. After each capture a review panel opens with **[Use Photo]** and **[Retake Photo]**.
+   - **[Use Photo]** commits the captured frame and advances to the next angle
+     (front → left → right → complete), disabling auto-capture so you can
+     reposition before the next angle.
+   - **[Retake Photo]** restarts the camera stream cleanly for the same angle
+     and resets auto-capture to off.
+6. After all three angles are committed the modal returns to the file view with
    the three images populated and uploads them through the same endpoint.
    The live preview is mirrored for natural selfie framing; captured images
    are stored unmirrored.
-6. Use **[Upload files]** to switch back to manual selection at any time.
+7. Use **[Upload files]** to switch back to manual selection at any time.
+8. An "Automatically capture when aligned" checkbox gates auto-capture per
+   session; it resets to off on every retake and when advancing angles.
 
 > The server now runs brightness, face-size, single-face, centering, sharpness,
 > and eyes-open checks via `shared/face_quality.py`. Bad photos are rejected with
@@ -121,7 +129,8 @@ front, left, and right angles automatically.
 ### 3.3 Upload & Verify
 
 1. Click **[Upload enrollment]** (or finish a camera capture) and confirm the
-   prompt.
+   **confirmation overlay** that opens ("Confirm face enrollment upload" /
+   "Remove face enrollment?").
 2. The server validates that each file is non-empty, within the size limit, and
    has an `image/*` content type.
 3. On success, the modal shows `Enrolled (vN)` and the roster **Face** column

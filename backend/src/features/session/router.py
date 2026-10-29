@@ -5,8 +5,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from api.deps import ProfessorServiceDep, SessionServiceDep, require_role
+from api.deps import CourseServiceDep, ProfessorServiceDep, SessionServiceDep, require_role
 from features.auth.model import User
+from features.course.schema import RosterItem
 from features.professor.schema import AssignedOfferingItem
 from features.session.schema import (
     ProfessorAttendanceItem,
@@ -148,6 +149,33 @@ async def get_session_plan(
         offering_id=offering_id,
         professor_id=professor_id,
         session_type=session_type,
+    )
+
+
+@router.get(
+    "/offerings/{offering_id}/students",
+    response_model=PaginatedResponse[RosterItem],
+    summary="List students enrolled in an offering (professor-scoped)",
+)
+async def list_offering_students(
+    offering_id: int,
+    user: ProfessorUser,
+    course_service: CourseServiceDep,
+    professor_service: ProfessorServiceDep,
+    section: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> PaginatedResponse[RosterItem]:
+    professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
+
+    return await course_service.get_roster_for_professor(
+        offering_id=offering_id,
+        professor_id=professor_id,
+        section=section,
+        search=search,
+        page=page,
+        size=size,
     )
 
 

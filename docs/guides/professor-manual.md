@@ -97,7 +97,7 @@ Per [D11](../project/decision-log.md), there are **two entry points** that deter
 | ---------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | **Course**             | 🔒 Locked — shows _course_ code, name, _program·year_, section, schedule, room                           | From _offering_ card                        |
 | **Geofence Radius**    | Preset buttons: 10m, 20m, 30m, 50m, 100m                                                                 | Offering default (typically 30m)            |
-| **Duration (minutes)** | Session length; expiry = `min(now + duration, scheduled_end_time)` per [D12](../project/decision-log.md) | Scheduled length (e.g., 90 for 1.5h)        |
+| **Duration (minutes)** | Session length; expiry = `min(max(scheduled_start, now) + duration, scheduled_end_time)` per [D12](../project/decision-log.md)/[D49](../project/decision-log.md) | Scheduled length (e.g., 90 for 1.5h)        |
 | **Present Window**     | Minutes from session start for _present_ status                                                          | Offering `default_present_window_minutes` (5) |
 | **Late Window**        | Minutes after present window for _late_ status                                                           | Offering `default_late_window_minutes` (10)   |
 | **Classroom Override** | Optional — overrides _offering_ GPS/room for this session only                                           | Blank = use _offering_ defaults             |
@@ -157,7 +157,9 @@ does not reach it.
 | **⏱ Scan window** | Countdown from `session.created_at + duration_minutes` (or `scheduled_end_time`, whichever is earlier) |
 | **🏁 Class ends** | Fixed _scheduled end time_ from the _offering_ schedule                                                  |
 
-> **Duration Expiry** ([D12](../project/decision-log.md)): `expires_at = min(created_at + duration_minutes, scheduled_end_time)`. After this, no new scans accepted.
+> **Duration Expiry** ([D12](../project/decision-log.md)): `expires_at = min(max(scheduled_start_time, created_at) + duration_minutes, scheduled_end_time)`. After this, no new scans accepted.
+>
+> **Scheduled sessions**: a session opened for a future class shows status **Scheduled** with a "Class starts in" countdown to `scheduled_start_time`; it is not scannable until then (`session_not_started`). Once the start time is reached it becomes **Active**.
 
 ### 4.3 Status Legend
 
@@ -255,6 +257,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 - **Primary/Assistant**: Shows your role for this _offering_
 - **[🔐 Open Session]**: Opens Locked variant (Section 3.2)
 - **[📊 Reports]**: Deep-links to [Reports](#8-reports) pre-filtered to this _offering_
+- **[👥 Students]**: Opens the enrolled-student roster for this _offering_ (`/professor/courses/{offeringId}/students`), with search by name, student ID, or email
 
 ---
 

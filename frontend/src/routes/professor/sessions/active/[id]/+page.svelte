@@ -243,8 +243,20 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				// not when the promise resolved. Otherwise every poll adds fetch
 				// latency back into the displayed timer. Seeding now here also
 				// prevents the first paint from calculating against its zero value.
-				scanSnapshotAt = requestStartedAt;
-				scanSnapshotRemaining = live.scanWindowRemaining;
+				const newExpiry =
+					requestStartedAt + live.scanWindowRemaining * 1000;
+				// Only re-anchor the countdown when it has drifted more than 2s
+				// from the server's value. Re-anchoring on every poll (each with
+				// its own request latency and integer-second rounding) made the
+				// displayed timer jump backwards/forwards a second at a time.
+				const currentExpiry =
+					scanSnapshotAt === null || scanSnapshotRemaining === null
+						? null
+						: scanSnapshotAt + scanSnapshotRemaining * 1000;
+				if (currentExpiry === null || Math.abs(newExpiry - currentExpiry) > 2000) {
+					scanSnapshotAt = requestStartedAt;
+					scanSnapshotRemaining = live.scanWindowRemaining;
+				}
 				now = Date.now();
 				loadError = null;
 				refreshError = null;
@@ -261,7 +273,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		poll = window.setInterval(() => void load(false), POLL_MS);
 		tick = window.setInterval(() => {
 			// Frozen while hidden; resumes on visibilitychange refresh.
-			// Stops ticking when the session is closed (expires_at in the past).
+			// Stops ticking when the session is closed or not yet started.
 			if (!cancelled && document.visibilityState === 'visible' && !isClosed) now = Date.now();
 		}, TICK_MS);
 		const handleVisible = () => {
@@ -287,8 +299,15 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			: scanSnapshotAt + scanSnapshotRemaining * 1000
 	);
 	const scanRemainingSeconds = $derived.by(() => {
-		if (scanExpiresAt === null) return null;
-		return Math.max(0, Math.floor((scanExpiresAt - now) / 1000));
+		// Prefer the server's absolute expiry when available — it is not
+		// affected by request latency or client/server clock skew, so the
+		// countdown ticks smoothly without the per-poll re-anchoring jumps.
+		const expiryMs =
+			session?.expiresAt != null
+				? new Date(session.expiresAt).getTime()
+				: scanExpiresAt;
+		if (expiryMs === null || Number.isNaN(expiryMs)) return null;
+		return Math.max(0, Math.floor((expiryMs - now) / 1000));
 	});
 
 	// The class end is the offering's plan (D93), so the countdown reads the
@@ -296,7 +315,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	const classEndsAt = $derived(session ? new Date(session.scheduledEndTime).getTime() : null);
 	const classRemainingSeconds = $derived.by(() => {
 		if (classEndsAt === null) return null;
-		if (isClosed) return 0;
+		if (isClosed || isScheduled) return 0;
 		return Math.max(0, Math.floor((classEndsAt - now) / 1000));
 	});
 	// A session opened after its class ended still runs, so the tile says so
@@ -306,6 +325,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	);
 
 	const isClosed = $derived(session?.status === 'closed');
+	const isScheduled = $derived(session?.status === 'scheduled');
 	const closedSession = $derived(isClosed ? session : null);
 	const scanExpired = $derived(scanRemainingSeconds !== null && scanRemainingSeconds <= 0);
 	const expiredSession = $derived(!isClosed && scanExpired);
@@ -476,7 +496,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		<button class="btn btn-ghost" type="button" onclick={goBack}>Back</button>
 		{#if session}
 			<div class="title">
-				<h1>{session.status === 'closed' ? 'Closed' : 'Active'}: {session.offeringCode} — {session.offeringName}</h1>
+				<h1>{session.status === 'scheduled' ? 'Scheduled' : session.status === 'closed' ? 'Closed' : 'Active'}: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
 					Section {session.offeringSections} · Code <span class="mono-data">{session.sessionCode}</span> ·
 					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
@@ -528,10 +548,13 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					<span class="timer-value">{formatCountdown(scanRemainingSeconds)}</span>
 				</div>
 				<div class="timer" class:urgent={classEnded}>
-					<span class="timer-label">{classEnded ? 'Class ended' : 'Class ends in'}</span>
-					<span class="timer-value">{isClosed ? formatClock(session.expiresAt ?? session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
-					{#if !isClosed}
+					<span class="timer-label">{isScheduled ? 'Class starts in' : classEnded ? 'Class ended' : 'Class ends in'}</span>
+					<span class="timer-value">{isScheduled ? formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000))) : isClosed ? formatClock(session.expiresAt ?? session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
+					{#if !isClosed && !isScheduled}
 						<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
+					{/if}
+					{#if isScheduled}
+						<span class="timer-sub">at {formatClock(session.scheduledStartTime)}</span>
 					{/if}
 				</div>
 			</div>

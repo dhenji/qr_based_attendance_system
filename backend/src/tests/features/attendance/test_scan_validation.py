@@ -56,7 +56,12 @@ from features.student.exceptions import (
 )
 from features.sync.model import SyncQueue
 from shared.enums import QueueStatus, ScannedVia, UserRole, ValidationStatus
-from shared.face_embeddings import embedding_to_base64, serialize_embedding
+from shared.face_embeddings import (
+    cosine_similarity,
+    deserialize_embedding,
+    embedding_to_base64,
+    serialize_embedding,
+)
 from tests.conftest import Factories
 
 
@@ -300,7 +305,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
         )
     )
 
-    assert result.status == ValidationStatus.PENDING.value
+    assert result.status == ValidationStatus.PRESENT.value
 
     row: Attendance = (
         await test_db_session.scalars(
@@ -310,7 +315,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
 
     # The computed status is kept for the professor's approve/reject decision.
     assert row.original_status == ValidationStatus.PRESENT.value
-    assert row.validation_status == ValidationStatus.PENDING.value
+    assert row.validation_status == ValidationStatus.PRESENT.value
     assert row.liveness_evidence is not None
     assert row.liveness_evidence["review"] is True
     assert abs(float(row.face_match_score) - score) < 0.001
@@ -346,8 +351,138 @@ async def test_review_band_preserves_late_as_original_status(
         )
     ).one()
 
-    assert result.status == ValidationStatus.PENDING.value
+    assert result.status == ValidationStatus.LATE.value
     assert row.original_status == ValidationStatus.LATE.value
+
+
+async def test_review_band_record_reads_identically_on_student_history_and_professor_feed(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A review-band scan renders the same status on both read paths.
+
+    The review-band change stores the computed status in
+    `attendance_records.validation_status` while keeping it in
+    `original_status` and flagging `liveness_evidence.review`. Both views are
+    supposed to read `validation_status` and nothing else, so the student's
+    history tile and the professor's live-session tile must agree on the same
+    row. This pins that contract for the review band, which is the case where
+    the two views are most likely to drift: a record that is *pending review*
+    here is still a present/late outcome on both pages, and any path that
+    recomputes status from timestamps or falls back to a default would split
+    them again.
+    """
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    attendance_service = AttendanceService(test_db_session, settings)
+    session_service = SessionService(test_db_session, settings)
+
+    live = _review_band_live_embedding(stack["student"])
+
+    result = await attendance_service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=2),
+            live_face_embedding=embedding_to_base64(live),
+        )
+    )
+
+    history = await attendance_service.get_history(user_id=stack["student"].user_id)
+    active = await session_service.get_active_session(
+        session_id=stack["session"].id, professor_id=stack["professor"].id
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
+    assert len(history.items) == 1
+    history_item = history.items[0]
+    feed_item = next(
+        s for s in active.students if s.student_number == student.student_id
+    )
+
+    # Both views read the persisted `validation_status` and nothing else.
+    assert history_item.status == ValidationStatus.PRESENT
+    assert feed_item.status == ValidationStatus.PRESENT
+    assert history_item.status == feed_item.status
+    # The scanned-at timestamp is the same column on both sides, so the two
+    # tiles must name the same instant too — a stale snapshot would split them.
+    assert history_item.scanned_at == feed_item.scanned_at
+    # The review flag and the computed original are preserved for the queue.
+    assert history_item.original_status == ValidationStatus.PRESENT
+
+
+async def test_late_review_band_record_reads_identically_on_student_history_and_professor_feed(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Same contract as above, for a review-band scan that computed to LATE.
+
+    The late band is the second half of the review window and the one that
+    produced the original symptom (history showed Late, the live feed showed
+    Present), so it gets its own case rather than folding into the present one.
+    """
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    attendance_service = AttendanceService(test_db_session, settings)
+    session_service = SessionService(test_db_session, settings)
+
+    live = _review_band_live_embedding(stack["student"], target=0.69)
+
+    await attendance_service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=8),
+            live_face_embedding=embedding_to_base64(live),
+        )
+    )
+
+    history = await attendance_service.get_history(user_id=stack["student"].user_id)
+    active = await session_service.get_active_session(
+        session_id=stack["session"].id, professor_id=stack["professor"].id
+    )
+
+    assert len(history.items) == 1
+    history_item = history.items[0]
+    feed_item = next(
+        s for s in active.students if s.student_number == student.student_id
+    )
+
+    assert history_item.status == ValidationStatus.LATE
+    assert feed_item.status == ValidationStatus.LATE
+    assert history_item.status == feed_item.status
+    assert history_item.original_status == ValidationStatus.LATE
+
+
+def _review_band_live_embedding(
+    student: Student, *, target: float = 0.68
+) -> np.ndarray:
+    """A live embedding whose cosine score lands inside the review band.
+
+    The reference embedding is the unit vector the seed writes for the
+    student; the live one is a blend of it and noise, tuned so the score sits
+    between `face_review_band_low` (0.65) and `face_match_threshold` (0.70).
+    The existing review-band tests build this inline and re-tune with a second
+    attempt when the first lands outside the band; this helper does the same
+    thing once so the two new tests share a recipe.
+    """
+    ref, _, _ = deserialize_embedding(student.face_embedding)
+
+    for seed_value in (27, 33, 7, 123):
+        live = ref * target + np.random.RandomState(seed_value).randn(128).astype(
+            np.float32
+        ) * 0.08
+        live = live / np.linalg.norm(live)
+        if 0.65 <= cosine_similarity(ref, live) < 0.70:
+            return live
+
+    raise AssertionError(
+        f"could not build a review-band embedding for target={target}"
+    )
 
 
 async def test_score_below_review_band_raises_face_mismatch(

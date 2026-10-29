@@ -25,6 +25,7 @@
 	} from '$lib/features/sync/service';
 	import { initStudent, studentState } from '$lib/features/student/store.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
+import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
@@ -89,43 +90,6 @@
 		clearCountdown();
 	};
 
-	const getErrorMessage = (error: unknown, fallback: string) =>
-		error instanceof Error ? error.message : fallback;
-
-	// D15 rejection reasons + session lookup failures mapped to user text.
-	// Raw codes never reach the UI.
-	const SCAN_ERROR_MESSAGES: Record<string, string> = {
-		duplicate_scan: 'You have already scanned for this session.',
-		outside_geofence: 'You are outside the attendance geofence.',
-		liveness_failed: 'Liveness check failed. Please try again in good lighting.',
-		face_mismatch: 'Face did not match the enrolled record. Please try again.',
-		face_not_enrolled: 'Face enrollment is required before you can proceed with attendance. Please contact your administrator to complete your face enrollment.',
-		not_enrolled: 'You are not enrolled in this course offering.',
-		student_number_mismatch: 'That ID number does not match your account.',
-		student_not_found: 'No student record found for your account. Contact an administrator.',
-		session_expired: 'This session has closed for scanning.',
-		session_not_found: 'Session not found. Check the code and try again.',
-		stub_embedding: 'Your face enrollment needs to be updated. Please contact your administrator to re-enroll.',
-	};
-
-	const toUserMessage = (error: unknown, fallback: string): string => {
-		if (error instanceof APIError && error.code && SCAN_ERROR_MESSAGES[error.code]) {
-			return SCAN_ERROR_MESSAGES[error.code];
-		}
-		if (error instanceof APIError && error.status === 410) {
-			return 'This session has closed for scanning.';
-		}
-		if (error instanceof APIError) {
-			return fallback;
-		}
-		return getErrorMessage(error, fallback);
-	};
-
-	// Only transport failures may be queued/retried as offline
-	// ('network_error' from the fetch wrapper, plus 'request_timeout' whose
-	// idempotent replay is safe via X-Idempotency-Key). Any other APIError is
-	// a server decision (4xx rejections) and must never be queued; any
-	// non-APIError is a local bug (GPS, programming error) and must surface.
 	const isNetworkError = (error: unknown): boolean =>
 		error instanceof APIError && (error.code === 'network_error' || error.code === 'request_timeout');
 
@@ -280,7 +244,7 @@
 					return;
 				}
 			}
-			scanError = toUserMessage(error, 'Unable to verify the session code');
+			scanError = toScanMessage(error, 'Unable to verify the session code');
 		} finally {
 			verifying = false;
 		}
@@ -366,7 +330,7 @@
 				startLiveness();
 				return;
 			}
-			scanError = toUserMessage(error, 'Unable to check your ID number');
+			scanError = toScanMessage(error, 'Unable to check your ID number');
 		} finally {
 			checkingId = false;
 		}
@@ -456,7 +420,7 @@
 	): Promise<{ lat: number; lng: number; accuracy: number }> =>
 		new Promise((resolve, reject) => {
 			if (!navigator.geolocation) {
-				reject(new Error('Location services are unavailable'));
+				reject(new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.'));
 				return;
 			}
 
@@ -469,11 +433,11 @@
 					}),
 				(err) => {
 					if (err.code === err.PERMISSION_DENIED) {
-						reject(new Error('Location permission is required'));
+						reject(new APIError('location_permission_denied', 'Location permission is required to verify your attendance. Enable location access in your device settings.'));
 					} else if (err.code === err.TIMEOUT) {
-						reject(new Error('Location timed out. Try again near a window or outdoors.'));
+						reject(new APIError('location_timeout', 'We could not determine your current location in time. Move to an area with a clearer signal and try again.'));
 					} else {
-						reject(new Error('Unable to read your location. Try again.'));
+						reject(new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.'));
 					}
 				},
 				options
@@ -490,7 +454,7 @@
 		try {
 			return await getPositionOnce({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
 		} catch (e) {
-			if (e instanceof Error && e.message.includes('timed out')) {
+			if (e instanceof APIError && (e.code === 'location_timeout' || e.message.includes('timed out'))) {
 				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 30000, timeout: 8000 });
 			}
 			throw e;
@@ -565,7 +529,7 @@
 			});
 
 			if (result.status === 'rejected') {
-				rejectionReason = 'This session is no longer accepting attendance.';
+				rejectionReason = 'This attendance was submitted outside the permitted time window. Check the attendance schedule with your professor.';
 				showFailure = true;
 				return;
 			}
@@ -606,11 +570,11 @@
 					showQueued = true;
 					queuedCode = sessionCode;
 				} catch {
-					rejectionReason = toUserMessage(error, 'Unable to submit the attendance scan');
+					rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan');
 					showFailure = true;
 				}
 			} else {
-				rejectionReason = toUserMessage(error, 'Unable to submit the attendance scan');
+				rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan');
 				showFailure = true;
 			}
 		} finally {
@@ -1032,9 +996,6 @@
 			>
 				<h3 id="scan-failure-title" class="result-title">Attendance Rejected</h3>
 				<div class="reject-reason">{rejectionReason || 'The scan could not be accepted'}</div>
-				<p class="reject-desc">
-					The attendance service rejected this scan. You can try again.
-				</p>
 				{#if alreadyScannedStop}
 					<button class="btn-primary try-again" onclick={() => goto(Routes.HISTORY)}>
 						View History

@@ -250,13 +250,16 @@ export const formatInZone = (
 	options: Intl.DateTimeFormatOptions
 ): string => {
 	if (iso === null) return '';
-	const instant = new Date(iso);
+	const normalizedIso =
+		/[zZ]|[+-]\d{2}:?\d{2}$/u.test(iso) ? iso : `${iso}Z`;
+	const instant = new Date(normalizedIso);
 	if (Number.isNaN(instant.getTime())) return '';
+	const zone = timeZone && timeZone.trim() !== '' ? timeZone : 'UTC';
 
 	try {
-		return new Intl.DateTimeFormat(undefined, { ...options, timeZone }).format(instant);
+		return new Intl.DateTimeFormat(undefined, { ...options, timeZone: zone }).format(instant);
 	} catch {
-		return new Intl.DateTimeFormat(undefined, options).format(instant);
+		return new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' }).format(instant);
 	}
 };
 
@@ -270,16 +273,21 @@ const zonedParts = (
 	options: Intl.DateTimeFormatOptions
 ): Record<string, string> | null => {
 	if (iso === null) return null;
-	const instant = new Date(iso);
+	const normalizedIso =
+		/[zZ]|[+-]\d{2}:?\d{2}$/u.test(iso) ? iso : `${iso}Z`;
+	const instant = new Date(normalizedIso);
 	if (Number.isNaN(instant.getTime())) return null;
+	const zone = timeZone && timeZone.trim() !== '' ? timeZone : 'UTC';
 
 	let formatted: Intl.DateTimeFormatPart[];
 	try {
-		formatted = new Intl.DateTimeFormat('en-CA', { ...options, timeZone }).formatToParts(
+		formatted = new Intl.DateTimeFormat('en-CA', { ...options, timeZone: zone }).formatToParts(
 			instant
 		);
 	} catch {
-		formatted = new Intl.DateTimeFormat('en-CA', options).formatToParts(instant);
+		formatted = new Intl.DateTimeFormat('en-CA', { ...options, timeZone: 'UTC' }).formatToParts(
+			instant
+		);
 	}
 
 	const parts: Record<string, string> = {};
