@@ -14,6 +14,8 @@
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
 import type {
+	AdminRosterItem,
+	AdminRosterItemResponse,
 	Professor,
 	ProfessorAssignedOffering,
 	ProfessorCourseSummary,
@@ -117,6 +119,39 @@ export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {
 		page += 1;
 	}
 	return dedupeAssignments(all).map(toCourseSummary);
+};
+
+// GET /professor/offerings/{id}/students — enrolled roster for one offering
+// the signed-in professor is assigned to. Reuses the admin roster item shape
+// (student_id, name, email, section, enrolled_at).
+const toProfessorRosterItem = (r: AdminRosterItemResponse): AdminRosterItem => ({
+	studentId: r.student_id,
+	name: r.name,
+	email: r.email ?? undefined,
+	section: r.section ?? undefined,
+	enrolledAt: r.enrolled_at,
+});
+
+export const listOfferingStudents = async (
+	offeringId: number,
+	filters: { section?: string; search?: string; page?: number; size?: number } = {}
+): Promise<{ items: AdminRosterItem[]; total: number; page: number; size: number }> => {
+	const params: Record<string, string> = {};
+	if (filters.section) params.section = filters.section;
+	if (filters.search) params.search = filters.search;
+	params.page = String(filters.page ?? 1);
+	params.size = String(filters.size ?? 20);
+	const response = await get<Paginated<AdminRosterItemResponse>>(
+		'professorOfferingStudents',
+		params,
+		`/${offeringId}/students`
+	);
+	return {
+		items: (response.items ?? []).map(toProfessorRosterItem),
+		total: response.total ?? 0,
+		page: response.page ?? 1,
+		size: response.size ?? 20,
+	};
 };
 
 // GET /professor/dashboard — today's session counts, the enrolled roster, and

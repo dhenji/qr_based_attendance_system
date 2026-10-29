@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.course.exceptions import (
@@ -64,6 +64,7 @@ from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
 from features.professor.exceptions import ProfessorNotFoundException
 from features.professor.model import Professor
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.session.exceptions import LabCoordinatesRequiredException
 from features.session.model import Session
 from features.program.exceptions import (
@@ -97,6 +98,8 @@ from shared.schedule import (
 from features.course.constants import (
     CODE_MAX_LENGTH,
     CODE_MIN_LENGTH,
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
     DURATION_MAX,
     DURATION_MIN,
     NAME_MAX_LENGTH,
@@ -1533,12 +1536,15 @@ class CourseService:
         self,
         *,
         offering_id: int,
-        section: str | None,
+        section: str | None = None,
+        search: str | None = None,
         page: int,
         size: int,
     ) -> PaginatedResponse[RosterItem]:
         await self._get_offering_or_404(offering_id)
-        stmt: Select[tuple[Enrollment]] = self._roster_stmt(offering_id, section)
+        stmt: Select[tuple[Enrollment]] = self._roster_stmt(
+            offering_id, section, search
+        )
 
         total: int = (
             await self._session.scalar(
@@ -1562,9 +1568,107 @@ class CourseService:
             size=size,
         )
 
+    async def get_roster_for_professor(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        section: str | None = None,
+        search: str | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> PaginatedResponse[RosterItem]:
+        return await self.get_offering_roster(
+            offering_id=offering_id,
+            professor_id=professor_id,
+            section=section,
+            search=search,
+            page=page,
+            size=size,
+        )
+
+    async def get_offering_roster(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        section: str | None = None,
+        search: str | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> PaginatedResponse[RosterItem]:
+        await self._get_offering_or_404(offering_id)
+        await self._require_professor_assignment(offering_id, professor_id)
+        return await self.get_roster(
+            offering_id=offering_id,
+            section=section,
+            search=search,
+            page=page,
+            size=size,
+        )
+
+    async def get_offering_students(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        section: str | None = None,
+        search: str | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> PaginatedResponse[RosterItem]:
+        return await self.get_offering_roster(
+            offering_id=offering_id,
+            professor_id=professor_id,
+            section=section,
+            search=search,
+            page=page,
+            size=size,
+        )
+
+    async def list_offering_students(
+        self,
+        *,
+        offering_id: int,
+        professor_id: int,
+        section: str | None = None,
+        search: str | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+    ) -> PaginatedResponse[RosterItem]:
+        return await self.get_offering_roster(
+            offering_id=offering_id,
+            professor_id=professor_id,
+            section=section,
+            search=search,
+            page=page,
+            size=size,
+        )
+
+    async def _require_professor_assignment(
+        self, offering_id: int, professor_id: int
+    ) -> None:
+        today: date = date.today()
+        row: CourseProfessor | None = (
+            await self._session.scalars(
+                select(CourseProfessor).where(
+                    CourseProfessor.offering_id == offering_id,
+                    CourseProfessor.professor_id == professor_id,
+                    CourseProfessor.effective_from <= today,
+                    or_(
+                        CourseProfessor.effective_to.is_(None),
+                        CourseProfessor.effective_to >= today,
+                    ),
+                )
+            )
+        ).one_or_none()
+
+        if row is None:
+            raise ProfessorNotAssignedException(offering_id)
+
     @staticmethod
     def _roster_stmt(
-        offering_id: int, section: str | None
+        offering_id: int, section: str | None, search: str | None = None
     ) -> Select[tuple[Enrollment]]:
         stmt: Select[tuple[Enrollment]] = (
             select(Enrollment)
@@ -1572,7 +1676,21 @@ class CourseService:
             .where(Enrollment.offering_id == offering_id)
         )
 
-        return apply_if(stmt, section, lambda v: Student.section == v)
+        stmt = apply_if(stmt, section, lambda v: Student.section == v)
+
+        if search:
+            term: str = f"%{search.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Student.student_id.ilike(term),
+                    Student.first_name.ilike(term),
+                    Student.middle_name.ilike(term),
+                    Student.last_name.ilike(term),
+                    Student.email.ilike(term),
+                )
+            )
+
+        return stmt
 
     async def _roster_items(self, rows: Sequence[Enrollment]) -> list[RosterItem]:
         items: list[RosterItem] = []
@@ -1598,6 +1716,7 @@ class CourseService:
                 RosterItem(
                     student_id=student.student_id,
                     name=name,
+                    email=student.email,
                     section=student.section,
                     enrolled_at=enrollment.created_at,
                 )

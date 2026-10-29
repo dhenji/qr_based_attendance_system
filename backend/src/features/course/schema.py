@@ -432,6 +432,7 @@ class AssignmentRead(BaseModel):
 class RosterItem(BaseModel):
     student_id: str
     name: str
+    email: str | None = None
     section: str | None = None
     enrolled_at: datetime
 

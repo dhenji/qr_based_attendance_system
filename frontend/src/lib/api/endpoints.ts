@@ -990,6 +990,28 @@ export const SessionPlanEndpoint: EndpointDef<SessionPlanResponse> = {
 	}),
 };
 
+// GET /professor/offerings/{id}/students — enrolled roster for an offering
+// the signed-in professor is assigned to (professor-scoped, paginated).
+export const ProfessorOfferingStudentsEndpoint: EndpointDef<Paginated<AdminRosterItemResponse>> = {
+	url: '/professor/offerings',
+	method: 'GET',
+	mock: (params) => {
+		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
+		const rows: AdminRosterItemResponse[] = [
+			{
+				student_id: 'S001',
+				name: 'Ada Lovelace',
+				email: 'ada@example.com',
+				section: 'A',
+				enrolled_at: new Date().toISOString(),
+			},
+		];
+		const total = rows.length;
+		const page = 1;
+		return { items: rows, total, page, size };
+	},
+};
+
 // GET /professor/courses — own active assignments, paginated. Since D93 the
 // wire rows also carry the configuration a session inherits: the offering's
 // schedule and classroom, its default windows and radius, its scheduled
@@ -4804,6 +4826,7 @@ export const endpoints = {
 	// Professor
 	professorProfile: ProfessorProfileEndpoint,
 	professorCourses: ProfessorCoursesEndpoint,
+	professorOfferingStudents: ProfessorOfferingStudentsEndpoint,
 	// Professor excuse queue (list + review live; quick/edit/revoke/bulk live
 	// by integer id — only the typed-number quick flow stays in-memory; the
 	// quick modal collects evidence via the D24 presigned flow)

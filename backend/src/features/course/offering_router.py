@@ -343,11 +343,12 @@ async def get_roster(
     _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: CourseServiceDep,
     section: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> PaginatedResponse[RosterItem]:
     return await service.get_roster(
-        offering_id=offering_id, section=section, page=page, size=size
+        offering_id=offering_id, section=section, search=search, page=page, size=size
     )
 
 

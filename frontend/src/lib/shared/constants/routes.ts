@@ -84,3 +84,7 @@ export const professorReport = (offeringId?: number): string =>
   offeringId === undefined
     ? Routes.PROFESSOR_REPORTS
     : `${Routes.PROFESSOR_REPORTS}?offering=${offeringId}`;
+
+// My Courses deep-links the enrolled-student roster for one offering.
+export const professorCourseStudents = (offeringId: number): string =>
+  `${Routes.PROFESSOR_COURSES}/${offeringId}/students`;

@@ -531,8 +531,8 @@ filters on professor screens and the active-session "Enrolled" count).
 
 |                  |                                                                   |
 | ---------------- | ----------------------------------------------------------------- |
-| **Query**        | `?section?&page=1&size=20`                                        |
-| **Response 200** | `{ items: [{ student_id, name, section, enrolled_at }], total, page, size }` |
+| **Query**        | `?section=&search=&page=1&size=20`                                |
+| **Response 200** | `{ items: [{ student_id, name, email, section, enrolled_at }], total, page, size }` |
 
 ---
 
@@ -1163,6 +1163,17 @@ The resolved plan a session for this offering would inherit (D93).
 | **Errors**       | 403 `not_assigned` · 404 `offering_not_found` · 422 `session_type_not_configured`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **Notes**        | `source` names where the meeting came from: `component` (the offering's active meeting for this type), `offering_legacy` (the offering's own schedule columns), `course_default` (no meeting configured — the duration comes from the course template) or `none`. `session_date` / `start_time` / `end_time` are the next occurrence in the institution's local terms; `scheduled_start` / `scheduled_end` are the same instants as UTC. `session_date` is null when no meeting is configured. `present_window_minutes` / `late_window_minutes` / `radius_meters` are the **effective** values: the offering's own, else the system default an administrator edits in Admin → System Settings, else the environment default (D93). The open form renders this instead of re-deriving the schedule, so what the professor sees is what the server stores. `override_capable` is false when there is no meeting to override. A `session_type` the offering does not meet is refused with 422 `session_type_not_configured` (D95) — a plan for it would be a plan the professor may not use. |
 | **Notes**        | **`start_window` (D94)** is the server's own answer to "may I open this now?": `{ permitted, reason, scheduled_date, start_time, end_time, scheduled_start, scheduled_end, opens_at, closes_at, current_time, timezone, early_open_minutes, late_open_minutes }`. `permitted` is false outside the window, and `reason` says why — `not_scheduled_today`, `before_window` or `after_window`. `scheduled_date` / `start_time` / `end_time` are *today's* occurrence of the meeting in the institution's local terms, and are null when today is not one of the meeting's days (the plan's next occurrence is what the session would carry then). `current_time` is the server's clock and `opens_at` / `closes_at` are the interval the professor may open in. The form renders this; it never re-derives the window. |
+
+#### `GET /professor/offerings/{offering_id}/students`
+
+Enrolled-student roster for an offering the signed-in professor is assigned to.
+
+|                  |                                                                                                                                                                                                            |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Query**        | `?section=&search=&page=&size=` (all optional)                                                                                                                                                              |
+| **Response 200** | `{ items: [{ student_id, name, email, section, enrolled_at }], total, page, size }`                                                                                                                           |
+| **Errors**       | 403 `not_assigned` · 404 `offering_not_found`                                                                                                                                                              |
+| **Notes**        | `search` filters by student ID, name, or email (case-insensitive). Only professors with a current `course_professors` assignment on the offering may read it. |
 
 #### `GET /professor/sessions/active/{session_id}`
 

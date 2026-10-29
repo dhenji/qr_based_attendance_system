@@ -443,6 +443,7 @@ export interface AdminAssignmentReopenPayload {
 export interface AdminRosterItemResponse {
 	student_id: string;
 	name: string;
+	email?: string | null;
 	section: string | null;
 	enrolled_at: string;
 }
@@ -450,12 +451,14 @@ export interface AdminRosterItemResponse {
 export interface AdminRosterItem {
 	studentId: string;
 	name: string;
+	email?: string;
 	section?: string;
 	enrolledAt: string;
 }
 
 export interface AdminRosterFilters {
 	section?: string;
+	search?: string;
 	page?: number;
 	size?: number;
 }

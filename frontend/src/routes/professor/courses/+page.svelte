@@ -6,7 +6,7 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { professorState, initProfessorCourses } from '$lib/features/professor/store.svelte';
 	import type { ProfessorCourseSummary } from '$lib/shared/types';
-	import { professorReport, professorSessionCreate } from '$lib/shared/constants/routes';
+	import { professorCourseStudents, professorReport, professorSessionCreate } from '$lib/shared/constants/routes';
 	import { dayLabels, formatWallClock } from '$lib/shared/utils/schedule';
 
 	onMount(() => {
@@ -239,6 +239,14 @@
 								>
 									<AppIcon name="chart" size={18} />
 									Reports
+								</button>
+								<button
+									class="btn btn-secondary"
+									data-testid="students-{course.offeringId}"
+									onclick={() => goto(professorCourseStudents(course.offeringId))}
+								>
+									<AppIcon name="users" size={18} />
+									Students
 								</button>
 							</div>
 						</li>
