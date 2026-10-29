@@ -38,7 +38,10 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 (and client-side GPS failures) to a specific, actionable message via
 `frontend/src/lib/features/liveness/errors.ts` (`toScanMessage`); a scan whose
 `status` is `rejected` shows that it was submitted outside the permitted time
-window.
+window. On the Session Confirmation step, status messages (`scanError` and the
+missing-ID footnote) render below the Confirm/Cancel button row, and error
+messages are styled as alert banners. The `session_not_started` copy now points
+to the scheduled start time rather than a manual professor action.
 
 **Review-band face matches** (`review_low <= score < threshold`) store their
 computed status (`present`/`late`) as `validation_status` — not `pending`. The

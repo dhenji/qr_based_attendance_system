@@ -624,7 +624,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		</div>
 	{/if}
 
-	{#if scanError}
+	{#if scanError && step !== 'confirm'}
 		<p class="error" role="alert">{scanError}</p>
 	{/if}
 
@@ -816,10 +816,6 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						{/if}
 					</div>
 
-					{#if !idNumber}
-						<p class="footnote">Your student ID is not available. Please complete your profile.</p>
-					{/if}
-
 					<div class="camera-actions" style="margin-top: 1.25rem;">
 						<button
 							class="btn-secondary"
@@ -832,6 +828,13 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 							Cancel
 						</button>
 					</div>
+
+					{#if scanError}
+						<p class="error" role="alert">{scanError}</p>
+					{/if}
+					{#if !idNumber}
+						<p class="footnote">Your student ID is not available. Please complete your profile.</p>
+					{/if}
 				</section>
 			{/if}
 		</div>
@@ -1352,6 +1355,17 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		font-size: 0.8125rem;
 		margin-top: 1rem;
 		margin-bottom: 0;
+	}
+
+	.error {
+		color: var(--danger-strong, var(--danger));
+		background: var(--danger-bg);
+		border: 1px solid var(--danger);
+		border-radius: 8px;
+		padding: 0.625rem 1rem;
+		margin: 0.75rem 0 0;
+		font-size: 0.875rem;
+		line-height: 1.4;
 	}
 
 	.overlay {
