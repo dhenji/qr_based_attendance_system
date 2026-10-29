@@ -16,6 +16,7 @@
 	let map: any = null;
 	let marker: any = null;
 	let leaflet: any = null;
+	let resizeObserver: ResizeObserver | null = null;
 
 	let searchQuery = $state('');
 	let results = $state<LocationSearchResult[]>([]);
@@ -120,9 +121,32 @@
 			placeMarker(map, L, la, lo);
 			onChange(la, lo);
 		});
+
+		// Leaflet does not recompute its tile layout when the container is
+		// resized by anything other than the Enlarge/Shrink toggle (e.g. a
+		// room selection that swaps the map in/out, or a parent reflow),
+		// which leaves gray blank tiles overlapping the form. Observe the
+		// container and invalidate on every size change.
+		if (typeof ResizeObserver !== 'undefined' && container) {
+			resizeObserver = new ResizeObserver(() => {
+				if (!map) return;
+				requestAnimationFrame(() => {
+					try {
+						map.invalidateSize();
+					} catch {
+						// map may have been removed; ignore.
+					}
+				});
+			});
+			resizeObserver.observe(container);
+		}
 	});
 
 	onDestroy(() => {
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+			resizeObserver = null;
+		}
 		if (map) {
 			map.remove();
 			map = null;
@@ -142,11 +166,15 @@
 
 	// Leaflet does not auto-recompute tile layout when its container is
 	// resized (e.g. the Enlarge/Shrink toggle), which leaves gray blank
-	// space. Invalidate after the new height is applied.
+	// space. Invalidate after the new height is applied. Also re-run when
+	// the pinned location changes (room selection) so tiles re-flow instead
+	// of overlapping stale content.
 	$effect(() => {
-		// Touch expanded so this re-runs on every toggle.
+		// Touch these so this re-runs on every relevant change.
 		void expanded;
 		void height;
+		void lat;
+		void lng;
 		if (!map) return;
 		const invalidate = () => map.invalidateSize();
 		const raf = requestAnimationFrame(() => setTimeout(invalidate, 0));
@@ -220,6 +248,9 @@
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+		/* Contain Leaflet's high internal z-indexes (panes up to 1000) inside
+		   this widget so they cannot paint over the page or modals. */
+		isolation: isolate;
 	}
 	.map-search {
 		position: relative;
@@ -266,6 +297,11 @@
 		width: 100%;
 		flex: 1 1 auto;
 		min-height: 120px;
+		/* Establish a stacking context for Leaflet's container; pane/control
+		   z-indexes resolve here instead of leaking into the page. */
+		position: relative;
+		z-index: 0;
+		isolation: isolate;
 	}
 	.map-toolbar {
 		display: flex;
