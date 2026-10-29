@@ -204,6 +204,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				course_code: verifiedSession.courseCode,
 				course_name: verifiedSession.courseName,
 				expires_at: verifiedSession.expiresAt,
+				scheduled_end_time: verifiedSession.scheduledEndTime,
 				geofence: verifiedSession.geofence,
 				geofenceEnabled: verifiedSession.geofenceEnabled,
 				isRemote: verifiedSession.isRemote
@@ -232,7 +233,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						geofence: cached.geofence,
 						geofenceEnabled: cached.geofenceEnabled,
 						isRemote: cached.isRemote,
-						scheduledEndTime: cached.expires_at
+						scheduledEndTime: cached.scheduled_end_time ?? cached.expires_at
 					};
 					showFailure = false;
 					rejectionReason = '';
@@ -741,14 +742,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				</button>
 				<h1>Session Confirmation</h1>
 			</div>
-			{#if session}
-				<p class="footnote" style="margin-top: -0.5rem; margin-bottom: 1rem; font-weight: 600;">
-					{session.courseCode} — {session.courseName}
-				</p>
-				<p class="footnote" style="margin-top: -0.75rem; margin-bottom: 1rem;">
-					{session.sessionType ?? 'Session'} · {session.isRemote ? 'Remote / online' : (session.classroomName ?? 'On campus')}
-				</p>
-			{/if}
+
 
 			{#if verifying}
 				<section class="card">

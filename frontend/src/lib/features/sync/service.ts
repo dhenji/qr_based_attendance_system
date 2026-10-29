@@ -52,6 +52,11 @@ export type CachedSession = {
 	course_code: string;
 	course_name: string;
 	expires_at: string;
+	// Actual scheduled class end time (UTC ISO). Cached separately from
+	// expires_at so the offline confirmation screen shows the real class end
+	// instead of the scan-window expiry. Optional for entries cached by older
+	// clients; those fall back to expires_at.
+	scheduled_end_time?: string;
 	// Center null = no classroom coordinates (mirrors VerifyGeofence); the
 	// scan pre-check skips geofence in that case, same as the server.
 	geofence: { radius: number; lat: number | null; lng: number | null };
