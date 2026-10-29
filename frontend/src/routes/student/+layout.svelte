@@ -79,7 +79,7 @@
 	onMount(async () => {
 		const user = await restoreSession();
 		if (!user) {
-			await goto(`${Routes.LOGIN}?next=${encodeURIComponent(page.url.pathname)}`, {
+			await goto(`${Routes.LOGIN}?next=${encodeURIComponent(page.url.pathname + page.url.search)}`, {
 				replaceState: true,
 			});
 		} else if (!isStudent()) {
