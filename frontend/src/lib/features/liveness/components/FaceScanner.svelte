@@ -240,6 +240,31 @@
 				challengeStage === 'right_center')
 	);
 
+	// Step labels for the liveness progress indicator.
+	const LIVENESS_STEPS = ['Blink', 'Turn left', 'Center', 'Turn right', 'Center', 'Done'] as const;
+
+	// Current step index (0-based) into LIVENESS_STEPS, or -1 before start.
+	const stepIndex = $derived.by(() => {
+		switch (challengeStage) {
+			case 'blink':
+				return beginDetection ? 0 : -1;
+			case 'blink_success':
+				return 1;
+			case 'left':
+				return 1;
+			case 'left_center':
+				return 2;
+			case 'right':
+				return 3;
+			case 'right_center':
+				return 4;
+			case 'complete':
+				return 5;
+			default:
+				return -1;
+		}
+	});
+
 	const turnCue = $derived.by(() => {
 		switch (challengeStage) {
 			case 'left':
@@ -868,7 +893,13 @@
 			</div>
 		{/if}
 		{#if !error && challengeStage !== 'blink_success'}
-			<div class="hint" role="status" aria-live="polite" class:passed={status === 'passed' && beginDetection}>{hintText}</div>
+			<div
+				class="hint"
+				role="status"
+				aria-live="polite"
+				data-status={status}
+				class:passed={status === 'passed' && beginDetection}
+			>{hintText}</div>
 		{/if}
 		{#if countdown > 0}
 			<div class="countdown-overlay" aria-live="polite">
@@ -884,6 +915,16 @@
 			</div>
 		{/if}
 	</div>
+	{#if beginDetection && !error && challengeStage !== 'blink_success'}
+		<div class="steps" role="group" aria-label="Liveness progress">
+			{#each LIVENESS_STEPS as label, i}
+				<div class="step" class:done={i < stepIndex} class:current={i === stepIndex}>
+					<span class="step-dot" aria-hidden="true"></span>
+					<span class="step-label">{label}</span>
+				</div>
+			{/each}
+		</div>
+	{/if}
 	{#if error}
 		<p class="error" role="alert">{error}</p>
 		<button class="retry-btn" type="button" onclick={retry}>Try again</button>
@@ -905,6 +946,9 @@
 		position: relative;
 		height: 100%;
 		aspect-ratio: 4 / 3;
+		border: 2px solid var(--border, #e2e8f0);
+		box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+		overflow: hidden;
 	}
 
 	video,
@@ -915,6 +959,10 @@
 		height: 100%;
 		object-fit: fill;
 		border-radius: 10px;
+		/* Mirror the preview selfie-style so left/right cues match what the
+		   student sees. Detection runs on the original frames, so landmark
+		   coordinates stay in original image space; only presentation flips. */
+		transform: scaleX(-1);
 	}
 
 	/* Static alignment guide: dashed oval the face must stay inside. */
@@ -1147,5 +1195,92 @@
 		font-size: 0.875rem;
 		font-weight: 600;
 		cursor: pointer;
+		transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+	}
+
+	.retry-btn:hover {
+		background: var(--brand-hover, var(--brand));
+		transform: translateY(-1px);
+	}
+
+	.retry-btn:active {
+		transform: translateY(0);
+	}
+
+	.retry-btn:focus-visible {
+		outline: 2px solid var(--accent, var(--brand));
+		outline-offset: 2px;
+	}
+
+	.retry-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+		transform: none;
+	}
+
+	/* Status-tinted hint backgrounds so progress reads without color alone
+	   (text label always present). */
+	.hint[data-status='no_face'],
+	.hint[data-status='center_face'],
+	.hint[data-status='too_far'] {
+		background: rgba(245, 158, 11, 0.85);
+	}
+
+	.hint[data-status='looking'],
+	.hint[data-status='detecting'] {
+		background: rgba(37, 99, 235, 0.85);
+	}
+
+	/* Liveness step progress indicator. */
+	.steps {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 0.75rem;
+		justify-content: center;
+		margin: 0.75rem auto 0;
+		max-width: 100%;
+	}
+
+	.step {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.75rem;
+		color: var(--text-muted, #64748b);
+	}
+
+	.step-dot {
+		width: 0.625rem;
+		height: 0.625rem;
+		border-radius: 50%;
+		background: var(--border-strong, #cbd5e1);
+		transition: background 0.2s ease, transform 0.2s ease;
+	}
+
+	.step.done .step-dot {
+		background: var(--success, #16a34a);
+	}
+
+	.step.current .step-dot {
+		background: var(--brand);
+		transform: scale(1.25);
+	}
+
+	.step.current .step-label {
+		color: var(--text-strong, #0f172a);
+		font-weight: 600;
+	}
+
+	.step.done .step-label {
+		color: var(--text-secondary, #475569);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.step-dot {
+			transition: none;
+		}
+		.retry-btn {
+			transition: none;
+		}
 	}
 </style>
