@@ -241,6 +241,10 @@ class SessionListItem(BaseModel):
     present_count: int = 0
     late_count: int = 0
     absent_count: int = 0
+    # Unscanned students read as pending while the session is scheduled/active
+    # and as absent once it is closed, so the list tile carries both tallies
+    # (default 0 keeps older payloads valid).
+    pending_count: int = 0
     status: Literal["scheduled", "active", "closed"]
 
     model_config = ConfigDict(from_attributes=True)
@@ -291,6 +295,10 @@ class SessionActiveResponse(BaseModel):
     scheduled_start_time: datetime
     scheduled_end_time: datetime
     expires_at: datetime | None = None
+    # Offering-level academic context (nullable so a broken graph degrades
+    # gracefully instead of 500ing on attribute access).
+    program_code: str | None = None
+    year_level_label: str | None = None
     status: Literal["scheduled", "active", "closed"]
     enrolled_count: int = 0
     remaining: int = 0
