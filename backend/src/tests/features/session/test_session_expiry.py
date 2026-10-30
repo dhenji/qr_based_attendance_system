@@ -793,9 +793,9 @@ async def test_session_list_reports_active_and_its_counts(
 
     item = listed.items[0]
     assert item.status == "active"
-    # The list tile carries per-status tallies, not an enrolled total: an
-    # unscanned student reads as absent.
-    assert item.absent_count == 1
+    # Unscanned students read as pending while the session is still open.
+    assert item.absent_count == 0
+    assert item.pending_count == 1
     assert item.present_count == 0
     assert item.late_count == 0
 

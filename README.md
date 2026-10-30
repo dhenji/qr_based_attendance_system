@@ -38,7 +38,10 @@ canonical D15 rejection reasons: `duplicate_scan`, `outside_geofence`,
 (and client-side GPS failures) to a specific, actionable message via
 `frontend/src/lib/features/liveness/errors.ts` (`toScanMessage`); a scan whose
 `status` is `rejected` shows that it was submitted outside the permitted time
-window.
+window. On the Session Confirmation step, status messages (`scanError` and the
+missing-ID footnote) render below the Confirm/Cancel button row, and error
+messages are styled as alert banners. The `session_not_started` copy now points
+to the scheduled start time rather than a manual professor action.
 
 **Review-band face matches** (`review_low <= score < threshold`) store their
 computed status (`present`/`late`) as `validation_status` — not `pending`. The
@@ -109,16 +112,16 @@ session is `closed`. Scanned students keep their server-decided status.
 | Session Entry    | Professor shows a session code; students enter it (the scan page also accepts a session QR where one is available)          |
 | Student ID Check | Prefilled from the signed-in profile; the server rejects a number that does not match the account                           |
 | GPS Verification | Ensures student is inside the classroom                                                                                     |
-| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts                                    |
+| Face Liveness    | Blink/head-turn evidence, server-graded, raises the cost of casual photo/replay attempts; live preview is mirrored selfie-style so left/right cues match on-screen movement (FaceScanner) |
 | Offline Mode     | Saves attendance locally when no internet; auto-uploads later                                                               |
 | Student Roster   | Import student from CSV file (with official email)                                                                          |
 | Dashboard        | View attendance in real time                                                                                                |
 | Analytics        | At-risk forecasting and recommendations for professors                                                                      |
 | Reports          | Download attendance reports (CSV/PDF/Print)                                                                                 |
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
-| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; Cloudflare Turnstile captcha (optional, config-gated) |
+| Account Security | Strong passwords (Argon2id), OTP, optional MFA, admin reset, lockout; password reuse is allowed during OTP-based recovery; Cloudflare Turnstile captcha (optional, config-gated) |
 
-> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual end time (`expires_at`) instead of a running countdown. Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column).
+> **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual scheduled class end time (`scheduled_end_time`) instead of a running countdown. The header now shows the offering's **Program** and **Year Level** (no Section). Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). The Active Sessions list now carries `pending_count` alongside `absent_count`. No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column). The page also renders a scannable QR code beside the session code that encodes a student join URL (`/student/scan?code=…`); students can scan it (camera/upload) or open the link directly, which auto-populates and verifies the code (including across auth redirects). The QR can be copied as a session code or exported as PNG.
 
 > **Registration**: students and professors self-register with email +
 > password by **claiming** their admin-seeded record (official email lookup +
@@ -351,7 +354,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**1053 cases across 82 files**) against the dedicated
+This runs the suite (**1055 cases across 82 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at
@@ -533,7 +536,7 @@ default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 | Area       | Status                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend    | 18 feature slices / 21 model classes / 21 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `e6f7a8b9c0d1` (17 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra                                               |
-| Frontend   | 51 +page.svelte files (50 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 11 feature components and 13 shared ones; typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts` |
+| Frontend   | 51 +page.svelte files (50 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 12 feature components and 14 shared ones (adds `RadiusSelector`); typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts`. Student scan now runs a bounded GPS location check (accuracy/distance/radius feedback, retry, continue gating) before face liveness; `ClassroomMapPicker` shows a radius circle and a "Use my location" control |
 | Schema     | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82)              |
 | Tests      | 891 backend cases in 71 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                                                                                                                                                                                                          |
 | Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { searchLocation, type LocationSearchResult } from '$lib/shared/utils/geo';
+	import { searchLocation, type LocationSearchResult, requestBestPosition } from '$lib/shared/utils/geo';
 
 	interface Props {
 		lat: number | null;
@@ -8,14 +8,31 @@
 		onChange: (lat: number, lng: number) => void;
 		onClear?: () => void;
 		height?: string;
+		radius?: number | null;
+		allowLocate?: boolean;
 	}
 
-	let { lat = $bindable(null), lng = $bindable(null), onChange, onClear, height = '380px' }: Props = $props();
+	let {
+	lat = $bindable(null),
+	lng = $bindable(null),
+	onChange,
+	onClear,
+	height = '380px',
+	radius = null,
+	allowLocate = true
+}: Props = $props();
 
 	let container: HTMLDivElement | null = null;
 	let map: any = null;
 	let marker: any = null;
 	let leaflet: any = null;
+	let resizeObserver: ResizeObserver | null = null;
+let gpsMarker: any = null;
+let radiusCircle: any = null;
+
+let locating = $state(false);
+let gpsError = $state<string | null>(null);
+let gpsAccuracy = $state<number | null>(null);
 
 	let searchQuery = $state('');
 	let results = $state<LocationSearchResult[]>([]);
@@ -41,6 +58,40 @@
 			});
 		}
 		m.setView([latitude, longitude], Math.max(m.getZoom(), 14));
+	}
+
+	async function locate() {
+		if (!allowLocate || locating) return;
+		locating = true;
+		gpsError = null;
+		try {
+			const fix = await requestBestPosition({
+				desiredAccuracy: radius ?? 50,
+				maxFixes: 3,
+				timeoutMs: 10000
+			});
+			gpsAccuracy = fix.accuracy;
+			lat = fix.lat;
+			lng = fix.lng;
+			if (map && leaflet) {
+				placeMarker(map, leaflet, fix.lat, fix.lng);
+				if (gpsMarker) {
+					gpsMarker.remove();
+					gpsMarker = null;
+				}
+				const icon = leaflet.divIcon({
+					className: 'gps-marker',
+					html: '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 2px #2563eb;"></div>',
+					iconSize: [12, 12]
+				});
+				gpsMarker = leaflet.marker([fix.lat, fix.lng], { icon, interactive: false }).addTo(map);
+			}
+			onChange(fix.lat, fix.lng);
+		} catch (e: any) {
+			gpsError = e?.message ?? 'Unable to get your location.';
+		} finally {
+			locating = false;
+		}
 	}
 
 	function scheduleSearch() {
@@ -76,6 +127,12 @@
 			marker.remove();
 			marker = null;
 		}
+		if (gpsMarker) {
+			gpsMarker.remove();
+			gpsMarker = null;
+		}
+		gpsAccuracy = null;
+		gpsError = null;
 		searchQuery = '';
 		onClear?.();
 	}
@@ -120,9 +177,40 @@
 			placeMarker(map, L, la, lo);
 			onChange(la, lo);
 		});
+
+		// Leaflet does not recompute its tile layout when the container is
+		// resized by anything other than the Enlarge/Shrink toggle (e.g. a
+		// room selection that swaps the map in/out, or a parent reflow),
+		// which leaves gray blank tiles overlapping the form. Observe the
+		// container and invalidate on every size change.
+		if (typeof ResizeObserver !== 'undefined' && container) {
+			resizeObserver = new ResizeObserver(() => {
+				if (!map) return;
+				requestAnimationFrame(() => {
+					try {
+						map.invalidateSize();
+					} catch {
+						// map may have been removed; ignore.
+					}
+				});
+			});
+			resizeObserver.observe(container);
+		}
 	});
 
 	onDestroy(() => {
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+			resizeObserver = null;
+		}
+		if (gpsMarker) {
+			try { gpsMarker.remove(); } catch { /* ignore */ }
+			gpsMarker = null;
+		}
+		if (radiusCircle) {
+			try { radiusCircle.remove(); } catch { /* ignore */ }
+			radiusCircle = null;
+		}
 		if (map) {
 			map.remove();
 			map = null;
@@ -140,13 +228,38 @@
 		}
 	});
 
+	// Keep the radius circle in sync without changing zoom.
+	$effect(() => {
+		if (!map || !leaflet) return;
+		const r = radius;
+		const la = lat;
+		const lo = lng;
+		if (radiusCircle) {
+			radiusCircle.remove();
+			radiusCircle = null;
+		}
+		if (r !== null && r !== undefined && la !== null && lo !== null) {
+			radiusCircle = leaflet.circle([la, lo], {
+				radius: r,
+				color: '#2563eb',
+				weight: 2,
+				fillColor: '#2563eb',
+				fillOpacity: 0.12
+			}).addTo(map);
+		}
+	});
+
 	// Leaflet does not auto-recompute tile layout when its container is
 	// resized (e.g. the Enlarge/Shrink toggle), which leaves gray blank
-	// space. Invalidate after the new height is applied.
+	// space. Invalidate after the new height is applied. Also re-run when
+	// the pinned location changes (room selection) so tiles re-flow instead
+	// of overlapping stale content.
 	$effect(() => {
-		// Touch expanded so this re-runs on every toggle.
+		// Touch these so this re-runs on every relevant change.
 		void expanded;
 		void height;
+		void lat;
+		void lng;
 		if (!map) return;
 		const invalidate = () => map.invalidateSize();
 		const raf = requestAnimationFrame(() => setTimeout(invalidate, 0));
@@ -193,6 +306,11 @@
 		<button type="button" class="map-tool-btn" onclick={() => (expanded = !expanded)}>
 			{expanded ? 'Shrink' : 'Enlarge'}
 		</button>
+		{#if allowLocate}
+			<button type="button" class="map-tool-btn" disabled={locating} onclick={() => void locate()}>
+				{locating ? 'Locating…' : 'Use my location'}
+			</button>
+		{/if}
 		<button
 			type="button"
 			class="map-tool-btn"
@@ -209,6 +327,17 @@
 			Clear pin
 		</button>
 	</div>
+	{#if gpsError}
+		<p class="map-gps-error" role="alert">{gpsError}</p>
+	{/if}
+	{#if gpsAccuracy !== null}
+		<p class="map-gps-accuracy" class:good={radius !== null && gpsAccuracy <= radius} class:warn={radius === null || gpsAccuracy > (radius ?? 0)}>
+			GPS accuracy: {Math.round(gpsAccuracy)} m
+			{#if radius !== null}
+				· radius {radius} m
+			{/if}
+		</p>
+	{/if}
 	<div bind:this={container} class="map-container"></div>
 </div>
 
@@ -220,6 +349,9 @@
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+		/* Contain Leaflet's high internal z-indexes (panes up to 1000) inside
+		   this widget so they cannot paint over the page or modals. */
+		isolation: isolate;
 	}
 	.map-search {
 		position: relative;
@@ -266,6 +398,11 @@
 		width: 100%;
 		flex: 1 1 auto;
 		min-height: 120px;
+		/* Establish a stacking context for Leaflet's container; pane/control
+		   z-indexes resolve here instead of leaking into the page. */
+		position: relative;
+		z-index: 0;
+		isolation: isolate;
 	}
 	.map-toolbar {
 		display: flex;
@@ -282,5 +419,23 @@
 		font-size: 0.75rem;
 		font-weight: 600;
 		cursor: pointer;
+	}
+
+	.map-gps-error {
+		margin: 0.25rem 0.5rem;
+		font-size: 0.75rem;
+		color: var(--danger, #dc2626);
+	}
+	.map-gps-accuracy {
+		margin: 0.25rem 0.5rem 0.5rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--text-muted, #666);
+	}
+	.map-gps-accuracy.good {
+		color: var(--success, #16a34a);
+	}
+	.map-gps-accuracy.warn {
+		color: var(--warning-text, #b45309);
 	}
 </style>

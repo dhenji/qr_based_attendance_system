@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import ClassroomMapPicker from '$lib/components/ClassroomMapPicker.svelte';
+	import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
@@ -1108,42 +1109,32 @@ let selectedOfferingId = $state<number | null>(null);
 				<span class="required-tag">Required</span>
 			</span>
 			<div class="radius-group" role="group" aria-label="Geofence radius">
-				<button
-					class="radius-btn radius-default"
-					class:selected={defaultRadius !== null && radius === defaultRadius}
-					aria-pressed={defaultRadius !== null && radius === defaultRadius}
-					disabled={defaultRadius === null}
-					title={defaultRadius === null
-						? 'Unavailable — the offering’s session plan could not be read'
-						: `Use the configured default (${defaultRadius} m)`}
-					onclick={() => {
+				<RadiusSelector
+					value={radius}
+					min={1}
+					max={1000}
+					defaultValue={defaultRadius ?? undefined}
+					inheriting={defaultRadius !== null && radius === defaultRadius}
+					defaultChipLabel={defaultRadius !== null ? `Default (${defaultRadius} m)` : undefined}
+					onDefault={() => {
 						if (defaultRadius !== null) radius = defaultRadius;
 					}}
-				>
-					Default{defaultRadius !== null ? ` · ${defaultRadius} m` : ''}
-				</button>
-				{#each radiusOptions as option (option)}
-					<button
-						class="radius-btn"
-						class:selected={radius === option && option !== defaultRadius}
-						aria-pressed={radius === option && option !== defaultRadius}
-						onclick={() => (radius = option)}
-					>
-						{option}m
-					</button>
-				{/each}
+					onChange={(v) => (radius = v)}
+				/>
 			</div>
 			<p class="hint">
-				Students must be within this distance from the classroom to scan.
+				Students must be within this radius to scan.
 				{#if inherited !== null}
-					{inherited.radius} m is the configured default
-					{#if radiusOverridden}
-						<span class="location-tag">Override</span>
-					{/if}
+					Default: {inherited.radius} m.
 				{:else}
 					The offering’s default radius is unavailable — retry loading the plan.
 				{/if}
 			</p>
+			{#if inherited !== null && radiusOverridden}
+				<p class="hint">
+					<span class="location-tag">Override</span>
+				</p>
+			{/if}
 		</div>
 		{:else}
 			<p class="hint">
@@ -1721,7 +1712,8 @@ let selectedOfferingId = $state<number | null>(null);
 	}
 
 	.location-tag {
-		margin-left: auto;		padding: 0.125rem 0.5rem;
+		margin-left: 0.5rem;
+		padding: 0.125rem 0.5rem;
 		border-radius: 6px;
 		background: var(--warning-bg);
 		border: 1px solid var(--warning-text);
@@ -1752,58 +1744,6 @@ let selectedOfferingId = $state<number | null>(null);
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
-	}
-
-	.radius-btn {
-		padding: 0.5rem 1rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font-family: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-	}
-
-	.radius-btn:hover {
-		background: var(--bg-hover);
-	}
-
-	.radius-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.radius-btn.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	/* The Default chip restores the offering's configured radius, so it is
-	   styled apart from the numeric chips: a dashed border marks it as "the
-	   configured value" rather than as one of the offered numbers, and the
-	   dashed edge survives the selected state so the two never read alike. */
-	.radius-default {
-		border-style: dashed;
-		color: var(--text-secondary);
-	}
-
-	.radius-default:hover:not(:disabled) {
-		color: var(--text-strong);
-	}
-
-	.radius-default.selected {
-		border-style: dashed;
-	}
-
-	.radius-btn:disabled {
-		color: var(--text-muted);
-		background: var(--bg-page);
-		border-color: var(--border);
-		cursor: not-allowed;
 	}
 
 	/* --- Session type toggle -------------------------------------------------- */
@@ -2279,7 +2219,6 @@ let selectedOfferingId = $state<number | null>(null);
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.radius-btn,
 		.btn {
 			transition: none;
 		}

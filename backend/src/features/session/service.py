@@ -731,6 +731,20 @@ class SessionService:
         enrolled_count: int = len(students)
         status: str = _session_status(row.expires_at, row.scheduled_start_time, now)
 
+        offering: CourseOffering | None = await self._session.get(
+            CourseOffering, row.offering_id
+        )
+        program: Program | None = (
+            await self._session.get(Program, offering.program_id)
+            if offering is not None
+            else None
+        )
+        year_level: YearLevel | None = (
+            await self._session.get(YearLevel, offering.year_level_id)
+            if offering is not None
+            else None
+        )
+
         return SessionActiveResponse(
             id=row.id,
             offering=row.offering_id,
@@ -742,6 +756,8 @@ class SessionService:
             scheduled_start_time=row.scheduled_start_time,
             scheduled_end_time=row.scheduled_end_time,
             expires_at=row.expires_at,
+            program_code=program.code if program is not None else None,
+            year_level_label=year_level.label if year_level is not None else None,
             status=status,
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),
@@ -1048,6 +1064,17 @@ class SessionService:
         """One list tile: present/late/absent plus the derived session status."""
         counts, scanned = _summarize(await self._attendance_rows(row.id))
         enrolled: int = await self._enrollment_count(row.offering_id)
+        status: str = _session_status(row.expires_at, row.scheduled_start_time, now)
+        unscanned: int = max(0, enrolled - scanned)
+
+        # Unscanned students are pending while the session is still open and
+        # only become absent once it has closed (mirrors `_active_student_items`).
+        if status == "closed":
+            absent_count: int = unscanned
+            pending_count: int = counts.pending
+        else:
+            absent_count = 0
+            pending_count = counts.pending + unscanned
 
         return SessionListItem(
             id=row.id,
@@ -1061,8 +1088,9 @@ class SessionService:
             duration_minutes=row.duration_minutes,
             present_count=counts.present,
             late_count=counts.late,
-            absent_count=max(0, enrolled - scanned),
-            status=_session_status(row.expires_at, row.scheduled_start_time, now),
+            absent_count=absent_count,
+            pending_count=pending_count,
+            status=status,
         )
 
     async def get_session_history(

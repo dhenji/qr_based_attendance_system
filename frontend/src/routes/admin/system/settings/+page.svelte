@@ -5,6 +5,7 @@
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatBytes, formatDate, formatTime } from '$lib/shared/utils/format';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
+import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	import {
 		cleanupSystem,
 		downloadBackupArchive,
@@ -29,7 +30,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
-	let geofence = $state('50');
+	let geofence = $state(50);
 	let presentWin = $state('5');
 	let lateWin = $state('10');
 	let earlyOpen = $state('30');
@@ -69,7 +70,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			const [fetched, rows] = await Promise.all([getSettings(), listBackups()]);
 			settings = fetched;
 			backups = rows;
-			geofence = String(fetched.geofence_default_radius);
+			geofence = fetched.geofence_default_radius;
 			presentWin = String(fetched.present_window_default);
 			lateWin = String(fetched.late_window_default);
 			earlyOpen = String(fetched.session_early_open_minutes ?? 30);
@@ -107,14 +108,14 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		if (saving) return;
 		saveError = null;
 		saveNote = null;
-		const radius = parsePositiveInt(geofence);
+		const radius = geofence;
 		const present = parsePositiveInt(presentWin);
 		const late = parsePositiveInt(lateWin);
 		const early = parseNonNegativeInt(earlyOpen);
 		const lateGrace = parseNonNegativeInt(lateOpen);
 		const daily = parsePositiveInt(retentionDaily);
 		const monthly = parsePositiveInt(retentionMonthly);
-		if (radius === null || present === null || late === null || daily === null || monthly === null) {
+		if (present === null || late === null || daily === null || monthly === null) {
 			saveError = 'Geofence, windows, and retention must all be whole numbers of at least 1.';
 			return;
 		}
@@ -248,7 +249,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<div class="field-grid">
 				<div class="field">
 					<label class="form-label" for="set-geofence">Geofence radius (meters)</label>
-					<input id="set-geofence" class="form-input" inputmode="numeric" bind:value={geofence} />
+					<RadiusSelector value={geofence} min={10} max={1000} onChange={(v) => (geofence = v)} />
 				</div>
 				<div class="field">
 					<label class="form-label" for="set-present">Default present window (min)</label>

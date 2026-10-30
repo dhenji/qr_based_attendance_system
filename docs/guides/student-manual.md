@@ -91,8 +91,7 @@ duration, _geofence_ radius, classroom). On failure, a generic "Invalid code"
 message is shown (no detail leak about the wrong program or an expired
 _session_).
 
-> **Session QR:** a later stage can read a session QR, but the current professor
-> live page displays the code only, not a QR image. See Stage 3.
+> **Session QR:** the professor's live page now displays a scannable QR code beside the session code (and offers a join link). Scanning it (camera or image upload) or opening the link auto-populates and verifies the session code, including across login redirects.
 
 ### Stage 2: Confirm Student ID
 
@@ -122,15 +121,15 @@ The app opens its camera scanner and asks you to scan the session QR shown on
 the projector. A successful scan re-verifies the session and opens the liveness
 challenge.
 
-> **Known limitation (current build):** the professor live page displays the
-> session code but does not render a QR image. "No thanks, enter manually"
-> returns to Stage 1, so the manual path cannot pass this camera stage unless a
-> QR encoding the bare session code is supplied separately. This is a UI gap,
-> not an identity check; the API itself accepts a typed session code.
+> **Note (current build):** the professor live page now renders a scannable QR code beside the session code, so the camera stage can complete directly. "No thanks, enter manually" still returns to Stage 1 for a typed code.
 
 ### Stage 4: Face Liveness
 
 [FIG: Live camera with face detected indicator, fixed liveness challenge stepper (Blink → Turn Left → Turn Right) with progress dots, offline badge variant]
+
+> The live camera preview is mirrored selfie-style, so "Turn Left"/"Turn Right"
+> instructions point in the direction you move on screen. The underlying
+> detection uses the original (unmirrored) frames.
 
 **Liveness Challenge** ([D31](../project/decision-log.md)):
 
@@ -389,7 +388,7 @@ scanned during attendance; identity comes from your signed-in account.
 | **Appearance**      | Theme: Light / Dark                                                                                         |
 | **Notifications**   | Push (on/off), Email (on/off)                                                                               |
 | **Privacy**         | Share GPS for attendance (on/off), Enable camera scanning (on/off)                                          |
-| **Security**        | Change Password (policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol), Set Up MFA, Set Security Question |
+| **Security**        | Change Password (opens the recovery page; logged-in users skip email entry and reuse is allowed), Set Up MFA, Set Security Question |
 | **Face Enrollment** | Status: Enrolled / Not enrolled — contact admin to re-enroll                                                |
 | **App Version**     | Display only                                                                                                |
 
@@ -418,7 +417,7 @@ scanned during attendance; identity comes from your signed-in account.
 | "Invalid code" in Stage 1        | Wrong code typed; _session_ expired; wrong _program_ | Check code on projector; ask professor to generate new _session_    |
 | "Not enrolled" in Stage 2        | Email in wrong _course_ roster                       | Contact admin to verify enrollment                                  |
 | "Student number mismatch"        | Typed number differs from your account               | Clear the field; use the prefilled number from your profile         |
-| QR scanner has no QR to scan     | Professor UI shows the code only (known gap)         | Use a QR encoding the bare session code, or report the missing QR   |
+| QR scanner has no QR to scan     | Professor UI now shows a scannable QR code beside the session code | Scan it, or open the join link / enter the code manually |
 | "Outside geofence" after Stage 4 | Too far from classroom                               | Move closer; check classroom location with professor                |
 | "Liveness failed" in Stage 4     | Camera angle; lighting; did not complete challenge   | Ensure face is centered; complete all 3 challenges; retry           |
 | "Face mismatch" in Stage 4       | Only a non-standard client sending a low score       | The shipped app sends `1.0`; retry or report the client             |

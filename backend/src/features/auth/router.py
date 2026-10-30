@@ -7,6 +7,8 @@ from features.auth.schema import (
     BackupCodesResponse,
     BackupCodesSummaryResponse,
     ChangePasswordRequest,
+    PasswordRecoveryResetRequest,
+    PasswordRecoveryStartResponse,
     ForgotPasswordStep1Request,
     ForgotPasswordStep2Request,
     LoginOtpResendRequest,
@@ -178,6 +180,34 @@ async def reset_password(
 ) -> TokenResponse:
     return await service.reset_password(
         payload.email, payload.otp_code, payload.new_password
+    )
+
+
+@router.post(
+    "/password-recovery/start",
+    response_model=PasswordRecoveryStartResponse,
+    summary="Start password recovery for the authenticated user (sends OTP)",
+)
+async def password_recovery_start(
+    current_user: CurrentUserDep,
+    service: AuthServiceDep,
+) -> PasswordRecoveryStartResponse:
+    return await service.start_password_recovery(current_user)
+
+
+@router.post(
+    "/password-recovery/reset",
+    response_model=TokenResponse,
+    summary="Reset the authenticated user's password with an OTP",
+)
+async def password_recovery_reset(
+    payload: PasswordRecoveryResetRequest,
+    current_user: CurrentUserDep,
+    service: AuthServiceDep,
+) -> TokenResponse:
+    # Email is derived from the session; no email field is accepted.
+    return await service.reset_password_authenticated(
+        current_user, payload.otp_code, payload.new_password
     )
 
 

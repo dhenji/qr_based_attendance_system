@@ -218,6 +218,7 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 				present_count: 15,
 				late_count: 3,
 				absent_count: 2,
+				pending_count: 0,
 				status: 'active',
 			},
 		],
@@ -317,6 +318,8 @@ export const SessionActiveEndpoint: EndpointDef<SessionActiveResponse> = {
 			scheduled_start_time: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
 			scheduled_end_time: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
 			expires_at: null,
+			program_code: 'BSCS',
+			year_level_label: '1st Year',
 			status: 'active',
 			enrolled_count: 30,
 			remaining: 12,
@@ -539,6 +542,18 @@ export const ForgotPasswordVerifyEndpoint: EndpointDef<ForgotPasswordVerifyRespo
 
 export const ResetPasswordEndpoint: EndpointDef<TokenResponse> = {
 	url: '/auth/reset-password',
+	method: 'POST',
+	mock: () => MOCK_TOKENS,
+};
+
+export const AuthPasswordRecoveryStartEndpoint: EndpointDef<{ recovery_token: string; masked_email: string }> = {
+	url: '/auth/password-recovery/start',
+	method: 'POST',
+	mock: () => ({ recovery_token: 'mock-recovery-token', masked_email: 'j***@example.com' }),
+};
+
+export const AuthPasswordRecoveryResetEndpoint: EndpointDef<TokenResponse> = {
+	url: '/auth/password-recovery/reset',
 	method: 'POST',
 	mock: () => MOCK_TOKENS,
 };
@@ -4811,6 +4826,8 @@ export const endpoints = {
 	authForgotPassword: ForgotPasswordEndpoint,
 	authForgotPasswordVerify: ForgotPasswordVerifyEndpoint,
 	authResetPassword: ResetPasswordEndpoint,
+	authPasswordRecoveryStart: AuthPasswordRecoveryStartEndpoint,
+	authPasswordRecoveryReset: AuthPasswordRecoveryResetEndpoint,
 	authSecurityQuestion: SecurityQuestionEndpoint,
 	// Student
 	studentProfile: StudentProfileEndpoint,

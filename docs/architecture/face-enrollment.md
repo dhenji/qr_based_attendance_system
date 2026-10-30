@@ -76,6 +76,11 @@ The frontend validates file extension/size via `facePhotoSchema` and now also ru
 canvas-based brightness/sharpness/dimension checks before upload; the live camera
 flow only auto-captures when all gates pass.
 
+Both camera previews in the app (admin `FaceEnrollmentCamera.svelte` and the
+student liveness scanner `FaceScanner.svelte`) mirror the live video + canvas
+with `transform: scaleX(-1)` selfie-style; detection still runs on the original
+frames, so landmark coordinates and captured images stay unmirrored.
+
 | Gate          | Condition                                                        | Error Message                                                |
 | ------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
 | Brightness    | Mean pixel luminance in [40, 220] (0–255)                        | "Image too dark / too bright — move to better lighting"      |

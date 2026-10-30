@@ -1136,7 +1136,7 @@ passes. The same rule governs the excuse endpoints under `/professor`.
 |                  |                                                                                                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?from?&to?&offering_id?&session_type=lecture\|lab?&page=1&size=20`                                                                                               |
-| **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, status }], ... }` |
+| **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, duration_minutes, present_count, late_count, absent_count, pending_count, status }], ... }` |
 | **Notes**        | `present_count`/`late_count`/`absent_count` and `status` are computed DTOs (no columns). `status` is `scheduled`/`active`/`closed`: `scheduled` while `now < scheduled_start_time` (session opened for a future class, not yet scannable), `active` while `expires_at > now`, otherwise `closed`. `expires_at` is a regular column populated by service layer at creation (D49). |
 
 #### `POST /professor/sessions`
@@ -1181,7 +1181,7 @@ Live session detail with dual timers.
 
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, offering, session_type, session_code, scan_window_remaining, scheduled_start_time, scheduled_end_time, expires_at, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
+| **Response 200** | `{ id, offering, session_type, session_code, scan_window_remaining, scheduled_start_time, scheduled_end_time, expires_at, program_code?, year_level_label?, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
 | **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `expires_at` is the actual session expiry (nullable) and is shown as the end time when `status === closed`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). The client header label is driven by `status` (`Active:` / `Closed:`), and both countdown timers freeze when `status === closed`. |
 
 #### `POST /professor/sessions/{session_id}/close`
@@ -1590,7 +1590,9 @@ lock after 5 failed attempts.
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` |
+| POST   | `/auth/password-recovery/start`    | Start recovery for the authenticated user — mints a grant, sends OTP, returns `{ recovery_token, masked_email }` | 401 unauthorized |
+| POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` |
 | POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |

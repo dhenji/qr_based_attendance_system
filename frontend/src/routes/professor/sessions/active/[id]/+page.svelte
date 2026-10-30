@@ -3,6 +3,7 @@
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import AppIcon from '$lib/components/AppIcon.svelte';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
@@ -81,6 +82,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		confirmLabel?: string;
 		busyLabel?: string;
 	}>(null);
+
+	let qrDataUrl = $state<string | null>(null);
+	let qrError = $state<string | null>(null);
+	let codeCopied = $state(false);
 
 	// Server-first export (POST /professor/reports/export) scoped to the
 	// session's course was abandoned on purpose: the server leg always
@@ -467,6 +472,60 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		reloadToken += 1;
 	};
 
+	$effect(() => {
+		const code = session?.sessionCode;
+		if (!browser || !code) {
+			qrDataUrl = null;
+			qrError = null;
+			return;
+		}
+		let cancelled = false;
+		qrDataUrl = null;
+		qrError = null;
+		void (async () => {
+			try {
+				const mod = (await import('qrcode')) as { default?: { toDataURL: (text: string, opts?: unknown) => Promise<string> }; toDataURL?: (text: string, opts?: unknown) => Promise<string> };
+				const QRCode: any = mod.default ?? mod;
+				const url = `${window.location.origin}/student/scan?code=${encodeURIComponent(code)}`;
+				const dataUrl = await QRCode.toDataURL(url, { margin: 2, width: 280 });
+				if (!cancelled) qrDataUrl = dataUrl;
+			} catch {
+				if (!cancelled) qrError = 'Could not generate QR code.';
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const copyCode = async () => {
+		const code = session?.sessionCode;
+		if (!code) return;
+		try {
+			await navigator.clipboard.writeText(code);
+			codeCopied = true;
+			setTimeout(() => {
+				codeCopied = false;
+			}, 2000);
+		} catch {
+			// swallow
+		}
+	};
+
+	const downloadQr = () => {
+		if (!qrDataUrl || !session) return;
+		try {
+			const link = document.createElement('a');
+			link.href = qrDataUrl;
+			link.download = `session-${session.id}-qr.png`;
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+		} catch {
+			// swallow
+		}
+	};
+
 	const handleClose = async () => {
 		const id = sessionId;
 		if (id === null || closing || isClosed) return;
@@ -498,7 +557,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			<div class="title">
 				<h1>{session.status === 'scheduled' ? 'Scheduled' : session.status === 'closed' ? 'Closed' : 'Active'}: {session.offeringCode} — {session.offeringName}</h1>
 				<p class="muted">
-					Section {session.offeringSections} · Code <span class="mono-data">{session.sessionCode}</span> ·
+					Program: {session.offeringProgram ?? '—'} · Year Level: {session.offeringYearLevel ?? '—'} ·
 					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
 						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
 					</span>
@@ -540,22 +599,48 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		{/if}
 
 		<section class="card code-card" aria-label="Projector session code">
-			<span class="code-label">Session Code · Show on projector</span>
-			<span class="code">{session.sessionCode}</span>
-			<div class="timers">
-				<div class="timer" class:urgent={expiringSoon || scanExpired}>
-					<span class="timer-label">Scan window</span>
-					<span class="timer-value">{formatCountdown(scanRemainingSeconds)}</span>
+			<div class="code-main">
+				<span class="code-label">Session Code · Show on projector</span>
+				<span class="code">{session.sessionCode}</span>
+				<div class="timers">
+					<div class="timer" class:urgent={expiringSoon || scanExpired}>
+						<span class="timer-label">Scan window</span>
+						<span class="timer-value">{formatCountdown(scanRemainingSeconds)}</span>
+					</div>
+					<div class="timer" class:urgent={classEnded}>
+						<span class="timer-label">{isScheduled ? 'Class starts in' : classEnded ? 'Class ended' : 'Class ends in'}</span>
+						<span class="timer-value">{isScheduled ? formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000))) : isClosed ? formatClock(session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
+						{#if !isClosed && !isScheduled}
+							<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
+						{/if}
+						{#if isScheduled}
+							<span class="timer-sub">at {formatClock(session.scheduledStartTime)}</span>
+						{/if}
+					</div>
 				</div>
-				<div class="timer" class:urgent={classEnded}>
-					<span class="timer-label">{isScheduled ? 'Class starts in' : classEnded ? 'Class ended' : 'Class ends in'}</span>
-					<span class="timer-value">{isScheduled ? formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000))) : isClosed ? formatClock(session.expiresAt ?? session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
-					{#if !isClosed && !isScheduled}
-						<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
-					{/if}
-					{#if isScheduled}
-						<span class="timer-sub">at {formatClock(session.scheduledStartTime)}</span>
-					{/if}
+			</div>
+			<div class="qr-side">
+				<span class="code-label">Scan to Join</span>
+				{#if qrError}
+					<p class="error">{qrError}</p>
+				{:else if qrDataUrl}
+					<img
+						src={qrDataUrl}
+						alt="QR code to join this session"
+						width="180"
+						height="180"
+						class="qr-image"
+					/>
+				{:else}
+					<div class="qr-placeholder">Generating…</div>
+				{/if}
+				<div class="qr-actions">
+					<button class="btn btn-secondary" type="button" onclick={() => void copyCode()}>
+						{codeCopied ? 'Copied' : 'Copy Session Code'}
+					</button>
+					<button class="btn btn-secondary" type="button" onclick={downloadQr} disabled={!qrDataUrl}>
+						Export QR Code
+					</button>
 				</div>
 			</div>
 		</section>
@@ -953,13 +1038,31 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	.code-card {
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 1rem;
+		justify-content: space-between;
+		gap: 1.5rem;
 		background: linear-gradient(135deg, var(--success-bg), var(--success-bg));
 		border: 2px solid var(--success);
 		text-align: center;
 		container-type: inline-size;
+	}
+
+	.code-main {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		flex: 1 1 20rem;
+	}
+
+	.qr-side {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+		flex: 0 0 auto;
 	}
 
 	.code-label {
@@ -1466,9 +1569,47 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		gap: 0.75rem;
 	}
 
+	.qr-card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		text-align: center;
+		max-width: 320px;
+		margin-inline: auto;
+	}
+
+	.qr-image {
+		background: #fff;
+		padding: 0.5rem;
+		border-radius: 8px;
+		margin-inline: auto;
+		display: block;
+	}
+
+	.qr-placeholder {
+		width: 180px;
+		height: 180px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--bg-muted);
+		border-radius: 8px;
+		color: var(--text-muted);
+		font-size: 0.875rem;
+	}
+
+	.qr-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		justify-content: center;
+	}
+
 	@media (max-width: 720px) {
 		.code-card {
 			padding: 1.25rem 0.75rem;
+			flex-direction: column;
 		}
 
 		.code {
@@ -1479,7 +1620,63 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			flex: 1 1 10rem;
 		}
 
-		.tiles {
+	.qr-card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		text-align: center;
+		max-width: 320px;
+		margin-inline: auto;
+	}
+
+	.qr-card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		text-align: center;
+		max-width: 320px;
+		margin-inline: auto;
+	}
+
+	.qr-image {
+		background: #fff;
+		padding: 0.5rem;
+		border-radius: 8px;
+		margin-inline: auto;
+		display: block;
+	}
+
+	.qr-code {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 1.25rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		color: var(--text-strong);
+		margin: 0;
+	}
+
+	.qr-placeholder {
+		width: 180px;
+		height: 180px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--bg-muted);
+		border-radius: 8px;
+		color: var(--text-muted);
+		font-size: 0.875rem;
+	}
+
+	.qr-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		justify-content: center;
+	}
+
+	.tiles {
 			grid-template-columns: 1fr;
 		}
 

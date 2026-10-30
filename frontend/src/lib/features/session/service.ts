@@ -147,6 +147,7 @@ export const listSessions = async (params?: {
 		presentCount: item.present_count,
 		lateCount: item.late_count,
 		absentCount: item.absent_count,
+		pendingCount: item.pending_count ?? 0,
 		status: item.status,
 	}));
 
@@ -273,6 +274,8 @@ export const getActiveSession = async (sessionId: number): Promise<LiveSession> 
 		excuseReason: student.excuse_reason,
 	}));
 
+	const course = courseFor(response.offering);
+
 	return {
 		id: response.id,
 		offeringId: response.offering,
@@ -281,6 +284,8 @@ export const getActiveSession = async (sessionId: number): Promise<LiveSession> 
 		offeringCode: courseCodeFor(response.offering),
 		offeringName: courseNameFor(response.offering),
 		offeringSections: sectionsFor(response.offering),
+		offeringProgram: response.program_code ?? course?.programCode ?? null,
+		offeringYearLevel: response.year_level_label ?? course?.yearLevelLabel ?? null,
 		sessionCode: response.session_code,
 		scanWindowRemaining: response.scan_window_remaining,
 		scheduledStartTime: response.scheduled_start_time,
