@@ -53,8 +53,8 @@
 			}
 			return e.message;
 		}
-		if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired'))
-			return e.code === 'otp_expired' ? 'That code has expired. Request a new one.' : 'That code is incorrect. Check your email and try again.';
+		if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired' || e.code === 'otp_max_attempts'))
+			return e.code === 'otp_expired' ? 'That code has expired. Request a new one.' : e.code === 'otp_max_attempts' ? 'Too many incorrect codes. Request a new code.' : 'That code is incorrect. Check your email and try again.';
 		if (e instanceof APIError && e.code === 'password_policy_violation')
 			return 'Password does not meet the required policy.';
 		return e instanceof Error && e.message ? e.message : fallback;
@@ -112,7 +112,7 @@
 			}, 1500);
 		} catch (e: unknown) {
 			error = toMessage(e, 'Password reset failed. Please try again.');
-			if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired')) {
+			if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired' || e.code === 'otp_max_attempts')) {
 				step = 'otp';
 			}
 		} finally {
