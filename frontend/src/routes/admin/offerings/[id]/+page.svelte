@@ -61,6 +61,7 @@
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
 	import ClassroomMapPicker from '$lib/components/ClassroomMapPicker.svelte';
+import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	import { APIError } from '$lib/api/client';
 	import {
 		WEEKLY_HOURS_CODES,
@@ -125,6 +126,7 @@
 	);
 	let settingsError = $state<string | null>(null);
 	let settingsBusy = $state(false);
+	let settingsOpen = $state(false);
 	let archiveBusy = $state(false);
 
 	// Scheduled components (D77: per-type schedules). The offering row
@@ -507,8 +509,10 @@
 				default_classroom_radius_meters: radius,
 			});
 			fillSettings();
+			settingsOpen = false;
 		} catch (e: unknown) {
 			settingsError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			settingsOpen = true;
 		} finally {
 			settingsBusy = false;
 		}
@@ -1201,8 +1205,8 @@
 					{#if offering.classroomLat !== undefined && offering.classroomLng !== undefined}
 						<div><dt>Geofence center</dt><dd>{offering.classroomLat}, {offering.classroomLng}</dd></div>
 					{/if}
-					<div><dt>Present window</dt><dd>{offering.presentWindowMinutes === null ? 'System default' : `${offering.presentWindowMinutes} min`}</dd></div>
-					<div><dt>Late window</dt><dd>{offering.lateWindowMinutes === null ? 'System default' : `${offering.lateWindowMinutes} min`}</dd></div>
+					<div><dt>Present window</dt><dd>{offering.presentWindowMinutes ?? systemDefaults?.present ?? '—'} min{offering.presentWindowMinutes === null ? ' (system default)' : ''}</dd></div>
+					<div><dt>Late window</dt><dd>{offering.lateWindowMinutes ?? systemDefaults?.late ?? '—'} min{offering.lateWindowMinutes === null ? ' (system default)' : ''}</dd></div>
 					<div><dt>Enrolled</dt><dd>{offering.enrolledCount}</dd></div>
 				</dl>
 				{#if course}
@@ -1530,11 +1534,24 @@
 			</section>
 
 			<section class="card">
-				<h2 class="card-title">Offering settings</h2>
+				<div class="card-head">
+					<h2 class="card-title">Offering settings</h2>
+					{#if !settingsOpen}
+						<button class="btn btn-primary btn-small" style="margin-bottom: 0.5rem;" onclick={() => (settingsOpen = true)}>Edit offering settings</button>
+					{/if}
+				</div>
 				<p class="muted">Rates and windows only. Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
 				{#if settingsError}
 					<p class="error" role="alert">{settingsError}</p>
 				{/if}
+				{#if !settingsOpen}
+					<dl class="settings-summary">
+						<div><dt>Present window</dt><dd>{offering.presentWindowMinutes ?? systemDefaults?.present ?? '—'} min{offering.presentWindowMinutes === null ? ' (system default)' : ''}</dd></div>
+						<div><dt>Late window</dt><dd>{offering.lateWindowMinutes ?? systemDefaults?.late ?? '—'} min{offering.lateWindowMinutes === null ? ' (system default)' : ''}</dd></div>
+						<div><dt>Geofence radius</dt><dd>{offering.defaultClassroomRadiusMeters ?? systemDefaults?.radius ?? '—'} m{offering.defaultClassroomRadiusMeters === null ? ' (system default)' : ''}</dd></div>
+					</dl>
+				{/if}
+				{#if settingsOpen}
 				<div class="form">
 					<div class="grid2">
 						<label>Sessions / week (automatic)<input class="input" value={detailSessionCount} disabled aria-label="Sessions per week, counted automatically from the meetings" /></label>
@@ -1564,13 +1581,22 @@
 						onChange={(la, lo) => { s_lat = String(la); s_lng = String(lo); }}
 						onClear={() => { s_lat = ''; s_lng = ''; }}
 					/>
-					<div class="grid2">
-						<label>Geofence radius, m<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.radius})` : 'System default'} bind:value={s_radius} /></label>
+					<div class="field">
+						<RadiusSelector
+							value={Number(s_radius) || systemDefaults?.radius || 50}
+							min={1}
+							max={1000}
+							defaultValue={systemDefaults?.radius}
+							inheriting={s_radius.trim() === ''}
+							defaultChipLabel={systemDefaults ? `Default (${systemDefaults.radius} m)` : 'Default'}
+							onDefault={() => (s_radius = '')}
+							onChange={(v) => (s_radius = String(v))}
+						/>
+						<p class="hint">
+							Blank inherits the value set in System Settings. A value here applies to this
+							offering's sessions only.
+						</p>
 					</div>
-					<p class="hint">
-						Blank inherits the value set in System Settings. A value here applies to this
-						offering's sessions only.
-					</p>
 				</div>
 				<div class="modal-actions">
 					<button class="btn btn-ghost" onclick={fillSettings}>Reset</button>
@@ -1578,6 +1604,7 @@
 						{settingsBusy ? 'Saving…' : 'Save'}
 					</button>
 				</div>
+				{/if}
 			</section>
 
 			<section class="card danger">
@@ -2692,5 +2719,40 @@
 		.facts {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+
+
+
+	.card-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+	.settings-summary {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+		gap: 0.5rem 1rem;
+		padding: 0.5rem 0;
+		margin: 0;
+	}
+	.settings-summary div {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+	.settings-summary dt {
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--text-muted, #666);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.settings-summary dd {
+		margin: 0;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		color: var(--text-strong, #111);
 	}
 </style>

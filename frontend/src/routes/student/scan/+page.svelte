@@ -30,8 +30,9 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import type { LivenessEvidence } from '$lib/shared/types';
+	import { requestBestPosition, calculateDistanceMeters } from '$lib/shared/utils/geo';
 
-	type Step = 'entry' | 'confirm' | 'liveness';
+	type Step = 'entry' | 'confirm' | 'location' | 'liveness';
 
 	let sessionCode = $state('');
 	let session = $state<SessionVerification | null>(null);
@@ -66,6 +67,12 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let rejectionReason = $state('');
 	let resultStatus = $state<'present' | 'late'>('present');
 	let scannedAt = $state('');
+	let pendingLiveness = $state<LivenessEvidence | null>(null);
+	let locatingGps = $state(false);
+	let gpsFix = $state<{ lat: number; lng: number; accuracy: number } | null>(null);
+	let gpsStatus = $state<'locating' | 'high' | 'low' | 'unavailable' | 'permission'>('locating');
+	let gpsDistanceMeters = $state<number | null>(null);
+	let gpsError = $state<string | null>(null);
 	let countdown = $state(0);
 	let countdownTimerId: ReturnType<typeof setInterval> | null = null;
 
@@ -353,12 +360,32 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			}
 			verifiedNumber = entered;
 			verifiedName = result.studentName;
-			startLiveness();
+			if (geofenceRequired) {
+				pendingLiveness = null;
+				gpsFix = null;
+				gpsStatus = 'locating';
+				gpsDistanceMeters = null;
+				gpsError = null;
+				step = 'location';
+				void requestGps();
+			} else {
+				startLiveness();
+			}
 		} catch (error) {
 			if (isNetworkError(error)) {
 				// Offline: proceed without the gate; submit queues for sync.
 				verifiedNumber = entered;
-				startLiveness();
+				if (geofenceRequired) {
+					pendingLiveness = null;
+					gpsFix = null;
+					gpsStatus = 'locating';
+					gpsDistanceMeters = null;
+					gpsError = null;
+					step = 'location';
+					void requestGps();
+				} else {
+					startLiveness();
+				}
 				return;
 			}
 			scanError = toScanMessage(error, 'Unable to check your ID number');
@@ -384,6 +411,12 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		scanError = null;
 		precheckFailed = false;
 		alreadyScannedStop = false;
+		pendingLiveness = null;
+		locatingGps = false;
+		gpsFix = null;
+		gpsStatus = 'locating';
+		gpsDistanceMeters = null;
+		gpsError = null;
 		step = 'confirm';
 	};
 
@@ -417,6 +450,12 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		session = null;
 		sessionCode = '';
 		scanError = null;
+		pendingLiveness = null;
+		locatingGps = false;
+		gpsFix = null;
+		gpsStatus = 'locating';
+		gpsDistanceMeters = null;
+		gpsError = null;
 		rejectionReason = '';
 		scannedAt = '';
 		showQueued = false;
@@ -493,13 +532,55 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		}
 	};
 
-	const handleLivenessComplete = async (livenessEvidence: LivenessEvidence) => {
-		if (submitting) return;
-		if (!session) {
-			rejectionReason = 'Verify the session before starting face liveness';
-			showFailure = true;
-			return;
+	const geofenceRequired = $derived(
+		session !== null &&
+			session.geofenceEnabled !== false &&
+			session.isRemote !== true &&
+			session.geofence.lat !== null &&
+			session.geofence.lng !== null
+	);
+
+	const requestGps = async () => {
+		if (!session) return;
+		locatingGps = true;
+		gpsFix = null;
+		gpsError = null;
+		gpsDistanceMeters = null;
+		gpsStatus = 'locating';
+		try {
+			const fix = await requestBestPosition({
+				desiredAccuracy: 50,
+				maxFixes: 3,
+				timeoutMs: 10000
+			});
+			gpsFix = fix;
+			const center = session.geofence;
+			const dist = calculateDistanceMeters(
+				fix.lat,
+				fix.lng,
+				center.lat as number,
+				center.lng as number
+			);
+			gpsDistanceMeters = dist;
+			gpsStatus = fix.accuracy <= 50 ? 'high' : 'low';
+		} catch (e) {
+			if (e instanceof APIError) {
+				if (e.code === 'location_permission_denied') gpsStatus = 'permission';
+				else if (e.code === 'location_timeout') gpsStatus = 'unavailable';
+				else gpsStatus = 'unavailable';
+				gpsError = e.message;
+			} else {
+				gpsStatus = 'unavailable';
+				gpsError = e instanceof Error ? e.message : 'Unable to get your location.';
+			}
+		} finally {
+			locatingGps = false;
 		}
+	};
+
+	const doSubmit = async (gps: { lat: number; lng: number; accuracy: number } | null) => {
+		if (submitting || !session || !pendingLiveness) return;
+		const livenessEvidence = pendingLiveness;
 		// Prefer the precheck-verified number; fall back to the profile when
 		// the gate was skipped offline.
 		const submitNumber = verifiedNumber || studentNumber;
@@ -519,23 +600,9 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		showQueued = false;
 		scanError = null;
 
-		let gps: { lat: number; lng: number; accuracy: number } | null = null;
 		let reachedSubmit = false;
 		try {
-			// Location is only required when the session actually enforces a
-			// geofence. Requesting it otherwise (no classroom, disabled, or
-			// remote) would prompt for permission without a feature needing it.
-			const geofenceRequired =
-				session.geofenceEnabled !== false &&
-				session.isRemote !== true &&
-				session.geofence.lat !== null &&
-				session.geofence.lng !== null;
-			if (geofenceRequired) {
-				gps = await getCurrentPosition();
-				// The contract allows a null center (session/schema.py VerifyGeofence),
-				// and the server skips its check in that case — so does this pre-check.
-				// Without the guard, null coerces to 0 in the Haversine math and every
-				// scan reads as thousands of km "outside" a center that was never set.
+			if (geofenceRequired && gps) {
 				if (
 					!validateGPS(
 						gps.lat,
@@ -578,10 +645,6 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				}
 			}, 1000);
 		} catch (error) {
-			// The scan completed locally but the POST never reached the server:
-			// queue the evidence (device-time scanned_at) for automatic sync.
-			// Anything before the POST — GPS, geofence, server rejections —
-			// keeps the failure overlay, since there is nothing valid to queue.
 			if (reachedSubmit && session && isNetworkError(error)) {
 				try {
 					await queue.enqueue({
@@ -612,6 +675,27 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		} finally {
 			submitting = false;
 		}
+	};
+
+	const handleLivenessComplete = async (livenessEvidence: LivenessEvidence) => {
+		if (submitting) return;
+		if (!session) {
+			rejectionReason = 'Verify the session before starting face liveness';
+			showFailure = true;
+			return;
+		}
+		pendingLiveness = livenessEvidence;
+		livenessActive = false;
+
+		const submitNumber = verifiedNumber || studentNumber;
+		if (!submitNumber) {
+			rejectionReason = 'Student profile is unavailable. Reload and try again.';
+			showFailure = true;
+			return;
+		}
+
+		const gps = geofenceRequired ? gpsFix : null;
+		await doSubmit(gps);
 	};
 
 	const toggleQr = () => {
@@ -869,6 +953,64 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				</section>
 			{/if}
 		</div>
+	{:else if step === 'location'}
+		<div class="page">
+			<div class="page-header">
+				<button class="back-btn" onclick={backToConfirm} disabled={submitting}>
+					← <span>Back</span>
+				</button>
+				<h1>Location Check</h1>
+			</div>
+			<section class="card">
+				<h2 class="section-title">Location Check</h2>
+				{#if locatingGps}
+					<p class="footnote">Acquiring your location…</p>
+				{:else if gpsStatus === 'permission'}
+					<p class="error" role="alert">{gpsError ?? 'Location permission denied.'}</p>
+				{:else if gpsStatus === 'unavailable'}
+					<p class="error" role="alert">{gpsError ?? 'Location unavailable.'}</p>
+				{:else if gpsFix}
+					<p class="footnote">
+						GPS accuracy: {Math.round(gpsFix.accuracy)} m
+						{#if gpsDistanceMeters !== null}
+							· Distance to classroom: {Math.round(gpsDistanceMeters)} m
+						{/if}
+						{#if session}
+							· Required radius: {session.geofence.radius} m
+						{/if}
+					</p>
+					{#if gpsStatus === 'low'}
+						<p class="footnote" role="status">Low accuracy — you may continue, but the result may be reviewed.</p>
+					{/if}
+					{#if gpsDistanceMeters !== null && session && gpsDistanceMeters > session.geofence.radius}
+						<p class="error" role="alert">You appear to be outside the attendance geofence.</p>
+					{:else if gpsDistanceMeters !== null}
+						<p class="footnote" role="status">Within the attendance geofence.</p>
+					{/if}
+				{/if}
+				<div class="camera-actions" style="margin-top: 1.25rem;">
+					<button class="btn-secondary" disabled={locatingGps} onclick={() => void requestGps()}>
+						{locatingGps ? 'Locating…' : 'Retry Location'}
+					</button>
+					<button
+						class="btn-primary"
+						disabled={locatingGps || !gpsFix ||
+							(gpsDistanceMeters !== null && session !== null && gpsDistanceMeters > session.geofence.radius)}
+						onclick={() => {
+							if (gpsFix) {
+								step = 'liveness';
+								startLiveness();
+							}
+						}}
+					>
+						Continue
+					</button>
+				</div>
+				{#if scanError}
+					<p class="error" role="alert">{scanError}</p>
+				{/if}
+			</section>
+		</div>
 	{:else}
 		<div class="page">
 			<div class="page-header">
@@ -883,18 +1025,18 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				<div class="viewport">
 					<FaceScanner active={livenessActive} onComplete={handleLivenessComplete} />
 				</div>
-				<p class="footnote">
-					Phase 2: blink once for face liveness — then the head-tilt check
-					starts automatically (left, center, right, center).
-					Your result is submitted to the attendance service for verification.
-					The face-match score sent with your scan is a provisional client
-					value while server-side matching lands — what is verified today
-					is your liveness evidence.
-				</p>
-				{#if submitting}
-					<p class="footnote">Submitting attendance…</p>
-				{/if}
-			</section>
+					<p class="footnote">
+						Phase 2: blink once for face liveness — then the head-tilt check
+						starts automatically (left, center, right, center).
+						Your result is submitted to the attendance service for verification.
+						The face-match score sent with your scan is a provisional client
+						value while server-side matching lands — what is verified today
+						is your liveness evidence.
+					</p>
+					{#if submitting}
+						<p class="footnote">Submitting attendance…</p>
+					{/if}
+				</section>
 		</div>
 	{/if}
 
