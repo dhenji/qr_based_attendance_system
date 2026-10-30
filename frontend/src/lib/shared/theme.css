@@ -45,6 +45,31 @@
 	--shadow-lg: 0 20px 40px rgba(15, 23, 42, 0.25);
 }
 
+/* Mobile / touch ergonomics (app-wide, applies on top of per-page rules). */
+@media (max-width: 768px) {
+	/* iOS Safari zooms the viewport when an input's font-size is < 16px.
+	   Bump form controls to 16px on phones so focusing a field never
+	   triggers a layout shift. */
+	input,
+	select,
+	textarea {
+		font-size: 16px;
+	}
+
+	/* Prevent the 300ms double-tap-to-zoom delay on interactive elements. */
+	button,
+	a,
+	[role='button'],
+	[role='link'] {
+		touch-action: manipulation;
+	}
+}
+
+/* Remove the default tap highlight flash on touch devices. */
+* {
+	-webkit-tap-highlight-color: transparent;
+}
+
 :root[data-theme='dark'] {
 	color-scheme: dark;
 	--bg-page: #0f172a;
