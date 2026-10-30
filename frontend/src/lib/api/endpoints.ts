@@ -546,6 +546,18 @@ export const ResetPasswordEndpoint: EndpointDef<TokenResponse> = {
 	mock: () => MOCK_TOKENS,
 };
 
+export const AuthPasswordRecoveryStartEndpoint: EndpointDef<{ recovery_token: string; masked_email: string }> = {
+	url: '/auth/password-recovery/start',
+	method: 'POST',
+	mock: () => ({ recovery_token: 'mock-recovery-token', masked_email: 'j***@example.com' }),
+};
+
+export const AuthPasswordRecoveryResetEndpoint: EndpointDef<TokenResponse> = {
+	url: '/auth/password-recovery/reset',
+	method: 'POST',
+	mock: () => MOCK_TOKENS,
+};
+
 // Set/update security question (authenticated) —
 // POST /auth/security-question {question, answer} -> 204. The question is
 // stored server-side (plaintext under a legacy column name); only the answer
@@ -4814,6 +4826,8 @@ export const endpoints = {
 	authForgotPassword: ForgotPasswordEndpoint,
 	authForgotPasswordVerify: ForgotPasswordVerifyEndpoint,
 	authResetPassword: ResetPasswordEndpoint,
+	authPasswordRecoveryStart: AuthPasswordRecoveryStartEndpoint,
+	authPasswordRecoveryReset: AuthPasswordRecoveryResetEndpoint,
 	authSecurityQuestion: SecurityQuestionEndpoint,
 	// Student
 	studentProfile: StudentProfileEndpoint,

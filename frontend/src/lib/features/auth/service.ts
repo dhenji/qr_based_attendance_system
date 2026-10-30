@@ -267,6 +267,35 @@ export const resetPassword = async (
 	});
 };
 
+// Authenticated password recovery: the backend derives the recipient email from
+// the session, so no email is sent from the client.
+export const startPasswordRecovery = async (): Promise<{
+	recoveryToken: string;
+	maskedEmail: string;
+}> => {
+	if (isMockMode()) {
+		return { recoveryToken: 'mock-recovery-token', maskedEmail: 'j***@example.com' };
+	}
+
+	const response = await post<{ recovery_token: string; masked_email: string }>(
+		'authPasswordRecoveryStart',
+		{}
+	);
+	return { recoveryToken: response.recovery_token, maskedEmail: response.masked_email };
+};
+
+export const resetPasswordAuthenticated = async (
+	otpCode: string,
+	newPassword: string
+): Promise<TokenResponse> => {
+	if (isMockMode()) return mockResetPassword('mock@example.com');
+
+	return post<TokenResponse>('authPasswordRecoveryReset', {
+		otp_code: otpCode.trim(),
+		new_password: newPassword
+	});
+};
+
 // Set/update the signed-in account's security question + answer (the pair
 // the forgot-password wizard quizzes). Authenticated; 204, no content back.
 export const setSecurityQuestion = async (question: string, answer: string): Promise<void> => {

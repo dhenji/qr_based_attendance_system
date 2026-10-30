@@ -327,28 +327,15 @@ def test_recovery_token_type_is_distinct() -> None:
     assert RECOVERY_TOKEN_TYPE not in (PREAUTH_TOKEN_TYPE, "refresh")
 
 
-def test_reset_password_rejects_reused_password() -> None:
-    from datetime import datetime, timedelta, timezone
+def test_reset_password_allows_reused_password() -> None:
+    record = _resettable_user(password_hash=hash_password("OldPass1!"))
 
-    from core.security import hash_otp
-    from features.auth.exceptions import PasswordReusedException
-
-    now = datetime.now(timezone.utc)
-
-    record = SimpleNamespace(
-        id=3,
-        email="u@example.com",
-        is_active=True,
-        consumed_at=None,
-        expires_at=now + timedelta(minutes=5),
-        otp_hash=hash_otp("123456"),
-        password_hash=hash_password("OldPass1!"),
+    tokens = asyncio.run(
+        _service(record).reset_password("reset.me@example.com", "123456", "OldPass1!")
     )
 
-    service = _service(record)
-
-    with pytest.raises(PasswordReusedException):
-        asyncio.run(service.reset_password("u@example.com", "123456", "OldPass1!"))
+    assert tokens.access_token
+    assert tokens.refresh_token
 
 
 def _resettable_user(**kwargs):

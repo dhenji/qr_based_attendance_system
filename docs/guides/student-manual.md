@@ -388,7 +388,7 @@ scanned during attendance; identity comes from your signed-in account.
 | **Appearance**      | Theme: Light / Dark                                                                                         |
 | **Notifications**   | Push (on/off), Email (on/off)                                                                               |
 | **Privacy**         | Share GPS for attendance (on/off), Enable camera scanning (on/off)                                          |
-| **Security**        | Change Password (policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol), Set Up MFA, Set Security Question |
+| **Security**        | Change Password (opens the recovery page; logged-in users skip email entry and reuse is allowed), Set Up MFA, Set Security Question |
 | **Face Enrollment** | Status: Enrolled / Not enrolled — contact admin to re-enroll                                                |
 | **App Version**     | Display only                                                                                                |
 

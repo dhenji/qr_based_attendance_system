@@ -19,6 +19,7 @@ import {
 	register,
 	resendLoginOtp,
 	resetPassword,
+	resetPasswordAuthenticated,
 	verifyLoginOtp,
 	verifyMfa,
 } from '$lib/features/auth/service';
@@ -364,6 +365,31 @@ export const doResetPassword = async (
 	return withLoading(async () => {
 		try {
 			const tokens = await resetPassword(email, otpCode, newPassword);
+
+			if (tokens.mfa_pending) {
+				clearTokens();
+				authState.mfaPending = true;
+				authState.preauthToken = tokens.preauth_token;
+				authState.status = 'anonymous';
+				return null;
+			}
+
+			return await establishSession(tokens);
+		} catch (error: unknown) {
+			authState.error = toMessage(error, 'Password reset failed. Please try again.');
+			throw error;
+		}
+	});
+};
+
+export const doResetPasswordAuthenticated = async (
+	otpCode: string,
+	newPassword: string
+): Promise<User | null> => {
+	authState.error = null;
+	return withLoading(async () => {
+		try {
+			const tokens = await resetPasswordAuthenticated(otpCode, newPassword);
 
 			if (tokens.mfa_pending) {
 				clearTokens();

@@ -358,7 +358,7 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 **Available Actions**:
 
-- **Change Password**: Policy — 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol
+- **Change Password**: Opens the recovery page (logged-in users skip email entry; password reuse allowed) — Policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol
 - **Set Up MFA**: TOTP authenticator app + backup codes
 - **Set Security Question**: Used for password reset fallback
 
