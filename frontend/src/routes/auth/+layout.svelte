@@ -21,6 +21,7 @@
 <style>
 	:global(main.auth) {
 		min-height: calc(100vh - 3.75rem);
+		min-height: calc(100dvh - 3.75rem);
 		position: relative;
 		isolation: isolate;
 	}

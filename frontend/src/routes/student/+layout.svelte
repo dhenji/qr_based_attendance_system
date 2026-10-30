@@ -279,6 +279,7 @@
 <style>
 	.shell {
 		min-height: 100vh;
+		min-height: 100dvh;
 		background: var(--bg-page);
 		overflow-x: hidden;
 	}
@@ -366,6 +367,7 @@
 	.body {
 		display: flex;
 		min-height: calc(100vh - 64px);
+		min-height: calc(100dvh - 64px);
 		min-width: 0;
 	}
 

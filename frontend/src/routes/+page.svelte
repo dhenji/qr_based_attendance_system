@@ -187,6 +187,7 @@
 <style>
 	.landing {
 		min-height: 100vh;
+		min-height: 100dvh;
 		font-family: var(--font-ui);
 		background: var(--bg-page);
 		color: var(--text);
