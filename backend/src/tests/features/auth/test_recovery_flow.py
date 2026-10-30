@@ -44,6 +44,12 @@ def _user(**kwargs):
         must_change_password=False,
         security_question_hash=QUESTION,
         security_answer_hash=hash_password("bluebell"),
+        failed_login_attempts=0,
+        is_locked=False,
+        locked_at=None,
+        lockout_level=0,
+        last_lockout_at=None,
+        lockout_override_until=None,
     )
 
     defaults.update(kwargs)
@@ -357,6 +363,9 @@ def _resettable_user(**kwargs):
         failed_login_attempts=0,
         is_locked=False,
         locked_at=None,
+        lockout_level=0,
+        last_lockout_at=None,
+        lockout_override_until=None,
         password_hash=hash_password("OldPass1!"),
         consumed_at=None,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),

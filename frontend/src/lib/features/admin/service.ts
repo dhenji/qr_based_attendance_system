@@ -39,6 +39,10 @@ import type {
 	AdminUserCreateResponse,
 	AdminUserFilters,
 	AdminUserResponse,
+	LockoutStatus,
+	LockoutStatusResponse,
+	LockoutReasonRequest,
+	LockoutOverrideRequest,
 	AdminUserRole,
 	ProfessorImportResult,
 	StudentImportResult,
@@ -415,6 +419,77 @@ export const resetUserPassword = async (userId: number): Promise<string> => {
 		`/${userId}/reset-password`
 	);
 	return response.temp_password;
+};
+
+// --- Account lockout (admin override) -----------------------------------------
+//
+// Five routes on /admin/users/{id}/lockout. Names a `users.id` directly.
+// Super-admin only (backend gate is admin, which super-admin passes). Mutations
+// return 204 (void); status returns LockoutStatus (camelCase view model).
+
+const toLockoutStatus = (r: LockoutStatusResponse): LockoutStatus => ({
+	userId: r.user_id,
+	email: r.email,
+	role: r.role,
+	isLocked: r.is_locked,
+	isPermanentlyLocked: r.is_permanently_locked,
+	lockedAt: r.locked_at ?? undefined,
+	lockoutLevel: r.lockout_level,
+	lockoutDurationMinutes: r.lockout_duration_minutes,
+	lockedUntil: r.locked_until ?? undefined,
+	remainingMinutes: r.remaining_minutes ?? undefined,
+	lastLockoutAt: r.last_lockout_at ?? undefined,
+	overrideUntil: r.override_until ?? undefined,
+	overrideRemainingMinutes: r.override_remaining_minutes ?? undefined,
+});
+
+export const getLockoutStatus = async (userId: number): Promise<LockoutStatus> => {
+	const response = await get<LockoutStatusResponse>(
+		'adminUserLockoutStatus',
+		undefined,
+		`/${userId}/lockout`
+	);
+	return toLockoutStatus(response);
+};
+
+export const releaseLockout = async (userId: number, reason: string): Promise<void> => {
+	await post<void>(
+		'adminUserLockoutRelease',
+		{ reason } satisfies LockoutReasonRequest,
+		undefined,
+		`/${userId}/lockout/release`
+	);
+};
+
+export const resetLockoutCounter = async (userId: number, reason: string): Promise<void> => {
+	await post<void>(
+		'adminUserLockoutResetCounter',
+		{ reason } satisfies LockoutReasonRequest,
+		undefined,
+		`/${userId}/lockout/reset-counter`
+	);
+};
+
+export const grantLockoutOverride = async (
+	userId: number,
+	durationMinutes: number,
+	reason: string
+): Promise<void> => {
+	await post<void>(
+		'adminUserLockoutOverride',
+		{ duration_minutes: durationMinutes, reason } satisfies LockoutOverrideRequest,
+		undefined,
+		`/${userId}/lockout/override`
+	);
+};
+
+export const revokeLockoutOverride = async (userId: number, reason: string): Promise<void> => {
+	await post<void>(
+		'adminUserLockoutOverrideRevoke',
+		{ reason } satisfies LockoutReasonRequest,
+		undefined,
+		`/${userId}/lockout/override/revoke`
+	);
 };
 
 // Names a roster row; the backend resolves it to an account and answers 409

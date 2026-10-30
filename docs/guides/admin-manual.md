@@ -393,3 +393,25 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 
 _For technical details on data models, API contracts, or offline-first behavior, see the [Architecture Docs](../architecture/)._
 
+
+---
+
+## 9. Account Lockout Management
+
+Admins (super_admin) manage lockouts from `/admin/users` → **Lockout** button on a user row.
+
+1. Open the user's **Lockout** modal to view status (level, duration, locked-at/until, remaining, override).
+2. Choose an action from the picker:
+   - **Release lockout** — clears the active lockout immediately.
+   - **Reset escalation counter** — forgives accumulated failures (does not unlock an active lock).
+   - **Grant temporary override** — allows login during an active lockout for 1–60 minutes.
+   - **Release and reset counter** — releases and resets escalation in one step.
+   - **Revoke override** — ends an active override (separate section, only when an override is active).
+3. Enter a reason (3–500 characters) — required for every action.
+4. Submit. Actions are audited with the reason.
+
+Notes:
+- The picker hides actions that do not apply (e.g., release/override when the lockout has expired or the account is not locked).
+- Permanently locked accounts show only **Release lockout**.
+- A user's own row has no Lockout button; self-recovery uses the forgot-password flow.
+- Successful password login resets the escalation level.

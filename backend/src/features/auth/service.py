@@ -52,12 +52,15 @@ from features.auth.exceptions import (
     AmbiguousAccountException,
     CurrentPasswordInvalid,
     InvalidCredentialsException,
-    LoginOtpLockedException,
+    InvalidOverrideDurationException,    LoginOtpLockedException,
+    PermanentAccountLockedException,
+
     MfaAlreadyEnabledException,
     MfaNotEnabledException,
     MfaVerifyException,
     OtpInvalidException,
     OtpExpiredException,
+    PermanentAccountLockedException,
     PasswordReusedException,
     RecoveryGrantRequiredException,
     RecoveryLockedException,
@@ -138,6 +141,13 @@ def _account_snapshot(user: User) -> dict[str, Any]:
         "failed_login_attempts": user.failed_login_attempts,
         "is_locked": user.is_locked,
         "locked_at": user.locked_at.isoformat() if user.locked_at else None,
+        "lockout_level": user.lockout_level,
+        "last_lockout_at": user.last_lockout_at.isoformat()
+        if user.last_lockout_at
+        else None,
+        "lockout_override_until": user.lockout_override_until.isoformat()
+        if user.lockout_override_until
+        else None,
         "must_change_password": user.must_change_password,
     }
 
@@ -164,12 +174,55 @@ async def _lockout_transaction() -> AsyncIterator[AsyncSession]:
             logger.exception("Lockout bookkeeping failed")
 
 
+def _escalation_minutes(settings: Settings, level: int) -> int:
+    raw: str = (settings.lockout_escalation_minutes or "").strip()
+    table: list[int] = []
+    if raw:
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                table.append(int(part))
+            except ValueError:
+                continue
+    if not table:
+        table = [settings.lockout_duration_minutes]
+    if level < 1:
+        level = 1
+    return table[min(level - 1, len(table) - 1)]
+
+
+def _escalation_table_len(settings: Settings) -> int:
+    raw: str = (settings.lockout_escalation_minutes or "").strip()
+    count: int = 0
+    for part in raw.split(","):
+        if part.strip():
+            try:
+                int(part.strip())
+                count += 1
+            except ValueError:
+                continue
+    return count if count > 0 else 1
+
+
+def _override_active(user: User) -> bool:
+    if user.lockout_override_until is None:
+        return False
+    return datetime.now(timezone.utc) < user.lockout_override_until
+
+
 async def _clear_expired_lockout(user_id: int) -> None:
     """Release a lock whose window has elapsed, and record the release."""
     async with _lockout_transaction() as session:
-        user: User | None = await session.get(User, user_id)
+        stmt = select(User).where(User.id == user_id).with_for_update()
+        user: User | None = (await session.execute(stmt)).scalar_one_or_none()
 
         if user is None:
+            return
+
+        # Never auto-clear a permanent lock.
+        if (user.lockout_level or 0) > _escalation_table_len(get_settings()):
             return
 
         old_value: dict[str, Any] = _account_snapshot(user)
@@ -191,18 +244,39 @@ async def _clear_expired_lockout(user_id: int) -> None:
 async def _register_failed_attempt(user_id: int, lockout_attempts: int) -> None:
     """Count one wrong password and lock the account on the threshold."""
     async with _lockout_transaction() as session:
-        user: User | None = await session.get(User, user_id)
+        stmt = select(User).where(User.id == user_id).with_for_update()
+        user: User | None = (await session.execute(stmt)).scalar_one_or_none()
 
         if user is None:
             return
+
+        now: datetime = datetime.now(timezone.utc)
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.failed_login_attempts += 1
         locked: bool = user.failed_login_attempts >= lockout_attempts
 
         if locked:
+            current_level: int = user.lockout_level or 0
+            # Escalation table length determines the maximum normal level.
+            try:
+                from core.config import get_settings
+
+                table_len: int = len(
+                    [p for p in (get_settings().lockout_escalation_minutes or "").split(",") if p.strip()]
+                )
+            except Exception:
+                table_len = 6
+            if table_len < 1:
+                table_len = 1
+            if current_level >= table_len:
+                # Promote to a permanent lock (level beyond the table).
+                user.lockout_level = table_len + 1
+            else:
+                user.lockout_level = current_level + 1
             user.is_locked = True
-            user.locked_at = datetime.now(timezone.utc)
+            user.locked_at = now
+            user.last_lockout_at = now
 
         await record_audit(
             session,
@@ -466,13 +540,24 @@ class AuthService:
 
         now: datetime = datetime.now(timezone.utc)
 
-        if user.is_locked and user.locked_at is not None:
+        override_active: bool = _override_active(user)
+
+        # Permanent lock: never auto-clears, even after the normal window.
+        if (user.lockout_level or 0) > _escalation_table_len(self._settings) and user.is_locked:
+            raise PermanentAccountLockedException()
+
+        if user.is_locked and user.locked_at is not None and not override_active:
+            duration_minutes: int = _escalation_minutes(
+                self._settings, user.lockout_level or 1
+            )
             locked_until: datetime = user.locked_at + timedelta(
-                minutes=self._settings.lockout_duration_minutes
+                minutes=duration_minutes
             )
 
             if now < locked_until:
                 remaining: int = int((locked_until - now).total_seconds() // 60) + 1
+                if remaining < 1:
+                    remaining = 1
                 raise AccountLockedException(remaining)
 
             await _clear_expired_lockout(user.id)
@@ -484,6 +569,8 @@ class AuthService:
         user.failed_login_attempts = 0
         user.is_locked = False
         user.locked_at = None
+        user.lockout_level = 0
+        user.last_lockout_at = None
         user.last_login = now
         await self._session.flush()
 
@@ -555,7 +642,10 @@ class AuthService:
             LOGIN_OTP_IP_MAX_ATTEMPTS,
             window_seconds,
         ):
-            raise RateLimitedException()
+            retry_after: int = await _login_otp_ip_limiter.retry_after_seconds(ip_key)
+            if retry_after <= 0:
+                retry_after = window_seconds
+            raise RateLimitedException(retry_after)
 
         try:
             await self.verify_otp(normalized, code, OtpPurpose.LOGIN)
@@ -842,6 +932,9 @@ class AuthService:
         user.failed_login_attempts = 0
         user.is_locked = False
         user.locked_at = None
+        user.lockout_level = 0
+        user.last_lockout_at = None
+        user.lockout_override_until = None
 
         await record_audit(
             self._session,
@@ -855,6 +948,154 @@ class AuthService:
         await self._session.flush()
 
         return temp_password
+
+    async def get_lockout_status(self, user_id: int) -> dict[str, Any]:
+        user: User | None = await self._users.get(user_id)
+        if user is None:
+            raise UserNotFoundException()
+
+        now: datetime = datetime.now(timezone.utc)
+        is_permanent: bool = (user.lockout_level or 0) > _escalation_table_len(
+            self._settings
+        )
+        if is_permanent:
+            duration_minutes: int = 0
+            locked_until = None
+        else:
+            duration_minutes: int = _escalation_minutes(
+                self._settings, user.lockout_level or 1
+            )
+            locked_until: datetime | None = None
+            if user.is_locked and user.locked_at is not None:
+                locked_until = user.locked_at + timedelta(minutes=duration_minutes)
+
+        remaining_minutes: int | None = None
+        if locked_until is not None and now < locked_until:
+            remaining_minutes = int((locked_until - now).total_seconds() // 60) + 1
+            if remaining_minutes < 1:
+                remaining_minutes = 1
+
+        override_remaining: int | None = None
+        if user.lockout_override_until is not None and now < user.lockout_override_until:
+            override_remaining = int(
+                (user.lockout_override_until - now).total_seconds() // 60
+            ) + 1
+            if override_remaining < 1:
+                override_remaining = 1
+
+        return {
+            "user_id": user.id,
+            "email": user.email,
+            "role": user.role,
+            "is_locked": user.is_locked,
+            "is_permanently_locked": is_permanent,
+            "locked_at": user.locked_at.isoformat() if user.locked_at else None,
+            "lockout_level": user.lockout_level or 0,
+            "lockout_duration_minutes": duration_minutes,
+            "locked_until": locked_until.isoformat() if locked_until else None,
+            "remaining_minutes": remaining_minutes,
+            "last_lockout_at": user.last_lockout_at.isoformat()
+            if user.last_lockout_at
+            else None,
+            "override_until": user.lockout_override_until.isoformat()
+            if user.lockout_override_until
+            else None,
+            "override_remaining_minutes": override_remaining,
+        }
+
+    async def release_lockout(
+        self, *, user_id: int, actor_id: int, reason: str
+    ) -> None:
+        user: User | None = await self._users.get(user_id)
+        if user is None:
+            raise UserNotFoundException()
+
+        old_value: dict[str, Any] = _account_snapshot(user)
+        user.is_locked = False
+        user.locked_at = None
+        user.failed_login_attempts = 0
+        user.lockout_level = 0
+        user.last_lockout_at = None
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UNLOCK,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value={**_account_snapshot(user), "reason": reason},
+        )
+        # store reason in audit via a separate field? record_audit signature?
+        await self._session.flush()
+
+    async def reset_violation_counter(
+        self, *, user_id: int, actor_id: int, reason: str
+    ) -> None:
+        user: User | None = await self._users.get(user_id)
+        if user is None:
+            raise UserNotFoundException()
+
+        old_value: dict[str, Any] = _account_snapshot(user)
+        user.lockout_level = 0
+        user.last_lockout_at = None
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value={**_account_snapshot(user), "reason": reason},
+        )
+        await self._session.flush()
+
+    async def grant_override(
+        self, *, user_id: int, actor_id: int, duration_minutes: int, reason: str
+    ) -> None:
+        if duration_minutes < 1 or duration_minutes > self._settings.lockout_override_max_minutes:
+            raise InvalidOverrideDurationException(self._settings.lockout_override_max_minutes)
+
+        user: User | None = await self._users.get(user_id)
+        if user is None:
+            raise UserNotFoundException()
+
+        now: datetime = datetime.now(timezone.utc)
+        old_value: dict[str, Any] = _account_snapshot(user)
+        user.lockout_override_until = now + timedelta(minutes=duration_minutes)
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value={**_account_snapshot(user), "reason": reason},
+        )
+        await self._session.flush()
+
+    async def revoke_override(
+        self, *, user_id: int, actor_id: int, reason: str
+    ) -> None:
+        user: User | None = await self._users.get(user_id)
+        if user is None:
+            raise UserNotFoundException()
+
+        old_value: dict[str, Any] = _account_snapshot(user)
+        user.lockout_override_until = None
+
+        await record_audit(
+            self._session,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value=old_value,
+            new_value={**_account_snapshot(user), "reason": reason},
+        )
+        await self._session.flush()
 
     async def setup_mfa(self, user: User) -> MFASetupResponse:
         if user.mfa_enabled:

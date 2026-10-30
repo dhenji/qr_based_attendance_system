@@ -84,6 +84,30 @@ class AccountLockedException(AuthDomainException):
         )
 
 
+
+class PermanentAccountLockedException(AppException):
+    """423 - account is permanently locked; only an admin can release it."""
+
+    status_code: int = 423
+    code: str = "account_permanently_locked"
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="This account has been permanently locked. Contact an administrator."
+        )
+
+class InvalidOverrideDurationException(AuthDomainException):
+    """422 - override duration outside allowed range."""
+
+    status_code: int = 422
+    code: str = "invalid_override_duration"
+
+    def __init__(self, max_minutes: int) -> None:
+        super().__init__(
+            message=f"Override duration must be between 1 and {max_minutes} minutes"
+        )
+
+
 class OtpInvalidException(AuthDomainException):
     """400 - OTP code does not match."""
 

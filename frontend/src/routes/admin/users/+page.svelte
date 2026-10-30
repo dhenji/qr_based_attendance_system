@@ -17,15 +17,16 @@
 		reactivateAdminUser,
 		refreshAdminUsers,
 	} from '$lib/features/admin/store.svelte';
-	import { createUser, resetUserPassword } from '$lib/features/admin/service';
+	import { createUser, resetUserPassword, getLockoutStatus, releaseLockout, resetLockoutCounter, grantLockoutOverride, revokeLockoutOverride } from '$lib/features/admin/service';
 	import { adminUserCreateSchema } from '$lib/features/admin/schema';
-	import type { AdminUser, AdminUserRole } from '$lib/shared/types';
+	import type { AdminUser, AdminUserRole, LockoutStatus } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
-	import { formatLocalDate } from '$lib/shared/utils/format';
+	import { formatLocalDate, formatLocalDateTime } from '$lib/shared/utils/format';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
+import { APIError } from '$lib/api/client';
 
 	// User Management (super_admin only, wireframe 4.13): wraps
 	// GET/POST /admin/users, PATCH /{id}/deactivate, PATCH /{id}/reactivate,
@@ -48,6 +49,29 @@
 	// Credential reset; shares TempPasswordModal with the students and
 	// professors rosters because the backend has one path behind all three.
 	let resetTarget = $state<AdminUser | null>(null);
+
+	// Account lockout modal state.
+	let lockoutTarget = $state<AdminUser | null>(null);
+	let lockoutStatus = $state<LockoutStatus | null>(null);
+	let lockoutLoading = $state(false);
+	let lockoutError = $state<string | null>(null);
+	let lockoutBusyAction = $state<string | null>(null);
+	let lockoutNotice = $state<string | null>(null);
+	let lockoutAction = $state<'release' | 'reset' | 'override' | 'release-reset'>('release');
+	let actionReason = $state('');
+	let revokeReason = $state('');
+	let overrideMinutes = $state(15);
+
+	$effect(() => {
+		if (!lockoutStatus) return;
+		const expired = lockoutStatus.isLocked && lockoutStatus.remainingMinutes === undefined;
+		const releaseAvailable = lockoutStatus.isPermanentlyLocked || (lockoutStatus.isLocked && !expired);
+		const overrideAvailable = lockoutStatus.isLocked && !lockoutStatus.isPermanentlyLocked && !expired;
+		if (lockoutAction === 'release' && !releaseAvailable) lockoutAction = 'reset';
+		if ((lockoutAction === 'override' || lockoutAction === 'release-reset') && !overrideAvailable) {
+			lockoutAction = releaseAvailable ? 'release' : 'reset';
+		}
+	});
 
 	let f_email = $state('');
 	let f_role = $state<'admin' | 'professor' | 'student'>('admin');
@@ -113,6 +137,106 @@
 
 	const displayName = (u: AdminUser) =>
 		[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email;
+
+	const describe = (e: unknown): string => {
+		if (e instanceof APIError) return e.message || 'Request failed.';
+		return e instanceof Error && e.message ? e.message : 'Request failed.';
+	};
+
+	const openLockout = async (u: AdminUser) => {
+		lockoutTarget = u;
+		lockoutStatus = null;
+		lockoutLoading = true;
+		lockoutError = null;
+		lockoutNotice = null;
+		actionReason = '';
+		revokeReason = '';
+		overrideMinutes = 15;
+		try {
+			const status = await getLockoutStatus(u.id);
+			if (!pageAlive) return;
+			if (status.userId !== u.id) return;
+			lockoutStatus = status;
+			const expired = status.isLocked && status.remainingMinutes === undefined;
+			const releaseAvailable = status.isPermanentlyLocked || (status.isLocked && !expired);
+			lockoutAction = releaseAvailable ? 'release' : 'reset';
+		} catch (e: unknown) {
+			if (!pageAlive) return;
+			const msg = describe(e);
+			if (e instanceof APIError && e.code === 'user_not_found') {
+				lockoutTarget = null;
+				lockoutStatus = null;
+				await refreshAdminUsers();
+				return;
+			}
+			lockoutError = msg;
+		} finally {
+			if (pageAlive) lockoutLoading = false;
+		}
+	};
+
+	const refreshLockoutStatus = async () => {
+		if (!lockoutTarget) return;
+		const u = lockoutTarget;
+		lockoutLoading = true;
+		lockoutError = null;
+		try {
+			const status = await getLockoutStatus(u.id);
+			if (!pageAlive) return;
+			lockoutStatus = status;
+			const expired2 = status.isLocked && status.remainingMinutes === undefined;
+			const releaseAvailable2 = status.isPermanentlyLocked || (status.isLocked && !expired2);
+			const available = (v: string) =>
+				v === 'release'
+					? releaseAvailable2
+					: v === 'override' || v === 'release-reset'
+						? status.isLocked && !status.isPermanentlyLocked && !expired2
+						: true;
+			if (!available(lockoutAction)) {
+				lockoutAction = releaseAvailable2 ? 'release' : 'reset';
+			}
+		} catch (e: unknown) {
+			if (!pageAlive) return;
+			const msg = describe(e);
+			if (e instanceof APIError && e.code === 'user_not_found') {
+				lockoutTarget = null;
+				lockoutStatus = null;
+				await refreshAdminUsers();
+				return;
+			}
+			lockoutError = msg;
+		} finally {
+			if (pageAlive) lockoutLoading = false;
+		}
+	};
+
+	const closeLockout = () => {
+		lockoutTarget = null;
+		lockoutStatus = null;
+		lockoutLoading = false;
+		lockoutError = null;
+		lockoutNotice = null;
+		lockoutBusyAction = null;
+	};
+
+	const runLockoutAction = async (action: string, fn: () => Promise<void>, clearReason: () => void) => {
+		lockoutBusyAction = action;
+		lockoutNotice = null;
+		lockoutError = null;
+		try {
+			await fn();
+			if (!pageAlive) return;
+			clearReason();
+			lockoutNotice = 'Action completed successfully.';
+			await refreshLockoutStatus();
+		} catch (e: unknown) {
+			if (!pageAlive) return;
+			lockoutError = describe(e);
+			await refreshLockoutStatus();
+		} finally {
+			if (pageAlive) lockoutBusyAction = null;
+		}
+	};
 
 	const openCreate = () => {
 		formError = null;
@@ -288,6 +412,9 @@
 										</button>
 									{/if}
 									<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+									{#if !isSelf(u)}
+										<button class="link" onclick={() => openLockout(u)}>Lockout</button>
+									{/if}
 								</div>
 							</td>
 						</tr>
@@ -449,6 +576,214 @@
 		onconfirm={() => resetUserPassword(resetTarget!.id)}
 		onclose={() => (resetTarget = null)}
 	/>
+{/if}
+
+{#if lockoutTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal lockout-modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="lockout-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (lockoutBusyAction ? undefined : closeLockout()) }}
+		>
+			<header class="lockout-header">
+				<div>
+					<h2 id="lockout-title" class="modal-title">Account lockout</h2>
+					<p class="lockout-subtitle">
+						<span class="lockout-name">{displayName(lockoutTarget)}</span>
+						<span class="lockout-email mono">{lockoutTarget.email}</span>
+					</p>
+				</div>
+				<span class="status-badge" class:locked={lockoutStatus?.isLocked} class:permanent={lockoutStatus?.isPermanentlyLocked}>
+					{lockoutStatus?.isPermanentlyLocked ? 'Permanently locked' : lockoutStatus?.isLocked ? 'Locked' : lockoutStatus ? 'Not locked' : '—'}
+				</span>
+			</header>
+
+			{#if lockoutNotice}
+				<p class="alert alert-success" role="status">{lockoutNotice}</p>
+			{/if}
+			{#if lockoutError}
+				<p class="alert alert-error" role="alert">{lockoutError}</p>
+			{/if}
+
+			{#if lockoutLoading && !lockoutStatus}
+				<div class="lockout-loading" aria-live="polite">
+					<span class="spinner" aria-hidden="true"></span>
+					Loading lockout status…
+				</div>
+			{:else if lockoutStatus}
+				<section class="lockout-status" aria-label="Lockout status">
+					{#if lockoutStatus.isPermanentlyLocked}
+						<div class="status-row">
+							<span class="status-label">State</span>
+							<span class="status-value">Permanently locked</span>
+						</div>
+					{/if}
+					<div class="status-row">
+						<span class="status-label">Level</span>
+						<span class="status-value">{lockoutStatus.lockoutLevel}</span>
+					</div>
+					{#if !lockoutStatus.isPermanentlyLocked}
+						<div class="status-row">
+							<span class="status-label">Duration</span>
+							<span class="status-value">{lockoutStatus.lockoutDurationMinutes} min</span>
+						</div>
+					{/if}
+					{#if lockoutStatus.lockedAt}
+						<div class="status-row">
+							<span class="status-label">Locked at</span>
+							<span class="status-value">{formatLocalDateTime(lockoutStatus.lockedAt)}</span>
+						</div>
+					{/if}
+					{#if !lockoutStatus.isPermanentlyLocked && lockoutStatus.lockedUntil}
+						<div class="status-row">
+							<span class="status-label">Locked until</span>
+							<span class="status-value">{formatLocalDateTime(lockoutStatus.lockedUntil)}</span>
+						</div>
+					{/if}
+					{#if !lockoutStatus.isPermanentlyLocked}
+						<div class="status-row">
+							<span class="status-label">Remaining</span>
+							<span class="status-value">
+								{#if lockoutStatus.remainingMinutes !== undefined}
+									{lockoutStatus.remainingMinutes} min
+								{:else if lockoutStatus.isLocked}
+									Expired (clears on next login attempt)
+								{:else}
+									—
+								{/if}
+							</span>
+						</div>
+					{/if}
+					{#if lockoutStatus.lastLockoutAt}
+						<div class="status-row">
+							<span class="status-label">Last lockout</span>
+							<span class="status-value">{formatLocalDateTime(lockoutStatus.lastLockoutAt)}</span>
+						</div>
+					{/if}
+					{#if lockoutStatus.overrideUntil}
+						<div class="status-row">
+							<span class="status-label">Override until</span>
+							<span class="status-value">{formatLocalDateTime(lockoutStatus.overrideUntil)}</span>
+						</div>
+					{/if}
+					{#if lockoutStatus.overrideRemainingMinutes !== undefined}
+						<div class="status-row">
+							<span class="status-label">Override remaining</span>
+							<span class="status-value">{lockoutStatus.overrideRemainingMinutes} min</span>
+						</div>
+					{/if}
+				</section>
+
+				{#if lockoutStatus.isLocked || lockoutStatus.lockoutLevel > 0}
+					<section class="lockout-section">
+						<h3 class="section-title">Lockout action</h3>
+						<p class="section-help">Choose an action and provide a reason.</p>
+						<label class="field">
+							<span>Action</span>
+							<select class="input" bind:value={lockoutAction} onchange={() => { actionReason = ''; overrideMinutes = 15; }}>
+								{#if lockoutStatus.isLocked && !lockoutStatus.isPermanentlyLocked && lockoutStatus.remainingMinutes !== undefined}
+									<option value="release">Release lockout</option>
+									<option value="override">Grant temporary override</option>
+									<option value="release-reset">Release and reset counter</option>
+								{/if}
+								{#if lockoutStatus.isLocked && !lockoutStatus.isPermanentlyLocked && lockoutStatus.remainingMinutes === undefined}
+									<!-- expired: no release/override/combined -->
+								{/if}
+								{#if lockoutStatus.isLocked && lockoutStatus.isPermanentlyLocked}
+									<option value="release">Release lockout</option>
+								{/if}
+								<option value="reset">Reset escalation counter</option>
+							</select>
+							<p class="section-help action-help">
+								{#if lockoutAction === 'release'}
+									Clears the active lockout immediately.
+								{:else if lockoutAction === 'reset'}
+									Resets the violation counter to zero.
+								{:else if lockoutAction === 'override'}
+									Allows login even while locked, for the chosen duration.
+								{:else if lockoutAction === 'release-reset'}
+									Releases the lockout and resets the escalation counter in one step.
+								{/if}
+							</p>
+						</label>
+						{#if lockoutAction === 'override' && lockoutStatus.isLocked && !lockoutStatus.isPermanentlyLocked}
+							<label class="field">
+								<span>Duration (minutes, 1–60)</span>
+								<input class="input" type="number" min="1" max="60" bind:value={overrideMinutes} />
+							</label>
+						{/if}
+						<label class="field">
+							<span>Reason <span class="required">*</span></span>
+							<textarea class="input" bind:value={actionReason} placeholder="Required (3–500 characters)" rows="2" aria-required="true"></textarea>
+							<span class="field-help">{actionReason.trim().length}/500</span>
+						</label>
+						<button
+							class="btn btn-primary"
+							title={actionReason.trim().length < 3 || actionReason.trim().length > 500 ? 'Enter a valid reason (3–500 characters)' : ''}
+							disabled={lockoutBusyAction !== null || actionReason.trim().length < 3 || actionReason.trim().length > 500 || (lockoutAction === 'override' && (overrideMinutes < 1 || overrideMinutes > 60))}
+							onclick={() => {
+								const reason = actionReason.trim();
+								if (lockoutAction === 'release') {
+									runLockoutAction('release', () => releaseLockout(lockoutTarget!.id, reason), () => (actionReason = ''));
+								} else if (lockoutAction === 'reset') {
+									runLockoutAction('reset', () => resetLockoutCounter(lockoutTarget!.id, reason), () => (actionReason = ''));
+								} else if (lockoutAction === 'override') {
+									runLockoutAction('override', () => grantLockoutOverride(lockoutTarget!.id, overrideMinutes, reason), () => (actionReason = ''));
+								} else if (lockoutAction === 'release-reset') {
+									runLockoutAction(
+										'release-reset',
+										async () => {
+											await releaseLockout(lockoutTarget!.id, reason);
+											await resetLockoutCounter(lockoutTarget!.id, reason);
+										},
+										() => (actionReason = '')
+									);
+								}
+							}}
+						>
+							{lockoutBusyAction === 'release'
+								? 'Releasing…'
+								: lockoutBusyAction === 'reset'
+									? 'Resetting…'
+									: lockoutBusyAction === 'override'
+										? 'Granting…'
+										: lockoutBusyAction === 'release-reset'
+											? 'Processing…'
+											: 'Submit'}
+						</button>
+					</section>
+				{/if}
+
+				{#if lockoutStatus.overrideUntil}
+					<section class="lockout-section">
+						<h3 class="section-title">Revoke override</h3>
+						<p class="section-help">Ends the active override immediately.</p>
+						<label class="field">
+							<span>Reason <span class="required">*</span></span>
+							<textarea class="input" bind:value={revokeReason} placeholder="Required (3–500 characters)" rows="2" aria-required="true"></textarea>
+							<span class="field-help">{revokeReason.trim().length}/500</span>
+						</label>
+						<button
+							class="btn btn-danger"
+							title={revokeReason.trim().length < 3 || revokeReason.trim().length > 500 ? 'Enter a valid reason (3–500 characters)' : ''}
+							disabled={lockoutBusyAction !== null || revokeReason.trim().length < 3 || revokeReason.trim().length > 500}
+							onclick={() =>
+								runLockoutAction('revoke', () => revokeLockoutOverride(lockoutTarget!.id, revokeReason.trim()), () => (revokeReason = ''))}
+						>
+							{lockoutBusyAction === 'revoke' ? 'Revoking…' : 'Revoke override'}
+						</button>
+					</section>
+				{/if}
+			{/if}
+
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={lockoutBusyAction !== null} onclick={closeLockout}>Close</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 <style>
@@ -762,4 +1097,166 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}
+
+	.lockout-modal {
+		max-width: 600px;
+	}
+
+	.lockout-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.lockout-subtitle {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		margin: 0.25rem 0 0;
+		font-size: 0.875rem;
+		color: var(--text-muted);
+	}
+
+	.lockout-name {
+		font-weight: 600;
+		color: var(--text);
+	}
+
+	.status-badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.25rem 0.75rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 700;
+		background: var(--success-bg);
+		color: var(--success);
+		white-space: nowrap;
+	}
+
+	.status-badge.locked {
+		background: var(--danger-bg);
+		color: var(--danger);
+	}
+
+	.status-badge.permanent {
+		background: var(--danger-bg);
+		color: var(--danger);
+		font-weight: 800;
+	}
+
+	.alert {
+		padding: 0.625rem 0.875rem;
+		border-radius: 8px;
+		font-size: 0.875rem;
+		margin: 0 0 1rem;
+	}
+
+	.alert-success {
+		background: var(--success-bg);
+		color: var(--success);
+	}
+
+	.alert-error {
+		background: var(--danger-bg);
+		color: var(--danger);
+	}
+
+	.lockout-loading {
+		display: flex;
+		align-items: center;
+		gap: 0.625rem;
+		padding: 1rem 0;
+		color: var(--text-muted);
+		font-size: 0.875rem;
+	}
+
+	.spinner {
+		width: 1rem;
+		height: 1rem;
+		border: 2px solid var(--border);
+		border-top-color: var(--accent);
+		border-radius: 50%;
+		animation: lockout-spin 0.8s linear infinite;
+	}
+
+	@keyframes lockout-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.lockout-status {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.375rem;
+		padding: 0.875rem 1rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-muted);
+		margin-bottom: 1rem;
+	}
+
+	.status-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		font-size: 0.875rem;
+	}
+
+	.status-label {
+		color: var(--text-muted);
+		font-weight: 600;
+	}
+
+	.status-value {
+		color: var(--text);
+		text-align: right;
+	}
+
+	.lockout-section {
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.875rem 1rem;
+		margin-bottom: 0.875rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+	}
+
+	.section-title {
+		margin: 0;
+		font-size: 0.9375rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.section-help {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+	}
+
+	.required {
+		color: var(--danger);
+	}
+
+	.field-help {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		text-align: right;
+	}
+
+
 </style>

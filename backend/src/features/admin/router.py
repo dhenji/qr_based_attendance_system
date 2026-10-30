@@ -17,7 +17,12 @@ from features.admin.schema import (
     AdminUserRead,
 )
 from features.auth.model import User
-from features.auth.schema import AdminPasswordResetResponse
+from features.auth.schema import (
+    AdminPasswordResetResponse,
+    LockoutOverrideRequest,
+    LockoutReasonRequest,
+    LockoutStatusResponse,
+)
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
@@ -103,3 +108,84 @@ async def reactivate_user(
     service: AdminServiceDep,
 ) -> None:
     await service.reactivate_user(actor_id=actor.id, user_id=user_id)
+
+
+@router.get(
+    "/{user_id}/lockout",
+    response_model=LockoutStatusResponse,
+    summary="Read account lockout state",
+)
+async def get_lockout_status(
+    user_id: int,
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    auth_service: AuthServiceDep,
+) -> LockoutStatusResponse:
+    data = await auth_service.get_lockout_status(user_id)
+    return LockoutStatusResponse(**data)
+
+
+@router.post(
+    "/{user_id}/lockout/release",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Release an active account lockout",
+)
+async def release_lockout(
+    user_id: int,
+    payload: LockoutReasonRequest,
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    auth_service: AuthServiceDep,
+) -> None:
+    await auth_service.release_lockout(
+        user_id=user_id, actor_id=actor.id, reason=payload.reason
+    )
+
+
+@router.post(
+    "/{user_id}/lockout/reset-counter",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Reset the lockout escalation counter",
+)
+async def reset_lockout_counter(
+    user_id: int,
+    payload: LockoutReasonRequest,
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    auth_service: AuthServiceDep,
+) -> None:
+    await auth_service.reset_violation_counter(
+        user_id=user_id, actor_id=actor.id, reason=payload.reason
+    )
+
+
+@router.post(
+    "/{user_id}/lockout/override",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Grant a temporary lockout override",
+)
+async def grant_lockout_override(
+    user_id: int,
+    payload: LockoutOverrideRequest,
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    auth_service: AuthServiceDep,
+) -> None:
+    await auth_service.grant_override(
+        user_id=user_id,
+        actor_id=actor.id,
+        duration_minutes=payload.duration_minutes,
+        reason=payload.reason,
+    )
+
+
+@router.post(
+    "/{user_id}/lockout/override/revoke",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke an active lockout override",
+)
+async def revoke_lockout_override(
+    user_id: int,
+    payload: LockoutReasonRequest,
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    auth_service: AuthServiceDep,
+) -> None:
+    await auth_service.revoke_override(
+        user_id=user_id, actor_id=actor.id, reason=payload.reason
+    )
