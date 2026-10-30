@@ -1590,7 +1590,9 @@ lock after 5 failed attempts.
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `password_reused` · 404 `unrecognized_email` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` |
+| POST   | `/auth/password-recovery/start`    | Start recovery for the authenticated user — mints a grant, sends OTP, returns `{ recovery_token, masked_email }` | 401 unauthorized |
+| POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` |
 | POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |

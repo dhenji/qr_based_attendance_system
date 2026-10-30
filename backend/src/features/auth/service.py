@@ -72,6 +72,7 @@ from features.auth.schema import (
     BackupCodesSummaryResponse,
     MeResponse,
     MFASetupResponse,
+    PasswordRecoveryStartResponse,
     RecoveryGrantResponse,
     SecurityQuestionResponse,
     TokenResponse,
@@ -89,6 +90,19 @@ logger: logging.Logger = logging.getLogger(__name__)
 _recovery_limiter = FixedWindowLimiter()
 _login_otp_limiter = FixedWindowLimiter()
 _login_otp_ip_limiter = FixedWindowLimiter()
+
+
+def _mask_email(email: str) -> str:
+    """Mask the local part of an email for display (e.g. j***@example.com)."""
+
+    local, separator, domain = email.partition("@")
+    if not separator:
+        return email
+    if len(local) <= 2:
+        masked_local = "*" * len(local)
+    else:
+        masked_local = local[0] + "*" * (len(local) - 2) + local[-1]
+    return f"{masked_local}@{domain}"
 
 
 def _decoy_question(email: str, settings: Settings) -> str:
@@ -725,9 +739,6 @@ class AuthService:
         if user is None or not user.is_active:
             raise UnrecognizedEmailException()
 
-        if verify_password(new_password, user.password_hash):
-            raise PasswordReusedException()
-
         old_value: dict[str, Any] = _account_snapshot(user)
 
         user.password_hash = hash_password(new_password)
@@ -754,6 +765,33 @@ class AuthService:
             )
 
         return self._build_tokens(user)
+
+    async def start_password_recovery(self, user: User) -> PasswordRecoveryStartResponse:
+        """Issue a recovery grant and OTP for the authenticated user's email.
+
+        The recipient is derived from the session, never from client input, so
+        an authenticated user can only ever recover their own account. The OTP
+        is minted through the same ``request_otp`` path as the public flow.
+        """
+
+        normalized: str = user.email.lower()
+        recovery_token: str = create_recovery_token(user.id, normalized, self._settings)
+
+        await self.request_otp(
+            normalized, OtpPurpose.FORGET_PASSWORD, recovery_token
+        )
+
+        return PasswordRecoveryStartResponse(
+            recovery_token=recovery_token,
+            masked_email=_mask_email(normalized),
+        )
+
+    async def reset_password_authenticated(
+        self, user: User, otp_code: str, new_password: str
+    ) -> TokenResponse:
+        """Reset the authenticated user's password, keyed off their session email."""
+
+        return await self.reset_password(user.email, otp_code, new_password)
 
     async def change_password(
         self, user: User, current_password: str, new_password: str

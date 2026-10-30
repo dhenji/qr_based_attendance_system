@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { onDestroy } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { authState, restoreSession } from '$lib/features/auth/store.svelte';
 	import { APIError } from '$lib/api/client';
 	import {
 		forgotPassword,
@@ -61,6 +62,15 @@
 	onDestroy(() => {
 		win.stop();
 		if (successTimer) clearTimeout(successTimer);
+	});
+
+	onMount(async () => {
+		await restoreSession();
+		const userEmail = authState.user?.email;
+		if (userEmail && step === 1) {
+			email = userEmail;
+			await handleStep1();
+		}
 	});
 
 	// Dismiss a stale failure as soon as the user starts correcting the form,

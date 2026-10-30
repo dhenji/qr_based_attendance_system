@@ -114,6 +114,17 @@ class RecoveryGrantResponse(BaseModel):
     recovery_token: str
 
 
+class PasswordRecoveryStartResponse(BaseModel):
+    """Returned when an authenticated user starts password recovery.
+
+    The recovery token gates OTP minting on the same path as the public
+    forgot-password flow; the masked email is for display only.
+    """
+
+    recovery_token: str
+    masked_email: str
+
+
 class ForgotPasswordStep1Request(OTPRequest):
     turnstile_token: str | None = None
 
@@ -137,6 +148,12 @@ class _NewPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(OTPRequest, _OTPCodeRequest, _NewPasswordRequest):
+    pass
+
+
+class PasswordRecoveryResetRequest(_OTPCodeRequest, _NewPasswordRequest):
+    """Reset payload for the authenticated recovery flow (no email field)."""
+
     pass
 
 
