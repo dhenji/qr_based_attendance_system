@@ -29,6 +29,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		min-height: 100vh;
+		min-height: 100dvh;
 		justify-content: center;
 		padding: 2rem 1.5rem;
 		text-align: center;

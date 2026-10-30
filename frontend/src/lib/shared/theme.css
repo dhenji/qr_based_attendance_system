@@ -70,6 +70,13 @@
 	-webkit-tap-highlight-color: transparent;
 }
 
+/* Notched phones: keep sticky topbars clear of the status bar / notch. */
+@media (max-width: 768px) {
+	.topbar {
+		padding-top: calc(0.625rem + env(safe-area-inset-top, 0px));
+	}
+}
+
 :root[data-theme='dark'] {
 	color-scheme: dark;
 	--bg-page: #0f172a;

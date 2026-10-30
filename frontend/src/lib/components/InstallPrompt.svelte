@@ -89,7 +89,7 @@
 		position: fixed;
 		left: 1rem;
 		right: 1rem;
-		bottom: 1rem;
+		bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
 		z-index: 60;
 		display: flex;
 		align-items: center;

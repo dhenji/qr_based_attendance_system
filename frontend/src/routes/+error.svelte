@@ -45,6 +45,7 @@
 		align-items: center;
 		gap: 1rem;
 		min-height: 100vh;
+		min-height: 100dvh;
 		justify-content: center;
 		padding: 2rem 1.5rem;
 	}
