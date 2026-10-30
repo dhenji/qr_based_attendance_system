@@ -885,3 +885,50 @@ export interface AdminUserFilters {
 export interface AdminPasswordResetResponse {
 	temp_password: string;
 }
+
+// --- Account lockout (admin override, backend LockoutStatusResponse) -----------
+//
+// Wire shape mirrors backend/src/features/auth/schema.py::LockoutStatusResponse
+// exactly (snake_case). The camelCase view-model is what pages render; the
+// service layer maps wire → view. Display only fields present in the response;
+// reason/source, failed-attempt count, and override history are unavailable.
+export interface LockoutStatusResponse {
+	user_id: number;
+	email: string;
+	role: string;
+	is_locked: boolean;
+	is_permanently_locked: boolean;
+	locked_at: string | null;
+	lockout_level: number;
+	lockout_duration_minutes: number;
+	locked_until: string | null;
+	remaining_minutes: number | null;
+	last_lockout_at: string | null;
+	override_until: string | null;
+	override_remaining_minutes: number | null;
+}
+
+export interface LockoutStatus {
+	userId: number;
+	email: string;
+	role: string;
+	isLocked: boolean;
+	isPermanentlyLocked: boolean;
+	lockedAt?: string;
+	lockoutLevel: number;
+	lockoutDurationMinutes: number;
+	lockedUntil?: string;
+	remainingMinutes?: number;
+	lastLockoutAt?: string;
+	overrideUntil?: string;
+	overrideRemainingMinutes?: number;
+}
+
+export interface LockoutReasonRequest {
+	reason: string;
+}
+
+export interface LockoutOverrideRequest {
+	duration_minutes: number;
+	reason: string;
+}

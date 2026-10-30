@@ -20,6 +20,8 @@
 
 ### Error Code Coverage
 
+Lockout override validation may return `invalid_override_duration`.
+
 Every code below appears in the `**Errors**` row (or summary-table column) of each
 endpoint that can return it, so this section no longer tracks an outstanding list —
 it records the exceptions to that rule instead. `src/tests/test_contract_error_codes.py`
@@ -1082,6 +1084,12 @@ admins; admins manage students/professors. Password resets set a temp password
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated admin (rejects self-reactivation; preserves password, MFA, lockout, and role) | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
+| GET    | `/admin/users/{user_id}/lockout`             | Account lockout status (`LockoutStatusResponse`, incl. `is_permanently_locked`) | admin (super_admin) | 404 `user_not_found` |
+Permanent lock raises `account_permanently_locked` (423) on `POST /auth/login` when an account is at the maximum escalation level.
+| POST   | `/admin/users/{user_id}/lockout/release`     | Release an active lockout (reason required) | admin (super_admin) | 404 `user_not_found` |
+| POST   | `/admin/users/{user_id}/lockout/reset-counter` | Reset the escalation counter (reason required) | admin (super_admin) | 404 `user_not_found` |
+| POST   | `/admin/users/{user_id}/lockout/override`    | Grant a temporary override (duration + reason) | admin (super_admin) | 404 `user_not_found` · 422 `invalid_override_duration` |
+| POST   | `/admin/users/{user_id}/lockout/override/revoke` | Revoke an active override (reason required) | admin (super_admin) | 404 `user_not_found` |
 | POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
 | POST   | `/admin/professors/{professor_id}/reset-password` | Reset linked professor-account password (temp once)| admin | 404 `professor_not_found` · 404 `user_not_found` · 409 `professor_account_unlinked` |
 

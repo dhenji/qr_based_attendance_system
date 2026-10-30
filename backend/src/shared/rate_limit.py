@@ -35,8 +35,16 @@ class RateLimitedException(AppException):
     status_code: int = 429
     code: str = "rate_limited"
 
-    def __init__(self) -> None:
-        super().__init__(message="Too many requests, please try again later")
+    def __init__(self, retry_after_seconds: int | None = None) -> None:
+        if retry_after_seconds is None or retry_after_seconds <= 0:
+            message = "Too many requests, please try again later"
+        else:
+            minutes = max(1, (retry_after_seconds + 59) // 60)
+            message = (
+                f"Too many requests, please try again in {minutes} "
+                f"minute{'s' if minutes != 1 else ''}."
+            )
+        super().__init__(message=message)
 
 
 class FixedWindowLimiter:
@@ -117,6 +125,24 @@ class FixedWindowLimiter:
 
         async with self._lock:
             self._windows.pop(key, None)
+
+    async def retry_after_seconds(self, key: str) -> int:
+        """Seconds remaining in ``key``'s current window (at least 1).
+
+        Used to build a ``RateLimitedException`` that tells the client how
+        long to wait. Returns the full window when no bucket exists.
+        """
+
+        async with self._lock:
+            entry: tuple[float, int, int] | None = self._windows.get(key)
+            if entry is None:
+                return 0
+            start, window, _ = entry
+            now: float = time.monotonic()
+            remaining: float = window - (now - start)
+            if remaining < 1:
+                remaining = 1
+            return int(remaining)
 
 
 _limiter = FixedWindowLimiter()
@@ -226,6 +252,9 @@ def rate_limit(
         bucket_key: str = f"{request.url.path}|{source.lower()}"
 
         if not await limiter.hit(bucket_key, max_calls, window_seconds):
-            raise RateLimitedException()
+            retry_after: int = await limiter.retry_after_seconds(bucket_key)
+            if retry_after <= 0:
+                retry_after = window_seconds
+            raise RateLimitedException(retry_after)
 
     return dependency

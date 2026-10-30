@@ -2260,3 +2260,34 @@
   Session" button.* Rejected: that button is disabled until a code exists, so
   the flow would still be "generate → enable → click", which is the same as a
   confirmation panel with extra steps.
+
+
+### ADR-085: Account Lockout Escalation, Permanent Lock, and Admin Management
+
+- **Decision:** Account lockout uses an escalating duration table
+  (`LOCKOUT_ESCALATION_MINUTES`, default `1,5,15,30,60,120`); escalation
+  persists indefinitely (no 24-hour decay) and resets only on successful login
+  or password reset. Reaching the table maximum (level 6) promotes the next
+  lockout to a permanent lock that never auto-clears; only an admin release
+  clears it and resets the level to 0. Expired (non-permanent) locks clear on
+  the next login attempt. Admins manage lockouts through `/admin/users` →
+  Lockout modal with a single action picker (release, reset counter, grant
+  override, release+reset), filtered by lock/expired/permanent state, a
+  required reason (3–500 chars), and a separate revoke-override section.
+  `LockoutStatusResponse` carries `is_permanently_locked`.
+- **Date:** 2026-10-30
+- **Status:** Accepted
+- **Context:** The previous 24-hour recovery decay caused repeated level-1
+  lockouts for returning users, and there was no way to permanently lock an
+  account after repeated abuse. Admin lockout management was super-admin-only
+  and lacked escalation reset.
+- **Consequences:** `AuthService.login` resets `lockout_level`/`last_lockout_at`
+  on successful password verification; `_clear_expired_lockout` never clears a
+  permanent lock; `release_lockout` resets the level; the frontend Lockout
+  modal filters picker options by lock/expired/permanent state and hides itself
+  on the current user's own row.
+- **Alternatives considered:**
+  (1) *Keep 24-hour decay.* Rejected: escalation reset too often for returning
+  users.
+  (2) *Add a separate permanent-lock column.* Rejected: the existing
+  `lockout_level` sentinel (level 7+) is sufficient and avoids a migration.

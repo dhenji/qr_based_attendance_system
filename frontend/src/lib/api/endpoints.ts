@@ -36,6 +36,7 @@ import type {
 	AdminStudentResponse,
 	AdminUserCreateResponse,
 	AdminUserResponse,
+	LockoutStatusResponse,
 	AnalyticsAtRiskItemResponse,
 	AnalyticsComparisonItemResponse,
 	AnalyticsCourseOptionsResponse,
@@ -3853,6 +3854,7 @@ const MOCK_AUDIT_ROWS: AuditLogItemResponse[] = [
 		old_value: {
 			failed_login_attempts: 4,
 			is_locked: false,
+			is_permanently_locked: false,
 			locked_at: null,
 			must_change_password: true,
 		},
@@ -4465,6 +4467,75 @@ export const AdminProfessorResetPasswordEndpoint: EndpointDef<AdminPasswordReset
 	},
 };
 
+// --- Admin account lockout (status + release + counter + override) -------------
+//
+// Five routes on backend features/admin/router.py under /admin/users/{id}/lockout.
+// Real API by default; mocks return an unlocked status and successful no-op
+// mutations (static fixtures, no backend state simulated).
+export const AdminUserLockoutStatusEndpoint: EndpointDef<LockoutStatusResponse> = {
+	url: '/admin/users',
+	method: 'GET',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_USER_ROWS.some((r) => r.id === id)) throw new Error('User not found.');
+		return {
+			user_id: id,
+			email: MOCK_ADMIN_USER_ROWS.find((r) => r.id === id)?.email ?? '',
+			role: 'admin',
+			is_locked: false,
+			is_permanently_locked: false,
+			locked_at: null,
+			lockout_level: 0,
+			lockout_duration_minutes: 0,
+			locked_until: null,
+			remaining_minutes: null,
+			last_lockout_at: null,
+			override_until: null,
+			override_remaining_minutes: null,
+		};
+	},
+};
+
+export const AdminUserLockoutReleaseEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_USER_ROWS.some((r) => r.id === id)) throw new Error('User not found.');
+		return mockNoContent();
+	},
+};
+
+export const AdminUserLockoutResetCounterEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_USER_ROWS.some((r) => r.id === id)) throw new Error('User not found.');
+		return mockNoContent();
+	},
+};
+
+export const AdminUserLockoutOverrideEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_USER_ROWS.some((r) => r.id === id)) throw new Error('User not found.');
+		return mockNoContent();
+	},
+};
+
+export const AdminUserLockoutOverrideRevokeEndpoint: EndpointDef<void> = {
+	url: '/admin/users',
+	method: 'POST',
+	mock: (_params, suffix) => {
+		const id = parseInt(suffix?.match(/\/(\d+)/)?.[1] ?? '', 10);
+		if (!MOCK_ADMIN_USER_ROWS.some((r) => r.id === id)) throw new Error('User not found.');
+		return mockNoContent();
+	},
+};
+
 // --- Professor excuse queue --------------------------------------------------
 //
 // Live routes on features/excuse/professor_router.py under the shared
@@ -4912,6 +4983,12 @@ export const endpoints = {
 	adminUserReactivate: AdminUserReactivateEndpoint,
 	// Admin password reset (three rosters, one backend implementation)
 	adminUserResetPassword: AdminUserResetPasswordEndpoint,
+	// Admin account lockout
+	adminUserLockoutStatus: AdminUserLockoutStatusEndpoint,
+	adminUserLockoutRelease: AdminUserLockoutReleaseEndpoint,
+	adminUserLockoutResetCounter: AdminUserLockoutResetCounterEndpoint,
+	adminUserLockoutOverride: AdminUserLockoutOverrideEndpoint,
+	adminUserLockoutOverrideRevoke: AdminUserLockoutOverrideRevokeEndpoint,
 	adminStudentResetPassword: AdminStudentResetPasswordEndpoint,
 	adminProfessorResetPassword: AdminProfessorResetPasswordEndpoint,
 	// Admin courses (templates, D44)
