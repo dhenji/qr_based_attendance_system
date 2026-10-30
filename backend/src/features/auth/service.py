@@ -60,6 +60,7 @@ from features.auth.exceptions import (
     MfaVerifyException,
     OtpInvalidException,
     OtpExpiredException,
+    OtpMaxAttemptsException,
     PermanentAccountLockedException,
     PasswordReusedException,
     RecoveryGrantRequiredException,
@@ -377,6 +378,7 @@ class AuthService:
                 OtpCodes.consumed_at.is_(None),
             )
             .order_by(OtpCodes.id.desc())
+            .with_for_update()
         )
 
         record: OtpCodes | None = (await self._session.scalars(stmt)).first()
@@ -386,6 +388,13 @@ class AuthService:
         if record.expires_at < now:
             raise OtpExpiredException()
         if not verify_otp_hash(code, record.otp_hash):
+            current_attempts: int = getattr(record, "failed_attempts", 0) or 0
+            record.failed_attempts = current_attempts + 1
+            if record.failed_attempts >= self._settings.otp_max_attempts:
+                record.consumed_at = now
+                await self._session.flush()
+                raise OtpMaxAttemptsException()
+            await self._session.flush()
             raise OtpInvalidException()
 
         record.consumed_at = now
@@ -650,6 +659,18 @@ class AuthService:
         try:
             await self.verify_otp(normalized, code, OtpPurpose.LOGIN)
         except OtpExpiredException:
+            raise
+        except OtpMaxAttemptsException:
+            await _login_otp_limiter.hit(
+                limiter_key,
+                LOGIN_OTP_MAX_ATTEMPTS,
+                window_seconds,
+            )
+            await _login_otp_ip_limiter.hit(
+                ip_key,
+                LOGIN_OTP_IP_MAX_ATTEMPTS,
+                window_seconds,
+            )
             raise
         except OtpInvalidException:
             await _login_otp_limiter.hit(

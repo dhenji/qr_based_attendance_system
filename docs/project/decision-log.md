@@ -2291,3 +2291,15 @@
   users.
   (2) *Add a separate permanent-lock column.* Rejected: the existing
   `lockout_level` sentinel (level 7+) is sufficient and avoids a migration.
+
+### ADR-086: Per-OTP Attempt Cap (Brute-Force Resistance)
+
+- **Decision:** Generic `verify_otp` (claim, recovery, and the underlying login-OTP check) enforces a persisted per-OTP cap of `OTP_MAX_ATTEMPTS` (default 5, configurable) wrong guesses. Each wrong guess increments `otp_codes.failed_attempts`; once the cap is reached the OTP is invalidated (`consumed_at = now`) and `400 otp_max_attempts` is raised, prompting a resend. The OTP row is read with `with_for_update()` to avoid lost updates. Expired or missing codes do not increment; a successful verification consumes the code as before. Login OTP keeps its per-email (5) and per-IP (25) fixed-window caps as the primary gate; the per-OTP cap is a backstop.
+- **Date:** 2026-10-30
+- **Status:** Accepted
+- **Context:** A 6-digit code could be guessed repeatedly within its 5-minute TTL, subject only to coarse route-level rate limits; recovery and claim OTPs had no invalidation after repeated wrong guesses.
+- **Consequences:** New `failed_attempts` column on `otp_codes` (migration `ff8df9fe1302`, server default 0); new `OTP_MAX_ATTEMPTS` setting (default 5, `ge=1`) and env var; new `OtpMaxAttemptsException` (400, `otp_max_attempts`), deliberately not a subclass of `OtpInvalidException` so `verify_login_otp` can account for it like a wrong guess. Frontend maps the code to "Too many incorrect codes. Request a new code." and prompts for a resend. Docs and AGENTS.md updated.
+- **Alternatives considered:**
+  (1) *In-memory limiter only.* Rejected: does not survive restarts or work across instances, and cannot invalidate the code itself.
+  (2) *Reuse `OtpInvalidException`.* Rejected: would be swallowed by `verify_login_otp`'s existing handler before the new cap could be accounted.
+  (3) *Relax to commit on failure.* Rejected for now: services stay flush-only; increments persist within the request transaction and the column is read back under `with_for_update()`.

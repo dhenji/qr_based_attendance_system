@@ -275,7 +275,8 @@ the API returns before the send completes, so give it a moment.
 | Sent OK but not received anywhere | Spam filtering, unverified sender, or From ≠ authenticated sender | Check spam; verify the sender at the relay (Brevo); align `SMTP_FROM` with the account/alias (Gmail). |
 | Some recipients receive, others never | Provider sandbox | Resend without a domain mails only the account owner; SES sandbox only verified recipients; Mailtrap/Mailpit deliver nowhere. |
 | `429 rate_limited` while testing | OTP-request limiter (5/60s per email) | Wait 60 seconds. |
-| `423 login_otp_locked` | 3 wrong login-OTP codes inside the 5-minute window | Use "resend" — it mints a fresh code and resets the per-email budget (a separate per-IP failure cap of 15 lasts 5 minutes). |
+| `423 login_otp_locked` | 5 wrong login-OTP codes inside the 5-minute window | Start over or request a new code — the current code is invalidated after 5 wrong guesses. |
+| `400 otp_max_attempts` | Too many incorrect codes for the current OTP (claim/recovery/login) | Request a new code (resend); the OTP is invalidated after `OTP_MAX_ATTEMPTS` (default 5) wrong guesses. |
 | A student/professor with MFA gets no OTP email | By design: TOTP is stronger than an emailed code | Expected; admins with MFA still receive the OTP before TOTP. |
 | Emails arrive ~10 s late | Inline send against a slow relay | Check `SMTP_TIMEOUT_SECONDS` and the relay's latency. |
 

@@ -128,6 +128,16 @@ class OtpExpiredException(AuthDomainException):
         super().__init__(message="OTP code has expired or was already used")
 
 
+class OtpMaxAttemptsException(AuthDomainException):
+    """400 - OTP code invalidated after too many wrong guesses."""
+
+    status_code: int = 400
+    code: str = "otp_max_attempts"
+
+    def __init__(self) -> None:
+        super().__init__(message="Too many incorrect codes. Request a new code.")
+
+
 class UnrecognizedEmailException(AuthDomainException):
     """404 - email is not in the roster (claim register)."""
 
@@ -230,8 +240,7 @@ class LoginOtpLockedException(AuthDomainException):
     def __init__(self, retry_after_minutes: int) -> None:
         super().__init__(
             message=(
-                "Login verification is temporarily locked due to too many "
-                f"failed attempts. Try again in {retry_after_minutes} minutes"
+                "Too many incorrect codes. Start over or request a new code."
             )
         )
 

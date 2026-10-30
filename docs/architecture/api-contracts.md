@@ -1590,17 +1590,17 @@ lock after 5 failed attempts.
 | --- |
 | ------ | ---------------------------------- | ---------------------------------------------------- |
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
-| POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
-| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
+| POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
 | POST   | `/auth/login`                      | Email/password login (+ OTP & MFA gates) | 400 `invalid_credentials` · 423 `account_locked` |
-| POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 423 `login_otp_locked` · 429 `rate_limited` |
+| POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 423 `login_otp_locked` · 429 `rate_limited` |
 | POST   | `/auth/login/resend`               | Resend login OTP (burns the previous code) | 400 `invalid_credentials` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` |
 | POST   | `/auth/password-recovery/start`    | Start recovery for the authenticated user — mints a grant, sends OTP, returns `{ recovery_token, masked_email }` | 401 unauthorized |
-| POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` |
+| POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
 | POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
@@ -1620,11 +1620,15 @@ exchanges `{otp_token, code}` for the token pair — or, for an admin with MFA
 enabled, for `{mfa_pending: true, preauth_token}` (OTP then TOTP). `POST
  /auth/login/resend` mints a fresh code and burns the previous one — and resets
  the email's wrong-code budget, since guesses against the burned code are
- guesses against a dead credential. Wrong codes are capped at 3 per email
+ guesses against a dead credential. Wrong codes are capped at 5 per email
  inside the 5-minute OTP window (then 423 `login_otp_locked`); a second,
- failure-only cap of 15 misses per client IP (then 429 `rate_limited`) survives
+ failure-only cap of 25 misses per client IP (then 429 `rate_limited`) survives
  email rotation — resends do not reset it. Expired codes and correct codes
- spend neither budget. The `otp_token` is a
+ spend neither budget. Every OTP verification is also subject to a per-OTP cap of
+ `OTP_MAX_ATTEMPTS` (default 5) wrong guesses: once exceeded the code is
+ invalidated and `400 otp_max_attempts` is returned, prompting a resend. This
+ applies to claim, recovery, and login OTPs; login OTP keeps its per-email (5)
+ and per-IP (25) caps as the primary gate. The `otp_token` is a
 5-minute `type="login_otp"` JWT carrying the account email: a missing,
 malformed, expired, wrong-typed, or email-mismatched grant — like a missing or
 inactive account — returns generic 400 `invalid_credentials`, and the grant is

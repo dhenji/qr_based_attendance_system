@@ -25,8 +25,9 @@ const MESSAGES: Record<string, string> = {
 
 	otp_invalid: 'That code is incorrect. Check your email and try again.',
 	otp_expired: 'That code has expired. Request a new one.',
+	otp_max_attempts: 'Too many incorrect codes. Request a new code.',
 	login_otp_locked:
-		'Too many incorrect codes. Wait a few minutes before trying again, or start over.',
+		'Too many incorrect codes. Start over or request a new code.',
 	recovery_locked:
 		'Too many recovery attempts. Wait a few minutes before trying again.',
 
