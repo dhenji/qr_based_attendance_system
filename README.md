@@ -116,7 +116,7 @@ session is `closed`. Scanned students keep their server-decided status.
 | Offline Mode     | Saves attendance locally when no internet; auto-uploads later                                                               |
 | Student Roster   | Import student from CSV file (with official email)                                                                          |
 | Dashboard        | View attendance in real time                                                                                                |
-| Analytics        | At-risk forecasting and recommendations for professors                                                                      |
+| Analytics        | At-risk forecasting and recommendations for professors; admin analytics and professor reports now filter by session type (LEC/LAB) |
 | Reports          | Download attendance reports (CSV/PDF/Print)                                                                                 |
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
 | Account Security | Strong passwords (Argon2id), OTP with a persisted per-OTP wrong-guess cap (`OTP_MAX_ATTEMPTS`, default 5) that invalidates the code, optional MFA, admin reset, escalating lockout (1/5/15/30/60/120 min, permanent after the maximum) with admin release/reset and successful-login reset; login OTP locks after 5 wrong guesses; password reuse is allowed during OTP-based recovery; Cloudflare Turnstile captcha (optional, config-gated) |

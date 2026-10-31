@@ -76,7 +76,7 @@
 				</text>
 			{/each}
 			{#each series as item (item.label)}
-				<path d={pathFor(item.points)} fill="none" stroke={item.color} stroke-width="2.5" />
+				<path d={pathFor(item.points)} fill="none" stroke={item.color} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
 				{#each item.points as point (point.x)}
 					<circle cx={xFor(labels.indexOf(point.x))} cy={yFor(point.y)} r="3.5" fill={item.color}>
 						<title>{item.label}: {point.x}, {percent(point.y)}</title>
@@ -124,7 +124,7 @@
 	}
 
 	.axis {
-		font-size: 12px;
+		font-size: 11px;
 		fill: var(--text-muted);
 	}
 
@@ -135,7 +135,7 @@
 		list-style: none;
 		margin: 0.75rem 0 0;
 		padding: 0;
-		font-size: 0.8125rem;
+		font-size: 0.75rem;
 		color: var(--text-secondary);
 	}
 

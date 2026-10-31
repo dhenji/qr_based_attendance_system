@@ -48,6 +48,7 @@ const analyticsParams = (f: AdminAnalyticsFilters): QueryParams => {
 	if (f.date_to) params.date_to = f.date_to;
 	if (f.granularity) params.granularity = f.granularity;
 	if (f.risk_level) params.risk_level = f.risk_level;
+	if (f.session_type) params.session_type = f.session_type;
 	return params;
 };
 
@@ -323,6 +324,7 @@ export type AnalyticsExportBody = {
 	course_ids?: number[];
 	date_from?: string;
 	date_to?: string;
+	session_type?: 'lecture' | 'lab';
 };
 
 export const fetchAnalyticsExportCsv = (body: AnalyticsExportBody): Promise<string> =>

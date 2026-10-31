@@ -56,6 +56,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	let year = $state('All');
 	let course = $state('All');
 	let section = $state('All');
+	let sessionType = $state<'All' | 'lecture' | 'lab'>('All');
 	let from = $state(initialRange.from);
 	let to = $state(initialRange.to);
 	let granularity = $state<ReportGranularity>('daily');
@@ -156,7 +157,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			from,
 			to,
 			granularity,
-			metric
+			metric,
+			session_type: sessionType
 		};
 		const activeTab = tab;
 		reloadToken;
@@ -319,6 +321,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		);
 		return {
 			...(course !== 'All' && ids.size === 1 ? { course_id: [...ids][0] } : {}),
+			...(sessionType !== 'All' ? { session_type: sessionType } : {}),
 			date_from: `${from <= to ? from : to}T00:00:00`,
 			date_to: `${from <= to ? to : from}T23:59:59`
 		};
@@ -444,6 +447,14 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					{#each availableSections as option (option)}
 						<option value={option}>{option}</option>
 					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="report-session-type">Session type</label>
+				<select id="report-session-type" class="form-input" bind:value={sessionType}>
+					<option value="All">All types</option>
+					<option value="lecture">Lecture (LEC)</option>
+					<option value="lab">Laboratory (LAB)</option>
 				</select>
 			</div>
 			<div class="field">

@@ -19,6 +19,7 @@ export type ReportSessionRecord = {
 	yearLevelLabel: string;
 	section: string;
 	date: string;
+	sessionType: 'lecture' | 'lab';
 	startTime: string;
 	endTime: string;
 	enrolled: number;
@@ -87,6 +88,7 @@ const sessionsForOffering = (offeringId: number): ReportSessionRecord[] => {
 			yearLevelLabel: course.yearLevelLabel,
 			section: course.section,
 			date: dateKey,
+			sessionType: 'lecture',
 			startTime: course.scheduleStartTime,
 			endTime: course.scheduleEndTime,
 			enrolled: course.enrolledCount,

@@ -83,6 +83,7 @@ class ReportsService:
         granularity: TrendGranularity = "daily",
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
     ) -> AllCoursesResponse:
         """Bucketed totals across every offering in the professor's union."""
         offerings: Sequence[CourseOffering] = await self._scoped_offerings(
@@ -90,7 +91,7 @@ class ReportsService:
         )
         offering_ids: list[int] = [row.id for row in offerings]
         sessions: Sequence[Session] = await self._sessions_in(
-            offering_ids, date_from, date_to
+            offering_ids, date_from, date_to, session_type
         )
         enrolled_by_offering = await self._enrolled_by_offering(offering_ids)
         buckets, bucket_tallies = await self._bucketed(
@@ -152,6 +153,7 @@ class ReportsService:
         semester: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> ReportsComparisonResponse:
@@ -197,7 +199,7 @@ class ReportsService:
             rows: list[CourseOffering] = cohorts[key]
             offering_ids: list[int] = [row.id for row in rows]
             sessions: Sequence[Session] = await self._sessions_in(
-                offering_ids, date_from, date_to
+                offering_ids, date_from, date_to, session_type
             )
             tallies: Counter[str] = await self._tallies(
                 [row.id for row in sessions]
@@ -243,6 +245,7 @@ class ReportsService:
         granularity: TrendGranularity = "daily",
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> ReportsTrendResponse:
@@ -270,7 +273,7 @@ class ReportsService:
             rows: list[CourseOffering] = by_course[course_id]
             offering_ids: list[int] = [row.id for row in rows]
             sessions: Sequence[Session] = await self._sessions_in(
-                offering_ids, date_from, date_to
+                offering_ids, date_from, date_to, session_type
             )
             buckets, bucket_tallies = await self._bucketed(
                 sessions, granularity, date_from, date_to
@@ -316,6 +319,7 @@ class ReportsService:
         format: str = "csv",
         include: Sequence[str] | None = None,
         statuses: Sequence[ValidationStatus | str] | None = None,
+        session_type: str | None = None,
     ) -> str:
         """Per-scan rows for the professor's union rendered as CSV text.
 
@@ -357,6 +361,7 @@ class ReportsService:
 
         stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
 
         if statuses:
             stmt = stmt.where(
@@ -376,8 +381,18 @@ class ReportsService:
         students: dict[int, Student] = await self._students_by_id(
             {row.student_id for row in records}
         )
+        session_types: dict[int, str] = {}
+        if records:
+            rows: Sequence[tuple[int, str]] = (
+                await self._session.execute(
+                    select(Session.id, Session.session_type).where(
+                        Session.id.in_({row.session_id for row in records})
+                    )
+                )
+            ).all()  # type: ignore[assignment]
+            session_types = {sid: st for sid, st in rows}
 
-        header: list[str] = ["session_id"]
+        header: list[str] = ["session_id", "session_type"]
 
         if "student_id" in wanted:
             header.append("student_id")
@@ -406,7 +421,10 @@ class ReportsService:
             if student is None:
                 continue
 
-            row: list[Any] = [record.session_id]
+            row: list[Any] = [
+                record.session_id,
+                session_types.get(record.session_id, ""),
+            ]
 
             if "student_id" in wanted:
                 row.append(student.student_id)
@@ -513,6 +531,7 @@ class ReportsService:
         offering_ids: list[int],
         date_from: datetime | None,
         date_to: datetime | None,
+        session_type: str | None = None,
     ) -> Sequence[Session]:
         if not offering_ids:
             return []
@@ -520,6 +539,7 @@ class ReportsService:
         stmt = select(Session).where(Session.offering_id.in_(offering_ids))
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
 
         return (await self._session.scalars(stmt)).all()
 

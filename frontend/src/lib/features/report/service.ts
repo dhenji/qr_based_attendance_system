@@ -36,6 +36,7 @@ export type ReportFilters = {
 	to: string;
 	granularity: ReportGranularity;
 	metric: ReportMetric;
+	session_type?: 'All' | 'lecture' | 'lab';
 };
 
 export type AggregateBucket = {
@@ -211,7 +212,8 @@ const filterMockSessions = (filters: ReportFilters): ReportSessionRecord[] => {
 			(filters.year === 'All' || session.yearLevelLabel === filters.year) &&
 			(filters.course === 'All' || session.courseCode === filters.course) &&
 			(filters.section === 'All' || session.section === filters.section) &&
-			session.date >= start &&
+			(filters.session_type === undefined || filters.session_type === 'All' || session.sessionType === filters.session_type) &&
+		session.date >= start &&
 			session.date <= end
 	);
 };
@@ -235,6 +237,7 @@ const toLiveRecord = (row: SessionHistoryRow, directory: ReportCourseDir[]): Rep
 		yearLevelLabel: identity?.yearLevelLabel ?? '',
 		section: row.section,
 		date: row.created_at.slice(0, 10),
+		sessionType: (row.session_type as 'lecture' | 'lab') ?? 'lecture',
 		startTime: row.created_at.slice(11, 16),
 		endTime: '',
 		enrolled,
@@ -260,6 +263,12 @@ const matchesLiveFilters = (
 		const sections = session.section.split(',').map((entry) => entry.trim());
 		if (!sections.includes(filters.section)) return false;
 	}
+	if (
+		filters.session_type !== undefined &&
+		filters.session_type !== 'All' &&
+		session.sessionType !== filters.session_type
+	)
+		return false;
 	return session.date >= start && session.date <= end;
 };
 
@@ -278,7 +287,11 @@ const fetchLiveSessions = async (
 			page,
 			size: LIVE_HISTORY_PAGE_SIZE,
 			sortBy: 'date',
-			sortDir: 'desc'
+			sortDir: 'desc',
+			sessionType:
+				filters.session_type && filters.session_type !== 'All'
+					? filters.session_type
+					: undefined
 		});
 		total = response.total;
 		if ((response.items ?? []).length === 0) break;
@@ -333,6 +346,9 @@ const fetchLiveAllCourses = async (
 		granularity: filters.granularity,
 		date_from: start,
 		date_to: end,
+		...(filters.session_type && filters.session_type !== 'All'
+			? { session_type: filters.session_type }
+			: {}),
 	});
 	const items: AggregateBucket[] = (response.items ?? []).map((row) => {
 		const bucket = bucketFor(row.date.slice(0, 10), filters.granularity);
@@ -396,7 +412,10 @@ const fetchLiveComparison = async (
 		date_from: start,
 		date_to: end,
 		page: '1',
-		size: String(COMPARISON_PAGE_SIZE)
+		size: String(COMPARISON_PAGE_SIZE),
+		...(filters.session_type && filters.session_type !== 'All'
+			? { session_type: filters.session_type }
+			: {}),
 	});
 	const items = (response.items ?? []).map((row) => toComparisonRow(row, directory));
 	return { items, total: response.total ?? items.length };
@@ -427,6 +446,9 @@ const fetchLiveTrends = async (
 			date_from: start,
 			date_to: end,
 			...(courseIds.length > 0 && filters.course !== 'All' ? { course_ids: courseIds } : {}),
+			...(filters.session_type && filters.session_type !== 'All'
+				? { session_type: filters.session_type }
+				: {}),
 		}
 	);
 	return (response.items ?? []).map((row) => {
@@ -663,6 +685,7 @@ export type ProfessorReportsExportBody = {
 	date_from?: string;
 	date_to?: string;
 	statuses?: Array<'present' | 'late' | 'absent' | 'excused' | 'pending' | 'rejected'>;
+	session_type?: 'lecture' | 'lab';
 };
 
 export const fetchProfessorReportsCsv = (body: ProfessorReportsExportBody): Promise<string> =>

@@ -74,6 +74,7 @@ async def test_export_returns_csv_with_all_columns(
     header = lines[0].split(",")
     assert header == [
         "session_id",
+        "session_type",
         "student_id",
         "name",
         "timestamp",
@@ -84,8 +85,9 @@ async def test_export_returns_csv_with_all_columns(
     ]
     row = lines[1].split(",")
     assert row[0] == str(setup["session"].id)
-    assert row[1] == setup["student"].student_id
-    assert setup["student"].first_name in row[2]
+    assert row[1] == "lecture"
+    assert row[2] == setup["student"].student_id
+    assert setup["student"].first_name in row[3]
     assert row[-1] == ValidationStatus.PRESENT.value
 
 
@@ -103,7 +105,7 @@ async def test_export_include_masks_columns(
 
     assert response.status_code == 200
     lines = response.text.strip().splitlines()
-    assert lines[0].split(",") == ["session_id", "name", "timestamp", "status"]
+    assert lines[0].split(",") == ["session_id", "session_type", "name", "timestamp", "status"]
     assert len(lines) == 2
 
 
