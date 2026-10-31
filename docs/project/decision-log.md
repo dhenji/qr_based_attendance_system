@@ -271,8 +271,7 @@
 
 ### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
 
-- **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 128-d embeddings (face-api.js-compatible), stores encrypted (`students.face_embedding BYTEA`) + `face_enrolled_at` + `face_embedding_version`.
-  > **As-built note (2026-10-21)** — the pipeline described above is **not
+- **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 512-d embeddings (MobileFaceNet), stores them in `students.face_embedding BYTEA` + `face_enrolled_at` + `face_embedding_version`. Encryption at rest is not implemented.  > **As-built note (2026-10-21)** — the pipeline described above is **not
   > implemented**. No face-recognition model is installed in this repository: the
   > only model the project ships is MediaPipe FaceLandmarker
   > (`frontend/static/models/face_landmarker.task`), which produces landmarks and
@@ -1576,8 +1575,7 @@
   threshold, no frontend test runner, no linters.
 - **Date:** 2026-10-05
 - **Status:** Accepted
-- **Forward note (2026-10-11):** the counts above are the 2026-10-05 snapshot. The suite is now 760 cases across 56 files and the chain is eleven revisions ending at `c9d4e5f6a7b8` (drops `users.username`, ADR-073).
-- **Context:** The suite was strong and entirely unenforced — 719 cases across 49
+- **Forward note (2026-10-31):** the counts above are a historical snapshot. The suite is now 1055 cases across 82 test files and the migration chain has 25 revisions ending at `b9c0d1e2f3a4` (session start-window columns, D94).- **Context:** The suite was strong and entirely unenforced — 719 cases across 49
   files, green on SQLite and Postgres, with no `.github/`, no `Makefile`, no
   `tox.ini`, and no `pyproject.toml`. Every count in the docs was maintained by
   hand. The consequential gap was migration drift: `conftest.py` builds the test

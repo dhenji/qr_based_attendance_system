@@ -127,27 +127,24 @@ exposure; it is not a way to kick an existing session out.
 
 ### Face Embedding Encryption (D28)
 
-> **Status: partially implemented (2026-10-25).** Enrollment now generates a real
-> 128-d embedding from the admin-uploaded photos using MediaPipe FaceLandmarker
+> **Status: implemented (2026-10-31).** Enrollment generates a real 512-d
+> embedding from the admin-uploaded photos using MobileFaceNet ONNX (`w600k_mbf`)
 > when the model is available (stored as a `FACEEMB1` binary blob via
 > `shared/face_embeddings.serialize_embedding`); otherwise it falls back to a
-> byte-seeded deterministic vector. AES-256-GCM encryption at rest is still
-> **not implemented** — the BYTEA column holds the plaintext blob. The
-> audit-trail exclusion in `_face_snapshot` is implemented and holds regardless.
+> landmark-based vector. AES-256-GCM encryption at rest is still **not
+> implemented** — the BYTEA column holds the plaintext blob. The audit-trail
+> exclusion in `_face_snapshot` is implemented and holds regardless.
 >
-> Scan verification now computes `cosine_similarity(stored_embedding,
-> live_face_embedding)` server-side (`attendance/service.py::submit_scan`) and
-> applies `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). The
-> client supplies `live_face_embedding`, derived from MediaPipe landmarks
-> captured during the liveness challenge, so provenance remains client-asserted.
-
+> Scan verification now generates the live embedding server-side from the
+> submitted image and computes `cosine_similarity(stored_embedding,
+> live_embedding)` (`attendance/service.py::submit_scan`), applying
+> `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). Provenance
+> remains client-asserted because the image is client-supplied.
 ```
 Server:
-  3 photos → a recognition model (none installed) → 128-d vectors per angle
-  → JSON blob: {"mean":[128f], "angles":{"front":[128f],"left":[128f],"right":[128f]}}
-  → AES-256-GCM encrypt with server key
-  → Store BYTEA in students.face_embedding
-
+  3 photos → MobileFaceNet ONNX (512-d) → serialized FACEEMB1 blob
+  → Store BYTEA in students.face_embedding (encryption at rest not implemented)
+```
 Client:
   Pull plaintext blob on login (version-gated)
   → Encrypt with a device-generated WebCrypto key
@@ -204,14 +201,12 @@ though the server verifies biometrics. It does not.
 | Input | Who computes it | What the server checks |
 | --- | --- | --- |
 | `liveness_evidence` | client (MediaPipe WASM) | three booleans true; `ear_samples` non-empty; their **mean** within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5); `pnp_evidence` non-empty; `face_count == 1`; yaw peaks validated when supplied (`peak_left_yaw <= -15`, `peak_right_yaw >= 15`) |
-| `live_face_embedding` | client (MediaPipe landmarks) | deserialized as `FACEEMB1`; cosine similarity against the enrolled embedding must be ≥ `face_review_band_low` (0.65); embedding dimension must be 128 |
-
-The liveness evidence and embedding are still client-asserted, but the server now
-performs a real embedding comparison against the enrolled template instead of
-trusting a submitted score. Provenance (that the embedding came from the frames
-that passed liveness) is not cryptographically bound. Two specifics worth
-stating plainly:
-
+| `live_face_image` / `live_face_embedding` | server (MobileFaceNet, with landmark fallback) | live embedding generated server-side and compared via cosine similarity against the enrolled embedding; score must be ≥ `face_review_band_low` (0.65) |
+The liveness evidence remains client-asserted, and the live embedding is now
+generated server-side from the submitted image, so the server performs a real
+comparison against the enrolled template instead of trusting a submitted score.
+Provenance (that the embedding came from the frames that passed liveness) is not
+cryptographically bound. Two specifics worth stating plainly:
 - `EAR_SAMPLES_MIN_COUNT` is **1**, so the three-step challenge is satisfiable
   with a single asserted sample per position.
 - A client can still forge both fields; the server validates plausibility and

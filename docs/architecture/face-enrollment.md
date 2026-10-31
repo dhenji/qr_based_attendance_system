@@ -5,24 +5,22 @@
 ## 1. Overview
 
 Face enrollment is an admin-captured flow. The server now generates a real
-128-d embedding from the uploaded photos and compares it against the live
-embedding submitted during a scan (`attendance/service.py::submit_scan`). The
-biometric step remains a spoof-mitigation signal, not the primary
-authentication method: student identity comes from the authenticated account.
-
+512-d embedding (MobileFaceNet, with a landmark-based fallback) from the
+uploaded photos and compares it against the live embedding during a scan
+(`attendance/service.py::submit_scan`). The biometric step remains a
+spoof-mitigation signal, not the primary authentication method: student
+identity comes from the authenticated account.
 Key properties:
 
 - **Admin-enrolled, not self-enrolled** (D28): only administrators may upload face
   photos. Students cannot upload their own face data. Embeddings are generated
-  server-side with MediaPipe FaceLandmarker when available.
-- **3-photo enrollment** (D43): front, left, right — chosen over 1 (too brittle) and
+  server-side with MobileFaceNet ONNX when available (landmark fallback otherwise).- **3-photo enrollment** (D43): front, left, right — chosen over 1 (too brittle) and
   5 (diminishing returns).
 - **Pull-on-login distribution** (D29): devices fetch the latest embedding on login
   by comparing a version integer; no push/WebSocket infrastructure required.
-- **Offline-capable** (D30): the queue stores liveness evidence; no embedding
-  comparison is implemented on either side, so only evidence and the submitted
-  score sync to the server.
-
+- **Offline-capable** (D30): the queue stores liveness evidence; the live
+  embedding is generated server-side from the submitted image, so only evidence
+  and the image sync to the server.
 ---
 
 ## 2. Enrollment Flow (Admin)
@@ -47,10 +45,9 @@ Admin picks student → Student Management → Enroll face modal
     All 3 valid
         │
         ▼
-Server generates a 128-d embedding per photo (MediaPipe FaceLandmarker when
-        │  available; byte-seeded fallback otherwise), averages front/left/right,
-        │  and stores a FACEEMB1 blob (shared/face_embeddings.serialize_embedding).
-        ▼
+Server generates a 512-d embedding (MobileFaceNet, landmark fallback
+        │  otherwise), averages front/left/right, and stores a FACEEMB1 blob
+        │  (shared/face_embeddings.serialize_embedding).        ▼
 Stores ONE JSON blob in students.face_embedding BYTEA (plaintext today)
         │
         ├─ Bumps face_embedding_version
@@ -357,8 +354,7 @@ codes with no implementation anywhere.
 
 | Limitation         | Status                | Notes                                                                                                                                                                                                                      |
 | ------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Server-side face matching | **Implemented** | Cosine similarity between the stored enrolled embedding and the client-supplied live embedding; thresholds `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). Provenance remains client-asserted. |
-| Sibling confusion  | **Partially mitigated** | Server-side matching now runs, but no PAD CNN; twin separation remains an accepted risk (D31). |
+| Server-side face matching | **Implemented** | The live embedding is generated server-side (MobileFaceNet, with landmark fallback) from the submitted image, then compared via cosine similarity against the stored enrolled embedding; thresholds `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). Provenance remains client-asserted. || Sibling confusion  | **Partially mitigated** | Server-side matching now runs, but no PAD CNN; twin separation remains an accepted risk (D31). |
 | Photo/video replay | Partially mitigated   | The fixed blink + turn challenge raises the cost of casual replay, but the evidence is client-asserted; a modified client can forge it. Video replay remains a theoretical vector (acknowledged).                          |
 | Model staleness    | Design only           | The current enrollment path writes a stub, so there is no model-generated embedding to migrate. If a real face-api.js/MediaPipe pipeline is added, bump `FACE_EMBEDDING_VERSION` and re-enroll the roster.                  |
 

@@ -88,8 +88,7 @@ Head-pose estimation from facial landmarks to detect left/right turns. Part of l
 
 ### Embedding
 
-A 128-dimensional face vector reserved by the schema. The current build stores a zero-filled placeholder in `students.face_embedding` (`_stub_embedding_blob`); real vector generation and encryption are **not implemented**, and no scan reads it. Versioned via `face_embedding_version`.
-
+A 512-dimensional face vector (MobileFaceNet, as-built) stored in `students.face_embedding` via `shared/face_embeddings.serialize_embedding`. Generated server-side from the three enrollment photos and compared via cosine similarity during a scan. Versioned via `face_embedding_version`.
 ### Evidence Bundle
 
 JSON object attached to an attendance record containing `liveness_evidence{blink_detected, head_turn_left, head_turn_right, ear_samples, pnp_evidence}`, the GPS `accuracy`, and a `review` flag. Stored in `attendance_records.liveness_evidence JSONB`; `face_match_score`, `scanned_via`, and the timestamp are separate columns. Used for audit and server-side re-validation on sync.

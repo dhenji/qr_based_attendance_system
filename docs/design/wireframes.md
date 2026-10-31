@@ -1688,12 +1688,10 @@ deployment; this screen manages all subsequent ones.
 
 > **Design mockup** for the admin face-enrollment flow (D28). The shipped UI is
 > a modal on `/admin/students`, not a dedicated route. It accepts **3 photos**
-> (front, left, right) as file uploads; the camera preview and quality-gate flow
-> below is design-only. The server stores a zero-filled placeholder in
-> `students.face_embedding` — real 128-d generation and AES-GCM encryption are
-> **not implemented**. See
+> (front, left, right) as file uploads. The server now generates a real 512-d
+> embedding (MobileFaceNet) from those photos; AES-GCM encryption at rest is
+> still **not implemented**. See
 > [face-enrollment.md](../architecture/face-enrollment.md) §4.2.
-
 ```
 ┌────────────┬────────────────────────────────────────────────────┐
 │ ☰          │  Face Enrollment — John Doe (2021-01234)          │
