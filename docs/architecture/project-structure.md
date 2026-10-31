@@ -1,9 +1,7 @@
 # Project Folder Structure — QR Attendance System
 
 > Historical intent, not current state: this doc shows the planned layout.
-> Truth is `README.md` + the code — 18 feature slices, 20 tables, 23 routers
-> over 15 mounts, 46 `+page.svelte` files.
-
+> Truth is `README.md` + the code — 18 feature slices, 21 tables, 23 routers over 15 mounts, 51 `+page.svelte` files.
 ```
 attendance-system/
 │
@@ -37,19 +35,19 @@ attendance-system/
 │   │   │   └── deps.py               # _get_db, _get_current_user, require_role, AuthServiceDep/AdminServiceDep
 │   │   │
 │   │   ├── features/                 # Vertical slices — one folder per domain
-│   │   │   ├── auth/                 # model.py: User, OtpCodes (router mounted)
-│   │   │   ├── student/              # model.py: Student (router mounted)
-│   │   │   ├── session/              # model.py: Session (router mounted)
-│   │   │   ├── attendance/           # model.py: Attendance (router mounted)
-│   │   │   ├── professor/            # model.py: Professor (router mounted)
-│   │   │   ├── course/               # model.py: Course, CourseOffering (router file exists, unmounted)
+│   │   │   ├── auth/                 # model.py: User, OtpCodes, MfaBackupCodes (routers mounted)
+│   │   │   ├── student/              # model.py: Student (routers mounted)
+│   │   │   ├── session/              # model.py: Session (routers mounted)
+│   │   │   ├── attendance/           # model.py: Attendance (routers mounted)
+│   │   │   ├── professor/            # model.py: Professor (routers mounted)
+│   │   │   ├── course/               # model.py: Course, CourseOffering, OfferingComponent (routers mounted)
 │   │   │   ├── course_professor/     # model.py: CourseProfessor + service.py
-│   │   │   ├── enrollment/           # model.py: Enrollment (router file exists, unmounted)
-│   │   │   ├── program/              # model.py: Program, YearLevel (no router file)
-│   │   │   ├── excuse/               # model.py: ExcuseRequest (model only)
-│   │   │   ├── analytics/            # model.py: StudentRiskScore (model only)
-│   │   │   ├── sync/                 # model.py: SyncQueue (no router file)
-│   │   │   └── system/               # model.py: BackupLog (model only)
+│   │   │   ├── enrollment/           # model.py: Enrollment (router stub, unmounted)
+│   │   │   ├── program/              # model.py: Program, YearLevel (routers mounted)
+│   │   │   ├── excuse/               # model.py: ExcuseRequest (routers mounted)
+│   │   │   ├── analytics/            # model.py: StudentRiskScore, StudentRiskScoreStaging
+│   │   │   ├── sync/                 # model.py: SyncQueue
+│   │   │   └── system/               # model.py: AppSetting, BackupLog, AuditLog
 │   │   │
 │   │   └── tests/                    # (planned) Unit & integration tests
 │   │       ├── conftest.py
@@ -147,9 +145,10 @@ attendance-system/
 > `src/features/program/`, `src/features/course_professor/`, `src/features/excuse/`
 > (ExcuseRequest: `initiated_by`/`initiated_via`, `attachment_urls`, `status`,
 > `reviewed_by`/`reviewed_at`), plus `src/shared/enums.py` and `src/shared/mixins.py`.
-> Model layer is now complete (16/16): `analytics` (StudentRiskScore) + `system`
-> (BackupLog) are modeled. Remaining work: `schema.py`/`service.py`/`router.py`
-> layers for all features (exception: `course_professor/service.py` exists);
+> Model layer is now complete (21/21): includes `analytics` (StudentRiskScore,
+> StudentRiskScoreStaging), `system` (AppSetting, BackupLog, AuditLog), `course`
+> (OfferingComponent), and auth MFA backup codes. Remaining work: `schema.py`/
+> `service.py`/`router.py`> layers for all features (exception: `course_professor/service.py` exists);
 > `liveness` is a frontend-only feature (no backend `features/liveness/` dir).
 
 > **Deferred (frontend):** `src/service-worker.ts` (PWA offline caching & background

@@ -56,13 +56,13 @@ cd backend
 alembic upgrade head
 ```
 
-> **Note:** `alembic upgrade head` applies the 16-table baseline migration
-> (`679a319c12d6`) **and** the ten revisions on top of it, ending at head
-> `c9d4e5f6a7b8` (drops `users.username`, ADR-073). That chain carries the schema to the current **20 tables** — including
-> `mfa_backup_codes`, `audit_logs`, `app_settings` and `student_risk_scores_staging`.
+> **Note:** `alembic upgrade head` applies the baseline migration
+> (`679a319c12d6`) **and** the revisions on top of it, ending at head
+> `b9c0d1e2f3a4` (session start-window columns, D94). That chain carries the schema to the current **21 tables** — including
+> `mfa_backup_codes`, `audit_logs`, `app_settings`, `student_risk_scores_staging`,
+> and `offering_components`.
 > See [migration-strategy.md](../architecture/migration-strategy.md) for the target schema
 > reference and the full revision list.
-
 ### 5. Run the server
 
 ```bash

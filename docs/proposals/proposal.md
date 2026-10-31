@@ -7,8 +7,7 @@
 >
 > **Note:** Schema design has evolved since this proposal was submitted. See `docs/architecture/migration-strategy.md` for the current target schema (a `course_offerings` table now decouples courses from program/year/schedule, and professor assignments/enrollments reference offerings).
 
-> **As-built note (2026-10-21):** this is a point-in-time proposal and its technology table is preserved as written. The system ships **one** model — MediaPipe FaceLandmarker (detection + 478 landmarks, client-side WASM) — and **no** face-recognition/embedding model: the 128-d "face embedding" the server stores is a zero-filled placeholder. Charts are hand-rolled SVG, not Chart.js (ADR-091). See [`models.md`](models.md) for the as-built model catalog and [`contributions.md`](contributions.md) for the as-built contribution claims.
-
+> **As-built note (2026-10-31):** this is a point-in-time proposal and its technology table is preserved as written. The system ships **two** models — MediaPipe FaceLandmarker (detection + 478 landmarks, client-side WASM) and MobileFaceNet ONNX (`w600k_mbf`, 512-d, server-side) for face embeddings. The stored embedding is a real 512-d vector, not a placeholder. Charts are hand-rolled SVG, not Chart.js (ADR-091). See [`models.md`](models.md) for the as-built model catalog and [`contributions.md`](contributions.md) for the as-built contribution claims.
 ---
 
 ## 1. Introduction
@@ -324,9 +323,8 @@ Rejection reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mis
 | Database        | PostgreSQL (server) + IndexedDB (client)           | Persistent storage + local cache                                |
 | QR Library      | html5-qrcode                                       | QR decoding and live detection in browser                       |
 | Face Tracking   | MediaPipe Face Mesh / face-api.js                  | Landmark tracking, blink & head-pose challenges                 |
-| Face Embeddings | face-api.js (ResNet-34-like, pretrained)           | 128-d face embeddings for enrolled-face matching                |
-| Charts          | Chart.js (+ date adapter)                          | Analytics dashboards wrapped in reusable Svelte component (D41) |
-| Analytics       | Heuristic thresholds (MVP), scikit-learn (upgrade) | At-risk scoring, compliance/participation metrics               |
+| Face Embeddings | MobileFaceNet ONNX (`w600k_mbf`, as-built)        | 512-d face embeddings for enrolled-face matching (supersedes the 128-d face-api.js design) |
+| Charts          | Chart.js (+ date adapter)                          | Analytics dashboards wrapped in reusable Svelte component (D41) || Analytics       | Heuristic thresholds (MVP), scikit-learn (upgrade) | At-risk scoring, compliance/participation metrics               |
 | Auth / Sessions | HMAC-SHA256                                        | Session code generation & verification                          |
 | Encryption      | AES-256-GCM (backup), pgcrypto (embeddings)        | Backup encryption, face embedding encryption at rest            |
 | Hosting         | Docker + cloud VPS                                 | Deployment and scaling                                          |
@@ -357,8 +355,7 @@ Rejection reasons: `duplicate`, `outside_geofence`, `liveness_failed`, `face_mis
 - **Academic Structure Service**: Programs, Year Levels, Courses with term structures
 - **Session Policy Engine**: Duration, present/late windows, expiry calculation
 - **Excuse Workflow**: 3 initiation paths, evidence storage, state machine
-- **Face Embedding Pipeline**: Admin 3-photo capture → server 128-d embedding → encrypted storage → pull-on-login
-- **Analytics Pipeline**: Daily batch risk scoring, unified Analytics & Reports page
+- **Face Embedding Pipeline**: Admin 3-photo capture → server 512-d embedding (MobileFaceNet) → storage → pull-on-login- **Analytics Pipeline**: Daily batch risk scoring, unified Analytics & Reports page
 - **Backup Pipeline**: pg_dump → encrypt (AES-256-GCM) → upload → log → retention prune
 
 ### 6.3 Database Schema
@@ -636,8 +633,7 @@ The project will follow an Agile approach with 2-week sprints:
 - Live QR detection (physical card vs screen)
 - Face liveness verification (challenge-response against image, video-replay, screen-recorder, and distortion attacks)
 - Offline liveness protocol with nonce anti-replay deferred validation
-- Admin-enrolled face verification (3-photo capture, 128-d encrypted embeddings, pull-on-login)
-- Academic hierarchy: Programs → Year Levels (with term structures) → Courses (multi-program sharing)
+- Admin-enrolled face verification (3-photo capture, 512-d embeddings, pull-on-login)- Academic hierarchy: Programs → Year Levels (with term structures) → Courses (multi-program sharing)
 - Window-based attendance policy: present/late windows, duration expiry, per-session overrides
 - Excuse workflow: professor quick-excuse, professor-initiated with evidence, student-initiated request (3 paths)
 - Unified analytics and reports: Overview, Course Comparison, Trends, At-Risk, Export with cascading filters

@@ -120,8 +120,7 @@
 
 | ID  | Decision                                                                                    |
 | --- | ------------------------------------------------------------------------------------------- |
-| D28 | Face enrollment: 3 photos (front/left/right); 128-d embedding/encryption not implemented    |
-| D38 | Remove Year+Section Promotion; replace with Academic Structure Updates                      |
+| D28 | Face enrollment: 3 photos (front/left/right); 512-d embedding (MobileFaceNet) implemented; encryption at rest not implemented || D38 | Remove Year+Section Promotion; replace with Academic Structure Updates                      |
 | D40 | Admin nav: Dashboard · Students · Professors · Programs · Analytics · Audit Logs · Settings |
 | D43 | Multi-angle enrollment reduced to 3 photos                                                  |
 

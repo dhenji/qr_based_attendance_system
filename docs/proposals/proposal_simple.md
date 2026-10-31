@@ -52,8 +52,7 @@ A web-based application that:
 | Session Code            | Professor shares a code with present/late windows; required to submit attendance         |
 | GPS Verification        | Ensures student is inside the classroom                                                  |
 | Face Liveness           | Blink→left→right challenges to block photo, replay & distortion tricks                   |
-| Face Enrollment         | Admin captures 3-angle photos; 128-d encrypted embeddings                                |
-| Academic Structure      | Program → Year Level → Course Offering hierarchy (discrete Course templates)  |
+| Face Enrollment         | Admin captures 3-angle photos; 512-d embeddings (MobileFaceNet)                          || Academic Structure      | Program → Year Level → Course Offering hierarchy (discrete Course templates)  |
 | Window-Based Attendance | Present/late windows, duration expiry, per-session overrides                             |
 | Excuse Workflow         | 3 paths: professor quick-excuse, with evidence, student request                          |
 | Offline Mode            | Saves attendance locally when no internet; auto-uploads later                            |
@@ -83,8 +82,7 @@ A web-based application that:
 | Frontend        | JavaScript (SvelteKit)                    |
 | Database        | PostgreSQL                                |
 | Charts          | Chart.js (analytics dashboards)           |
-| Face Embeddings | face-api.js (pretrained, 128-d)           |
-| Platform        | Progressive Web App (works on any device) |
+| Face Embeddings | MobileFaceNet ONNX (512-d, as-built)      || Platform        | Progressive Web App (works on any device) |
 
 ## 8. CS Concepts Used
 
