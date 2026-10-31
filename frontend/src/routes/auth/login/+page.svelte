@@ -20,6 +20,7 @@
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 	import Turnstile from '$lib/components/Turnstile.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
+import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
 
 	// 'credentials' -> 'login-otp' (mandatory OTP) -> 'mfa' (admins with MFA
 	// enabled, chained after the OTP) -> 'change-password' (temporary password).
@@ -35,10 +36,12 @@
 	let redirecting = $state(false);
 	let redirectTimer: ReturnType<typeof setTimeout> | null = $state(null);
 	let otpRound = $state(0);
-	let currentPassword = $state('');
-	let newPassword = $state('');
-	let confirmPassword = $state('');
-	let error = $state('');
+let currentPassword = $state('');
+let newPassword = $state('');
+let confirmPassword = $state('');
+let securityQuestion = $state('');
+let securityAnswer = $state('');
+let error = $state('');
 
 	let passwordInput: HTMLInputElement | undefined = $state();
 	let mfaInput: HTMLInputElement | undefined = $state();
@@ -201,8 +204,24 @@
 			return;
 		}
 
+		const isAdminTemp = authState.user?.role === 'admin';
+		if (isAdminTemp) {
+			if (!securityQuestion) {
+				error = 'Please choose a security question';
+				return;
+			}
+			if (!securityAnswer.trim()) {
+				error = 'Security answer is required';
+				return;
+			}
+		}
+
 		try {
-			await doChangePassword(currentPassword, newPassword);
+			if (isAdminTemp) {
+				await doChangePassword(currentPassword, newPassword, securityQuestion, securityAnswer.trim());
+			} else {
+				await doChangePassword(currentPassword, newPassword);
+			}
 			await finishLogin(authState.user);
 		} catch (e: unknown) {
 			error = describe(e, 'Password change failed.');
@@ -410,6 +429,24 @@
 							<p class="hint warn">Passwords do not match.</p>
 						{/if}
 					</div>
+
+					{#if authState.user?.role === 'admin'}
+						<div class="field">
+							<label class="form-label" for="security-question">Security question</label>
+							<select class="form-input" id="security-question" bind:value={securityQuestion}>
+								<option value="" disabled>Choose a question…</option>
+								{#each SECURITY_QUESTIONS as q (q)}
+									<option value={q}>{q}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="field">
+							<label class="form-label" for="security-answer">Security answer</label>
+							<input class="form-input" id="security-answer" type="text"
+								autocomplete="off" placeholder="Your answer" bind:value={securityAnswer} />
+						</div>
+					{/if}
 
 					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
 						{authState.loading ? 'Saving…' : 'Set password and continue'}

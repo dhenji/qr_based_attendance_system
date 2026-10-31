@@ -108,7 +108,7 @@ Student enters session code (or scans a session QR if one is available) → serv
 | MFA                    | TOTP (RFC 6238) via authenticator app; user-revocable via `POST /auth/mfa/disable` (password-verified), which also clears the TOTP secret and invalidates every unconsumed backup code |
 | Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
 | `must_change_password` | Set by admin **account creation and admin reset only**. There is no first-login trigger |
-| Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056) |
+| Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056). Non-super-admin first login captures it; super-admin is unaffected |
 
 Disabling MFA requires the current password, not a fresh TOTP code: reaching the
 route at all required completing the MFA challenge at login, so the bearer token

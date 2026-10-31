@@ -905,7 +905,12 @@ class AuthService:
         return await self.reset_password(user.email, otp_code, new_password)
 
     async def change_password(
-        self, user: User, current_password: str, new_password: str
+        self,
+        user: User,
+        current_password: str,
+        new_password: str,
+        security_question: str | None = None,
+        security_answer: str | None = None,
     ) -> None:
         if not verify_password(current_password, user.password_hash):
             raise CurrentPasswordInvalid()
@@ -915,6 +920,14 @@ class AuthService:
 
         user.password_hash = hash_password(new_password)
         user.must_change_password = False
+
+        if security_question is not None or security_answer is not None:
+            if not security_question or not security_answer:
+                raise PasswordPolicyException(field="security_question")
+            user.security_question_hash = security_question
+            user.security_answer_hash = hash_password(
+                self._normalize_answer(security_answer)
+            )
 
         await self._session.flush()
 
