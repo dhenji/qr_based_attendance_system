@@ -222,7 +222,11 @@ async def change_password(
     service: AuthServiceDep,
 ) -> None:
     await service.change_password(
-        current_user, payload.current_password, payload.new_password
+        current_user,
+        payload.current_password,
+        payload.new_password,
+        payload.security_question,
+        payload.security_answer,
     )
 
 

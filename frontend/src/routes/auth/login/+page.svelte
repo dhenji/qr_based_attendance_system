@@ -20,6 +20,7 @@
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 	import Turnstile from '$lib/components/Turnstile.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
+import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
 
 	// 'credentials' -> 'login-otp' (mandatory OTP) -> 'mfa' (admins with MFA
 	// enabled, chained after the OTP) -> 'change-password' (temporary password).
@@ -32,11 +33,15 @@
 	let mfaCode = $state('');
 	let otp = $state<string[]>(['', '', '', '', '', '']);
 	let resending = $state(false);
+	let redirecting = $state(false);
+	let redirectTimer: ReturnType<typeof setTimeout> | null = $state(null);
 	let otpRound = $state(0);
-	let currentPassword = $state('');
-	let newPassword = $state('');
-	let confirmPassword = $state('');
-	let error = $state('');
+let currentPassword = $state('');
+let newPassword = $state('');
+let confirmPassword = $state('');
+let securityQuestion = $state('');
+let securityAnswer = $state('');
+let error = $state('');
 
 	let passwordInput: HTMLInputElement | undefined = $state();
 	let mfaInput: HTMLInputElement | undefined = $state();
@@ -48,6 +53,7 @@
 
 	onDestroy(() => {
 		win.stop();
+		if (redirectTimer) clearTimeout(redirectTimer);
 	});
 
 	// Same policy the backend enforces in shared/validators.password_strength
@@ -125,8 +131,23 @@
 		}
 	};
 
+	const scheduleRedirect = () => {
+		if (redirectTimer) clearTimeout(redirectTimer);
+		redirecting = true;
+		redirectTimer = setTimeout(() => {
+			redirecting = false;
+			redirectTimer = null;
+			backToCredentials();
+		}, 2500);
+	};
+
 	const handleResendOtp = async () => {
 		error = '';
+		if (win.remaining <= 0) {
+			error = 'The code has expired. Redirecting to sign in…';
+			scheduleRedirect();
+			return;
+		}
 		resending = true;
 		try {
 			await doLoginOtpResend();
@@ -135,7 +156,12 @@
 			win.restart();
 			otpInput?.focus();
 		} catch (e: unknown) {
-			error = describe(e, 'Could not resend the code. Please try again.');
+			if (e instanceof APIError && e.code === 'invalid_credentials') {
+				error = 'Your sign-in session expired. Redirecting to sign in…';
+				scheduleRedirect();
+			} else {
+				error = describe(e, 'Could not resend the code. Please try again.');
+			}
 		} finally {
 			resending = false;
 		}
@@ -178,8 +204,24 @@
 			return;
 		}
 
+		const isAdminTemp = authState.user?.role === 'admin';
+		if (isAdminTemp) {
+			if (!securityQuestion) {
+				error = 'Please choose a security question';
+				return;
+			}
+			if (!securityAnswer.trim()) {
+				error = 'Security answer is required';
+				return;
+			}
+		}
+
 		try {
-			await doChangePassword(currentPassword, newPassword);
+			if (isAdminTemp) {
+				await doChangePassword(currentPassword, newPassword, securityQuestion, securityAnswer.trim());
+			} else {
+				await doChangePassword(currentPassword, newPassword);
+			}
 			await finishLogin(authState.user);
 		} catch (e: unknown) {
 			error = describe(e, 'Password change failed.');
@@ -268,7 +310,7 @@
 			{/if}
 		</div>
 
-		<div class="card">
+		<div class="card" class:redirecting={redirecting}>
 			{#if isMockMode()}
 				<p class="hint mock-hint" data-testid="mock-accounts">
 					Mock mode — sign in with any password as
@@ -279,7 +321,7 @@
 				</p>
 			{/if}
 			{#if error}
-				<div class="error-banner" role="alert">{error}</div>
+				<div class="error-banner" class:redirecting={redirecting} role="alert">{error}</div>
 			{/if}
 
 			{#if stage === 'credentials'}
@@ -325,12 +367,12 @@
 						<OtpInput bind:digits={otp} bind:this={otpInput} disabled={authState.loading} onChange={clearError} />
 					{/key}
 
-					<OtpCodeRow win={win} busy={resending} onresend={handleResendOtp} />
+					<OtpCodeRow win={win} busy={resending || redirecting} onresend={handleResendOtp} />
 
-					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
+					<button class="btn-primary" type="submit" disabled={authState.loading || redirecting} aria-busy={authState.loading || redirecting}>
 						{authState.loading ? 'Verifying…' : 'Verify'}
 					</button>
-					<button type="button" class="link-btn block" onclick={backToCredentials}>
+					<button type="button" class="link-btn block" onclick={backToCredentials} disabled={redirecting}>
 						Back to sign in
 					</button>
 				</form>
@@ -387,6 +429,24 @@
 							<p class="hint warn">Passwords do not match.</p>
 						{/if}
 					</div>
+
+					{#if authState.user?.role === 'admin'}
+						<div class="field">
+							<label class="form-label" for="security-question">Security question</label>
+							<select class="form-input" id="security-question" bind:value={securityQuestion}>
+								<option value="" disabled>Choose a question…</option>
+								{#each SECURITY_QUESTIONS as q (q)}
+									<option value={q}>{q}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="field">
+							<label class="form-label" for="security-answer">Security answer</label>
+							<input class="form-input" id="security-answer" type="text"
+								autocomplete="off" placeholder="Your answer" bind:value={securityAnswer} />
+						</div>
+					{/if}
 
 					<button class="btn-primary" type="submit" disabled={authState.loading} aria-busy={authState.loading}>
 						{authState.loading ? 'Saving…' : 'Set password and continue'}
@@ -480,8 +540,12 @@
 		margin: 0;
 	}
 
+	.card.redirecting {
+		opacity: 0.4;
+		transition: opacity 0.3s ease;
+	}
+
 	.card {
-		position: relative;
 		background: var(--bg-card);
 		padding: 2rem;
 		border: 1px solid var(--border);
@@ -500,8 +564,15 @@
 		background: linear-gradient(90deg, var(--brand), var(--accent) 55%, transparent 90%);
 	}
 
+	.error-banner.redirecting {
+		font-size: 0.9rem;
+		font-weight: 700;
+		text-align: center;
+		background: color-mix(in srgb, var(--danger) 18%, var(--bg-card));
+		border-color: var(--danger);
+	}
+
 	.error-banner {
-		background: var(--danger-bg);
 		border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
 		border-left: 3px solid var(--danger);
 		border-radius: 8px;

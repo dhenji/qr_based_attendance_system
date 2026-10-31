@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
 	// accurate for all of them. Kept distinct from login_otp_locked below:
 	// that one is per-account, this one follows the device.
 	rate_limited: 'Too many attempts from this device. Wait a moment and try again.',
+	account_permanently_locked: 'This account has been permanently locked. Contact an administrator.',
 
 	unrecognized_email:
 		'No student or professor record matches that email. Ask an administrator to add you to the roster.',
@@ -24,8 +25,9 @@ const MESSAGES: Record<string, string> = {
 
 	otp_invalid: 'That code is incorrect. Check your email and try again.',
 	otp_expired: 'That code has expired. Request a new one.',
+	otp_max_attempts: 'Too many incorrect codes. Request a new code.',
 	login_otp_locked:
-		'Too many incorrect codes. Wait a few minutes before trying again, or start over.',
+		'Too many incorrect codes. Start over or request a new code.',
 	recovery_locked:
 		'Too many recovery attempts. Wait a few minutes before trying again.',
 
@@ -79,6 +81,14 @@ export const toAuthMessage = (error: unknown, fallback: string): string => {
 			}
 			if (error.code === 'account_locked') return ACCOUNT_LOCKED_FALLBACK;
 			return MESSAGES[error.code] ?? error.message ?? fallback;
+		}
+		if (error.code === 'rate_limited') {
+			const match = error.message.match(LOCKOUT_MINUTES);
+			if (match) {
+				const minutes = match[1];
+				return `Too many attempts from this device. Wait a moment and try again in ${minutes} minute${minutes === '1' ? '' : 's'}.`;
+			}
+			return MESSAGES.rate_limited;
 		}
 		return MESSAGES[error.code] ?? error.message ?? fallback;
 	}

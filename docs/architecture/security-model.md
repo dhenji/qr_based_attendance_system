@@ -22,6 +22,7 @@
 | T10 | **Excuse abuse** — student fabricates excuse               | Low      | Excuse requests require professor approval. Prof-initiated excuses have audit trail (`excused_by`, `excused_at`). Evidence attachments stored immutably in S3-compatible storage.                                                   | D20, D21, D24                            |
 | T11 | **Man-in-the-middle**                                      | Medium   | HTTPS everywhere (production). CORS restricts frontend origin. Session QR payloads are **unsigned JSON** — the HMAC derives the *code*, not the payload, so a payload is tamperable by anyone who can read it (D18).                                                                                                                | D18                                      |
 | T12 | **DB dump exfiltration**                                   | High     | Backups encrypted AES-256-GCM with key from env (`BACKUP_ENCRYPTION_KEY`). Key rotation tracked via `encryption_key_version`.                                                                                                       | D39                                      |
+| T13 | **Queued scan payload theft from device**                   | Medium   | `attendance_queue` rows (incl. captured face image and liveness evidence) are stored in origin-scoped IndexedDB **without** the WebCrypto encryption applied to `face_embeddings`. Accepted for MVP: same-origin storage + XSS mitigations; encrypting the queue like embeddings is a future hardening item. | — (audit follow-up) |
 
 ---
 
@@ -62,7 +63,7 @@ Student enters session code (or scans a session QR if one is available) → serv
 1. Admin imports student/professor record with email
 2. User visits `/auth/register` → enters email → receives 6-digit OTP via email, then supplies the answer to the security question it returns. Registration is **two** calls (`POST /auth/otp/request`, then `POST /auth/register`) and `security_question` + `security_answer` are mandatory.
 3. OTP verified → user sets password → account activated
-4. One-time use; OTP expires after 5 minutes
+4. One-time use; OTP expires after 5 minutes; invalidated after `OTP_MAX_ATTEMPTS` (default 5) wrong guesses (`400 otp_max_attempts`)
 
 ### JWT Structure
 
@@ -78,7 +79,8 @@ Student enters session code (or scans a session QR if one is available) → serv
 - Access token: 15-minute expiry
 - Refresh token: 7-day expiry, returned in `TokenResponse` body (D51); httpOnly cookie form deferred to Phase 10 (same-origin HTTPS)
 - MFA login gating (D51): if `user.mfa_enabled`, `POST /auth/login` returns `{mfa_pending: true, preauth_token}` (5-min JWT `type="preauth"`, grants no access); `POST /auth/mfa/verify` exchanges `{preauth_token, code}` for full token pair
-- Login OTP (mandatory second factor): a password-OK login returns `{otp_pending: true, otp_token}` (5-min JWT `type="login_otp"`, grants no access) plus a 6-digit emailed code, except students/professors with MFA who keep the TOTP path; `POST /auth/login/verify` exchanges the grant + code for tokens (admins with MFA get an MFA challenge instead: OTP then TOTP). Wrong codes capped at 3 per email inside the 5-min OTP window (then 423 `login_otp_locked`); a second failure-only cap of 15 misses per client IP (then 429) survives email rotation. A resend mints a fresh code and resets the email budget only. Expired codes and successes spend neither budget
+- Login OTP (mandatory second factor): a password-OK login returns `{otp_pending: true, otp_token}` (5-min JWT `type="login_otp"`, grants no access) plus a 6-digit emailed code, except students/professors with MFA who keep the TOTP path; `POST /auth/login/verify` exchanges the grant + code for tokens (admins with MFA get an MFA challenge instead: OTP then TOTP). Wrong codes capped at 5 per email inside the 5-min OTP window (then 423 `login_otp_locked`); a second failure-only cap of 25 misses per client IP (then 429) survives email rotation. A resend mints a fresh code and resets the email budget only. Expired codes and successes spend neither budget. A backstop per-OTP cap of `OTP_MAX_ATTEMPTS` (default 5) wrong guesses invalidates the code (`400 otp_max_attempts`) on top of the per-email/per-IP caps; login OTP keeps its existing caps as the primary gate.
+- OTP brute-force resistance (per-OTP cap): generic `verify_otp` (claim, recovery, login) persists a `failed_attempts` counter on `otp_codes` and invalidates the code (`consumed_at = now`) after `OTP_MAX_ATTEMPTS` (default 5, configurable) wrong guesses, raising `400 otp_max_attempts`. The read uses `with_for_update()` to avoid lost updates. Expired or missing codes do not increment; a successful verification consumes the code as before. The cap is a backstop — login OTP keeps its per-email (5) and per-IP (25) caps as the primary gate.
 - Forgot-password (ADR-052, supersedes D51's OTP-only deferral): mandatory 4-step — email → security question (Argon2id-hashed answer, 3-attempt cap then lock) → OTP via `OtpPurpose.FORGET_PASSWORD` → new password. Turnstile on step 1 was deferred in ADR-052; it is now implemented as key-gated siteverify (ADR-053).
 - Recovery-flow hardening (ADR-056):
   - **Step 1 does not leak account existence.** Unknown emails receive a *deterministic* decoy question (HMAC of the normalized email over `SECURITY_QUESTION_POOL`) and `set: true`, so a given address always returns the same question and the response shape matches the known-email case. This mitigates enumeration rather than eliminating it — the decoy text differs from a real question. Emailing the question instead of returning it would close the gap; deferred.
@@ -102,11 +104,11 @@ Student enters session code (or scans a session QR if one is available) → serv
 | Control                | Implementation                        |
 | ---------------------- | ------------------------------------- |
 | Hashing                | Argon2id (memory=64MB, time=3, parallelism=4) |
-| Lockout                | 5 failed attempts → 15-minute lockout |
+| Lockout                | 5 failed attempts → escalating lockout (1/5/15/30/60/120 min by consecutive lockout count); escalation persists indefinitely and resets on successful login or password reset; the maximum level promotes to a permanent lock that only an admin can release (with reason, audited) |
 | MFA                    | TOTP (RFC 6238) via authenticator app; user-revocable via `POST /auth/mfa/disable` (password-verified), which also clears the TOTP secret and invalidates every unconsumed backup code |
 | Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
 | `must_change_password` | Set by admin **account creation and admin reset only**. There is no first-login trigger |
-| Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056) |
+| Security question      | Answer Argon2id-hashed; question stored readable (see ADR-056). Non-super-admin first login captures it; super-admin is unaffected |
 
 Disabling MFA requires the current password, not a fresh TOTP code: reaching the
 route at all required completing the MFA challenge at login, so the bearer token
@@ -126,27 +128,24 @@ exposure; it is not a way to kick an existing session out.
 
 ### Face Embedding Encryption (D28)
 
-> **Status: partially implemented (2026-10-25).** Enrollment now generates a real
-> 128-d embedding from the admin-uploaded photos using MediaPipe FaceLandmarker
+> **Status: implemented (2026-10-31).** Enrollment generates a real 512-d
+> embedding from the admin-uploaded photos using MobileFaceNet ONNX (`w600k_mbf`)
 > when the model is available (stored as a `FACEEMB1` binary blob via
 > `shared/face_embeddings.serialize_embedding`); otherwise it falls back to a
-> byte-seeded deterministic vector. AES-256-GCM encryption at rest is still
-> **not implemented** — the BYTEA column holds the plaintext blob. The
-> audit-trail exclusion in `_face_snapshot` is implemented and holds regardless.
+> landmark-based vector. AES-256-GCM encryption at rest is still **not
+> implemented** — the BYTEA column holds the plaintext blob. The audit-trail
+> exclusion in `_face_snapshot` is implemented and holds regardless.
 >
-> Scan verification now computes `cosine_similarity(stored_embedding,
-> live_face_embedding)` server-side (`attendance/service.py::submit_scan`) and
-> applies `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). The
-> client supplies `live_face_embedding`, derived from MediaPipe landmarks
-> captured during the liveness challenge, so provenance remains client-asserted.
-
+> Scan verification now generates the live embedding server-side from the
+> submitted image and computes `cosine_similarity(stored_embedding,
+> live_embedding)` (`attendance/service.py::submit_scan`), applying
+> `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). Provenance
+> remains client-asserted because the image is client-supplied.
 ```
 Server:
-  3 photos → a recognition model (none installed) → 128-d vectors per angle
-  → JSON blob: {"mean":[128f], "angles":{"front":[128f],"left":[128f],"right":[128f]}}
-  → AES-256-GCM encrypt with server key
-  → Store BYTEA in students.face_embedding
-
+  3 photos → MobileFaceNet ONNX (512-d) → serialized FACEEMB1 blob
+  → Store BYTEA in students.face_embedding (encryption at rest not implemented)
+```
 Client:
   Pull plaintext blob on login (version-gated)
   → Encrypt with a device-generated WebCrypto key
@@ -203,14 +202,12 @@ though the server verifies biometrics. It does not.
 | Input | Who computes it | What the server checks |
 | --- | --- | --- |
 | `liveness_evidence` | client (MediaPipe WASM) | three booleans true; `ear_samples` non-empty; their **mean** within `EAR_MEAN_MIN..EAR_MEAN_MAX` (0.05..0.5); `pnp_evidence` non-empty; `face_count == 1`; yaw peaks validated when supplied (`peak_left_yaw <= -15`, `peak_right_yaw >= 15`) |
-| `live_face_embedding` | client (MediaPipe landmarks) | deserialized as `FACEEMB1`; cosine similarity against the enrolled embedding must be ≥ `face_review_band_low` (0.65); embedding dimension must be 128 |
-
-The liveness evidence and embedding are still client-asserted, but the server now
-performs a real embedding comparison against the enrolled template instead of
-trusting a submitted score. Provenance (that the embedding came from the frames
-that passed liveness) is not cryptographically bound. Two specifics worth
-stating plainly:
-
+| `live_face_image` / `live_face_embedding` | server (MobileFaceNet, with landmark fallback) | live embedding generated server-side and compared via cosine similarity against the enrolled embedding; score must be ≥ `face_review_band_low` (0.65) |
+The liveness evidence remains client-asserted, and the live embedding is now
+generated server-side from the submitted image, so the server performs a real
+comparison against the enrolled template instead of trusting a submitted score.
+Provenance (that the embedding came from the frames that passed liveness) is not
+cryptographically bound. Two specifics worth stating plainly:
 - `EAR_SAMPLES_MIN_COUNT` is **1**, so the three-step challenge is satisfiable
   with a single asserted sample per position.
 - A client can still forge both fields; the server validates plausibility and

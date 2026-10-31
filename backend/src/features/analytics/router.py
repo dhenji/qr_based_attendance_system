@@ -21,7 +21,7 @@ from features.analytics.schema import (
 )
 from features.auth.model import User
 from shared.constants import SEMESTER_MAX_LENGTH
-from shared.enums import RiskLevel, UserRole
+from shared.enums import RiskLevel, SessionType, UserRole
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.rate_limit import rate_limit
 
@@ -52,6 +52,7 @@ async def get_overview(
     course_ids: list[int] | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
 ) -> OverviewResponse:
     return await service.get_overview(
         program_id=program_id,
@@ -60,6 +61,7 @@ async def get_overview(
         course_ids=course_ids,
         date_from=date_from,
         date_to=date_to,
+        session_type=session_type.value if session_type is not None else None,
     )
 
 
@@ -77,6 +79,7 @@ async def get_course_comparison(
     course_ids: list[int] | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> CourseComparisonResponse:
@@ -87,6 +90,7 @@ async def get_course_comparison(
         course_ids=course_ids,
         date_from=date_from,
         date_to=date_to,
+        session_type=session_type.value if session_type is not None else None,
         page=page,
         size=size,
     )
@@ -130,6 +134,7 @@ async def get_trends(
     granularity: TrendGranularity = Query(default="daily"),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> TrendResponse:
@@ -141,6 +146,7 @@ async def get_trends(
         granularity=granularity,
         date_from=date_from,
         date_to=date_to,
+        session_type=session_type.value if session_type is not None else None,
         page=page,
         size=size,
     )
@@ -264,6 +270,7 @@ async def export_analytics(
         course_ids=payload.course_ids,
         date_from=payload.date_from,
         date_to=payload.date_to,
+        session_type=payload.session_type,
     )
 
     return StreamingResponse(

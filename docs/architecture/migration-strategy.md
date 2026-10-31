@@ -7,8 +7,9 @@
 >
 > **Forward-looking:** four tables landed with later backend-phases —
 > `mfa_backup_codes` (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase
-> 12.0) and `student_risk_scores_staging` (`d4e5f6a7b8c9`) — bringing the baseline
-> to a **20-table** target schema. Each addition gets its own
+> 12.0), `student_risk_scores_staging` (`d4e5f6a7b8c9`), and `offering_components`
+> (D77, `e8f9a0b1c2d3`) — bringing the baseline to a **21-table** target schema.
+> Each addition gets its own
 > `alembic revision --autogenerate`. `audit_logs` (`f4a9c2b7d103`) carries structural
 > rows today and takes the broader audit coverage in Phase 8.7.
 >
@@ -44,14 +45,12 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 
 ## Target Schema (§6 — Authoritative Reference)
 
-Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `excuse_requests`, `student_risk_scores`, `backup_log`, `sync_queue`
-
+Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `offering_components`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `excuse_requests`, `student_risk_scores`, `student_risk_scores_staging`, `mfa_backup_codes`, `audit_logs`, `app_settings`, `backup_log`, `sync_queue`
 The baseline migration creates these 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
 
-> **Target grows to 20 tables** as the four later tables are added: `mfa_backup_codes`
+> **Target grows to 21 tables** as the later tables are added: `mfa_backup_codes`
 > (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase 12.0),
-> `student_risk_scores_staging` (`d4e5f6a7b8c9`). All four
-> models are imported into `backend/alembic/env.py` (the first two via
+> `student_risk_scores_staging` (`d4e5f6a7b8c9`), and `offering_components` (D77). All five> models are imported into `backend/alembic/env.py` (the first two via
 > `features.auth.model` / `features.system.model`) and have their own revisions.
 
 ---
@@ -199,12 +198,11 @@ class CourseProfessor(Base):
     is_primary = Boolean default False
     effective_from = Date NOT NULL
     effective_to = Date NULL  -- NULL = ongoing
-    semester = String(20)  -- validated against year_level.term_structure
     assigned_by = BigInteger FK → users.id
     assigned_at = DateTime(timezone=True) default now()
     PK(offering_id, professor_id, effective_from)
 ```
-
+> **No `semester` column** (dropped by `b2c3d4e5f6a7`); the offering's semester is reached via `course_offerings`.
 **Service-layer rule (enforced in Python, not DB):** Reject overlapping `[effective_from, effective_to)` ranges for same `(offering_id, professor_id)`.
 
 > **Delete rule history:** the baseline `679a319c12d6` created all three FKs as
@@ -400,8 +398,7 @@ class BackupLog(Base):
     kind = String(20)  -- 'full' | 'analytics'
     size_bytes = BigInteger
     sha256 = String(64)
-    storage_backend = String(20)  -- 'local' | 's3'
-    encryption_key_version = Integer
+    storage_backend = String(10)  -- 'local' | 's3'    encryption_key_version = Integer
     started_at = DateTime(timezone=True)
     finished_at = DateTime(timezone=True) NULL
     status = String(20)  -- 'started' | 'completed' | 'failed'
@@ -512,14 +509,10 @@ After all migrations, verify:
 - [ ] `programs`: id, code(UK), name, description, total_years, is_active, created_at, updated_at
 - [ ] `year_levels`: id, program_id(FK CASCADE), year_number, label, term_structure(JSONB), sort_order, UNIQUE(program_id, year_number)
 - [ ] `courses`: course_code(UK), course_name, units, session_duration_hours, is_active, timestamps (no FKs — template only)
-- [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows, is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)
-- [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, semester, assigned_by, assigned_at
-- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, academic_year NOT NULL, UNIQUE(student_id, offering_id, academic_year), validated against year_level.term_structure
-- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(regular column set by service layer)/override coords, CHECK constraint; course_id DROPPED
-- [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
+- [ ] `course_offerings`: course_id(FK), program_id(FK), year_level_id(FK), semester, academic_year, schedule/classroom fields, windows (nullable, inherit), default_classroom_radius_meters (nullable, inherit), is_active, timestamps, UNIQUE(course_id, program_id, semester, academic_year)- [ ] `course_professors`: composite PK(offering_id, professor_id, effective_from), effectiveness dates, is_primary, assigned_by, assigned_at (no `semester` column)- [x] `enrollments`: offering_id NOT NULL, semester NOT NULL, academic_year NOT NULL, UNIQUE(student_id, offering_id, academic_year), validated against year_level.term_structure
+- [ ] `sessions`: offering_id, professor_id FK → professors, duration/windows/scheduled/expires_at(regular column set by service layer), schedule_overridden, actual_start_time, original_scheduled_start_time, override_reason, created_by, session_type, is_remote, geofence_enabled, classroom override coords, CHECK constraint; course_id DROPPED- [ ] `attendance_records`: evidence, face_score, scanned_via, original_status, excuse_*, UNIQUE not needed
 - [ ] `excuse_requests`: all columns, status enum, initiated_by/via
 - [ ] `student_risk_scores`: features JSONB, computed_day DATE, UNIQUE on (student_id, offering_id, semester, computed_day)
 - [ ] `backup_log`: all columns including sha256, key_version; status = started/completed/failed
-- [ ] `students`: year_level_id FK → year_levels; section retained (snapshot per D2); face_embedding(BYTEA), face_enrolled_at, face_embedding_version; legacy `course` DROPPED (no program_id)
-- [ ] All enums in code match §6 (ValidationStatus expanded, etc.)
+- [ ] `students`: year_level_id FK → year_levels; section retained (snapshot per D2); face_embedding(BYTEA), face_embedding_algorithm, face_enrolled_at, face_embedding_version; legacy `course` DROPPED (no program_id)- [ ] All enums in code match §6 (ValidationStatus expanded, etc.)
 

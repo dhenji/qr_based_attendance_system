@@ -33,7 +33,15 @@ class Settings(BaseSettings):
 
     # Account lockout fields
     lockout_attempts: int = 5
+    # Base fallback; escalation table below takes precedence when non-empty.
     lockout_duration_minutes: int = 15
+    # Comma-separated escalation table: duration (minutes) for the 1st, 2nd, ...
+    # consecutive lockout. The last value caps all subsequent lockouts.
+    lockout_escalation_minutes: str = "1,5,15,30,60,120"
+    # Reset the escalation level after this many hours with no new lockout.
+    lockout_recovery_hours: int = 24
+    # Maximum temporary override an admin may grant, in minutes.
+    lockout_override_max_minutes: int = 60
 
     # Face enrollment fields
     face_match_threshold: float = 0.70
@@ -73,6 +81,7 @@ class Settings(BaseSettings):
     default_late_window_minutes: int = 10
     default_geofence_radius_meters: int = 50
     otp_expires_minutes: int = 5
+    otp_max_attempts: int = 5
 
     # Wall-clock class times (`course_offerings.schedule_start_time` /
     # `schedule_end_time`) are naive local times: "09:00" means nine in the

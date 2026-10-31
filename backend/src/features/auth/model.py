@@ -40,6 +40,13 @@ class User(CreatedAtMixin, Base):
     is_locked: Mapped[bool] = mapped_column(server_default=false())
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Incremental lockout state (consecutive lockout count + decay anchor).
+    lockout_level: Mapped[int] = mapped_column(Integer, server_default="0")
+    last_lockout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Temporary admin override: while now < this timestamp the locked gate is
+    # bypassed. NULL means no active override.
+    lockout_override_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class OtpCodes(CreatedAtMixin, Base):
     __tablename__ = "otp_codes"
@@ -53,6 +60,7 @@ class OtpCodes(CreatedAtMixin, Base):
     otp_hash: Mapped[str] = mapped_column(String(255))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_attempts: Mapped[int] = mapped_column(Integer, server_default="0")
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )

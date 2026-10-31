@@ -20,6 +20,8 @@
 
 ### Error Code Coverage
 
+Lockout override validation may return `invalid_override_duration`.
+
 Every code below appears in the `**Errors**` row (or summary-table column) of each
 endpoint that can return it, so this section no longer tracks an outstanding list —
 it records the exceptions to that rule instead. `src/tests/test_contract_error_codes.py`
@@ -567,8 +569,8 @@ Check enrollment status.
 |                  |                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | **Role**         | admin                                                                                            |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                          |
-| **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&session_type=lecture\|lab?` |
+| **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions, lecture_sessions, lab_sessions }` |
 
 #### `GET /admin/analytics/course-options`
 
@@ -594,14 +596,14 @@ Semester/dates are filter axes, not identity.
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&page?&size?`                                            |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&session_type=lecture\|lab?&page?&size?`                |
 | **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 #### `GET /admin/analytics/trends`
 
 |                  |                                                                                   |
 | ---------------- | --------------------------------------------------------------------------------- |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&granularity=daily              | weekly | monthly&date_from?&date_to?` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&granularity=daily              | weekly | monthly&date_from?&date_to?&session_type=lecture\|lab?` |
 | **Response 200** | `{ items: [{ date, compliance_rate, participation_rate, total_sessions }], ... }` |
 
 #### `GET /admin/analytics/at-risk`
@@ -617,7 +619,7 @@ Export analytics as CSV/PDF.
 
 |                  |                            |
 | ---------------- | -------------------------- |
-| **Request**      | `{ format: "csv", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to? }` |
+| **Request**      | `{ format: "csv", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to?, session_type? }` |
 | **Response 200** | File download (CSV) |
 | **Errors**       | 422 `unsupported_export_format` for any format other than `csv` |
 
@@ -1071,7 +1073,9 @@ Update professor fields + course assignments.
 
 Admin accounts are never self-registered (wireframes.md 4.13). Super Admins manage
 admins; admins manage students/professors. Password resets set a temp password
-(returned once) and force `must_change_password=true`.
+(returned once) and force `must_change_password=true`. Non-super-admin users set
+a security question during the forced password change; super-admin keeps the
+password-only flow.
 
 | Method | Path                                    | Purpose                                            | Role        |
 | Errors |
@@ -1082,6 +1086,12 @@ admins; admins manage students/professors. Password resets set a temp password
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated admin (rejects self-reactivation; preserves password, MFA, lockout, and role) | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
 | POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
+| GET    | `/admin/users/{user_id}/lockout`             | Account lockout status (`LockoutStatusResponse`, incl. `is_permanently_locked`) | admin (super_admin) | 404 `user_not_found` |
+Permanent lock raises `account_permanently_locked` (423) on `POST /auth/login` when an account is at the maximum escalation level.
+| POST   | `/admin/users/{user_id}/lockout/release`     | Release an active lockout (reason required) | admin (super_admin) | 404 `user_not_found` |
+| POST   | `/admin/users/{user_id}/lockout/reset-counter` | Reset the escalation counter (reason required) | admin (super_admin) | 404 `user_not_found` |
+| POST   | `/admin/users/{user_id}/lockout/override`    | Grant a temporary override (duration + reason) | admin (super_admin) | 404 `user_not_found` · 422 `invalid_override_duration` |
+| POST   | `/admin/users/{user_id}/lockout/override/revoke` | Revoke an active override (reason required) | admin (super_admin) | 404 `user_not_found` |
 | POST   | `/admin/students/{student_id}/reset-password`   | Reset linked student-account password (temp once)  | admin | 404 `student_not_found` · 404 `user_not_found` · 409 `student_account_unlinked` |
 | POST   | `/admin/professors/{professor_id}/reset-password` | Reset linked professor-account password (temp once)| admin | 404 `professor_not_found` · 404 `user_not_found` · 409 `professor_account_unlinked` |
 
@@ -1293,7 +1303,7 @@ Aggregate attendance across all assigned courses.
 
 |                  |                                                                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?granularity=daily                                                                                                             | weekly | monthly&date_from?&date_to?` |
+| **Query**        | `?granularity=daily                                                                                                             | weekly | monthly&date_from?&date_to?&session_type=lecture\|lab?` |
 | **Response 200** | `{ items: [{ date, total_sessions, total_students, compliance_rate, participation_rate }], avg_compliance, avg_participation }` |
 
 #### `GET /professor/reports/comparison`
@@ -1305,7 +1315,7 @@ without a course-id lookup (which cannot tell two cohorts apart).
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&page?&size?`                                                       |
+| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&session_type=lecture\|lab?&page?&size?`                           |
 | **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, program_code, year_level_label, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 (Compare rows at `:451` and `:1023` do accept `granularity=daily|weekly|monthly`; this scoped row does not.)
@@ -1316,7 +1326,7 @@ Multi-series trend data.
 
 |                  |                                                            |
 | ---------------- | ---------------------------------------------------------- |
-| **Query**        | `?course_ids?&metric=compliance                            | participation&granularity=daily | weekly | monthly&date_from?&date_to?` |
+| **Query**        | `?course_ids?&metric=compliance                            | participation&granularity=daily | weekly | monthly&date_from?&date_to?&session_type=lecture\|lab?` |
 | **Response 200** | `{ items: [{ date, course_id, course_code, rate }], ... }` |
 
 #### `POST /professor/reports/export`
@@ -1325,7 +1335,7 @@ Export attendance for the professor's own assigned courses (wireframes.md 3.7/3.
 
 |                  |                                                                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus] }` |
+| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus], session_type? }` |
 | **Response 200** | Generated file (download)                                                                                             |
 
 **Scope note:** Excel/Print are frontend concerns — backend emits CSV or PDF only.
@@ -1582,18 +1592,18 @@ lock after 5 failed attempts.
 | --- |
 | ------ | ---------------------------------- | ---------------------------------------------------- |
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
-| POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` |
-| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
+| POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
+| POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
 | POST   | `/auth/login`                      | Email/password login (+ OTP & MFA gates) | 400 `invalid_credentials` · 423 `account_locked` |
-| POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 423 `login_otp_locked` · 429 `rate_limited` |
+| POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 423 `login_otp_locked` · 429 `rate_limited` |
 | POST   | `/auth/login/resend`               | Resend login OTP (burns the previous code) | 400 `invalid_credentials` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 404 `unrecognized_email` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` |
 | POST   | `/auth/password-recovery/start`    | Start recovery for the authenticated user — mints a grant, sends OTP, returns `{ recovery_token, masked_email }` | 401 unauthorized |
-| POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` |
-| POST   | `/auth/change-password`            | Change password (authenticated) | 400 `current_password_invalid` · 400 `password_reused` |
+| POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
+| POST   | `/auth/change-password`            | Change password (authenticated; optional `security_question`/`security_answer`) | 400 `current_password_invalid` · 400 `password_reused` · 422 `password_policy_violation` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
 | GET    | `/auth/mfa/backup-codes`           | Backup-code summary (total/remaining) | — |
@@ -1612,11 +1622,15 @@ exchanges `{otp_token, code}` for the token pair — or, for an admin with MFA
 enabled, for `{mfa_pending: true, preauth_token}` (OTP then TOTP). `POST
  /auth/login/resend` mints a fresh code and burns the previous one — and resets
  the email's wrong-code budget, since guesses against the burned code are
- guesses against a dead credential. Wrong codes are capped at 3 per email
+ guesses against a dead credential. Wrong codes are capped at 5 per email
  inside the 5-minute OTP window (then 423 `login_otp_locked`); a second,
- failure-only cap of 15 misses per client IP (then 429 `rate_limited`) survives
+ failure-only cap of 25 misses per client IP (then 429 `rate_limited`) survives
  email rotation — resends do not reset it. Expired codes and correct codes
- spend neither budget. The `otp_token` is a
+ spend neither budget. Every OTP verification is also subject to a per-OTP cap of
+ `OTP_MAX_ATTEMPTS` (default 5) wrong guesses: once exceeded the code is
+ invalidated and `400 otp_max_attempts` is returned, prompting a resend. This
+ applies to claim, recovery, and login OTPs; login OTP keeps its per-email (5)
+ and per-IP (25) caps as the primary gate. The `otp_token` is a
 5-minute `type="login_otp"` JWT carrying the account email: a missing,
 malformed, expired, wrong-typed, or email-mismatched grant — like a missing or
 inactive account — returns generic 400 `invalid_credentials`, and the grant is

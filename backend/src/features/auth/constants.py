@@ -17,7 +17,7 @@ SECURITY_RECOVERY_MAX_ATTEMPTS: int = 3
 # resend mints a fresh code and resets this budget, so the lock can never
 # outlive the credential it protects by more than 1x. Expired codes do not
 # consume budget, only mismatches do.
-LOGIN_OTP_MAX_ATTEMPTS: int = 3
+LOGIN_OTP_MAX_ATTEMPTS: int = 5
 
 # Login-OTP wrong-code cap per client IP inside the same window. Unlike the
 # per-email cap, a resend does NOT reset this one — that is what stops a
@@ -25,7 +25,7 @@ LOGIN_OTP_MAX_ATTEMPTS: int = 3
 # only: successes and expired codes never touch it. 15 admits several
 # mistyping users behind one NAT while still binding a script in under a
 # minute. Trips report the reused 429 `rate_limited` code, not a new one.
-LOGIN_OTP_IP_MAX_ATTEMPTS: int = 15
+LOGIN_OTP_IP_MAX_ATTEMPTS: int = 25
 
 BACKUP_CODE_LENGTH: int = 10
 BACKUP_CODE_COUNT: int = 10

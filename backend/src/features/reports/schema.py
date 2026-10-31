@@ -83,6 +83,7 @@ class ProfessorExportRequest(BaseModel):
         default_factory=lambda: list(DEFAULT_EXPORT_INCLUDE)
     )
     statuses: list[ValidationStatus] | None = None
+    session_type: str | None = None
 
     @model_validator(mode="after")
     def _check_range(self) -> ProfessorExportRequest:

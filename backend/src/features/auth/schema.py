@@ -159,6 +159,8 @@ class PasswordRecoveryResetRequest(_OTPCodeRequest, _NewPasswordRequest):
 
 class ChangePasswordRequest(_NewPasswordRequest):
     current_password: str
+    security_question: str | None = None
+    security_answer: str | None = None
 
 
 class MFASetupResponse(BaseModel):
@@ -234,3 +236,28 @@ class AdminPasswordResetResponse(BaseModel):
     """
 
     temp_password: str
+
+
+class LockoutStatusResponse(BaseModel):
+    user_id: int
+    email: str
+    role: str
+    is_locked: bool
+    is_permanently_locked: bool = False
+    locked_at: datetime | None = None
+    lockout_level: int = 0
+    lockout_duration_minutes: int = 0
+    locked_until: datetime | None = None
+    remaining_minutes: int | None = None
+    last_lockout_at: datetime | None = None
+    override_until: datetime | None = None
+    override_remaining_minutes: int | None = None
+
+
+class LockoutReasonRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+class LockoutOverrideRequest(BaseModel):
+    duration_minutes: int = Field(..., ge=1)
+    reason: str = Field(..., min_length=3, max_length=500)

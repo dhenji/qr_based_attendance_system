@@ -17,7 +17,7 @@ from features.reports.schema import (
     ReportsTrendResponse,
 )
 from shared.constants import SEMESTER_MAX_LENGTH
-from shared.enums import UserRole
+from shared.enums import SessionType, UserRole
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
@@ -48,6 +48,7 @@ async def reports_all_courses(
     granularity: TrendGranularity = Query(default="daily"),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
 ) -> AllCoursesResponse:
     professor_id: int = await professor_service.resolve_professor_id(
         user_id=user.id
@@ -58,6 +59,7 @@ async def reports_all_courses(
         granularity=granularity,
         date_from=date_from,
         date_to=date_to,
+        session_type=session_type.value if session_type is not None else None,
     )
 
 
@@ -75,6 +77,7 @@ async def reports_comparison(
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> ReportsComparisonResponse:
@@ -89,6 +92,7 @@ async def reports_comparison(
         semester=semester,
         date_from=date_from,
         date_to=date_to,
+        session_type=session_type.value if session_type is not None else None,
         page=page,
         size=size,
     )
@@ -108,6 +112,7 @@ async def reports_trends(
     granularity: TrendGranularity = Query(default="daily"),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    session_type: SessionType | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> ReportsTrendResponse:
@@ -122,6 +127,7 @@ async def reports_trends(
         granularity=granularity,
         date_from=date_from,
         date_to=date_to,
+        session_type=session_type.value if session_type is not None else None,
         page=page,
         size=size,
     )
@@ -148,6 +154,7 @@ async def export_professor_reports(
         format=payload.format,
         include=payload.include,
         statuses=payload.statuses,
+        session_type=payload.session_type,
     )
 
     return StreamingResponse(

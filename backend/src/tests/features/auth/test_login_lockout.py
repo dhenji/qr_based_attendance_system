@@ -279,6 +279,9 @@ async def test_audit_snapshot_never_carries_the_email_or_the_hash(
             "failed_login_attempts",
             "is_locked",
             "locked_at",
+            "lockout_level",
+            "last_lockout_at",
+            "lockout_override_until",
             "must_change_password",
         }
         assert user.email not in str(snapshot)
