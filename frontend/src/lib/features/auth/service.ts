@@ -203,13 +203,20 @@ export const generateBackupCodes = async (): Promise<BackupCodesResponse> =>
 export const listBackupCodes = async (): Promise<BackupCodesSummaryResponse> =>
 	get<BackupCodesSummaryResponse>('authMfaBackupCodesSummary');
 
-export const changePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
+export const changePassword = async (
+	currentPassword: string,
+	newPassword: string,
+	securityQuestion?: string,
+	securityAnswer?: string
+): Promise<void> => {
 	if (isMockMode()) return mockNoop();
 
 	const body: ChangePasswordRequest = {
 		current_password: currentPassword,
 		new_password: newPassword,
 	};
+	if (securityQuestion) body.security_question = securityQuestion;
+	if (securityAnswer) body.security_answer = securityAnswer;
 	await post<void>('authChangePassword', body);
 };
 

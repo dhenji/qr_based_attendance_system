@@ -409,14 +409,17 @@ export const doResetPasswordAuthenticated = async (
 
 export const doChangePassword = async (
 	currentPassword: string,
-	newPassword: string
+	newPassword: string,
+	securityQuestion?: string,
+	securityAnswer?: string
 ): Promise<void> => {
 	authState.error = null;
 	return withLoading(async () => {
 		try {
-			await changePassword(currentPassword, newPassword);
+			await changePassword(currentPassword, newPassword, securityQuestion, securityAnswer);
 			if (authState.user) authState.user.mustChangePassword = false;
 			authState.mustChangePassword = false;
+			if (authState.user && securityQuestion) authState.user.securityQuestionSet = true;
 		} catch (error: unknown) {
 			authState.error = toMessage(error, 'Password change failed.');
 			throw error;

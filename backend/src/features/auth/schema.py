@@ -159,6 +159,8 @@ class PasswordRecoveryResetRequest(_OTPCodeRequest, _NewPasswordRequest):
 
 class ChangePasswordRequest(_NewPasswordRequest):
     current_password: str
+    security_question: str | None = None
+    security_answer: str | None = None
 
 
 class MFASetupResponse(BaseModel):

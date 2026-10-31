@@ -1633,7 +1633,11 @@ assignment.
 
 ### 4.11 Admin Profile
 
-Same as Student Profile (2.10). Fields: Name (First/Middle/Last), Email, Role (Super Admin / Admin), Last Login.
+Admin profile uses the student settings visual shell: identity card (name,
+email, role, last login), Appearance (theme), a Security card (Change Password,
+MFA via `MfaSettings`, Security Question), and an app version footer.
+Non-super-admin first login with a temp password captures the security question
+in the forced flow; super-admin uses the password-only flow.
 
 ### 4.12 Admin Attendance Review — `/admin/attendance`
 

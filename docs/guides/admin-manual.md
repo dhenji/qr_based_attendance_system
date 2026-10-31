@@ -415,3 +415,5 @@ Notes:
 - Permanently locked accounts show only **Release lockout**.
 - A user's own row has no Lockout button; self-recovery uses the forgot-password flow.
 - Successful password login resets the escalation level.
+- Admins created or reset with a temporary password set a security question
+  during their first login; super-admin accounts use the password-only flow.

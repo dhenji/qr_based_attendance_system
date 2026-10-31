@@ -104,6 +104,8 @@ export interface BackupCodesSummaryResponse {
 export interface ChangePasswordRequest {
 	new_password: string;
 	current_password: string;
+	security_question?: string;
+	security_answer?: string;
 }
 
 // POST /auth/login | /auth/register | /auth/refresh | /auth/mfa/verify |
