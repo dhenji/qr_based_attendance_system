@@ -26,7 +26,35 @@
 	let liveLoading = $state(false);
 	let liveError = $state<string | null>(null);
 	let resolvingId = $state<number | null>(null);
-	let reviewNote = $state('');
+	// Per-row review notes (the previous single global input leaked a note
+	// typed for one row into the decision for a different row).
+	let reviewNotes = $state<Record<number, string>>({});
+
+	// Pagination
+	let livePage = $state(1);
+	let liveSize = $state(20);
+	const totalPages = $derived(Math.max(1, Math.ceil(liveTotal / liveSize)));
+
+	// Client-side filters (backend review endpoint only accepts status/page/size)
+	let filterCourse = $state('All');
+	let filterDateFrom = $state('');
+	let filterDateTo = $state('');
+
+	const courseOptions = $derived.by(() => {
+		const codes = new Set<string>();
+		for (const r of liveItems) if (r.course_code) codes.add(r.course_code);
+		return [...codes].sort();
+	});
+
+	const filteredItems = $derived.by(() => {
+		return liveItems.filter((row) => {
+			if (filterCourse !== 'All' && row.course_code !== filterCourse) return false;
+			const day = row.scanned_at ? row.scanned_at.slice(0, 10) : '';
+			if (filterDateFrom && day < filterDateFrom) return false;
+			if (filterDateTo && day > filterDateTo) return false;
+			return true;
+		});
+	});
 
 	// alive-guard: if the route unmounts while the first load is in flight,
 	// destroy has already run and the focus revalidate must not attach.
@@ -42,7 +70,7 @@
 		liveLoading = true;
 		liveError = null;
 		try {
-			const response = await listLivenessReview({ status: liveStatus, page: 1, size: 20 });
+			const response = await listLivenessReview({ status: liveStatus, page: livePage, size: liveSize });
 			liveItems = response.items ?? [];
 			liveTotal = response.total ?? liveItems.length;
 		} catch (e) {
@@ -70,8 +98,8 @@
 		resolvingId = id;
 		liveError = null;
 		try {
-			await resolveLivenessReview(id, decision, reviewNote);
-			reviewNote = '';
+			await resolveLivenessReview(id, decision, reviewNotes[id] ?? '');
+			reviewNotes[id] = '';
 			await loadLiveness();
 		} catch (e) {
 			liveError = e instanceof Error ? e.message : 'Could not resolve this record.';
@@ -79,6 +107,42 @@
 			resolvingId = null;
 		}
 	};
+
+	const goToPage = (p: number) => {
+		const next = Math.min(Math.max(1, p), totalPages);
+		if (next === livePage) return;
+		livePage = next;
+		void loadLiveness();
+	};
+
+	// Per-row expand state for the evidence bundle. Stored as a reactive
+	// record (not a Set) so property assignment triggers re-render.
+	let expanded = $state<Record<number, boolean>>({});
+	const toggleEvidence = (id: number) => {
+		expanded[id] = !expanded[id];
+	};
+
+	// Safe accessors for the free-form evidence dict (backend shape is
+	// LivenessEvidence + accuracy/review/review_note, but we never trust it).
+	const asRecord = (v: unknown): Record<string, unknown> =>
+		v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+	const asBool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
+	const asNum = (v: unknown): number | null =>
+		typeof v === 'number' && Number.isFinite(v) ? v : null;
+	const asStr = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+	const asNums = (v: unknown): number[] =>
+		Array.isArray(v) ? v.filter((x): x is number => typeof x === 'number' && Number.isFinite(x)) : [];
+
+	const evidenceOf = (row: LivenessReviewItemResponse) => asRecord(row.evidence);
+	const earStats = (samples: number[]) => {
+		if (samples.length === 0) return null;
+		const min = Math.min(...samples);
+		const max = Math.max(...samples);
+		const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+		return { min, max, mean };
+	};
+	const fmtNum = (v: number | null, digits = 2) => (v === null ? '—' : v.toFixed(digits));
+	const fmtBool = (v: boolean | null) => (v === null ? '—' : v ? 'Yes' : 'No');
 </script>
 
 <div class="page">
@@ -94,25 +158,39 @@
 			class="input"
 			aria-label="Review status"
 			bind:value={liveStatus}
-			onchange={() => void loadLiveness()}
+			onchange={() => { livePage = 1; void loadLiveness(); }}
 		>
 			<option value="pending">Pending</option>
 			<option value="approved">Approved</option>
 			<option value="rejected">Rejected</option>
 		</select>
+		<select
+			class="input"
+			aria-label="Filter by course"
+			bind:value={filterCourse}
+		>
+			<option value="All">All courses</option>
+			{#each courseOptions as code (code)}
+				<option value={code}>{code}</option>
+			{/each}
+		</select>
 		<input
 			class="input"
-			type="text"
-			placeholder="Review note (optional, stored with the decision)"
-			aria-label="Review note"
-			bind:value={reviewNote}
-			maxlength={1000}
+			type="date"
+			aria-label="Scanned from"
+			bind:value={filterDateFrom}
+		/>
+		<input
+			class="input"
+			type="date"
+			aria-label="Scanned to"
+			bind:value={filterDateTo}
 		/>
 		<button class="btn btn-secondary" onclick={() => void loadLiveness()}>Refresh</button>
 	</section>
 
 	{#if liveLoading && liveItems.length === 0}
-		<SkeletonTable rows={6} cols={5} label="Loading review queue…" />
+		<SkeletonTable rows={6} cols={6} label="Loading review queue…" />
 	{:else if liveError}
 		<section class="card"><p class="error">{liveError}</p></section>
 	{:else if liveItems.length === 0}
@@ -130,23 +208,46 @@
 						<th scope="col">Student</th>
 						<th scope="col">Session</th>
 						<th scope="col">Score</th>
+						<th scope="col">Evidence</th>
 						<th scope="col">Scanned</th>
 						{#if liveStatus === 'pending'}<th scope="col">Decision</th>{/if}
 					</tr>
 				</thead>
 				<tbody>
-					{#each liveItems as row (row.id)}
+					{#if filteredItems.length === 0}
+						<tr><td colspan="6" class="muted">No rows match the current filters.</td></tr>
+					{/if}
+					{#each filteredItems as row (row.id)}
 						<tr>
 							<td>
 								<span class="strong">{row.student_name}</span>
 								<div class="muted small">{row.student_number} · {row.course_code}</div>
 							</td>
 							<td>{row.session_code}</td>
-							<td>{row.face_match_score.toFixed(2)}</td>
+							<td>{row.face_match_score == null ? '—' : row.face_match_score.toFixed(2)}</td>
+							<td>
+								<button
+									class="btn btn-secondary btn-sm"
+									type="button"
+									aria-expanded={expanded[row.id] ? 'true' : 'false'}
+									aria-controls={`evidence-${row.id}`}
+									onclick={() => toggleEvidence(row.id)}
+								>
+									{expanded[row.id] ? 'Hide' : 'View'}
+								</button>
+							</td>
 							<td>{formatLocalDateTime(row.scanned_at)}</td>
 							{#if liveStatus === 'pending'}
 								<td>
 									<div class="row-actions">
+										<input
+											class="input input-sm"
+											type="text"
+											placeholder="Note (optional)"
+											aria-label={`Review note for ${row.student_number}`}
+											maxlength={1000}
+											bind:value={reviewNotes[row.id]}
+										/>
 										<button
 											class="btn btn-secondary"
 											type="button"
@@ -167,9 +268,73 @@
 								</td>
 							{/if}
 						</tr>
+						{#if expanded[row.id]}
+							{@const ev = evidenceOf(row)}
+							{@const samples = asNums(ev.ear_samples)}
+							{@const stats = earStats(samples)}
+							{@const pnp = asRecord(ev.pnp_evidence)}
+							<tr class="evidence-row" id={`evidence-${row.id}`}>
+								<td colspan="6">
+									<div class="evidence-panel">
+										<div class="evidence-group">
+											<h3 class="evidence-title">Challenge</h3>
+											<dl class="evidence-dl">
+												<div><dt>Blink detected</dt><dd class:ok={asBool(ev.blink_detected) === true} class:bad={asBool(ev.blink_detected) === false}>{fmtBool(asBool(ev.blink_detected))}</dd></div>
+												<div><dt>Head turn left</dt><dd class:ok={asBool(ev.head_turn_left) === true} class:bad={asBool(ev.head_turn_left) === false}>{fmtBool(asBool(ev.head_turn_left))}</dd></div>
+												<div><dt>Head turn right</dt><dd class:ok={asBool(ev.head_turn_right) === true} class:bad={asBool(ev.head_turn_right) === false}>{fmtBool(asBool(ev.head_turn_right))}</dd></div>
+												<div><dt>Face count</dt><dd>{fmtNum(asNum(ev.face_count), 0)}</dd></div>
+											</dl>
+										</div>
+										<div class="evidence-group">
+											<h3 class="evidence-title">Eye aspect ratio</h3>
+											<dl class="evidence-dl">
+												<div><dt>Samples</dt><dd>{samples.length}</dd></div>
+												{#if stats}
+													<div><dt>Mean</dt><dd>{stats.mean.toFixed(3)}</dd></div>
+													<div><dt>Min / Max</dt><dd>{stats.min.toFixed(3)} / {stats.max.toFixed(3)}</dd></div>
+												{:else}
+													<div><dt>Mean</dt><dd>—</dd></div>
+												{/if}
+											</dl>
+										</div>
+										<div class="evidence-group">
+											<h3 class="evidence-title">Head pose (PnP)</h3>
+											<dl class="evidence-dl">
+												<div><dt>Source</dt><dd>{asStr(pnp.source) ?? '—'}</dd></div>
+												<div><dt>Baseline yaw</dt><dd>{fmtNum(asNum(pnp.baseline_yaw), 1)}°</dd></div>
+												<div><dt>Yaw</dt><dd>{fmtNum(asNum(pnp.yaw), 1)}°</dd></div>
+												<div><dt>Peak left</dt><dd>{fmtNum(asNum(pnp.peak_left_yaw), 1)}°</dd></div>
+												<div><dt>Peak right</dt><dd>{fmtNum(asNum(pnp.peak_right_yaw), 1)}°</dd></div>
+												<div><dt>Yaw samples</dt><dd>{asNums(pnp.yaw_samples).length}</dd></div>
+											</dl>
+										</div>
+										<div class="evidence-group">
+											<h3 class="evidence-title">Context</h3>
+											<dl class="evidence-dl">
+												<div><dt>GPS accuracy</dt><dd>{asNum(ev.accuracy) === null ? '—' : `${asNum(ev.accuracy)!.toFixed(1)} m`}</dd></div>
+												<div><dt>Review band</dt><dd>{asBool(ev.review) ? 'Yes' : 'No'}</dd></div>
+												{#if asStr(ev.review_note)}
+													<div><dt>Review note</dt><dd>{asStr(ev.review_note)}</dd></div>
+												{/if}
+											</dl>
+										</div>
+									</div>
+								</td>
+							</tr>
+						{/if}
 					{/each}
 				</tbody>
 			</table>
+			<div class="pager">
+				<span class="muted small">
+					Showing {filteredItems.length} of {liveItems.length} on this page · {liveTotal} total
+				</span>
+				<div class="row-actions">
+					<button class="btn btn-secondary" type="button" disabled={livePage <= 1 || liveLoading} onclick={() => goToPage(livePage - 1)}>Prev</button>
+					<span class="muted small">Page {livePage} of {totalPages}</span>
+					<button class="btn btn-secondary" type="button" disabled={livePage >= totalPages || liveLoading} onclick={() => goToPage(livePage + 1)}>Next</button>
+				</div>
+			</div>
 		</section>
 	{/if}
 </div>
@@ -311,6 +476,86 @@
 
 	.table-wrap {
 		overflow-x: auto;
+	}
+
+	.btn-sm {
+		padding: 0.375rem 0.625rem;
+		font-size: 0.75rem;
+	}
+
+	.input-sm {
+		padding: 0.375rem 0.5rem;
+		font-size: 0.75rem;
+		min-width: 8rem;
+	}
+
+	.pager {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		margin-top: 0.75rem;
+		padding-top: 0.75rem;
+		border-top: 1px solid var(--divider);
+	}
+
+	.evidence-row td {
+		background: var(--bg-subtle, var(--divider));
+		padding: 0.75rem;
+	}
+
+	.evidence-panel {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+		gap: 1rem;
+	}
+
+	.evidence-group {
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.75rem 1rem;
+	}
+
+	.evidence-title {
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+		margin: 0 0 0.5rem;
+	}
+
+	.evidence-dl {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.25rem;
+		margin: 0;
+	}
+
+	.evidence-dl > div {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.5rem;
+		font-size: 0.8125rem;
+	}
+
+	.evidence-dl dt {
+		color: var(--text-muted);
+	}
+
+	.evidence-dl dd {
+		margin: 0;
+		font-weight: 600;
+		color: var(--text-strong);
+	}
+
+	.evidence-dl dd.ok {
+		color: var(--success, #16a34a);
+	}
+
+	.evidence-dl dd.bad {
+		color: var(--danger);
 	}
 
 	@media (max-width: 640px) {
