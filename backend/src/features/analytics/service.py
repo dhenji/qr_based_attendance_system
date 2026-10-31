@@ -106,6 +106,7 @@ async def _scoped_sessions(
     offering_ids: list[int],
     date_from: datetime | None,
     date_to: datetime | None,
+    session_type: str | None = None,
 ) -> Sequence[Session]:
     if not offering_ids:
         return []
@@ -113,6 +114,7 @@ async def _scoped_sessions(
     stmt = select(Session).where(Session.offering_id.in_(offering_ids))
     stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
     stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+    stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
 
     return (await session.scalars(stmt)).all()
 
@@ -240,6 +242,7 @@ class AnalyticsService:
         course_ids: Sequence[int] | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
     ) -> OverviewResponse:
         """Totals plus average rates over the offering filter set."""
         offerings: Sequence[CourseOffering] = (
@@ -249,7 +252,7 @@ class AnalyticsService:
         ).all()
         offering_ids: list[int] = [row.id for row in offerings]
         sessions: Sequence[Session] = await _scoped_sessions(
-            self._session, offering_ids, date_from, date_to
+            self._session, offering_ids, date_from, date_to, session_type
         )
         enrolled_by_offering = await _enrollments_by_offering(
             self._session, offering_ids
@@ -277,6 +280,8 @@ class AnalyticsService:
             avg_compliance_rate=compliance,
             avg_participation_rate=participation,
             total_sessions=len(sessions),
+            lecture_sessions=sum(1 for row in sessions if row.session_type == "lecture"),
+            lab_sessions=sum(1 for row in sessions if row.session_type == "lab"),
         )
 
     async def get_course_comparison(
@@ -288,6 +293,7 @@ class AnalyticsService:
         course_ids: Sequence[int] | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> CourseComparisonResponse:
@@ -331,7 +337,7 @@ class AnalyticsService:
             rows: list[CourseOffering] = cohorts[key]
             offering_ids: list[int] = [row.id for row in rows]
             sessions: Sequence[Session] = await _scoped_sessions(
-                self._session, offering_ids, date_from, date_to
+                self._session, offering_ids, date_from, date_to, session_type
             )
             enrolled_by_offering = await _enrollments_by_offering(
                 self._session, offering_ids
@@ -437,6 +443,7 @@ class AnalyticsService:
         granularity: TrendGranularity = "daily",
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> TrendResponse:
@@ -453,7 +460,7 @@ class AnalyticsService:
             return TrendResponse(items=[], total=0, page=page, size=size)
 
         sessions: Sequence[Session] = await _scoped_sessions(
-            self._session, offering_ids, date_from, date_to
+            self._session, offering_ids, date_from, date_to, session_type
         )
         enrolled_by_offering = await _enrollments_by_offering(
             self._session, offering_ids
@@ -878,6 +885,7 @@ class AnalyticsService:
         course_ids: Sequence[int] | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        session_type: str | None = None,
     ) -> str:
         """Per-course rows rendered as CSV text for the admin export download.
 
@@ -899,6 +907,7 @@ class AnalyticsService:
             course_ids=course_ids,
             date_from=date_from,
             date_to=date_to,
+            session_type=session_type,
             page=DEFAULT_PAGE,
             size=MAX_PAGE_SIZE,
         )

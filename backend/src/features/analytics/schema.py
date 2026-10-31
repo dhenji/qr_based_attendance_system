@@ -17,6 +17,8 @@ class OverviewResponse(BaseModel):
     avg_compliance_rate: float
     avg_participation_rate: float
     total_sessions: int
+    lecture_sessions: int = 0
+    lab_sessions: int = 0
 
 
 class CourseComparisonItem(BaseModel):
@@ -141,3 +143,4 @@ class AnalyticsExportRequest(BaseModel):
     course_ids: list[int] | None = None
     date_from: datetime | None = None
     date_to: datetime | None = None
+    session_type: str | None = None

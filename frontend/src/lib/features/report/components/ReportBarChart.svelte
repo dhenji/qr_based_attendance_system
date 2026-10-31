@@ -26,16 +26,18 @@
 	}: ReportBarChartProps = $props();
 
 	const width = 640;
-	const labelWidth = 190;
-	const chartWidth = 410;
-	const barHeight = 22;
-	const gap = 12;
-	const topPad = 16;
+	const labelWidth = 230;
+	const chartWidth = 370;
+	const barHeight = 20;
+	const gap = 10;
+	const topPad = 32;
 	const bottomPad = 16;
 	const height = $derived(topPad + Math.max(1, bars.length) * (barHeight + gap) + bottomPad);
 	const maxValue = $derived(Math.max(1, average ?? 0, ...bars.map((bar) => bar.value)));
 	const barWidth = (value: number): number => Math.max(2, (value / maxValue) * chartWidth);
 	const percent = (value: number): string => `${Math.round(value * 100)}%`;
+	const truncate = (value: string): string =>
+		value.length > 30 ? `${value.slice(0, 28)}…` : value;
 	const titleId = $derived(`${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-chart`);
 </script>
 
@@ -55,8 +57,17 @@
 				{@const y = topPad + index * (barHeight + gap)}
 				{@const valueX = labelWidth + barWidth(bar.value)}
 				<text x={labelWidth - 12} y={y + 15} text-anchor="end" class="label">
-					{bar.label}
+					<title>{bar.label}</title>
+					{truncate(bar.label)}
 				</text>
+				<rect
+					x={labelWidth}
+					y={y}
+					width={chartWidth}
+					height={barHeight}
+					rx="6"
+					class="track"
+				/>
 				<rect
 					x={labelWidth}
 					y={y}
@@ -101,13 +112,19 @@
 
 	.label,
 	.value {
-		font-size: 12px;
+		font-size: 11px;
 		fill: var(--text-secondary);
 	}
 
 	.value {
 		font-weight: 700;
 		fill: var(--text-strong);
+	}
+
+	.track {
+		fill: var(--bg-page);
+		stroke: var(--border);
+		stroke-width: 1;
 	}
 
 	.bar {
@@ -121,7 +138,7 @@
 	}
 
 	.average-label {
-		font-size: 12px;
+		font-size: 10px;
 		font-weight: 700;
 		fill: var(--success);
 	}

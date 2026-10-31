@@ -489,6 +489,8 @@ export interface AnalyticsOverviewResponse {
 	avg_compliance_rate: number;
 	avg_participation_rate: number;
 	total_sessions: number;
+	lecture_sessions?: number;
+	lab_sessions?: number;
 }
 
 export interface AnalyticsComparisonItemResponse {
@@ -633,6 +635,7 @@ export interface AdminAnalyticsFilters {
 	date_to?: string;
 	granularity?: AnalyticsGranularity;
 	risk_level?: AnalyticsRiskLevel;
+	session_type?: 'lecture' | 'lab';
 }
 
 export interface AttendanceOverviewFilters {

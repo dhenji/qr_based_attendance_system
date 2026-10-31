@@ -569,8 +569,8 @@ Check enrollment status.
 |                  |                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | **Role**         | admin                                                                                            |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?`                          |
-| **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions }` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&session_type=lecture\|lab?` |
+| **Response 200** | `{ total_students, total_courses, avg_compliance_rate, avg_participation_rate, total_sessions, lecture_sessions, lab_sessions }` |
 
 #### `GET /admin/analytics/course-options`
 
@@ -596,14 +596,14 @@ Semester/dates are filter axes, not identity.
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&page?&size?`                                            |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&date_from?&date_to?&session_type=lecture\|lab?&page?&size?`                |
 | **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 #### `GET /admin/analytics/trends`
 
 |                  |                                                                                   |
 | ---------------- | --------------------------------------------------------------------------------- |
-| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&granularity=daily              | weekly | monthly&date_from?&date_to?` |
+| **Query**        | `?program_id?&year_level_id?&semester?&course_ids?&granularity=daily              | weekly | monthly&date_from?&date_to?&session_type=lecture\|lab?` |
 | **Response 200** | `{ items: [{ date, compliance_rate, participation_rate, total_sessions }], ... }` |
 
 #### `GET /admin/analytics/at-risk`
@@ -619,7 +619,7 @@ Export analytics as CSV/PDF.
 
 |                  |                            |
 | ---------------- | -------------------------- |
-| **Request**      | `{ format: "csv", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to? }` |
+| **Request**      | `{ format: "csv", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to?, session_type? }` |
 | **Response 200** | File download (CSV) |
 | **Errors**       | 422 `unsupported_export_format` for any format other than `csv` |
 
@@ -1301,7 +1301,7 @@ Aggregate attendance across all assigned courses.
 
 |                  |                                                                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?granularity=daily                                                                                                             | weekly | monthly&date_from?&date_to?` |
+| **Query**        | `?granularity=daily                                                                                                             | weekly | monthly&date_from?&date_to?&session_type=lecture\|lab?` |
 | **Response 200** | `{ items: [{ date, total_sessions, total_students, compliance_rate, participation_rate }], avg_compliance, avg_participation }` |
 
 #### `GET /professor/reports/comparison`
@@ -1313,7 +1313,7 @@ without a course-id lookup (which cannot tell two cohorts apart).
 
 |                  |                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&page?&size?`                                                       |
+| **Query**        | `?program_id?&year_level_id?&semester?&date_from?&date_to?&session_type=lecture\|lab?&page?&size?`                           |
 | **Response 200** | `{ items: [{ course_id, course_code, program_id, year_level_id, program_code, year_level_label, compliance_rate, participation_rate, total_sessions }], total, page, size }` |
 
 (Compare rows at `:451` and `:1023` do accept `granularity=daily|weekly|monthly`; this scoped row does not.)
@@ -1324,7 +1324,7 @@ Multi-series trend data.
 
 |                  |                                                            |
 | ---------------- | ---------------------------------------------------------- |
-| **Query**        | `?course_ids?&metric=compliance                            | participation&granularity=daily | weekly | monthly&date_from?&date_to?` |
+| **Query**        | `?course_ids?&metric=compliance                            | participation&granularity=daily | weekly | monthly&date_from?&date_to?&session_type=lecture\|lab?` |
 | **Response 200** | `{ items: [{ date, course_id, course_code, rate }], ... }` |
 
 #### `POST /professor/reports/export`
@@ -1333,7 +1333,7 @@ Export attendance for the professor's own assigned courses (wireframes.md 3.7/3.
 
 |                  |                                                                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus] }` |
+| **Request**      | `{ course_id?, date_from?, date_to?, format: "csv", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus], session_type? }` |
 | **Response 200** | Generated file (download)                                                                                             |
 
 **Scope note:** Excel/Print are frontend concerns — backend emits CSV or PDF only.

@@ -85,6 +85,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let dateTo = $state(initialRange.to);
 	let granularity = $state<'daily' | 'weekly' | 'monthly'>('daily');
 	let riskLevel = $state<'' | 'low' | 'medium' | 'high'>('');
+	let sessionTypeFilter = $state<'' | 'lecture' | 'lab'>('');
 	let nameSortDir = $state<'asc' | 'desc'>('asc');
 	let formError = $state<string | null>(null);
 	let filterNotice = $state<string | null>(null);
@@ -205,6 +206,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		date_to: dateTo.trim() || undefined,
 		granularity,
 		risk_level: riskLevel || undefined,
+		session_type: sessionTypeFilter || undefined,
 	});
 
 	const apply = async () => {
@@ -390,6 +392,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		selectedCourseIds = selectedCourseIds.includes(id)
 			? selectedCourseIds.filter((v) => v !== id)
 			: [...selectedCourseIds, id];
+		void apply();
 	};
 
 	const setMetric = (m: AnalyticsMetric) => setAnalyticsMetric(m);
@@ -559,14 +562,18 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 					<option value={t.code}>{t.label}</option>
 				{/each}
 			</select>
+			<select class="input" aria-label="Session type filter" bind:value={sessionTypeFilter} onchange={apply}>
+				<option value="">All session types</option>
+				<option value="lecture">Lecture (LEC)</option>
+				<option value="lab">Laboratory (LAB)</option>
+			</select>
 			<select class="input" aria-label="Granularity" bind:value={granularity}>
 				<option value="daily">Daily</option>
 				<option value="weekly">Weekly</option>
 				<option value="monthly">Monthly</option>
 			</select>
-			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} />
-			<input class="input" type="date" aria-label="To date" bind:value={dateTo} />
-			<button class="btn btn-primary" data-testid="apply" onclick={apply}>Apply Filters</button>
+			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} onchange={apply} />
+			<input class="input" type="date" aria-label="To date" bind:value={dateTo} onchange={apply} />
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
 		{/if}
@@ -637,6 +644,12 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<section class="kpis" aria-busy={adminAnalyticsState.loading}>
 			<div class="kpi"><span class="kpi-value">{overview.total_students}</span><span class="kpi-label">Students</span></div>
 			<div class="kpi"><span class="kpi-value">{overview.total_sessions}</span><span class="kpi-label">Sessions</span></div>
+			{#if sessionTypeFilter !== 'lab'}
+				<div class="kpi"><span class="kpi-value">{overview.lecture_sessions}</span><span class="kpi-label">Lecture (LEC)</span></div>
+			{/if}
+			{#if sessionTypeFilter !== 'lecture'}
+				<div class="kpi"><span class="kpi-value">{overview.lab_sessions}</span><span class="kpi-label">Laboratory (LAB)</span></div>
+			{/if}
 			<!-- Both rates arrive as 0-1 fractions (backend `_rates` does
 			     round(present/enrolled, 4)), so they need scaling before
 			     formatting. The CSV export in features/admin/analytics/service.ts
