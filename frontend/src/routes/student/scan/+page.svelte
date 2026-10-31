@@ -590,8 +590,11 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			return;
 		}
 
-		// Generate idempotency key once per attempt (shared between live POST and offline replay)
+		// Generate idempotency key and capture timestamp once per attempt (shared
+		// between live POST and offline replay) so a queued scan keeps its
+		// capture-time device timestamp instead of the enqueue/retry time.
 		const idempotencyKey = newQueueId();
+		const scanTimestamp = new Date().toISOString();
 
 		livenessActive = false;
 		submitting = true;
@@ -623,7 +626,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				gps,
 				livenessEvidence,
 				liveFaceImage: (livenessEvidence as any).faceImage,
-				scannedAt: new Date().toISOString(),
+				scannedAt: scanTimestamp,
 				idempotencyKey,
 			});
 
@@ -656,7 +659,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 							gps,
 							livenessEvidence,
 							liveFaceImage: (livenessEvidence as any).faceImage,
-							scannedAt: new Date().toISOString(),
+							scannedAt: scanTimestamp,
 							idempotencyKey
 						}
 					});

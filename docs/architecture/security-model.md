@@ -22,6 +22,7 @@
 | T10 | **Excuse abuse** — student fabricates excuse               | Low      | Excuse requests require professor approval. Prof-initiated excuses have audit trail (`excused_by`, `excused_at`). Evidence attachments stored immutably in S3-compatible storage.                                                   | D20, D21, D24                            |
 | T11 | **Man-in-the-middle**                                      | Medium   | HTTPS everywhere (production). CORS restricts frontend origin. Session QR payloads are **unsigned JSON** — the HMAC derives the *code*, not the payload, so a payload is tamperable by anyone who can read it (D18).                                                                                                                | D18                                      |
 | T12 | **DB dump exfiltration**                                   | High     | Backups encrypted AES-256-GCM with key from env (`BACKUP_ENCRYPTION_KEY`). Key rotation tracked via `encryption_key_version`.                                                                                                       | D39                                      |
+| T13 | **Queued scan payload theft from device**                   | Medium   | `attendance_queue` rows (incl. captured face image and liveness evidence) are stored in origin-scoped IndexedDB **without** the WebCrypto encryption applied to `face_embeddings`. Accepted for MVP: same-origin storage + XSS mitigations; encrypting the queue like embeddings is a future hardening item. | — (audit follow-up) |
 
 ---
 

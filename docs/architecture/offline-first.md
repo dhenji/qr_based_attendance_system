@@ -79,6 +79,16 @@ at-rest protection and only ever compares against it locally.
 
 ---
 
+## Storage Security Note
+
+`face_embeddings` rows are encrypted at rest with a device-generated
+non-extractable AES-GCM key (see store 2 above). The `attendance_queue`
+payloads — including captured face images and liveness evidence — are **not**
+encrypted today; they rely on the browser's origin-scoped IndexedDB storage.
+Shared-device and XSS scenarios are covered by the threat model in
+`security-model.md`; encrypting the queue the same way as embeddings is a
+future hardening item.
+
 ## Sync Algorithm
 
 ```
@@ -156,16 +166,10 @@ at-rest protection and only ever compares against it locally.
 | `session_expired`  | `scanned_at` after `expires_at`     | D16        |
 | `outside_geofence` | GPS outside radius                  | D17, D27   |
 | `liveness_failed`  | Liveness checks fail                | D31        |
-<<<<<<< HEAD
-| `face_mismatch`    | Submitted score < 0.65; no cosine comparison | ADR-068 |
-| `not_enrolled`     | Student not in course roster        | D27        |
-| `duplicate_scan`   | Student already scanned for session | D15        |
-=======
 | `face_mismatch`    | Cosine similarity < threshold       | D27 step 4 |
 | `face_not_enrolled`| Student has no face enrollment      | D27 submit |
 | `not_enrolled`     | Student not in course roster        | D27 step 2 |
 | `duplicate_scan`   | Student already scanned for session | D27 step 2 |
->>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
 
 ### Exponential Backoff
 
@@ -180,6 +184,18 @@ retry_delay = min(30s * 2^retry_count, 30 minutes)
 - `attempts` is **not** reset on a later retry — only on enqueue (a fresh queue
   row starts at 0). The counter is what trips `max_attempts` into terminal
   rejection, so resetting it on each sync would defeat the cap.
+
+### Clock Skew
+
+`scanned_at` is device time and is never trusted for authorization; the
+server rejects a scan whose `scanned_at` is after `session.expires_at`
+(`session_expired`) and computes the present/late window from it. A device
+whose clock is far off can therefore be marked late or rejected on sync.
+The client captures a single `scannedAt` per attempt (see
+`student/scan/+page.svelte::doSubmit`) and the backend keeps the value
+verbatim rather than re-stamping it, so replaying does not drift further.
+Operators investigating skew-related rejections should compare
+`attendance_records.timestamp` with the session window, not the sync time.
 
 ### Conflict Resolution
 

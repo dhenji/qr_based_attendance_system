@@ -185,6 +185,32 @@ const memoryQueue = new Map<string, QueuedScan>();
 const memorySessions = new Map<number, CachedSession>();
 let idbUnusable = false;
 
+// Cross-tab drain coordination. Web Locks (see flushQueue) is the primary
+// guard; BroadcastChannel is the fallback signal so tabs that cannot acquire a
+// lock at least know another tab is draining and skip their own run.
+let remoteDraining = false;
+let drainChannel: BroadcastChannel | null = null;
+if (typeof BroadcastChannel !== 'undefined') {
+	try {
+		drainChannel = new BroadcastChannel('attendly-outbox-drain');
+		drainChannel.onmessage = (event: MessageEvent) => {
+			const data = event.data as { type?: unknown } | null;
+			if (data?.type === 'drain-start') remoteDraining = true;
+			else if (data?.type === 'drain-end') remoteDraining = false;
+		};
+	} catch {
+		drainChannel = null;
+	}
+}
+
+const broadcastDrain = (type: 'drain-start' | 'drain-end'): void => {
+	try {
+		drainChannel?.postMessage({ type });
+	} catch {
+		// ignore
+	}
+};
+
 const useMemory = (): boolean => isMockMode() || idbUnusable || typeof indexedDB === 'undefined';
 
 const idbOrMemory = async <T>(fn: () => Promise<T>, fallback: () => T): Promise<T> => {
@@ -387,12 +413,14 @@ const markPendingForRetry = async (id: string, lastError: string): Promise<'reje
 	return 'pending';
 };
 
-// flushQueue
+// drainOnce
+// Inner drain implementation. Assumes the caller holds the single-flight
+// guard (either the in-process `draining` flag or the cross-tab Web Lock).
 // Drain pending items oldest-first through the live scan endpoint, one
 // idempotent replay each (X-Idempotency-Key = queue id). Stops at the first
 // transient failure — the rest would fail the same way — and leaves backoff
 // scheduling to the caller via retryDelayMs.
-export const flushQueue = async (): Promise<{ synced: number; rejected: number; failed: number }> => {
+const drainOnce = async (): Promise<{ synced: number; rejected: number; failed: number }> => {
 	if (isMockMode()) return { synced: 0, rejected: 0, failed: 0 };
 	if (draining) return { synced: 0, rejected: 0, failed: 0 };
 	draining = true;
@@ -435,6 +463,56 @@ export const flushQueue = async (): Promise<{ synced: number; rejected: number; 
 		return { synced, rejected, failed };
 	} finally {
 		draining = false;
+	}
+};
+
+// flushQueue
+// Cross-tab single-flight wrapper around drainOnce. Uses the Web Locks API
+// when available so two browser tabs cannot drain the same IndexedDB queue
+// concurrently; falls back to the in-process guard on unsupported browsers
+// (Firefox, older Safari), where the existing per-tab guard still applies.
+export const flushQueue = async (): Promise<{ synced: number; rejected: number; failed: number }> => {
+	if (isMockMode()) return { synced: 0, rejected: 0, failed: 0 };
+	if (remoteDraining) return { synced: 0, rejected: 0, failed: 0 };
+
+	const locks = (typeof navigator !== 'undefined'
+		? (navigator as Navigator & {
+				locks?: {
+					request: (
+						name: string,
+						options: { ifAvailable: boolean },
+						callback: (lock: unknown) => Promise<void>
+					) => Promise<void>;
+				};
+			}).locks
+		: undefined);
+
+	if (locks) {
+		let result: { synced: number; rejected: number; failed: number } = {
+			synced: 0,
+			rejected: 0,
+			failed: 0
+		};
+		let started = false;
+		await locks.request(
+			'attendly-outbox-drain',
+			{ ifAvailable: true },
+			async (lock: unknown) => {
+				if (!lock) return;
+				started = true;
+				broadcastDrain('drain-start');
+				result = await drainOnce();
+			}
+		);
+		if (started) broadcastDrain('drain-end');
+		return result;
+	}
+
+	broadcastDrain('drain-start');
+	try {
+		return await drainOnce();
+	} finally {
+		broadcastDrain('drain-end');
 	}
 };
 
