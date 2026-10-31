@@ -15,13 +15,13 @@
 		type StudentHistoryStatus,
 	} from '$lib/features/student/service';
 	import type { ScheduledClass } from '$lib/shared/types';
-	import { flushQueue, queue, type QueuedScan } from '$lib/features/sync/service';
+	import { flushQueue, queue, retryDelayMs, type QueuedScan } from '$lib/features/sync/service';
 	import {
 		ATTACHMENTS_MAX_FILES,
 		uploadAttachments,
 		validateAttachmentFiles,
 	} from '$lib/features/excuse/attachments';
-	import { formatDate, formatTime } from '$lib/shared/utils/format';
+	import { formatDate, formatTime, formatLocalDateTime } from '$lib/shared/utils/format';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
@@ -147,10 +147,15 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		time: string;
 		status: 'pending' | 'rejected';
 		reason: string | null;
+		attempts: number;
+		maxAttempts: number;
+		updatedAt: string;
 	};
 
 	let queueRows = $state<QueueRow[]>([]);
 	let queueBusy = $state(false);
+	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
+	let lastSyncAt = $state<string | null>(null);
 
 	const toQueueRow = (item: QueuedScan): QueueRow => ({
 		id: item.id,
@@ -158,7 +163,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		date: formatDate(item.payload.scannedAt),
 		time: formatTime(item.payload.scannedAt),
 		status: item.status === 'rejected' ? 'rejected' : 'pending',
-		reason: item.lastError
+		reason: item.lastError,
+		attempts: item.attempts,
+		maxAttempts: item.maxAttempts,
+		updatedAt: item.updatedAt
 	});
 
 	const refreshQueue = async () => {
@@ -171,10 +179,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	};
 
 	const syncNow = async () => {
-		if (queueBusy) return;
+		if (queueBusy || !isOnline) return;
 		queueBusy = true;
 		try {
 			await flushQueue();
+			lastSyncAt = new Date().toISOString();
 		} finally {
 			await refreshQueue();
 			queueBusy = false;
@@ -205,9 +214,15 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		const handleVisible = () => {
 			if (document.visibilityState === 'visible') void refreshQueue();
 		};
+		const handleOnline = () => { isOnline = true; void syncNow(); };
+		const handleOffline = () => { isOnline = false; };
 		document.addEventListener('visibilitychange', handleVisible);
+		window.addEventListener('online', handleOnline);
+		window.addEventListener('offline', handleOffline);
 		return () => {
 			document.removeEventListener('visibilitychange', handleVisible);
+			window.removeEventListener('online', handleOnline);
+			window.removeEventListener('offline', handleOffline);
 		};
 	});
 
@@ -603,11 +618,17 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		<section class="card queue-card" aria-label="Pending sync">
 			<div class="queue-head">
 				<h2 class="section-title">Pending sync ({queueRows.length})</h2>
-				<button class="btn-ghost" disabled={queueBusy} onclick={() => void syncNow()}>
+				<button class="btn-ghost" disabled={queueBusy || !isOnline} onclick={() => void syncNow()} title={!isOnline ? 'You are offline' : undefined}>
 					{queueBusy ? 'Syncing…' : 'Sync now'}
 				</button>
 			</div>
 			<p class="muted">These scans live on this device only — they are not attendance records yet.</p>
+			{#if !isOnline}
+				<p class="muted small" role="status">You are offline — scans will sync automatically when connectivity returns.</p>
+			{/if}
+			{#if lastSyncAt}
+				<p class="muted small">Last sync {formatLocalDateTime(lastSyncAt!)}.</p>
+			{/if}
 			<ul class="queue-list">
 				{#each queueRows as item (item.id)}
 					<li class="queue-row">
@@ -624,6 +645,18 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 						<span class="course" title={item.reason ?? 'Session scan awaiting upload'}>
 							Session {item.sessionCode}
 						</span>
+						{#if item.status === 'pending'}
+							<span class="queue-meta muted small">
+								Attempt {item.attempts}/{item.maxAttempts}
+								{#if item.attempts > 0}
+									· next retry ~{Math.ceil(retryDelayMs(item.attempts) / 1000)}s
+								{/if}
+							</span>
+						{:else}
+							<span class="queue-meta muted small" title={item.reason ?? undefined}>
+								{item.reason ?? 'Rejected by server'}
+							</span>
+						{/if}
 						{#if item.status === 'rejected'}
 							<span class="queue-actions">
 								<button class="btn-ghost btn-small" onclick={() => void retryQueued(item.id)}>Retry</button>
