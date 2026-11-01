@@ -132,5 +132,8 @@ npm run test:coverage  # with v8 coverage -> ./coverage
 ## Docs (only what agents actually need)
 
 - `docs/architecture/api-contracts.md` — endpoint inventory (scan `student_number` field documented but comparison-only, see above).
+- `docs/architecture/analytics.md` — analytics result calculations
+- `docs/architecture/anti-spoofing.md` — scan anti-spoofing result calculations
+- `docs/architecture/attendance-workflow/README.md` — layered attendance scan flow
 - `docs/project/decision-log.md` — authoritative (D1–D83, ADR-001–083); check before "fixing" odd-looking contracts.
 - `docs/project/roadmap.md` — 13 phases; Phase 12 is **not** a gap (it is marked `[Done]`, as are Phases 0 and 9).

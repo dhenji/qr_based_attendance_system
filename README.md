@@ -484,6 +484,9 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/architecture/face-enrollment.md`](docs/architecture/face-enrollment.md) — face enrollment flow & current verification limitations
 - [`docs/architecture/excuse-workflow.md`](docs/architecture/excuse-workflow.md) — state machine & permission matrix
 - [`docs/architecture/risk-model.md`](docs/architecture/risk-model.md) — at-risk prediction & batch job spec
+- [`docs/architecture/analytics.md`](docs/architecture/analytics.md) — admin analytics filters, rates, risk scoring, and result calculation
+- [`docs/architecture/anti-spoofing.md`](docs/architecture/anti-spoofing.md) — scan anti-spoofing controls and result calculation
+- [`docs/architecture/attendance-workflow/README.md`](docs/architecture/attendance-workflow/README.md) — layered attendance scan flow and data layer
 
 ### Deployment
 
