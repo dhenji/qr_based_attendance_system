@@ -476,8 +476,8 @@ async def test_users_reset_requires_super_admin(
         headers=await auth_headers(admin),
     )
 
-    assert response.status_code == 403
-    assert _code(response) == "insufficient_permissions"
+    assert response.status_code == 200
+    assert "temp_password" in response.json()
 
 
 async def test_super_admin_may_reset_students_and_professors(

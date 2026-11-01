@@ -838,7 +838,7 @@ export type AdminCreatableRole = 'admin' | 'professor' | 'student';
 
 export interface AdminUserResponse {
 	id: number;
-	email: string;
+	email?: string | null;
 	role: AdminUserRole;
 	first_name: string | null;
 	last_name: string | null;
@@ -854,7 +854,7 @@ export interface AdminUserCreateResponse extends AdminUserResponse {
 
 export interface AdminUser {
 	id: number;
-	email: string;
+	email?: string | null;
 	role: AdminUserRole;
 	firstName?: string;
 	lastName?: string;
@@ -897,7 +897,7 @@ export interface AdminPasswordResetResponse {
 // reason/source, failed-attempt count, and override history are unavailable.
 export interface LockoutStatusResponse {
 	user_id: number;
-	email: string;
+	email?: string | null;
 	role: string;
 	is_locked: boolean;
 	is_permanently_locked: boolean;
@@ -913,7 +913,7 @@ export interface LockoutStatusResponse {
 
 export interface LockoutStatus {
 	userId: number;
-	email: string;
+	email?: string | null;
 	role: string;
 	isLocked: boolean;
 	isPermanentlyLocked: boolean;

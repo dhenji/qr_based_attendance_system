@@ -349,7 +349,10 @@ reading of it — the actor's name and role, the subject's name, a one-line
 summary and a field-level change (ADR-088). The derived names are read out
 of the audit snapshot first, so they survive the record's deletion; a plain
 admin sees them too, which a client-side lookup could not manage because
-`GET /admin/users` is super-admin-only.
+`GET /admin/users` is accessible to `admin` (and `super_admin`); admins cannot see or
+manage super_admin accounts, view other admin accounts with `email`/name omitted, and
+can fully manage professor/student accounts. Restricted-target mutations return 403
+`insufficient_permissions`.
 
 One row above is marked unimplemented because the surface does not exist yet:
 there is no admin account unlock route. See ADR-064.

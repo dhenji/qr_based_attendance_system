@@ -240,7 +240,7 @@ class AdminPasswordResetResponse(BaseModel):
 
 class LockoutStatusResponse(BaseModel):
     user_id: int
-    email: str
+    email: str | None = None
     role: str
     is_locked: bool
     is_permanently_locked: bool = False

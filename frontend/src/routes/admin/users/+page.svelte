@@ -7,6 +7,7 @@
 	import TempPasswordModal from '$lib/components/TempPasswordModal.svelte';
 	import {
 		authState,
+		isAdmin,
 		isSuperAdmin,
 		restoreSession,
 	} from '$lib/features/auth/store.svelte';
@@ -74,7 +75,7 @@ import { APIError } from '$lib/api/client';
 	});
 
 	let f_email = $state('');
-	let f_role = $state<'admin' | 'professor' | 'student'>('admin');
+	let f_role = $state<'admin' | 'professor' | 'student'>(isSuperAdmin() ? 'admin' : 'professor');
 	let f_first_name = $state('');
 	let f_middle_name = $state('');
 	let f_last_name = $state('');
@@ -90,6 +91,7 @@ import { APIError } from '$lib/api/client';
 
 	const selfId = $derived(authState.user?.id ?? null);
 	const isSelf = (u: AdminUser) => selfId !== null && String(u.id) === String(selfId);
+	const canMutateUser = (u: AdminUser) => isSuperAdmin() || (u.role !== 'admin' && u.role !== 'super_admin');
 
 	const load = (page = 1) =>
 		initAdminUsers(
@@ -119,7 +121,7 @@ import { APIError } from '$lib/api/client';
 
 	onMount(async () => {
 		const user = await restoreSession();
-		if (!user || !isSuperAdmin()) {
+		if (!user || !isAdmin()) {
 			await goto(Routes.ADMIN_DASHBOARD);
 			return;
 		}
@@ -136,7 +138,7 @@ import { APIError } from '$lib/api/client';
 	};
 
 	const displayName = (u: AdminUser) =>
-		[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email;
+		[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '—';
 
 	const describe = (e: unknown): string => {
 		if (e instanceof APIError) return e.message || 'Request failed.';
@@ -241,7 +243,7 @@ import { APIError } from '$lib/api/client';
 	const openCreate = () => {
 		formError = null;
 		f_email = '';
-		f_role = 'admin';
+		f_role = isSuperAdmin() ? 'admin' : 'professor';
 		f_first_name = '';
 		f_middle_name = '';
 		f_last_name = '';
@@ -273,7 +275,7 @@ import { APIError } from '$lib/api/client';
 			});
 			formOpen = false;
 			copied = false;
-			createdTemp = { email: result.user.email, tempPassword: result.tempPassword };
+			createdTemp = { email: result.user.email ?? '', tempPassword: result.tempPassword };
 			await refreshAdminUsers();
 			notifyEntityChanged('users');
 		} catch (e: unknown) {
@@ -343,7 +345,9 @@ import { APIError } from '$lib/api/client';
 		/>
 		<select class="input" aria-label="Role filter" bind:value={roleFilter} onchange={applyFilters}>
 			<option value="all">All roles</option>
-			<option value="super_admin">Super Admin</option>
+			{#if isSuperAdmin()}
+				<option value="super_admin">Super Admin</option>
+			{/if}
 			<option value="admin">Admin</option>
 			<option value="professor">Professor</option>
 			<option value="student">Student</option>
@@ -388,7 +392,7 @@ import { APIError } from '$lib/api/client';
 					{#each adminUsersState.items as u (u.id)}
 						<tr>
 							<td>{displayName(u)}</td>
-							<td class="mono">{u.email}</td>
+							<td class="mono">{u.email ?? '—'}</td>
 							<td>{u.role}</td>
 							<td>
 								<span class={u.isActive ? 'status-active' : 'status-inactive'}>
@@ -401,17 +405,19 @@ import { APIError } from '$lib/api/client';
 									{#if u.isActive}
 										{#if isSelf(u)}
 											<span class="hint" title="You cannot deactivate your own account">You</span>
-										{:else}
+										{:else if canMutateUser(u)}
 											<button class="link danger" onclick={() => (deactivateTarget = u)}>
 												Deactivate
 											</button>
 										{/if}
-									{:else}
+									{:else if canMutateUser(u)}
 										<button class="link" onclick={() => (reactivateTarget = u)}>
 											Reactivate
 										</button>
 									{/if}
-									<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+									{#if canMutateUser(u)}
+										<button class="link" onclick={() => (resetTarget = u)}>Reset password</button>
+									{/if}
 									{#if !isSelf(u)}
 										<button class="link" onclick={() => openLockout(u)}>Lockout</button>
 									{/if}
@@ -460,7 +466,9 @@ import { APIError } from '$lib/api/client';
 				<label>Email<input class="input" type="email" bind:value={f_email} placeholder="sam.t.torres@isu.edu.ph" /></label>
 				<label>Role
 					<select class="input" bind:value={f_role}>
-						<option value="admin">Admin</option>
+						{#if isSuperAdmin()}
+							<option value="admin">Admin</option>
+						{/if}
 						<option value="professor">Professor</option>
 						<option value="student">Student</option>
 					</select>
@@ -593,7 +601,7 @@ import { APIError } from '$lib/api/client';
 					<h2 id="lockout-title" class="modal-title">Account lockout</h2>
 					<p class="lockout-subtitle">
 						<span class="lockout-name">{displayName(lockoutTarget)}</span>
-						<span class="lockout-email mono">{lockoutTarget.email}</span>
+						<span class="lockout-email mono">{lockoutTarget.email ?? '—'}</span>
 					</p>
 				</div>
 				<span class="status-badge" class:locked={lockoutStatus?.isLocked} class:permanent={lockoutStatus?.isPermanentlyLocked}>
@@ -677,7 +685,7 @@ import { APIError } from '$lib/api/client';
 					{/if}
 				</section>
 
-				{#if lockoutStatus.isLocked || lockoutStatus.lockoutLevel > 0}
+				{#if (lockoutStatus.isLocked || lockoutStatus.lockoutLevel > 0) && canMutateUser(lockoutTarget)}
 					<section class="lockout-section">
 						<h3 class="section-title">Lockout action</h3>
 						<p class="section-help">Choose an action and provide a reason.</p>
@@ -757,7 +765,7 @@ import { APIError } from '$lib/api/client';
 					</section>
 				{/if}
 
-				{#if lockoutStatus.overrideUntil}
+				{#if lockoutStatus.overrideUntil && canMutateUser(lockoutTarget)}
 					<section class="lockout-section">
 						<h3 class="section-title">Revoke override</h3>
 						<p class="section-help">Ends the active override immediately.</p>
