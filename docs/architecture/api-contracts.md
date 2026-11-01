@@ -1,5 +1,7 @@
 # API Contracts — QR Attendance System
 
+> Layered analytics docs: [`docs/analytics/`](../analytics/README.md).
+
 > Canonical reference for every endpoint. Each entry: method, path, role guard,
 > request schema, response schema, error codes.
 

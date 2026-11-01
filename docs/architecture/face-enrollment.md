@@ -1,5 +1,9 @@
 # Face Enrollment & Verification Architecture
 
+> Layered, code-grounded anti-spoofing docs:
+> [`docs/anti-spoofing/`](../anti-spoofing/README.md). This file keeps the
+> enrollment architecture; that directory holds the per-layer audit.
+
 > **Decisions covered:** D27–D31, D43
 
 ## 1. Overview
@@ -88,6 +92,10 @@ frames, so landmark coordinates and captured images stay unmirrored.
 | Eyes open     | Eye aspect ratio (EAR) > 0.2 for both eyes                       | "Please keep your eyes open"                                 |
 
 ### 2.2 Storage Format
+
+> **Audit (anti-spoofing docs):** the shipped blob is now a real `FACEEMB1`
+> binary embedding (`shared/face_embeddings.serialize_embedding`), not the
+> zero-filled JSON placeholder described below. The encryption gap remains.
 
 A single JSON blob stored in `students.face_embedding` (BYTEA column) — **plaintext today**,
 with AES-256-GCM as the D28 design (see §5). The values below are illustrative; the
@@ -334,7 +342,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 
 | Method | Path                                         | Role    | Description                                                                               |
 | ------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
-| POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server stores a placeholder embedding (no generation)         |
+| POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server validates quality gates and stores a `FACEEMB1` embedding (MobileFaceNet, landmark fallback) |
 | GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
 | DELETE | `/admin/face-enrollment/{student_id}`       | Admin   | Revoke enrollment: clears the blob, nulls `face_enrolled_at`, bumps `face_embedding_version` (204) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
