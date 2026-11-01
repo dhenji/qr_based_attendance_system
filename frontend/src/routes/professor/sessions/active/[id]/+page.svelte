@@ -18,7 +18,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		quickExcuse
 	} from '$lib/features/excuse/service';
 	import { buildCsv } from '$lib/features/report/service';
-	import { isMockMode } from '$lib/api/client';
+	import { APIError, isMockMode } from '$lib/api/client';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 
@@ -213,6 +213,15 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		}
 	};
 
+	// Fingerprint of a live snapshot for the no-op poll guard: if this is
+	// unchanged between two polls, the session state (and table) need not be
+	// replaced, avoiding a full re-render on idle 3s polls.
+	const sessionFingerprint = (value: LiveSession): string =>
+		`${value.status}|${value.enrolledCount}|${value.remaining}|${value.pendingSyncCount}|${value.scanWindowRemaining}|${value.expiresAt ?? ''}|` +
+		value.students
+			.map((row) => `${row.studentNumber}:${row.status}:${row.scannedAt ?? ''}:${row.excuseReason ?? ''}`)
+			.join(',');
+
 	$effect(() => {
 		const id = sessionId;
 		reloadToken;
@@ -225,6 +234,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		}
 
 		let cancelled = false;
+		const controller = new AbortController();
 		let poll: number | undefined;
 		let tick: number | undefined;
 		currentPage = 1;
@@ -240,8 +250,18 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 			try {
 				const requestStartedAt = Date.now();
-				const live = await getActiveSession(id);
-				if (cancelled) return;
+				const live = await getActiveSession(id, controller.signal);
+				if (cancelled || controller.signal.aborted) return;
+
+				// Equality guard: skip state replacement (and the resulting full
+				// table re-render) when the snapshot is byte-equivalent to the
+				// one we already hold. Common between scans on a 3s poll.
+				if (session !== null && sessionFingerprint(session) === sessionFingerprint(live)) {
+					now = Date.now();
+					loadError = null;
+					refreshError = null;
+					return;
+				}
 
 				session = live;
 				// Anchor the countdown to when the server snapshot was requested,
@@ -265,8 +285,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				now = Date.now();
 				loadError = null;
 				refreshError = null;
-			} catch {
-				if (cancelled) return;
+			} catch (error) {
+				if (cancelled || controller.signal.aborted) return;
+				if (error instanceof APIError && error.code === 'request_cancelled') return;
 				if (session === null) loadError = 'The live session could not be loaded.';
 				else refreshError = 'The live feed failed to refresh. Showing the last update.';
 			} finally {
@@ -288,6 +309,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 		return () => {
 			cancelled = true;
+			controller.abort();
 			window.clearInterval(poll);
 			window.clearInterval(tick);
 			document.removeEventListener('visibilitychange', handleVisible);
@@ -366,34 +388,41 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	const sortedStudents = $derived.by<FeedRow[]>(() => {
 		if (!session) return [];
 		const direction = sortDirection === 'asc' ? 1 : -1;
-		const rows = [...session.students];
+		// Precompute the per-row sort keys once instead of reparsing dates and
+		// re-running localeCompare inside every comparator invocation.
+		const rows = session.students.map((row) => ({
+			row,
+			timeMs: row.scannedAt ? new Date(row.scannedAt).getTime() : Number.NaN,
+		}));
 
-		const byTime = (row: FeedRow): number =>
-			row.scannedAt ? new Date(row.scannedAt).getTime() : Number.NaN;
 		const byName = (a: FeedRow, b: FeedRow): number =>
 			a.name.localeCompare(b.name) || a.studentNumber.localeCompare(b.studentNumber);
 
 		rows.sort((a, b) => {
 			switch (sortKey) {
 				case 'time': {
-					const aMissing = Number.isNaN(byTime(a)) ? 1 : 0;
-					const bMissing = Number.isNaN(byTime(b)) ? 1 : 0;
+					const aMissing = Number.isNaN(a.timeMs) ? 1 : 0;
+					const bMissing = Number.isNaN(b.timeMs) ? 1 : 0;
 					if (aMissing !== bMissing) return aMissing - bMissing;
-					if (aMissing === 1) return byName(a, b) * direction;
-					return (byTime(a) - byTime(b) || a.studentNumber.localeCompare(b.studentNumber)) * direction;
+					if (aMissing === 1) return byName(a.row, b.row) * direction;
+					return (
+						(a.timeMs - b.timeMs ||
+							a.row.studentNumber.localeCompare(b.row.studentNumber)) * direction
+					);
 				}
 				case 'name':
-					return byName(a, b) * direction;
-			case 'status':
-				return (
-					(STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
-						byTime(a) - byTime(b) ||
-						byName(a, b)) * direction
-				);
-		}
-	});
+					return byName(a.row, b.row) * direction;
+				case 'status':
+					return (
+						(STATUS_SORT_ORDER[a.row.status] - STATUS_SORT_ORDER[b.row.status] ||
+							a.timeMs - b.timeMs ||
+							byName(a.row, b.row)) * direction
+					);
+			}
+			return 0;
+		});
 
-		return rows;
+		return rows.map((entry) => entry.row);
 	});
 
 	const pageCount = $derived(Math.max(1, Math.ceil(sortedStudents.length / PAGE_SIZE)));
