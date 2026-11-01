@@ -73,8 +73,13 @@ export const getStudentUpdateCount = async (): Promise<number> => {
 		const first = await listStudentExcuses({ page: 1, size: PAGE_SIZE });
 		const pageCount = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE) || 1);
 		const rows = [...first.items];
-		for (let page = 2; page <= pageCount; page += 1) {
-			rows.push(...(await listStudentExcuses({ page, size: PAGE_SIZE })).items);
+		if (pageCount > 1) {
+			const rest = await Promise.all(
+				Array.from({ length: pageCount - 1 }, (_, i) =>
+					listStudentExcuses({ page: i + 2, size: PAGE_SIZE })
+				)
+			);
+			for (const result of rest) rows.push(...result.items);
 		}
 		let count = 0;
 		for (const row of rows) {

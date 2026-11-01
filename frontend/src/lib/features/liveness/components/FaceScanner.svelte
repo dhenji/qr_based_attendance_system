@@ -100,6 +100,8 @@
 	let idleFrames = 0;
 	let blinkMinEar = 1;
 	let lastFaceLandmarks: any[] = [];
+	// Reused across completions to avoid allocating a canvas per scan.
+	let captureCanvas: HTMLCanvasElement | null = null;
 
 	interface FaceResult {
 		faceLandmarks?: NormalizedLandmark[][];
@@ -559,10 +561,17 @@
 				}
 				if (video.currentTime !== lastVideoTime) {
 					lastVideoTime = video.currentTime;
-					const result = landmarker.detectForVideo(video, performance.now());
-					if (beginDetection) {
+					// Skip MediaPipe inference unless a challenge is actually
+					// running: during the 3s countdown and the blink-success
+					// pause the result would be discarded anyway.
+					if (beginDetection && challengeStage !== 'blink_success') {
+						const result = landmarker.detectForVideo(video, performance.now());
 						draw(result);
 						evaluate(result);
+					} else {
+						// Keep the overlay from freezing on a stale wireframe.
+						const ctx = canvas?.getContext('2d');
+						ctx?.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
 					}
 				}
 				rafId = requestAnimationFrame(tick);
@@ -754,7 +763,8 @@
 				let faceImage: string | undefined;
 				try {
 					if (video && video.videoWidth && video.videoHeight) {
-						const c = document.createElement('canvas');
+						if (!captureCanvas) captureCanvas = document.createElement('canvas');
+						const c = captureCanvas;
 						c.width = video.videoWidth;
 						c.height = video.videoHeight;
 						const ctx = c.getContext('2d');

@@ -351,8 +351,12 @@
 						}
 						if (video.currentTime !== lastVideoTime) {
 							lastVideoTime = video.currentTime;
-							const result = landmarker.detectForVideo(video, performance.now());
-							evaluate(result);
+							// Skip inference while a capture/review is in flight:
+							// evaluate() would return early and the work is wasted.
+							if (!(capturing || reviewFile)) {
+								const result = landmarker.detectForVideo(video, performance.now());
+								evaluate(result);
+							}
 						}
 					}
 				} catch (frameError) {

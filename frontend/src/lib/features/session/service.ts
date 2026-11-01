@@ -261,9 +261,17 @@ export const closeSession = async (sessionId: number) => {
 // exposes neither, so both are gone — `excuse_reason` is the only per-student
 // excuse text. A backend 404 (wrong id, or another professor's session)
 // rejects, and the page renders its not-found state from that.
-export const getActiveSession = async (sessionId: number): Promise<LiveSession> => {
+export const getActiveSession = async (
+	sessionId: number,
+	signal?: AbortSignal | null
+): Promise<LiveSession> => {
 	await ensureCourses();
-	const response = await get<SessionActiveResponse>('sessionActive', undefined, `/${sessionId}`);
+	const response = await get<SessionActiveResponse>(
+		'sessionActive',
+		undefined,
+		`/${sessionId}`,
+		signal ? { signal } : undefined
+	);
 
 	const students: LiveStudent[] = (response.students ?? []).map((student) => ({
 		studentNumber: student.student_number,

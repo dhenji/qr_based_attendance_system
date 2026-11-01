@@ -62,10 +62,12 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		if (seen.size > 0) {
 			return [...seen].map(([code, name]) => ({ code, name }));
 		}
-		return [...new Set(rows.map((r) => r.course))].map((code) => ({
-			code,
-			name: rows.find((r) => r.course === code)?.courseName ?? '',
-		}));
+		// Build the code->name map once instead of an O(n^2) find per code.
+		const byCode = new Map<string, string>();
+		for (const r of rows) {
+			if (!byCode.has(r.course)) byCode.set(r.course, r.courseName);
+		}
+		return [...byCode].map(([code, name]) => ({ code, name }));
 	});
 	const STATUSES: Status[] = ['present', 'late', 'absent', 'excused', 'pending', 'rejected'];
 
