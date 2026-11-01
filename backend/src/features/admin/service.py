@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.exceptions import ForbiddenException
 from core.security import hash_password
 from features.admin.constants import TEMP_PASSWORD_LENGTH
 from features.admin.exceptions import (
@@ -28,6 +29,12 @@ from features.student.model import Student
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.enums import AuditAction, AuditEntity, UserRole
+from shared.user_management_policy import (
+    can_assign_role,
+    can_manage_target,
+    can_view_target,
+    hide_sensitive_fields,
+)
 from shared.pagination import PaginatedResponse
 
 
@@ -93,13 +100,20 @@ def _to_admin_user_read(
     student_last: str | None,
     professor_first: str | None,
     professor_last: str | None,
+    *,
+    viewer_role: UserRole | str | None = None,
+    actor_id: int | None = None,
 ) -> AdminUserRead:
+    target_role = UserRole(user.role)
+    sensitive = hide_sensitive_fields(
+        viewer_role, target_role, actor_id=actor_id, target_id=user.id
+    )
     return AdminUserRead(
         id=user.id,
-        email=user.email,
-        role=UserRole(user.role),
-        first_name=student_first or professor_first,
-        last_name=student_last or professor_last,
+        email=None if sensitive else user.email,
+        role=target_role,
+        first_name=None if sensitive else (student_first or professor_first),
+        last_name=None if sensitive else (student_last or professor_last),
         is_active=user.is_active,
         must_change_password=user.must_change_password,
         last_login=user.last_login,
@@ -114,10 +128,41 @@ class AdminService:
         self._students: BaseCRUD[Student] = BaseCRUD(Student, session)
         self._professors: BaseCRUD[Professor] = BaseCRUD(Professor, session)
 
+    async def _resolve_actor_role(
+        self,
+        *,
+        actor_id: int | None = None,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
+    ) -> UserRole:
+        if actor_role is not None:
+            return UserRole(actor_role) if not isinstance(actor_role, UserRole) else actor_role
+        if viewer_role is not None:
+            return UserRole(viewer_role) if not isinstance(viewer_role, UserRole) else viewer_role
+        if actor_id is not None:
+            try:
+                user: User | None = await self._users.get(actor_id)
+            except AttributeError:
+                user = None
+            if user is not None:
+                return UserRole(user.role)
+        return UserRole.SUPER_ADMIN
+
     async def create_user(
-        self, *, payload: AdminUserCreate, actor_id: int
+        self,
+        *,
+        payload: AdminUserCreate,
+        actor_id: int | None = None,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
     ) -> AdminUserCreateResponse:
         normalized: str = payload.email.lower()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_assign_role(resolved_actor_role, payload.role):
+            raise ForbiddenException()
 
         existing: User | None = await self._users.get_by(email=normalized)
 
@@ -230,9 +275,18 @@ class AdminService:
         is_active: bool | None,
         page: int,
         size: int,
+        actor_id: int | None = None,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
     ) -> PaginatedResponse[AdminUserRead]:
+        resolved_viewer_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+
         filters = _users_filters(search, role, is_active)
         stmt: Select[Any] = _users_stmt()
+        if resolved_viewer_role == UserRole.ADMIN:
+            stmt = stmt.where(User.role != UserRole.SUPER_ADMIN.value)
         if filters:
             stmt = stmt.where(*filters)
 
@@ -250,32 +304,60 @@ class AdminService:
         ).all()
 
         return PaginatedResponse[AdminUserRead](
-            items=[_to_admin_user_read(*row) for row in rows],
+            items=[
+                _to_admin_user_read(*row, viewer_role=resolved_viewer_role, actor_id=actor_id) for row in rows
+            ],
             total=total,
             page=page,
             size=size,
         )
 
-    async def deactivate_user(self, *, actor_id: int, user_id: int) -> None:
-        if actor_id == user_id:
+    async def deactivate_user(
+        self,
+        *,
+        actor_id: int | None = None,
+        user_id: int,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
+    ) -> None:
+        if actor_id is not None and actor_id == user_id:
             raise SelfDeactivationForbidden()
 
         user: User | None = await self._users.get(user_id)
 
         if user is None:
             raise AdminUserNotFound()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_manage_target(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         user.is_active = False
         await self._session.flush()
 
-    async def reactivate_user(self, *, actor_id: int, user_id: int) -> None:
-        if actor_id == user_id:
+    async def reactivate_user(
+        self,
+        *,
+        actor_id: int | None = None,
+        user_id: int,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
+    ) -> None:
+        if actor_id is not None and actor_id == user_id:
             raise SelfDeactivationForbidden()
 
         user: User | None = await self._users.get(user_id)
 
         if user is None:
             raise AdminUserNotFound()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_manage_target(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         user.is_active = True
         await self._session.flush()

@@ -2301,3 +2301,14 @@
   (1) *In-memory limiter only.* Rejected: does not survive restarts or work across instances, and cannot invalidate the code itself.
   (2) *Reuse `OtpInvalidException`.* Rejected: would be swallowed by `verify_login_otp`'s existing handler before the new cap could be accounted.
   (3) *Relax to commit on failure.* Rejected for now: services stay flush-only; increments persist within the request transaction and the column is read back under `with_for_update()`.
+
+
+---
+
+### ADR-087: Admin Role Access to User Management
+
+- **Decision:** `/admin/users` is accessible to the `admin` role in addition to `super_admin`. Admins cannot see or manage super_admin accounts; admin targets are view-only with `email`/name omitted (except the admin's own account, which shows its fields); admins can fully manage professor/student accounts. Restricted-target mutations return 403 `insufficient_permissions`.
+- **Date:** 2026-11-01
+- **Status:** Accepted
+- **Context:** User management was super-admin-only, preventing delegated administration. Role-based restrictions preserve least privilege for sensitive admin accounts.
+- **Consequences:** Route guards changed from `SUPER_ADMIN` to `ADMIN`; `AdminService` and `AuthService` became actor/target-role aware; `shared/user_management_policy.py` centralizes permission helpers; `core/exceptions.py` gained `ForbiddenException`; frontend nav and page gate use `isAdmin()`; Add User modal preselects a valid default role.

@@ -349,7 +349,7 @@ export const downloadProfessorTemplate = async (): Promise<string> =>
 
 export const toAdminUser = (u: AdminUserResponse | AdminUserCreateResponse): AdminUser => ({
 	id: u.id,
-	email: u.email,
+	email: u.email ?? undefined,
 	role: u.role as AdminUserRole,
 	firstName: u.first_name ?? undefined,
 	lastName: u.last_name ?? undefined,
@@ -429,7 +429,7 @@ export const resetUserPassword = async (userId: number): Promise<string> => {
 
 const toLockoutStatus = (r: LockoutStatusResponse): LockoutStatus => ({
 	userId: r.user_id,
-	email: r.email,
+	email: r.email ?? undefined,
 	role: r.role,
 	isLocked: r.is_locked,
 	isPermanentlyLocked: r.is_permanently_locked,

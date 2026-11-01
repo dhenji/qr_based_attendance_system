@@ -1081,11 +1081,11 @@ password-only flow.
 | Errors |
 | --- |
 | ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
-| GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
-| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `roster_link_impossible` |
-| PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
-| PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated admin (rejects self-reactivation; preserves password, MFA, lockout, and role) | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
-| POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
+| GET    | `/admin/users`                          | List users (search, role/status filters, sortable) | admin (super_admin) | — |
+| POST   | `/admin/users`                          | Create user (name, email, role, temp password?)   | admin (super_admin) | 409 `admin_user_email_exists` · 409 `roster_link_impossible` · 403 `insufficient_permissions` |
+| PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate user (rejects self-deactivation)  | admin (super_admin) | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` · 403 `insufficient_permissions` |
+| PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated user (rejects self-reactivation; preserves password, MFA, lockout, and role) | admin (super_admin) | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` · 403 `insufficient_permissions` |
+| POST   | `/admin/users/{user_id}/reset-password`      | Reset user password → temp + `must_change_password` | admin (super_admin) | 404 `user_not_found` · 403 `insufficient_permissions` |
 | GET    | `/admin/users/{user_id}/lockout`             | Account lockout status (`LockoutStatusResponse`, incl. `is_permanently_locked`) | admin (super_admin) | 404 `user_not_found` |
 Permanent lock raises `account_permanently_locked` (423) on `POST /auth/login` when an account is at the maximum escalation level.
 | POST   | `/admin/users/{user_id}/lockout/release`     | Release an active lockout (reason required) | admin (super_admin) | 404 `user_not_found` |
