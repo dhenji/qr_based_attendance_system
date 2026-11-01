@@ -1,7 +1,8 @@
 import adapter from '@sveltejs/adapter-auto';
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import { visualizer } from 'rollup-plugin-visualizer';
+import { svelteTesting } from '@testing-library/svelte/vite';
 
 // Optional later upgrade to full offline precaching:
 //   npm i -D vite-plugin-pwa
@@ -40,6 +41,24 @@ export default defineConfig({
 		}),
 		process.env.ANALYZE === 'true'
 			? visualizer({ filename: 'stats.html', gzipSize: true, brotliSize: true })
-			: null
-	].filter(Boolean) as any
+			: null,
+		svelteTesting()
+	].filter(Boolean) as any,
+	test: {
+		environment: 'jsdom',
+		setupFiles: ['./src/test-setup.ts'],
+		coverage: {
+			provider: 'v8',
+			reporter: ['text', 'lcov'],
+			reportsDirectory: './coverage',
+			include: ['src/lib/**/*.{ts,svelte}'],
+			exclude: ['**/*.test.ts', '**/*.spec.ts', 'src/test-setup.ts'],
+			thresholds: {
+				statements: 11,
+				branches: 7,
+				functions: 5,
+				lines: 13
+			}
+		}
+	}
 });

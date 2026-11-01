@@ -399,7 +399,7 @@ Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md)
 | --- | --- | --- | --- |
 | `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 760 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
-| `frontend` | `npm ci && npm run check` | — | a svelte-check *error* (warnings pass) |
+| `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
 
 Python 3.12 and Node 22, matching `backend/Dockerfile.dev` and
 `frontend/Dockerfile.dev`. No job reads a secret; `permissions: contents: read`.
@@ -415,11 +415,11 @@ migration, never the model**.
 
 | Not gated | Why | Where it is verified instead |
 | --- | --- | --- |
-| Coverage threshold | `--cov` is deliberately out of `addopts`; no number is enforced | run on demand; see [performance-benchmarks.md](performance-benchmarks.md) |
-| Postgres leg of the 760 cases | `TEST_DATABASE_URL` unset in CI; SQLite shims (`JSONB`→`JSON`, `BigInteger`→`INTEGER`, aware `DateTime`) cover the suite | Phase 9 status in `roadmap.md`: green on both |
+| Coverage threshold | enforced in CI at 11/7/5/13 (statements/branches/functions/lines) via `vite.config.ts` | run on demand with `npm run test:coverage` |
+| Postgres leg of the backend cases | `TEST_DATABASE_URL` unset in CI; SQLite shims (`JSONB`→`JSON`, `BigInteger`→`INTEGER`, aware `DateTime`) cover the suite | Phase 9 status in `roadmap.md`: green on both |
 | Load / throughput | needs a live API in `BENCHMARK_MODE` plus locust | `performance-benchmarks.md` §7 |
 | Backup pipeline | host needs `openssl enc` with AEAD (`-aes-256-gcm`) | `performance-benchmarks.md` §7 — currently environment-blocked |
-| Frontend runtime tests | no test runner exists at all (no `test` script, no vitest/playwright, zero spec files) | manual |
+| Frontend runtime tests | Vitest 5 + @testing-library/svelte + jsdom; 100 co-located `*.test.ts` cases plus `src/testing/` helpers | `npm run test` / `npm run test:coverage` |
 | Linting / formatting | none configured in the repo | manual |
 
 CI **reports**; it only blocks a merge once all three jobs are added as required

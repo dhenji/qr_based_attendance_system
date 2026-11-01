@@ -589,7 +589,7 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
   - Which decision IDs from the Decision Log are addressed (if applicable)
   - How to test manually
 - No secrets, keys, or `.env` files in commits.
-- All `npm run check` must pass before merging (frontend changes).
+- All `npm run check` and `npm run test` must pass before merging (frontend changes).
 - Branch off `main`; merge via PR review.
 - Squash-merge preferred for clean history.
 
@@ -617,9 +617,15 @@ Scope is optional but recommended: `auth`, `student`, `session`, `attendance`, `
 
 ### 5.2 Frontend Tests
 
+- **Framework:** Vitest 5 + @testing-library/svelte + jsdom; configured in `vite.config.ts`
+  (`environment: 'jsdom'`, setup `src/test-setup.ts`, v8 coverage thresholds 11/7/5/13).
 - **Type checking:** `npm run check` (svelte-check) must pass.
-- **Component testing:** Vitest + @testing-library/svelte (to be added).
-- **Naming:** `<ComponentName>.test.ts` co-located with component.
+- **Unit/component tests:** `npm run test` (Vitest) must pass; run in watch mode with
+  `npm run test:watch`.
+- **Coverage:** `npm run test:coverage` (v8, lcov + text) — thresholds enforced in CI.
+- **Location:** co-located `*.test.ts` next to source; shared helpers in `src/testing/`.
+- **Imports:** explicit Vitest imports (`describe`, `it`, `expect`, `vi`); no `globals: true`.
+- **Naming:** `<ComponentName>.test.ts` / `<util>.test.ts`.
 - **E2E (later):** Playwright for critical user flows.
 
 ### 5.3 Test Data

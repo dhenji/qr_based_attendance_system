@@ -1,6 +1,6 @@
 # AGENTS.md — QR-Based Attendance System
 
-FastAPI backend (18 feature slices, 21 models, 25 Alembic revisions) + SvelteKit 2 / Svelte 5 frontend. Real API by default, mock opt-in via `PUBLIC_MOCK_MODE`. No linters or formatters; CI runs the backend suite, `alembic check`, and the frontend typecheck (ADR-069). `README.md` is current; when docs conflict, trust `README.md` + executable config.
+FastAPI backend (18 feature slices, 21 models, 25 Alembic revisions) + SvelteKit 2 / Svelte 5 frontend. Real API by default, mock opt-in via `PUBLIC_MOCK_MODE`. No linters or formatters; CI runs the backend suite, `alembic check`, the frontend typecheck, frontend unit/component tests (Vitest + @testing-library/svelte), and a frontend build (ADR-069). `README.md` is current; when docs conflict, trust `README.md` + executable config.
 
 ## Repo state
 
@@ -58,6 +58,9 @@ npm install
 cp .env.example .env   # only PUBLIC_* reaches the browser
 npm run dev            # :5173
 npm run check          # typecheck (runs svelte-kit sync first)
+npm run test           # unit/component tests (Vitest)
+npm run test:watch     # Vitest in watch mode
+npm run test:coverage  # with v8 coverage -> ./coverage
 ```
 
 ## Backend
@@ -111,6 +114,7 @@ npm run check          # typecheck (runs svelte-kit sync first)
 ## Frontend
 
 - Runes mode forced in `vite.config.ts` (function form, `node_modules` exempt) — write `$state`/`$props`, not legacy reactives. `envPrefix: ['VITE_','PUBLIC_']` is what lets `PUBLIC_*` reach the browser. Strict TS; deps are `html5-qrcode`, `zod`, `@mediapipe/tasks-vision` (no `chart.js`).
+- Frontend tests: Vitest 5 + `@testing-library/svelte` + jsdom, configured in `vite.config.ts` (environment `jsdom`, setup `src/test-setup.ts`, v8 coverage with thresholds 11/7/5/13). Tests are co-located `*.test.ts` next to source; shared helpers (e.g. `ModalWrapper.svelte`) live in `src/testing/`. Explicit Vitest imports (no `globals: true`). Run with `npm run test` / `npm run test:watch` / `npm run test:coverage`.
 - `src/lib/api/client.ts`: `MOCK = PUBLIC_MOCK_MODE === 'true'` (real API by default); all URLs prefixed with `/api`; handles three backend error envelopes (AppException dict, FastAPI 422 list, plain-string 401/403) + 401-refresh retry + `postForm`/`getText` for CSV import/template.
 - **No service hard-codes `MOCK = true`** — `client.ts:18` is the only reader of `PUBLIC_MOCK_MODE`, and every service branches on `isMockMode()`. Several still hold a local fixture fallback for the mock leg (in `excuse/mock.ts`, `report/mock.ts`, the `sync` in-memory queue, the `MOCK_*` consts in `api/endpoints.ts`) — that is a data fallback, not a pinned flag. Professor attendance ledger (`attendance/service.ts`) is real — it joins course/session identity client-side because the contract row carries only `scanned_at`.
 - Endpoints are named `EndpointDef`s in `src/lib/api/endpoints.ts` collected into an `endpoints` registry; feature slices live in `src/lib/features/` (12 top-level dirs, `admin` included — `analytics` lives under `admin/` — plus `notifications` which has `poll.ts` and no `service.ts`), shared types/constants/utils under `src/lib/shared/`. Admin routes (`src/routes/admin/...`) are real pages now — 51 +page.svelte files in total (50 pages: 4 landing / 3 auth / 6 student / 12 professor / 25 admin, plus 1 /admin redirect stub). Admin profile now uses the student settings visual shell, and the forced login flow captures a security question only for non-super-admins.

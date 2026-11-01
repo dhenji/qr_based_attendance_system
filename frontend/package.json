@@ -3,6 +3,9 @@
 	"private": true,
 	"version": "0.1.0",
 	"type": "module",
+	"engines": {
+		"node": ">=22.22.2"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -10,18 +13,26 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"build:analyze": "set ANALYZE=true&&npm run build"
+		"build:analyze": "set ANALYZE=true&&npm run build",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
+		"@testing-library/jest-dom": "^6.6.0",
+		"@testing-library/svelte": "^5.4.2",
 		"@types/qrcode": "^1.5.6",
+		"jsdom": "^30.0.0",
 		"rollup-plugin-visualizer": "^7.1.1",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"typescript": "^6.0.3",
-		"vite": "^8.0.16"
+		"vite": "^8.0.16",
+		"vitest": "^5.0.3",
+		"@vitest/coverage-v8": "^5.0.3"
 	},
 	"dependencies": {
 		"@mediapipe/tasks-vision": "^1.0.1",

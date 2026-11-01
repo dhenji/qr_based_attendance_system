@@ -178,7 +178,7 @@ const fetchWith401Retry = async (
 //   3. HTTPException -> {"detail": "some string"}
 // Plain-text 500s (unhandled non-AppException escapes to FastAPI's default
 // text body) fall through to the generic branch with the text preserved.
-const parseError = async (response: Response): Promise<APIError> => {
+export const parseError = async (response: Response): Promise<APIError> => {
 	const { status } = response;
 	// Read as text first: the body can only be consumed once, and a
 	// plain-text 500 has no JSON to parse.
