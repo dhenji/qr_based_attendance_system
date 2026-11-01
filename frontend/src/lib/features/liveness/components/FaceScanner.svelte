@@ -765,8 +765,9 @@
 					if (video && video.videoWidth && video.videoHeight) {
 						if (!captureCanvas) captureCanvas = document.createElement('canvas');
 						const c = captureCanvas;
-						c.width = video.videoWidth;
-						c.height = video.videoHeight;
+						const scale = Math.min(1, 640 / video.videoWidth, 480 / video.videoHeight);
+						c.width = Math.max(1, Math.round(video.videoWidth * scale));
+						c.height = Math.max(1, Math.round(video.videoHeight * scale));
 						const ctx = c.getContext('2d');
 						if (ctx) {
 							ctx.drawImage(video, 0, 0, c.width, c.height);

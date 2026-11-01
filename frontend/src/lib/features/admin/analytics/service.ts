@@ -128,7 +128,9 @@ export const getCourseOptions = async (
 	if (filters.limit !== undefined) params.limit = String(filters.limit);
 	const response = await get<AnalyticsCourseOptionsResponse>(
 		'adminAnalyticsCourseOptions',
-		params
+		params,
+		undefined,
+		{ cacheTtlMs: 10_000 }
 	);
 	const items = (response.items ?? []).map((o) => ({
 		id: o.course_id,
