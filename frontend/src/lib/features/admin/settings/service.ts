@@ -14,7 +14,7 @@
 // builders from the sibling analytics service. Backup download is the one
 // genuine gap: see downloadBackupDescriptor below.
 
-import { backupDownloadPath, get, getBlob, isMockMode, patch, post } from '$lib/api/client';
+import { backupDownloadPath, get, getBlob, invalidateApiCache, isMockMode, patch, post } from '$lib/api/client';
 import type {
 	BackupLogItemResponse,
 	SystemSettingsResponse
@@ -48,10 +48,12 @@ export type SettingsPatch = Partial<
 >;
 
 export const getSettings = async (): Promise<SystemSettings> =>
-	get<SystemSettings>('systemSettings');
+	get<SystemSettings>('systemSettings', undefined, undefined, { cacheTtlMs: 30_000 });
 
 export const patchSettings = async (patchBody: SettingsPatch): Promise<SystemSettings> => {
 	const response = await patch<SystemSettings>('systemSettingsPatch', patchBody);
+	// Drop the cached GET so the next read reflects the persisted patch.
+	invalidateApiCache((key) => key.startsWith('systemSettings|'));
 	return response;
 };
 

@@ -268,7 +268,7 @@
 				if (!blob) { resolve(null); return; }
 				const file = new File([blob], `${step}.jpg`, { type: 'image/jpeg' });
 				resolve(file);
-			}, 'image/jpeg', 0.92);
+			}, 'image/jpeg', 0.85);
 		});
 	};
 

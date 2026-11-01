@@ -311,6 +311,35 @@ const forMock = (params?: QueryParams): Record<string, string> | undefined => {
 	);
 };
 
+// In-flight GET dedup + short-lived cache. Both are best-effort and only
+// apply to real (non-mock) GET requests without a caller abort signal, so a
+// caller can still cancel its own request without affecting shared ones.
+const __inflight = new Map<string, Promise<unknown>>();
+const __cache = new Map<string, { value: unknown; expires: number }>();
+
+const __serializeParams = (params?: QueryParams): string => {
+	if (!params) return '';
+	const keys = Object.keys(params).sort();
+	return JSON.stringify(keys.map((k) => [k, params[k]]));
+};
+
+const __cacheKey = (
+	endpoint: keyof typeof endpoints,
+	suffix: string,
+	params: QueryParams | undefined,
+	token: string | null
+): string => `${String(endpoint)}|${suffix || ''}|${__serializeParams(params)}|${token || ''}`;
+
+export const invalidateApiCache = (matcher?: (key: string) => boolean): void => {
+	if (!matcher) {
+		__cache.clear();
+		return;
+	}
+	for (const key of [...__cache.keys()]) {
+		if (matcher(key)) __cache.delete(key);
+	}
+};
+
 // Generic API call handler
 const apiCall = async <T>(
 	endpoint: keyof typeof endpoints,
@@ -328,9 +357,12 @@ const apiCall = async <T>(
 		// Per-request timeout override (ms) and caller abort signal.
 		timeoutMs?: number;
 		signal?: AbortSignal | null;
+		// Opt-in short-lived response cache (ms). Only meaningful for GETs;
+		// 0/unset disables caching. Mutations should call invalidateApiCache.
+		cacheTtlMs?: number;
 	} = {}
 ): Promise<T> => {
-	const { method = 'GET', body, params, suffix = '', headers, timeoutMs, signal } = options;
+	const { method = 'GET', body, params, suffix = '', headers, timeoutMs, signal, cacheTtlMs = 0 } = options;
 	const endpointDef = endpoints[endpoint];
 
 	// Mock mode — return mock data (call inputs forwarded so stateful mocks
@@ -371,6 +403,33 @@ const apiCall = async <T>(
 		...(signal ? { signal } : {})
 	};
 
+	// GET dedup + opt-in cache (real mode only). Mutations bypass this.
+	if (method === 'GET' && !MOCK) {
+		const key = __cacheKey(endpoint, suffix, params, authToken);
+		const now = Date.now();
+		if (cacheTtlMs > 0) {
+			const cached = __cache.get(key);
+			if (cached && cached.expires > now) {
+				return Promise.resolve(cached.value as T);
+			}
+		}
+		if (!signal) {
+			const existing = __inflight.get(key);
+			if (existing) return existing as Promise<T>;
+			const promise = request<T>(url.toString(), init, timeoutMs ?? DEFAULT_TIMEOUT_MS)
+				.then((value) => {
+					if (cacheTtlMs > 0) {
+						__cache.set(key, { value, expires: Date.now() + cacheTtlMs });
+					}
+					return value;
+				})
+				.finally(() => {
+					__inflight.delete(key);
+				});
+			__inflight.set(key, promise);
+			return promise;
+		}
+	}
 	return request<T>(url.toString(), init, timeoutMs ?? DEFAULT_TIMEOUT_MS);
 };
 
@@ -381,7 +440,7 @@ export const get = <T>(
 	endpoint: keyof typeof endpoints,
 	params?: QueryParams,
 	suffix?: string,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ) => apiCall<T>(endpoint, { method: 'GET', params, suffix, ...opts });
 
 export const post = <T>(
@@ -390,7 +449,7 @@ export const post = <T>(
 	params?: QueryParams,
 	suffix?: string,
 	headers?: Record<string, string>,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ) => apiCall<T>(endpoint, { method: 'POST', body, params, suffix, headers, ...opts });
 
 export const put = <T>(
@@ -398,7 +457,7 @@ export const put = <T>(
 	body?: unknown,
 	params?: QueryParams,
 	suffix?: string,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ) => apiCall<T>(endpoint, { method: 'PUT', body, params, suffix, ...opts });
 
 export const patch = <T>(
@@ -406,7 +465,7 @@ export const patch = <T>(
 	body?: unknown,
 	params?: QueryParams,
 	suffix?: string,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ) => apiCall<T>(endpoint, { method: 'PATCH', body, params, suffix, ...opts });
 
 export const del = <T>(
@@ -415,7 +474,7 @@ export const del = <T>(
 	suffix?: string,
 	body?: unknown,
 	headers?: Record<string, string>,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ) => apiCall<T>(endpoint, { method: 'DELETE', params, suffix, body, headers, ...opts });
 
 // Multipart upload for CSV roster imports (POST /admin/students/import,
@@ -427,7 +486,7 @@ export const postForm = async <T>(
 	form: FormData,
 	params?: QueryParams,
 	suffix?: string,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ): Promise<T> => {
 	const endpointDef = endpoints[endpoint];
 
@@ -523,7 +582,7 @@ export const backupDownloadPath = (id: number): string => `/admin/backups/${id}/
 export const getText = async (
 	path: string,
 	params?: QueryParams,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV download is unavailable in mock mode');
@@ -554,7 +613,7 @@ export const getText = async (
 export const postText = async (
 	path: string,
 	body: unknown,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ): Promise<string> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server CSV export is unavailable in mock mode');
@@ -591,7 +650,7 @@ export const postText = async (
 export const getBlob = async (
 	path: string,
 	params?: QueryParams,
-	opts?: { timeoutMs?: number; signal?: AbortSignal | null }
+	opts?: { timeoutMs?: number; signal?: AbortSignal | null; cacheTtlMs?: number }
 ): Promise<{ blob: Blob; filename: string }> => {
 	if (MOCK) {
 		throw new APIError('mock_mode', 'Server file download is unavailable in mock mode');
