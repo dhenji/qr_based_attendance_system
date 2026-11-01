@@ -270,6 +270,24 @@ npm run check:watch
 
 ---
 
+## Testing
+
+Frontend unit/component tests use **Vitest 5** + **@testing-library/svelte** + **jsdom**,
+configured in `vite.config.ts` (`environment: 'jsdom'`, setup file
+`src/test-setup.ts`, v8 coverage with thresholds 11/7/5/13). Tests are co-located
+as `*.test.ts` next to the source they cover; shared helpers (e.g. `ModalWrapper.svelte`)
+live in `src/testing/`. Vitest imports are explicit (no `globals: true`).
+
+```bash
+cd frontend
+npm run test            # single run
+npm run test:watch      # watch mode
+npm run test:coverage   # with v8 coverage -> ./coverage (lcov + text)
+```
+
+Coverage is reported to `frontend/coverage/` (gitignored) and uploaded as the
+`frontend-coverage` artifact in CI.
+
 ## Useful Commands
 
 | Command               | Purpose                          |
@@ -279,6 +297,9 @@ npm run check:watch
 | `npm run preview`     | Preview production build locally |
 | `npm run check`       | Typecheck all Svelte + TS files  |
 | `npm run check:watch` | Typecheck in watch mode          |
+| `npm run test`        | Run Vitest unit/component tests  |
+| `npm run test:watch`  | Vitest in watch mode             |
+| `npm run test:coverage` | Vitest with v8 coverage        |
 
 ---
 
@@ -291,3 +312,8 @@ npm run check:watch
 | `html5-qrcode`             | QR code scanning                   |
 | `zod`                      | Schema validation                  |
 | `@mediapipe/tasks-vision`  | FaceLandmarker WASM runtime + model (the only ML model in the project) |
+| `vitest`                   | Unit/component test runner |
+| `@testing-library/svelte`  | Svelte component testing utilities |
+| `@testing-library/jest-dom` | DOM matchers for Vitest |
+| `jsdom`                    | DOM environment for Vitest |
+| `@vitest/coverage-v8`      | V8 coverage provider |

@@ -410,6 +410,14 @@ Frontend typecheck (runs svelte-kit sync automatically):
 cd frontend && npm run check
 ```
 
+Frontend unit/component tests (Vitest + @testing-library/svelte):
+
+```bash
+cd frontend && npm run test            # single run
+cd frontend && npm run test:watch      # watch mode
+cd frontend && npm run test:coverage   # with v8 coverage -> ./coverage
+```
+
 Frontend watch mode:
 
 ```bash
@@ -418,6 +426,8 @@ cd frontend && npm run check:watch
 
 There are no linters or formatters configured. The backend suite is 1055 cases
 across 82 files (282 sync + 647 async test functions, plus parametrized expansions).
+The frontend suite uses Vitest + @testing-library/svelte (jsdom) under `frontend/src/**/*.test.ts`;
+run it with `npm run test` / `npm run test:coverage`.
 ### CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
@@ -427,7 +437,7 @@ across 82 files (282 sync + 647 async test functions, plus parametrized expansio
 | Job          | Gate                                                            | Needs                          |
 | ------------ | --------------------------------------------------------------- | ------------------------------ |
 | `backend`    | `python -m pytest src/tests -q` — 1055 cases on in-memory SQLite | nothing                        || `migrations` | `alembic upgrade head && alembic check`                         | a `postgres:16-alpine` service |
-| `frontend`   | `npm ci && npm run check` (svelte-check)                        | nothing                        |
+| `frontend`   | `npm ci && npm run check && npm run test:coverage && npm run build` | nothing                        |
 
 No job reads a secret. The `migrations` job is the one that matters: the test
 schema is built with `Base.metadata.create_all`, straight from the models, so
@@ -535,7 +545,7 @@ default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend    | 18 feature slices / 21 model classes / 21 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `b9c0d1e2f3a4` (25 revisions); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra                                               || Frontend   | 51 +page.svelte files (50 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 12 feature components and 14 shared ones (adds `RadiusSelector`); typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts`. Student scan now runs a bounded GPS location check (accuracy/distance/radius feedback, retry, continue gating) before face liveness; `ClassroomMapPicker` shows a radius circle and a "Use my location" control |
 | Schema     | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82)              |
-| Tests      | 1055 backend cases in 82 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend verification is `npm run check`                                                                                                                                                                                                          || Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |
+| Tests      | 1055 backend cases in 82 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend: 100 Vitest unit/component cases (co-located `*.test.ts` + `src/testing/` helpers) plus `npm run check`; coverage thresholds enforced in CI (11/7/5/13)                                                                                                                                                                                                          || Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |
 
 The remaining known gaps are operational rather than structural: Phase 10
 (production launch) and Phase 11 (ongoing operations) are deployment and process

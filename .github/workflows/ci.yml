@@ -28,6 +28,7 @@ jobs:
   backend:
     name: Backend suite (SQLite)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         # `Settings.env_file = ".env"` is resolved relative to the CWD and
@@ -62,6 +63,7 @@ jobs:
   migrations:
     name: Migration drift (alembic check)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       db:
         image: postgres:16-alpine
@@ -114,6 +116,10 @@ jobs:
   frontend:
     name: Frontend typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         working-directory: frontend
@@ -138,9 +144,17 @@ jobs:
         run: npm ci
 
       - name: Typecheck
-        # There is no frontend test framework: no `test` script, no
-        # vitest/playwright/jest dependency, and zero *.test.ts / *.spec.ts
-        # files. svelte-check (errors only; warnings pass) is the entire
-        # automatable gate. `npm run build` is deliberately absent --
-        # adapter-auto on an unrecognised platform only warns and exits 0.
         run: npm run check
+
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+
+      - name: Build
+        run: npm run build
