@@ -1,10 +1,10 @@
 # Data Flow Diagrams
 
 > Layered, code-grounded attendance workflow docs:
-> [`docs/attendance-workflow/`](../attendance-workflow/README.md). This file keeps
+> [`docs/architecture/attendance-workflow/`](attendance-workflow/README.md). This file keeps
 > the system-wide sequence diagrams; that directory holds the per-layer audit.
-> Analytics layer docs: [`docs/analytics/`](../analytics/README.md).
-> Anti-spoofing layer docs: [`docs/anti-spoofing/`](../anti-spoofing/README.md).
+> Analytics layer docs: [`docs/architecture/analytics.md`](analytics.md).
+> Anti-spoofing layer docs: [`docs/architecture/anti-spoofing.md`](anti-spoofing.md).
 
 > Mermaid sequence diagrams for all major system flows. References the
 > [target schema](../design/database-er.md) and its column names.

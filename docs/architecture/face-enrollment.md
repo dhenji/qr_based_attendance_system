@@ -1,8 +1,8 @@
 # Face Enrollment & Verification Architecture
 
 > Layered, code-grounded anti-spoofing docs:
-> [`docs/anti-spoofing/`](../anti-spoofing/README.md). This file keeps the
-> enrollment architecture; that directory holds the per-layer audit.
+> [`docs/architecture/anti-spoofing.md`](anti-spoofing.md). This file keeps the
+> enrollment architecture; that file holds the consolidated per-layer audit.
 
 > **Decisions covered:** D27–D31, D43
 

@@ -114,22 +114,29 @@ attendance-system/
 │   │   ├── proposal.md               # Full project proposal
 │   │   ├── proposal_simple.md        # Simplified proposal (1st week)
 │   │   ├── models.md                 # ML/model catalog
-│   │   └── contributions.md          # CS contribution mapping
+│   │   └── contributions.md         # CS contribution mapping
 │   ├── architecture/
-│   │   ├── frontend-architecture.md  # Production SvelteKit structure
-│   │   ├── project-structure.md      # This file
-│   │   ├── api-contracts.md          # Endpoint schemas & conventions
-│   │   ├── offline-first.md          # IndexedDB, sync algorithm, embedding pull (stub; no comparison)
-│   │   ├── security-model.md         # Threat model & mitigations
-│   │   ├── data-flow.md              # Mermaid sequence diagrams
-│   │   └── migration-strategy.md     # Alembic migration plan
+│   │   ├── analytics.md             # Admin analytics, rates, risk scoring, result calculation
+│   │   ├── anti-spoofing.md         # Scan anti-spoofing controls and result calculation
+│   │   ├── attendance-workflow/      # Layered attendance scan flow and data layer
+│   │   │   └── README.md
+│   │   ├── api-contracts.md         # Endpoint schemas & conventions
+│   │   ├── data-flow.md             # Mermaid sequence diagrams
+│   │   ├── excuse-workflow.md       # Excuse state machine and permissions
+│   │   ├── face-enrollment.md       # Face enrollment flow and verification limits
+│   │   ├── frontend-architecture.md # Production SvelteKit structure
+│   │   ├── migration-strategy.md    # Alembic migration plan
+│   │   ├── offline-first.md         # IndexedDB, sync algorithm, embedding pull
+│   │   ├── project-structure.md     # This file
+│   │   ├── risk-model.md            # At-risk prediction and batch job spec
+│   │   └── security-model.md        # Threat model and mitigations
 │   ├── deployment/
 │   │   ├── deployment-workflow.md    # Deployment guide
 │   │   └── backup-strategy.md        # Backup pipeline (Phase 3)
 │   ├── design/
-│   │   ├── database-er.md            # ERD diagrams
-│   │   └── wireframes.md             # Wireframes
-│   └── presentations/                # Slides + deck (.pptx, .pdf)
+│   │   ├── database-er.md           # ERD diagrams
+│   │   └── wireframes.md            # Wireframes
+│   └── presentations/               # Slides + deck (.pptx, .pdf)
 │
 ├── docker-compose.dev.yml             # Local development: PostgreSQL + migrations + backend + frontend (frontend HMR via CHOKIDAR_USEPOLLING)
 ├── .github/workflows/ci.yml           # CI: backend suite, alembic drift check, frontend typecheck (ADR-069)

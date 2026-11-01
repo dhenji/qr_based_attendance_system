@@ -2312,3 +2312,10 @@
 - **Status:** Accepted
 - **Context:** User management was super-admin-only, preventing delegated administration. Role-based restrictions preserve least privilege for sensitive admin accounts.
 - **Consequences:** Route guards changed from `SUPER_ADMIN` to `ADMIN`; `AdminService` and `AuthService` became actor/target-role aware; `shared/user_management_policy.py` centralizes permission helpers; `core/exceptions.py` gained `ForbiddenException`; frontend nav and page gate use `isAdmin()`; Add User modal preselects a valid default role.
+
+## Known gaps / not implemented
+
+- Client-side face embedding compare (offline) — not implemented; cached
+  embedding stored as ciphertext with no decrypt-and-compare path
+  (`offline-first.md` §Offline Verification).
+- In-app notification table — unimplemented by design (no table).

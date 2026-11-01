@@ -1,8 +1,8 @@
 # Security Model
 
 > Layered, code-grounded anti-spoofing docs:
-> [`docs/anti-spoofing/`](../anti-spoofing/README.md). This file keeps the
-> threat model; that directory holds the per-layer audit.
+> [`docs/architecture/anti-spoofing.md`](anti-spoofing.md). This file keeps the
+> threat model; that file holds the consolidated per-layer audit.
 
 > Threat model, mitigations, and security posture for the QR-Based Attendance
 > System. Every mitigation cites the governing decision from the

@@ -21,8 +21,6 @@ or admin roster flows (see `docs/architecture/excuse-workflow.md`,
 7. `07-integrations-and-background-processing.md` — face gen, MediaPipe, cron, sync
 8. `08-end-to-end-workflow.md` — online/precheck/offline/review/history (Mermaid)
 9. `09-dependencies-and-data-flow.md` — dependency graph, transforms, error paths
-10. `10-documentation-alignment-audit.md` — discrepancy table + known gaps
-
 ## Layer map
 
 | Layer | Components | Key sources |
