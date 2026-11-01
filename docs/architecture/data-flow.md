@@ -1,5 +1,11 @@
 # Data Flow Diagrams
 
+> Layered, code-grounded attendance workflow docs:
+> [`docs/attendance-workflow/`](../attendance-workflow/README.md). This file keeps
+> the system-wide sequence diagrams; that directory holds the per-layer audit.
+> Analytics layer docs: [`docs/analytics/`](../analytics/README.md).
+> Anti-spoofing layer docs: [`docs/anti-spoofing/`](../anti-spoofing/README.md).
+
 > Mermaid sequence diagrams for all major system flows. References the
 > [target schema](../design/database-er.md) and its column names.
 
@@ -45,7 +51,7 @@ sequenceDiagram
     S->>S: MediaPipe FaceLandmarker WASM
     S->>S: Challenge: Blink → Turn Left → Turn Right
     S->>S: EAR check (blink), PnP check (head turns)
-    S->>S: face_match_score = placeholder 1.0 (no embedding comparison)
+    S->>S: Capture scan frame (live_face_image) — server computes embedding (MobileFaceNet) and score
     S->>S: navigator.geolocation.getCurrentPosition() + Haversine pre-check
     alt Outside geofence
         S-->>S: Show error "Outside geofence"
@@ -53,26 +59,19 @@ sequenceDiagram
 
     Note over S,DB: Step 5 — Submit Attendance
 
-    S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>face_match_score: 1.0,<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
+    S->>API: POST /student/attendance/scan {<br>session_id: 456,<br>student_number: "24-2111",<br>gps: {lat, lng, accuracy},<br>liveness_evidence: {blink_detected, head_turn_left,<br>head_turn_right, ear_samples, pnp_evidence},<br>live_face_image: "<base64 scan frame>",<br>scanned_at: "2026-08-25T10:15:30Z"<br>}
 
     API->>API: 1. Check idempotency key → return prior result<br>(key = "user_id:session_id:X-Idempotency-Key", 15-min TTL)
     API->>API: 2. Verify session exists & is active + not expired
     API->>API: 3. Resolve student by token user_id; compare student_number
     API->>API: 4. Check enrollment (students.id → enrollments)
-<<<<<<< HEAD
-    API->>API: 5. Check duplicate scan
-    API->>API: 6. Validate geofence (server-side Haversine)
-    API->>API: 7. Grade liveness evidence (booleans + EAR mean + PnP presence)
-    API->>API: 8. Apply score band to the submitted face_match_score<br>(< 0.65 → 403 face_mismatch; 0.65–0.70 → pending review)
-=======
-    API->>API: 5. Check face enrollment (students.face_embedding NOT NULL) → 403 face_not_enrolled
+<    API->>API: 5. Check face enrollment (students.face_embedding NOT NULL) → 403 face_not_enrolled
     API->>API: 6. Check duplicate scan
-    API->>API: 7. Validate geofence (server-side Haversine)
-    API->>API: 8. Validate liveness evidence
-    API->>API: 9. Validate face_match_score ≥ FACE_MATCH_THRESHOLD
->>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
+    API->>API: 7. Validate geofence (server-side Haversine) — only when benchmark_mode is off
+    API->>API: 8. Validate liveness evidence — only when benchmark_mode is off
+    API->>API: 9. Generate embedding from live_face_image (MobileFaceNet) or live_face_embedding; cosine_similarity vs enrolled; score band: < 0.65 → 403 face_mismatch; 0.65–0.70 → pending review
 
-    API->>API: 9. Compute status (elapsed since session.created_at):<br>elapsed ≤ present_window → present<br>elapsed ≤ present_window + late_window → late<br>else → rejected
+    API->>API: 10. Compute status (elapsed since max(session.created_at, session.scheduled_start_time)):<br>elapsed ≤ present_window → present<br>elapsed ≤ present_window + late_window → late<br>else → rejected
 
     API->>DB: INSERT INTO attendance_records<br>(session_id, student_id, validation_status, timestamp,<br>scanned_via, liveness_evidence, face_match_score,<br>gps_lat, gps_lng, original_status, sync_status)
     DB-->>API: attendance_records.id
@@ -82,8 +81,11 @@ sequenceDiagram
 
 > **Identity note:** `student_number` is a confirmation check only. The student
 > row is selected by `Student.user_id`, so a client cannot submit as somebody
-> else. `face_match_score` is a client-supplied value; the server never compares
-> embeddings (ADR-068). The shipped client sends `1.0`.
+> else. `face_match_score` is computed server-side from the enrolled embedding
+> and the embedding generated from `live_face_image` (MobileFaceNet, cosine
+> similarity); the client supplies the image, not a score (threshold 0.70,
+> review band 0.65). See `shared/face_embeddings.py` and
+> `shared/face_embedding_generator.py`.
 
 ---
 

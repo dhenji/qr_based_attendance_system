@@ -1,5 +1,9 @@
 # Offline-First Architecture
 
+> Layered, code-grounded attendance workflow docs:
+> [`docs/attendance-workflow/`](../attendance-workflow/README.md).
+> Anti-spoofing layer docs: [`docs/anti-spoofing/`](../anti-spoofing/README.md).
+
 > Client-side offline storage, sync algorithm, and server-side validation for
 > scans that occur without network connectivity.
 

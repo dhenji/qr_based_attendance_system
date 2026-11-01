@@ -1,5 +1,9 @@
 # At-Risk Student Prediction Model
 
+> Layered, code-grounded analytics docs:
+> [`docs/analytics/`](../analytics/README.md). This file keeps the detailed
+> feature derivations; that directory holds the per-layer audit.
+
 > **Decisions covered:** D35
 
 ## 1. Overview
