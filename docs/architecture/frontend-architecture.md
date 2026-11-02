@@ -2,7 +2,7 @@
 
 > Historical intent, not current state: the "pending slices" and ~22-page
 > tree below predate the landed frontend. Truth is `README.md` + the code —
-> 12 feature dirs, 46 `+page.svelte` files, real API by default.
+> 12 feature dirs, 51 `+page.svelte` files, real API by default.
 
 > Canonical structure for `frontend/src/`. Replaces the earlier flat
 > `services/ + stores/ + components/` layout with domain-driven **feature

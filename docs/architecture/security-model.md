@@ -221,8 +221,9 @@ cryptographically bound. Two specifics worth stating plainly:
 
 Face enrollment now validates uploads through `shared/face_quality.py` and raises
 `invalid_image`, `no_face_detected`, `multiple_faces`, and `quality_too_low` as
-documented. The stored vector is still a placeholder (`_stub_embedding_blob`);
-real generation/encryption remains unimplemented.
+documented. The stored vector is a real 512-d embedding generated server-side
+(MobileFaceNet ONNX, landmark fallback); encryption at rest remains
+unimplemented.
 
 **What this does and does not protect.** The server-enforced parts of the scan —
 session code, authenticated identity + student-ID confirmation, GPS geofence —

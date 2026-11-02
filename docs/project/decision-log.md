@@ -2313,6 +2313,34 @@
 - **Context:** User management was super-admin-only, preventing delegated administration. Role-based restrictions preserve least privilege for sensitive admin accounts.
 - **Consequences:** Route guards changed from `SUPER_ADMIN` to `ADMIN`; `AdminService` and `AuthService` became actor/target-role aware; `shared/user_management_policy.py` centralizes permission helpers; `core/exceptions.py` gained `ForbiddenException`; frontend nav and page gate use `isAdmin()`; Add User modal preselects a valid default role.
 
+### ADR-088: Audit Trail Derived Read Model
+
+- **Decision:** The stored audit row is evidence and stays unaltered (ADR-064). The read endpoint (`GET /admin/audit-logs`) adds a derived layer — `actor`, `subject`, `summary`, `action_label`, `changes` — resolved from the audit snapshot first, then from joins, so the derived names survive deletion of the underlying record. A plain admin sees them too, which a client-side lookup could not manage.
+- **Date:** 2026-10-31
+- **Status:** Accepted
+- **Consequences:** `AuditLog` responses carry both the raw row and the derived read model; resolution rules are reused by the excuse slice (ADR-090).
+
+### ADR-089: Audit Trail Is Never Pruned; Action Index Added
+
+- **Decision:** The audit trail is never pruned, archived, or deleted — it is the evidence, and any retention window would be an arbitrary guess that destroys records. Growth is monitored via row count and table size. A composite index `ix_audit_logs_action_performed_at (action, performed_at)` supports filtered reads.
+- **Date:** 2026-10-31
+- **Status:** Accepted
+- **Consequences:** Monitoring documents the trail size; `action` has no standalone index but the composite index exists.
+
+### ADR-090: Display Identity Resolution for Excuse Requests
+
+- **Decision:** `ExcuseRequest` carries resolved display identity (`student_name`, `student_number`, `student_section`, `session_code`, `session_date`, `course_code`, `course_name`, `reviewed_by_name`) computed by the slice using ADR-088's rule. Unresolvable references fall back to a labelled id (e.g. `"Student #4"`), never a blank.
+- **Date:** 2026-10-31
+- **Status:** Accepted
+- **Consequences:** Same shape across admin and professor views; client does not join a directory.
+
+### ADR-091: Hand-Rolled SVG Charts (No Chart.js)
+
+- **Decision:** Analytics dashboards use two hand-rolled SVG components (`ReportTrendChart.svelte`, `ReportBarChart.svelte`) instead of Chart.js, which was specified in ADR-041 but never installed.
+- **Date:** 2026-10-31
+- **Status:** Accepted
+- **Consequences:** No chart library dependency; D41 references amended.
+
 ## Known gaps / not implemented
 
 - Client-side face embedding compare (offline) — not implemented; cached

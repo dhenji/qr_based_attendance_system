@@ -15,7 +15,7 @@ Source-text assertions rather than imports, for the same reason
 `test_locust_discovery.py` does it: these files must be read as text, and importing
 the whole feature tree to read class attributes is not worth the import cost.
 
-The six unreachable codes are enumerated explicitly. They are listed in the
+The five unreachable codes are enumerated explicitly. They are listed in the
 contract's *Error Code Coverage* prose rather than on an endpoint, so they would
 otherwise read as failures — they are a known and deliberate set, and a new one
 appearing must break this test.
@@ -39,7 +39,7 @@ UNREACHABLE = frozenset(
     {
         "internal_error",  # default AppException code; nothing constructs one bare
         "database_error",  # DatabaseException has a handler, no raise site
-        "face_not_enrolled",  # never raised
+
         "invalid_semester",  # never raised; semester is free text
         "role_mismatch",  # never raised; require_role uses HTTPException
         # never raised; policy runs as a Pydantic validator, failing as 422
