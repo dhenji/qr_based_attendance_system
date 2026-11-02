@@ -158,8 +158,8 @@ attendance-system/
 > `service.py`/`router.py`> layers for all features (exception: `course_professor/service.py` exists);
 > `liveness` is a frontend-only feature (no backend `features/liveness/` dir).
 
-> **Deferred (frontend):** `src/service-worker.ts` (PWA offline caching & background
-> sync), `hooks.server.ts`, `vite-plugin-pwa`, `static/icons/`.
+> **Deferred (frontend):** `hooks.server.ts`, `vite-plugin-pwa`, `static/icons/`.
+> `src/service-worker.ts` is now implemented (offline cache + background sync).
 
 ---
 

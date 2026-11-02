@@ -93,48 +93,28 @@ frames, so landmark coordinates and captured images stay unmirrored.
 
 ### 2.2 Storage Format
 
-> **Audit (anti-spoofing docs):** the shipped blob is now a real `FACEEMB1`
-> binary embedding (`shared/face_embeddings.serialize_embedding`), not the
-> zero-filled JSON placeholder described below. The encryption gap remains.
+The shipped blob is a real `FACEEMB1` binary embedding
+(`shared/face_embeddings.serialize_embedding`), generated server-side during
+enrollment (MobileFaceNet ONNX, landmark fallback). It is **plaintext today**;
+AES-256-GCM encryption at rest remains unimplemented (D28/T9).
 
-A single JSON blob stored in `students.face_embedding` (BYTEA column) — **plaintext today**,
-with AES-256-GCM as the D28 design (see §5). The values below are illustrative; the
-shipped blob is zero-filled.
+- **`students.face_embedding`** (BYTEA NULL): serialized 512-d embedding
+  (`FACEEMB1`), generated from the front/left/right photos.
+- **`students.face_embedding_algorithm`** (TEXT): `mobilefacenet-v1` or
+  `mediapipe-v1` (landmark fallback).
+- **`students.face_embedding_version`** (INT): monotonic; bumped on every write.
+- **Encryption**: ⚠ **Not implemented.** The design is AES-256-GCM with a
+  server-side key. The BYTEA column holds the plaintext blob today.
 
-```json
-{
-  "mean": [0.0231, -0.0412, ..., 0.0891],
-  "angles": {
-    "front": [0.0250, -0.0398, ..., 0.0912],
-    "left":  [0.0198, -0.0445, ..., 0.0867],
-    "right": [0.0244, -0.0401, ..., 0.0895]
-  }
-}
-```
-
-- **`mean`** (128 floats): shape-only placeholder; in the D28 design it would be
-  the **primary comparison target** during verification. No comparison exists in
-  the current build.
-- **`angles`** (3 × 128 floats): per-angle vectors, part of the D28 design for
-  **tie-breaking** when the mean score falls in the review band (0.65–0.70).
-  ⚠ **Not implemented.** The stub writes three zero vectors for shape parity, and
-  nothing reads them back — there is no per-angle comparison anywhere in the
-  codebase, so the tie-break re-check that §4's review band describes does not
-  happen. The single `face_match_score` the client submits **is** still compared
-  against the threshold to flag the review band (`attendance/service.py:519`);
-  only the angle-level second opinion is missing.
-- **Encryption**: ⚠ **Not implemented.** The design is AES-256-GCM with a server-side
-  key, decrypted only on the server during enrollment or when serving the embedding
-  to a verified student device (D29). What the server writes today is plain
-  `json.dumps(...).encode("utf-8")` (`face_enrollment/service.py:38`) — no cipher,
-  no key. The BYTEA column is real and holds the blob; only the encryption is missing,
-  which is what T9 tracks.
+The earlier 128-float `mean`/`angles` JSON design is superseded; verification
+compares the enrolled embedding against a server-generated live embedding via
+cosine similarity (see §4 / security-model.md).
 
 ### 2.3 Supporting Columns
 
 | Column                            | Type             | Purpose                                       |
 | --------------------------------- | ---------------- | --------------------------------------------- |
-| `students.face_embedding`         | BYTEA NULL       | Placeholder blob (encryption not implemented) |
+| `students.face_embedding`         | BYTEA NULL       | Real 512-d embedding (encryption not implemented) |
 | `students.face_enrolled_at`       | TIMESTAMPTZ NULL | Timestamp of last enrollment                  |
 | `students.face_embedding_version` | INT DEFAULT 0    | Monotonic version; incremented on every write |
 
