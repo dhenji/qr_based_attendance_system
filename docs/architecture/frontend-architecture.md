@@ -100,9 +100,9 @@ frontend/
     │   │   │   ├── db.ts                         # IndexedDB wrapper (queue store)
     │   │   │   └── engine.ts                     # enqueue/dequeue, retry, status transitions
     │   │   │
-    │   │   ├── course/  ○                        (deferred — empty until backend)
-    │   │   ├── enrollment/ ○                     (deferred)
-    │   │   └── analytics/ ○                      (deferred)
+    │   │   ├── course/                            (implemented)
+    │   │   ├── enrollment/                       (implemented)
+    │   │   └── analytics/                        (implemented, under admin/)
     │   │
     │   └── shared/
     │       ├── styles/

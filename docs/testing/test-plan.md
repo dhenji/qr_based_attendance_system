@@ -233,8 +233,8 @@
 ### 4.1 Scan Flow (Sequential, Current Implementation)
 
 > The shipped flow is `entry → id → qr → liveness` on `/student/scan`. The
-> original five-step numbering is retained for traceability, but the student-ID
-> QR scan and server-side face matching are not implemented. Rows marked
+> original five-step numbering is retained for traceability. Server-side face
+> matching is implemented; the student-ID QR scan is not. Rows marked
 > **N/A** document that gap rather than a passing test.
 
 | #       | Decision IDs | Case                                   | Preconditions                                          | Steps                                    | Expected Result                                                                                     |
@@ -252,7 +252,7 @@
 | S-SC-11 | D27, D13     | Step 5 — Result: Late                  | Scan within late_window_minutes (after present window) | Complete all steps                       | Overlay: "LATE ⏰" + timestamp; status=late                                                         |
 | S-SC-12 | D18          | Step 1 — Invalid code                  | Expired session code entered                           | Enter code; click Verify                 | Error: "Invalid or expired session code"                                                            |
 | S-SC-13 | D27, ADR-083 | Step 2 — Student-number mismatch       | Signed in as student A; enter student B's number       | Click Check                              | `403 student_number_mismatch`; no attendance row written                                            |
-| S-SC-14 | D28, D29, D30 | Step 4 — No face enrolled (N/A)       | Student has no `face_embedding`                        | Reach step 4                             | **N/A** — the scan never reads `face_embedding`; liveness runs regardless. Server-side matching is not implemented. |
+| S-SC-14 | D28, D29, D30 | Step 4 — No face enrolled             | Student has no `face_embedding`                        | Reach step 4                             | `403 face_not_enrolled`; scan rejected; no attendance row written. |
 
 ### 4.2 Attendance History
 
