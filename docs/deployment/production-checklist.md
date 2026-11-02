@@ -47,9 +47,9 @@
 | `BACKUP_S3_PREFIX`               | If s3    | `backups/`                 |                                                               |
 | `BACKUP_RETENTION_DAILY`         | Yes      | `30`                       | Default                                                       |
 | `BACKUP_RETENTION_MONTHLY`       | Yes      | `12`                       | Default                                                       |
-| `FACE_MATCH_THRESHOLD`           | Yes      | `0.7`                      | Band threshold for the client-submitted score (no cosine comparison) |
+| `FACE_MATCH_THRESHOLD`           | Yes      | `0.7`                      | Cosine-similarity pass threshold for server-side face matching (review band 0.65–0.70) |
 | `FACE_REVIEW_BAND_LOW`           | Yes      | `0.65`                     | Lower bound of the manual-review band                         |
-| `FACE_EMBEDDING_VERSION`         | Yes      | `1`                        | Placeholder embedding format version                          |
+| `FACE_EMBEDDING_VERSION`         | Yes      | `1`                        | Embedding format version                                      |
 | `DEFAULT_PRESENT_WINDOW_MINUTES` | Yes      | `5`                        | Course default                                                |
 | `DEFAULT_LATE_WINDOW_MINUTES`    | Yes      | `10`                       | Course default                                                |
 | `RISK_ABSENCE_RATE_HIGH`         | Yes      | `0.30`                     | D35                                                           |
@@ -209,8 +209,8 @@ logins/min and 15 OTP failures/5 min **deployment-wide**. The per-email caps
 
 | Item                   | Check                                                        |
 | ---------------------- | ------------------------------------------------------------ |
-| `FACE_MATCH_THRESHOLD` | Set to `0.7` (default); bands the client-submitted score only — the shipped client sends `1.0`, so it never triggers a mismatch |
-| Embedding encryption   | **Not implemented** — `face_embedding` stores a plaintext zero-filled placeholder; do not claim encryption at rest |
+| `FACE_MATCH_THRESHOLD` | Set to `0.7` (default); pass threshold for server-side cosine similarity (review band 0.65–0.70) |
+| Embedding encryption   | **Not implemented** — `face_embedding` stores a plaintext real 512-d embedding; do not claim encryption at rest |
 | Version gating         | Student device downloads embedding only when version changes |
 
 ### Verification
@@ -301,7 +301,7 @@ AND contype = 'c';
 # Test S3 write
 aws s3 ls s3://$BACKUP_S3_BUCKET/ --recursive | head -5
 
-# Test face enrollment upload (placeholder blob; front/left/right are required)
+# Test face enrollment upload (real 512-d embedding; front/left/right are required)
 curl -X POST http://localhost:8000/api/admin/face-enrollment/1 \
     -F "front=@front.jpg" \
     -F "left=@left.jpg" \

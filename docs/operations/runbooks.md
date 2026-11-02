@@ -190,7 +190,7 @@
 
 ## Runbook 4: Re-enroll Failed Faces
 
-**Purpose:** Replace a student's face-enrollment record when the placeholder needs to be reset (no real embeddings are generated in this build).
+**Purpose:** Replace a student's face-enrollment record (real 512-d embedding regenerated on upload).
 
 ### Preconditions
 
@@ -222,19 +222,19 @@
      `no_face_detected`, `multiple_faces`, or `quality_too_low`
 
 4. **Server stores the enrollment:**
-   - It writes a zero-filled placeholder JSON blob; no ResNet inference runs
+   - It generates a real 512-d FACEEMB1 embedding (MobileFaceNet ONNX, landmark fallback)
    - The blob is **plaintext** in `students.face_embedding` (BYTEA); encryption
      is not implemented
    - `face_embedding_version` is incremented and `face_enrolled_at` updated
 
 5. **If re-enrollment is for a different student** (replace old enrollment):
-   - The new placeholder supersedes the old blob
+   - The new embedding supersedes the old blob
    - Version bump makes the client pull the new blob on next login; it is not
      used for matching
 
 ### Verification
 
-- [ ] `face_embedding` is NOT NULL and contains the placeholder blob (real vectors are not generated in this build)
+- [ ] `face_embedding` is NOT NULL and contains a real 512-d embedding
 - [ ] `face_enrolled_at` reflects the new upload time
 - [ ] `face_embedding_version` is incremented
 - [ ] Student can complete the scan flow (session code → ID confirmation → liveness)

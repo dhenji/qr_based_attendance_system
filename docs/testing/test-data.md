@@ -389,7 +389,7 @@ Seed 3 excuse requests to exercise all D21 paths:
 
 **Rationale:** Mixed enrollment status tests:
 
-- D28: admin-enrolled faces (placeholder blob; no real embedding)
+- D28: admin-enrolled faces (real 512-d embedding generated server-side)
 - D29: pull-on-login version check
 - D30: offline verification with cached embedding — **design only, not implemented**
 - Edge case: students without face enrollment can still scan; the scan never

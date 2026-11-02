@@ -30,7 +30,7 @@ latency measured from client action to next-screen-ready.
 | 2                          | Student-number confirmation → precheck         | <300ms       | <600ms       | <1000ms      | API `POST /student/attendance/precheck` (token-derived student + number comparison + enrollment + duplicate)  |
 | 3                          | GPS geofence validation                         | <50ms        | <100ms       | <150ms       | Haversine computation is local; GPS position fix time excluded (hardware-dependent)                           |
 | 4a                         | Face liveness challenge (client-side MediaPipe) | <5000ms      | <8000ms      | <12000ms     | Client-side: start challenge to all 3 steps confirmed. Includes blink detection + turn detection              |
-| 4b                         | Face-score band check (server)                  | <10ms        | <25ms        | <50ms        | Threshold comparison on the client-submitted score; **no embedding comparison** exists                        |
+| 4b                         | Face-score band check (server)                  | <10ms        | <25ms        | <50ms        | Cosine similarity between enrolled and server-generated live embedding; threshold + review band               |
 | 5                          | Attendance record write + response              | <100ms       | <250ms       | <500ms       | DB insert + response delivery                                                                                 |
 | **Full scan (happy path)** | **Steps 1a→5 end-to-end**                       | **<6s**      | **<10s**     | **<15s**     | **Client-to-client measurement (excludes GPS fix time and liveness challenge time which are user-dependent)** |
 

@@ -68,21 +68,21 @@ ORDER BY hour DESC;
    ORDER BY created_at DESC;
    ```
 2. Check for same device fingerprints or GPS coordinates across rejections.
-3. Cross-reference with enrollment records for context. Enrollment is informational only — the scan does not read `face_embedding`, so a missing or stale enrollment cannot cause a rejection.
+3. Cross-reference with enrollment records for context. A missing or stale enrollment causes `face_not_enrolled` / `stub_embedding` rejections.
 4. Review liveness evidence and geofence distance; those are the layers that can reject a scan.
 
 ### Remediation
 
 - **Buddy punching (student A scans for student B):** Evidence in liveness challenge failures (blink/turn not detected). Report to academic integrity office.
 - **Photo/video replay:** The liveness challenge defeats casual static photos; video replay and modified clients remain possible because evidence is client-asserted. Escalate repeated cases to security review.
-- **Face mismatch:** Not a possible scan outcome in this build — no embedding comparison exists. Re-enrolling only replaces the placeholder; it does not fix a rejection.
-- **Legitimate false rejections:** Check liveness evidence and geofence distance. `FACE_MATCH_THRESHOLD` only bands the client-submitted score, and the shipped client always sends `1.0`, so changing it has no effect on the app.
+- **Face mismatch:** A scan is rejected when the server-computed cosine similarity is below the review band (`FACE_MATCH_THRESHOLD` 0.70, review band 0.65–0.70). Re-enrolling replaces the stored embedding and may resolve stale/mismatched enrollments.
+- **Legitimate false rejections:** Check liveness evidence, geofence distance, and face-match score. `FACE_MATCH_THRESHOLD` bands the server-computed similarity, so tuning it changes acceptance.
 
 ### Post-Incident
 
 - Document incident with timestamps, affected students, rejection patterns.
-- Do not tune `FACE_MATCH_THRESHOLD` to fix app rejections: it only bands the client-submitted score, and the shipped client always sends `1.0`.
-- If systematic spoofing is suspected, collect liveness evidence and review the client-asserted limitations; threshold changes will not affect the shipped app.
+- Tune `FACE_MATCH_THRESHOLD` only with care: it bands server-computed similarity, so changes affect acceptance. Review liveness evidence and enrollment quality first.
+- If systematic spoofing is suspected, collect liveness evidence and review the client-asserted limitations; threshold changes affect the shipped app.
 - If systematic spoof attempt: consider adding rate limiting per student per session.
   Note: D25 prohibits any "mark all present" override; D26 keeps liveness mandatory
   for remote sessions. Rate limiting must not weaken these invariants.

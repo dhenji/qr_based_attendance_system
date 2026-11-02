@@ -271,19 +271,11 @@
 
 ### ADR-028: Face Embedding — Admin-Enrolled, 3 Photos, Encrypted
 
-- **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 512-d embeddings (MobileFaceNet), stores them in `students.face_embedding BYTEA` + `face_enrolled_at` + `face_embedding_version`. Encryption at rest is not implemented.  > **As-built note (2026-10-21)** — the pipeline described above is **not
-  > implemented**. No face-recognition model is installed in this repository: the
-  > only model the project ships is MediaPipe FaceLandmarker
-  > (`frontend/static/models/face_landmarker.task`), which produces landmarks and
-  > blendshapes, not identity embeddings, and the named face-api.js ResNet was
-  > never a dependency of either side. The server writes the documented blob shape
-  > **zero-filled** and tagged `"stub": true` (`_stub_embedding_blob`), the blob is
-  > stored **plaintext** (the AES-256-GCM step is not implemented), and no
-  > similarity comparison runs — `face_match_score` is a client assertion the
-  > server band-checks without ever reading the stored blob. What *did* ship is
-  > the distribution half: the enrollment route, the version column, the
-  > pull-on-login handshake and the device-side encrypted cache (ADR-029). See
-  > `docs/proposals/models.md` §3 for the as-built catalog.
+- **Decision (D28):** Face embedding: **admin-enrolled** via a dedicated admin section (NOT bundled into CSV import). Enrollment captures **3 photos** (front, left, right); server generates 512-d embeddings (MobileFaceNet), stores them in `students.face_embedding BYTEA` + `face_enrolled_at` + `face_embedding_version`. Encryption at rest is not implemented.  > **As-built note (2026-11-02)** — the pipeline described above is now
+  > implemented: enrollment generates a real 512-d `FACEEMB1` embedding
+  > (MobileFaceNet ONNX, landmark fallback) and stores it plaintext; scan
+  > computes cosine similarity server-side. Encryption at rest and offline
+  > comparison remain unimplemented (D29, D30).
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Privacy — biometric enrollment is admin-supervised. 3 angles improve accuracy. Encryption at rest required.
@@ -305,10 +297,10 @@
 - **Context:** Embedding never leaves device in offline mode. Server re-verifies on sync? No — server trusts client score but validates liveness evidence.
 - **Consequences:** Offline queue item includes `face_match_score`, `liveness_evidence`. Server validates evidence, not embedding.
 
-> **Implementation status (ADR-068, 2026-10-24):** D28's real embedding
-> generation/encryption and D30's offline comparison are **not implemented**.
-> Enrollment stores a zero-filled placeholder, the scan never reads it, and
-> `face_match_score` is client-supplied (the shipped client sends `1.0`).
+> **Implementation status (ADR-068, 2026-11-02):** D28's real embedding
+> generation is implemented (encryption at rest is not). D30's offline
+> comparison is not implemented; comparison runs on sync. `face_match_score`
+> is server-computed.
 
 ### ADR-031: Fixed Liveness Sequence — Blink → Left → Right
 
@@ -489,9 +481,9 @@
 - **Context:** Threshold tuned to reduce false rejects; session lifecycle state is fully derivable from `sessions.expires_at`, so persisting a separate status column would risk drift.
 - **Consequences:** `face_match_score >= 0.70` passes (below → `face_mismatch` rejection); `FACE_REVIEW_BAND_LOW` (0.65) still flags borderline scans for manual review. `sessions.status` (`active`/`closed`) is derived during serialization.
 
-> **Implementation note (ADR-068):** this threshold bands the client-submitted
-> `face_match_score`. No embedding comparison exists, and the shipped client
-> always sends `1.0`.
+> **Implementation note (ADR-068):** this threshold bands the server-computed
+> cosine similarity between the enrolled and live embeddings. The shipped client
+> no longer submits an authoritative score.
 
 ### ADR-049: Session expires_at Computed in Application Layer
 
@@ -1515,6 +1507,9 @@
 
 ### ADR-068: Biometric Evidence Is Client-Asserted, and the Server Says So
 
+> **Amended (2026-11-02):** server-side embedding comparison is now implemented
+> (cosine similarity). Liveness evidence remains client-asserted.
+
 - **Decision (D68):** The liveness challenge and face-match score are computed
   in the client and graded by the server only for internal consistency. The
   server performs no biometric measurement and no embedding comparison. This is
@@ -1563,6 +1558,10 @@
   placeholder is why `api-contracts.md` records `no_face_detected`,
   `multiple_faces`, `quality_too_low` and `invalid_image` as
   documented-but-never-raised.
+
+> **Implementation note (2026-11-02):** Step 4 now includes server-side
+> cosine similarity between the enrolled and live embeddings. Liveness
+> evidence remains client-asserted; `face_match_score` is server-computed.
 
 ### ADR-069: CI Runs Three Gates, and the Migration Check Is the One That Matters
 

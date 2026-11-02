@@ -397,7 +397,7 @@ These are **explicitly out of scope** for this system:
 | D27      | Scan flow (amended by ADR-083 — typed ID confirmation, no student-ID QR) |
 | D28      | Face embedding encryption at rest                   |
 | D29      | Embedding pull-on-login (version-gated)             |
-| D30      | Offline verification decision — no embedding comparison is implemented |
+| D30      | Offline verification decision — embedding comparison runs on sync (server-side) |
 | D31      | Liveness protocol (fixed sequence, EAR + PnP)       |
 | D32      | Profile read-only (identity admin-managed)          |
 | D39      | Backup encryption (AES-256-GCM)                     |

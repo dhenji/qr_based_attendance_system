@@ -146,11 +146,10 @@ challenge.
    submitted signals (the three booleans, the EAR mean, and non-empty PnP
    evidence)
 
-> **Face matching is not implemented in this build.** The app does not compare
-> your face with an enrolled embedding, and it does not use a cached embedding
-> offline. It sends a placeholder match score (`1.0`); the server only applies
-> its score bands to that submitted number. The liveness challenge still runs.
-> See [face-enrollment.md](../architecture/face-enrollment.md) §4.2.
+> **Face matching is implemented server-side.** The server compares your live
+> face to your enrolled embedding and applies the pass/review/fail bands. The
+> liveness challenge still runs. See
+> [face-enrollment.md](../architecture/face-enrollment.md) §4.
 
 ### Stage 5: Location Check & Result
 
@@ -372,8 +371,7 @@ Click any day to see:
 
 **Face Enrollment Status** ([D28](../project/decision-log.md)):
 
-- ✅ Enrolled — 3 photos uploaded and enrollment/version recorded; the stored
-  embedding is a placeholder in this build
+- ✅ Enrolled — 3 photos uploaded; a real 512-d embedding is stored server-side
 - ❌ Not enrolled — contact admin for face enrollment
 
 **My QR**: A device-generated tile from your _student number_. It is **not**
