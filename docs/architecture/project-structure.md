@@ -18,7 +18,7 @@ attendance-system/
 │   │   │
 │   │   ├── shared/                   # Cross-feature helpers
 │   │   │   ├── __init__.py
-│   │   │   ├── enums.py              # UserRole, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SyncStatus, QueueStatus
+│   │   │   ├── enums.py              # UserRole, AuditEntity, AuditAction, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SessionType, SyncStatus, QueueStatus (16)
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
 │   │   │   ├── dependencies.py       # pagination + reusable annotated deps
 │   │   │   ├── captcha.py            # Cloudflare Turnstile siteverify (key-gated no-op when unset)

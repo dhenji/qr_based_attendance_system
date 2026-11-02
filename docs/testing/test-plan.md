@@ -385,7 +385,7 @@ Every decision D1–D48 is covered by at least one test case above.
 | D45      | A-PA-1, A-PA-2, A-PA-3, P-SS-3, A-AN-3 (course_professors & student_risk_scores keyed by offering_id)                                                                                              |
 | D46      | P-SC-1, P-SC-2, P-SC-4, P-AS-1, P-SS-3 (sessions.professor_id references professors.id)                                                                                                           |
 | D47      | A-BS-1, A-BS-2, A-BS-3, SEC-9 (backup statuses started/completed/failed; finished_at nullable)                                                                                                       |
-| D48      | A-FE-1, S-SC-8, S-SC-9 (FACE_MATCH_THRESHOLD=0.70 bands the client-submitted score; review band 0.65–0.70; shipped client sends 1.0; session status active/closed computed DTO-only) |
+| D48      | A-FE-1, S-SC-8, S-SC-9 (FACE_MATCH_THRESHOLD=0.70 bands the server-computed score; review band 0.65–0.70; face enrollment required to scan; session status active/closed computed DTO-only) |
 
 ---
 
@@ -397,7 +397,7 @@ Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md)
 
 | Job | Command | Runs against | Fails on |
 | --- | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 760 cases |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1055 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
 | `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
 

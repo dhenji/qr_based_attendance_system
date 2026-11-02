@@ -364,7 +364,7 @@ codes with no implementation anywhere.
 | ------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Server-side face matching | **Implemented** | The live embedding is generated server-side (MobileFaceNet, with landmark fallback) from the submitted image, then compared via cosine similarity against the stored enrolled embedding; thresholds `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). Provenance remains client-asserted. || Sibling confusion  | **Partially mitigated** | Server-side matching now runs, but no PAD CNN; twin separation remains an accepted risk (D31). |
 | Photo/video replay | Partially mitigated   | The fixed blink + turn challenge raises the cost of casual replay, but the evidence is client-asserted; a modified client can forge it. Video replay remains a theoretical vector (acknowledged).                          |
-| Model staleness    | Design only           | The current enrollment path writes a stub, so there is no model-generated embedding to migrate. If a real face-api.js/MediaPipe pipeline is added, bump `FACE_EMBEDDING_VERSION` and re-enroll the roster.                  |
+| Model staleness    | Implemented           | Enrollment now generates a real 512-d embedding (MobileFaceNet ONNX, landmark fallback). If the model or algorithm changes, bump `FACE_EMBEDDING_VERSION` and re-enroll the roster. |
 
 ---
 
