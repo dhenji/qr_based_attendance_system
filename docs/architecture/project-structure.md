@@ -84,9 +84,9 @@ attendance-system/
 │   │   │   │   ├── attendance/       # service.ts, store.svelte.ts, schema.ts, mock.ts
 │   │   │   │   ├── liveness/         # store.svelte.ts (scan state machine), bundle.ts, schema.ts, components/ — frontend-only feature
 │   │   │   │   ├── sync/             # service.ts, db.ts (IndexedDB wrapper), engine.ts (enqueue/dequeue/retry/status)
-│   │   │   │   ├── course/  ○        # deferred — empty until backend
-│   │   │   │   ├── enrollment/ ○     # deferred
-│   │   │   │   └── analytics/ ○      # deferred
+│   │   │   │   ├── course/           # implemented
+│   │   │   │   ├── enrollment/       # implemented
+│   │   │   │   └── analytics/       # implemented (under admin/)
 │   │   │   └── shared/
 │   │   │       ├── styles/tokens.css # palette, spacing, radius, status colors
 │   │   │       ├── ui/               # Button, Card, Input, Select, Toggle, Table, Badge, Modal, EmptyState
