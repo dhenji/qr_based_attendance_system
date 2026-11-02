@@ -544,7 +544,7 @@ filters on professor screens and the active-session "Enrolled" count).
 
 #### `POST /admin/face-enrollment/{student_id}`
 
-Upload 3 photos (front, left, right). The server validates the uploads and stores a zero-filled **placeholder** embedding; real vector generation is not implemented.
+Upload 3 photos (front, left, right). The server validates the uploads and generates/stores a real 512-d **FACEEMB1** embedding.
 
 |                  |                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------- |
@@ -1487,7 +1487,7 @@ Pull face embedding (version-gated, D29).
 |                  |                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?current_version=0`                                                                                               |
-| **Response 200** | `{ version: int, embedding: string (base64-encoded placeholder blob; not encrypted) }` — only if `current_version < server_version` |
+| **Response 200** | `{ version: int, embedding: string (base64-encoded FACEEMB1 blob; not encrypted) }` — only if `current_version < server_version` |
 | **Response 204** | No content (version matches, no update needed)                                                                     |
 
 ---

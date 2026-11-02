@@ -296,7 +296,7 @@ sequenceDiagram
     S->>S: Confirm student number from the signed-in profile (precheck)
     S->>S: GPS geofence check (Haversine)
     S->>S: Face liveness challenge (blink→left→right)
-    S->>S: face_match_score = placeholder 1.0 (no embedding comparison)
+    S->>S: Live face image captured for server-side embedding comparison
 
     S->>API: POST /student/attendance/scan {session_id, student_number, gps {lat, lng, accuracy}, liveness_evidence, face_match_score, scanned_at}
     API->>DB: Check idempotency key
@@ -390,7 +390,7 @@ Checks performed locally before queuing:
 | Student number format   | Profile value (3–50 chars, upper-cased; the conventional `YY-NNNN` shape is not validated) | Yes |
 | GPS within geofence     | Haversine vs cached session coords | Yes                         |
 | Liveness (blink, turns) | MediaPipe WASM                     | Yes                         |
-| Face match score        | Not applicable — no embedding comparison is implemented | No              |
+| Face match score        | Server-side cosine similarity on sync (requires connectivity) | No              |
 | Duplicate scan          | Deferred to the server on sync     | No                          |
 
 Server re-validates **all** checks on sync. Client validation is UX-only

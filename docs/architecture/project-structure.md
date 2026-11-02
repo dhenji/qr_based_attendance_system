@@ -177,14 +177,14 @@ attendance-system/
 | `backend/src/features/*/model.py`                                                             | Database Design & Normalization (3NF)                                                                                       |
 | `frontend/src/lib/features/sync/service.ts` + `backend/src/features/sync/` (router/service planned) | Offline Sync / Eventual Consistency                                                                                    |
 | `backend/src/features/program/` + `backend/src/features/course/`                              | Academic Hierarchy: Program → Year Level → CourseOffering (courses = templates)                                             |
-| `backend/src/features/student/` + `backend/src/features/face_enrollment/`                      | Biometrics: enrollment service/router (placeholder embedding; quality gates implemented in shared/face_quality.py)                    |
+| `backend/src/features/student/` + `backend/src/features/face_enrollment/`                      | Biometrics: enrollment service/router (real 512-d embedding; quality gates in shared/face_quality.py)                    |
 | `backend/src/features/excuse/` (model.py; service/router planned)                             | State Machine: excuse request lifecycle (pending→approved/rejected), permission matrix, audit trail                         |
 | `backend/src/features/system/`                                                                | DevOps: backup pipeline (pg_dump→encrypt→store→prune), academic-structure CRUD, system settings                             |
 | `frontend/src/lib/features/report/components/`                                       | Data Visualization: hand-rolled SVG charts (`ReportTrendChart.svelte`, `ReportBarChart.svelte`) — no chart library (ADR-091)                            |
 | `frontend/src/lib/features/session/components/calendar/` (planned)                            | Calendar UI: month/week grid views, day detail sheets                                                                       |
 | `frontend/src/routes/student/scan/` + `frontend/src/lib/features/{student,liveness}/components/` | Sequential UI Pattern: guided scan flow (entry→ID→QR→liveness) with state machine                                          |
 | `frontend/src/lib/features/excuse/components/` (planned)                                      | Workflow UI: excuse modals, request forms, review lists                                                                     |
-| `frontend/src/routes/admin/students/+page.svelte` (inline modal)                              | Enrollment UI: 3-photo file upload (quality gates; placeholder embedding)                                                |
+| `frontend/src/routes/admin/students/+page.svelte` (inline modal)                              | Enrollment UI: 3-photo file upload (quality gates; real embedding)                                                |
 
 ---
 

@@ -115,7 +115,7 @@ sequenceDiagram
     Student->>Student: Confirm student number (prefilled from account)
     Student->>Student: Complete face-liveness challenge
     Student->>Student: Capture GPS
-    Student->>Student: Submit evidence (placeholder face score 1.0)
+    Student->>Student: Submit evidence (server computes face match)
 
     Server->>Server: 1. Verify session code + expiry
     Server->>Server: 2. Resolve student from token; compare student_number

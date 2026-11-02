@@ -8,11 +8,11 @@
 >
 > **Route**: `/admin/students` → **Enroll face** modal ([D28](../project/decision-log.md), [D43](../project/decision-log.md)). There is no dedicated `/admin/face-enrollment/{student_id}` page.
 
-> **Current build status (2026-10-24):** enrollment records three uploaded
-> photos, but **no face embedding is generated**. The server stores a
-> zero-filled placeholder blob, does not encrypt it, and no scan compares it.
-> Attendance runs the liveness challenge only. See
-> [face-enrollment.md](../architecture/face-enrollment.md) §4.2 and ADR-068.
+> **Current build status (2026-11-02):** enrollment generates a real 512-d
+> embedding (MobileFaceNet ONNX, landmark fallback), stored plaintext; scans
+> compare the server-generated live embedding via cosine similarity. Encryption
+> at rest is not implemented. See
+> [face-enrollment.md](../architecture/face-enrollment.md) §4 and ADR-068.
 
 ---
 
@@ -32,30 +32,16 @@
 ## 1. Overview
 
 Face enrollment accepts **3 image files** (front, left, right) per student
-([D43](../project/decision-log.md)). The current server writes a single
-placeholder JSON blob to `students.face_embedding` ([D28](../project/decision-log.md)):
+([D43](../project/decision-log.md)). The server generates a real 512-d
+`FACEEMB1` embedding and writes it to `students.face_embedding`
+([D28](../project/decision-log.md)):
 
-```json
-{
-  "mean": [0.0, "... 128 floats"],
-  "angles": {
-    "front": [0.0, "... 128 floats"],
-    "left": [0.0, "... 128 floats"],
-    "right": [0.0, "... 128 floats"]
-  },
-  "stub": true,
-  "version": 1
-}
-```
-
-- **`mean` / `angles`**: Shape-compatible placeholders only — there is no
-  face-api.js ResNet inference and no real vector.
+- **Embedding**: 512-d vector generated server-side (MobileFaceNet ONNX,
+  landmark fallback).
 - **Version**: the `students.face_embedding_version` column increments on every
-  upload; the blob's `"version"` field is the format version
-  (`FACE_EMBEDDING_VERSION`, currently `1`).
-- **Encryption**: The database blob is plaintext JSON today. The student's
-  browser caches a pulled copy with AES-GCM in IndexedDB, but that cache is not
-  used for matching.
+  upload (`FACE_EMBEDDING_VERSION`, currently `1`).
+- **Encryption**: The database blob is plaintext today. The student's
+  browser caches a pulled copy with AES-GCM in IndexedDB.
 
 > **Enrollment is not required to scan.** Students without an enrollment can
 > complete liveness and submit attendance. The scan never reads
@@ -192,7 +178,7 @@ front, left, and right angles automatically.
 
 ### 5.3 Encryption
 
-- **Server at rest**: Plaintext JSON placeholder; application-level encryption
+- **Server at rest**: Plaintext real 512-d embedding; application-level encryption
   is **not implemented**.
 - **On device**: The cached copy is AES-GCM encrypted with a non-extractable
   device key.
@@ -207,7 +193,7 @@ front, left, and right angles automatically.
 | Trigger                           | Action                                                                              |
 | --------------------------------- | ----------------------------------------------------------------------------------- |
 | **Student requests**              | Admin opens the same modal and uploads three new files                              |
-| **Significant appearance change** | Re-upload — the placeholder is replaced                                             |
+| **Significant appearance change** | Re-upload — the embedding is replaced                                             |
 | **Admin archive**                 | Blob is cleared and the student is deactivated                                      |
 | **Version bump**                  | Every upload increments `face_embedding_version`; devices may pull on next login    |
 
@@ -216,7 +202,7 @@ front, left, and right angles automatically.
 1. Navigate to `/admin/students`.
 2. Open the student's **[Re-enroll face]** action.
 3. Upload three new images (or capture them via the live camera).
-4. Submit — the old placeholder is discarded and the version is bumped.
+4. Submit — the old embedding is discarded and the version is bumped.
 
 ### 6.3 How to Remove an Enrollment
 
@@ -226,8 +212,8 @@ front, left, and right angles automatically.
    nulled, and `face_embedding_version` is incremented so device caches drop
    their copy.
 
-> **No rollback**: Re-enrollment replaces the stored blob. Previous attendance
-> records are unaffected (and contain no embedding comparison).
+> **No rollback**: Re-enrollment replaces the stored embedding. Previous attendance
+> records are unaffected.
 
 ---
 
@@ -240,19 +226,18 @@ Use this script when explaining enrollment to students:
 > **What we collect**: Three photos of your face (front, left, right) are
 > uploaded for enrollment.
 >
-> **What we store today**: The current build does **not** generate or keep a
-> real face embedding. It records that enrollment happened, stores a
-> zero-filled placeholder in the database, and keeps the enrollment date and
-> version. The uploaded photos are not retained by the application.
+> **What we store today**: The server generates a real face embedding (a
+> 512-d vector) from your photos and stores it in the database (plaintext
+> today; encryption at rest is not implemented). The uploaded photos are not
+> retained by the application.
 >
-> **What we do with it**: The scan does **not** compare your face with an
-> enrolled photo. Attendance uses a liveness challenge (blink and head turns)
-> and GPS. Face matching is planned but not implemented.
+> **What we do with it**: During attendance, the server compares your live
+> face to the stored embedding. Attendance also uses a liveness challenge
+> (blink and head turns) and GPS.
 >
 > **What we do NOT do**:
 >
 > - We do **not** store the raw photos after the upload request completes
-> - We do **not** compare your live face to an enrolled embedding in this build
 > - We do **not** share your face data with any third party
 > - We do **not** track your face outside of scan sessions
 >
@@ -262,9 +247,9 @@ Use this script when explaining enrollment to students:
 > - Your enrollment is cleared if your account is archived (not merely toggled inactive)
 > - The device cache is encrypted in transit and at rest in IndexedDB
 >
-> **Storage**: The server holds a zero-filled placeholder in
+> **Storage**: The server holds a real face embedding in
 > `students.face_embedding` (plaintext today). Your browser may cache a pulled
-> copy encrypted with AES-GCM, but it is not used for matching.
+> copy encrypted with AES-GCM.
 >
 > **Questions?** Contact your administrator or refer to the
 > [Face Enrollment Architecture](../architecture/face-enrollment.md) for
@@ -297,6 +282,6 @@ Use this script when explaining enrollment to students:
 
 ---
 
-_For the placeholder format, current limitations, and the unimplemented
+_For the embedding format, current limitations (encryption at rest), and the
 matching pipeline, see the [Face Enrollment Architecture](../architecture/face-enrollment.md)
 and [Security Model](../architecture/security-model.md)._

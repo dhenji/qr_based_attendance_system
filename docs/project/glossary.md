@@ -136,7 +136,7 @@ Account activation flow where a student/professor enters their official email â†
 | `duplicate_scan`   | Student already scanned for this session   |
 | `outside_geofence` | GPS distance > radius                      |
 | `liveness_failed`  | Liveness challenge failed (EAR/PnP)        |
-| `face_mismatch`    | Submitted `face_match_score` < 0.65 (no cosine comparison exists) |
+| `face_mismatch`    | Server-computed cosine similarity < 0.65 review band (face_match_score below threshold) |
 | `not_enrolled`     | Student not enrolled in session's offering |
 | `session_expired`  | `scanned_at` > `expires_at` (offline sync) |
 

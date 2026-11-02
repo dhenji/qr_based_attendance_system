@@ -106,7 +106,7 @@ sequenceDiagram
     IDB-->>S: Stored locally
     S-->>S: Show "Evidence saved — will verify after sync"
 
-    Note over S,IDB: `student_number` is queued for the confirmation check only;<br>the server re-resolves the student from the sync token.<br>The replay path supplies the same placeholder `face_match_score`.
+    Note over S,IDB: `student_number` is queued for the confirmation check only;<br>the server re-resolves the student from the sync token.<br>The replay path supplies the same queued scan payload (including the captured face image).
 
     Note over S,DB: Network restored — background sync
 

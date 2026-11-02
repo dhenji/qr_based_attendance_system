@@ -110,7 +110,7 @@
 - Student CRUD: create, import (CSV), edit, archive, reactivate
 - Professor CRUD: create, edit, archive
 - Bulk CSV import with validation
-- Student face enrollment (3-photo capture; placeholder embedding only — real generation/encryption not implemented) (D28, D43)
+- Student face enrollment (3-photo capture; real 512-d embedding; encryption not implemented) (D28, D43)
 - Program Management suite (replaces flat Course Management) (D38, D40)
   - Programs list, detail, year-level tabs, term structure editor
   - Year-level course list with CRUD
@@ -182,7 +182,7 @@
   1. Session entry (type code; session QR payload exists but is not rendered yet)
   2. Student-number confirmation → resolve from token → enrollment check
   3. Session-QR camera (mandatory on the manual-code path) or skip if a QR was scanned
-  4. Liveness challenge (blink → left → right); no embedding comparison (D31)
+  4. Liveness challenge (blink → left → right); server-side embedding comparison (D31)
   5. GPS geofence + submit; result overlay (present/late/rejected/pending)
 - Offline queue: pending records stored client-side, synced with exponential backoff (D16)
 - `scanned_at` server-side validation on sync

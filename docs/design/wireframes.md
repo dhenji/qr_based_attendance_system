@@ -509,7 +509,7 @@ Four-step flow. Each step advances after verification.
 > **Liveness sequence is fixed** (blink → turn left → turn right, D31).
 > MediaPipe Face Mesh runs WASM client-side, and the server re-checks the
 > submitted EAR/PnP signals. **Face matching is not implemented**: the client
-> sends a placeholder `face_match_score` of `1.0`, and the stored enrollment
+> sends a live face image for server-side embedding comparison, and the stored enrollment
 > embedding is a stub. There is no offline embedding comparison (D30 is design
 > only). See [face-enrollment.md](../architecture/face-enrollment.md) §4.2.
 
@@ -1729,16 +1729,15 @@ deployment; this screen manages all subsequent ones.
 │            │                                                    │
 │            │  Step 3: Save & Enroll                             │
 │            │  [💾 Save Enrollment]                              │
-│            │  Current build stores a placeholder embedding;     │
-│            │  no real vector is generated or encrypted.         │
+│            │  Current build stores a real 512-d embedding;       │
+│            │  encryption at rest is not implemented.           │
 │            └────────────────────────────────────────────────────┘
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> **Re-enrollment**: replaces the stored placeholder and bumps the version. **Revocation** on archive.
+> **Re-enrollment**: replaces the stored embedding and bumps the version. **Revocation** on archive.
 > **Thresholds**: the server applies `FACE_MATCH_THRESHOLD` (0.70) and the
-> 0.65 review band to the client-submitted `face_match_score`; no cosine
-> comparison exists.
+> 0.65 review band to the server-computed cosine similarity.
 
 ---
 
@@ -1940,7 +1939,7 @@ Partial failure:
 - **Scan flow**: strictly sequential 5-step flow (D27) — session code/QR → student-ID QR → GPS geofence → face liveness (fixed blink-left-right) → result overlay; requires prior face enrollment (NULL `face_embedding` → `403 face_not_enrolled`)
 >>>>>>> b620ab2 (feat(scan): require face enrollment before attendance submission)
 - **Embedded conventions**: locked fields (§9), window math blocks, dual timers, full status legend, cohort badges, filter rails, lettered sub-screens (2.2a, 4.5b, etc.)
-- **Admin face enrollment** (4.14): modal on the Student Management page for enrolling student faces (D28); uploads 3 photos (front/left/right) and records enrollment. Real embedding generation and encryption are **not implemented** in this build — the stored blob is a zero-filled placeholder.
+- **Admin face enrollment** (4.14): modal on the Student Management page for enrolling student faces (D28); uploads 3 photos (front/left/right) and records enrollment. Real embedding generation is implemented (MobileFaceNet ONNX); encryption at rest is not implemented in this build.
 - **Session History breakdown** (3.5): Present/Late/Absent counts per session for quick overview
 
 ---

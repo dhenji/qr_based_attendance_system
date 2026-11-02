@@ -131,7 +131,7 @@ Student logs in
 Client checks cached version (IndexedDB)
     │
     ├─ Cache miss → GET /student/me/face-embedding
-    │                 Server returns { embedding: <base64 placeholder>, version: N }
+    │                 Server returns { embedding: <base64 FACEEMB1 blob>, version: N }
     │                 Client stores in IndexedDB, encrypted with device WebCrypto key
     │
     ├─ Cache hit, version == N → no-op
@@ -202,7 +202,7 @@ The current scan integration is D27 step 4 as amended by ADR-083:
 Step 1: Verify session code → session config fetched
 Step 2: Confirm student ID → resolved from the authenticated account (no QR)
 Step 3: GPS geofence validation (client pre-check; server re-validates)
-Step 4: Face liveness challenge; client submits evidence + placeholder score
+Step 4: Face liveness challenge; server computes face match from submitted image
 Step 5: Write attendance record
 ```
 
