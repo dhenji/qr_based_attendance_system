@@ -130,3 +130,33 @@ async def test_dependency_ignores_spoofed_header_from_untrusted_peer(
     # Same peer, different forged header: still the peer's bucket.
     with pytest.raises(RateLimitedException):
         await gate(_request("203.0.113.7", "198.51.100.99"))
+
+
+# --- release() refunds a single hit ------------------------------------------
+
+
+async def test_release_refunds_a_single_hit() -> None:
+    limiter = rate_limit_module._limiter
+    # Use a fresh limiter to avoid cross-test state.
+    from shared.rate_limit import FixedWindowLimiter
+
+    lim = FixedWindowLimiter()
+    assert await lim.hit("k", 5, 60) is True
+    assert await lim.hit("k", 5, 60) is True
+    await lim.release("k")
+    # One hit refunded: budget still has room.
+    assert await lim.hit("k", 5, 60) is True
+    for _ in range(3):
+        assert await lim.hit("k", 5, 60) is True
+    assert await lim.hit("k", 5, 60) is False
+
+
+async def test_release_on_missing_or_expired_bucket_is_noop() -> None:
+    from shared.rate_limit import FixedWindowLimiter
+
+    lim = FixedWindowLimiter()
+    await lim.release("missing")  # must not raise
+    assert await lim.hit("k", 5, 60) is True
+    await lim.release("k")
+    # Bucket dropped; a fresh hit starts a new window.
+    assert await lim.hit("k", 5, 60) is True
