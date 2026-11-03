@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request, status
 
 from api.deps import AuthServiceDep, CurrentUserDep, OptionalUserDep
+from features.auth.exceptions import AccountLockedException
 from features.auth.schema import (
     BackupCodesResponse,
     BackupCodesSummaryResponse,
@@ -86,14 +87,24 @@ async def login(
     request: Request,
     service: AuthServiceDep,
     _: None = Depends(rate_limit(20, 60, key="ip")),
-    _rl_email: None = Depends(rate_limit(5, 60, key="email")),
+    _rl_email: None = Depends(rate_limit(20, 60, key="email")),
 ) -> TokenResponse:
     await verify_turnstile_token(
         payload.turnstile_token,
         client_ip=client_ip(request),
     )
 
-    return await service.login(payload.email, payload.password)
+    try:
+        return await service.login(payload.email, payload.password)
+    except AccountLockedException:
+        # An already-locked account is merely observing its lockout, not
+        # guessing a password: refund the per-email rate-limit hit so the
+        # escalated duration can be observed before the lock expires.
+        from shared.rate_limit import _limiter
+
+        bucket_key: str = f"{request.url.path}|{payload.email.strip().lower()}"
+        await _limiter.release(bucket_key)
+        raise
 
 
 # The verify/resend bodies carry the login-OTP grant rather than an email,

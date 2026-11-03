@@ -1595,7 +1595,7 @@ lock after 5 failed attempts.
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
 | POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
 | POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
-| POST   | `/auth/login`                      | Email/password login (+ OTP & MFA gates) | 400 `invalid_credentials` · 423 `account_locked` |
+| POST   | `/auth/login`                      | Email/password login (+ OTP & MFA gates) | 400 `invalid_credentials` · 423 `account_locked` · 429 `rate_limited` (20 req/60s per IP and per email; `account_locked` responses refund the email bucket) |
 | POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 423 `login_otp_locked` · 429 `rate_limited` |
 | POST   | `/auth/login/resend`               | Resend login OTP (burns the previous code) | 400 `invalid_credentials` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
