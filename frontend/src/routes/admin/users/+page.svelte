@@ -362,6 +362,29 @@ import { APIError } from '$lib/api/client';
 		<button class="btn btn-secondary" data-testid="apply" onclick={applyFilters}>Apply</button>
 	</section>
 
+	{#if search.trim() || roleFilter !== 'all' || statusFilter !== 'all'}
+		<div class="chips" aria-label="Active filters">
+			{#if search.trim()}
+				<button class="chip" type="button" onclick={() => { search = ''; applyFilters(); }}>
+					Search: {search} <span aria-hidden="true">×</span>
+				</button>
+			{/if}
+			{#if roleFilter !== 'all'}
+				<button class="chip" type="button" onclick={() => { roleFilter = 'all'; applyFilters(); }}>
+					Role: {roleFilter} <span aria-hidden="true">×</span>
+				</button>
+			{/if}
+			{#if statusFilter !== 'all'}
+				<button class="chip" type="button" onclick={() => { statusFilter = 'all'; applyFilters(); }}>
+					Status: {statusFilter} <span aria-hidden="true">×</span>
+				</button>
+			{/if}
+			<button class="chip chip-clear" type="button" onclick={() => { search = ''; roleFilter = 'all'; statusFilter = 'all'; applyFilters(); }}>
+				Clear all
+			</button>
+		</div>
+	{/if}
+
 	{#if adminUsersState.loading}
 		<SkeletonTable rows={8} cols={6} label="Loading users…" />
 	{:else if adminUsersState.error}
@@ -392,10 +415,12 @@ import { APIError } from '$lib/api/client';
 				</thead>
 				<tbody>
 					{#each adminUsersState.items as u (u.id)}
-						<tr>
+						<tr class:view-only={!canMutateUser(u) && !isSelf(u)}>
 							<td>{displayName(u)}</td>
-							<td class="mono">{u.email ?? 'Restricted'}</td>
-							<td>{u.role}</td>
+							<td class="mono" title={u.email ? u.email : 'Details hidden by permission policy'}>
+	{u.email ?? 'Restricted account'}
+</td>
+							<td><span class="role-badge role-{u.role}">{u.role.replace('_', ' ')}</span></td>
 							<td>
 								<span class={u.isActive ? 'status-active' : 'status-inactive'}>
 									{u.isActive ? 'Active' : 'Inactive'}
@@ -1271,5 +1296,49 @@ import { APIError } from '$lib/api/client';
 		text-align: right;
 	}
 
+
+
+/* Role badges */
+.role-badge {
+	display: inline-block;
+	padding: 0.125rem 0.5rem;
+	border-radius: 999px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: capitalize;
+	background: var(--bg-muted, #e2e8f0);
+	color: var(--text-secondary, #475569);
+}
+.role-badge.role-super_admin { background: #fde68a; color: #92400e; }
+.role-badge.role-admin { background: var(--info-bg, #dbeafe); color: var(--info-text, #1e40af); }
+.role-badge.role-professor { background: var(--success-bg, #dcfce7); color: var(--success, #166534); }
+.role-badge.role-student { background: var(--bg-muted, #e2e8f0); color: var(--text-secondary, #475569); }
+
+/* Filter chips */
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin: 0.75rem 0 0;
+}
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.25rem 0.625rem;
+	border-radius: 999px;
+	border: 1px solid var(--border-strong, #cbd5e1);
+	background: var(--bg-card, #fff);
+	color: var(--text-strong, #0f172a);
+	font: inherit;
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+.chip:hover { background: var(--bg-hover, #f1f5f9); }
+.chip-clear { border-color: var(--danger, #dc2626); color: var(--danger, #dc2626); }
+
+/* View-only rows */
+tr.view-only { opacity: 0.7; }
+tr.view-only td { color: var(--text-muted, #64748b); }
 
 </style>
