@@ -29,7 +29,7 @@
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 import { APIError } from '$lib/api/client';
 
-	// User Management (super_admin only, wireframe 4.13): wraps
+	// User Management (ADMIN guard: admin + super_admin, wireframe 4.13): wraps
 	// GET/POST /admin/users, PATCH /{id}/deactivate, PATCH /{id}/reactivate,
 	// and POST /{id}/reset-password. Plain admins never see this page — the
 	// layout hides the nav item and this guard bounces them to the dashboard.
@@ -138,7 +138,9 @@ import { APIError } from '$lib/api/client';
 	};
 
 	const displayName = (u: AdminUser) =>
-		[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '—';
+		[u.firstName, u.lastName].filter(Boolean).join(' ') ||
+		u.email ||
+		`${u.role} #${u.id}`;
 
 	const describe = (e: unknown): string => {
 		if (e instanceof APIError) return e.message || 'Request failed.';
@@ -392,7 +394,7 @@ import { APIError } from '$lib/api/client';
 					{#each adminUsersState.items as u (u.id)}
 						<tr>
 							<td>{displayName(u)}</td>
-							<td class="mono">{u.email ?? '—'}</td>
+							<td class="mono">{u.email ?? 'Restricted'}</td>
 							<td>{u.role}</td>
 							<td>
 								<span class={u.isActive ? 'status-active' : 'status-inactive'}>
@@ -420,6 +422,9 @@ import { APIError } from '$lib/api/client';
 									{/if}
 									{#if !isSelf(u)}
 										<button class="link" onclick={() => openLockout(u)}>Lockout</button>
+									{/if}
+									{#if !canMutateUser(u) && !isSelf(u)}
+										<span class="hint" title="View only: insufficient permissions to modify this account">View only</span>
 									{/if}
 								</div>
 							</td>
@@ -504,7 +509,7 @@ import { APIError } from '$lib/api/client';
 		>
 			<h2 id="deactivate-title" class="modal-title">Deactivate account?</h2>
 			<p class="modal-text">
-				{displayName(deactivateTarget)} ({deactivateTarget.email}) will lose access
+				{displayName(deactivateTarget)} ({deactivateTarget.email ?? 'restricted account'}) will lose access
 				immediately. You can reactivate the account later from this page.
 			</p>
 			{#if adminUsersState.actionError}
@@ -532,7 +537,7 @@ import { APIError } from '$lib/api/client';
 		>
 			<h2 id="reactivate-title" class="modal-title">Reactivate account?</h2>
 			<p class="modal-text">
-				{displayName(reactivateTarget)} ({reactivateTarget.email}) will regain access
+				{displayName(reactivateTarget)} ({reactivateTarget.email ?? 'restricted account'}) will regain access
 				immediately. Their password, MFA settings, and role are unchanged.
 			</p>
 			{#if adminUsersState.actionError}
@@ -601,7 +606,7 @@ import { APIError } from '$lib/api/client';
 					<h2 id="lockout-title" class="modal-title">Account lockout</h2>
 					<p class="lockout-subtitle">
 						<span class="lockout-name">{displayName(lockoutTarget)}</span>
-						<span class="lockout-email mono">{lockoutTarget.email ?? '—'}</span>
+						<span class="lockout-email mono">{lockoutTarget.email ?? 'Restricted'}</span>
 					</p>
 				</div>
 				<span class="status-badge" class:locked={lockoutStatus?.isLocked} class:permanent={lockoutStatus?.isPermanentlyLocked}>
