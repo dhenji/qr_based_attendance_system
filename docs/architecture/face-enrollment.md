@@ -73,6 +73,16 @@ then brightness, face-size, centering, sharpness, and eyes-open checks, returnin
 usability (`FaceEnrollmentCamera.svelte`, `features/admin/enrollment/quality.ts`)
 but the backend re-validates every upload.
 
+**Error handling note:** the detail passed to each exception names the offending
+photo (e.g. `front photo: No face detected`), so the API response and the UI
+can point at the specific photo/gate that failed. `NoFaceDetectedException` is
+imported at module level in `service.py`; do **not** re-import it locally inside
+the `except FaceEmbeddingGenerationError` block — Python would then treat the
+name as function-local and raise `UnboundLocalError` before the
+`no_face_detected` gate branch could run (the cause of the former generic 500
+on camera captures). An unexpected server-side failure surfaces as
+`500 internal_error`, which the UI maps to an actionable fallback message.
+
 The frontend validates file extension/size via `facePhotoSchema` and now also runs
 canvas-based brightness/sharpness/dimension checks before upload; the live camera
 flow only auto-captures when all gates pass.

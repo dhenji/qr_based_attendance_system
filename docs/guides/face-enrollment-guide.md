@@ -266,7 +266,9 @@ Use this script when explaining enrollment to students:
 | Enrollment status not visible            | Roster not refreshed                                 | Refresh the students page                             |
 | Student device has an old version        | Version mismatch; student has not logged in          | Ask the student to log out and back in                |
 | Faculty expects a face match             | **Not implemented** in this build                    | Explain the gap; do not promise biometric matching    |
-| "Face not detected" / "too many faces"   | Those errors are never raised by the current server  | Check the upload validation instead                   |
+| "No face detected" / "too many faces"    | Backend quality gate rejected the photo (detection/multiple faces) | Retake the named photo with one face centered and well lit |
+| "Image quality too low"                  | Backend quality gate (brightness/size/centering/sharpness/eyes) | Retake the named photo; improve lighting and hold still |
+| "Something went wrong. Please try again." (HTTP 500) | Unexpected server error; previously an `UnboundLocalError` in `FaceEnrollmentService.enroll_face` | Retry; if it persists, check server logs and the captured photo |
 
 ---
 
