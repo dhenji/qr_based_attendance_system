@@ -126,6 +126,27 @@ class FixedWindowLimiter:
         async with self._lock:
             self._windows.pop(key, None)
 
+    async def release(self, key: str) -> None:
+        """Refund a single hit for ``key``.
+
+        Used when a request was counted against the budget but turned out not
+        to be an authentication attempt worth counting (e.g. an already-locked
+        account merely observing its lockout): decrement the current window's
+        counter by one, never below zero. Lock-protected like ``hit``.
+        """
+        async with self._lock:
+            entry = self._windows.get(key)
+            if entry is None:
+                return
+            start, window, count = entry
+            now = time.monotonic()
+            if now - start >= window:
+                return
+            if count <= 1:
+                self._windows.pop(key, None)
+            else:
+                self._windows[key] = (start, window, count - 1)
+
     async def retry_after_seconds(self, key: str) -> int:
         """Seconds remaining in ``key``'s current window (at least 1).
 

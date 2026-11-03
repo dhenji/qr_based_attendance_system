@@ -108,7 +108,7 @@ Student enters session code (or scans a session QR if one is available) → serv
 | Control                | Implementation                        |
 | ---------------------- | ------------------------------------- |
 | Hashing                | Argon2id (memory=64MB, time=3, parallelism=4) |
-| Lockout                | 5 failed attempts → escalating lockout (1/5/15/30/60/120 min by consecutive lockout count); escalation persists indefinitely and resets on successful login or password reset; the maximum level promotes to a permanent lock that only an admin can release (with reason, audited) |
+| Lockout                | 5 failed attempts → escalating lockout (1/5/15/30/60/120 min by consecutive lockout count); escalation persists indefinitely and resets on successful login or password reset; the maximum level promotes to a permanent lock that only an admin can release (with reason, audited). The login per-email rate limiter (20 req/60s) refunds its hit on an already-locked account (`rate_limit._limiter.release`) so the escalated duration stays observable before the lock expires |
 | MFA                    | TOTP (RFC 6238) via authenticator app; user-revocable via `POST /auth/mfa/disable` (password-verified), which also clears the TOTP secret and invalidates every unconsumed backup code |
 | Password policy        | Min 8 chars, mixed case + number + symbol (wireframes.md:1903) |
 | `must_change_password` | Set by admin **account creation and admin reset only**. There is no first-login trigger |
