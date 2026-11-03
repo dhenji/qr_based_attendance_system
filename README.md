@@ -69,12 +69,14 @@ session is `closed`. Scanned students keep their server-decided status.
 | 5   | Face Liveness           | Casual photo/replay attempts (client-asserted) | Blink/turn challenge; server-graded evidence |
 | 6   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students     | DB Constraint + FK Check                     |
 
-> **Current biometric limitation:** the server grades the client's liveness
-> evidence, but it does **not** compare a face embedding. `face_match_score` is
-> a client-supplied value (the shipped client sends a placeholder `1.0`), and
-> face enrollment is not required to scan. Server-side face matching is not
-> implemented — see the [security model](docs/architecture/security-model.md)
-> and ADR-068. Face enrollment runs six biometric quality gates
+> **Biometrics (current state):** face enrollment is required to scan, and the
+> server generates the live embedding from the submitted image and compares it
+> to the enrolled embedding via cosine similarity
+> (`FACE_MATCH_THRESHOLD` 0.70, review band 0.65–0.70). Liveness evidence
+> remains client-asserted (MediaPipe WASM), so provenance is not
+> cryptographically bound — see the
+> [security model](docs/architecture/security-model.md) and ADR-068. Face
+> enrollment runs six biometric quality gates
 > (brightness 40–220, face size ≥15% of frame, single face, centering ≤30% offset,
 > sharpness/Laplacian variance ≥50, eyes open EAR ≥0.2) via
 > `shared/face_quality.py` using MediaPipe FaceLandmarker before storing the
@@ -119,7 +121,7 @@ session is `closed`. Scanned students keep their server-decided status.
 | Analytics        | At-risk forecasting and recommendations for professors; admin analytics and professor reports now filter by session type (LEC/LAB) |
 | Reports          | Download attendance reports (CSV/PDF/Print)                                                                                 |
 | Data Tables      | Sortable columns, category + date-range filters, search, print                                                              |
-| Account Security | Strong passwords (Argon2id), OTP with a persisted per-OTP wrong-guess cap (`OTP_MAX_ATTEMPTS`, default 5) that invalidates the code, optional MFA, admin reset, escalating lockout (1/5/15/30/60/120 min, permanent after the maximum) with admin release/reset and successful-login reset; login OTP locks after 5 wrong guesses; password reuse is allowed during OTP-based recovery; Cloudflare Turnstile captcha (optional, config-gated); non-super-admin accounts capture a security question during the forced first-login password change so self-service recovery is available |
+| Account Security | Strong passwords (Argon2id), OTP with a persisted per-OTP wrong-guess cap (`OTP_MAX_ATTEMPTS`, default 5) that invalidates the code, optional MFA, admin reset, escalating lockout (1/5/15/30/60/120 min, permanent after the maximum) with admin release/reset and successful-login reset; login OTP locks after 5 wrong guesses; password reuse is allowed during OTP-based recovery; Cloudflare Turnstile captcha (optional, config-gated); non-super-admin accounts capture a security question during the forced first-login password change so self-service recovery is available; `/admin/users` is now accessible to the admin role with role-based restrictions (no super_admin access, view-only hidden fields for other admins) |
 
 > **Professor active session**: the live session page (`/professor/sessions/active/{id}`) reflects authoritative lifecycle — its header reads "Scheduled:" / "Closed:" / "Active:" from `session.status`; a future-start session shows "Scheduled" with a "Class starts in" countdown; timers freeze only when closed; the class-end timer shows the actual scheduled class end time (`scheduled_end_time`) instead of a running countdown. The header now shows the offering's **Program** and **Year Level** (no Section). Scan rejection on not-yet-started sessions is enforced server-side via `scheduled_start_time` (`session_not_started`), and on closed sessions via `expires_at` (`session_expired`). Student rows show `pending` when unscanned and the session is `scheduled`/`active`, and `absent` once it is `closed`; scanned students keep their server-decided status (`present`/`late`). The Active Sessions list now carries `pending_count` alongside `absent_count`. No migration needed — `scheduled_start_time` and `expires_at` already exist on the `sessions` table. Session status is derived as `scheduled`/`active`/`closed` (no status column). The page also renders a scannable QR code beside the session code that encodes a student join URL (`/student/scan?code=…`); students can scan it (camera/upload) or open the link directly, which auto-populates and verifies the code (including across auth redirects). The QR can be copied as a session code or exported as PNG.
 
@@ -146,7 +148,7 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 ## Prerequisites
 
 - Python 3.12+
-- Node.js 20+
+- Node.js 22+ (20+ may work, but Docker/CI use 22)
 - Docker & Docker Compose (for Option A)
 
 ## Repository Layout
@@ -160,14 +162,14 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
  │   ├── src/routes/       # 51 +page.svelte files (50 pages + 1 /admin redirect stub): landing (Attendly) + about/cookies/privacy-policy, auth (login/register/forgot-password), student (dashboard/scan/schedule/history/profile/settings), professor (dashboard/courses/attendance/excuse-requests/reports/sessions + create/history/active/[id]/profile/settings + courses/[offeringId]/students), admin (dashboard/setup-wizard/analytics/attendance/audit-logs/excuses/users/profile + programs, students, professors, courses, offerings CRUD & archive/import, system/settings)
 │   └── src/lib/
 │       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (named typed EndpointDefs with mock fixtures, collected into an `endpoints` registry)
- │       ├── components/   # AppIcon, ErrorBoundary, InstallPrompt, LoadingSpinner, MfaSettings, Modal, TempPasswordModal (7 shared)
+ │       ├── components/   # ~30 shared components (see docs/developer/frontend-components.md)
  │       ├── features/     # 12 top-level dirs (+ analytics under admin = 13th conceptual slice): admin (8 sub-slices: analytics/audit/courses/excuses/liveness/offerings/programs/settings), liveness, attendance (professor ledger, real API), auth, excuse, notifications (poll.ts only), professor, report, session, settings, student, sync — services + runes stores (auth, student, admin) + 5 feature components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart)
  │       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user + index.ts), constants/ (roles/routes/status/terms), utils/ (format/gen/geo/timing), actions/ (focusTrap), theme.css
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot + cron scheduler, AppException handler)
 │   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP/recovery-grant/backup-code fingerprint, HMAC session codes + versioned QR payload), scheduler.py (APScheduler lifecycle), exceptions.py
-│   │   ├── shared/       # enums.py (15 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py, constants.py, query.py, audit.py, rates.py, storage.py, datetimes.py
+│   │   ├── shared/       # enums.py (16 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py, constants.py, query.py, audit.py, rates.py, storage.py, datetimes.py
  │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 15 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 18 slices: admin, analytics, attendance, auth, course, course_professor, dashboard, enrollment, excuse, face_enrollment, professor, program, reports, session, student, sync, system, upload
 │   │   │   └── */        # model.py in 13 slices (21 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
@@ -484,6 +486,9 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 - [`docs/architecture/face-enrollment.md`](docs/architecture/face-enrollment.md) — face enrollment flow & current verification limitations
 - [`docs/architecture/excuse-workflow.md`](docs/architecture/excuse-workflow.md) — state machine & permission matrix
 - [`docs/architecture/risk-model.md`](docs/architecture/risk-model.md) — at-risk prediction & batch job spec
+- [`docs/architecture/analytics.md`](docs/architecture/analytics.md) — admin analytics filters, rates, risk scoring, and result calculation
+- [`docs/architecture/anti-spoofing.md`](docs/architecture/anti-spoofing.md) — scan anti-spoofing controls and result calculation
+- [`docs/architecture/attendance-workflow/README.md`](docs/architecture/attendance-workflow/README.md) — layered attendance scan flow and data layer
 
 ### Deployment
 

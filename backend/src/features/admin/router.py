@@ -36,10 +36,11 @@ router = APIRouter(prefix="/admin/users")
 @router.get(
     "",
     response_model=PaginatedResponse[AdminUserRead],
+    response_model_exclude_none=True,
     summary="List users (search, role/status filters, paginated)",
 )
 async def list_users(
-    _: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: AdminServiceDep,
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     role: UserRole | None = Query(default=None),
@@ -48,19 +49,22 @@ async def list_users(
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> PaginatedResponse[AdminUserRead]:
     return await service.list_users(
-        search=search, role=role, is_active=is_active, page=page, size=size
+        search=search, role=role, is_active=is_active, page=page, size=size,
+        actor_id=actor.id,
+        actor_role=actor.role,
     )
 
 
 @router.post(
     "",
     response_model=AdminUserCreateResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_201_CREATED,
     summary="Create an admin/professor/student user account (returns temp password once)",
 )
 async def create_user(
     payload: AdminUserCreate,
-    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: AdminServiceDep,
 ) -> AdminUserCreateResponse:
     return await service.create_user(payload=payload, actor_id=actor.id)
@@ -73,13 +77,13 @@ async def create_user(
 )
 async def reset_user_password(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     auth_service: AuthServiceDep,
 ) -> AdminPasswordResetResponse:
     # `AuthService` owns the credential write — this route names a `users.id`
     # directly, so there is no roster row to resolve first.
     temp_password: str = await auth_service.admin_reset_password(
-        user_id=user_id, actor_id=actor.id
+        user_id=user_id, actor_id=actor.id, actor_role=actor.role
     )
     return AdminPasswordResetResponse(temp_password=temp_password)
 
@@ -91,10 +95,10 @@ async def reset_user_password(
 )
 async def deactivate_user(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: AdminServiceDep,
 ) -> None:
-    await service.deactivate_user(actor_id=actor.id, user_id=user_id)
+    await service.deactivate_user(actor_id=actor.id, user_id=user_id, actor_role=actor.role)
 
 
 @router.patch(
@@ -104,15 +108,16 @@ async def deactivate_user(
 )
 async def reactivate_user(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.SUPER_ADMIN))],
+    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: AdminServiceDep,
 ) -> None:
-    await service.reactivate_user(actor_id=actor.id, user_id=user_id)
+    await service.reactivate_user(actor_id=actor.id, user_id=user_id, actor_role=actor.role)
 
 
 @router.get(
     "/{user_id}/lockout",
     response_model=LockoutStatusResponse,
+    response_model_exclude_none=True,
     summary="Read account lockout state",
 )
 async def get_lockout_status(
@@ -120,7 +125,7 @@ async def get_lockout_status(
     actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     auth_service: AuthServiceDep,
 ) -> LockoutStatusResponse:
-    data = await auth_service.get_lockout_status(user_id)
+    data = await auth_service.get_lockout_status(user_id, actor_id=actor.id, actor_role=actor.role)
     return LockoutStatusResponse(**data)
 
 
@@ -136,7 +141,7 @@ async def release_lockout(
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.release_lockout(
-        user_id=user_id, actor_id=actor.id, reason=payload.reason
+        user_id=user_id, actor_id=actor.id, actor_role=actor.role, reason=payload.reason
     )
 
 
@@ -152,7 +157,7 @@ async def reset_lockout_counter(
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.reset_violation_counter(
-        user_id=user_id, actor_id=actor.id, reason=payload.reason
+        user_id=user_id, actor_id=actor.id, actor_role=actor.role, reason=payload.reason
     )
 
 
@@ -170,6 +175,7 @@ async def grant_lockout_override(
     await auth_service.grant_override(
         user_id=user_id,
         actor_id=actor.id,
+        actor_role=actor.role,
         duration_minutes=payload.duration_minutes,
         reason=payload.reason,
     )
@@ -187,5 +193,5 @@ async def revoke_lockout_override(
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.revoke_override(
-        user_id=user_id, actor_id=actor.id, reason=payload.reason
+        user_id=user_id, actor_id=actor.id, actor_role=actor.role, reason=payload.reason
     )

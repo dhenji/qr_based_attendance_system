@@ -4368,7 +4368,7 @@ export const AdminUserCreateEndpoint: EndpointDef<AdminUserCreateResponse> = {
 		if (!['admin', 'professor', 'student'].includes(role)) {
 			throw new Error('Role must be admin, professor, or student.');
 		}
-		if (MOCK_ADMIN_USER_ROWS.some((r) => r.email.toLowerCase() === email)) {
+		if (MOCK_ADMIN_USER_ROWS.some((r) => (r.email ?? '').toLowerCase() === email)) {
 			throw new Error('Email already exists.');
 		}
 		const row: AdminUserResponse = {

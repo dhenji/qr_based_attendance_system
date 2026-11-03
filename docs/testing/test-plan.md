@@ -111,16 +111,17 @@
 
 ### 2.6 Face Enrollment
 
-> **Current build:** the endpoint validates non-empty content, size, and
-> `image/*` content type, then stores a zero-filled placeholder blob. No face
-> detection, quality scoring, real embedding generation, or encryption exists.
+> **Current build:** the endpoint validates content, size, and image format via
+> `shared/face_quality.py` (six quality gates), generates a real 512-d
+> `FACEEMB1` embedding (MobileFaceNet ONNX, landmark fallback), and stores it.
+> Encryption at rest is not implemented.
 
 | #      | Decision IDs | Case                                    | Preconditions                       | Steps                                                                       | Expected Result                                                                                                                 |
 | ------ | ------------ | --------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| A-FE-1 | D28, D43     | Enroll student face — 3 photos          | Student exists, no prior enrollment | POST /admin/face-enrollment/{student_id} with 3 images (front, left, right) | `face_embedding` BYTEA populated with the placeholder; `face_enrolled_at` set; `face_embedding_version` incremented |
+| A-FE-1 | D28, D43     | Enroll student face — 3 photos          | Student exists, no prior enrollment | POST /admin/face-enrollment/{student_id} with 3 images (front, left, right) | `face_embedding` BYTEA populated with a real 512-d embedding; `face_enrolled_at` set; `face_embedding_version` incremented |
 | A-FE-2 | D28          | Reject non-image upload                 | Same setup                          | Upload a text file in one slot                                              | 400 `invalid_image`; no enrollment written                                                                                      |
 | A-FE-3 | D28          | Reject oversized image                  | Same setup                          | Upload a file above `ATTACHMENTS_MAX_BYTES`                                 | 400 `invalid_image`; no enrollment written                                                                                      |
-| A-FE-4 | D28          | Re-enrollment supersedes old enrollment | Student already enrolled (v=1)      | Upload new 3 photos                                                         | `face_embedding_version` bumps to 2; old placeholder overwritten                                                               |
+| A-FE-4 | D28          | Re-enrollment supersedes old enrollment | Student already enrolled (v=1)      | Upload new 3 photos                                                         | `face_embedding_version` bumps to 2; old embedding overwritten                                                               |
 | A-FE-5 | D28          | Revocation on student archive           | Student archived (is_active=false)  | Admin archives student                                                      | `face_embedding` cleared (NULL); pull-on-login returns 404 `face_embedding_not_found`                                          |
 
 ### 2.7 Analytics & Reports
@@ -232,8 +233,8 @@
 ### 4.1 Scan Flow (Sequential, Current Implementation)
 
 > The shipped flow is `entry → id → qr → liveness` on `/student/scan`. The
-> original five-step numbering is retained for traceability, but the student-ID
-> QR scan and server-side face matching are not implemented. Rows marked
+> original five-step numbering is retained for traceability. Server-side face
+> matching is implemented; the student-ID QR scan is not. Rows marked
 > **N/A** document that gap rather than a passing test.
 
 | #       | Decision IDs | Case                                   | Preconditions                                          | Steps                                    | Expected Result                                                                                     |
@@ -245,13 +246,13 @@
 | S-SC-5  | D27          | Step 2 — Not enrolled rejected         | Student not enrolled in session's offering              | Sign in as the non-enrolled student; confirm number | `enrolled: false` / `not_enrolled`; cannot proceed                                     |
 | S-SC-6  | D27          | GPS geofence pass                      | Student within 30m of classroom                        | Capture GPS after liveness               | Distance < 30m; green pill "Within geofence"; submit accepted                                       |
 | S-SC-7  | D27          | GPS geofence fail                      | Student 50m outside radius                             | Capture GPS after liveness               | Red pill "Outside geofence"; retry option; cannot submit                                            |
-| S-SC-8  | D27, D31     | Step 4 — Liveness pass                 | Student within radius                                  | Blink → Turn Left → Turn Right challenge | Each step confirmed; server accepts the evidence; client sends placeholder score `1.0`              |
+| S-SC-8  | D27, D31     | Step 4 — Liveness pass                 | Student within radius                                  | Blink → Turn Left → Turn Right challenge | Each step confirmed; server accepts the evidence and computes face match server-side              |
 | S-SC-9  | D27, D31     | Step 4 — Liveness fail                 | Student fails blink or head-turn                      | Complete liveness challenge              | `liveness_failed`; cannot proceed; no attendance row                                                |
 | S-SC-10 | D27, D13     | Step 5 — Result: Present               | Scan within present_window_minutes                     | Complete all steps                       | Overlay: "PRESENT ✅" + timestamp; attendance record written with status=present                    |
 | S-SC-11 | D27, D13     | Step 5 — Result: Late                  | Scan within late_window_minutes (after present window) | Complete all steps                       | Overlay: "LATE ⏰" + timestamp; status=late                                                         |
 | S-SC-12 | D18          | Step 1 — Invalid code                  | Expired session code entered                           | Enter code; click Verify                 | Error: "Invalid or expired session code"                                                            |
 | S-SC-13 | D27, ADR-083 | Step 2 — Student-number mismatch       | Signed in as student A; enter student B's number       | Click Check                              | `403 student_number_mismatch`; no attendance row written                                            |
-| S-SC-14 | D28, D29, D30 | Step 4 — No face enrolled (N/A)       | Student has no `face_embedding`                        | Reach step 4                             | **N/A** — the scan never reads `face_embedding`; liveness runs regardless. Server-side matching is not implemented. |
+| S-SC-14 | D28, D29, D30 | Step 4 — No face enrolled             | Student has no `face_embedding`                        | Reach step 4                             | `403 face_not_enrolled`; scan rejected; no attendance row written. |
 
 ### 4.2 Attendance History
 
@@ -307,7 +308,7 @@
 | SEC-1  | Buddy punching           | D19, D27, ADR-083 | Another person uses Student A's signed-in session | Person B has Student A's device/account        | Complete scan flow               | The record is bound to Student A's token. **No face-match gate exists**, so B can complete liveness as A. Accepted gap; do not treat the row as a passing biometric test. |
 | SEC-2  | Liveness replay          | D27, D31, ADR-068 | Student shows a photo/video to the liveness camera | Photo or recorded clip                         | Complete liveness challenge      | Casual static-photo replay fails blink/turn; video replay and a modified client remain possible because evidence is client-asserted. |
 | SEC-3  | QR relay                 | D18, D19      | Session code/QR forwarded to remote student   | Remote student has a valid code/QR                  | Scan flow                        | Session code is time-bound; course context comes from the session; GPS geofence catches a remote device unless location is spoofed.                                          |
-| SEC-4  | Sibling confusion        | D31           | Twin attempts to pass as sibling              | Twin completes liveness challenge                   | Face comparison                  | **N/A** — no embedding comparison exists; sibling similarity is not exercised.                                                                                               |
+| SEC-4  | Sibling confusion        | D31           | Twin attempts to pass as sibling              | Twin completes liveness challenge                   | Face comparison                  | Server-side cosine similarity may flag low similarity; no PAD CNN, so twin separation remains an accepted risk. |
 | SEC-5  | GPS spoof                | D27           | GPS coordinates spoofed to classroom location | Spoof GPS to exact classroom lat/lng                | Scan flow                        | Geofence passes; liveness is still required, but **face matching is not** — spoof alone plus liveness is sufficient for the biometric layer.                                  |
 | SEC-6  | Token theft              | D18           | Stale/used session code reused                | Replay old session code                             | Verify code                      | Expired codes rejected; HMAC comparison fails for a wrong code.                                                                                                               |
 | SEC-7  | Offline scan replay      | D16           | Offline scan synced after session expires     | Scan offline during session; sync after expires_at  | Sync server validates scanned_at | scanned_at outside window → rejected with reason=session_expired                                                                                                              |
@@ -385,7 +386,7 @@ Every decision D1–D48 is covered by at least one test case above.
 | D45      | A-PA-1, A-PA-2, A-PA-3, P-SS-3, A-AN-3 (course_professors & student_risk_scores keyed by offering_id)                                                                                              |
 | D46      | P-SC-1, P-SC-2, P-SC-4, P-AS-1, P-SS-3 (sessions.professor_id references professors.id)                                                                                                           |
 | D47      | A-BS-1, A-BS-2, A-BS-3, SEC-9 (backup statuses started/completed/failed; finished_at nullable)                                                                                                       |
-| D48      | A-FE-1, S-SC-8, S-SC-9 (FACE_MATCH_THRESHOLD=0.70 bands the client-submitted score; review band 0.65–0.70; shipped client sends 1.0; session status active/closed computed DTO-only) |
+| D48      | A-FE-1, S-SC-8, S-SC-9 (FACE_MATCH_THRESHOLD=0.70 bands the server-computed score; review band 0.65–0.70; face enrollment required to scan; session status active/closed computed DTO-only) |
 
 ---
 
@@ -397,7 +398,7 @@ Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md)
 
 | Job | Command | Runs against | Fails on |
 | --- | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 760 cases |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1055 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
 | `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
 

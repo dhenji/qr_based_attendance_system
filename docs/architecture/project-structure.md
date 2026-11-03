@@ -18,7 +18,7 @@ attendance-system/
 │   │   │
 │   │   ├── shared/                   # Cross-feature helpers
 │   │   │   ├── __init__.py
-│   │   │   ├── enums.py              # UserRole, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SyncStatus, QueueStatus
+│   │   │   ├── enums.py              # UserRole, AuditEntity, AuditAction, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SessionType, SyncStatus, QueueStatus (16)
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
 │   │   │   ├── dependencies.py       # pagination + reusable annotated deps
 │   │   │   ├── captcha.py            # Cloudflare Turnstile siteverify (key-gated no-op when unset)
@@ -84,9 +84,9 @@ attendance-system/
 │   │   │   │   ├── attendance/       # service.ts, store.svelte.ts, schema.ts, mock.ts
 │   │   │   │   ├── liveness/         # store.svelte.ts (scan state machine), bundle.ts, schema.ts, components/ — frontend-only feature
 │   │   │   │   ├── sync/             # service.ts, db.ts (IndexedDB wrapper), engine.ts (enqueue/dequeue/retry/status)
-│   │   │   │   ├── course/  ○        # deferred — empty until backend
-│   │   │   │   ├── enrollment/ ○     # deferred
-│   │   │   │   └── analytics/ ○      # deferred
+│   │   │   │   ├── course/           # implemented
+│   │   │   │   ├── enrollment/       # implemented
+│   │   │   │   └── analytics/       # implemented (under admin/)
 │   │   │   └── shared/
 │   │   │       ├── styles/tokens.css # palette, spacing, radius, status colors
 │   │   │       ├── ui/               # Button, Card, Input, Select, Toggle, Table, Badge, Modal, EmptyState
@@ -114,22 +114,29 @@ attendance-system/
 │   │   ├── proposal.md               # Full project proposal
 │   │   ├── proposal_simple.md        # Simplified proposal (1st week)
 │   │   ├── models.md                 # ML/model catalog
-│   │   └── contributions.md          # CS contribution mapping
+│   │   └── contributions.md         # CS contribution mapping
 │   ├── architecture/
-│   │   ├── frontend-architecture.md  # Production SvelteKit structure
-│   │   ├── project-structure.md      # This file
-│   │   ├── api-contracts.md          # Endpoint schemas & conventions
-│   │   ├── offline-first.md          # IndexedDB, sync algorithm, embedding pull (stub; no comparison)
-│   │   ├── security-model.md         # Threat model & mitigations
-│   │   ├── data-flow.md              # Mermaid sequence diagrams
-│   │   └── migration-strategy.md     # Alembic migration plan
+│   │   ├── analytics.md             # Admin analytics, rates, risk scoring, result calculation
+│   │   ├── anti-spoofing.md         # Scan anti-spoofing controls and result calculation
+│   │   ├── attendance-workflow/      # Layered attendance scan flow and data layer
+│   │   │   └── README.md
+│   │   ├── api-contracts.md         # Endpoint schemas & conventions
+│   │   ├── data-flow.md             # Mermaid sequence diagrams
+│   │   ├── excuse-workflow.md       # Excuse state machine and permissions
+│   │   ├── face-enrollment.md       # Face enrollment flow and verification limits
+│   │   ├── frontend-architecture.md # Production SvelteKit structure
+│   │   ├── migration-strategy.md    # Alembic migration plan
+│   │   ├── offline-first.md         # IndexedDB, sync algorithm, embedding pull
+│   │   ├── project-structure.md     # This file
+│   │   ├── risk-model.md            # At-risk prediction and batch job spec
+│   │   └── security-model.md        # Threat model and mitigations
 │   ├── deployment/
 │   │   ├── deployment-workflow.md    # Deployment guide
 │   │   └── backup-strategy.md        # Backup pipeline (Phase 3)
 │   ├── design/
-│   │   ├── database-er.md            # ERD diagrams
-│   │   └── wireframes.md             # Wireframes
-│   └── presentations/                # Slides + deck (.pptx, .pdf)
+│   │   ├── database-er.md           # ERD diagrams
+│   │   └── wireframes.md            # Wireframes
+│   └── presentations/               # Slides + deck (.pptx, .pdf)
 │
 ├── docker-compose.dev.yml             # Local development: PostgreSQL + migrations + backend + frontend (frontend HMR via CHOKIDAR_USEPOLLING)
 ├── .github/workflows/ci.yml           # CI: backend suite, alembic drift check, frontend typecheck (ADR-069)
@@ -151,8 +158,8 @@ attendance-system/
 > `service.py`/`router.py`> layers for all features (exception: `course_professor/service.py` exists);
 > `liveness` is a frontend-only feature (no backend `features/liveness/` dir).
 
-> **Deferred (frontend):** `src/service-worker.ts` (PWA offline caching & background
-> sync), `hooks.server.ts`, `vite-plugin-pwa`, `static/icons/`.
+> **Deferred (frontend):** `hooks.server.ts`, `vite-plugin-pwa`, `static/icons/`.
+> `src/service-worker.ts` is now implemented (offline cache + background sync).
 
 ---
 
@@ -170,14 +177,14 @@ attendance-system/
 | `backend/src/features/*/model.py`                                                             | Database Design & Normalization (3NF)                                                                                       |
 | `frontend/src/lib/features/sync/service.ts` + `backend/src/features/sync/` (router/service planned) | Offline Sync / Eventual Consistency                                                                                    |
 | `backend/src/features/program/` + `backend/src/features/course/`                              | Academic Hierarchy: Program → Year Level → CourseOffering (courses = templates)                                             |
-| `backend/src/features/student/` + `backend/src/features/face_enrollment/`                      | Biometrics: enrollment service/router (placeholder embedding; quality gates implemented in shared/face_quality.py)                    |
+| `backend/src/features/student/` + `backend/src/features/face_enrollment/`                      | Biometrics: enrollment service/router (real 512-d embedding; quality gates in shared/face_quality.py)                    |
 | `backend/src/features/excuse/` (model.py; service/router planned)                             | State Machine: excuse request lifecycle (pending→approved/rejected), permission matrix, audit trail                         |
 | `backend/src/features/system/`                                                                | DevOps: backup pipeline (pg_dump→encrypt→store→prune), academic-structure CRUD, system settings                             |
 | `frontend/src/lib/features/report/components/`                                       | Data Visualization: hand-rolled SVG charts (`ReportTrendChart.svelte`, `ReportBarChart.svelte`) — no chart library (ADR-091)                            |
 | `frontend/src/lib/features/session/components/calendar/` (planned)                            | Calendar UI: month/week grid views, day detail sheets                                                                       |
 | `frontend/src/routes/student/scan/` + `frontend/src/lib/features/{student,liveness}/components/` | Sequential UI Pattern: guided scan flow (entry→ID→QR→liveness) with state machine                                          |
 | `frontend/src/lib/features/excuse/components/` (planned)                                      | Workflow UI: excuse modals, request forms, review lists                                                                     |
-| `frontend/src/routes/admin/students/+page.svelte` (inline modal)                              | Enrollment UI: 3-photo file upload (quality gates; placeholder embedding)                                                |
+| `frontend/src/routes/admin/students/+page.svelte` (inline modal)                              | Enrollment UI: 3-photo file upload (quality gates; real embedding)                                                |
 
 ---
 

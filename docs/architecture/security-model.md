@@ -1,5 +1,9 @@
 # Security Model
 
+> Layered, code-grounded anti-spoofing docs:
+> [`docs/architecture/anti-spoofing.md`](anti-spoofing.md). This file keeps the
+> threat model; that file holds the consolidated per-layer audit.
+
 > Threat model, mitigations, and security posture for the QR-Based Attendance
 > System. Every mitigation cites the governing decision from the
 > [decision log](../project/decision-log.md).
@@ -217,8 +221,9 @@ cryptographically bound. Two specifics worth stating plainly:
 
 Face enrollment now validates uploads through `shared/face_quality.py` and raises
 `invalid_image`, `no_face_detected`, `multiple_faces`, and `quality_too_low` as
-documented. The stored vector is still a placeholder (`_stub_embedding_blob`);
-real generation/encryption remains unimplemented.
+documented. The stored vector is a real 512-d embedding generated server-side
+(MobileFaceNet ONNX, landmark fallback); encryption at rest remains
+unimplemented.
 
 **What this does and does not protect.** The server-enforced parts of the scan —
 session code, authenticated identity + student-ID confirmation, GPS geofence —
@@ -349,7 +354,10 @@ reading of it — the actor's name and role, the subject's name, a one-line
 summary and a field-level change (ADR-088). The derived names are read out
 of the audit snapshot first, so they survive the record's deletion; a plain
 admin sees them too, which a client-side lookup could not manage because
-`GET /admin/users` is super-admin-only.
+`GET /admin/users` is accessible to `admin` (and `super_admin`); admins cannot see or
+manage super_admin accounts, view other admin accounts with `email`/name omitted, and
+can fully manage professor/student accounts. Restricted-target mutations return 403
+`insufficient_permissions`.
 
 One row above is marked unimplemented because the surface does not exist yet:
 there is no admin account unlock route. See ADR-064.
@@ -389,7 +397,7 @@ These are **explicitly out of scope** for this system:
 | D27      | Scan flow (amended by ADR-083 — typed ID confirmation, no student-ID QR) |
 | D28      | Face embedding encryption at rest                   |
 | D29      | Embedding pull-on-login (version-gated)             |
-| D30      | Offline verification decision — no embedding comparison is implemented |
+| D30      | Offline verification decision — embedding comparison runs on sync (server-side) |
 | D31      | Liveness protocol (fixed sequence, EAR + PnP)       |
 | D32      | Profile read-only (identity admin-managed)          |
 | D39      | Backup encryption (AES-256-GCM)                     |

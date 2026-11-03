@@ -1,5 +1,9 @@
 # Face Enrollment & Verification Architecture
 
+> Layered, code-grounded anti-spoofing docs:
+> [`docs/architecture/anti-spoofing.md`](anti-spoofing.md). This file keeps the
+> enrollment architecture; that file holds the consolidated per-layer audit.
+
 > **Decisions covered:** D27–D31, D43
 
 ## 1. Overview
@@ -89,44 +93,28 @@ frames, so landmark coordinates and captured images stay unmirrored.
 
 ### 2.2 Storage Format
 
-A single JSON blob stored in `students.face_embedding` (BYTEA column) — **plaintext today**,
-with AES-256-GCM as the D28 design (see §5). The values below are illustrative; the
-shipped blob is zero-filled.
+The shipped blob is a real `FACEEMB1` binary embedding
+(`shared/face_embeddings.serialize_embedding`), generated server-side during
+enrollment (MobileFaceNet ONNX, landmark fallback). It is **plaintext today**;
+AES-256-GCM encryption at rest remains unimplemented (D28/T9).
 
-```json
-{
-  "mean": [0.0231, -0.0412, ..., 0.0891],
-  "angles": {
-    "front": [0.0250, -0.0398, ..., 0.0912],
-    "left":  [0.0198, -0.0445, ..., 0.0867],
-    "right": [0.0244, -0.0401, ..., 0.0895]
-  }
-}
-```
+- **`students.face_embedding`** (BYTEA NULL): serialized 512-d embedding
+  (`FACEEMB1`), generated from the front/left/right photos.
+- **`students.face_embedding_algorithm`** (TEXT): `mobilefacenet-v1` or
+  `mediapipe-v1` (landmark fallback).
+- **`students.face_embedding_version`** (INT): monotonic; bumped on every write.
+- **Encryption**: ⚠ **Not implemented.** The design is AES-256-GCM with a
+  server-side key. The BYTEA column holds the plaintext blob today.
 
-- **`mean`** (128 floats): shape-only placeholder; in the D28 design it would be
-  the **primary comparison target** during verification. No comparison exists in
-  the current build.
-- **`angles`** (3 × 128 floats): per-angle vectors, part of the D28 design for
-  **tie-breaking** when the mean score falls in the review band (0.65–0.70).
-  ⚠ **Not implemented.** The stub writes three zero vectors for shape parity, and
-  nothing reads them back — there is no per-angle comparison anywhere in the
-  codebase, so the tie-break re-check that §4's review band describes does not
-  happen. The single `face_match_score` the client submits **is** still compared
-  against the threshold to flag the review band (`attendance/service.py:519`);
-  only the angle-level second opinion is missing.
-- **Encryption**: ⚠ **Not implemented.** The design is AES-256-GCM with a server-side
-  key, decrypted only on the server during enrollment or when serving the embedding
-  to a verified student device (D29). What the server writes today is plain
-  `json.dumps(...).encode("utf-8")` (`face_enrollment/service.py:38`) — no cipher,
-  no key. The BYTEA column is real and holds the blob; only the encryption is missing,
-  which is what T9 tracks.
+The earlier 128-float `mean`/`angles` JSON design is superseded; verification
+compares the enrolled embedding against a server-generated live embedding via
+cosine similarity (see §4 / security-model.md).
 
 ### 2.3 Supporting Columns
 
 | Column                            | Type             | Purpose                                       |
 | --------------------------------- | ---------------- | --------------------------------------------- |
-| `students.face_embedding`         | BYTEA NULL       | Placeholder blob (encryption not implemented) |
+| `students.face_embedding`         | BYTEA NULL       | Real 512-d embedding (encryption not implemented) |
 | `students.face_enrolled_at`       | TIMESTAMPTZ NULL | Timestamp of last enrollment                  |
 | `students.face_embedding_version` | INT DEFAULT 0    | Monotonic version; incremented on every write |
 
@@ -143,7 +131,7 @@ Student logs in
 Client checks cached version (IndexedDB)
     │
     ├─ Cache miss → GET /student/me/face-embedding
-    │                 Server returns { embedding: <base64 placeholder>, version: N }
+    │                 Server returns { embedding: <base64 FACEEMB1 blob>, version: N }
     │                 Client stores in IndexedDB, encrypted with device WebCrypto key
     │
     ├─ Cache hit, version == N → no-op
@@ -214,7 +202,7 @@ The current scan integration is D27 step 4 as amended by ADR-083:
 Step 1: Verify session code → session config fetched
 Step 2: Confirm student ID → resolved from the authenticated account (no QR)
 Step 3: GPS geofence validation (client pre-check; server re-validates)
-Step 4: Face liveness challenge; client submits evidence + placeholder score
+Step 4: Face liveness challenge; server computes face match from submitted image
 Step 5: Write attendance record
 ```
 
@@ -334,7 +322,7 @@ The server stores the full bundle in `attendance_records.liveness_evidence`
 
 | Method | Path                                         | Role    | Description                                                                               |
 | ------ | -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
-| POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server stores a placeholder embedding (no generation)         |
+| POST   | `/admin/face-enrollment/{student_id}`        | Admin   | Upload 3 images (multipart); server validates quality gates and stores a `FACEEMB1` embedding (MobileFaceNet, landmark fallback) |
 | GET    | `/admin/face-enrollment/{student_id}`       | Admin   | Check enrollment status, version, enrolled_at (returns `{ enrolled, face_enrolled_at?, face_embedding_version? }`) |
 | DELETE | `/admin/face-enrollment/{student_id}`       | Admin   | Revoke enrollment: clears the blob, nulls `face_enrolled_at`, bumps `face_embedding_version` (204) |
 | GET    | `/student/me/face-embedding`                 | Student | Version-gated pull; returns embedding + version only if version > client's cached version |
@@ -356,7 +344,7 @@ codes with no implementation anywhere.
 | ------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Server-side face matching | **Implemented** | The live embedding is generated server-side (MobileFaceNet, with landmark fallback) from the submitted image, then compared via cosine similarity against the stored enrolled embedding; thresholds `FACE_MATCH_THRESHOLD` (0.70) / `FACE_REVIEW_BAND_LOW` (0.65). Provenance remains client-asserted. || Sibling confusion  | **Partially mitigated** | Server-side matching now runs, but no PAD CNN; twin separation remains an accepted risk (D31). |
 | Photo/video replay | Partially mitigated   | The fixed blink + turn challenge raises the cost of casual replay, but the evidence is client-asserted; a modified client can forge it. Video replay remains a theoretical vector (acknowledged).                          |
-| Model staleness    | Design only           | The current enrollment path writes a stub, so there is no model-generated embedding to migrate. If a real face-api.js/MediaPipe pipeline is added, bump `FACE_EMBEDDING_VERSION` and re-enroll the roster.                  |
+| Model staleness    | Implemented           | Enrollment now generates a real 512-d embedding (MobileFaceNet ONNX, landmark fallback). If the model or algorithm changes, bump `FACE_EMBEDDING_VERSION` and re-enroll the roster. |
 
 ---
 

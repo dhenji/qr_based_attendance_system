@@ -2,12 +2,13 @@
 
 > Historical intent, not current state: the "pending slices" and ~22-page
 > tree below predate the landed frontend. Truth is `README.md` + the code —
-> 12 feature dirs, 46 `+page.svelte` files, real API by default.
+> 12 feature dirs, 51 `+page.svelte` files, real API by default.
 
 > Canonical structure for `frontend/src/`. Replaces the earlier flat
 > `services/ + stores/ + components/` layout with domain-driven **feature
 > slices** aligned with backend domains, except `liveness` (frontend-only) and
-> the pending slices (professor, program, course_professor, excuse, system) that are not yet implemented.
+> the pending slices listed below are historical: professor, program, course,
+> enrollment, excuse, analytics, and system slices are now implemented.
 
 ## Feature-Slice Convention
 
@@ -99,9 +100,9 @@ frontend/
     │   │   │   ├── db.ts                         # IndexedDB wrapper (queue store)
     │   │   │   └── engine.ts                     # enqueue/dequeue, retry, status transitions
     │   │   │
-    │   │   ├── course/  ○                        (deferred — empty until backend)
-    │   │   ├── enrollment/ ○                     (deferred)
-    │   │   └── analytics/ ○                      (deferred)
+    │   │   ├── course/                            (implemented)
+    │   │   ├── enrollment/                       (implemented)
+    │   │   └── analytics/                        (implemented, under admin/)
     │   │
     │   └── shared/
     │       ├── styles/

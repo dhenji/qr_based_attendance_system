@@ -14,6 +14,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
+from core.exceptions import ForbiddenException
 from core.database import database
 from core.security import (
     LOGIN_OTP_TOKEN_TYPE,
@@ -87,6 +88,13 @@ from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.email import send_otp_email
 from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
+from shared.user_management_policy import (
+    can_manage_target,
+    can_mutate_lockout,
+    can_read_lockout,
+    can_view_target,
+    hide_sensitive_fields,
+)
 from shared.rate_limit import FixedWindowLimiter, RateLimitedException
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -301,6 +309,26 @@ class AuthService:
         self._professor: BaseCRUD[Professor] = BaseCRUD(Professor, session)
 
         self._backup_codes: BaseCRUD[MfaBackupCodes] = BaseCRUD(MfaBackupCodes, session)
+
+    async def _resolve_actor_role(
+        self,
+        *,
+        actor_id: int | None = None,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
+    ) -> UserRole:
+        if actor_role is not None:
+            return actor_role if isinstance(actor_role, UserRole) else UserRole(actor_role)
+        if viewer_role is not None:
+            return viewer_role if isinstance(viewer_role, UserRole) else UserRole(viewer_role)
+        if actor_id is not None:
+            try:
+                user: User | None = await self._users.get(actor_id)
+            except AttributeError:
+                user = None
+            if user is not None:
+                return UserRole(user.role)
+        return UserRole.SUPER_ADMIN
 
     async def request_otp(
         self,
@@ -931,7 +959,14 @@ class AuthService:
 
         await self._session.flush()
 
-    async def admin_reset_password(self, *, user_id: int, actor_id: int) -> str:
+    async def admin_reset_password(
+        self,
+        *,
+        user_id: int,
+        actor_id: int,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
+    ) -> str:
         """Set a temporary password on someone else's account. Returns it once.
 
         The one implementation behind all three admin routes
@@ -956,6 +991,12 @@ class AuthService:
 
         if user is None:
             raise UserNotFoundException()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_manage_target(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         old_value: dict[str, Any] = _account_snapshot(user)
 
@@ -983,10 +1024,27 @@ class AuthService:
 
         return temp_password
 
-    async def get_lockout_status(self, user_id: int) -> dict[str, Any]:
+    async def get_lockout_status(
+        self,
+        user_id: int,
+        *,
+        actor_id: int | None = None,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
+    ) -> dict[str, Any]:
         user: User | None = await self._users.get(user_id)
         if user is None:
             raise UserNotFoundException()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_read_lockout(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
+
+        hide = hide_sensitive_fields(
+            resolved_actor_role, UserRole(user.role), actor_id=actor_id, target_id=user.id
+        )
 
         now: datetime = datetime.now(timezone.utc)
         is_permanent: bool = (user.lockout_level or 0) > _escalation_table_len(
@@ -1019,7 +1077,7 @@ class AuthService:
 
         return {
             "user_id": user.id,
-            "email": user.email,
+            "email": None if hide else user.email,
             "role": user.role,
             "is_locked": user.is_locked,
             "is_permanently_locked": is_permanent,
@@ -1038,11 +1096,23 @@ class AuthService:
         }
 
     async def release_lockout(
-        self, *, user_id: int, actor_id: int, reason: str
+        self,
+        *,
+        user_id: int,
+        actor_id: int,
+        reason: str,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
     ) -> None:
         user: User | None = await self._users.get(user_id)
         if user is None:
             raise UserNotFoundException()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_mutate_lockout(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.is_locked = False
@@ -1064,11 +1134,23 @@ class AuthService:
         await self._session.flush()
 
     async def reset_violation_counter(
-        self, *, user_id: int, actor_id: int, reason: str
+        self,
+        *,
+        user_id: int,
+        actor_id: int,
+        reason: str,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
     ) -> None:
         user: User | None = await self._users.get(user_id)
         if user is None:
             raise UserNotFoundException()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_mutate_lockout(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_level = 0
@@ -1086,7 +1168,14 @@ class AuthService:
         await self._session.flush()
 
     async def grant_override(
-        self, *, user_id: int, actor_id: int, duration_minutes: int, reason: str
+        self,
+        *,
+        user_id: int,
+        actor_id: int,
+        duration_minutes: int,
+        reason: str,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
     ) -> None:
         if duration_minutes < 1 or duration_minutes > self._settings.lockout_override_max_minutes:
             raise InvalidOverrideDurationException(self._settings.lockout_override_max_minutes)
@@ -1094,6 +1183,12 @@ class AuthService:
         user: User | None = await self._users.get(user_id)
         if user is None:
             raise UserNotFoundException()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_mutate_lockout(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         now: datetime = datetime.now(timezone.utc)
         old_value: dict[str, Any] = _account_snapshot(user)
@@ -1111,11 +1206,23 @@ class AuthService:
         await self._session.flush()
 
     async def revoke_override(
-        self, *, user_id: int, actor_id: int, reason: str
+        self,
+        *,
+        user_id: int,
+        actor_id: int,
+        reason: str,
+        viewer_role: UserRole | str | None = None,
+        actor_role: UserRole | str | None = None,
     ) -> None:
         user: User | None = await self._users.get(user_id)
         if user is None:
             raise UserNotFoundException()
+
+        resolved_actor_role = await self._resolve_actor_role(
+            actor_id=actor_id, viewer_role=viewer_role, actor_role=actor_role
+        )
+        if not can_mutate_lockout(resolved_actor_role, UserRole(user.role)):
+            raise ForbiddenException()
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = None

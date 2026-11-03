@@ -153,7 +153,7 @@
 
 	const navItems = $derived([
 		...baseNavItems,
-		...(isSuperAdmin()
+		...(isAdmin()
 			? [{ label: 'Users', path: Routes.ADMIN_USERS, enabled: true, icon: 'users' } satisfies NavItem]
 			: []),
 	]);

@@ -1,5 +1,7 @@
 # API Contracts — QR Attendance System
 
+> Layered analytics docs: [`docs/architecture/analytics.md`](analytics.md).
+
 > Canonical reference for every endpoint. Each entry: method, path, role guard,
 > request schema, response schema, error codes.
 
@@ -47,12 +49,11 @@ call it. Three consequences worth knowing:
   own and inherits 409 through `SessionDatabaseException → DatabaseException`, as
   does `year_level_program_mismatch` inheriting 422 via `DomainException`.
 
-**Five codes are defined but unreachable**, so no endpoint row can list them:
+**Four codes are defined but unreachable**, so no endpoint row can list them:
 
 | Code | Why it cannot occur |
 | ---- | ------------------- |
 | `database_error` | `DatabaseException` has a 409 handler but no `raise` site anywhere. |
-| `face_not_enrolled` | `FaceNotEnrolledException` is never raised. |
 | `invalid_semester` | `InvalidSemesterException` is never raised; `semester` is a free-text column with no vocabulary. |
 | `role_mismatch` | `RoleMismatchException` is never raised; `require_role` returns an `HTTPException` with `insufficient_permissions` (403). |
 | `password_policy_violation` | `PasswordPolicyException` is never raised. New passwords *are* strength-checked, but through a Pydantic `password_strength` validator that fails as the generic 422 `validation_error` — so the custom code can never be emitted and was removed from the change-password row rather than left implying otherwise. |
@@ -65,9 +66,9 @@ They are kept rather than deleted because each is a plausible future guard, and 
 unused exception class is not a defect. If one is ever raised, the guard test fails
 and the row gets added.
 
-Conversely, `multiple_faces`, `quality_too_low` and `invalid_image`
-are documented below but not yet raised: face detection is stubbed by
-`_stub_embedding_blob` pending the MediaPipe pipeline. `validation_error` is the
+`multiple_faces`, `quality_too_low`, `invalid_image`, and `no_face_detected`
+are now raised by `FaceEnrollmentService` (`shared/face_quality.py`), so they
+appear in the face-enrollment endpoint rows. `validation_error` is the
 generic 422 produced by FastAPI request validation, not a custom exception.
 
 ### DTO → Column Mapping
@@ -543,7 +544,7 @@ filters on professor screens and the active-session "Enrolled" count).
 
 #### `POST /admin/face-enrollment/{student_id}`
 
-Upload 3 photos (front, left, right). The server validates the uploads and stores a zero-filled **placeholder** embedding; real vector generation is not implemented.
+Upload 3 photos (front, left, right). The server validates the uploads and generates/stores a real 512-d **FACEEMB1** embedding.
 
 |                  |                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------- |
@@ -1081,11 +1082,11 @@ password-only flow.
 | Errors |
 | --- |
 | ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
-| GET    | `/admin/users`                          | List admins (search, role/status filters, sortable) | super_admin | — |
-| POST   | `/admin/users`                          | Create admin (name, email, role, temp password?)   | super_admin | 409 `admin_user_email_exists` · 409 `roster_link_impossible` |
-| PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate admin (rejects self-deactivation)  | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
-| PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated admin (rejects self-reactivation; preserves password, MFA, lockout, and role) | super_admin | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` |
-| POST   | `/admin/users/{user_id}/reset-password`      | Reset admin password → temp + `must_change_password` | super_admin | 404 `user_not_found` |
+| GET    | `/admin/users`                          | List users (search, role/status filters, sortable) | admin (super_admin) | — |
+| POST   | `/admin/users`                          | Create user (name, email, role, temp password?)   | admin (super_admin) | 409 `admin_user_email_exists` · 409 `roster_link_impossible` · 403 `insufficient_permissions` |
+| PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate user (rejects self-deactivation)  | admin (super_admin) | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` · 403 `insufficient_permissions` |
+| PATCH  | `/admin/users/{user_id}/reactivate`          | Reactivate a deactivated user (rejects self-reactivation; preserves password, MFA, lockout, and role) | admin (super_admin) | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` · 403 `insufficient_permissions` |
+| POST   | `/admin/users/{user_id}/reset-password`      | Reset user password → temp + `must_change_password` | admin (super_admin) | 404 `user_not_found` · 403 `insufficient_permissions` |
 | GET    | `/admin/users/{user_id}/lockout`             | Account lockout status (`LockoutStatusResponse`, incl. `is_permanently_locked`) | admin (super_admin) | 404 `user_not_found` |
 Permanent lock raises `account_permanently_locked` (423) on `POST /auth/login` when an account is at the maximum escalation level.
 | POST   | `/admin/users/{user_id}/lockout/release`     | Release an active lockout (reason required) | admin (super_admin) | 404 `user_not_found` |
@@ -1393,7 +1394,7 @@ Submit attendance scan (online or queued for offline sync).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, live_face_embedding?: string | null, live_face_image?: string | null, scanned_at: ISO-8601 }` (at least one of `live_face_embedding` / `live_face_image` required) |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "pending" | "rejected", scanned_at, expires_at }` |
-| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 422 `session_not_started` · 404 `student_not_found` |
+| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `face_not_enrolled` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 422 `session_not_started` · 404 `student_not_found` |
 | **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |
@@ -1486,7 +1487,7 @@ Pull face embedding (version-gated, D29).
 |                  |                                                                                                                    |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
 | **Query**        | `?current_version=0`                                                                                               |
-| **Response 200** | `{ version: int, embedding: string (base64-encoded placeholder blob; not encrypted) }` — only if `current_version < server_version` |
+| **Response 200** | `{ version: int, embedding: string (base64-encoded FACEEMB1 blob; not encrypted) }` — only if `current_version < server_version` |
 | **Response 204** | No content (version matches, no update needed)                                                                     |
 
 ---

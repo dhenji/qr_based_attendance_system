@@ -32,6 +32,7 @@ class AdminUserCreate(AdminUserBase):
 
 
 class AdminUserRead(AdminUserBase):
+    email: EmailStr | None = None
     id: int
     first_name: str | None = None
     last_name: str | None = None
