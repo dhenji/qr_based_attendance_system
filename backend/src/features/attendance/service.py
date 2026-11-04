@@ -346,9 +346,13 @@ class AttendanceService:
         return db_session, student
 
     def _decide_scan_outcome(
-        self, db_session: Session, scanned_at: datetime, face_match_score: float
+        self,
+        db_session: Session,
+        scanned_at: datetime,
+        face_match_score: float,
+        geofence_review: bool = False,
     ) -> tuple[str, str | None, bool]:
-        review: bool = self._is_review_band(face_match_score)
+        review: bool = self._is_review_band(face_match_score) or geofence_review
         computed: str = self._compute_status(db_session, scanned_at)
         original: str | None = computed if review else None
         return computed, original, review
@@ -441,12 +445,13 @@ class AttendanceService:
         if score < review_low:
             raise FaceMismatchException(score, threshold)
 
+        geofence_review: bool = False
         if not self._settings.benchmark_mode:
-            self._validate_geofence(db_session, payload.gps)
+            geofence_review = self._validate_geofence(db_session, payload.gps)
             self._validate_liveness(payload.liveness_evidence)
 
         status, original, review = self._decide_scan_outcome(
-            db_session, scanned_at, score
+            db_session, scanned_at, score, geofence_review
         )
 
         return await self._persist_scan(
@@ -596,12 +601,20 @@ class AttendanceService:
         if student.face_embedding is None:
             raise FaceNotEnrolledException(student.id)
 
-    def _validate_geofence(self, session: Session, gps: GPSInput | None) -> None:
+    def _validate_geofence(self, session: Session, gps: GPSInput | None) -> bool:
+        """Validate the geofence.
+
+        Returns ``True`` when the measured position is outside the radius but
+        within the reported GPS uncertainty (an ambiguous case that is routed
+        to the admin review queue instead of being rejected outright).
+        Raises ``OutsideGeofenceException`` when the position is clearly
+        outside the radius even after accounting for uncertainty.
+        """
         if not getattr(session, "geofence_enabled", True):
-            return
+            return False
 
         if session.classroom_lat is None or session.classroom_lng is None:
-            return
+            return False
 
         # A session that requires a geofence cannot be validated without a
         # position; treat a missing fix as "outside" rather than crashing.
@@ -614,8 +627,18 @@ class AttendanceService:
             gps.lat, gps.lng, session.classroom_lat, session.classroom_lng
         )
 
-        if distance > session.classroom_radius_meters:
-            raise OutsideGeofenceException(distance, session.classroom_radius_meters)
+        radius: float = session.classroom_radius_meters
+        # Cap the uncertainty so a wildly inaccurate (or spoofed) fix cannot
+        # neutralise the geofence entirely. 50 m matches the client's
+        # high-accuracy target.
+        uncertainty: float = min(float(gps.accuracy), 50.0)
+
+        if distance <= radius:
+            return False
+        if distance - uncertainty > radius:
+            raise OutsideGeofenceException(distance, radius)
+        # Ambiguous: outside measured, but within reported uncertainty.
+        return True
 
     def _validate_liveness(self, evidence: LivenessEvidence) -> None:
         if not _validate_liveness_evidence(evidence):

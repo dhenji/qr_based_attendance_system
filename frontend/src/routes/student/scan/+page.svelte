@@ -526,7 +526,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			return await getPositionOnce({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
 		} catch (e) {
 			if (e instanceof APIError && (e.code === 'location_timeout' || e.message.includes('timed out'))) {
-				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 30000, timeout: 8000 });
+				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 0, timeout: 8000 });
 			}
 			throw e;
 		}

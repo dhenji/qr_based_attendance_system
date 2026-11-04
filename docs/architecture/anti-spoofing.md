@@ -84,7 +84,9 @@ Last verified against commit: see `git rev-parse HEAD`.
 - Idempotency key scoped `user_id:session_id:key`, TTL 900 s, process-local
   (`attendance/service.py:114-254`, `constants.py:30-35`).
 - Geofence is skipped when disabled or classroom coords are missing; missing
-  GPS is treated as outside (`attendance/service.py:591-611`).
+  GPS is treated as outside; a position outside the radius but within reported
+  GPS uncertainty (capped at 50 m) is treated as ambiguous and routed to review
+  (`attendance/service.py:591-620`).
 
 ---
 

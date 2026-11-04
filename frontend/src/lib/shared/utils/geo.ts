@@ -35,6 +35,7 @@ export interface BestPosition {
 	lat: number;
 	lng: number;
 	accuracy: number;
+	timestamp?: number;
 }
 
 export interface BestPositionOptions {
@@ -104,15 +105,37 @@ export const requestBestPosition = async (
 		try {
 			watchId = navigator.geolocation.watchPosition(
 				(pos) => {
+					const c = pos.coords;
+					if (
+						!Number.isFinite(c.latitude) ||
+						!Number.isFinite(c.longitude) ||
+						!Number.isFinite(c.accuracy)
+					) {
+						return;
+					}
 					fixes += 1;
 					const fix: BestPosition = {
-						lat: pos.coords.latitude,
-						lng: pos.coords.longitude,
-						accuracy: pos.coords.accuracy,
+						lat: c.latitude,
+						lng: c.longitude,
+						accuracy: c.accuracy,
+						timestamp: pos.timestamp,
 					};
 					if (best === null || fix.accuracy < best.accuracy) best = fix;
-					if (fix.accuracy <= desiredAccuracy || fixes >= maxFixes) {
-						finish(best as BestPosition);
+					if (import.meta.env.DEV) {
+						// eslint-disable-next-line no-console
+						console.debug('[geo] fix', {
+							lat: fix.lat,
+							lng: fix.lng,
+							accuracy: fix.accuracy,
+							timestamp: fix.timestamp,
+							fixes,
+							bestAccuracy: best?.accuracy
+						});
+					}
+					if (best !== null && best.accuracy <= desiredAccuracy) {
+						finish(best);
+					} else if (fixes >= maxFixes) {
+						finish((best ?? fix) as BestPosition);
 					}
 				},
 				(err) => {
