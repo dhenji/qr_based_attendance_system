@@ -18,7 +18,7 @@
 
 import { get } from '$lib/api/client';
 import type { Paginated } from '$lib/api/endpoints';
-import type { CourseType, ProfessorAttendanceItemResponse } from '$lib/shared/types';
+import type { CourseType, ProfessorAttendanceItemResponse, ProfessorAttendanceLedgerResponse } from '$lib/shared/types';
 import { listSessions } from '$lib/features/session/service';
 import {
 	initProfessorCourses,
@@ -63,11 +63,16 @@ export type AttendanceLedgerSortDir = 'asc' | 'desc';
 
 export type AttendanceLedgerFilters = {
 	offeringId?: number;
+	programId?: number;
+	yearLevelId?: number;
+	academicYear?: string;
+	semester?: string;
 	course?: string;
 	section?: string;
 	sessionId?: number;
 	sessionType?: CourseType;
 	status?: ProfessorAttendanceStatus;
+	search?: string;
 	from?: string;
 	to?: string;
 	sortBy?: AttendanceLedgerSortBy;
@@ -221,14 +226,19 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 			query.course_id = String(matches[0].courseId);
 		}
 	}
+	if (params?.programId !== undefined) query.program_id = String(params.programId);
+	if (params?.yearLevelId !== undefined) query.year_level_id = String(params.yearLevelId);
+	if (params?.academicYear !== undefined) query.academic_year = params.academicYear;
+	if (params?.semester !== undefined) query.semester = params.semester;
 	if (params?.section !== undefined) query.section = params.section;
 	if (params?.sessionId !== undefined) query.session_id = String(params.sessionId);
+	if (params?.search !== undefined) query.search = params.search;
 	if (params?.sessionType) query.session_type = params.sessionType;
 	if (params?.status !== undefined) query.status = params.status;
 	if (params?.from) query.date_from = params.from;
 	if (params?.to) query.date_to = params.to;
 
-	const response = await get<Paginated<ProfessorAttendanceItemResponse>>(
+	const response = await get<ProfessorAttendanceLedgerResponse>(
 		'attendanceList',
 		query
 	);
@@ -273,15 +283,29 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 		};
 	});
 
-	// Page counts only — the envelope carries total/page/size but no
-	// aggregates, so summaryText must label these as page counts.
-	const counts = { present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 };
+	// Prefer server-side aggregates when present; fall back to page counts.
+	const counts = response.counts
+		? {
+				present: response.counts.present ?? 0,
+				late: response.counts.late ?? 0,
+				absent: response.counts.absent ?? 0,
+				excused: response.counts.excused ?? 0,
+				pending: response.counts.pending ?? 0,
+				rejected: response.counts.rejected ?? 0
+		  }
+		: { present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 };
 	const sessionIds = new Set<number>();
 	let missingCount = 0;
-	for (const item of items) {
-		counts[item.status] += 1;
-		sessionIds.add(item.session_id);
-		if (!item.sessionKnown) missingCount += 1;
+	if (!response.counts) {
+		for (const item of items) {
+			counts[item.status] += 1;
+			sessionIds.add(item.session_id);
+			if (!item.sessionKnown) missingCount += 1;
+		}
+	} else {
+		for (const item of items) {
+			if (!item.sessionKnown) missingCount += 1;
+		}
 	}
 
 	return {
@@ -289,7 +313,8 @@ export const listRecords = async (params?: AttendanceLedgerFilters) => {
 		total: response.total,
 		page: response.page,
 		size: response.size,
-		total_sessions: sessionIds.size,
+		total_sessions: response.total_sessions ?? sessionIds.size,
+		total_students: response.total_students ?? 0,
 		counts,
 		missingCount,
 		directoryIncomplete: missingCount > 0

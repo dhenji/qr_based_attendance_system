@@ -4,7 +4,7 @@ import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import ColumnElement, Select, func, or_, select
@@ -46,6 +46,7 @@ from features.session.plan import (
 from features.session.schema import (
     ActiveStudentItem,
     ProfessorAttendanceItem,
+    ProfessorAttendanceResponse,
     QRPayload,
     SessionActiveResponse,
     SessionCloseResponse,
@@ -166,6 +167,20 @@ def _session_status(
         return "active"
 
     return "closed"
+
+
+def _end_of_day(value: datetime | None) -> datetime | None:
+    """Treat a midnight ``date_to`` as the end of that day.
+
+    Date-only query parameters parse to midnight, which would otherwise
+    exclude every record after 00:00. An explicit non-midnight value is
+    preserved so callers can still bound a precise instant.
+    """
+    if value is None:
+        return None
+    if value.timetuple()[3:6] == (0, 0, 0) and value.microsecond == 0:
+        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return value
 
 
 class SessionService:
@@ -959,7 +974,7 @@ class SessionService:
             offering_id=offering_id,
             session_type=session_type,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
         total: int = (
@@ -1120,7 +1135,7 @@ class SessionService:
             offering_id=offering_id,
             session_type=session_type,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
         rows: Sequence[Session] = (
@@ -1185,19 +1200,24 @@ class SessionService:
         self,
         *,
         professor_id: int,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        academic_year: str | None = None,
+        semester: str | None = None,
         course_id: int | None = None,
         offering_id: int | None = None,
         section: str | None = None,
         session_id: int | None = None,
         session_type: SessionType | str | None = None,
         status: ValidationStatus | str | None = None,
+        search: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
-    ) -> PaginatedResponse[ProfessorAttendanceItem]:
+    ) -> ProfessorAttendanceResponse:
         """Filterable attendance table across the professor's sessions.
 
         ``section`` is derived from the enrolled student's section (offerings
@@ -1207,22 +1227,49 @@ class SessionService:
         page, size = _normalize_page(page, size)
         stmt: Select[tuple[Attendance]] = self._attendance_stmt(
             professor_id,
+            program_id=program_id,
+            year_level_id=year_level_id,
+            academic_year=academic_year,
+            semester=semester,
             course_id=course_id,
             offering_id=offering_id,
             section=section,
             session_id=session_id,
             session_type=session_type,
             status=status,
+            search=search,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
+        scoped = stmt.subquery()
         total: int = (
             await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
+                select(func.count()).select_from(scoped)
             )
             or 0
         )
+        status_rows = (
+            await self._session.execute(
+                select(scoped.c.validation_status, func.count())
+                .select_from(scoped)
+                .group_by(scoped.c.validation_status)
+            )
+        ).all()
+        counts = {str(row[0]): int(row[1]) for row in status_rows}
+        total_students: int = (
+            await self._session.scalar(
+                select(func.count(func.distinct(scoped.c.student_id))).select_from(scoped)
+            )
+            or 0
+        )
+        total_sessions: int = (
+            await self._session.scalar(
+                select(func.count(func.distinct(scoped.c.session_id))).select_from(scoped)
+            )
+            or 0
+        )
+
         records: Sequence[Attendance] = (
             await self._session.scalars(
                 _apply_attendance_order(stmt, sort_by=sort_by, sort_dir=sort_dir)
@@ -1238,25 +1285,33 @@ class SessionService:
             {r.session_id for r in records}
         )
 
-        return PaginatedResponse[ProfessorAttendanceItem](
+        return ProfessorAttendanceResponse(
             items=self._attendance_items(records, students, session_types),
             total=total,
             page=page,
             size=size,
+            counts=counts,
+            total_students=total_students,
+            total_sessions=total_sessions,
         )
 
     def _attendance_stmt(
         self,
         professor_id: int,
         *,
-        course_id: int | None,
-        offering_id: int | None,
-        section: str | None,
-        session_id: int | None,
-        session_type: SessionType | str | None,
-        status: ValidationStatus | str | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        academic_year: str | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        offering_id: int | None = None,
+        section: str | None = None,
+        session_id: int | None = None,
+        session_type: SessionType | str | None = None,
+        status: ValidationStatus | str | None = None,
+        search: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> Select[tuple[Attendance]]:
         """Base join for one professor's attendance rows, plus every filter.
 
@@ -1278,14 +1333,31 @@ class SessionService:
             )
         )
 
+        need_offering = any(
+            v is not None
+            for v in (course_id, program_id, year_level_id, academic_year, semester)
+        )
+        if need_offering:
+            stmt = stmt.join(CourseOffering, CourseOffering.id == Session.offering_id)
         if course_id is not None:
-            stmt = stmt.join(
-                CourseOffering, CourseOffering.id == Session.offering_id
-            ).where(CourseOffering.course_id == course_id)
+            stmt = stmt.where(CourseOffering.course_id == course_id)
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        stmt = apply_if(stmt, year_level_id, lambda v: CourseOffering.year_level_id == v)
+        stmt = apply_if(stmt, academic_year, lambda v: CourseOffering.academic_year == v)
+        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
 
         stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, section, lambda v: Student.section == v)
         stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
+        if search is not None:
+            pattern = f"%{search}%"
+            stmt = stmt.where(
+                or_(
+                    Student.student_id.ilike(pattern),
+                    Student.first_name.ilike(pattern),
+                    Student.last_name.ilike(pattern),
+                )
+            )
         if session_type is not None:
             value: str = (
                 session_type.value

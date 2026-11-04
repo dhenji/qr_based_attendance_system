@@ -1,10 +1,11 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
+	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
+	import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import {
 		listRecords,
 		type AttendanceLedgerSortBy,
@@ -45,10 +46,18 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		'rejected'
 	];
 
-	let course = $state('');
+	// Filters
+	let academicYear = $state('');
+	let semester = $state('');
+	let programFilter = $state('');
+	let yearFilter = $state('');
 	let section = $state('');
+	let course = $state('');
+	let classOfferingId = $state('');
 	let status = $state<'All' | ProfessorAttendanceStatus>('All');
 	let sessionType = $state<'All' | 'lecture' | 'lab'>('All');
+	let searchInput = $state('');
+	let search = $state('');
 	let from = $state(initialRange.from);
 	let to = $state(initialRange.to);
 	let sortBy = $state<AttendanceLedgerSortBy>('date');
@@ -56,6 +65,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	let currentPage = $state(1);
 	let rows = $state<LedgerRow[]>([]);
 	let total = $state(0);
+	let totalStudents = $state(0);
 	let totalSessions = $state(0);
 	let counts = $state({ present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 });
 	let isLoading = $state(true);
@@ -78,56 +88,143 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	}>(null);
 	let directoryIncomplete = $state(false);
 	let missingCount = $state(0);
+	let syncingFromOffering = $state(false);
+	let loadingFromUrl = $state(false);
 
-	// Course options deduped by code, sections joined from the live courses
-	// store. The ledger only queries once both are picked.
+	// Debounce search
+	$effect(() => {
+		const value = searchInput;
+		const timer = setTimeout(() => {
+			search = value.trim();
+			currentPage = 1;
+		}, 300);
+		return () => clearTimeout(timer);
+	});
+
+	const byAcademicYear = $derived(
+		professorState.courses.filter((item) => (academicYear ? item.academicYear === academicYear : true))
+	);
+	const bySemester = $derived(
+		byAcademicYear.filter((item) => (semester ? item.semester === semester : true))
+	);
+	const byProgram = $derived(
+		bySemester.filter((item) => (programFilter ? String(item.programId) === programFilter : true))
+	);
+	const byYear = $derived(
+		byProgram.filter((item) => (yearFilter ? String(item.yearLevelId) === yearFilter : true))
+	);
+	const bySection = $derived(
+		byYear.filter((item) => (section ? item.sections.includes(section) : true))
+	);
+	const higherFilteredCourses = $derived(byYear);
+	const baseFilteredCourses = $derived(bySection);
+	const filteredCourses = $derived(
+		baseFilteredCourses.filter((item) => (course ? item.courseCode === course : true))
+	);
+
+	const academicYearOptions = $derived(
+		[...new Set(professorState.courses.map((item) => item.academicYear))].sort()
+	);
+	const semesterOptions = $derived(
+		[...new Set(byAcademicYear.map((item) => item.semester))].sort()
+	);
+	const programOptions = $derived(
+		[...new Map(bySemester.map((item) => [String(item.programId), item.programCode])).entries()]
+			.map(([id, code]) => ({ id, code }))
+			.filter((item) => item.id !== 'undefined')
+	);
+	const yearOptions = $derived(
+		[...new Map(
+			byProgram.map((item) => [String(item.yearLevelId), item.yearLevelLabel])
+		).entries()]
+			.map(([id, label]) => ({ id, label }))
+			.filter((item) => item.id !== 'undefined')
+	);
+	const sectionOptions = $derived(
+		[...new Set(byYear.flatMap((item) => item.sections))].sort()
+	);
 	const courseOptions = $derived(
-		[...new Map(professorState.courses.map((item) => [item.courseCode, item.courseName])).entries()].map(
+		[...new Map(bySection.map((item) => [item.courseCode, item.courseName])).entries()].map(
 			([code, name]) => ({ code, name })
 		)
 	);
-
-	// Course → section cascade: sections narrow to the chosen course, and the
-	// ledger only queries once both are picked. Dates + status reveal after.
-	const availableSections = $derived(
-		course === ''
-			? []
-			: [
-					...new Set(
-						professorState.courses
-							.filter((item) => item.courseCode === course)
-							.flatMap((item) => item.sections)
-					)
-				]
-	);
-
-	const canQuery = $derived(course !== '' && section !== '');
-
-	// Picking a new course clears the section until one is chosen.
-	$effect(() => {
-		course;
-		section = '';
-		currentPage = 1;
+	const classOptions = $derived.by(() => {
+		const base = professorState.courses.map((item) => ({
+			id: item.offeringId,
+			label: `${item.programCode} · ${item.yearLevelLabel} · ${item.courseCode} — ${item.courseName}${item.sections.length ? ` (${item.sections.join(', ')})` : ''}`
+		}));
+		const selectedId = classOfferingId ? Number(classOfferingId) : null;
+		if (selectedId && !base.some((option) => option.id === selectedId)) {
+			const item = professorState.courses.find((course) => course.offeringId === selectedId);
+			if (item) {
+				base.unshift({
+					id: item.offeringId,
+					label: `${item.programCode} · ${item.yearLevelLabel} · ${item.courseCode} — ${item.courseName}${item.sections.length ? ` (${item.sections.join(', ')})` : ''}`
+				});
+			}
+		}
+		return base;
 	});
 
 	$effect(() => {
-		if (!canQuery) {
-			rows = [];
-			total = 0;
-			totalSessions = 0;
-			counts = { present: 0, late: 0, absent: 0, excused: 0, pending: 0, rejected: 0 };
-			directoryIncomplete = false;
-			missingCount = 0;
-			isLoading = false;
-			loadError = null;
-			return;
+		if (sessionType !== 'All' && !availableSessionTypes.has(sessionType)) {
+			sessionType = 'All';
 		}
+	});
 
+	const availableSessionTypes = $derived.by(() => {
+		const source =
+			classOfferingId
+				? professorState.courses.filter((item) => item.offeringId === Number(classOfferingId))
+				: filteredCourses;
+		const types = new Set<string>();
+		for (const item of source) {
+			for (const type of item.sessionTypes ?? []) types.add(type);
+			for (const component of item.components ?? []) types.add(component.session_type);
+		}
+		// Fallback: if metadata missing, mirror backend (lecture only).
+		if (types.size === 0) {
+			types.add('lecture');
+		}
+		return types;
+	});
+
+	// Clear selections that become invalid after a parent change.
+	$effect(() => {
+		if (programFilter && !programOptions.some((o) => o.id === programFilter)) programFilter = '';
+	});
+	$effect(() => {
+		if (yearFilter && !yearOptions.some((o) => o.id === yearFilter)) yearFilter = '';
+	});
+	$effect(() => {
+		if (section && !sectionOptions.includes(section)) section = '';
+	});
+	$effect(() => {
+		if (course && !courseOptions.some((item) => item.code === course)) course = '';
+	});
+
+	const selectedOffering = $derived(
+		classOfferingId
+			? professorState.courses.find((item) => item.offeringId === Number(classOfferingId)) ?? null
+			: course
+				? (filteredCourses[0] ?? null)
+				: null
+	);
+
+	const canQuery = $derived(true);
+
+	$effect(() => {
 		const query = {
+			programId: programFilter ? Number(programFilter) : undefined,
+			yearLevelId: yearFilter ? Number(yearFilter) : undefined,
+			academicYear: academicYear || undefined,
+			semester: semester || undefined,
 			course: course || undefined,
 			section: section || undefined,
+			offeringId: classOfferingId ? Number(classOfferingId) : undefined,
 			status: status === 'All' ? undefined : status,
 			sessionType: sessionType === 'All' ? undefined : sessionType,
+			search: search || undefined,
 			from: from || undefined,
 			to: to || undefined,
 			sortBy,
@@ -135,6 +232,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			page: currentPage,
 			size: PAGE_SIZE
 		};
+		// Note: program/year level filters are applied through the class selector;
+		// backend program_id/year_level_id are not resolved from labels here.
 		reloadToken;
 
 		let cancelled = false;
@@ -147,12 +246,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				if (cancelled) return;
 				rows = result.items;
 				total = result.total;
+				totalStudents = result.total_students ?? 0;
 				totalSessions = result.total_sessions;
 				counts = result.counts;
 				directoryIncomplete = result.directoryIncomplete;
 				missingCount = result.missingCount;
-				// The service clamps out-of-range pages (e.g. filters shrank the
-				// result under us); follow it so the pager never points nowhere.
 				if (result.page !== currentPage) currentPage = result.page;
 			} catch (e) {
 				if (!cancelled)
@@ -172,9 +270,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	});
 
 	const pageCount = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-	// Windowed pager: the ledger can span ~100+ pages, so rendering one
-	// button per page (the history-page pattern) becomes a wall of buttons.
-	// Show first + last with a ±2 window around the current page instead.
 	const visiblePages = $derived.by((): Array<number | 'gap-start' | 'gap-end'> => {
 		if (pageCount <= 7)
 			return Array.from({ length: pageCount }, (_, index) => index + 1);
@@ -194,6 +289,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		return `${start}–${end} of ${total} records`;
 	});
 
+	const attendanceRate = $derived(
+		total > 0 ? Math.round((counts.present / total) * 1000) / 10 : 0
+	);
+
 	const summaryText = $derived(
 		`This page: Present ${counts.present} · Late ${counts.late} · Excused ${counts.excused} · Absent ${counts.absent} across ${totalSessions} ${totalSessions === 1 ? 'session' : 'sessions'}`
 	);
@@ -208,7 +307,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		if (sortBy === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
 		else {
 			sortBy = key;
-			// Dates read newest-first; everything else reads A-to-Z / low-to-high.
 			sortDir = key === 'date' ? 'desc' : 'asc';
 		}
 		currentPage = 1;
@@ -230,16 +328,59 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	};
 
 	const resetFilters = () => {
-		course = '';
+		academicYear = '';
+		semester = '';
+		programFilter = '';
+		yearFilter = '';
 		section = '';
+		course = '';
+		classOfferingId = '';
 		status = 'All';
 		sessionType = 'All';
+		searchInput = '';
+		search = '';
 		from = initialRange.from;
 		to = initialRange.to;
 		currentPage = 1;
 		exportWarning = null;
 		exportProgress = null;
 		exportCapped = false;
+	};
+
+	const toLocalIsoDate = (value: Date): string =>
+		`${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+
+	const setToday = () => {
+		const today = toLocalIsoDate(new Date());
+		from = today;
+		to = today;
+		currentPage = 1;
+	};
+
+	const setYesterday = () => {
+		const date = new Date();
+		date.setDate(date.getDate() - 1);
+		const value = toLocalIsoDate(date);
+		from = value;
+		to = value;
+		currentPage = 1;
+	};
+
+	const setThisWeek = () => {
+		const now = new Date();
+		const day = now.getDay();
+		const diff = day === 0 ? 6 : day - 1;
+		const monday = new Date(now);
+		monday.setDate(now.getDate() - diff);
+		from = toLocalIsoDate(monday);
+		to = toLocalIsoDate(now);
+		currentPage = 1;
+	};
+
+	const setAllTime = () => {
+		from = '';
+		to = '';
+		currentPage = 1;
 	};
 
 	const viewDetail = (sessionId: number) => void goto(professorActiveSession(sessionId));
@@ -262,7 +403,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	};
 
 	const exportCsv = async () => {
-		if (exporting || !canQuery) return;
+		if (exporting) return;
 		const token = exportToken + 1;
 		exportToken = token;
 		exporting = true;
@@ -272,19 +413,19 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		exportProgress = 'Starting export…';
 		try {
 			const baseQuery = {
+				academicYear: academicYear || undefined,
+				semester: semester || undefined,
 				course: course || undefined,
 				section: section || undefined,
+				offeringId: classOfferingId ? Number(classOfferingId) : undefined,
 				status: status === 'All' ? undefined : status,
 				sessionType: sessionType === 'All' ? undefined : sessionType,
+				search: search || undefined,
 				from: from || undefined,
 				to: to || undefined,
 				sortBy,
 				sortDir
 			};
-			// Walk pages to export the full filtered set. The cap bounds the
-			// whole export at 10k rows (the history-page pattern) so a huge
-			// scope can never loop forever; progress + cancel keep a large
-			// export interruptible instead of hanging the tab.
 			const first = await listRecords({ ...baseQuery, page: 1, size: EXPORT_PAGE_SIZE });
 			if (exportToken !== token) return;
 			const all = [...first.items];
@@ -376,111 +517,173 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	<header class="header">
 		<div>
 			<h1>Attendance</h1>
-			{#if canQuery}
-				<p class="muted">Cross-session roster across your courses · {rangeText}</p>
-			{:else}
-				<p class="muted">Select a course and section to begin.</p>
-			{/if}
+			<p class="muted">Cross-session roster across your classes · {rangeText}</p>
 			<p class="muted">Read-only ledger — excuse actions live on the session page.</p>
 		</div>
 	</header>
 
+	{#if professorState.courses.length === 0 && !professorState.coursesLoading}
+		<section class="card">
+			<EmptyState
+				icon="file"
+				title="No course assignments"
+				hint="You have no assigned classes yet. Contact your administrator."
+			/>
+		</section>
+	{:else}
+	<section class="summary-cards" aria-label="Attendance summary">
+		<div class="stat-card">
+			<span class="stat-label">Total students</span>
+			<span class="stat-value">{totalStudents}</span>
+		</div>
+		<div class="stat-card">
+			<span class="stat-label">Present</span>
+			<span class="stat-value">{counts.present}</span>
+		</div>
+		<div class="stat-card">
+			<span class="stat-label">Late</span>
+			<span class="stat-value">{counts.late}</span>
+		</div>
+		<div class="stat-card">
+			<span class="stat-label">Absent</span>
+			<span class="stat-value">{counts.absent}</span>
+		</div>
+		<div class="stat-card">
+			<span class="stat-label">Excused</span>
+			<span class="stat-value">{counts.excused}</span>
+		</div>
+		<div class="stat-card">
+			<span class="stat-label">Attendance rate</span>
+			<span class="stat-value">{attendanceRate}%</span>
+		</div>
+	</section>
+
 	<section class="card filters no-print" aria-label="Attendance filters">
-		<div class="filter-grid steps">
+		<div class="filter-grid wide">
 			<div class="field">
-				<label class="form-label" for="course">1 · Course</label>
+				<label class="form-label" for="academic-year">Academic year</label>
+				<select id="academic-year" class="form-input" bind:value={academicYear} onchange={() => { semester = ""; programFilter = ""; yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }}>
+					<option value="">All</option>
+					{#each academicYearOptions as option (option)}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="class">Class</label>
 				<select
-					id="course"
-					class="form-input"
-					bind:value={course}
-					onchange={() => (currentPage = 1)}
-				>
-					<option value="">Select a course…</option>
+	id="class"
+	class="form-input"
+	bind:value={classOfferingId}
+	onchange={() => {
+		const item = professorState.courses.find((course) => course.offeringId === Number(classOfferingId));
+		if (!item) return;
+		academicYear = item.academicYear;
+		semester = item.semester;
+		programFilter = String(item.programId ?? '');
+		yearFilter = String(item.yearLevelId ?? '');
+		section = item.sections[0] ?? '';
+		course = item.courseCode;
+	}}
+>
+					<option value="">All classes</option>
+					{#each classOptions as option (option.id)}
+						<option value={option.id}>{option.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="semester">Semester</label>
+				<select id="semester" class="form-input" bind:value={semester} onchange={() => { programFilter = ""; yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }}>
+					<option value="">All</option>
+					{#each semesterOptions as option (option)}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="program">Program</label>
+				<select id="program" class="form-input" bind:value={programFilter} onchange={() => { yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+					<option value="">All</option>
+					{#each programOptions as option (option.id)}
+						<option value={option.id}>{option.code}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="year-level">Year level</label>
+				<select id="year-level" class="form-input" bind:value={yearFilter} onchange={() => { section = ""; course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+					<option value="">All</option>
+					{#each yearOptions as option (option.id)}
+						<option value={option.id}>{option.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="section">Section</label>
+				<select id="section" class="form-input" bind:value={section} onchange={() => { course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+					<option value="">All</option>
+					{#each sectionOptions as option (option)}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="course">Course</label>
+				<select id="course" class="form-input" bind:value={course} onchange={() => { classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+					<option value="">All</option>
 					{#each courseOptions as option (option.code)}
 						<option value={option.code}>{option.code} — {option.name}</option>
 					{/each}
 				</select>
 			</div>
+		</div>
+
+		<div class="filter-grid refine">
 			<div class="field">
-				<label class="form-label" for="section">2 · Section</label>
-				<select
-					id="section"
-					class="form-input"
-					bind:value={section}
-					disabled={!course}
-					onchange={() => (currentPage = 1)}
-				>
-					<option value="">{course ? 'Select a section…' : 'Pick a course first'}</option>
-					{#each availableSections as option (option)}
-						<option value={option}>{option}</option>
+				<label class="form-label" for="session-type">Type</label>
+				<select id="session-type" class="form-input" bind:value={sessionType} onchange={() => (currentPage = 1)}>
+					<option value="All">All types</option>
+					{#if availableSessionTypes.has('lecture')}
+						<option value="lecture">Lecture</option>
+					{/if}
+					{#if availableSessionTypes.has('lab')}
+						<option value="lab">Laboratory</option>
+					{/if}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="status">Status</label>
+				<select id="status" class="form-input" bind:value={status} onchange={() => (currentPage = 1)}>
+					{#each statusOptions as option (option)}
+						<option value={option}>{option === 'All' ? 'All statuses' : option}</option>
 					{/each}
 				</select>
 			</div>
-		</div>
-		{#if canQuery}
-			<div class="filter-grid refine">
-				<div class="field">
-					<label class="form-label" for="session-type">Type</label>
-					<select
-						id="session-type"
-						class="form-input"
-						bind:value={sessionType}
-						onchange={() => (currentPage = 1)}
-					>
-						<option value="All">Lecture + Lab</option>
-						<option value="lecture">Lecture</option>
-						<option value="lab">Laboratory</option>
-					</select>
-				</div>
-				<div class="field">
-					<label class="form-label" for="status">Status</label>
-					<select
-						id="status"
-						class="form-input"
-						bind:value={status}
-						onchange={() => (currentPage = 1)}
-					>
-						{#each statusOptions as option (option)}
-							<option value={option}>{option === 'All' ? 'All statuses' : option}</option>
-						{/each}
-					</select>
-				</div>
-				<div class="field">
-					<label class="form-label" for="from">From</label>
-					<input
-						id="from"
-						class="form-input"
-						type="date"
-						bind:value={from}
-						onchange={() => (currentPage = 1)}
-					/>
-				</div>
-				<div class="field">
-					<label class="form-label" for="to">To</label>
-					<input
-						id="to"
-						class="form-input"
-						type="date"
-						bind:value={to}
-						onchange={() => (currentPage = 1)}
-					/>
-				</div>
+			<div class="field">
+				<label class="form-label" for="search">Search student</label>
+				<input id="search" class="form-input" type="search" bind:value={searchInput} placeholder="Name or student number" />
 			</div>
-		{/if}
+			<div class="field">
+				<label class="form-label" for="from">From</label>
+				<input id="from" class="form-input" type="date" bind:value={from} onchange={() => (currentPage = 1)} />
+			</div>
+			<div class="field">
+				<label class="form-label" for="to">To</label>
+				<input id="to" class="form-input" type="date" bind:value={to} onchange={() => (currentPage = 1)} />
+			</div>
+		</div>
+
 		<div class="filter-actions">
+			<button class="btn btn-ghost" type="button" onclick={setToday}>Today</button>
+			<button class="btn btn-ghost" type="button" onclick={setYesterday}>Yesterday</button>
+			<button class="btn btn-ghost" type="button" onclick={setThisWeek}>This week</button>
+			<button class="btn btn-ghost" type="button" onclick={setAllTime}>All time</button>
 			<button class="btn btn-ghost" type="button" onclick={resetFilters}>Reset filters</button>
 		</div>
 	</section>
 
-	{#if !canQuery}
-		<section class="card">
-			<EmptyState
-				icon="chart"
-				title="Select a course and section"
-				hint="Pick both filters above to view attendance records."
-			/>
-		</section>
-	{:else if loadError}
+	{#if loadError}
 		<section class="card">
 			<p class="error">{loadError}</p>
 			<button class="btn btn-secondary" type="button" onclick={() => (reloadToken += 1)}>
@@ -488,13 +691,14 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			</button>
 		</section>
 	{:else if isLoading && rows.length === 0}
+		<SkeletonCards count={6} label="Loading attendance summary…" />
 		<SkeletonTable rows={8} cols={6} label="Loading attendance records…" />
 	{:else if rows.length === 0}
 		<section class="card">
 			<EmptyState
 				icon="file"
 				title="No attendance records match these filters"
-				hint="Try widening the date range."
+				hint="Try widening the date range or clearing filters."
 			/>
 		</section>
 	{:else}
@@ -504,70 +708,35 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					<thead>
 						<tr>
 							<th scope="col" aria-sort={ariaSort('date')}>
-								<button
-									class="sort"
-									type="button"
-									onclick={() => setSort('date')}
-									aria-label={sortLabel('date', 'Date')}
-								>
+								<button class="sort" type="button" onclick={() => setSort('date')} aria-label={sortLabel('date', 'Date')}>
 									<span>Date</span>
-									<span class="sort-arrow" class:active={sortBy === 'date'} aria-hidden="true">
-										{sortArrow('date')}
-									</span>
+									<span class="sort-arrow" class:active={sortBy === 'date'} aria-hidden="true">{sortArrow('date')}</span>
 								</button>
 							</th>
 							<th scope="col" aria-sort={ariaSort('student')}>
-								<button
-									class="sort"
-									type="button"
-									onclick={() => setSort('student')}
-									aria-label={sortLabel('student', 'Student')}
-								>
+								<button class="sort" type="button" onclick={() => setSort('student')} aria-label={sortLabel('student', 'Student')}>
 									<span>Student</span>
-									<span class="sort-arrow" class:active={sortBy === 'student'} aria-hidden="true">
-										{sortArrow('student')}
-									</span>
+									<span class="sort-arrow" class:active={sortBy === 'student'} aria-hidden="true">{sortArrow('student')}</span>
 								</button>
 							</th>
 							<th scope="col" aria-sort={ariaSort('section')}>
-								<button
-									class="sort"
-									type="button"
-									onclick={() => setSort('section')}
-									aria-label={sortLabel('section', 'Section')}
-								>
+								<button class="sort" type="button" onclick={() => setSort('section')} aria-label={sortLabel('section', 'Course')}>
 									<span>Course</span>
-									<span class="sort-arrow" class:active={sortBy === 'section'} aria-hidden="true">
-										{sortArrow('section')}
-									</span>
+									<span class="sort-arrow" class:active={sortBy === 'section'} aria-hidden="true">{sortArrow('section')}</span>
 								</button>
 							</th>
 							<th scope="col">Session</th>
 							<th scope="col">Type</th>
 							<th scope="col" aria-sort={ariaSort('status')}>
-								<button
-									class="sort"
-									type="button"
-									onclick={() => setSort('status')}
-									aria-label={sortLabel('status', 'Status')}
-								>
+								<button class="sort" type="button" onclick={() => setSort('status')} aria-label={sortLabel('status', 'Status')}>
 									<span>Status</span>
-									<span class="sort-arrow" class:active={sortBy === 'status'} aria-hidden="true">
-										{sortArrow('status')}
-									</span>
+									<span class="sort-arrow" class:active={sortBy === 'status'} aria-hidden="true">{sortArrow('status')}</span>
 								</button>
 							</th>
 							<th scope="col" aria-sort={ariaSort('time')}>
-								<button
-									class="sort"
-									type="button"
-									onclick={() => setSort('time')}
-									aria-label={sortLabel('time', 'Time')}
-								>
+								<button class="sort" type="button" onclick={() => setSort('time')} aria-label={sortLabel('time', 'Time')}>
 									<span>Scanned</span>
-									<span class="sort-arrow" class:active={sortBy === 'time'} aria-hidden="true">
-										{sortArrow('time')}
-									</span>
+									<span class="sort-arrow" class:active={sortBy === 'time'} aria-hidden="true">{sortArrow('time')}</span>
 								</button>
 							</th>
 							<th scope="col"><span class="sr-only">Action</span></th>
@@ -604,12 +773,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 									{/if}
 								</td>
 								<td>
-									<button
-										class="mini"
-										type="button"
-										onclick={() => viewDetail(row.session_id)}
-										aria-label={`View session ${row.session_code} for ${row.student_name}`}
-									>
+									<button class="mini" type="button" onclick={() => viewDetail(row.session_id)} aria-label={`View session ${row.session_code} for ${row.student_name}`}>
 										View
 									</button>
 								</td>
@@ -624,59 +788,19 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					<p class="warning" role="status">{directoryWarning}</p>
 				{/if}
 				<nav class="pages no-print" aria-label="Attendance pages">
-					<button
-						class="page"
-						type="button"
-						disabled={currentPage <= 1}
-						onclick={() => (currentPage = 1)}
-						aria-label="Go to first attendance page"
-					>
-						First
-					</button>
-					<button
-						class="page"
-						type="button"
-						disabled={currentPage <= 1}
-						onclick={() => (currentPage = Math.max(1, currentPage - 1))}
-						aria-label="Go to previous attendance page"
-					>
-						Previous
-					</button>
+					<button class="page" type="button" disabled={currentPage <= 1} onclick={() => (currentPage = 1)} aria-label="Go to first attendance page">First</button>
+					<button class="page" type="button" disabled={currentPage <= 1} onclick={() => (currentPage = Math.max(1, currentPage - 1))} aria-label="Go to previous attendance page">Previous</button>
 					{#each visiblePages as pageNumber (pageNumber)}
 						{#if typeof pageNumber === 'number'}
-							<button
-								class="page"
-								class:current={pageNumber === currentPage}
-								type="button"
-								disabled={pageNumber === currentPage}
-								onclick={() => (currentPage = pageNumber)}
-								aria-label={`Go to attendance page ${pageNumber}`}
-								aria-current={pageNumber === currentPage ? 'page' : undefined}
-							>
+							<button class="page" class:current={pageNumber === currentPage} type="button" disabled={pageNumber === currentPage} onclick={() => (currentPage = pageNumber)} aria-label={`Go to attendance page ${pageNumber}`} aria-current={pageNumber === currentPage ? 'page' : undefined}>
 								{pageNumber}
 							</button>
 						{:else}
 							<span class="gap" aria-hidden="true">…</span>
 						{/if}
 					{/each}
-					<button
-						class="page"
-						type="button"
-						disabled={currentPage >= pageCount}
-						onclick={() => (currentPage = Math.min(pageCount, currentPage + 1))}
-						aria-label="Go to next attendance page"
-					>
-						Next
-					</button>
-					<button
-						class="page"
-						type="button"
-						disabled={currentPage >= pageCount}
-						onclick={() => (currentPage = pageCount)}
-						aria-label="Go to last attendance page"
-					>
-						Last
-					</button>
+					<button class="page" type="button" disabled={currentPage >= pageCount} onclick={() => (currentPage = Math.min(pageCount, currentPage + 1))} aria-label="Go to next attendance page">Next</button>
+					<button class="page" type="button" disabled={currentPage >= pageCount} onclick={() => (currentPage = pageCount)} aria-label="Go to last attendance page">Last</button>
 					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
 				</nav>
 				<div class="table-actions no-print">
@@ -684,12 +808,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 						<AppIcon name="file" size={18} />
 						Print
 					</button>
-					<button
-						class="btn btn-secondary"
-						type="button"
-						disabled={exporting || total === 0}
-						onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }], onabort: cancelExport })}
-					>
+					<button class="btn btn-secondary" type="button" disabled={exporting || total === 0} onclick={() => (pendingExport = { run: exportCsv, details: [{ label: 'Format', value: 'CSV' }, { label: 'Rows', value: total ? String(total) : '0' }], onabort: cancelExport })}>
 						<AppIcon name="file" size={18} />
 						{exporting ? 'Exporting…' : 'Export CSV'}
 					</button>
@@ -711,6 +830,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			</div>
 		</section>
 	{/if}
+	{/if}
 	{#if pendingExport}
 		<ConfirmExportDialog
 			title={pendingExport.title}
@@ -730,7 +850,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
-		max-width: 1000px;
+		max-width: 1400px;
 		margin: 0 auto;
 	}
 
@@ -756,12 +876,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		box-shadow: var(--shadow-sm);
 	}
 
-	.empty {
-		margin: 0;
-		color: var(--text-muted);
-		font-size: 0.9375rem;
-	}
-
 	.error {
 		margin: 0 0 1rem;
 		color: var(--danger-strong);
@@ -775,13 +889,44 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-weight: 600;
 	}
 
+	.summary-cards {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 1rem;
+	}
+
+	.stat-card {
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 1rem 1.25rem;
+		box-shadow: var(--shadow-sm);
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.stat-label {
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+		font-weight: 600;
+	}
+
+	.stat-value {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: var(--text-strong);
+	}
+
 	.filter-grid {
 		display: grid;
 		gap: 1rem;
 	}
 
-	.steps {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+	.wide {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
 
 	.refine {
@@ -992,7 +1137,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.375rem;
+		gap: 0.75rem;
 	}
 
 	.page {
@@ -1099,13 +1244,21 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		.filter-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
+		.wide {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 
 	@media (max-width: 560px) {
 		.filter-grid {
 			grid-template-columns: minmax(0, 1fr);
 		}
-
+		.wide {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.refine {
+			grid-template-columns: minmax(0, 1fr);
+		}
 		.table-actions .btn {
 			flex: 1 1 auto;
 		}

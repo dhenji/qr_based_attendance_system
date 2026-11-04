@@ -32,6 +32,16 @@ or admin roster flows (see `docs/architecture/excuse-workflow.md`,
 | Data | Models, tables, queries, SQLite shims, transactions | `backend/src/features/attendance/model.py`, `backend/src/features/session/model.py`, SQLAlchemy in services |
 | Integrations | Face embedding gen, MediaPipe, email, cron risk batch, sync replay | `backend/src/shared/face_embedding_generator.py`, `backend/src/shared/face_quality.py`, `backend/src/shared/email.py`, `backend/src/analytics/batch.py`, `backend/src/core/scheduler.py` |
 
+## Professor attendance ledger
+
+`GET /professor/attendance` is the read-only professor ledger. It supports
+server-side filtering by academic scope (`program_id`, `year_level_id`,
+`academic_year`, `semester`), `course_id`, `offering_id`, `section`,
+`session_id`, `session_type`, `status`, `search` (student number/name), and
+`date_from`/`date_to`, plus sort/page/size. The response includes global
+aggregates (`counts`, `total_students`, `total_sessions`) for the filtered set.
+`date_to` is normalized to end-of-day for inclusive ranges.
+
 ## Related docs
 
 - `docs/architecture/data-flow.md` — system-wide flow diagrams (pointers here)
