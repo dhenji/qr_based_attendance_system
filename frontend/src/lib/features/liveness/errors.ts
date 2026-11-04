@@ -38,8 +38,54 @@ export const SCAN_ERROR_MESSAGES: Record<string, string> = {
 	location_unavailable: 'We could not determine your current location. Enable location services and try again.'
 };
 
+// Friendly translations for the raw backend validation messages that reach
+// the student. Keys are substrings matched case-insensitively against the
+// (prefix-stripped) backend message.
+const VALIDATION_MESSAGE_TRANSLATIONS: Array<[string, string]> = [
+	[
+		'ear_samples',
+		'Eye measurements were out of range. Please retry the liveness check.',
+	],
+	[
+		'live_face_embedding or live_face_image',
+		'Could not capture your face image. Try again in good lighting.',
+	],
+	[
+		'less than or equal to 1000',
+		'Location accuracy was too low. Try again outdoors or near a window.',
+	],
+	[
+		'greater than or equal to 0',
+		'Location accuracy was invalid. Try again.',
+	],
+];
+
+const stripValidationPrefix = (message: string): string =>
+	message.replace(/^value error,\s*/i, '').trim();
+
+const translateValidationMessage = (message: string): string => {
+	const cleaned = stripValidationPrefix(message);
+	const lower = cleaned.toLowerCase();
+	for (const [needle, friendly] of VALIDATION_MESSAGE_TRANSLATIONS) {
+		if (lower.includes(needle.toLowerCase())) {
+			return friendly;
+		}
+	}
+	return cleaned || message;
+};
+
 export const toScanMessage = (error: unknown, fallback: string): string => {
 	if (error instanceof APIError) {
+		// Surface the backend's specific 422 detail, translated into
+		// student-friendly copy, instead of the generic validation_error
+		// message, so a student can act on the actual failing field.
+		if (
+			error.code === 'validation_error' &&
+			error.message &&
+			error.message !== 'Validation failed'
+		) {
+			return translateValidationMessage(error.message);
+		}
 		if (error.code && SCAN_ERROR_MESSAGES[error.code]) {
 			return SCAN_ERROR_MESSAGES[error.code];
 		}

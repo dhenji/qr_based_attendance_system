@@ -121,6 +121,11 @@ Last verified against commit: see `git rev-parse HEAD`.
 - Backend codes map via `toScanMessage()`; network errors queue for sync.
 - Rejected scan (`result.status === 'rejected'`) shows permitted-time-window
   copy, not raw backend messages.
+- Pydantic 422 validation failures (e.g. GPS accuracy out of range, missing
+  face frame, out-of-range ear samples) are now surfaced with their specific
+  field detail, translated into student-friendly copy instead of a single
+  generic message. GPS accuracy is clamped to the backend cap (100000 m) and
+  the scan page refuses to submit when no face frame was captured.
 - `.error` paragraphs styled as alert banners (`+page.svelte`).
 
 ---
