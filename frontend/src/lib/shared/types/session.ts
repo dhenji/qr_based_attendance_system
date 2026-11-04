@@ -198,6 +198,16 @@ export interface ProfessorAttendanceItemResponse {
 	face_match_score: number | null;
 }
 
+export interface ProfessorAttendanceLedgerResponse {
+	items: ProfessorAttendanceItemResponse[];
+	total: number;
+	page: number;
+	size: number;
+	counts?: Record<string, number>;
+	total_students?: number;
+	total_sessions?: number;
+}
+
 // View-models (course names joined client-side from the courses store)
 
 export interface SessionSummary {

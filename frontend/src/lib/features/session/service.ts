@@ -124,8 +124,8 @@ export const listSessions = async (params?: {
 	await ensureCourses();
 
 	const query: Record<string, string> = {};
-	if (params?.from) query.from = params.from;
-	if (params?.to) query.to = params.to;
+	if (params?.from) query.date_from = params.from;
+	if (params?.to) query.date_to = params.to;
 	if (params?.offeringId !== undefined) query.offering_id = String(params.offeringId);
 	if (params?.sessionType) query.session_type = params.sessionType;
 	query.page = String(params?.page ?? 1);

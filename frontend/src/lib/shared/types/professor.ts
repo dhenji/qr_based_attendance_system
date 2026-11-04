@@ -106,7 +106,9 @@ export interface ProfessorCourseSummary {
 	courseName: string;
 	units: number;
 	programCode: string;
+	programId?: number;
 	yearLevelLabel: string;
+	yearLevelId?: number;
 	semester: string;
 	academicYear: string;
 	sections: string[];

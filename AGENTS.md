@@ -101,6 +101,12 @@ npm run test:coverage  # with v8 coverage -> ./coverage
 - Load gate: `locustfile.py::_report` asserts §2's targets (scan rps, p95, p99, 0 duplicates, slowest replay batch) and sets `environment.process_exit_code = 1` on a miss, so a load run is CI-gateable; thresholds are `LOCUST_MIN_RPS` / `LOCUST_MAX_P95_MS` / `LOCUST_MAX_P99_MS` / `LOCUST_MAX_DRAIN_S`, and the gate only ever forces failure (a clean run leaves the exit code to locust's own `exit_code_on-error`). Throughput counts successful scans over the wall-clock window, not `stats.total.total_time` (that is a sum of response times) nor `total_rps` (that is blended across login/profile/scan). `get_current_response_time_percentile` returns `None` when its trailing-10s cache has no samples — coerce it to a pass and a short run gates green.
 - Load queue: slots 1-15 scan live, 16-25 backlog 1-3 scans, 26-30 backlog 5-8 (`_profile_for_slot`); a queued scan is a real POST with `scanned_at` now minus `LOCUST_QUEUE_STALE_S` (default 90, must stay above the 60s staleness floor or replays stop writing sync rows). Each user tracks live-scanned vs backlogged sessions in disjoint sets, because the second scan for a (student, session) is a 409 `duplicate_scan` that fails the gate; leftover backlog replays in `on_stop`. Replayed scans count toward `scans_ok` and carry fresh `X-Idempotency-Key` values — a reused key returns the prior result instead of queueing, which would make the drain leg vacuous.
 
+## Professor attendance dashboard
+
+- `/professor/attendance` now acts as a dashboard with cascading filters (Academic Year → Semester → Program → Year Level → Section → Course → Class), global summary cards, debounced student search, quick date controls (Today/Yesterday/This Week/All time), and Class-based auto-fill.
+- Backend `GET /professor/attendance` supports `program_id`, `year_level_id`, `academic_year`, `semester`, and `search`/`q`/`student_search`, and returns `counts`, `total_students`, `total_sessions` aggregates.
+- `date_to` is normalized to end-of-day on the backend for inclusive date ranges.
+
 ## Backend tests
 
 - 1055 collected cases / 82 files (282 sync + 647 async test functions, plus parametrized expansions): sync hand-rolled-fake tests (`asyncio.run()`, unaffected by `asyncio_mode=auto` — don't mass-convert) + DB-backed async tests. `program` is covered by `src/tests/features/program/test_program_service.py`; `src/tests/features/excuse/` has all three layers (`test_service.py`, `test_routes_http.py`, `test_notifications.py`).

@@ -1280,9 +1280,9 @@ Query attendance records with filters.
 
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?course_id?&offering_id?&section?&session_id?&session_type=lecture\|lab?&status?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
-| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, session_type, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
-| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. `sort_by` accepts `date`/`student`/`section`/`status`/`time` (wireframes.md 3.4 column headers). |
+| **Query**        | `?program_id?&year_level_id?&academic_year?&semester?&course_id?&offering_id?&section?&session_id?&session_type=lecture\|lab?&status?&search?&q?&student_search?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, session_type, status, original_status?, scanned_at, scanned_via, face_match_score? }], total, page, size, counts?, total_students?, total_sessions? }` |
+| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. `sort_by` accepts `date`/`student`/`section`/`status`/`time`. `counts` is a per-status aggregate over the filtered set; `total_students`/`total_sessions` are distinct counts. `date_to` is inclusive of the full day (end-of-day normalization). |
 
 #### `GET /professor/sessions/history`
 

@@ -7,7 +7,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as dtime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -305,6 +305,14 @@ _REVIEW_FILTERS: dict[str, Callable[[Select[Any]], Select[Any]]] = {
     "approved": _approved_review_filter,
     "rejected": _rejected_review_filter,
 }
+
+
+def _end_of_day(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.timetuple()[3:6] == (0, 0, 0) and value.microsecond == 0:
+        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return value
 
 
 class AttendanceService:
@@ -745,7 +753,7 @@ class AttendanceService:
             course_id=course_id,
             status=status,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
         filtered = self._apply_history_filters(self._history_base(student.id), filters)
@@ -1271,6 +1279,7 @@ class AttendanceService:
         date_to: datetime | None = None,
     ) -> OverviewResponse:
         """Per-course sessions, compliance rate, and trend over the filter set."""
+        date_to = _end_of_day(date_to)
         offering_ids: list[int] = await self._overview_offering_ids(
             course_id, professor_id
         )
@@ -1550,7 +1559,7 @@ class AttendanceService:
             course_id=course_id,
             professor_id=professor_id,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -1612,7 +1621,7 @@ class AttendanceService:
             course_id=course_id,
             status=status,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
         filtered = self._apply_history_filters(self._history_base(student.id), filters)
