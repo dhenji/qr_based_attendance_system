@@ -23,7 +23,8 @@ Schema bounds: `EAR_SAMPLES_MIN_COUNT=1`, `EAR_SAMPLES_MAX_COUNT=100`,
 - Skip if `session.classroom_lat/lng` is None.
 - If GPS is None → raise `OutsideGeofenceException` (missing fix treated as
   outside).
-- Haversine distance > `classroom_radius_meters` → raise.
+- Haversine distance > `classroom_radius_meters` + reported GPS uncertainty (capped at 50 m) → raise.
+- Haversine distance in (radius, radius + uncertainty] → return `True` (ambiguous → admin review).
 
 Benchmark mode skips geofence + liveness (`attendance/service.py:436-439`).
 

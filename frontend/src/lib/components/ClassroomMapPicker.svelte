@@ -28,6 +28,7 @@
 	let leaflet: any = null;
 	let resizeObserver: ResizeObserver | null = null;
 let gpsMarker: any = null;
+let gpsAccuracyCircle: any = null;
 let radiusCircle: any = null;
 
 let locating = $state(false);
@@ -66,7 +67,7 @@ let gpsAccuracy = $state<number | null>(null);
 		gpsError = null;
 		try {
 			const fix = await requestBestPosition({
-				desiredAccuracy: radius ?? 50,
+				desiredAccuracy: 50,
 				maxFixes: 3,
 				timeoutMs: 10000
 			});
@@ -86,6 +87,18 @@ let gpsAccuracy = $state<number | null>(null);
 				});
 				gpsMarker = leaflet.marker([fix.lat, fix.lng], { icon, interactive: false }).addTo(map);
 			}
+			if (gpsAccuracyCircle) {
+				try { gpsAccuracyCircle.remove(); } catch { /* ignore */ }
+				gpsAccuracyCircle = null;
+			}
+			gpsAccuracyCircle = leaflet.circle([fix.lat, fix.lng], {
+				radius: Math.max(fix.accuracy, 1),
+				color: '#2563eb',
+				weight: 1,
+				fillColor: '#2563eb',
+				fillOpacity: 0.08,
+				dashArray: '4 4'
+			}).addTo(map);
 			onChange(fix.lat, fix.lng);
 		} catch (e: any) {
 			gpsError = e?.message ?? 'Unable to get your location.';
@@ -130,6 +143,10 @@ let gpsAccuracy = $state<number | null>(null);
 		if (gpsMarker) {
 			gpsMarker.remove();
 			gpsMarker = null;
+		}
+		if (gpsAccuracyCircle) {
+			try { gpsAccuracyCircle.remove(); } catch { /* ignore */ }
+			gpsAccuracyCircle = null;
 		}
 		gpsAccuracy = null;
 		gpsError = null;
@@ -206,6 +223,10 @@ let gpsAccuracy = $state<number | null>(null);
 		if (gpsMarker) {
 			try { gpsMarker.remove(); } catch { /* ignore */ }
 			gpsMarker = null;
+		}
+		if (gpsAccuracyCircle) {
+			try { gpsAccuracyCircle.remove(); } catch { /* ignore */ }
+			gpsAccuracyCircle = null;
 		}
 		if (radiusCircle) {
 			try { radiusCircle.remove(); } catch { /* ignore */ }

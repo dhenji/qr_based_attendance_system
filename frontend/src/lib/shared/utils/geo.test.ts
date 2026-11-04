@@ -6,7 +6,8 @@ import {
 	isLowAccuracy,
 	calculateDistanceMeters,
 	isWithinGeofence,
-	searchLocation
+	searchLocation,
+	requestBestPosition
 } from './geo';
 
 describe('clamp', () => {
@@ -129,5 +130,85 @@ describe('searchLocation', () => {
 	it('returns [] on fetch failure', async () => {
 		fetchMock.mockRejectedValue(new Error('network'));
 		expect(await searchLocation('Manila')).toEqual([]);
+	});
+});
+
+describe('requestBestPosition', () => {
+	let watchCallback: ((pos: any) => void) | null = null;
+	let errorCallback: ((err: any) => void) | null = null;
+	let clearWatch: ReturnType<typeof vi.fn>;
+	let watchPosition: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		watchCallback = null;
+		errorCallback = null;
+		clearWatch = vi.fn();
+		watchPosition = vi.fn((success, error, _opts) => {
+			watchCallback = success;
+			errorCallback = error;
+			return 1;
+		});
+		vi.stubGlobal('navigator', {
+			geolocation: { watchPosition, clearWatch }
+		} as any);
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	const makePos = (lat: number, lng: number, accuracy: number) => ({
+		coords: { latitude: lat, longitude: lng, accuracy },
+		timestamp: 12345
+	});
+
+	it('returns the lowest-accuracy fix among collected fixes', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 1, maxFixes: 3, timeoutMs: 1000 });
+		// first fix accuracy 100
+		watchCallback!(makePos(1, 2, 100));
+		// second fix accuracy 10
+		watchCallback!(makePos(3, 4, 10));
+		// third triggers maxFixes
+		watchCallback!(makePos(5, 6, 50));
+		const res = await promise;
+		expect(res).toEqual({ lat: 3, lng: 4, accuracy: 10, timestamp: 12345 });
+	});
+
+	it('stops early once a fix meets desiredAccuracy', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		watchCallback!(makePos(1, 2, 40));
+		const res = await promise;
+		expect(res.accuracy).toBe(40);
+		// further fixes should not matter
+	});
+
+	it('does not stop on a coarse fix when desiredAccuracy is small', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 2, timeoutMs: 1000 });
+		watchCallback!(makePos(1, 2, 100)); // coarse, should not stop (maxFixes 2)
+		watchCallback!(makePos(3, 4, 10)); // stops via maxFixes
+		const res = await promise;
+		expect(res).toEqual({ lat: 3, lng: 4, accuracy: 10, timestamp: 12345 });
+	});
+
+	it('throws location_timeout when no fix arrives', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 100 });
+		vi.advanceTimersByTime(100);
+		await expect(promise).rejects.toMatchObject({ code: 'location_timeout' });
+	});
+
+	it('ignores fixes with non-finite coordinates', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 1, timeoutMs: 1000 });
+		watchCallback!({ coords: { latitude: NaN, longitude: 1, accuracy: 10 }, timestamp: 1 });
+		watchCallback!(makePos(2, 3, 20));
+		const res = await promise;
+		expect(res).toEqual({ lat: 2, lng: 3, accuracy: 20, timestamp: 12345 });
+	});
+
+	it('maps permission denied error', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		errorCallback!({ code: 1, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+		await expect(promise).rejects.toMatchObject({ code: 'location_permission_denied' });
 	});
 });
