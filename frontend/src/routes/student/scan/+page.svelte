@@ -687,6 +687,14 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			showFailure = true;
 			return;
 		}
+		// A scan cannot be validated without a captured face frame; surface a
+		// clear, retryable error instead of submitting a payload the backend
+		// will reject as 422 validation_error.
+		if (!(livenessEvidence as any)?.faceImage) {
+			rejectionReason = 'Could not capture your face image. Try again in good lighting.';
+			showFailure = true;
+			return;
+		}
 		pendingLiveness = livenessEvidence;
 		livenessActive = false;
 

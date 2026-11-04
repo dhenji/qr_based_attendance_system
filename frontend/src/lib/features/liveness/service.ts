@@ -113,7 +113,17 @@ export const submitAttendanceScan = async (input: {
 		{
 			session_id: input.sessionId,
 			student_number: input.studentNumber,
-			gps: input.gps ?? null,
+			gps: input.gps
+		? {
+				lat: input.gps.lat,
+				lng: input.gps.lng,
+				// Clamp to the backend's GPS_ACCURACY_MAX (100000) so an
+				// extreme desktop/IP fix can never trip the 422 bound; the
+				// geofence decision is distance-based, so capping accuracy is
+				// metadata-only and does not change the outcome.
+				accuracy: Math.min(input.gps.accuracy, 100000),
+			}
+		: null,
 			liveness_evidence: {
 				blink_detected: input.livenessEvidence.blinkDetected,
 				head_turn_left: input.livenessEvidence.headTurnLeft,
