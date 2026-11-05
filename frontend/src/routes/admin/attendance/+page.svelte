@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import {
@@ -12,9 +13,9 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 
 	// Attendance Review (wireframe 4.12): the flagged-scan decision queue.
-	// Records whose face_match_score fell in the review band stay actionable
-	// only while pending; resolving via the buttons below approves (restores
-	// present/late) or rejects them, and writes an audit row.
+	// Borderline scans (face review band 0.65-0.70, or geofence uncertainty)
+	// stay actionable only while pending; resolving via the buttons below
+	// approves (confirms present/late) or rejects them, and writes an audit row.
 	//
 	// The per-course attendance snapshot that used to share this route now
 	// lives in Analytics & Reports (the "Attendance" tab); this page owns the
@@ -26,6 +27,8 @@
 	let liveLoading = $state(false);
 	let liveError = $state<string | null>(null);
 	let resolvingId = $state<number | null>(null);
+	let loadToken = $state(0);
+	let confirmTarget = $state<{ id: number; decision: 'approve' | 'reject' } | null>(null);
 	// Per-row review notes (the previous single global input leaked a note
 	// typed for one row into the decision for a different row).
 	let reviewNotes = $state<Record<number, string>>({});
@@ -56,6 +59,10 @@
 		});
 	});
 
+	const confirmRow = $derived(
+		confirmTarget ? (liveItems.find((r) => r.id === confirmTarget!.id) ?? null) : null
+	);
+
 	// alive-guard: if the route unmounts while the first load is in flight,
 	// destroy has already run and the focus revalidate must not attach.
 	let pageAlive = true;
@@ -67,23 +74,26 @@
 	});
 
 	const loadLiveness = async () => {
+		const token = ++loadToken;
 		liveLoading = true;
 		liveError = null;
 		try {
 			const response = await listLivenessReview({ status: liveStatus, page: livePage, size: liveSize });
+			if (token !== loadToken) return;
 			liveItems = response.items ?? [];
 			liveTotal = response.total ?? liveItems.length;
 		} catch (e) {
+			if (token !== loadToken) return;
 			liveError = e instanceof Error ? e.message : 'Could not load the review queue.';
 		} finally {
-			liveLoading = false;
+			if (token === loadToken) liveLoading = false;
 		}
 	};
 
 	// Aggregate page: no entity subscriptions — the queue is a point-in-time
 	// read. Tab focus re-runs it with the current status filter.
 	const refreshVisible = () => {
-		if (liveLoading) return;
+		if (liveLoading || resolvingId !== null) return;
 		void loadLiveness();
 	};
 
@@ -100,12 +110,13 @@
 		try {
 			await resolveLivenessReview(id, decision, reviewNotes[id] ?? '');
 			reviewNotes[id] = '';
-			await loadLiveness();
 		} catch (e) {
 			liveError = e instanceof Error ? e.message : 'Could not resolve this record.';
 		} finally {
 			resolvingId = null;
 		}
+		confirmTarget = null;
+		await loadLiveness();
 	};
 
 	const goToPage = (p: number) => {
@@ -149,7 +160,7 @@
 	<header class="header">
 		<div>
 			<h1>Attendance Review</h1>
-			<p class="muted">Flagged scans (GPS / face review band) · {liveTotal} {liveStatus}</p>
+			<p class="muted">Flagged scans (borderline face match or GPS uncertainty) · {liveTotal} {liveStatus}</p>
 		</div>
 	</header>
 
@@ -252,7 +263,7 @@
 											class="btn btn-secondary"
 											type="button"
 											disabled={resolvingId !== null}
-											onclick={() => void resolveRow(row.id, 'approve')}
+											onclick={() => (confirmTarget = { id: row.id, decision: 'approve' })}
 										>
 											Approve
 										</button>
@@ -260,7 +271,7 @@
 											class="btn btn-secondary"
 											type="button"
 											disabled={resolvingId !== null}
-											onclick={() => void resolveRow(row.id, 'reject')}
+											onclick={() => (confirmTarget = { id: row.id, decision: 'reject' })}
 										>
 											Reject
 										</button>
@@ -308,11 +319,25 @@
 												<div><dt>Yaw samples</dt><dd>{asNums(pnp.yaw_samples).length}</dd></div>
 											</dl>
 										</div>
+										{#if asStr(evidenceOf(row).review_reason)?.includes('geofence_uncertainty')}
+										{@const g = asRecord(evidenceOf(row).geofence)}
+										<div class="evidence-group">
+											<h3 class="evidence-title">Geofence</h3>
+											<dl class="evidence-dl">
+												<div><dt>Distance</dt><dd>{asNum(g.distance_meters) === null ? '—' : `${asNum(g.distance_meters)!.toFixed(1)} m`}</dd></div>
+												<div><dt>Radius</dt><dd>{asNum(g.radius_meters) === null ? '—' : `${asNum(g.radius_meters)} m`}</dd></div>
+												<div><dt>GPS accuracy</dt><dd>{asNum(g.accuracy_meters) === null ? '—' : `${asNum(g.accuracy_meters)!.toFixed(1)} m`}</dd></div>
+												<div><dt>Uncertainty</dt><dd>{asNum(g.uncertainty_meters) === null ? '—' : `${asNum(g.uncertainty_meters)!.toFixed(1)} m`}</dd></div>
+												<div><dt>Classroom</dt><dd>{asNum(g.classroom_lat) === null ? '—' : `${asNum(g.classroom_lat)}, ${asNum(g.classroom_lng)}`}</dd></div>
+											</dl>
+										</div>
+										{/if}
 										<div class="evidence-group">
 											<h3 class="evidence-title">Context</h3>
 											<dl class="evidence-dl">
 												<div><dt>GPS accuracy</dt><dd>{asNum(ev.accuracy) === null ? '—' : `${asNum(ev.accuracy)!.toFixed(1)} m`}</dd></div>
 												<div><dt>Review band</dt><dd>{asBool(ev.review) ? 'Yes' : 'No'}</dd></div>
+<div><dt>Review reason</dt><dd>{asStr(ev.review_reason) ?? '—'}</dd></div>
 												{#if asStr(ev.review_note)}
 													<div><dt>Review note</dt><dd>{asStr(ev.review_note)}</dd></div>
 												{/if}
@@ -336,6 +361,52 @@
 				</div>
 			</div>
 		</section>
+	{/if}
+
+	{#if confirmTarget && confirmRow}
+		<Modal
+			title={confirmTarget.decision === 'approve' ? 'Confirm Approval' : 'Confirm Rejection'}
+			onclose={() => (confirmTarget = null)}
+			closeOnBackdrop={false}
+		>
+			<p class="confirm-message">
+				{confirmTarget.decision === 'approve'
+					? 'Approve this flagged scan and confirm it as present/late?'
+					: 'Reject this flagged scan and mark it as rejected?'}
+			</p>
+			<dl class="confirm-details">
+				<div class="confirm-row"><dt>Student</dt><dd>{confirmRow.student_name} ({confirmRow.student_number})</dd></div>
+				<div class="confirm-row"><dt>Session</dt><dd>{confirmRow.session_code}</dd></div>
+				<div class="confirm-row"><dt>Course</dt><dd>{confirmRow.course_code}</dd></div>
+				<div class="confirm-row"><dt>Score</dt><dd>{confirmRow.face_match_score == null ? '—' : confirmRow.face_match_score.toFixed(2)}</dd></div>
+				{#if (reviewNotes[confirmRow.id] ?? '').trim()}
+					<div class="confirm-row"><dt>Note</dt><dd>{reviewNotes[confirmRow.id]}</dd></div>
+				{/if}
+			</dl>
+			{#snippet footer()}
+				<button
+					class="btn btn-ghost"
+					type="button"
+					disabled={resolvingId !== null}
+					onclick={() => (confirmTarget = null)}
+				>
+					Cancel
+				</button>
+				<button
+					class="btn btn-primary"
+					type="button"
+					disabled={resolvingId !== null}
+					aria-busy={resolvingId !== null}
+					onclick={() => void resolveRow(confirmTarget!.id, confirmTarget!.decision)}
+				>
+					{resolvingId !== null
+						? 'Processing…'
+						: confirmTarget!.decision === 'approve'
+							? 'Approve'
+							: 'Reject'}
+				</button>
+			{/snippet}
+		</Modal>
 	{/if}
 </div>
 
@@ -556,6 +627,59 @@
 
 	.evidence-dl dd.bad {
 		color: var(--danger);
+	}
+
+	.btn-primary {
+		background: var(--accent, #2563eb);
+		border: 1px solid var(--accent, #2563eb);
+		color: #fff;
+	}
+
+	.btn-primary:hover:not(:disabled) {
+		background: var(--accent-hover, #1d4ed8);
+	}
+
+	.btn-ghost {
+		background: transparent;
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
+	}
+
+	.btn-ghost:hover:not(:disabled) {
+		background: var(--divider);
+	}
+
+	.confirm-message {
+		margin: 0;
+		font-size: 0.9375rem;
+		color: var(--text-muted);
+	}
+
+	.confirm-details {
+		margin: 0;
+		display: grid;
+		gap: 0.375rem;
+		padding: 0.75rem;
+		border-radius: 8px;
+		background: var(--bg-subtle, var(--divider));
+		border: 1px solid var(--border);
+	}
+
+	.confirm-row {
+		display: flex;
+		gap: 0.75rem;
+		font-size: 0.875rem;
+	}
+
+	.confirm-row dt {
+		font-weight: 600;
+		color: var(--text);
+		min-width: 5rem;
+	}
+
+	.confirm-row dd {
+		margin: 0;
+		color: var(--text-strong);
 	}
 
 	@media (max-width: 640px) {

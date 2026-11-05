@@ -82,6 +82,8 @@ def _make_live_emb(score: float = 0.9) -> str:
 # Somewhere inside the default radius of the fixture classroom.
 INSIDE_GPS = GPSInput(lat=14.0001, lng=121.0001, accuracy=5.0)
 OUTSIDE_GPS = GPSInput(lat=14.02, lng=121.0, accuracy=5.0)
+# ~70 m from the classroom but reported accuracy 50 m → ambiguous (review), not rejected.
+AMBIGUOUS_GPS = GPSInput(lat=14.00063, lng=121.0, accuracy=50.0)
 
 CLASSROOM_LAT = 14.0
 CLASSROOM_LNG = 121.0
@@ -318,6 +320,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
     assert row.validation_status == ValidationStatus.PRESENT.value
     assert row.liveness_evidence is not None
     assert row.liveness_evidence["review"] is True
+    assert row.liveness_evidence["review_reason"] == "face_review_band"
     assert abs(float(row.face_match_score) - score) < 0.001
 
 
@@ -566,6 +569,44 @@ async def test_scan_outside_geofence_raises(
 
     assert excinfo.value.status_code == 403
     assert "exceeds max 50m" in excinfo.value.message
+
+
+async def test_scan_with_ambiguous_geofence_is_reviewed(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    stack: dict[str, Any] = await seed(factories)
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    result = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=2),
+            gps=AMBIGUOUS_GPS,
+        )
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
+
+    row: Attendance = (
+        await test_db_session.scalars(
+            select(Attendance).where(Attendance.id == result.id)
+        )
+    ).one()
+
+    assert row.liveness_evidence is not None
+    assert row.liveness_evidence["review"] is True
+    assert row.liveness_evidence["review_reason"] == "geofence_uncertainty"
+    geo = row.liveness_evidence["geofence"]
+    assert geo is not None
+    assert "distance_meters" in geo
+    assert "radius_meters" in geo
+    assert geo["radius_meters"] == 50
+    assert "classroom_lat" in geo
 
 
 async def test_session_without_classroom_coords_skips_geofence(

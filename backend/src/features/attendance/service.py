@@ -29,6 +29,8 @@ from features.attendance.constants import (
     REVIEW_DECISIONS,
     REVIEW_DEFAULT_STATUS,
     REVIEW_NOTE_EVIDENCE_KEY,
+    REVIEW_REASON_FACE_BAND,
+    REVIEW_REASON_GEOFENCE,
     REVIEW_STATUSES,
     SYNC_STALE_SECONDS,
     _IDEMPOTENCY_MAX_ENTRIES,
@@ -351,11 +353,18 @@ class AttendanceService:
         scanned_at: datetime,
         face_match_score: float,
         geofence_review: bool = False,
-    ) -> tuple[str, str | None, bool]:
-        review: bool = self._is_review_band(face_match_score) or geofence_review
+    ) -> tuple[str, str | None, bool, str | None]:
+        face_review: bool = self._is_review_band(face_match_score)
+        review: bool = face_review or geofence_review
         computed: str = self._compute_status(db_session, scanned_at)
         original: str | None = computed if review else None
-        return computed, original, review
+        reasons: list[str] = []
+        if face_review:
+            reasons.append(REVIEW_REASON_FACE_BAND)
+        if geofence_review:
+            reasons.append(REVIEW_REASON_GEOFENCE)
+        review_reason: str | None = ",".join(reasons) if reasons else None
+        return computed, original, review, review_reason
 
     async def _persist_scan(
         self,
@@ -370,6 +379,8 @@ class AttendanceService:
         cache_key: str | None,
         idempotency_key: str | None,
         face_match_score: float,
+        review_reason: str | None = None,
+        geofence_details: dict | None = None,
     ) -> ScanResponse:
         """Write the attendance row and build the response.
 
@@ -381,7 +392,16 @@ class AttendanceService:
         Session into the identity map.
         """
         row: Attendance = await self._write_attendance(
-            payload, student_id, db_session.id, scanned_at, status, review, original, face_match_score
+            payload,
+            student_id,
+            db_session.id,
+            scanned_at,
+            status,
+            review,
+            original,
+            face_match_score,
+            review_reason,
+            geofence_details,
         )
         await self._maybe_record_sync(
             db_session.id, student_id, row.id, scanned_at, now, idempotency_key
@@ -446,11 +466,17 @@ class AttendanceService:
             raise FaceMismatchException(score, threshold)
 
         geofence_review: bool = False
+        geofence_details: dict | None = None
         if not self._settings.benchmark_mode:
-            geofence_review = self._validate_geofence(db_session, payload.gps)
+            geofence_review, geofence_details = self._validate_geofence(
+                db_session, payload.gps
+            )
             self._validate_liveness(payload.liveness_evidence)
 
-        status, original, review = self._decide_scan_outcome(
+        if not geofence_review:
+            geofence_details = None
+
+        status, original, review, review_reason = self._decide_scan_outcome(
             db_session, scanned_at, score, geofence_review
         )
 
@@ -466,6 +492,8 @@ class AttendanceService:
             cache_key,
             idempotency_key,
             score,
+            review_reason,
+            geofence_details,
         )
 
     async def precheck_scan(
@@ -601,21 +629,22 @@ class AttendanceService:
         if student.face_embedding is None:
             raise FaceNotEnrolledException(student.id)
 
-    def _validate_geofence(self, session: Session, gps: GPSInput | None) -> bool:
+    def _validate_geofence(
+        self, session: Session, gps: GPSInput | None
+    ) -> tuple[bool, dict | None]:
         """Validate the geofence.
 
-        Returns ``True`` when the measured position is outside the radius but
-        within the reported GPS uncertainty (an ambiguous case that is routed
-        to the admin review queue instead of being rejected outright).
+        Returns ``(review, details)``. ``review`` is ``True`` when the measured
+        position is outside the radius but within the reported GPS uncertainty
+        (an ambiguous case routed to the admin review queue); ``details`` carries
+        the distance/radius/accuracy/classroom context for the review evidence.
         Raises ``OutsideGeofenceException`` when the position is clearly
         outside the radius even after accounting for uncertainty.
         """
         if not getattr(session, "geofence_enabled", True):
-            return False
-
+            return False, None
         if session.classroom_lat is None or session.classroom_lng is None:
-            return False
-
+            return False, None
         # A session that requires a geofence cannot be validated without a
         # position; treat a missing fix as "outside" rather than crashing.
         if gps is None:
@@ -633,12 +662,21 @@ class AttendanceService:
         # high-accuracy target.
         uncertainty: float = min(float(gps.accuracy), 50.0)
 
+        details: dict = {
+            "distance_meters": round(distance, 2),
+            "radius_meters": radius,
+            "accuracy_meters": float(gps.accuracy),
+            "uncertainty_meters": uncertainty,
+            "classroom_lat": session.classroom_lat,
+            "classroom_lng": session.classroom_lng,
+        }
+
         if distance <= radius:
-            return False
+            return False, details
         if distance - uncertainty > radius:
             raise OutsideGeofenceException(distance, radius)
         # Ambiguous: outside measured, but within reported uncertainty.
-        return True
+        return True, details
 
     def _validate_liveness(self, evidence: LivenessEvidence) -> None:
         if not _validate_liveness_evidence(evidence):
@@ -674,13 +712,26 @@ class AttendanceService:
         return ValidationStatus.REJECTED.value
 
     def _build_evidence(
-        self, evidence: LivenessEvidence, accuracy: float, review: bool
+        self,
+        evidence: LivenessEvidence,
+        accuracy: float,
+        review: bool,
+        review_reason: str | None = None,
+        geofence_details: dict | None = None,
     ) -> dict:
         data: dict = evidence.model_dump()
         data["accuracy"] = accuracy
 
         if review:
             data["review"] = True
+            if review_reason is not None:
+                data["review_reason"] = review_reason
+            if (
+                geofence_details is not None
+                and review_reason is not None
+                and "geofence_uncertainty" in review_reason
+            ):
+                data["geofence"] = geofence_details
 
         return data
 
@@ -694,6 +745,8 @@ class AttendanceService:
         review: bool,
         original_status: str | None = None,
         face_match_score: float = 0.0,
+        review_reason: str | None = None,
+        geofence_details: dict | None = None,
     ) -> Attendance:
         row = Attendance(
             student_id=student_id,
@@ -708,6 +761,8 @@ class AttendanceService:
                 payload.liveness_evidence,
                 (payload.gps.accuracy if payload.gps is not None else 0.0),
                 review,
+                review_reason,
+                geofence_details,
             ),
             face_match_score=Decimal(str(face_match_score)),
             scanned_via=payload.scanned_via.value,

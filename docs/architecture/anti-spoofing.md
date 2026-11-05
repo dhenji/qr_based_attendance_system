@@ -341,8 +341,12 @@ sequenceDiagram
 ## Review flow
 
 Flagged rows (`evidence.review == true`) listed via
-`/admin/attendance/liveness-review`. Resolve approve restores computed
-present/late; reject marks rejected. Audit row written.
+`/admin/attendance/liveness-review`. `evidence.review_reason` records why the
+row was flagged (`face_review_band` and/or `geofence_uncertainty`), and
+geofence-flagged rows carry an `evidence.geofence` context object
+(distance/radius/accuracy/uncertainty/classroom coords). The admin page
+confirms each decision in a dialog before issuing the PATCH. Resolve approve
+restores computed present/late; reject marks rejected. Audit row written.
 
 ## Enrollment and revoke
 
@@ -484,6 +488,12 @@ Fixed challenge order: blink, turn left, turn right.
 ## 10.8 Review band and resolution
 
 - Review rows are selected by `liveness_evidence["review"] == true`.
+- `liveness_evidence["review_reason"]` records why the row was flagged:
+  `face_review_band` and/or `geofence_uncertainty` (comma-joined when both).
+- `liveness_evidence["geofence"]` carries the geofence context for a
+  geofence-flagged row: `distance_meters`, `radius_meters`,
+  `accuracy_meters`, `uncertainty_meters`, `classroom_lat`,
+  `classroom_lng`.
 - Approve restores `validation_status` to `original_status`.
 - Reject sets `validation_status = rejected`.
 - Resolution removes the review flag, stores the reviewer note in evidence,

@@ -1,10 +1,11 @@
 // features/admin/liveness/service.ts
 // Admin liveness-review queue (flagged-scan human review).
 //
-// GET /admin/attendance/liveness-review?status&page&size lists records whose
-// face_match_score fell in the review band with validation_status pending;
-// PATCH /admin/attendance/liveness-review/{id}/resolve approves (restores
-// present/late) or rejects them. Real API by default; mocks only when
+// GET /admin/attendance/liveness-review?status&page&size lists flagged/borderline
+// scans (face match in the 0.65-0.70 review band, or a geofence position that
+// is outside the radius but within reported GPS uncertainty). Their provisional
+// status is already present/late; Approve confirms it, Reject overrides to
+// rejected. Real API by default; mocks only when
 // PUBLIC_MOCK_MODE=true.
 
 import { get, patch } from '$lib/api/client';

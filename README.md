@@ -57,7 +57,12 @@ is in the band reads as `present`/`late` everywhere (student history, professor
 active session, and admin queue alike). The same flag is set for
 geofence-ambiguous scans (measured position outside the radius but within the
 reported GPS uncertainty, capped at 50 m), which are accepted but routed to
-review instead of rejected outright.
+review instead of rejected outright. Flagged evidence now records
+`review_reason` (`face_review_band` and/or `geofence_uncertainty`) and, for
+geofence-flagged rows, a `geofence` context object (distance, radius,
+accuracy, uncertainty, classroom coordinates) so the admin review queue can
+show why a row was flagged. The admin review page confirms each decision in
+a dialog and is guarded against stale reloads.
 
 **Offline sync replays**: a queued scan submitted after its session has closed
 is still accepted when it carries an `X-Idempotency-Key` — the scan endpoint
