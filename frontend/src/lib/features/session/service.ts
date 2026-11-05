@@ -91,10 +91,21 @@ export const invalidateCourseCache = (): void => {
 };
 
 const ensureCourses = async (): Promise<void> => {
+	// A previous warm may have failed (or belonged to another account whose
+	// state was reset) — drop the flag so we retry instead of serving stale/
+	// empty course identity (which surfaces as generic "Offering N" names).
+	if (coursesReady && professorState.courses.length === 0 && professorState.coursesError) {
+		coursesReady = false;
+	}
 	if (coursesReady) return;
 	coursesReady = true;
 	if (professorState.courses.length === 0 && !professorState.coursesError) {
 		await initProfessorCourses();
+	}
+	// If warming failed, allow the next call to retry rather than pinning the
+	// empty state for the rest of the session.
+	if (professorState.coursesError) {
+		coursesReady = false;
 	}
 };
 
