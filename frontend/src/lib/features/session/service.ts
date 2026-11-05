@@ -69,6 +69,8 @@ export type SessionHistoryFilters = {
 	course?: string;
 	section?: string;
 	sessionType?: CourseType;
+	status?: 'scheduled' | 'active' | 'closed';
+	search?: string;
 	from?: string;
 	to?: string;
 	sortBy?: SessionHistorySortBy;
@@ -388,6 +390,8 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 		};
 		if (offeringIds[0] !== undefined) query.offering_id = String(offeringIds[0]);
 		if (params?.sessionType) query.session_type = params.sessionType;
+		if (params?.status) query.status = params.status;
+		if (params?.search) query.search = params.search;
 		if (params?.section !== undefined) query.section = params.section;
 		if (params?.from) query.date_from = params.from;
 		if (params?.to) query.date_to = params.to;
@@ -427,6 +431,8 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 			};
 			if (params?.section !== undefined) query.section = params.section;
 			if (params?.sessionType) query.session_type = params.sessionType;
+			if (params?.status) query.status = params.status;
+			if (params?.search) query.search = params.search;
 			if (params?.from) query.date_from = params.from;
 			if (params?.to) query.date_to = params.to;
 			const response = await get<Paginated<SessionHistoryItemResponse>>('sessionHistory', query);

@@ -1129,6 +1129,8 @@ class SessionService:
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[SessionHistoryItem]:
@@ -1146,6 +1148,7 @@ class SessionService:
             session_type=session_type,
             date_from=date_from,
             date_to=_end_of_day(date_to),
+            search=search,
         )
 
         rows: Sequence[Session] = (
@@ -1156,6 +1159,12 @@ class SessionService:
 
         for row in rows:
             if not await self._matches_section(row.offering_id, section):
+                continue
+
+            row_status = _session_status(
+                row.expires_at, row.scheduled_start_time, now
+            )
+            if status is not None and row_status != status:
                 continue
 
             items.append(await self._session_history_item(row, now))
@@ -1457,8 +1466,9 @@ class SessionService:
         *,
         offering_id: int | None,
         session_type: SessionType | str | None = None,
-        date_from: datetime | None,
-        date_to: datetime | None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
     ) -> Select[tuple[Session]]:
         """Sessions the professor opened, or is assigned to teach.
 
@@ -1480,8 +1490,19 @@ class SessionService:
                 else str(session_type)
             )
             stmt = stmt.where(Session.session_type == value)
+        # Date bounds arriving from the HTTP layer are naive (FastAPI parses a
+        # date-only query param to midnight without tzinfo). Coerce them to UTC
+        # so they compare correctly against the tz-aware `created_at` column
+        # instead of being treated as server-local wall time.
+        if date_from is not None and date_from.tzinfo is None:
+            date_from = date_from.replace(tzinfo=timezone.utc)
+        if date_to is not None and date_to.tzinfo is None:
+            date_to = date_to.replace(tzinfo=timezone.utc)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        if search:
+            needle = f"%{search.strip()}%"
+            stmt = stmt.where(Session.session_code.ilike(needle))
 
         return stmt
 
@@ -1531,7 +1552,7 @@ class SessionService:
         with it, or a professor loses sight of their own past sessions once an
         assignment's `effective_to` passes.
         """
-        today: date = date.today()
+        today: date = datetime.now(timezone.utc).date()
 
         return (
             select(CourseProfessor.offering_id)
@@ -1556,7 +1577,7 @@ class SessionService:
         course". The admin remove path (`course/service.py`) keeps its 404
         (nothing to remove), which answers a different question.
         """
-        today: date = date.today()
+        today: date = datetime.now(timezone.utc).date()
         row: CourseProfessor | None = (
             await self._session.scalars(
                 select(CourseProfessor)

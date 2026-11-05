@@ -1290,7 +1290,7 @@ Session history with filters.
 
 |                  |                                                            |
 | ---------------- | ---------------------------------------------------------- |
-| **Query**        | `?offering_id?&section?&session_type=lecture\|lab?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Query**        | `?offering_id?&section?&session_type=lecture\|lab?&status=scheduled\|active\|closed?&search?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
 | **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, present_count, late_count, absent_count, compliance_rate, participation_rate }], ... }` |
 | **Notes**        | Per-session `present_count`/`late_count`/`absent_count` + both rates feed the 3.5 columns and the compliance/participation tooltip (D36). |
 
