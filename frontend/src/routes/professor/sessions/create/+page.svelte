@@ -293,7 +293,39 @@ let selectedOfferingId = $state<number | null>(null);
 		return durationMinutes > effectiveMaxDuration;
 	});
 
-	const durationInvalid = $derived(durationMinutes <= 0 || durationExceedsLimit);
+	// An un-overridden open that starts late must still fit inside the
+	// class: the scan window begins at the later of the class start and
+	// "now", so a duration that runs past the scheduled end is rejected
+	// rather than silently capped.
+	const nonOverrideExceedsSchedule = $derived.by(() => {
+		if (scheduleOverride) return false;
+		if (plan === null || plan.scheduled_start === null || plan.scheduled_end === null)
+			return false;
+		const window = startWindow;
+		if (window === null || window.current_time === null) return false;
+		const base = Math.max(
+			new Date(plan.scheduled_start).getTime(),
+			new Date(window.current_time).getTime()
+		);
+		const end = base + durationMinutes * 60 * 1000;
+		return end > new Date(plan.scheduled_end).getTime();
+	});
+
+	const nonOverrideRemainingMinutes = $derived.by(() => {
+		if (plan === null || plan.scheduled_start === null || plan.scheduled_end === null)
+			return 0;
+		const window = startWindow;
+		if (window === null || window.current_time === null) return 0;
+		const base = Math.max(
+			new Date(plan.scheduled_start).getTime(),
+			new Date(window.current_time).getTime()
+		);
+		return Math.max(0, Math.round((new Date(plan.scheduled_end).getTime() - base) / 60000));
+	});
+
+	const durationInvalid = $derived(
+		durationMinutes <= 0 || durationExceedsLimit || nonOverrideExceedsSchedule
+	);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
 	// The scheduled window the session will carry: the plan's next
@@ -1161,8 +1193,13 @@ let selectedOfferingId = $state<number | null>(null);
 				{/if}
 				{#if durationExceedsLimit}
 					<p class="field-error">
-						Duration exceeds the available meeting window
+						Duration exceeds the remaining scheduled time
 						{#if effectiveMaxDuration !== null}({effectiveMaxDuration} min){/if}.
+					</p>
+				{:else if nonOverrideExceedsSchedule}
+					<p class="field-error">
+						Duration exceeds the remaining scheduled time
+						({nonOverrideRemainingMinutes} min).
 					</p>
 				{/if}
 				{#if inherited !== null}

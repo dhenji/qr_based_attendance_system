@@ -269,11 +269,27 @@ class SessionService:
         )
         self._check_windows(windows, duration)
 
-        # Duration must fit the meeting window it belongs to. A session
-        # cannot run longer than the class it is opened against.
+        # D94: the class has to be running before we even consider the
+        # duration — an open outside the window is refused with its own
+        # error, ahead of any duration check.
         if payload.session_date is None and payload.start_time is None:
-            if plan.has_meeting and duration > plan.meeting_minutes:
-                raise InvalidSessionTimeException()
+            self._require_within_start_window(plan=plan, now=moment)
+
+        # Duration must fit the meeting window it belongs to. A session
+        # cannot run longer than the class it is opened against. For an
+        # un-overridden open the scan window starts at the later of the
+        # class start and "now", so the duration must fit what is left of
+        # the class from that point — not just the whole meeting.
+        if payload.session_date is None and payload.start_time is None:
+            if plan.has_meeting and plan.scheduled_end is not None:
+                base = (
+                    plan.scheduled_start
+                    if plan.scheduled_start is not None
+                    and plan.scheduled_start > moment
+                    else moment
+                )
+                if base + timedelta(minutes=duration) > plan.scheduled_end:
+                    raise InvalidSessionTimeException()
         elif plan.has_meeting and plan.end_time is not None:
             zone = resolve_timezone(
                 self._settings.institution_timezone, label="institution timezone"
@@ -358,12 +374,6 @@ class SessionService:
             classroom_lat is None or classroom_lng is None
         ):
             raise LabCoordinatesRequiredException()
-
-        # D94: the class has to be running. An override is the professor's
-        # explicit way past the window, so the check applies only when the
-        # payload carries none.
-        if payload.session_date is None and payload.start_time is None:
-            self._require_within_start_window(plan=plan, now=moment)
 
         scheduled_start, scheduled_end, overridden = self._apply_override(
             plan=plan,
