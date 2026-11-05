@@ -31,6 +31,7 @@ import {
 } from '$lib/features/auth/tokens';
 import { resetStudentState } from '$lib/features/student/store.svelte';
 import { resetProfessorState } from '$lib/features/professor/store.svelte';
+import { invalidateCourseCache } from '$lib/features/session/service';
 import { resetAdminRosterStates } from '$lib/features/admin/store.svelte';
 import { resetAdminProgramsStates } from '$lib/features/admin/programs/store.svelte';
 import { resetAdminCoursesStates } from '$lib/features/admin/courses/store.svelte';
@@ -168,6 +169,9 @@ const establishSession = async (tokens: TokenResponse): Promise<User> => {
 	authState.status = 'authenticated';
 	authState.mustChangePassword = tokens.must_change_password || current.must_change_password;
 	authState.error = null;
+	// Drop any course join warmed for a previous account so the new session
+	// re-warms from GET /professor/courses instead of serving stale identity.
+	invalidateCourseCache();
 	// Face-embedding pull (D29): background, never blocks the sign-in.
 	if (current.role === 'student') {
 		void refreshFaceCache(current.email, current.face_enrolled ?? false);
@@ -208,6 +212,7 @@ export const restoreSession = (): Promise<User | null> => {
 			authState.user = toUser(current);
 			authState.status = 'authenticated';
 			authState.mustChangePassword = current.must_change_password;
+			invalidateCourseCache();
 			if (current.role === 'student') {
 				void refreshFaceCache(current.email, current.face_enrolled ?? false);
 			}
@@ -438,6 +443,7 @@ export const doLogout = async (): Promise<void> => {
 	// device-local, not session data.
 	resetStudentState();
 	resetProfessorState();
+	invalidateCourseCache();
 	resetAdminRosterStates();
 	resetAdminProgramsStates();
 	resetAdminCoursesStates();

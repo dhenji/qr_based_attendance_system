@@ -317,3 +317,11 @@ Coverage is reported to `frontend/coverage/` (gitignored) and uploaded as the
 | `@testing-library/jest-dom` | DOM matchers for Vitest |
 | `jsdom`                    | DOM environment for Vitest |
 | `@vitest/coverage-v8`      | V8 coverage provider |
+
+## Module-level readiness flags
+
+Feature services (e.g. `session/service.ts`) may cache warmed data behind a
+module-level flag (`coursesReady`). These flags must be invalidated on
+login/logout/account-switch together with the runes store resets, otherwise
+stale or empty identity leaks between accounts. See
+`invalidateCourseCache()` and its callers in `features/auth/store.svelte.ts`.
