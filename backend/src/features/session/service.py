@@ -91,6 +91,7 @@ _STATUS_COUNT_FIELDS: dict[str, str] = {
     ValidationStatus.PENDING.value: "pending",
     ValidationStatus.ABSENT.value: "absent",
     ValidationStatus.EXCUSED.value: "excused",
+    ValidationStatus.REJECTED.value: "rejected",
 }
 
 
@@ -144,6 +145,12 @@ def _geofence_enabled_of(row: Session) -> bool:
     """Geofence flag, defaulting to True for hand-rolled fakes."""
     value = getattr(row, "geofence_enabled", True)
     return bool(value) if value is not None else True
+
+
+def _schedule_overridden_of(row: Session) -> bool:
+    """Override flag, defaulting to False for hand-rolled fakes."""
+    value = getattr(row, "schedule_overridden", False)
+    return bool(value) if value is not None else False
 
 
 def _session_status(
@@ -769,6 +776,18 @@ class SessionService:
             if offering is not None
             else None
         )
+        course: Course | None = (
+            await self._session.get(Course, offering.course_id)
+            if offering is not None
+            else None
+        )
+
+        compliance, participation = attendance_rates(
+            present=counts.present,
+            late=counts.late,
+            excused=counts.excused,
+            enrolled=enrolled_count,
+        )
 
         return SessionActiveResponse(
             id=row.id,
@@ -783,10 +802,28 @@ class SessionService:
             expires_at=row.expires_at,
             program_code=program.code if program is not None else None,
             year_level_label=year_level.label if year_level is not None else None,
+            academic_year=offering.academic_year if offering is not None else None,
+            semester=offering.semester if offering is not None else None,
+            course_code=course.course_code if course is not None else None,
+            course_name=course.course_name if course is not None else None,
             status=status,
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),
             pending_sync_count=await self._pending_sync_count(session_id),
+            duration_minutes=getattr(row, "duration_minutes", 0) or 0,
+            present_window_minutes=getattr(row, "present_window_minutes", 0) or 0,
+            late_window_minutes=getattr(row, "late_window_minutes", 0) or 0,
+            classroom_name=getattr(row, "classroom_name", None),
+            classroom_lat=getattr(row, "classroom_lat", None),
+            classroom_lng=getattr(row, "classroom_lng", None),
+            classroom_radius_meters=getattr(row, "classroom_radius_meters", 0) or 0,
+            schedule_overridden=_schedule_overridden_of(row),
+            actual_start_time=getattr(row, "actual_start_time", None),
+            original_scheduled_start_time=getattr(row, "original_scheduled_start_time", None),
+            override_reason=getattr(row, "override_reason", None),
+            created_at=getattr(row, "created_at", None),
+            compliance_rate=compliance,
+            participation_rate=participation,
             students=self._active_student_items(students, records, status),
             counts=counts,
         )

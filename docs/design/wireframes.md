@@ -952,6 +952,14 @@ duration_minutes, scheduled_end_time)`.
 > from `expires_at` (falls back to scheduled end time) instead of a
 > running countdown, the [Close] button is disabled, and the skeleton
 > gate no longer blocks rendering on `classRemainingSeconds`.
+>
+> The page now also exposes four collapsible `<details>` panels —
+> **General session information**, **Schedule and time**, **Location**,
+> **Attendance overview** — surfacing course/program/year/academic-year/
+> semester/type/status/duration/windows, schedule & override provenance,
+> classroom/geofence details, a `rejected` count, and compliance/
+> participation rates. Counts include `rejected`.
+
 
 ### 3.4 Professor Attendance List — `/professor/attendance`
 
