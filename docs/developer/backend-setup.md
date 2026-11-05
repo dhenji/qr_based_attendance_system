@@ -87,7 +87,7 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-The suite holds **1055 cases across 82 files** (282 sync + 647 async test functions, plus parametrized expansions). `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
+The suite holds **1060 cases across 82 files** (282 sync + 647 async test functions, plus parametrized expansions). `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
 
 Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead. Create a dedicated test database first — the Compose Postgres only creates `attendance_sys`, and the suite runs `create_all`/`drop_all` per test, so never point `TEST_DATABASE_URL` at `attendance_sys` itself:
 

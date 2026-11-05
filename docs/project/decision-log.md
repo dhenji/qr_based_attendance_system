@@ -1574,7 +1574,7 @@
   threshold, no frontend test runner, no linters.
 - **Date:** 2026-10-05
 - **Status:** Accepted
-- **Forward note (2026-10-31):** the counts above are a historical snapshot. The suite is now 1055 cases across 82 test files and the migration chain has 25 revisions ending at `b9c0d1e2f3a4` (session start-window columns, D94).- **Context:** The suite was strong and entirely unenforced — 719 cases across 49
+- **Forward note (2026-10-31):** the counts above are a historical snapshot. The suite is now 1060 cases across 82 test files and the migration chain has 25 revisions ending at `b9c0d1e2f3a4` (session start-window columns, D94).- **Context:** The suite was strong and entirely unenforced — 719 cases across 49
   files, green on SQLite and Postgres, with no `.github/`, no `Makefile`, no
   `tox.ini`, and no `pyproject.toml`. Every count in the docs was maintained by
   hand. The consequential gap was migration drift: `conftest.py` builds the test

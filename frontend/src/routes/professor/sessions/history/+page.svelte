@@ -35,8 +35,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	let course = $state('All');
 	let section = $state('All');
 	let sessionType = $state<'All' | 'lecture' | 'lab'>('All');
-	let from = $state(initialRange.from);
-	let to = $state(initialRange.to);
+	let statusFilter = $state<'All' | 'scheduled' | 'active' | 'closed'>('All');
+	let searchInput = $state('');
+	let searchQuery = $state('');
+	let from = $state('');
+	let to = $state('');
 	let sortBy = $state<SessionHistorySortBy>('date');
 	let sortDir = $state<SessionHistorySortDir>('desc');
 	let currentPage = $state(1);
@@ -90,10 +93,21 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	});
 
 	$effect(() => {
+		const value = searchInput;
+		const timer = setTimeout(() => {
+			searchQuery = value;
+			currentPage = 1;
+		}, 300);
+		return () => clearTimeout(timer);
+	});
+
+	$effect(() => {
 		const query = {
 			course: course === 'All' ? undefined : course,
 			section: section === 'All' ? undefined : section,
 			sessionType: sessionType === 'All' ? undefined : sessionType,
+			status: statusFilter === 'All' ? undefined : statusFilter,
+			search: searchQuery || undefined,
 			from: from || undefined,
 			to: to || undefined,
 			sortBy,
@@ -196,11 +210,40 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		course = 'All';
 		section = 'All';
 		sessionType = 'All';
-		from = initialRange.from;
-		to = initialRange.to;
+		statusFilter = 'All';
+		searchInput = '';
+		searchQuery = '';
+		from = '';
+		to = '';
 		currentPage = 1;
 		exportWarning = null;
 		exportProgress = null;
+	};
+
+	const setQuickRange = (kind: 'today' | 'week' | 'month' | 'all') => {
+		const now = new Date();
+		const key = (d: Date) =>
+			`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+		if (kind === 'all') {
+			from = '';
+			to = '';
+		} else if (kind === 'today') {
+			from = key(now);
+			to = key(now);
+		} else if (kind === 'week') {
+			const start = new Date(now);
+			start.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+			const end = new Date(start);
+			end.setDate(start.getDate() + 6);
+			from = key(start);
+			to = key(end);
+		} else if (kind === 'month') {
+			const start = new Date(now.getFullYear(), now.getMonth(), 1);
+			const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+			from = key(start);
+			to = key(end);
+		}
+		currentPage = 1;
 	};
 
 	const viewDetail = (id: number) => void goto(professorActiveSession(id));
@@ -233,6 +276,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					course: course === 'All' ? undefined : course,
 					section: section === 'All' ? undefined : section,
 					sessionType: sessionType === 'All' ? undefined : sessionType,
+					status: statusFilter === 'All' ? undefined : statusFilter,
+					search: searchQuery || undefined,
 					from: from || undefined,
 					to: to || undefined,
 					sortBy,
@@ -322,6 +367,16 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	<section class="card filters no-print" aria-label="History filters">
 		<div class="filter-grid">
 			<div class="field">
+				<label class="form-label" for="search">Search</label>
+				<input
+					id="search"
+					class="form-input"
+					type="search"
+					placeholder="Session code…"
+					bind:value={searchInput}
+				/>
+			</div>
+			<div class="field">
 				<label class="form-label" for="course">Course</label>
 				<select
 					id="course"
@@ -363,6 +418,20 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				</select>
 			</div>
 			<div class="field">
+				<label class="form-label" for="status">Status</label>
+				<select
+					id="status"
+					class="form-input"
+					bind:value={statusFilter}
+					onchange={() => (currentPage = 1)}
+				>
+					<option value="All">All statuses</option>
+					<option value="scheduled">Scheduled</option>
+					<option value="active">Active</option>
+					<option value="closed">Closed</option>
+				</select>
+			</div>
+			<div class="field">
 				<label class="form-label" for="from">From</label>
 				<input
 					id="from"
@@ -384,6 +453,12 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			</div>
 		</div>
 		<div class="filter-actions">
+			<div class="quick-filters">
+				<button class="btn btn-ghost" type="button" onclick={() => setQuickRange('today')}>Today</button>
+				<button class="btn btn-ghost" type="button" onclick={() => setQuickRange('week')}>This week</button>
+				<button class="btn btn-ghost" type="button" onclick={() => setQuickRange('month')}>This month</button>
+				<button class="btn btn-ghost" type="button" onclick={() => setQuickRange('all')}>All time</button>
+			</div>
 			<button class="btn btn-ghost" type="button" onclick={resetFilters}>Reset filters</button>
 		</div>
 	</section>
@@ -439,6 +514,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 							</th>
 						<th scope="col">Section</th>
 						<th scope="col">Type</th>
+						<th scope="col">Status</th>
 						<th scope="col">P / L / A</th>
 							<th scope="col" aria-sort={ariaSort('rate')}>
 								<button
@@ -468,6 +544,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 								<td>
 									<span class="type-badge" class:is-lab={row.session_type === 'lab'}>
 										{row.session_type === 'lab' ? 'Lab' : 'Lecture'}
+									</span>
+								</td>
+								<td>
+									<span class="status-badge" class:is-active={row.status === 'active'} class:is-closed={row.status === 'closed'} class:is-scheduled={row.status === 'scheduled'}>
+										{row.status}
 									</span>
 								</td>
 								<td class="numeric">{plaText(row)}</td>
@@ -797,6 +878,42 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.type-badge.is-lab {
 		color: var(--warning-text);
 		background: var(--warning-bg);
+	}
+
+	.status-badge {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: capitalize;
+		white-space: nowrap;
+		color: var(--text-muted);
+		background: var(--bg-page);
+		border: 1px solid var(--border);
+	}
+
+	.status-badge.is-active {
+		color: var(--success);
+		background: var(--success-bg);
+		border-color: transparent;
+	}
+
+	.status-badge.is-closed {
+		color: var(--text-muted);
+		background: var(--bg-page);
+	}
+
+	.status-badge.is-scheduled {
+		color: var(--brand);
+		background: var(--accent-bg, var(--bg-hover));
+		border-color: transparent;
+	}
+
+	.quick-filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
 	}
 
 	/* D36: compliance by default; the title/aria-label reveals participation. */

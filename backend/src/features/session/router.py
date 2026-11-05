@@ -104,6 +104,8 @@ async def session_history(
     offering_id: int | None = Query(default=None, gt=0),
     section: str | None = Query(default=None),
     session_type: SessionType | None = Query(default=None),
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     sort_by: str | None = Query(default=None),
@@ -122,6 +124,8 @@ async def session_history(
         date_to=date_to,
         sort_by=sort_by,
         sort_dir=sort_dir,
+        status=status,
+        search=search,
         page=page,
         size=size,
     )
