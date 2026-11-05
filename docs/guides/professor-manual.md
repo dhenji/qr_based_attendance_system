@@ -199,7 +199,8 @@ When `session.status` is `closed` (manually closed via **[Close]** or auto-expir
 - The **[Close]** button is disabled.
 - The page still renders fully (attendance review remains available).
 
-Click **[Close]** in the header to formally end the session. This is optional — sessions auto-expire at `expires_at`.
+- The active session page now exposes four collapsible detail panels (General session info, Schedule and time, Location, Attendance overview) with schedule-override provenance, classroom/geofence details, a `rejected` count, and compliance/participation rates.
+
 
 ---
 

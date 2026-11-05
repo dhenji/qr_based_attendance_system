@@ -585,12 +585,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		{#if session}
 			<div class="title">
 				<h1>{session.status === 'scheduled' ? 'Scheduled' : session.status === 'closed' ? 'Closed' : 'Active'}: {session.offeringCode} — {session.offeringName}</h1>
-				<p class="muted">
-					Program: {session.offeringProgram ?? '—'} · Year Level: {session.offeringYearLevel ?? '—'} ·
-					<span class="type-badge" class:is-lab={session.sessionType === 'lab'}>
-						{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}
-					</span>
-				</p>
 			</div>
 			<button
 				class="btn btn-danger"
@@ -673,6 +667,211 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				</div>
 			</div>
 		</section>
+
+		<details class="card details-card" aria-label="General session information">
+			<summary class="details-summary">
+				<h2 class="section-title">General session information</h2>
+				<span class="details-meta">
+					<span class="details-hint">Click to expand</span>
+					<span class="details-arrow" aria-hidden="true">▸</span>
+				</span>
+			</summary>
+			<dl class="detail-grid">
+				<div>
+					<dt>Course</dt>
+					<dd>{session.offeringCode} — {session.offeringName}</dd>
+				</div>
+				<div>
+					<dt>Program</dt>
+					<dd>{session.offeringProgram ?? '—'}</dd>
+				</div>
+				<div>
+					<dt>Year level</dt>
+					<dd>{session.offeringYearLevel ?? '—'}</dd>
+				</div>
+				<div>
+					<dt>Academic year</dt>
+					<dd>{session.academicYear ?? '—'}</dd>
+				</div>
+				<div>
+					<dt>Semester</dt>
+					<dd>{session.semester ?? '—'}</dd>
+				</div>
+				<div>
+					<dt>Session type</dt>
+					<dd>{session.sessionType === 'lab' ? 'Laboratory' : 'Lecture'}</dd>
+				</div>
+				<div>
+					<dt>Status</dt>
+					<dd class="status status-{session.status}">{session.status}</dd>
+				</div>
+				<div>
+					<dt>Duration</dt>
+					<dd>{session.durationMinutes ?? 0} min</dd>
+				</div>
+				<div>
+					<dt>Present window</dt>
+					<dd>{session.presentWindowMinutes ?? 0} min</dd>
+				</div>
+				<div>
+					<dt>Late window</dt>
+					<dd>{session.lateWindowMinutes ?? 0} min</dd>
+				</div>
+			</dl>
+		</details>
+
+		<details class="card details-card" aria-label="Schedule and time information">
+			<summary class="details-summary">
+				<h2 class="section-title">Schedule and time</h2>
+				<span class="details-meta">
+					<span class="details-hint">Click to expand</span>
+					<span class="details-arrow" aria-hidden="true">▸</span>
+				</span>
+			</summary>
+			<dl class="detail-grid">
+				<div>
+					<dt>Scheduled start</dt>
+					<dd>{formatDateTime(new Date(session.scheduledStartTime).getTime())}</dd>
+				</div>
+				<div>
+					<dt>Scheduled end</dt>
+					<dd>{formatDateTime(new Date(session.scheduledEndTime).getTime())}</dd>
+				</div>
+				<div>
+					<dt>Actual opened at</dt>
+					<dd>{session.actualStartTime ? formatDateTime(new Date(session.actualStartTime).getTime()) : '—'}</dd>
+				</div>
+				{#if session.scheduleOverridden}
+					<div>
+						<dt>Original scheduled start</dt>
+						<dd>{session.originalScheduledStartTime ? formatDateTime(new Date(session.originalScheduledStartTime).getTime()) : '—'}</dd>
+					</div>
+					<div>
+						<dt>Override reason</dt>
+						<dd>{session.overrideReason ?? '—'}</dd>
+					</div>
+				{:else}
+					<div>
+						<dt>Override</dt>
+						<dd>No</dd>
+					</div>
+				{/if}
+				<div>
+					<dt>Scan window expires</dt>
+					<dd>{session.expiresAt ? formatDateTime(new Date(session.expiresAt).getTime()) : '—'}</dd>
+				</div>
+				<div>
+					<dt>Remaining to scheduled end</dt>
+					<dd>{classRemainingSeconds !== null ? formatCountdown(classRemainingSeconds) : '—'}</dd>
+				</div>
+				<div>
+					<dt>Actual end (if closed)</dt>
+					<dd>{isClosed && session.expiresAt ? formatDateTime(new Date(session.expiresAt).getTime()) : '—'}</dd>
+				</div>
+				<div>
+					<dt>Actual duration (if closed)</dt>
+					<dd>
+						{isClosed && session.actualStartTime && session.expiresAt
+							? formatCountdown(Math.max(0, Math.floor((new Date(session.expiresAt).getTime() - new Date(session.actualStartTime).getTime()) / 1000)))
+							: '—'}
+					</dd>
+				</div>
+			</dl>
+		</details>
+
+		<details class="card details-card" aria-label="Session location">
+			<summary class="details-summary">
+				<h2 class="section-title">Location</h2>
+				<span class="details-meta">
+					<span class="details-hint">Click to expand</span>
+					<span class="details-arrow" aria-hidden="true">▸</span>
+				</span>
+			</summary>
+			<dl class="detail-grid">
+				<div>
+					<dt>Classroom</dt>
+					<dd>{session.classroomName ?? '—'}</dd>
+				</div>
+				{#if session.classroomName}
+					<div>
+						<dt>Latitude</dt>
+						<dd>{session.classroomLat ?? '—'}</dd>
+					</div>
+					<div>
+						<dt>Longitude</dt>
+						<dd>{session.classroomLng ?? '—'}</dd>
+					</div>
+				{/if}
+				<div>
+					<dt>Geofence radius</dt>
+					<dd>{session.classroomRadiusMeters ?? 0} m</dd>
+				</div>
+				<div>
+					<dt>Remote / online</dt>
+					<dd>{session.isRemote ? 'Yes' : 'No'}</dd>
+				</div>
+				<div>
+					<dt>Geofence enforced</dt>
+					<dd>{session.geofenceEnabled ? 'Yes' : 'No'}</dd>
+				</div>
+			</dl>
+		</details>
+
+		<details class="card details-card" aria-label="Attendance overview">
+			<summary class="details-summary">
+				<h2 class="section-title">Attendance overview</h2>
+				<span class="details-meta">
+					<span class="details-hint">Click to expand</span>
+					<span class="details-arrow" aria-hidden="true">▸</span>
+				</span>
+			</summary>
+			<dl class="detail-grid">
+				<div>
+					<dt>Total enrolled</dt>
+					<dd>{session.enrolledCount}</dd>
+				</div>
+				<div>
+					<dt>Scanned</dt>
+					<dd>{scanned}</dd>
+				</div>
+				<div>
+					<dt>Remaining</dt>
+					<dd>{session.remaining}</dd>
+				</div>
+				<div>
+					<dt>Present</dt>
+					<dd>{session.counts.present}</dd>
+				</div>
+				<div>
+					<dt>Late</dt>
+					<dd>{session.counts.late}</dd>
+				</div>
+				<div>
+					<dt>Excused</dt>
+					<dd>{session.counts.excused}</dd>
+				</div>
+				<div>
+					<dt>Pending</dt>
+					<dd>{session.counts.pending}</dd>
+				</div>
+				<div>
+					<dt>Absent</dt>
+					<dd>{session.counts.absent}</dd>
+				</div>
+				<div>
+					<dt>Rejected</dt>
+					<dd>{session.counts.rejected ?? 0}</dd>
+				</div>
+				<div>
+					<dt>Compliance rate</dt>
+					<dd>{((session.complianceRate ?? 0) * 100).toFixed(2)}%</dd>
+				</div>
+				<div>
+					<dt>Participation rate</dt>
+					<dd>{((session.participationRate ?? 0) * 100).toFixed(2)}%</dd>
+				</div>
+			</dl>
+		</details>
 
 		<section class="tiles" aria-label="Session totals">
 			<article class="tile">
@@ -1157,6 +1356,104 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.timer-sub {
 		font-size: 0.8125rem;
 		color: var(--text-muted);
+	}
+
+	.details-card {
+		margin-bottom: 0.5rem;
+	}
+
+	.details-card > summary {
+		list-style: none;
+		cursor: pointer;
+		user-select: none;
+		border-radius: 8px;
+		padding: 0.25rem 0.5rem;
+		margin: -0.25rem -0.5rem;
+		transition: background-color 0.15s ease;
+	}
+
+	.details-card > summary:hover {
+		background: var(--bg-hover);
+	}
+
+	.details-card > summary:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.details-hint,
+	.details-arrow {
+		transition: color 0.15s ease;
+	}
+
+	.details-card > summary:hover .details-hint,
+	.details-card > summary:hover .details-arrow {
+		color: var(--text-strong);
+	}
+
+	.details-card > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.details-summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.details-summary h2 {
+		margin: 0;
+	}
+
+	.details-meta {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.details-hint {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		white-space: nowrap;
+	}
+
+	.details-arrow {
+		color: var(--text-muted);
+		transition: transform 0.15s ease;
+	}
+
+	.details-card[open] .details-arrow {
+		transform: rotate(90deg);
+	}
+
+	.detail-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem 1.5rem;
+		margin: 1rem 0 0;
+	}
+
+	.detail-grid div {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.detail-grid dt {
+		font-size: 0.75rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+	}
+
+	.detail-grid dd {
+		margin: 0;
+		color: var(--text-strong);
+		font-size: 0.9375rem;
+		word-break: break-word;
 	}
 
 	.tiles {
@@ -1705,7 +2002,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		justify-content: center;
 	}
 
-	.tiles {
+	.tiles,
+	.detail-grid {
 			grid-template-columns: 1fr;
 		}
 
