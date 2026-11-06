@@ -93,6 +93,8 @@ _session_).
 
 > **Session QR:** the professor's live page now displays a scannable QR code beside the session code (and offers a join link). Scanning it (camera or image upload) or opening the link auto-populates and verifies the session code, including across login redirects.
 
+> **Session details:** once the code verifies, the Session Confirmation screen lists the course, session type, scheduled start time, session expiry, class end, and location before you confirm attendance. The displayed start time reflects the professor's configured (and any overridden) class start.
+
 ### Stage 2: Confirm Student ID
 
 [FIG: Student ID field prefilled from the profile + Check button]
