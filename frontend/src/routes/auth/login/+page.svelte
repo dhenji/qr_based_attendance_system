@@ -553,16 +553,6 @@ let error = $state('');
 		box-shadow: var(--shadow-sm);
 	}
 
-	.card::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 16px;
-		right: 16px;
-		height: 3px;
-		border-radius: 0 0 3px 3px;
-		background: linear-gradient(90deg, var(--brand), var(--accent) 55%, transparent 90%);
-	}
 
 	.error-banner.redirecting {
 		font-size: 0.9rem;
