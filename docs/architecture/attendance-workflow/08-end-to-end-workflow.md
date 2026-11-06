@@ -35,8 +35,11 @@ sync row only when `(now - scanned_at) > 60 s`.
 ## Review
 
 Flagged rows (`evidence.review == true`) listed via `/admin/attendance/liveness-review`.
-Resolve approve restores computed present/late; reject marks rejected. Audit row
-written (`attendance/service.py:1212`).
+`evidence.review_reason` records why the row was flagged (`face_review_band`
+and/or `geofence_uncertainty`), and geofence-flagged rows carry an
+`evidence.geofence` context object. Resolve approve restores computed
+present/late; reject marks rejected. Audit row written
+(`attendance/service.py:1212`).
 
 ## History
 

@@ -103,7 +103,7 @@ class FaceEnrollmentService:
 
             result = assess_image_bytes(content)
             if not result.ok:
-                detail = f"{name}: {result.message or result.code}"
+                detail = f"{name} photo: {result.message or result.code}"
                 code = result.code
                 if code == "invalid_image":
                     raise InvalidImageException(detail)
@@ -126,8 +126,6 @@ class FaceEnrollmentService:
                 algorithm=preferred_algorithm,
             )
         except FaceEmbeddingGenerationError as e:
-            from features.face_enrollment.exceptions import NoFaceDetectedException
-
             raise NoFaceDetectedException(str(e)) from e
 
         student.face_embedding = embedding_blob

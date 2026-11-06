@@ -190,7 +190,9 @@ async def test_the_late_open_grace_admits_a_class_still_running(
 
     read = await service.create_session(
         professor_id=stack["professor"].id,
-        payload=SessionCreate(offering_id=stack["offering"].id),
+        payload=SessionCreate(
+            offering_id=stack["offering"].id, duration_minutes=15
+        ),
         now=SESSION_NOW + timedelta(minutes=40),
     )
 
@@ -212,7 +214,7 @@ async def test_a_zero_late_grace_row_is_honoured(
         await service.create_session(
             professor_id=stack["professor"].id,
             payload=SessionCreate(offering_id=stack["offering"].id),
-            now=SESSION_NOW + timedelta(minutes=40),
+            now=SESSION_NOW + timedelta(minutes=70),
         )
 
 
@@ -253,7 +255,7 @@ async def test_the_window_follows_the_institution_timezone(
     read = await service.create_session(
         professor_id=stack["professor"].id,
         payload=SessionCreate(offering_id=stack["offering"].id),
-        now=datetime(2026, 10, 21, 0, 30, tzinfo=timezone.utc),
+        now=datetime(2026, 10, 21, 0, 0, tzinfo=timezone.utc),
     )
 
     assert read.id

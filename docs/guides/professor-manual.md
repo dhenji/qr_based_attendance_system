@@ -199,7 +199,8 @@ When `session.status` is `closed` (manually closed via **[Close]** or auto-expir
 - The **[Close]** button is disabled.
 - The page still renders fully (attendance review remains available).
 
-Click **[Close]** in the header to formally end the session. This is optional — sessions auto-expire at `expires_at`.
+- The active session page now exposes four collapsible detail panels (General session info, Schedule and time, Location, Attendance overview) with schedule-override provenance, classroom/geofence details, a `rejected` count, and compliance/participation rates.
+
 
 ---
 
@@ -234,7 +235,16 @@ Click **[📥 Export]** → [Export screen](#8-export) with current filters pre-
 
 ### 6.1 Session History — `/professor/sessions/history`
 
-[FIG: Session History table with filters (Course, Section, Date Range), columns (Date, Code, Section, Present/Late/Absent breakdown, Rate), clickable rows for detail, Export CSV]
+[FIG: Session History table with filters (Search, Course, Section, Type, Status, Date Range with quick Today/This week/This month/All time), columns (Date, Code, Section, Type, Status, Present/Late/Absent breakdown, Rate), clickable rows for detail, Export CSV]
+
+**Filters**:
+
+- **Search**: by session code (debounced).
+- **Status**: All / Scheduled / Active / Closed.
+- **Quick date ranges**: Today, This week, This month, All time (clears the date bounds).
+- Date bounds are interpreted in UTC, so sessions opened "today" in UTC are never hidden by a browser-local default window; leaving both dates empty shows all sessions.
+
+**Status badge**: each row shows its derived lifecycle status (`scheduled`/`active`/`closed`).
 
 **Rate Column**:
 

@@ -193,10 +193,11 @@
 
 	const FACE_ERROR_MESSAGES: Record<string, string> = {
 		invalid_image: 'One of the photos could not be read. Use clear JPG, PNG, or WebP images.',
-		no_face_detected: 'No face was detected in one of the photos. Retake with the face centered.',
-		multiple_faces: 'More than one face was detected. Photos must show a single face.',
-		quality_too_low: 'One of the photos failed the quality check (lighting, size, sharpness, eyes open).',
+		no_face_detected: 'No face was detected in one of the photos (front/left/right). Retake with the face centered and well lit.',
+		multiple_faces: 'More than one face was detected. Each photo must show a single face.',
+		quality_too_low: 'One of the photos failed the quality check (lighting, size, sharpness, eyes open). Retake that photo.',
 		student_not_found: 'Student record not found. Refresh the list and try again.',
+		internal_error: 'The server hit an unexpected error while enrolling. Check the captured photo and try again, or contact support.',
 	};
 
 	const openFace = (row: AdminStudent) => {
@@ -288,12 +289,15 @@
 			await refreshAdminStudents();
 			notifyEntityChanged('students');
 		} catch (e: unknown) {
-			if (e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code] && e.message) {
-				// Prefer the backend detail, which names the failing photo and gate.
-				faceError = e.message;
+			if (e instanceof APIError) {
+				if (e.code && FACE_ERROR_MESSAGES[e.code]) {
+					// Prefer the backend detail, which names the failing photo and gate.
+					faceError = e.message && e.message.length > 0 ? e.message : FACE_ERROR_MESSAGES[e.code];
+				} else {
+					faceError = e.message || 'Upload failed. Try again.';
+				}
 			} else {
-				faceError =
-					e instanceof Error && e.message ? e.message : 'Upload failed. Try again.';
+				faceError = e instanceof Error && e.message ? e.message : 'Upload failed. Try again.';
 			}
 		} finally {
 			faceBusy = false;

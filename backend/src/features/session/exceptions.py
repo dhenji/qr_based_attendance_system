@@ -175,8 +175,8 @@ class InvalidSessionTimeException(SessionDomainException):
     def __init__(self) -> None:
         super().__init__(
             message=(
-                "The session must end after it starts — check the scheduled "
-                "time."
+                "The session duration exceeds the remaining scheduled time — "
+                "check the scheduled time."
             )
         )
 

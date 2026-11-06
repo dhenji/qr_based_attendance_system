@@ -184,6 +184,8 @@
 | P-AS-2 | D13          | Duration expiry banner   | Session window expired                                             | View active session                                       | Banner: "Scanning closed — waiting for offline syncs"                                                  |
 | P-AS-3 | D15          | Student status display   | Students scanned: 2 present, 1 late, 3 absent, 1 excused           | View feed                                                 | Row statuses: ✅ Present, ⏰ Late, ❌ Absent, 📝 Excused; count totals shown                           |
 | P-AS-4 | D23          | Excuse All Absent — bulk | 5 students marked absent in session                                | Click [Excuse All Absent]; enter reason "Class cancelled" | All 5 attendance records → status=excused; excuse_requests created for each; original_status preserved |
+| P-AS-5 | D93          | Collapsible detail panels | Active session with override + classroom configured               | View active session                                       | Four `<details>` panels (General session info, Schedule and time, Location, Attendance overview) render course/program/year/academic-year/semester/type/status/duration/windows, override provenance, classroom/geofence details, `rejected` count, compliance/participation rates |
+| P-AS-6 | D13          | Rejected count + rates   | Session with 1 expired-window offline sync                        | View active session                                       | `counts.rejected` = 1; compliance_rate = present/enrolled; participation_rate = (present+late+excused)/enrolled |
 
 ### 3.4 Attendance List & Filters
 
@@ -398,7 +400,7 @@ Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md)
 
 | Job | Command | Runs against | Fails on |
 | --- | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1055 cases |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1060 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
 | `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
 

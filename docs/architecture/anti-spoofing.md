@@ -84,7 +84,9 @@ Last verified against commit: see `git rev-parse HEAD`.
 - Idempotency key scoped `user_id:session_id:key`, TTL 900 s, process-local
   (`attendance/service.py:114-254`, `constants.py:30-35`).
 - Geofence is skipped when disabled or classroom coords are missing; missing
-  GPS is treated as outside (`attendance/service.py:591-611`).
+  GPS is treated as outside; a position outside the radius but within reported
+  GPS uncertainty (capped at 50 m) is treated as ambiguous and routed to review
+  (`attendance/service.py:591-620`).
 
 ---
 
@@ -121,6 +123,11 @@ Last verified against commit: see `git rev-parse HEAD`.
 - Backend codes map via `toScanMessage()`; network errors queue for sync.
 - Rejected scan (`result.status === 'rejected'`) shows permitted-time-window
   copy, not raw backend messages.
+- Pydantic 422 validation failures (e.g. GPS accuracy out of range, missing
+  face frame, out-of-range ear samples) are now surfaced with their specific
+  field detail, translated into student-friendly copy instead of a single
+  generic message. GPS accuracy is clamped to the backend cap (100000 m) and
+  the scan page refuses to submit when no face frame was captured.
 - `.error` paragraphs styled as alert banners (`+page.svelte`).
 
 ---
@@ -334,8 +341,12 @@ sequenceDiagram
 ## Review flow
 
 Flagged rows (`evidence.review == true`) listed via
-`/admin/attendance/liveness-review`. Resolve approve restores computed
-present/late; reject marks rejected. Audit row written.
+`/admin/attendance/liveness-review`. `evidence.review_reason` records why the
+row was flagged (`face_review_band` and/or `geofence_uncertainty`), and
+geofence-flagged rows carry an `evidence.geofence` context object
+(distance/radius/accuracy/uncertainty/classroom coords). The admin page
+confirms each decision in a dialog before issuing the PATCH. Resolve approve
+restores computed present/late; reject marks rejected. Audit row written.
 
 ## Enrollment and revoke
 
@@ -477,6 +488,12 @@ Fixed challenge order: blink, turn left, turn right.
 ## 10.8 Review band and resolution
 
 - Review rows are selected by `liveness_evidence["review"] == true`.
+- `liveness_evidence["review_reason"]` records why the row was flagged:
+  `face_review_band` and/or `geofence_uncertainty` (comma-joined when both).
+- `liveness_evidence["geofence"]` carries the geofence context for a
+  geofence-flagged row: `distance_meters`, `radius_meters`,
+  `accuracy_meters`, `uncertainty_meters`, `classroom_lat`,
+  `classroom_lng`.
 - Approve restores `validation_status` to `original_status`.
 - Reject sets `validation_status = rejected`.
 - Resolution removes the review flag, stores the reviewer note in evidence,

@@ -14,6 +14,7 @@ from shared.constants import (
     RADIUS_METERS_MIN,
 )
 from shared.enums import SessionType, ValidationStatus
+from shared.pagination import PaginatedResponse
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
@@ -270,6 +271,7 @@ class SessionCounts(BaseModel):
     pending: int = 0
     absent: int = 0
     excused: int = 0
+    rejected: int = 0
 
 
 class SessionActiveResponse(BaseModel):
@@ -299,10 +301,32 @@ class SessionActiveResponse(BaseModel):
     # gracefully instead of 500ing on attribute access).
     program_code: str | None = None
     year_level_label: str | None = None
+    academic_year: str | None = None
+    semester: str | None = None
+    course_code: str | None = None
+    course_name: str | None = None
     status: Literal["scheduled", "active", "closed"]
     enrolled_count: int = 0
     remaining: int = 0
     pending_sync_count: int = 0
+    # Session configuration (minutes).
+    duration_minutes: int = 0
+    present_window_minutes: int = 0
+    late_window_minutes: int = 0
+    # Location / geofence details.
+    classroom_name: str | None = None
+    classroom_lat: float | None = None
+    classroom_lng: float | None = None
+    classroom_radius_meters: int = 0
+    # Schedule provenance (D94).
+    schedule_overridden: bool = False
+    actual_start_time: datetime | None = None
+    original_scheduled_start_time: datetime | None = None
+    override_reason: str | None = None
+    created_at: datetime | None = None
+    # Attendance rates (compliance = present/enrolled; participation adds late+excused).
+    compliance_rate: float = 0.0
+    participation_rate: float = 0.0
     students: list[ActiveStudentItem] = Field(default_factory=list)
     counts: SessionCounts = Field(default_factory=SessionCounts)
 
@@ -333,6 +357,14 @@ class ProfessorAttendanceItem(BaseModel):
     scanned_at: datetime
     scanned_via: str | None = None
     face_match_score: float | None = None
+
+
+class ProfessorAttendanceResponse(PaginatedResponse[ProfessorAttendanceItem]):
+    """Paginated professor attendance ledger plus global aggregates."""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    total_students: int = 0
+    total_sessions: int = 0
 
 
 class VerifyCodeRequest(BaseModel):

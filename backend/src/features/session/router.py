@@ -11,6 +11,7 @@ from features.course.schema import RosterItem
 from features.professor.schema import AssignedOfferingItem
 from features.session.schema import (
     ProfessorAttendanceItem,
+    ProfessorAttendanceResponse,
     SessionActiveResponse,
     SessionCloseResponse,
     SessionCreate,
@@ -70,7 +71,9 @@ async def list_sessions(
     service: SessionServiceDep,
     professor_service: ProfessorServiceDep,
     date_from: datetime | None = Query(default=None, alias="from"),
+    date_from_canonical: datetime | None = Query(default=None, alias="date_from"),
     date_to: datetime | None = Query(default=None, alias="to"),
+    date_to_canonical: datetime | None = Query(default=None, alias="date_to"),
     offering_id: int | None = Query(default=None, gt=0),
     session_type: SessionType | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
@@ -80,8 +83,8 @@ async def list_sessions(
 
     return await service.list_professor_sessions(
         professor_id=professor_id,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=date_from or date_from_canonical,
+        date_to=date_to or date_to_canonical,
         offering_id=offering_id,
         session_type=session_type,
         page=page,
@@ -101,6 +104,8 @@ async def session_history(
     offering_id: int | None = Query(default=None, gt=0),
     section: str | None = Query(default=None),
     session_type: SessionType | None = Query(default=None),
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     sort_by: str | None = Query(default=None),
@@ -119,6 +124,8 @@ async def session_history(
         date_to=date_to,
         sort_by=sort_by,
         sort_dir=sort_dir,
+        status=status,
+        search=search,
         page=page,
         size=size,
     )
@@ -236,38 +243,53 @@ async def close_session(
 
 @router.get(
     "/attendance",
-    response_model=PaginatedResponse[ProfessorAttendanceItem],
+    response_model=ProfessorAttendanceResponse,
     summary="Query attendance records with filters",
 )
 async def professor_attendance(
     user: ProfessorUser,
     service: SessionServiceDep,
     professor_service: ProfessorServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    academic_year: str | None = Query(default=None),
+    semester: str | None = Query(default=None),
     course_id: int | None = Query(default=None, gt=0),
     offering_id: int | None = Query(default=None, gt=0),
     section: str | None = Query(default=None),
     session_id: int | None = Query(default=None, gt=0),
     session_type: SessionType | None = Query(default=None),
     status: ValidationStatus | None = Query(default=None),
-    date_from: datetime | None = Query(default=None),
-    date_to: datetime | None = Query(default=None),
+    search: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    student_search: str | None = Query(default=None),
+    date_from: datetime | None = Query(default=None, alias="from"),
+    date_from_canonical: datetime | None = Query(default=None, alias="date_from"),
+    date_to: datetime | None = Query(default=None, alias="to"),
+    date_to_canonical: datetime | None = Query(default=None, alias="date_to"),
     sort_by: str | None = Query(default=None),
     sort_dir: str | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
-) -> PaginatedResponse[ProfessorAttendanceItem]:
+) -> ProfessorAttendanceResponse:
     professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
 
+    resolved_search = search or q or student_search
     return await service.get_professor_attendance(
         professor_id=professor_id,
+        program_id=program_id,
+        year_level_id=year_level_id,
+        academic_year=academic_year,
+        semester=semester,
         course_id=course_id,
         offering_id=offering_id,
         section=section,
         session_id=session_id,
         session_type=session_type,
         status=status,
-        date_from=date_from,
-        date_to=date_to,
+        search=resolved_search,
+        date_from=date_from or date_from_canonical,
+        date_to=date_to or date_to_canonical,
         sort_by=sort_by,
         sort_dir=sort_dir,
         page=page,

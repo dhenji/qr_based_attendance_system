@@ -55,10 +55,12 @@ class _FakeSession:
         objs: tuple = (),
         rows: dict | list | None = None,
         counts: list[int | None] | None = None,
+        execute_rows: list | None = None,
     ):
         self.store = {(type(o), getattr(o, "id", None)): o for o in objs}
         self.rows = rows if rows is not None else {}
         self.counts = list(counts or [])
+        self.execute_rows = list(execute_rows or [])
         self.added = []
 
     async def get(self, model, ident):
@@ -74,6 +76,10 @@ class _FakeSession:
 
     async def scalar(self, stmt):
         return self.counts.pop(0) if self.counts else 0
+
+    async def execute(self, stmt):
+        rows = self.execute_rows.pop(0) if self.execute_rows else []
+        return _FakeResult(rows)
 
     async def flush(self):
         pass
@@ -447,7 +453,8 @@ def test_professor_attendance_maps_student_columns() -> None:
     session = _FakeSession(
         objs=(),
         rows={Attendance: [record], Student: [_student(1, "S001")]},
-        counts=[1],
+        counts=[1, 1, 1],
+        execute_rows=[[("present", 1)]],
     )
     service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
 

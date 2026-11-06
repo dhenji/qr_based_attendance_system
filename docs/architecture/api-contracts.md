@@ -1192,8 +1192,8 @@ Live session detail with dual timers.
 
 |                  |                                                                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ id, offering, session_type, session_code, scan_window_remaining, scheduled_start_time, scheduled_end_time, expires_at, program_code?, year_level_label?, status, enrolled_count, remaining, pending_sync_count, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused } }` |
-| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `expires_at` is the actual session expiry (nullable) and is shown as the end time when `status === closed`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). The client header label is driven by `status` (`Active:` / `Closed:`), and both countdown timers freeze when `status === closed`. |
+| **Response 200** | `{ id, offering, session_type, is_remote, geofence_enabled, session_code, scan_window_remaining, scheduled_start_time, scheduled_end_time, expires_at, program_code?, year_level_label?, academic_year?, semester?, course_code?, course_name?, status, enrolled_count, remaining, pending_sync_count, duration_minutes, present_window_minutes, late_window_minutes, classroom_name?, classroom_lat?, classroom_lng?, classroom_radius_meters, schedule_overridden, actual_start_time?, original_scheduled_start_time?, override_reason?, created_at?, compliance_rate, participation_rate, students: [{ student_number, name, section, status, scanned_at?, excuse_reason? }], counts: { present, late, pending, absent, excused, rejected } }` |
+| **Notes**        | `status` and `scan_window_remaining` are computed DTOs (no columns); `scan_window_remaining` is expressed in **seconds**, unlike `duration_minutes` / `present_window_minutes` / `late_window_minutes`. `expires_at` is the actual session expiry (nullable) and is shown as the end time when `status === closed`. `students[].student_number` maps `students.student_id`; `students[].status` maps `attendance_records.validation_status`; `students[].scanned_at` maps `attendance_records.timestamp`. `enrolled_count`/`remaining` feed the projector stat tiles; `pending_sync_count` feeds the "waiting for offline syncs" banner (wireframes.md 3.3). The client header label is driven by `status` (`Active:` / `Closed:`), and both countdown timers freeze when `status === closed`. `counts` now includes `rejected` (expired-window offline syncs and other rejected records). `compliance_rate` = present/enrolled and `participation_rate` = (present+late+excused)/enrolled, both via `shared/rates.py::attendance_rates` (4-decimal rounding, 0.0 for non-positive denominator). The new scalar fields are sourced from the offering/course/session row with `getattr` defaults so hand-rolled fakes still serialize; `schedule_overridden` is the D93 override flag. `is_remote` and `geofence_enabled` pre-exist in `SessionActiveResponse` and are now also surfaced in the Location panel. |
 
 #### `POST /professor/sessions/{session_id}/close`
 
@@ -1280,9 +1280,9 @@ Query attendance records with filters.
 
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**        | `?course_id?&offering_id?&section?&session_id?&session_type=lecture\|lab?&status?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
-| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, session_type, status, original_status?, scanned_at, scanned_via, face_match_score? }], ... }` |
-| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. `sort_by` accepts `date`/`student`/`section`/`status`/`time` (wireframes.md 3.4 column headers). |
+| **Query**        | `?program_id?&year_level_id?&academic_year?&semester?&course_id?&offering_id?&section?&session_id?&session_type=lecture\|lab?&status?&search?&q?&student_search?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Response 200** | `{ items: [{ id, student_number, student_name, section, session_id, session_type, status, original_status?, scanned_at, scanned_via, face_match_score? }], total, page, size, counts?, total_students?, total_sessions? }` |
+| **Notes**        | `student_number` maps `students.student_id`; `status` maps `attendance_records.validation_status`; `scanned_at` maps `attendance_records.timestamp`; `original_status` is the preserved pre-excuse value. `sort_by` accepts `date`/`student`/`section`/`status`/`time`. `counts` is a per-status aggregate over the filtered set; `total_students`/`total_sessions` are distinct counts. `date_to` is inclusive of the full day (end-of-day normalization). |
 
 #### `GET /professor/sessions/history`
 
@@ -1290,7 +1290,7 @@ Session history with filters.
 
 |                  |                                                            |
 | ---------------- | ---------------------------------------------------------- |
-| **Query**        | `?offering_id?&section?&session_type=lecture\|lab?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
+| **Query**        | `?offering_id?&section?&session_type=lecture\|lab?&status=scheduled\|active\|closed?&search?&date_from?&date_to?&sort_by?&sort_dir?&page=1&size=20` |
 | **Response 200** | `{ items: [{ id, offering_id, session_type, session_code, created_at, expires_at, present_count, late_count, absent_count, compliance_rate, participation_rate }], ... }` |
 | **Notes**        | Per-session `present_count`/`late_count`/`absent_count` + both rates feed the 3.5 columns and the compliance/participation tooltip (D36). |
 
@@ -1379,7 +1379,7 @@ Verify a typed session code. The scan page also posts raw decoded QR text as `co
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
 | **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_start_time, scheduled_end_time, classroom_name, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
-| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. |
+| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. `scheduled_start_time` is the authoritative class start (including professor overrides; `actual_start_time` is audit-only) and is what the student scan confirmation renders as "Start time". |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` |
 
 ---

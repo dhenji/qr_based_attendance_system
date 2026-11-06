@@ -82,7 +82,7 @@ SQLITE_URL = "sqlite+aiosqlite:///:memory:"
 # session would pass or fail depending on when the suite ran.
 #
 # A Wednesday 08:30 UTC: a meeting day, and inside the window.
-SESSION_TEST_NOW: datetime = datetime(2026, 10, 21, 8, 30, tzinfo=timezone.utc)
+SESSION_TEST_NOW: datetime = datetime(2026, 10, 21, 8, 0, tzinfo=timezone.utc)
 
 DEFAULT_TERM_STRUCTURE: dict[str, Any] = {
     "terms": [

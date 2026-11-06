@@ -53,7 +53,9 @@ class LivenessEvidence(BaseModel):
     def _ear_in_range(cls, v: list[float]) -> list[float]:
         for sample in v:
             if not EAR_VALUE_MIN <= sample <= EAR_VALUE_MAX:
-                raise ValueError("ear_samples must all be within 0.0..1.0")
+                raise ValueError(
+                    "Eye measurements were out of range. Please retry the liveness check."
+                )
 
         return v
 

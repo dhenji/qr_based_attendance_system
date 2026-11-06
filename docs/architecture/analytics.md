@@ -355,6 +355,7 @@ section summarizes service-level calculation and persistence behavior.
   - compliance = `present / enrolled`
   - participation = `(present + late + excused) / enrolled`
   - rounded to 4 decimals; both are `0.0` when `enrolled <= 0`.
+- `SessionActiveResponse.compliance_rate` / `participation_rate` (`GET /professor/sessions/active/{session_id}`) reuse the same `shared/rates.py::attendance_rates` helper.
 
 ## 10.3 Course comparison
 

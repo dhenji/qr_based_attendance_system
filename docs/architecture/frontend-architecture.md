@@ -182,3 +182,16 @@ frontend/
 
 `hooks.server.ts` · `service-worker.ts` · `static/icons/` · `vite-plugin-pwa` · `robots.txt`
 
+
+## Session course join cache
+
+`src/lib/features/session/service.ts` keeps a module-level `coursesReady` flag that
+gates the one-time warm of the professor course join (`ensureCourses`). Pages such
+as `/professor/dashboard` and the attendance ledger depend on it for real course
+code/name/section instead of generic `Offering N` fallbacks.
+
+- `invalidateCourseCache()` must be called on every session boundary (login via
+  `establishSession`, session restore, logout) alongside the store resets, so a
+  warm from one professor never leaks into another account.
+- `ensureCourses` resets the flag when a warm fails (empty courses + `coursesError`)
+  so the next call retries instead of pinning the failed state.

@@ -367,7 +367,7 @@ Separate from backups — exports aggregated reporting data (CSV/PDF) without to
 | **Attendance Snapshot**  | `/admin/analytics?tab=attendance`     | Cross-course attendance summary (Analytics → Attendance tab) |
 | **Audit Logs**           | `/admin/audit-logs`                   | System-wide action log with filters                   |
 | **Archive**              | `/admin/students/archive`             | View/restore/permanently delete archived students     |
-| **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged scans (GPS / submitted score band) |
+| **Liveness Review**      | `/admin/attendance/liveness-review`   | Manual review of flagged/borderline scans (face review band 0.65-0.70, or geofence uncertainty). Rows are provisional `present`/`late` scans; if no action is taken the provisional status stands and counts in reports. Approve confirms, Reject overrides to `rejected` (audit row + optional note). `liveness_evidence.review_reason` records why the row was flagged. |
 | **Admin Users**          | `/admin/users`                        | Manage user accounts (Admin and Super Admin; role-restricted) |
 | **Face Enrollment**      | `/admin/students` → **Enroll face**   | Upload 3 photos or capture them via live camera; remove an existing enrollment (modal; real 512-d embedding) |
 

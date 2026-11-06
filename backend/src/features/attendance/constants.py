@@ -11,7 +11,7 @@ STUDENT_NUMBER_MIN_LENGTH: int = 1
 STUDENT_NUMBER_MAX_LENGTH: int = 50
 
 GPS_ACCURACY_MIN: float = 0.0
-GPS_ACCURACY_MAX: float = 1000.0
+GPS_ACCURACY_MAX: float = 100000.0
 
 FACE_MATCH_SCORE_MIN: float = 0.0
 FACE_MATCH_SCORE_MAX: float = 1.0
@@ -63,6 +63,12 @@ REVIEW_DEFAULT_STATUS: str = "pending"
 REVIEW_DECISIONS: frozenset[str] = frozenset({"approve", "reject"})
 
 REVIEW_NOTE_MAX_LENGTH: int = 1000
+
+# Why a row was flagged for the liveness review queue. Stored as an
+# additive key inside `attendance_records.liveness_evidence` so historical
+# rows that predate the key simply omit it.
+REVIEW_REASON_FACE_BAND: str = "face_review_band"
+REVIEW_REASON_GEOFENCE: str = "geofence_uncertainty"
 
 # Where a reviewer's free-text note is stored: `attendance_records` has no
 # dedicated column, so it rides inside the existing JSONB evidence blob.

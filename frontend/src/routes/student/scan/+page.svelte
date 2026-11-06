@@ -241,6 +241,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				course_code: verifiedSession.courseCode,
 				course_name: verifiedSession.courseName,
 				expires_at: verifiedSession.expiresAt,
+				scheduled_start_time: verifiedSession.scheduledStartTime,
 				scheduled_end_time: verifiedSession.scheduledEndTime,
 				geofence: verifiedSession.geofence,
 				geofenceEnabled: verifiedSession.geofenceEnabled,
@@ -270,6 +271,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						geofence: cached.geofence,
 						geofenceEnabled: cached.geofenceEnabled,
 						isRemote: cached.isRemote,
+						scheduledStartTime: cached.scheduled_start_time ?? cached.expires_at,
 						scheduledEndTime: cached.scheduled_end_time ?? cached.expires_at
 					};
 					showFailure = false;
@@ -526,7 +528,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			return await getPositionOnce({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
 		} catch (e) {
 			if (e instanceof APIError && (e.code === 'location_timeout' || e.message.includes('timed out'))) {
-				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 30000, timeout: 8000 });
+				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 0, timeout: 8000 });
 			}
 			throw e;
 		}
@@ -684,6 +686,14 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		if (submitting) return;
 		if (!session) {
 			rejectionReason = 'Verify the session before starting face liveness';
+			showFailure = true;
+			return;
+		}
+		// A scan cannot be validated without a captured face frame; surface a
+		// clear, retryable error instead of submitting a payload the backend
+		// will reject as 422 validation_error.
+		if (!(livenessEvidence as any)?.faceImage) {
+			rejectionReason = 'Could not capture your face image. Try again in good lighting.';
 			showFailure = true;
 			return;
 		}
@@ -884,6 +894,10 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						<p class="ticket-line">
 							<span class="ticket-label">Session type</span>
 							<span class="ticket-value">{session.sessionType ?? '—'}</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Start time</span>
+							<span class="ticket-value mono-data">{session.scheduledStartTime ? formatLocalDateTime(session.scheduledStartTime) : '—'}</span>
 						</p>
 						<p class="ticket-line">
 							<span class="ticket-label">Session ends</span>

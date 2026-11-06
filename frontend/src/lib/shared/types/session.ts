@@ -149,6 +149,7 @@ export interface SessionActiveResponse {
 	offering: number;
 	session_type: CourseType;
 	is_remote?: boolean;
+	geofence_enabled?: boolean;
 	session_code: string;
 	scan_window_remaining: number;
 	scheduled_start_time: string;
@@ -156,10 +157,28 @@ export interface SessionActiveResponse {
 	expires_at: string | null;
 	program_code?: string | null;
 	year_level_label?: string | null;
+	academic_year?: string | null;
+	semester?: string | null;
+	course_code?: string | null;
+	course_name?: string | null;
 	status: SessionRowStatus;
 	enrolled_count: number;
 	remaining: number;
 	pending_sync_count: number;
+	duration_minutes?: number;
+	present_window_minutes?: number;
+	late_window_minutes?: number;
+	classroom_name?: string | null;
+	classroom_lat?: number | null;
+	classroom_lng?: number | null;
+	classroom_radius_meters?: number;
+	schedule_overridden?: boolean;
+	actual_start_time?: string | null;
+	original_scheduled_start_time?: string | null;
+	override_reason?: string | null;
+	created_at?: string | null;
+	compliance_rate?: number;
+	participation_rate?: number;
 	students: ActiveStudentItemResponse[];
 	counts: {
 		present: number;
@@ -167,6 +186,7 @@ export interface SessionActiveResponse {
 		pending: number;
 		absent: number;
 		excused: number;
+		rejected?: number;
 	};
 }
 
@@ -196,6 +216,16 @@ export interface ProfessorAttendanceItemResponse {
 	scanned_at: string;
 	scanned_via: string | null;
 	face_match_score: number | null;
+}
+
+export interface ProfessorAttendanceLedgerResponse {
+	items: ProfessorAttendanceItemResponse[];
+	total: number;
+	page: number;
+	size: number;
+	counts?: Record<string, number>;
+	total_students?: number;
+	total_sessions?: number;
 }
 
 // View-models (course names joined client-side from the courses store)
@@ -238,11 +268,16 @@ export interface LiveSession {
 	offeringId: number;
 	sessionType: CourseType;
 	isRemote?: boolean;
+	geofenceEnabled?: boolean;
 	offeringCode: string;
 	offeringName: string;
 	offeringSections: string;
 	offeringProgram: string | null;
 	offeringYearLevel: string | null;
+	academicYear?: string | null;
+	semester?: string | null;
+	courseCode?: string | null;
+	courseName?: string | null;
 	sessionCode: string;
 	scanWindowRemaining: number;
 	scheduledStartTime: string;
@@ -252,6 +287,20 @@ export interface LiveSession {
 	enrolledCount: number;
 	remaining: number;
 	pendingSyncCount: number;
+	durationMinutes?: number;
+	presentWindowMinutes?: number;
+	lateWindowMinutes?: number;
+	classroomName?: string | null;
+	classroomLat?: number | null;
+	classroomLng?: number | null;
+	classroomRadiusMeters?: number;
+	scheduleOverridden?: boolean;
+	actualStartTime?: string | null;
+	originalScheduledStartTime?: string | null;
+	overrideReason?: string | null;
+	createdAt?: string | null;
+	complianceRate?: number;
+	participationRate?: number;
 	students: LiveStudent[];
 	counts: {
 		present: number;
@@ -259,6 +308,7 @@ export interface LiveSession {
 		pending: number;
 		absent: number;
 		excused: number;
+		rejected?: number;
 	};
 }
 

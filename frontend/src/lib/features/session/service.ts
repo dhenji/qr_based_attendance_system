@@ -69,6 +69,8 @@ export type SessionHistoryFilters = {
 	course?: string;
 	section?: string;
 	sessionType?: CourseType;
+	status?: 'scheduled' | 'active' | 'closed';
+	search?: string;
 	from?: string;
 	to?: string;
 	sortBy?: SessionHistorySortBy;
@@ -91,10 +93,21 @@ export const invalidateCourseCache = (): void => {
 };
 
 const ensureCourses = async (): Promise<void> => {
+	// A previous warm may have failed (or belonged to another account whose
+	// state was reset) — drop the flag so we retry instead of serving stale/
+	// empty course identity (which surfaces as generic "Offering N" names).
+	if (coursesReady && professorState.courses.length === 0 && professorState.coursesError) {
+		coursesReady = false;
+	}
 	if (coursesReady) return;
 	coursesReady = true;
 	if (professorState.courses.length === 0 && !professorState.coursesError) {
 		await initProfessorCourses();
+	}
+	// If warming failed, allow the next call to retry rather than pinning the
+	// empty state for the rest of the session.
+	if (professorState.coursesError) {
+		coursesReady = false;
 	}
 };
 
@@ -124,8 +137,8 @@ export const listSessions = async (params?: {
 	await ensureCourses();
 
 	const query: Record<string, string> = {};
-	if (params?.from) query.from = params.from;
-	if (params?.to) query.to = params.to;
+	if (params?.from) query.date_from = params.from;
+	if (params?.to) query.date_to = params.to;
 	if (params?.offeringId !== undefined) query.offering_id = String(params.offeringId);
 	if (params?.sessionType) query.session_type = params.sessionType;
 	query.page = String(params?.page ?? 1);
@@ -289,11 +302,16 @@ export const getActiveSession = async (
 		offeringId: response.offering,
 		sessionType: response.session_type ?? 'lecture',
 		isRemote: response.is_remote ?? false,
+		geofenceEnabled: response.geofence_enabled ?? true,
 		offeringCode: courseCodeFor(response.offering),
 		offeringName: courseNameFor(response.offering),
 		offeringSections: sectionsFor(response.offering),
 		offeringProgram: response.program_code ?? course?.programCode ?? null,
 		offeringYearLevel: response.year_level_label ?? course?.yearLevelLabel ?? null,
+		academicYear: response.academic_year ?? null,
+		semester: response.semester ?? null,
+		courseCode: response.course_code ?? course?.courseCode ?? null,
+		courseName: response.course_name ?? course?.courseName ?? null,
 		sessionCode: response.session_code,
 		scanWindowRemaining: response.scan_window_remaining,
 		scheduledStartTime: response.scheduled_start_time,
@@ -303,6 +321,20 @@ export const getActiveSession = async (
 		enrolledCount: response.enrolled_count,
 		remaining: response.remaining,
 		pendingSyncCount: response.pending_sync_count,
+		durationMinutes: response.duration_minutes,
+		presentWindowMinutes: response.present_window_minutes,
+		lateWindowMinutes: response.late_window_minutes,
+		classroomName: response.classroom_name,
+		classroomLat: response.classroom_lat,
+		classroomLng: response.classroom_lng,
+		classroomRadiusMeters: response.classroom_radius_meters,
+		scheduleOverridden: response.schedule_overridden,
+		actualStartTime: response.actual_start_time,
+		originalScheduledStartTime: response.original_scheduled_start_time,
+		overrideReason: response.override_reason,
+		createdAt: response.created_at,
+		complianceRate: response.compliance_rate,
+		participationRate: response.participation_rate,
 		students,
 		counts: response.counts,
 	};
@@ -377,6 +409,8 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 		};
 		if (offeringIds[0] !== undefined) query.offering_id = String(offeringIds[0]);
 		if (params?.sessionType) query.session_type = params.sessionType;
+		if (params?.status) query.status = params.status;
+		if (params?.search) query.search = params.search;
 		if (params?.section !== undefined) query.section = params.section;
 		if (params?.from) query.date_from = params.from;
 		if (params?.to) query.date_to = params.to;
@@ -416,6 +450,8 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 			};
 			if (params?.section !== undefined) query.section = params.section;
 			if (params?.sessionType) query.session_type = params.sessionType;
+			if (params?.status) query.status = params.status;
+			if (params?.search) query.search = params.search;
 			if (params?.from) query.date_from = params.from;
 			if (params?.to) query.date_to = params.to;
 			const response = await get<Paginated<SessionHistoryItemResponse>>('sessionHistory', query);

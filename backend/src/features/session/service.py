@@ -4,7 +4,7 @@ import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import ColumnElement, Select, func, or_, select
@@ -46,6 +46,7 @@ from features.session.plan import (
 from features.session.schema import (
     ActiveStudentItem,
     ProfessorAttendanceItem,
+    ProfessorAttendanceResponse,
     QRPayload,
     SessionActiveResponse,
     SessionCloseResponse,
@@ -90,6 +91,7 @@ _STATUS_COUNT_FIELDS: dict[str, str] = {
     ValidationStatus.PENDING.value: "pending",
     ValidationStatus.ABSENT.value: "absent",
     ValidationStatus.EXCUSED.value: "excused",
+    ValidationStatus.REJECTED.value: "rejected",
 }
 
 
@@ -145,6 +147,12 @@ def _geofence_enabled_of(row: Session) -> bool:
     return bool(value) if value is not None else True
 
 
+def _schedule_overridden_of(row: Session) -> bool:
+    """Override flag, defaulting to False for hand-rolled fakes."""
+    value = getattr(row, "schedule_overridden", False)
+    return bool(value) if value is not None else False
+
+
 def _session_status(
     expires_at: datetime | None,
     scheduled_start_time: datetime | None,
@@ -166,6 +174,20 @@ def _session_status(
         return "active"
 
     return "closed"
+
+
+def _end_of_day(value: datetime | None) -> datetime | None:
+    """Treat a midnight ``date_to`` as the end of that day.
+
+    Date-only query parameters parse to midnight, which would otherwise
+    exclude every record after 00:00. An explicit non-midnight value is
+    preserved so callers can still bound a precise instant.
+    """
+    if value is None:
+        return None
+    if value.timetuple()[3:6] == (0, 0, 0) and value.microsecond == 0:
+        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return value
 
 
 class SessionService:
@@ -254,11 +276,27 @@ class SessionService:
         )
         self._check_windows(windows, duration)
 
-        # Duration must fit the meeting window it belongs to. A session
-        # cannot run longer than the class it is opened against.
+        # D94: the class has to be running before we even consider the
+        # duration — an open outside the window is refused with its own
+        # error, ahead of any duration check.
         if payload.session_date is None and payload.start_time is None:
-            if plan.has_meeting and duration > plan.meeting_minutes:
-                raise InvalidSessionTimeException()
+            self._require_within_start_window(plan=plan, now=moment)
+
+        # Duration must fit the meeting window it belongs to. A session
+        # cannot run longer than the class it is opened against. For an
+        # un-overridden open the scan window starts at the later of the
+        # class start and "now", so the duration must fit what is left of
+        # the class from that point — not just the whole meeting.
+        if payload.session_date is None and payload.start_time is None:
+            if plan.has_meeting and plan.scheduled_end is not None:
+                base = (
+                    plan.scheduled_start
+                    if plan.scheduled_start is not None
+                    and plan.scheduled_start > moment
+                    else moment
+                )
+                if base + timedelta(minutes=duration) > plan.scheduled_end:
+                    raise InvalidSessionTimeException()
         elif plan.has_meeting and plan.end_time is not None:
             zone = resolve_timezone(
                 self._settings.institution_timezone, label="institution timezone"
@@ -343,12 +381,6 @@ class SessionService:
             classroom_lat is None or classroom_lng is None
         ):
             raise LabCoordinatesRequiredException()
-
-        # D94: the class has to be running. An override is the professor's
-        # explicit way past the window, so the check applies only when the
-        # payload carries none.
-        if payload.session_date is None and payload.start_time is None:
-            self._require_within_start_window(plan=plan, now=moment)
 
         scheduled_start, scheduled_end, overridden = self._apply_override(
             plan=plan,
@@ -744,6 +776,18 @@ class SessionService:
             if offering is not None
             else None
         )
+        course: Course | None = (
+            await self._session.get(Course, offering.course_id)
+            if offering is not None
+            else None
+        )
+
+        compliance, participation = attendance_rates(
+            present=counts.present,
+            late=counts.late,
+            excused=counts.excused,
+            enrolled=enrolled_count,
+        )
 
         return SessionActiveResponse(
             id=row.id,
@@ -758,10 +802,28 @@ class SessionService:
             expires_at=row.expires_at,
             program_code=program.code if program is not None else None,
             year_level_label=year_level.label if year_level is not None else None,
+            academic_year=offering.academic_year if offering is not None else None,
+            semester=offering.semester if offering is not None else None,
+            course_code=course.course_code if course is not None else None,
+            course_name=course.course_name if course is not None else None,
             status=status,
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),
             pending_sync_count=await self._pending_sync_count(session_id),
+            duration_minutes=getattr(row, "duration_minutes", 0) or 0,
+            present_window_minutes=getattr(row, "present_window_minutes", 0) or 0,
+            late_window_minutes=getattr(row, "late_window_minutes", 0) or 0,
+            classroom_name=getattr(row, "classroom_name", None),
+            classroom_lat=getattr(row, "classroom_lat", None),
+            classroom_lng=getattr(row, "classroom_lng", None),
+            classroom_radius_meters=getattr(row, "classroom_radius_meters", 0) or 0,
+            schedule_overridden=_schedule_overridden_of(row),
+            actual_start_time=getattr(row, "actual_start_time", None),
+            original_scheduled_start_time=getattr(row, "original_scheduled_start_time", None),
+            override_reason=getattr(row, "override_reason", None),
+            created_at=getattr(row, "created_at", None),
+            compliance_rate=compliance,
+            participation_rate=participation,
             students=self._active_student_items(students, records, status),
             counts=counts,
         )
@@ -959,7 +1021,7 @@ class SessionService:
             offering_id=offering_id,
             session_type=session_type,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
         total: int = (
@@ -1104,6 +1166,8 @@ class SessionService:
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[SessionHistoryItem]:
@@ -1120,7 +1184,8 @@ class SessionService:
             offering_id=offering_id,
             session_type=session_type,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
+            search=search,
         )
 
         rows: Sequence[Session] = (
@@ -1131,6 +1196,12 @@ class SessionService:
 
         for row in rows:
             if not await self._matches_section(row.offering_id, section):
+                continue
+
+            row_status = _session_status(
+                row.expires_at, row.scheduled_start_time, now
+            )
+            if status is not None and row_status != status:
                 continue
 
             items.append(await self._session_history_item(row, now))
@@ -1185,19 +1256,24 @@ class SessionService:
         self,
         *,
         professor_id: int,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        academic_year: str | None = None,
+        semester: str | None = None,
         course_id: int | None = None,
         offering_id: int | None = None,
         section: str | None = None,
         session_id: int | None = None,
         session_type: SessionType | str | None = None,
         status: ValidationStatus | str | None = None,
+        search: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         sort_by: str | None = None,
         sort_dir: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
-    ) -> PaginatedResponse[ProfessorAttendanceItem]:
+    ) -> ProfessorAttendanceResponse:
         """Filterable attendance table across the professor's sessions.
 
         ``section`` is derived from the enrolled student's section (offerings
@@ -1207,22 +1283,49 @@ class SessionService:
         page, size = _normalize_page(page, size)
         stmt: Select[tuple[Attendance]] = self._attendance_stmt(
             professor_id,
+            program_id=program_id,
+            year_level_id=year_level_id,
+            academic_year=academic_year,
+            semester=semester,
             course_id=course_id,
             offering_id=offering_id,
             section=section,
             session_id=session_id,
             session_type=session_type,
             status=status,
+            search=search,
             date_from=date_from,
-            date_to=date_to,
+            date_to=_end_of_day(date_to),
         )
 
+        scoped = stmt.subquery()
         total: int = (
             await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
+                select(func.count()).select_from(scoped)
             )
             or 0
         )
+        status_rows = (
+            await self._session.execute(
+                select(scoped.c.validation_status, func.count())
+                .select_from(scoped)
+                .group_by(scoped.c.validation_status)
+            )
+        ).all()
+        counts = {str(row[0]): int(row[1]) for row in status_rows}
+        total_students: int = (
+            await self._session.scalar(
+                select(func.count(func.distinct(scoped.c.student_id))).select_from(scoped)
+            )
+            or 0
+        )
+        total_sessions: int = (
+            await self._session.scalar(
+                select(func.count(func.distinct(scoped.c.session_id))).select_from(scoped)
+            )
+            or 0
+        )
+
         records: Sequence[Attendance] = (
             await self._session.scalars(
                 _apply_attendance_order(stmt, sort_by=sort_by, sort_dir=sort_dir)
@@ -1238,25 +1341,33 @@ class SessionService:
             {r.session_id for r in records}
         )
 
-        return PaginatedResponse[ProfessorAttendanceItem](
+        return ProfessorAttendanceResponse(
             items=self._attendance_items(records, students, session_types),
             total=total,
             page=page,
             size=size,
+            counts=counts,
+            total_students=total_students,
+            total_sessions=total_sessions,
         )
 
     def _attendance_stmt(
         self,
         professor_id: int,
         *,
-        course_id: int | None,
-        offering_id: int | None,
-        section: str | None,
-        session_id: int | None,
-        session_type: SessionType | str | None,
-        status: ValidationStatus | str | None,
-        date_from: datetime | None,
-        date_to: datetime | None,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        academic_year: str | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        offering_id: int | None = None,
+        section: str | None = None,
+        session_id: int | None = None,
+        session_type: SessionType | str | None = None,
+        status: ValidationStatus | str | None = None,
+        search: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> Select[tuple[Attendance]]:
         """Base join for one professor's attendance rows, plus every filter.
 
@@ -1278,14 +1389,31 @@ class SessionService:
             )
         )
 
+        need_offering = any(
+            v is not None
+            for v in (course_id, program_id, year_level_id, academic_year, semester)
+        )
+        if need_offering:
+            stmt = stmt.join(CourseOffering, CourseOffering.id == Session.offering_id)
         if course_id is not None:
-            stmt = stmt.join(
-                CourseOffering, CourseOffering.id == Session.offering_id
-            ).where(CourseOffering.course_id == course_id)
+            stmt = stmt.where(CourseOffering.course_id == course_id)
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        stmt = apply_if(stmt, year_level_id, lambda v: CourseOffering.year_level_id == v)
+        stmt = apply_if(stmt, academic_year, lambda v: CourseOffering.academic_year == v)
+        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
 
         stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
         stmt = apply_if(stmt, section, lambda v: Student.section == v)
         stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
+        if search is not None:
+            pattern = f"%{search}%"
+            stmt = stmt.where(
+                or_(
+                    Student.student_id.ilike(pattern),
+                    Student.first_name.ilike(pattern),
+                    Student.last_name.ilike(pattern),
+                )
+            )
         if session_type is not None:
             value: str = (
                 session_type.value
@@ -1375,8 +1503,9 @@ class SessionService:
         *,
         offering_id: int | None,
         session_type: SessionType | str | None = None,
-        date_from: datetime | None,
-        date_to: datetime | None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
     ) -> Select[tuple[Session]]:
         """Sessions the professor opened, or is assigned to teach.
 
@@ -1398,8 +1527,19 @@ class SessionService:
                 else str(session_type)
             )
             stmt = stmt.where(Session.session_type == value)
+        # Date bounds arriving from the HTTP layer are naive (FastAPI parses a
+        # date-only query param to midnight without tzinfo). Coerce them to UTC
+        # so they compare correctly against the tz-aware `created_at` column
+        # instead of being treated as server-local wall time.
+        if date_from is not None and date_from.tzinfo is None:
+            date_from = date_from.replace(tzinfo=timezone.utc)
+        if date_to is not None and date_to.tzinfo is None:
+            date_to = date_to.replace(tzinfo=timezone.utc)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        if search:
+            needle = f"%{search.strip()}%"
+            stmt = stmt.where(Session.session_code.ilike(needle))
 
         return stmt
 
@@ -1449,7 +1589,7 @@ class SessionService:
         with it, or a professor loses sight of their own past sessions once an
         assignment's `effective_to` passes.
         """
-        today: date = date.today()
+        today: date = datetime.now(timezone.utc).date()
 
         return (
             select(CourseProfessor.offering_id)
@@ -1474,7 +1614,7 @@ class SessionService:
         course". The admin remove path (`course/service.py`) keeps its 404
         (nothing to remove), which answers a different question.
         """
-        today: date = date.today()
+        today: date = datetime.now(timezone.utc).date()
         row: CourseProfessor | None = (
             await self._session.scalars(
                 select(CourseProfessor)

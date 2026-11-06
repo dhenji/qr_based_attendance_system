@@ -989,6 +989,40 @@ async def test_history_reports_a_closed_session(
     assert history.items[0].status == "closed"
 
 
+async def test_history_status_and_search_filters(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    stack = await factories.full_stack()
+    service = SessionService(test_db_session, settings)
+
+    # Default (no filter) returns the session.
+    all_history = await service.get_session_history(professor_id=stack["professor"].id)
+    assert all_history.total == 1
+
+    # Status filter: the seeded session is still active (expires_at in future).
+    active = await service.get_session_history(
+        professor_id=stack["professor"].id, status="active"
+    )
+    assert active.total == 1
+    closed = await service.get_session_history(
+        professor_id=stack["professor"].id, status="closed"
+    )
+    assert closed.total == 0
+
+    # Search filter matches the session code.
+    code = stack["session"].session_code
+    searched = await service.get_session_history(
+        professor_id=stack["professor"].id, search=code
+    )
+    assert searched.total == 1
+    missed = await service.get_session_history(
+        professor_id=stack["professor"].id, search="NOPE-DOES-NOT-EXIST"
+    )
+    assert missed.total == 0
+
+
 async def test_professor_attendance_lists_scanned_rows(
     test_db_session: AsyncSession,
     factories: Factories,
