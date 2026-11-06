@@ -25,8 +25,8 @@ Key internal helpers: `_resolve_scan_parties`, `_decide_scan_outcome`,
 `backend/src/features/session/service.py` (`SessionService`). Lifecycle:
 
 - `create_session(professor_id, payload, actor_id, now)` — opens a session,
-  inherits offering plan (D93), stamps `expires_at = min(created_at + duration,
-  scheduled_end_time)` (D49/D94), records audit `OPEN`.
+  inherits offering plan (D93), stamps `expires_at = max(scheduled_start_time, created_at) + duration`
+  (D49/D94; may extend beyond `scheduled_end_time` for overtime), records audit `OPEN`.
 - `get_active_session(session_id)` — returns session + scanned student tiles.
 - `close_session(session_id)` — stamps `expires_at = now`.
 - Status derived `_session_status(expires_at, scheduled_start_time, now)` →

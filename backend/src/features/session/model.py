@@ -113,12 +113,14 @@ class Session(CreatedAtMixin, Base):
 
     @property
     def computed_expires_at(self) -> datetime:
-        """LEAST(created_at + duration_minutes, scheduled_end_time) - 12, D49."""
+        """created_at + duration_minutes.
 
-        return min(
-            self.created_at + timedelta(minutes=self.duration_minutes),
-            self.scheduled_end_time,
-        )
+        Duration is independent of the offering's scheduled end time, so the
+        scan window runs for the full requested duration even when that
+        extends beyond the original class end (overtime).
+        """
+
+        return self.created_at + timedelta(minutes=self.duration_minutes)
 
     offering: Mapped[CourseOffering] = relationship()
     professor: Mapped[Professor] = relationship()

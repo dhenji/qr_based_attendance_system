@@ -195,7 +195,7 @@ holding their ID, professors claim by holding their school email).
 │    → Sets duration (minutes), present window, late window       │
 │    → Optional classroom override (blank = course default)       │
 │    → Server computes: expires_at = min(now + duration,          │
-│        scheduled_end_time) per D12                               │
+│        created_at + duration) per D12                             │
 │    → Server generates HMAC-signed session code + QR payload     │
 │      {"v":1,"code":"A7X-9K2M","offering":123,"radius":30,      │
 │       "pw":5,"lw":10} per D18                                   │
@@ -478,7 +478,7 @@ Sessions (EXTENDED — D11/D12/D13/D17, course_id dropped per Step 6)
   -- CHECK (present_window_minutes + late_window_minutes <= duration_minutes)
   - scheduled_start_time (TIMESTAMPTZ — copied from course schedule at open)
   - scheduled_end_time (TIMESTAMPTZ — copied from course schedule at open)
-  - expires_at (TIMESTAMPTZ — LEAST(created_at + duration_minutes, scheduled_end_time) per D12)
+  - expires_at (TIMESTAMPTZ — max(scheduled_start_time, created_at) + duration_minutes per D12)
   - classroom_name (NULL — session-level override, D17)
   - classroom_lat (NULL), classroom_lng (NULL)
   - created_at

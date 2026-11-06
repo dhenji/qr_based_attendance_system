@@ -152,7 +152,7 @@
 | D8  | Mid-semester professor replacement via effective_to / new effective_from |
 | D9  | Assistants supported (secondary assignments)                             |
 | D11 | Opening from My Courses locks course; Dashboard allows selector          |
-| D12 | Duration expiry = min(created_at + duration, scheduled_end)              |
+| D12 | Duration expiry = max(scheduled_start, created_at) + duration (may extend beyond scheduled_end) |
 | D13 | Present window + late window ≤ duration (CHECK constraint)               |
 | D14 | Default windows on course, overridable per session — superseded by D44 (defaults moved to `course_offerings`) |
 | D17 | Classroom override at session level                                      |
