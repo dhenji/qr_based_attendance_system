@@ -97,7 +97,7 @@ Per [D11](../project/decision-log.md), there are **two entry points** that deter
 | ---------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | **Course**             | 🔒 Locked — shows _course_ code, name, _program·year_, section, schedule, room                           | From _offering_ card                        |
 | **Geofence Radius**    | Preset buttons: 10m, 20m, 30m, 50m, 100m                                                                 | Offering default (typically 30m)            |
-| **Duration (minutes)** | Session length; expiry = `min(max(scheduled_start, now) + duration, scheduled_end_time)` per [D12](../project/decision-log.md)/[D49](../project/decision-log.md) | Scheduled length (e.g., 90 for 1.5h)        |
+| **Duration (minutes)** | Session length; expiry = `max(scheduled_start, now) + duration` (may extend beyond the offering's scheduled end time) per [D12](../project/decision-log.md)/[D49](../project/decision-log.md) | Scheduled length (e.g., 90 for 1.5h)        |
 | **Present Window**     | Minutes from session start for _present_ status                                                          | Offering `default_present_window_minutes` (5) |
 | **Late Window**        | Minutes after present window for _late_ status                                                           | Offering `default_late_window_minutes` (10)   |
 | **Classroom Override** | Optional — overrides _offering_ GPS/room for this session only                                           | Blank = use _offering_ defaults             |

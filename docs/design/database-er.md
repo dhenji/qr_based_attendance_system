@@ -586,7 +586,7 @@ erDiagram
 > - `course_professors` uses **effectiveness dating** (D7/D8): a session's professor of record is the `course_professors` row where `session.created_at::date BETWEEN effective_from AND COALESCE(effective_to, 'infinity')` AND `semester` matches.
 > - `students.face_embedding` stores a real 512-d `FACEEMB1` embedding (D28/D43); encryption at rest is not implemented.
 > - `year_levels.term_structure` JSONB: `{"terms":[{"code":"1st_sem","label":"1st Semester"},...]}` (D3).
-> - `sessions.expires_at` is a **regular column populated by the application service layer**: `LEAST(created_at + duration_minutes * interval '1 minute', scheduled_end_time)` (D12, D49).
+> - `sessions.expires_at` is a **regular column populated by the application service layer**: `max(scheduled_start_time, created_at) + duration_minutes` (D12, D49); may extend beyond `scheduled_end_time` for overtime sessions.
 > - `ValidationStatus` enum: `present` · `late` · `absent` · `excused` · `pending` · `rejected` (D15).
 > - Rejection reasons / API error codes: `duplicate_scan` · `outside_geofence` · `liveness_failed` · `face_mismatch` · `not_enrolled` · `session_expired` (D15/D16).
 

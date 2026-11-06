@@ -623,12 +623,12 @@ async def test_computed_expiry_is_created_at_plus_duration(
     assert session.computed_expires_at == session.created_at + timedelta(minutes=45)
 
 
-async def test_computed_expiry_floors_at_scheduled_end(
+async def test_computed_expiry_ignores_scheduled_end(
     test_db_session: AsyncSession,
     factories: Factories,
     settings: Settings,
 ) -> None:
-    """The schedule branch: a short duration inside an early-ending block."""
+    """Duration is independent of the offering schedule: no floor at scheduled_end."""
 
     stack = await factories.full_stack(duration_minutes=30)
     session = stack["session"]
@@ -636,7 +636,7 @@ async def test_computed_expiry_floors_at_scheduled_end(
     session.scheduled_end_time = end
     session.created_at = SESSION_NOW
 
-    assert session.computed_expires_at == end
+    assert session.computed_expires_at == SESSION_NOW + timedelta(minutes=30)
 
 
 # --- attendance read path over a closed session ---------------------------

@@ -434,8 +434,8 @@ scan page (Svelte)
   future.
 - `scanned_at` must not be after `expires_at`.
 - `now` must be at or after `scheduled_start_time`.
-- `expires_at = min(max(scheduled_start_time, created_at) + duration,
-  scheduled_end_time)`.
+- `expires_at = max(scheduled_start_time, created_at) + duration`
+  (may extend beyond `scheduled_end_time` for overtime).
 
 ## 10.4 Face match score
 

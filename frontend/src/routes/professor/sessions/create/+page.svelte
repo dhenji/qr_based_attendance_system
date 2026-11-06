@@ -248,84 +248,7 @@ let selectedOfferingId = $state<number | null>(null);
 	// windows_exceed_duration (422) for the same condition.
 	const windowsFit = $derived(presentWindow + lateWindow <= durationMinutes);
 
-	const meetingEndMinutes = $derived.by(() => {
-		if (!plan?.end_time) return null;
-		const parts = plan.end_time.split(':');
-		if (parts.length < 2) return null;
-		const hours = Number(parts[0]);
-		const minutes = Number(parts[1]);
-		if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-		return hours * 60 + minutes;
-	});
-
-	const meetingStartMinutes = $derived.by(() => {
-		if (!plan?.start_time) return null;
-		const parts = plan.start_time.split(':');
-		if (parts.length < 2) return null;
-		const hours = Number(parts[0]);
-		const minutes = Number(parts[1]);
-		if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-		return hours * 60 + minutes;
-	});
-
-	const overrideStartMinutes = $derived.by(() => parseTimeToMinutes(overrideStart));
-
-	const maxDurationByWindow = $derived.by(() => {
-		if (!scheduleOverride) return null;
-		if (meetingEndMinutes === null || overrideStartMinutes === null) return null;
-		if (
-			meetingStartMinutes !== null &&
-			overrideStartMinutes >= meetingStartMinutes &&
-			overrideStartMinutes < meetingEndMinutes
-		) {
-			return Math.max(0, meetingEndMinutes - overrideStartMinutes);
-		}
-		return plan?.duration_minutes ?? null;
-	});
-
-	const effectiveMaxDuration = $derived.by(() => {
-		if (scheduleOverride) return maxDurationByWindow;
-		return plan?.duration_minutes ?? null;
-	});
-
-	const durationExceedsLimit = $derived.by(() => {
-		if (effectiveMaxDuration === null) return false;
-		return durationMinutes > effectiveMaxDuration;
-	});
-
-	// An un-overridden open that starts late must still fit inside the
-	// class: the scan window begins at the later of the class start and
-	// "now", so a duration that runs past the scheduled end is rejected
-	// rather than silently capped.
-	const nonOverrideExceedsSchedule = $derived.by(() => {
-		if (scheduleOverride) return false;
-		if (plan === null || plan.scheduled_start === null || plan.scheduled_end === null)
-			return false;
-		const window = startWindow;
-		if (window === null || window.current_time === null) return false;
-		const base = Math.max(
-			new Date(plan.scheduled_start).getTime(),
-			new Date(window.current_time).getTime()
-		);
-		const end = base + durationMinutes * 60 * 1000;
-		return end > new Date(plan.scheduled_end).getTime();
-	});
-
-	const nonOverrideRemainingMinutes = $derived.by(() => {
-		if (plan === null || plan.scheduled_start === null || plan.scheduled_end === null)
-			return 0;
-		const window = startWindow;
-		if (window === null || window.current_time === null) return 0;
-		const base = Math.max(
-			new Date(plan.scheduled_start).getTime(),
-			new Date(window.current_time).getTime()
-		);
-		return Math.max(0, Math.round((new Date(plan.scheduled_end).getTime() - base) / 60000));
-	});
-
-	const durationInvalid = $derived(
-		durationMinutes <= 0 || durationExceedsLimit || nonOverrideExceedsSchedule
-	);
+	const durationInvalid = $derived(durationMinutes <= 0);
 	const windowsInvalid = $derived(presentWindow < 0 || lateWindow < 0);
 
 	// The scheduled window the session will carry: the plan's next
@@ -483,17 +406,7 @@ let selectedOfferingId = $state<number | null>(null);
 	// server's rule so the form and the projector agree.
 	const expiryPreview = $derived.by(() => {
 		if (durationInvalid) return null;
-		const fromNow = new Date(Date.now() + durationMinutes * 60 * 1000);
-		if (scheduleOverride) return { at: fromNow };
-		const classEnd = plan?.scheduled_end ? new Date(plan.scheduled_end) : null;
-		if (
-			classEnd !== null &&
-			classEnd.getTime() > Date.now() &&
-			classEnd.getTime() < fromNow.getTime()
-		) {
-			return { at: classEnd };
-		}
-		return { at: fromNow };
+		return { at: new Date(Date.now() + durationMinutes * 60 * 1000) };
 	});
 
 	const RADII = [10, 20, 30, 50, 100] as const;
@@ -1191,17 +1104,7 @@ let selectedOfferingId = $state<number | null>(null);
 						Scan window closes {dateTimeText(expiryPreview.at)} ({durationMinutes}m from now)
 					</p>
 				{/if}
-				{#if durationExceedsLimit}
-					<p class="field-error">
-						Duration exceeds the remaining scheduled time
-						{#if effectiveMaxDuration !== null}({effectiveMaxDuration} min){/if}.
-					</p>
-				{:else if nonOverrideExceedsSchedule}
-					<p class="field-error">
-						Duration exceeds the remaining scheduled time
-						({nonOverrideRemainingMinutes} min).
-					</p>
-				{/if}
+
 				{#if inherited !== null}
 					<p class="hint">
 						{inherited.duration} m — the length of the scheduled meeting

@@ -120,7 +120,7 @@ The dashboard layers (descriptive: what happened, diagnostic: why, predictive: w
 
 ## C5 — Window-Based Attendance Policy Engine — **Implemented**
 
-- **Session creation** takes `duration_minutes`, `present_window_minutes` and `late_window_minutes`; the server computes `expires_at = min(created_at + duration, scheduled_end_time)` (D12, D49). The anchor is the session's **creation** time, not the moment of the request.
+- **Session creation** takes `duration_minutes`, `present_window_minutes` and `late_window_minutes`; the server computes `expires_at = max(scheduled_start_time, created_at) + duration` (D12, D49). The anchor is the session's **creation** time, not the moment of the request, and the window may extend beyond the offering's scheduled end time (overtime).
 - **The constraint `present_window + late_window ≤ duration` is enforced twice** — at the API layer (`SessionService._check_windows`) and by the database (`ck_session_window_sum_lte_duration`), so a write that bypasses the service still cannot violate it.
 - **Offering-level defaults** (`default_present_window_minutes`, `default_late_window_minutes`) are prefilled per D14 and resolved in `SessionService._resolve_windows` with a global config fallback; a per-session override wins.
 - **Status determination**: a scan inside the present window → `present`; inside the late window after that → `late`; outside both → `rejected` (`AttendanceService._compute_status`). A student who never scanned reads as `absent` in the session roster — a **derived** roster value, not a persisted attendance row (D13).

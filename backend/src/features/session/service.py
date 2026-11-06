@@ -282,60 +282,11 @@ class SessionService:
         if payload.session_date is None and payload.start_time is None:
             self._require_within_start_window(plan=plan, now=moment)
 
-        # Duration must fit the meeting window it belongs to. A session
-        # cannot run longer than the class it is opened against. For an
-        # un-overridden open the scan window starts at the later of the
-        # class start and "now", so the duration must fit what is left of
-        # the class from that point — not just the whole meeting.
-        if payload.session_date is None and payload.start_time is None:
-            if plan.has_meeting and plan.scheduled_end is not None:
-                base = (
-                    plan.scheduled_start
-                    if plan.scheduled_start is not None
-                    and plan.scheduled_start > moment
-                    else moment
-                )
-                if base + timedelta(minutes=duration) > plan.scheduled_end:
-                    raise InvalidSessionTimeException()
-        elif plan.has_meeting and plan.end_time is not None:
-            zone = resolve_timezone(
-                self._settings.institution_timezone, label="institution timezone"
-            )
-            local_now = moment.astimezone(zone) if moment.tzinfo is not None else moment.replace(
-                tzinfo=timezone.utc
-            ).astimezone(zone)
-            meeting_end_minutes = plan.end_time.hour * 60 + plan.end_time.minute
-            meeting_start_minutes = (
-                plan.start_time.hour * 60 + plan.start_time.minute
-                if plan.start_time is not None
-                else None
-            )
-            if payload.start_time is not None:
-                override_start_minutes = (
-                    payload.start_time.hour * 60 + payload.start_time.minute
-                )
-            elif plan.start_time is not None:
-                override_start_minutes = (
-                    plan.start_time.hour * 60 + plan.start_time.minute
-                )
-            else:
-                override_start_minutes = (
-                    local_now.hour * 60 + local_now.minute
-                )
-            # Only cap by the remaining window when the override starts
-            # inside the original meeting. Otherwise the full meeting
-            # duration is the limit.
-            if (
-                meeting_start_minutes is not None
-                and meeting_start_minutes
-                <= override_start_minutes
-                < meeting_end_minutes
-            ):
-                max_duration = meeting_end_minutes - override_start_minutes
-            else:
-                max_duration = plan.meeting_minutes or duration
-            if max_duration <= 0 or duration > max_duration:
-                raise InvalidSessionTimeException()
+        # Duration is independent of the offering's original schedule: the
+        # course offering is only the default reference. A professor may set
+        # a custom duration that extends beyond the offering's scheduled end
+        # time, so no cap is applied here. Invalid (non-positive) durations
+        # are still rejected by the schema and by `_apply_override`.
 
         radius: int = payload.classroom_radius_meters or plan.radius_meters
 
@@ -736,12 +687,10 @@ class SessionService:
         if scheduled.tzinfo is None:
             scheduled = scheduled.replace(tzinfo=timezone.utc)
         base: datetime = scheduled if scheduled > created else created
-        candidate: datetime = base + timedelta(minutes=duration)
-        row.expires_at = (
-            min(candidate, row.scheduled_end_time)
-            if row.scheduled_end_time > base
-            else candidate
-        )
+        # Duration is independent of the offering's scheduled end time: the
+        # scan window runs for the full requested duration, even when that
+        # extends beyond the original class end (overtime).
+        row.expires_at = base + timedelta(minutes=duration)
         row.session_code = generate_session_code(row.id, self._settings)
         await self._session.flush()
 

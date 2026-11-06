@@ -290,7 +290,7 @@ class Session(Base):
     classroom_lng = Float NULL
 
     # @property computed_expires_at:
-    #   return min(created_at + timedelta(minutes=duration_minutes), scheduled_end_time)
+    #   return max(scheduled_start_time, created_at) + timedelta(minutes=duration_minutes)
     #   NOTE: the model docstring cites a "-12s clock-skew buffer", but the property
     #   does NOT subtract it — expires_at is written verbatim (D49; documented, unchanged).
     # Service sets: session.expires_at = session.computed_expires_at
@@ -308,7 +308,7 @@ class Session(Base):
 - `late_window_minutes` = `course_offering.default_late_window_minutes` (10)
 - `scheduled_start_time/end_time` = `course_offering` schedule for that day (compute from `schedule_days` + date)
 - `classroom_lat/lng/name` = `course_offering` classroom (override for session-specific room changes)
-- `expires_at` = set by service layer: `min(created_at + duration_minutes * interval '1 min', scheduled_end_time)`
+- `expires_at` = set by service layer: `max(scheduled_start_time, created_at) + duration_minutes * interval '1 min'`
 
 **Rollback:** Drop new columns, restore `course_id` from backup.
 
