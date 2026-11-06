@@ -109,7 +109,7 @@
 
 ### ADR-012: Session Duration & Expiry — System-Time Based
 
-- **Decision (D12):** Session duration is **system-time based**. Example: class scheduled 7:00–8:30; prof arrives 7:10 and sets duration 15 min → scan window ends 7:25. Class still ends at scheduled 8:30 (system time). `expires_at = min(created_at + duration_minutes, scheduled_end_time)`.
+- **Decision (D12):** Session duration is **system-time based**. Example: class scheduled 7:00–8:30; prof arrives 7:10 and sets duration 15 min → scan window ends 7:25. Class still ends at scheduled 8:30 (system time). `expires_at = max(scheduled_start_time, created_at) + duration_minutes`. The offering schedule is the default reference, not a hard maximum: a professor may set a duration that extends beyond the offering's scheduled end time (overtime).
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Context:** Prevents sessions from running past scheduled class end. Professor sets intended scan duration; system enforces hard ceiling at scheduled end.

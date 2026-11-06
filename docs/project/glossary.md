@@ -64,11 +64,11 @@ Per-session minute windows measured from `session.created_at`:
 
 ### Duration Expiry
 
-The hard ceiling for scanning: `expires_at = min(session.created_at + duration_minutes, scheduled_end_time)`. After this, no scans accepted; offline scans with `scanned_at` past expiry → `rejected (session_expired)`.
+The hard ceiling for scanning: `expires_at = max(scheduled_start_time, created_at) + duration_minutes`. The scan window runs for the full requested duration and may extend beyond the offering's scheduled end time (overtime). After this, no scans accepted; offline scans with `scanned_at` past expiry → `rejected (session_expired)`.
 
 ### Scheduled End
 
-The offering's scheduled class end time (`course_offerings.schedule_end_time`) copied to `sessions.scheduled_end_time` at session creation. Forms the ceiling for `expires_at`.
+The offering's scheduled class end time (`course_offerings.schedule_end_time`) copied to `sessions.scheduled_end_time` at session creation. Serves as the default reference for the session window; `expires_at` may extend beyond it when a professor sets an overtime duration.
 
 ### Geofence
 
