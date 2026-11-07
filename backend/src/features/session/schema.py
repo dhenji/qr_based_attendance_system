@@ -257,6 +257,10 @@ class SessionHistoryItem(SessionListItem):
 
 
 class ActiveStudentItem(BaseModel):
+    # The student's database primary key, so per-record actions (such as a
+    # professor quick-excuse) can target the row without a second lookup. The
+    # printed student number stays in `student_number`.
+    student_id: int
     student_number: str
     name: str
     section: str | None = None

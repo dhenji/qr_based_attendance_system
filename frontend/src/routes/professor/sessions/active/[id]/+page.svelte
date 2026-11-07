@@ -15,7 +15,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		excuseAllAbsent,
 		EXCUSE_REASON_MIN_LENGTH,
 		EXCUSE_REASON_SHORT_MESSAGE,
-		quickExcuse
+		quickExcuse,
+		quickExcuseByIds
 	} from '$lib/features/excuse/service';
 	import { buildCsv } from '$lib/features/report/service';
 	import { APIError, isMockMode } from '$lib/api/client';
@@ -161,24 +162,31 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		excuseBusy = true;
 		excuseError = null;
 		try {
-			if (!isMockMode()) {
-				// Live feed rows carry student numbers only; the per-record
-				// routes need integer ids no professor endpoint returns.
-				throw new Error(
-					'Per-student excuse needs backend support to resolve this row — use Excuse all absent or the review queue instead.'
+			if (isMockMode()) {
+				await quickExcuse({
+					studentNumber: excuseTarget.studentNumber,
+					studentName: excuseTarget.name,
+					section: excuseTarget.section ?? undefined,
+					courseCode: session.offeringCode,
+					courseName: session.offeringName,
+					sessionId: session.id,
+					sessionCode: session.sessionCode,
+					originalStatus: excuseTarget.status as 'absent' | 'late' | 'rejected',
+					reason
+				});
+			} else {
+				await quickExcuseByIds(
+					session.id,
+					excuseTarget.studentId,
+					reason,
+					[],
+					{
+						studentNumber: excuseTarget.studentNumber,
+						studentName: excuseTarget.name,
+						section: excuseTarget.section ?? undefined,
+					}
 				);
 			}
-			await quickExcuse({
-				studentNumber: excuseTarget.studentNumber,
-				studentName: excuseTarget.name,
-				section: excuseTarget.section ?? undefined,
-				courseCode: session.offeringCode,
-				courseName: session.offeringName,
-				sessionId: session.id,
-				sessionCode: session.sessionCode,
-				originalStatus: excuseTarget.status as 'absent' | 'late' | 'rejected',
-				reason
-			});
 			excuseTarget = null;
 			reloadToken += 1;
 		} catch (error: unknown) {

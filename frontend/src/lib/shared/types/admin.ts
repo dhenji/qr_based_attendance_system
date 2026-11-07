@@ -441,6 +441,10 @@ export interface AdminAssignmentReopenPayload {
 }
 
 export interface AdminRosterItemResponse {
+	// The student's database primary key (backend RosterItem.id). The printed
+	// student number lives in `student_id` (a string); this is the integer id
+	// that per-record routes such as the professor quick-excuse need.
+	id: number;
 	student_id: string;
 	name: string;
 	email?: string | null;
@@ -449,6 +453,9 @@ export interface AdminRosterItemResponse {
 }
 
 export interface AdminRosterItem {
+	// Database primary key of the student (backend RosterItem.id). Optional for
+	// backward compat with any caller that builds the item without it.
+	id?: number;
 	studentId: string;
 	name: string;
 	email?: string;

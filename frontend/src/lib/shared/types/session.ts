@@ -136,6 +136,8 @@ export interface SessionStartWindow {
 
 // GET /professor/sessions/active/{id}
 export interface ActiveStudentItemResponse {
+	// Database primary key of the student (backend ActiveStudentItem.student_id).
+	student_id: number;
 	student_number: string;
 	name: string;
 	section: string | null;
@@ -255,6 +257,7 @@ export interface SessionHistorySummary extends SessionSummary {
 }
 
 export interface LiveStudent {
+	studentId: number;
 	studentNumber: string;
 	name: string;
 	section: string | null;

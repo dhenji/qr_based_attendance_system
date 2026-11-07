@@ -483,7 +483,7 @@ As with compliance, the denominator is the enrolled count, not total records.
 | PATCH  | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Update existing excuse (reason, notes)                        |
 | DELETE | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Revoke a prof-initiated excuse (sets status back to original) |
 | POST   | `/professor/sessions/{id}/excuse-all-absent`       | Professor | Bulk excuse all absent (Path: quick, D23)                     |
-| GET    | `/professor/excuse-requests?status=pending`        | Professor | List pending excuse requests for review                       |
+| GET    | `/professor/excuse-requests?...`                  | Professor | List excuse requests for review (status, search, course, section, type, evidence, original status, reviewer, date ranges, sort) |
 | POST   | `/professor/excuse-requests/{rid}/review`          | Professor | Approve or reject a student-initiated request                 |
 | POST   | `/student/excuse-requests`                         | Student   | Submit excuse request (Path C)                                |
 | GET    | `/student/excuse-requests`                         | Student   | List own excuse requests                                      |

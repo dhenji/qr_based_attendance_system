@@ -1250,11 +1250,11 @@ Bulk excuse all absent students.
 | **Errors**       | 404 `attendance_not_found` · 409 `already_excused` · 422 `excuse_not_eligible` |
 #### `GET /professor/excuse-requests`
 
-List pending excuse requests for professor's courses.
+List excuse requests for professor's courses (filterable).
 
 |                  |                                                 |
 | ---------------- | ----------------------------------------------- |
-| **Query**        | `?status=pending                                | approved | rejected&page=1&size=20` |
+| **Query**        | `?status=pending|approved|rejected&search=&course=&section=&initiated_via=quick|prof_with_evidence|request&has_evidence=true|false&original_status=absent|late|rejected|unknown&reviewer=&from=&to=&submitted_from=&submitted_to=&reviewed_from=&reviewed_to=&sort_by=requested_at|reviewed_at|status|student_name|id&sort_dir=asc|desc&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
 
 > The same `ExcuseRequest` shape as the admin view, with the same resolved
