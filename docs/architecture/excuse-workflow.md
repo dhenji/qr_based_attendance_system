@@ -427,6 +427,15 @@ The four events above are the whole set. `quick_excuse`, `excuse_with_evidence`,
 `edit_excuse` and `revoke_excuse` send nothing: the professor already knows they
 did it, and §8 lists no notice for them.
 
+Attendance liveness review follows the same email-only pattern: rejecting a
+flagged scan in `AttendanceService.resolve_review` dispatches a message built
+by `features/attendance/notifications.py` to the affected student, carrying the
+course, session code, rejection reason, and retake availability. The in-app
+half is delivered through the student notification bell, which polls rejected
+attendance rows by `reviewed_at` (stored in `liveness_evidence`). Retake is
+allowed only while the session is still open and only when all prior attempts
+for that student/session are `rejected`.
+
 ---
 
 ## 9. Reporting Impact (D36)

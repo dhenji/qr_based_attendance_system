@@ -21,7 +21,7 @@
 		POLL_INTERVAL_MS,
 		truncateNotifPreview,
 	} from '$lib/features/notifications/poll';
-	import { listStudentExcuses } from '$lib/features/student/service';
+	import { getSessionHistory, listStudentExcuses } from '$lib/features/student/service';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { NAV_ICONS, type NavItem } from '$lib/shared/constants/navIcons';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
@@ -116,16 +116,25 @@
 	const loadNotifPreview = async () => {
 		notifLoading = true;
 		try {
-			const { items } = await listStudentExcuses({ page: 1, size: 10 });
-			notifPreview = items
+			const excuseItems = (await listStudentExcuses({ page: 1, size: 10 })).items
 				.filter((row) => row.status !== 'pending')
-				.sort((a, b) => (b.reviewedAt ?? '').localeCompare(a.reviewedAt ?? ''))
-				.slice(0, 5)
 				.map((row) => ({
-					id: row.id,
+					id: `excuse-${row.id}`,
 					title: `Excuse ${row.status}`,
 					sub: truncateNotifPreview(row.reason),
+					reviewedAt: row.reviewedAt ?? '',
 				}));
+			const attendanceItems = (await getSessionHistory({ status: 'rejected', page: 1, size: 10 })).items
+				.map((row) => ({
+					id: `attendance-${row.id}`,
+					title: 'Attendance evidence rejected',
+					sub: truncateNotifPreview(row.reviewNote ?? row.courseCode),
+					reviewedAt: row.reviewedAt ?? '',
+				}));
+			notifPreview = [...excuseItems, ...attendanceItems]
+				.sort((a, b) => (b.reviewedAt ?? '').localeCompare(a.reviewedAt ?? ''))
+				.slice(0, 5)
+				.map(({ reviewedAt, ...item }) => item);
 		} catch {
 			notifPreview = [];
 		} finally {

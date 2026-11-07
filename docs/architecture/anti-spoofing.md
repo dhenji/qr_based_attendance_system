@@ -573,4 +573,9 @@ revocation bump `face_embedding_version`.
 - Offline replay can succeed after session expiry when an idempotency key is
   present.
 - Face enrollment is required even in benchmark mode.
+- Rejected liveness evidence stores `reviewed_by`/`reviewed_at` in
+  `liveness_evidence` alongside `review_note` and emails the student with the
+  rejection reason and retake availability. Retake is allowed only while the
+  session is still open and only when all prior attempts for that
+  student/session are `rejected`.
 

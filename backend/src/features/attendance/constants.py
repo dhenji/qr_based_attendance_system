@@ -74,6 +74,12 @@ REVIEW_REASON_GEOFENCE: str = "geofence_uncertainty"
 # dedicated column, so it rides inside the existing JSONB evidence blob.
 REVIEW_NOTE_EVIDENCE_KEY: str = "review_note"
 
+# Where the reviewer identity/timestamp are stored: `attendance_records` has
+# no dedicated columns, so they ride inside the existing JSONB evidence blob
+# alongside the note.
+REVIEWED_BY_EVIDENCE_KEY: str = "reviewed_by"
+REVIEWED_AT_EVIDENCE_KEY: str = "reviewed_at"
+
 RECENT_SCANS_DEFAULT_LIMIT: int = 10
 RECENT_SCANS_MAX_LIMIT: int = 100
 

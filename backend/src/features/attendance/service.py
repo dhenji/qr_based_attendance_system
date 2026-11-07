@@ -29,6 +29,8 @@ from features.attendance.constants import (
     REVIEW_DECISIONS,
     REVIEW_DEFAULT_STATUS,
     REVIEW_NOTE_EVIDENCE_KEY,
+    REVIEWED_AT_EVIDENCE_KEY,
+    REVIEWED_BY_EVIDENCE_KEY,
     REVIEW_REASON_FACE_BAND,
     REVIEW_REASON_GEOFENCE,
     REVIEW_STATUSES,
@@ -45,6 +47,7 @@ from features.attendance.exceptions import (
     StudentNumberMismatchException,
 )
 from features.attendance.model import Attendance
+from features.attendance import notifications as attendance_notifications
 from features.attendance.schema import (
     GPSInput,
     HistoryCounts,
@@ -80,8 +83,10 @@ from features.student.exceptions import (
     StudentNotFoundException,
 )
 from features.student.model import Student
+from features.auth.model import User
 from features.sync.model import SyncQueue
 from shared.audit import record_audit
+from shared.email import OutboundEmail, dispatch_emails
 from shared.enums import (
     AuditAction,
     AuditEntity,
@@ -518,14 +523,33 @@ class AttendanceService:
             enrolled = False
 
         already_scanned: bool = False
+        retake_available: bool = False
         try:
             await self._require_no_duplicate(student.id, db_session.id)
         except DuplicateScanException:
             already_scanned = True
+            # Determine whether the duplicate is a retake-eligible rejection.
+            rows: Sequence[Attendance] = (
+                await self._session.scalars(
+                    select(Attendance).where(
+                        Attendance.session_id == db_session.id,
+                        Attendance.student_id == student.id,
+                    )
+                )
+            ).all()
+            rejected_only = all(
+                r.validation_status == ValidationStatus.REJECTED.value for r in rows
+            ) and bool(rows)
+            if rejected_only and db_session.expires_at is not None and _ensure_aware(
+                db_session.expires_at
+            ) > _utcnow():
+                retake_available = True
+                already_scanned = False
 
         return PrecheckResponse(
             enrolled=enrolled,
             already_scanned=already_scanned,
+            retake_available=retake_available,
             student={
                 "student_id": student.student_id,
                 "name": f"{student.first_name} {student.last_name}",
@@ -606,18 +630,36 @@ class AttendanceService:
             raise NotEnrolledException(student_id, offering_id)
 
     async def _require_no_duplicate(self, student_id: int, session_id: int) -> None:
-        existing: Attendance | None = (
+        # Retake support: a previously rejected attempt does not block a new
+        # submission, provided the session is still open. Any other status
+        # (present/late/pending/excused) blocks, as does a rejected attempt
+        # against an expired session.
+        rows: Sequence[Attendance] = (
             await self._session.scalars(
-                select(Attendance)
-                .where(
+                select(Attendance).where(
                     Attendance.session_id == session_id,
                     Attendance.student_id == student_id,
                 )
-                .limit(1)
             )
-        ).one_or_none()
+        ).all()
 
-        if existing is not None:
+        if not rows:
+            return
+
+        blocking_statuses = {
+            ValidationStatus.PRESENT.value,
+            ValidationStatus.LATE.value,
+            ValidationStatus.PENDING.value,
+            ValidationStatus.EXCUSED.value,
+        }
+        if any(r.validation_status in blocking_statuses for r in rows):
+            raise DuplicateScanException(student_id, session_id)
+
+        # Only rejected attempts remain. Allow only while the session is open.
+        db_session: Session | None = await self._session.get(Session, session_id)
+        if db_session is None or db_session.expires_at is None:
+            raise DuplicateScanException(student_id, session_id)
+        if _ensure_aware(db_session.expires_at) <= _utcnow():
             raise DuplicateScanException(student_id, session_id)
 
     async def _require_face_enrollment(self, student: Student) -> None:
@@ -1097,6 +1139,14 @@ class AttendanceService:
 
         items: list[HistoryItem] = []
 
+        # Pairs that already have a non-rejected attempt: those rejected rows
+        # are superseded and no longer retake-eligible.
+        successful_pairs = {
+            (r.student_id, r.session_id)
+            for r in records
+            if r.validation_status != ValidationStatus.REJECTED.value
+        }
+
         for record in records:
             db_session = session_map.get(record.session_id)
             offering = offering_map.get(db_session.offering_id) if db_session else None
@@ -1105,15 +1155,36 @@ class AttendanceService:
             if db_session is None or offering is None or course is None:
                 continue
 
+            evidence = record.liveness_evidence or {}
+            reviewed_at_raw = evidence.get(REVIEWED_AT_EVIDENCE_KEY)
+            reviewed_at = None
+            if isinstance(reviewed_at_raw, str):
+                try:
+                    reviewed_at = datetime.fromisoformat(reviewed_at_raw.replace("Z", "+00:00"))
+                except ValueError:
+                    reviewed_at = None
+
+            retake_available = False
+            if record.validation_status == ValidationStatus.REJECTED.value:
+                if (record.student_id, record.session_id) not in successful_pairs:
+                    if db_session.expires_at is not None and _ensure_aware(
+                        db_session.expires_at
+                    ) > _utcnow():
+                        retake_available = True
+
             items.append(
                 HistoryItem(
                     id=record.id,
                     session_id=record.session_id,
+                    session_code=db_session.session_code,
                     course_code=course.course_code,
                     course_name=course.course_name,
                     status=record.validation_status,  # type: ignore[arg-type]
                     original_status=record.original_status,  # type: ignore[arg-type]
                     excuse_reason=record.excuse_reason,
+                    review_note=evidence.get(REVIEW_NOTE_EVIDENCE_KEY) or evidence.get("review_note"),
+                    reviewed_at=reviewed_at,
+                    retake_available=retake_available,
                     scanned_at=record.timestamp,
                     scanned_via=record.scanned_via,
                 )
@@ -1284,13 +1355,18 @@ class AttendanceService:
         return recomputed
 
     async def _apply_resolution(
-        self, row: Attendance, evidence: dict, status: str, note: str | None
+        self, row: Attendance, evidence: dict, status: str, note: str | None,
+        actor_id: int | None = None,
     ) -> None:
         row.validation_status = status
         evidence.pop("review", None)
 
         if note is not None:
             evidence[REVIEW_NOTE_EVIDENCE_KEY] = note
+
+        if actor_id is not None:
+            evidence[REVIEWED_BY_EVIDENCE_KEY] = actor_id
+            evidence[REVIEWED_AT_EVIDENCE_KEY] = _utcnow().isoformat()
 
         row.liveness_evidence = evidence
         await self._session.flush()
@@ -1318,7 +1394,7 @@ class AttendanceService:
             status = ValidationStatus.REJECTED.value
 
         previous: str = row.validation_status
-        await self._apply_resolution(row, evidence, status, note)
+        await self._apply_resolution(row, evidence, status, note, actor_id=actor_id)
 
         # Approving restores a computed present/late status and rejecting marks
         # the record `rejected`, so both rewrite a student's attendance outcome
@@ -1341,12 +1417,69 @@ class AttendanceService:
             },
         )
 
+        # Notify the student by email when their evidence is rejected. Best-effort:
+        # dispatch_emails never raises, so a relay failure cannot roll back the
+        # decision above. Done last, after the audit row is flushed.
+        if decision == "reject":
+            await self._notify_liveness_rejected(
+                row=row, note=note, actor_id=actor_id
+            )
+
         return ResolveReviewResponse(
             id=row.id,
             status=ValidationStatus(row.validation_status),  # type: ignore[arg-type]
             reviewed_by=actor_id,
             reviewed_at=_utcnow(),
         )
+
+    async def _notify_liveness_rejected(
+        self, *, row: Attendance, note: str | None, actor_id: int
+    ) -> None:
+        '''Email the affected student about a rejected liveness review.'''
+        now: datetime = _utcnow()
+
+        db_session: Session | None = await self._session.get(Session, row.session_id)
+        if db_session is None:
+            return
+
+        offering: CourseOffering | None = await self._session.get(CourseOffering, db_session.offering_id)
+        course_name: str = "your course"
+        if offering is not None:
+            course: Course | None = await self._session.get(Course, offering.course_id)
+            if course is not None:
+                course_name = f"{course.course_code} - {course.course_name}"
+
+        student: Student | None = await self._session.get(Student, row.student_id)
+        if student is None:
+            return
+
+        email: str | None = None
+        if student.user_id is not None:
+            user: User | None = await self._session.get(User, student.user_id)
+            if user is not None and user.email:
+                email = user.email
+        if not email and student.email:
+            email = student.email
+
+        if not email:
+            return
+
+        retake_available: bool = (
+            db_session.expires_at is not None
+            and _ensure_aware(db_session.expires_at) > now
+        )
+
+        session_date: str = _ensure_aware(db_session.scheduled_start_time).strftime("%Y-%m-%d")
+
+        subject, body = attendance_notifications.liveness_rejected(
+            course=course_name,
+            session_code=db_session.session_code,
+            session_date=session_date,
+            reason=note,
+            retake_available=retake_available,
+        )
+
+        dispatch_emails([OutboundEmail(to=email, subject=subject, body=body)])
 
     async def get_overview(
         self,

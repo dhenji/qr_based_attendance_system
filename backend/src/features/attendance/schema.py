@@ -112,11 +112,15 @@ class HistoryItem(BaseModel):
 
     id: int
     session_id: int
+    session_code: str | None = None
     course_code: str
     course_name: str
     status: ValidationStatus
     original_status: ValidationStatus | None = None
     excuse_reason: str | None = None
+    review_note: str | None = None
+    reviewed_at: datetime | None = None
+    retake_available: bool = False
     scanned_at: datetime
     scanned_via: str | None = None
 
@@ -210,6 +214,7 @@ class PrecheckResponse(BaseModel):
 
     enrolled: bool
     already_scanned: bool
+    retake_available: bool = False
     student: dict[str, Any] = Field(default_factory=dict)
 
 
