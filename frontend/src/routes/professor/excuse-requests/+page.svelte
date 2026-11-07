@@ -105,6 +105,9 @@
 	// Searchable student selection (replaces manual number/name entry).
 	let quickStudentSearch = $state('');
 	let quickSelectedStudent = $state<AdminRosterItem | null>(null);
+	let quickEnrolledCourseCodes = $state<string[]>([]);
+	let quickEnrolledLoading = $state(false);
+	let quickEnrolledError = $state<string | null>(null);
 	let quickRoster = $state<AdminRosterItem[]>([]);
 	let quickRosterLoading = $state(false);
 	let quickRosterError = $state<string | null>(null);
@@ -375,6 +378,9 @@
 		quickStudentSearch = '';
 		quickSelectedStudent = null;
 		quickRoster = [];
+		quickEnrolledCourseCodes = [];
+		quickEnrolledLoading = false;
+		quickEnrolledError = null;
 		quickRosterError = null;
 		// Warm real sessions so the excuse attaches to an actual session id.
 		// Each carries its offering id so the roster can be loaded for the
@@ -420,6 +426,93 @@
 		return () => {
 			cancelled = true;
 		};
+	});
+
+	// Retrieve the selected student's enrolled courses from actual enrollment
+	// records (one roster lookup per offering the professor is assigned to).
+	// The result drives the grouped course picker (enrolled vs. other).
+	$effect(() => {
+		const student = quickSelectedStudent;
+		if (!quickOpen) return;
+		if (student === null || student.id === undefined) {
+			quickEnrolledCourseCodes = [];
+			quickEnrolledLoading = false;
+			quickEnrolledError = null;
+			return;
+		}
+		let cancelled = false;
+		quickEnrolledLoading = true;
+		quickEnrolledError = null;
+		void (async () => {
+			try {
+				if (professorState.courses.length === 0 && !isMockMode()) {
+					await initProfessorCourses();
+				}
+				if (cancelled) return;
+				const courseList =
+					professorState.courses.length > 0
+						? professorState.courses.map((c) => ({
+								offeringId: c.offeringId,
+								courseCode: c.courseCode,
+							}))
+						: directory.map((c) => ({
+								offeringId: c.offeringId,
+								courseCode: c.courseCode,
+							}));
+				const offeringIds = [...new Set(courseList.map((c) => c.offeringId))];
+				const enrolled = new Set<string>();
+				await Promise.all(
+					offeringIds.map(async (offeringId) => {
+						try {
+							const { items } = await listOfferingStudents(offeringId, { size: 100 });
+							if (items.some((row) => row.id === student.id || row.studentId === student.studentId)) {
+								const course = courseList.find((c) => c.offeringId === offeringId);
+								if (course) enrolled.add(course.courseCode);
+							}
+						} catch {
+							// Ignore per-offering failures; other offerings still resolve.
+						}
+					})
+				);
+				if (cancelled) return;
+				const sorted = [...enrolled].sort();
+				quickEnrolledCourseCodes = sorted;
+				if (sorted.length > 0) {
+					quickCourse = sorted[0];
+				}
+			} catch {
+				if (!cancelled) quickEnrolledError = 'Could not load enrolled courses for this student.';
+			} finally {
+				if (!cancelled) quickEnrolledLoading = false;
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const quickCourseOfferingIds = $derived(
+		new Set(
+			(professorState.courses.length > 0
+				? professorState.courses
+				: directory.map((c) => ({ offeringId: c.offeringId, courseCode: c.courseCode }))
+			)
+				.filter((c) => c.courseCode === quickCourse)
+				.map((c) => c.offeringId)
+		)
+	);
+	const quickVisibleSessions = $derived(
+		quickSessions.filter((s) =>
+			quickCourseOfferingIds.size === 0 ? true : quickCourseOfferingIds.has(s.offeringId)
+		)
+	);
+
+	$effect(() => {
+		const sessions = quickVisibleSessions;
+		if (sessions.length === 0) return;
+		if (!sessions.some((s) => s.id === quickSessionId)) {
+			quickSessionId = sessions[0].id;
+		}
 	});
 
 	const closeQuick = () => {
@@ -1248,8 +1341,14 @@
 				</div>
 				<div class="field">
 					<label class="form-label" for="quick-course">Course</label>
+					{#if quickEnrolledLoading}
+						<p class="modal-sub" role="status">Loading enrolled courses…</p>
+					{/if}
+					{#if quickEnrolledError}
+						<p class="error">{quickEnrolledError}</p>
+					{/if}
 					<select id="quick-course" class="form-input" bind:value={quickCourse}>
-						{#each courseOptions as option (option)}
+						{#each [...quickEnrolledCourseCodes, ...courseOptions.filter((c) => !quickEnrolledCourseCodes.includes(c))] as option (option)}
 							<option value={option}>{option}</option>
 						{/each}
 					</select>
@@ -1262,7 +1361,7 @@
 						class="form-input"
 						bind:value={quickSessionId}
 					>
-						{#each quickSessions as session (session.id)}
+						{#each quickVisibleSessions as session (session.id)}
 							<option value={session.id}>#{session.id} · {session.code}</option>
 						{/each}
 					</select>
