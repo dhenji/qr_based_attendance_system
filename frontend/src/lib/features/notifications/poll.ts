@@ -13,7 +13,7 @@ import { isMockMode } from '$lib/api/client';
 import { authState } from '$lib/features/auth/store.svelte';
 import { listExcuseRequests } from '$lib/features/excuse/service';
 import { getPrefs } from '$lib/features/settings/service';
-import { listStudentExcuses } from '$lib/features/student/service';
+import { getSessionHistory, listStudentExcuses } from '$lib/features/student/service';
 
 export const POLL_INTERVAL_MS = 60_000;
 
@@ -68,24 +68,53 @@ export const getStudentUpdateCount = async (): Promise<number> => {
 			markStudentSeen();
 			return 0;
 		}
-		const PAGE_SIZE = 50;
-		const MAX_PAGES = 5;
-		const first = await listStudentExcuses({ page: 1, size: PAGE_SIZE });
-		const pageCount = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE) || 1);
-		const rows = [...first.items];
-		if (pageCount > 1) {
-			const rest = await Promise.all(
-				Array.from({ length: pageCount - 1 }, (_, i) =>
-					listStudentExcuses({ page: i + 2, size: PAGE_SIZE })
-				)
-			);
-			for (const result of rest) rows.push(...result.items);
-		}
 		let count = 0;
-		for (const row of rows) {
-			if (row.status === 'pending') continue;
-			if (row.reviewedAt && row.reviewedAt > seen) count += 1;
+
+		// Excuse decisions.
+		try {
+			const PAGE_SIZE = 50;
+			const MAX_PAGES = 5;
+			const first = await listStudentExcuses({ page: 1, size: PAGE_SIZE });
+			const pageCount = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE) || 1);
+			const rows = [...first.items];
+			if (pageCount > 1) {
+				const rest = await Promise.all(
+					Array.from({ length: pageCount - 1 }, (_, i) =>
+						listStudentExcuses({ page: i + 2, size: PAGE_SIZE })
+					)
+				);
+				for (const result of rest) rows.push(...result.items);
+			}
+			for (const row of rows) {
+				if (row.status === 'pending') continue;
+				if (row.reviewedAt && row.reviewedAt > seen) count += 1;
+			}
+		} catch {
+			// fail-soft
 		}
+
+		// Rejected attendance liveness evidence (newly reviewed).
+		try {
+			const PAGE_SIZE = 50;
+			const MAX_PAGES = 5;
+			const first = await getSessionHistory({ status: 'rejected', page: 1, size: PAGE_SIZE });
+			const pageCount = Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE) || 1);
+			const rows = [...first.items];
+			if (pageCount > 1) {
+				const rest = await Promise.all(
+					Array.from({ length: pageCount - 1 }, (_, i) =>
+						getSessionHistory({ status: 'rejected', page: i + 2, size: PAGE_SIZE })
+					)
+				);
+				for (const result of rest) rows.push(...result.items);
+			}
+			for (const row of rows) {
+				if (row.reviewedAt && row.reviewedAt > seen) count += 1;
+			}
+		} catch {
+			// fail-soft
+		}
+
 		return count;
 	} catch {
 		return 0;

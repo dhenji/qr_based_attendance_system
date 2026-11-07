@@ -49,6 +49,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let verifiedName = $state('');
 	let precheckFailed = $state(false);
 	let alreadyScannedStop = $state(false);
+	let retakeMode = $state(false);
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
@@ -347,12 +348,16 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				showFailure = true;
 				return;
 			}
-			if (result.alreadyScanned) {
+			if (result.alreadyScanned && !result.retakeAvailable) {
 				precheckFailed = true;
 				alreadyScannedStop = true;
 				rejectionReason = SCAN_ERROR_MESSAGES.duplicate_scan;
 				showFailure = true;
 				return;
+			}
+			if (result.retakeAvailable) {
+				scanError = null;
+				retakeMode = true;
 			}
 			if (!isMockMode() && studentState.student?.faceEnrolled === false) {
 				precheckFailed = true;
@@ -961,6 +966,9 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						</button>
 					</div>
 
+					{#if retakeMode}
+						<p class="info" role="status">Retaking attendance for a previously rejected submission.</p>
+					{/if}
 					{#if scanError}
 						<p class="error" role="alert">{scanError}</p>
 					{/if}

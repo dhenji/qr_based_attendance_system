@@ -178,6 +178,7 @@ export const AttendanceScanEndpoint: EndpointDef<AttendanceScanResponse> = {
 export interface AttendancePrecheckResponse {
 	enrolled: boolean;
 	already_scanned: boolean;
+	retake_available?: boolean;
 	student: {
 		student_id: string;
 		name: string;
@@ -651,11 +652,15 @@ export type StudentHistoryStatus =
 export interface StudentHistoryItemResponse {
 	id: number;
 	session_id: number;
+	session_code?: string | null;
 	course_code: string;
 	course_name: string;
 	status: StudentHistoryStatus;
 	original_status?: StudentHistoryStatus | null;
 	excuse_reason?: string | null;
+	review_note?: string | null;
+	reviewed_at?: string | null;
+	retake_available?: boolean;
 	scanned_at: string;
 	scanned_via?: string | null;
 }
