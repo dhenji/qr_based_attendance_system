@@ -65,9 +65,20 @@ export const requireExcuseReason = (reason: string): string => {
 export type ExcuseFilters = {
 	status?: ExcuseStatus;
 	course?: string;
+	section?: string;
+	initiatedVia?: ExcuseInitiatedVia;
+	hasEvidence?: boolean;
+	originalStatus?: ExcuseOriginalStatus;
+	reviewer?: string;
 	search?: string;
 	from?: string;
 	to?: string;
+	submittedFrom?: string;
+	submittedTo?: string;
+	reviewedFrom?: string;
+	reviewedTo?: string;
+	sortBy?: 'requested_at' | 'reviewed_at' | 'status' | 'student_name' | 'id';
+	sortDir?: 'asc' | 'desc';
 	page?: number;
 	size?: number;
 };
@@ -164,13 +175,17 @@ const matches = (row: ExcuseRequest, filters: ExcuseFilters): boolean => {
 	if (filters.status !== undefined && row.status !== filters.status) return false;
 	if (filters.course !== undefined && filters.course !== '' && row.courseCode !== filters.course)
 		return false;
+	if (filters.section !== undefined && filters.section !== '' && row.section !== filters.section)
+		return false;
+	if (filters.initiatedVia !== undefined && row.initiatedVia !== filters.initiatedVia)
+		return false;
 	if (filters.from !== undefined && filters.from !== '' && row.sessionDate.slice(0, 10) < filters.from)
 		return false;
 	if (filters.to !== undefined && filters.to !== '' && row.sessionDate.slice(0, 10) > filters.to)
 		return false;
 	const search = (filters.search ?? '').trim().toLowerCase();
 	if (search) {
-		const haystack = `${row.studentName} ${row.studentNumber} ${row.courseCode} ${row.sessionCode}`.toLowerCase();
+		const haystack = `${row.studentName} ${row.studentNumber} ${row.courseCode} ${row.sessionCode} ${row.reason}`.toLowerCase();
 		if (!haystack.includes(search)) return false;
 	}
 	return true;
@@ -209,12 +224,37 @@ export const listExcuseRequests = async (filters: ExcuseFilters = {}): Promise<E
 		size: String(Math.min(Math.max(filters.size ?? 10, 1), 100)),
 	};
 	if (filters.status !== undefined) query.status = filters.status;
+	if (filters.search !== undefined && filters.search.trim() !== '')
+		query.search = filters.search.trim();
+	if (filters.course !== undefined && filters.course.trim() !== '')
+		query.course = filters.course.trim();
+	if (filters.section !== undefined && filters.section.trim() !== '')
+		query.section = filters.section.trim();
+	if (filters.initiatedVia !== undefined) query.initiated_via = filters.initiatedVia;
+	if (filters.hasEvidence !== undefined)
+		query.has_evidence = String(filters.hasEvidence);
+	if (filters.originalStatus !== undefined && filters.originalStatus !== 'unknown')
+		query.original_status = filters.originalStatus;
+	if (filters.reviewer !== undefined && filters.reviewer.trim() !== '')
+		query.reviewer = filters.reviewer.trim();
+	if (filters.from !== undefined && filters.from.trim() !== '')
+		query.from = filters.from.trim();
+	if (filters.to !== undefined && filters.to.trim() !== '') query.to = filters.to.trim();
+	if (filters.submittedFrom !== undefined && filters.submittedFrom.trim() !== '')
+		query.submitted_from = filters.submittedFrom.trim();
+	if (filters.submittedTo !== undefined && filters.submittedTo.trim() !== '')
+		query.submitted_to = filters.submittedTo.trim();
+	if (filters.reviewedFrom !== undefined && filters.reviewedFrom.trim() !== '')
+		query.reviewed_from = filters.reviewedFrom.trim();
+	if (filters.reviewedTo !== undefined && filters.reviewedTo.trim() !== '')
+		query.reviewed_to = filters.reviewedTo.trim();
+	if (filters.sortBy !== undefined) query.sort_by = filters.sortBy;
+	if (filters.sortDir !== undefined) query.sort_dir = filters.sortDir;
 
 	const response = await get<Paginated<ExcuseRequestReadResponse>>('excuseList', query);
 	const items = (response.items ?? [])
 		.map(mapReadRow)
-		.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
-		.filter((row) => matches(row, filters));
+		.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
 
 	return {
 		items,
@@ -356,7 +396,8 @@ export const quickExcuseByIds = async (
 	sessionId: number,
 	studentId: number,
 	reason: string,
-	attachmentUrls: string[] = []
+	attachmentUrls: string[] = [],
+	student?: { studentNumber?: string; studentName?: string; section?: string }
 ): Promise<{ excuseRequestId: number; originalStatus: string | null; newStatus: string }> => {
 	const clean = requireReason(reason);
 	const urls = [...attachmentUrls];
@@ -366,9 +407,9 @@ export const quickExcuseByIds = async (
 			{
 				id: nextId,
 				studentId,
-				studentNumber: `#${studentId}`,
-				studentName: `Student #${studentId}`,
-				section: '—',
+				studentNumber: student?.studentNumber?.trim() || `#${studentId}`,
+				studentName: student?.studentName?.trim() || `Student #${studentId}`,
+				section: student?.section?.trim() || '—',
 				courseCode: '—',
 				courseName: '',
 				sessionId,

@@ -1714,6 +1714,7 @@ class CourseService:
             )
             items.append(
                 RosterItem(
+                    id=student.id,
                     student_id=student.student_id,
                     name=name,
                     email=student.email,

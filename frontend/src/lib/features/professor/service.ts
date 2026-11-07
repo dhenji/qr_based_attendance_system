@@ -127,6 +127,7 @@ export const listCourses = async (): Promise<ProfessorCourseSummary[]> => {
 // the signed-in professor is assigned to. Reuses the admin roster item shape
 // (student_id, name, email, section, enrolled_at).
 const toProfessorRosterItem = (r: AdminRosterItemResponse): AdminRosterItem => ({
+	id: r.id,
 	studentId: r.student_id,
 	name: r.name,
 	email: r.email ?? undefined,

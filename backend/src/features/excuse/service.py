@@ -552,6 +552,21 @@ class ExcuseService:
         status: str | None,
         page: int,
         size: int,
+        search: str | None = None,
+        course: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        section: str | None = None,
+        initiated_via: str | None = None,
+        has_evidence: bool | None = None,
+        original_status: str | None = None,
+        reviewer: str | None = None,
+        submitted_from: datetime | None = None,
+        submitted_to: datetime | None = None,
+        reviewed_from: datetime | None = None,
+        reviewed_to: datetime | None = None,
+        sort_by: str | None = None,
+        sort_dir: str | None = None,
     ) -> PaginatedResponse[ExcuseRequestRead]:
         """List excuse requests for the offerings the professor is assigned to.
 
@@ -582,12 +597,164 @@ class ExcuseService:
         stmt = (
             select(ExcuseRequest)
             .join(Session, Session.id == ExcuseRequest.session_id)
+            .join(CourseOffering, CourseOffering.id == Session.offering_id)
+            .join(Course, Course.id == CourseOffering.course_id)
+            .outerjoin(Student, Student.id == ExcuseRequest.student_id)
+            .outerjoin(Attendance, (Attendance.student_id == ExcuseRequest.student_id) & (Attendance.session_id == ExcuseRequest.session_id))
+            .outerjoin(User, User.id == ExcuseRequest.reviewed_by)
             .where(assigned)
         )
         if status is not None:
             stmt = stmt.where(ExcuseRequest.status == status)
 
-        return await self._paginate(stmt, page=page, size=size)
+        if initiated_via is not None and initiated_via.strip():
+            stmt = stmt.where(ExcuseRequest.initiated_via == initiated_via.strip())
+
+        if course is not None and course.strip():
+            stmt = stmt.where(Course.course_code == course.strip().upper())
+
+        if section is not None and section.strip():
+            stmt = stmt.where(Student.section == section.strip())
+
+        if has_evidence is True:
+            stmt = stmt.where(
+                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0) > 0
+            )
+        elif has_evidence is False:
+            stmt = stmt.where(
+                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0) == 0
+            )
+
+        if original_status is not None and original_status.strip():
+            stmt = stmt.where(
+                func.coalesce(Attendance.original_status, Attendance.validation_status)
+                == original_status.strip()
+            )
+
+        if date_from is not None:
+            bound_from = date_from
+            if bound_from.tzinfo is None:
+                bound_from = bound_from.replace(tzinfo=timezone.utc)
+            stmt = stmt.where(Session.created_at >= bound_from)
+
+        if date_to is not None:
+            bound_to = date_to
+            if bound_to.tzinfo is None:
+                bound_to = bound_to.replace(tzinfo=timezone.utc)
+            if (
+                bound_to.timetuple()[3:6] == (0, 0, 0)
+                and bound_to.microsecond == 0
+            ):
+                bound_to = bound_to.replace(
+                    hour=23, minute=59, second=59, microsecond=999999
+                )
+            stmt = stmt.where(Session.created_at <= bound_to)
+
+        if submitted_from is not None:
+            bound = submitted_from
+            if bound.tzinfo is None:
+                bound = bound.replace(tzinfo=timezone.utc)
+            stmt = stmt.where(ExcuseRequest.requested_at >= bound)
+
+        if submitted_to is not None:
+            bound = submitted_to
+            if bound.tzinfo is None:
+                bound = bound.replace(tzinfo=timezone.utc)
+            if (
+                bound.timetuple()[3:6] == (0, 0, 0)
+                and bound.microsecond == 0
+            ):
+                bound = bound.replace(
+                    hour=23, minute=59, second=59, microsecond=999999
+                )
+            stmt = stmt.where(ExcuseRequest.requested_at <= bound)
+
+        if reviewed_from is not None:
+            bound = reviewed_from
+            if bound.tzinfo is None:
+                bound = bound.replace(tzinfo=timezone.utc)
+            stmt = stmt.where(ExcuseRequest.reviewed_at >= bound)
+
+        if reviewed_to is not None:
+            bound = reviewed_to
+            if bound.tzinfo is None:
+                bound = bound.replace(tzinfo=timezone.utc)
+            if (
+                bound.timetuple()[3:6] == (0, 0, 0)
+                and bound.microsecond == 0
+            ):
+                bound = bound.replace(
+                    hour=23, minute=59, second=59, microsecond=999999
+                )
+            stmt = stmt.where(ExcuseRequest.reviewed_at <= bound)
+
+        if reviewer is not None and reviewer.strip():
+            term = f"%{reviewer.strip()}%"
+            try:
+                reviewer_id = int(reviewer.strip())
+            except ValueError:
+                reviewer_id = None
+            conditions = [
+                User.first_name.ilike(term),
+                User.last_name.ilike(term),
+                User.email.ilike(term),
+            ]
+            if reviewer_id is not None:
+                conditions.append(ExcuseRequest.reviewed_by == reviewer_id)
+            stmt = stmt.where(or_(*conditions))
+
+        if search is not None and search.strip():
+            term = f"%{search.strip()}%"
+            search_conditions = [
+                Student.first_name.ilike(term),
+                Student.last_name.ilike(term),
+                Student.student_id.ilike(term),
+                Session.session_code.ilike(term),
+                Course.course_code.ilike(term),
+            ]
+            try:
+                search_conditions.append(ExcuseRequest.id == int(search.strip()))
+            except ValueError:
+                pass
+            stmt = stmt.where(or_(*search_conditions))
+
+        page = max(page, 1)
+        size = min(max(size, 1), 200)
+        total: int = (
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
+            or 0
+        )
+
+        sort_column_map = {
+            "requested_at": ExcuseRequest.requested_at,
+            "reviewed_at": ExcuseRequest.reviewed_at,
+            "status": ExcuseRequest.status,
+            "id": ExcuseRequest.id,
+        }
+        sort_col = sort_column_map.get(sort_by or "requested_at", ExcuseRequest.requested_at)
+        if sort_by == "student_name":
+            sort_col = Student.last_name
+        descending = (sort_dir or "desc").lower() != "asc"
+        order_expr = sort_col.desc() if descending else sort_col.asc()
+
+        rows: Sequence[ExcuseRequest] = (
+            await self._session.scalars(
+                stmt.order_by(order_expr)
+                .offset((page - 1) * size)
+                .limit(size)
+            )
+        ).all()
+
+        await self._resolve_names(rows)
+
+        return PaginatedResponse[ExcuseRequestRead](
+            items=[self._to_read(row) for row in rows],
+            total=total,
+            page=page,
+            size=size,
+        )
 
     async def list_for_student(
         self, *, user_id: int, page: int, size: int

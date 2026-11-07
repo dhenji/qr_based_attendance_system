@@ -815,6 +815,7 @@ class SessionService:
 
         return [
             ActiveStudentItem(
+                student_id=student.id,
                 student_number=student.student_id,
                 name=f"{student.first_name} {student.last_name}",
                 section=student.section,

@@ -1020,6 +1020,7 @@ export const ProfessorOfferingStudentsEndpoint: EndpointDef<Paginated<AdminRoste
 		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
 		const rows: AdminRosterItemResponse[] = [
 			{
+				id: 1,
 				student_id: 'S001',
 				name: 'Ada Lovelace',
 				email: 'ada@example.com',
@@ -2692,6 +2693,7 @@ export const AdminOfferingRosterEndpoint: EndpointDef<Paginated<AdminRosterItemR
 	method: 'GET',
 	mock: (params) => {
 		let rows: AdminRosterItemResponse[] = MOCK_ADMIN_STUDENT_ROWS.map((s) => ({
+			id: s.id,
 			student_id: s.student_id,
 			name: [s.first_name, s.middle_name, s.last_name].filter(Boolean).join(' '),
 			section: s.section,

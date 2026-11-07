@@ -90,6 +90,7 @@
 	let missingCount = $state(0);
 	let syncingFromOffering = $state(false);
 	let loadingFromUrl = $state(false);
+	let showAdvanced = $state(false);
 
 	// Debounce search
 	$effect(() => {
@@ -167,7 +168,12 @@
 	});
 
 	$effect(() => {
-		if (sessionType !== 'All' && !availableSessionTypes.has(sessionType)) {
+		if (availableSessionTypes.size === 1) {
+			const only = [...availableSessionTypes][0] as 'lecture' | 'lab';
+			if (sessionType === 'All' || !availableSessionTypes.has(sessionType)) {
+				sessionType = only;
+			}
+		} else if (sessionType !== 'All' && !availableSessionTypes.has(sessionType)) {
 			sessionType = 'All';
 		}
 	});
@@ -559,16 +565,7 @@
 	</section>
 
 	<section class="card filters no-print" aria-label="Attendance filters">
-		<div class="filter-grid wide">
-			<div class="field">
-				<label class="form-label" for="academic-year">Academic year</label>
-				<select id="academic-year" class="form-input" bind:value={academicYear} onchange={() => { semester = ""; programFilter = ""; yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }}>
-					<option value="">All</option>
-					{#each academicYearOptions as option (option)}
-						<option value={option}>{option}</option>
-					{/each}
-				</select>
-			</div>
+		<div class="filter-grid refine">
 			<div class="field">
 				<label class="form-label" for="class">Class</label>
 				<select
@@ -590,66 +587,6 @@
 					{#each classOptions as option (option.id)}
 						<option value={option.id}>{option.label}</option>
 					{/each}
-				</select>
-			</div>
-			<div class="field">
-				<label class="form-label" for="semester">Semester</label>
-				<select id="semester" class="form-input" bind:value={semester} onchange={() => { programFilter = ""; yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }}>
-					<option value="">All</option>
-					{#each semesterOptions as option (option)}
-						<option value={option}>{option}</option>
-					{/each}
-				</select>
-			</div>
-			<div class="field">
-				<label class="form-label" for="program">Program</label>
-				<select id="program" class="form-input" bind:value={programFilter} onchange={() => { yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
-					<option value="">All</option>
-					{#each programOptions as option (option.id)}
-						<option value={option.id}>{option.code}</option>
-					{/each}
-				</select>
-			</div>
-			<div class="field">
-				<label class="form-label" for="year-level">Year level</label>
-				<select id="year-level" class="form-input" bind:value={yearFilter} onchange={() => { section = ""; course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
-					<option value="">All</option>
-					{#each yearOptions as option (option.id)}
-						<option value={option.id}>{option.label}</option>
-					{/each}
-				</select>
-			</div>
-			<div class="field">
-				<label class="form-label" for="section">Section</label>
-				<select id="section" class="form-input" bind:value={section} onchange={() => { course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
-					<option value="">All</option>
-					{#each sectionOptions as option (option)}
-						<option value={option}>{option}</option>
-					{/each}
-				</select>
-			</div>
-			<div class="field">
-				<label class="form-label" for="course">Course</label>
-				<select id="course" class="form-input" bind:value={course} onchange={() => { classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
-					<option value="">All</option>
-					{#each courseOptions as option (option.code)}
-						<option value={option.code}>{option.code} — {option.name}</option>
-					{/each}
-				</select>
-			</div>
-		</div>
-
-		<div class="filter-grid refine">
-			<div class="field">
-				<label class="form-label" for="session-type">Type</label>
-				<select id="session-type" class="form-input" bind:value={sessionType} onchange={() => (currentPage = 1)}>
-					<option value="All">All types</option>
-					{#if availableSessionTypes.has('lecture')}
-						<option value="lecture">Lecture</option>
-					{/if}
-					{#if availableSessionTypes.has('lab')}
-						<option value="lab">Laboratory</option>
-					{/if}
 				</select>
 			</div>
 			<div class="field">
@@ -675,12 +612,94 @@
 		</div>
 
 		<div class="filter-actions">
+			<button
+				class="btn btn-ghost"
+				type="button"
+				aria-expanded={showAdvanced}
+				aria-controls="advanced-filters"
+				onclick={() => (showAdvanced = !showAdvanced)}
+			>
+				{showAdvanced ? 'Hide advanced filters' : 'Show advanced filters'}
+			</button>
 			<button class="btn btn-ghost" type="button" onclick={setToday}>Today</button>
 			<button class="btn btn-ghost" type="button" onclick={setYesterday}>Yesterday</button>
 			<button class="btn btn-ghost" type="button" onclick={setThisWeek}>This week</button>
 			<button class="btn btn-ghost" type="button" onclick={setAllTime}>All time</button>
 			<button class="btn btn-ghost" type="button" onclick={resetFilters}>Reset filters</button>
 		</div>
+
+		{#if showAdvanced}
+			<div id="advanced-filters" class="filter-grid wide advanced-filters">
+				<div class="field">
+					<label class="form-label" for="academic-year">Academic year</label>
+					<select id="academic-year" class="form-input" bind:value={academicYear} onchange={() => { semester = ""; programFilter = ""; yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }}>
+						<option value="">All</option>
+						{#each academicYearOptions as option (option)}
+							<option value={option}>{option}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="semester">Semester</label>
+					<select id="semester" class="form-input" bind:value={semester} onchange={() => { programFilter = ""; yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }}>
+						<option value="">All</option>
+						{#each semesterOptions as option (option)}
+							<option value={option}>{option}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="program">Program</label>
+					<select id="program" class="form-input" bind:value={programFilter} onchange={() => { yearFilter = ""; section = ""; course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+						<option value="">All</option>
+						{#each programOptions as option (option.id)}
+							<option value={option.id}>{option.code}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="year-level">Year level</label>
+					<select id="year-level" class="form-input" bind:value={yearFilter} onchange={() => { section = ""; course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+						<option value="">All</option>
+						{#each yearOptions as option (option.id)}
+							<option value={option.id}>{option.label}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="section">Section</label>
+					<select id="section" class="form-input" bind:value={section} onchange={() => { course = ""; classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+						<option value="">All</option>
+						{#each sectionOptions as option (option)}
+							<option value={option}>{option}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="course">Course</label>
+					<select id="course" class="form-input" bind:value={course} onchange={() => { classOfferingId = ""; currentPage = 1; }} disabled={!!classOfferingId}>
+						<option value="">All</option>
+						{#each courseOptions as option (option.code)}
+							<option value={option.code}>{option.code} — {option.name}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="session-type">Type</label>
+					<select id="session-type" class="form-input" bind:value={sessionType} onchange={() => (currentPage = 1)}>
+						{#if availableSessionTypes.size > 1}
+							<option value="All">All types</option>
+						{/if}
+						{#if availableSessionTypes.has('lecture')}
+							<option value="lecture">Lecture</option>
+						{/if}
+						{#if availableSessionTypes.has('lab')}
+							<option value="lab">Laboratory</option>
+						{/if}
+					</select>
+				</div>
+			</div>
+		{/if}
 	</section>
 
 	{#if loadError}
@@ -932,6 +951,12 @@
 	.refine {
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		margin-top: 1rem;
+	}
+
+	.advanced-filters {
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--divider);
 	}
 
 	.field {
