@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import threading
 from typing import Tuple
 
 import numpy as np
@@ -63,6 +64,7 @@ _ONNX_CANDIDATES = [
 
 _onnx_session = None
 _onnx_failed = False
+_onnx_lock = threading.Lock()
 
 
 def _model_path() -> str | None:
@@ -86,28 +88,29 @@ def _onnx_candidates() -> list[str]:
 
 def _get_onnx_session():
     global _onnx_session, _onnx_failed
-    if _onnx_session is not None:
+    if _onnx_session is not None or _onnx_failed:
         return _onnx_session
-    if _onnx_failed:
-        return None
-    try:
-        import onnxruntime as ort
-    except Exception:
-        _onnx_failed = True
-        return None
-    for candidate in _onnx_candidates():
-        if not candidate or not os.path.exists(candidate):
-            continue
-        try:
-            _onnx_session = ort.InferenceSession(
-                candidate, providers=["CPUExecutionProvider"]
-            )
+    with _onnx_lock:
+        if _onnx_session is not None or _onnx_failed:
             return _onnx_session
+        try:
+            import onnxruntime as ort
         except Exception:
-            continue
-    _onnx_failed = True
-    _onnx_session = None
-    return None
+            _onnx_failed = True
+            return None
+        for candidate in _onnx_candidates():
+            if not candidate or not os.path.exists(candidate):
+                continue
+            try:
+                _onnx_session = ort.InferenceSession(
+                    candidate, providers=["CPUExecutionProvider"]
+                )
+                return _onnx_session
+            except Exception:
+                continue
+        _onnx_failed = True
+        _onnx_session = None
+        return None
 
 
 def _load_image_bytes(content: bytes):

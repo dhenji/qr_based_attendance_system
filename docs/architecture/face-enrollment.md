@@ -116,7 +116,8 @@ AES-256-GCM encryption at rest remains unimplemented (D28/T9).
 - **Encryption**: ⚠ **Not implemented.** The design is AES-256-GCM with a
   server-side key. The BYTEA column holds the plaintext blob today.
 
-The earlier 128-float `mean`/`angles` JSON design is superseded; verification
+Enrollment persists the derived embedding only — the source photos are not
+stored or retrievable (privacy, D28). The earlier 128-float `mean`/`angles` JSON design is superseded; verification
 compares the enrolled embedding against a server-generated live embedding via
 cosine similarity (see §4 / security-model.md).
 

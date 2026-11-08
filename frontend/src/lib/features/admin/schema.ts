@@ -69,11 +69,11 @@ export const csvFileSchema = z
 // content type, size and non-empty (face_enrollment/service.py:41-60) and
 // nothing more.
 //
-// The six biometric gates from the design (brightness, face size, single face,
-// centring, sharpness, eyes open) are NOT implemented on either side — they
-// need either a client-side camera capture flow or server-side image analysis,
-// and the contract codes no_face_detected / multiple_faces / quality_too_low
-// have no implementation that could raise them.
+// Client-side file checks only: extension, empty, and size. The six biometric
+// gates (brightness, face size, single face, centring, sharpness, eyes open)
+// are implemented server-side in shared/face_quality.py and mirrored for
+// usability in features/admin/enrollment/quality.ts; the backend re-validates
+// every upload authoritatively.
 export const facePhotoSchema = z
 	.instanceof(File, { message: 'Choose a photo' })
 	.refine(

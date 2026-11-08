@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -61,33 +62,35 @@ class FaceQualityResult:
 
 _landmarker: Any = None
 _landmarker_failed: bool = False
+_landmarker_lock = threading.Lock()
 
 
 def _get_landmarker() -> Any:
     global _landmarker, _landmarker_failed
-    if _landmarker is not None:
+    if _landmarker is not None or _landmarker_failed:
         return _landmarker
-    if _landmarker_failed:
-        return None
-    path = _model_path()
-    if path is None or cv2 is None or mp is None or np is None:
-        _landmarker_failed = True
-        return None
-    try:
-        from mediapipe.tasks.python import vision
-        from mediapipe.tasks.python.core import base_options
+    with _landmarker_lock:
+        if _landmarker is not None or _landmarker_failed:
+            return _landmarker
+        path = _model_path()
+        if path is None or cv2 is None or mp is None or np is None:
+            _landmarker_failed = True
+            return None
+        try:
+            from mediapipe.tasks.python import vision
+            from mediapipe.tasks.python.core import base_options
 
-        options = vision.FaceLandmarkerOptions(
-            base_options=base_options.BaseOptions(model_asset_path=path),
-            running_mode=vision.RunningMode.IMAGE,
-            num_faces=_MAX_FACES,
-        )
-        _landmarker = vision.FaceLandmarker.create_from_options(options)
-        return _landmarker
-    except Exception:
-        _landmarker_failed = True
-        _landmarker = None
-        return None
+            options = vision.FaceLandmarkerOptions(
+                base_options=base_options.BaseOptions(model_asset_path=path),
+                running_mode=vision.RunningMode.IMAGE,
+                num_faces=_MAX_FACES,
+            )
+            _landmarker = vision.FaceLandmarker.create_from_options(options)
+            return _landmarker
+        except Exception:
+            _landmarker_failed = True
+            _landmarker = None
+            return None
 
 
 def decode_image(content: bytes):
