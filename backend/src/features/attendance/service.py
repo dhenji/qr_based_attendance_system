@@ -31,6 +31,7 @@ from features.attendance.constants import (
     REVIEW_NOTE_EVIDENCE_KEY,
     REVIEWED_AT_EVIDENCE_KEY,
     REVIEWED_BY_EVIDENCE_KEY,
+    REVIEW_REASON_ACCURACY_LOW,
     REVIEW_REASON_FACE_BAND,
     REVIEW_REASON_GEOFENCE,
     REVIEW_STATUSES,
@@ -40,6 +41,7 @@ from features.attendance.constants import (
 from features.attendance.exceptions import (
     AttendanceDomainException,
     FaceMismatchException,
+    GpsAccuracyTooLowException,
     LivenessFailedException,
     OutsideGeofenceException,
     ReviewNotFoundException,
@@ -363,9 +365,10 @@ class AttendanceService:
         scanned_at: datetime,
         face_match_score: float,
         geofence_review: bool = False,
+        accuracy_review: bool = False,
     ) -> tuple[str, str | None, bool, str | None]:
         face_review: bool = self._is_review_band(face_match_score)
-        review: bool = face_review or geofence_review
+        review: bool = face_review or geofence_review or accuracy_review
         computed: str = self._compute_status(db_session, scanned_at)
         original: str | None = computed if review else None
         reasons: list[str] = []
@@ -373,6 +376,8 @@ class AttendanceService:
             reasons.append(REVIEW_REASON_FACE_BAND)
         if geofence_review:
             reasons.append(REVIEW_REASON_GEOFENCE)
+        if accuracy_review:
+            reasons.append(REVIEW_REASON_ACCURACY_LOW)
         review_reason: str | None = ",".join(reasons) if reasons else None
         return computed, original, review, review_reason
 
@@ -477,17 +482,28 @@ class AttendanceService:
 
         geofence_review: bool = False
         geofence_details: dict | None = None
+        accuracy_review: bool = False
         if not self._settings.benchmark_mode:
+            if payload.gps is not None:
+                hard_floor = self._settings.gps_hard_floor_meters
+                if hard_floor <= 0:
+                    hard_floor = 1000.0
+                if float(payload.gps.accuracy) > hard_floor:
+                    raise GpsAccuracyTooLowException(float(payload.gps.accuracy), hard_floor)
             geofence_review, geofence_details = self._validate_geofence(
                 db_session, payload.gps
             )
             self._validate_liveness(payload.liveness_evidence)
+            if payload.gps is not None:
+                threshold = self._settings.gps_review_accuracy_threshold
+                if threshold > 0 and float(payload.gps.accuracy) > threshold:
+                    accuracy_review = True
 
         if not geofence_review:
             geofence_details = None
 
         status, original, review, review_reason = self._decide_scan_outcome(
-            db_session, scanned_at, score, geofence_review
+            db_session, scanned_at, score, geofence_review, accuracy_review
         )
 
         return await self._persist_scan(
@@ -705,9 +721,11 @@ class AttendanceService:
 
         radius: float = session.classroom_radius_meters
         # Cap the uncertainty so a wildly inaccurate (or spoofed) fix cannot
-        # neutralise the geofence entirely. 50 m matches the client's
-        # high-accuracy target.
-        uncertainty: float = min(float(gps.accuracy), 50.0)
+        # neutralise the geofence entirely. Configurable via settings.
+        cap = self._settings.geofence_uncertainty_cap_meters
+        if cap <= 0:
+            cap = 50.0
+        uncertainty: float = min(float(gps.accuracy), cap)
 
         details: dict = {
             "distance_meters": round(distance, 2),

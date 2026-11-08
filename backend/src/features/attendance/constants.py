@@ -69,6 +69,7 @@ REVIEW_NOTE_MAX_LENGTH: int = 1000
 # rows that predate the key simply omit it.
 REVIEW_REASON_FACE_BAND: str = "face_review_band"
 REVIEW_REASON_GEOFENCE: str = "geofence_uncertainty"
+REVIEW_REASON_ACCURACY_LOW: str = "accuracy_low"
 
 # Where a reviewer's free-text note is stored: `attendance_records` has no
 # dedicated column, so it rides inside the existing JSONB evidence blob.

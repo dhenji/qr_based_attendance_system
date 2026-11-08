@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     face_input_size: int = 112
     face_embedding_normalize: str = "minus_one_one"
 
+    # GPS / geofence hardening
+    gps_review_accuracy_threshold: float = 100.0
+    gps_hard_floor_meters: float = 1000.0
+    geofence_uncertainty_cap_meters: float = 50.0
+
     # Backup-attachment fields
     backup_storage_type: str = "local"
     backup_local_dir: str = "./backups"

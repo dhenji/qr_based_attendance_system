@@ -35,7 +35,8 @@ export const SCAN_ERROR_MESSAGES: Record<string, string> = {
 	internal_error: 'We could not process your attendance right now. Try again later. If the problem persists, contact support.',
 	location_permission_denied: 'Location permission is required to verify your attendance. Enable location access in your device settings.',
 	location_timeout: 'We could not determine your current location in time. Move to an area with a clearer signal and try again.',
-	location_unavailable: 'We could not determine your current location. Enable location services and try again.'
+	location_unavailable: 'We could not determine your current location. Enable location services and try again.',
+	gps_accuracy_too_low: 'Your GPS accuracy is too low to verify attendance. Move to an area with a clearer signal and try again.'
 };
 
 // Friendly translations for the raw backend validation messages that reach
