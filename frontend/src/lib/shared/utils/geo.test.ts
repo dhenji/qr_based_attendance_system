@@ -212,3 +212,195 @@ describe('requestBestPosition', () => {
 		await expect(promise).rejects.toMatchObject({ code: 'location_permission_denied' });
 	});
 });
+describe('requestBestPosition edge cases', () => {
+	let watchCallback: ((pos: any) => void) | null = null;
+	let errorCallback: ((err: any) => void) | null = null;
+	let clearWatch: ReturnType<typeof vi.fn>;
+	let watchPosition: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		watchCallback = null;
+		errorCallback = null;
+		clearWatch = vi.fn();
+		watchPosition = vi.fn((success, error, _opts) => {
+			watchCallback = success;
+			errorCallback = error;
+			return 1;
+		});
+		vi.stubGlobal('navigator', {
+			geolocation: { watchPosition, clearWatch }
+		} as any);
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	const makePos = (lat: number, lng: number, accuracy: number, timestamp?: number) => ({
+		coords: { latitude: lat, longitude: lng, accuracy },
+		timestamp: timestamp ?? 12345
+	});
+
+	it('ignores fixes with non-positive accuracy', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 2, timeoutMs: 1000 });
+		watchCallback!(makePos(1, 2, 0));
+		watchCallback!(makePos(3, 4, 20));
+		const res = await promise;
+		expect(res).toEqual({ lat: 3, lng: 4, accuracy: 20, timestamp: 12345 });
+	});
+
+	it('ignores fixes with out-of-range coords', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 2, timeoutMs: 1000 });
+		watchCallback!({ coords: { latitude: 100, longitude: 1, accuracy: 10 }, timestamp: 1 });
+		watchCallback!(makePos(3, 4, 20));
+		const res = await promise;
+		expect(res).toEqual({ lat: 3, lng: 4, accuracy: 20, timestamp: 12345 });
+	});
+
+	it('rejects with location_accuracy_too_low when maxAccuracy exceeded', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 1, timeoutMs: 1000, maxAccuracy: 10 });
+		watchCallback!(makePos(1, 2, 20));
+		await expect(promise).rejects.toMatchObject({ code: 'location_accuracy_too_low' });
+	});
+
+	it('maps permission denied', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		errorCallback!({ code: 1, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+		await expect(promise).rejects.toMatchObject({ code: 'location_permission_denied' });
+	});
+
+	it('times out with no fix', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 100 });
+		vi.advanceTimersByTime(100);
+		await expect(promise).rejects.toMatchObject({ code: 'location_timeout' });
+	});
+
+	it('clamps maxFixes < 1 to 1', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 0, timeoutMs: 1000 });
+		watchCallback!(makePos(1, 2, 20));
+		const res = await promise;
+		expect(res).toEqual({ lat: 1, lng: 2, accuracy: 20, timestamp: 12345 });
+	});
+
+	it('clamps timeoutMs < 0 to 0', async () => {
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: -5 });
+		// timeout 0 fires immediately
+		vi.advanceTimersByTime(0);
+		await expect(promise).rejects.toMatchObject({ code: 'location_timeout' });
+	});
+
+	it('ignores stale timestamp (>=1e12, >30s old)', async () => {
+		const now = Date.now();
+		const promise = requestBestPosition({ desiredAccuracy: 50, maxFixes: 2, timeoutMs: 1000 });
+		watchCallback!(makePos(1, 2, 10, now - 60000));
+		watchCallback!(makePos(3, 4, 20, now));
+		const res = await promise;
+		expect(res).toEqual({ lat: 3, lng: 4, accuracy: 20, timestamp: now });
+	});
+});
+
+describe('requestBestPosition in-flight dedup', () => {
+	let watchCallback: ((pos: any) => void) | null = null;
+	let watchPosition: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		watchCallback = null;
+		watchPosition = vi.fn((success, _error, _opts) => {
+			watchCallback = success;
+			return 1;
+		});
+		vi.stubGlobal('navigator', {
+			geolocation: { watchPosition, clearWatch: vi.fn() }
+		} as any);
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	it('shares one watch across concurrent calls', async () => {
+		const p1 = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		const p2 = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		expect(watchPosition).toHaveBeenCalledTimes(1);
+		watchCallback!({ coords: { latitude: 1, longitude: 2, accuracy: 10 }, timestamp: 12345 });
+		const [r1, r2] = await Promise.all([p1, p2]);
+		expect(r1).toEqual(r2);
+	});
+});
+
+describe('requestBestPosition fast first fix', () => {
+	let watchCallback: ((pos: any) => void) | null = null;
+	let errorCallback: ((err: any) => void) | null = null;
+	let getCurrentPosition: ReturnType<typeof vi.fn>;
+	let watchPosition: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		watchCallback = null;
+		errorCallback = null;
+		getCurrentPosition = vi.fn();
+		watchPosition = vi.fn((success, error, _opts) => {
+			watchCallback = success;
+			errorCallback = error;
+			return 1;
+		});
+		vi.stubGlobal('navigator', {
+			geolocation: { watchPosition, clearWatch: vi.fn(), getCurrentPosition }
+		} as any);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('returns fast fix when good', async () => {
+		getCurrentPosition.mockImplementation((success: any) => {
+			success({ coords: { latitude: 1, longitude: 2, accuracy: 10 }, timestamp: Date.now() });
+		});
+		const res = await requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000, fastTimeoutMs: 100 });
+		expect(res).toMatchObject({ lat: 1, lng: 2, accuracy: 10 });
+	});
+
+	it('falls through on coarse fast fix', async () => {
+		getCurrentPosition.mockImplementation((success: any) => {
+			success({ coords: { latitude: 1, longitude: 2, accuracy: 200 }, timestamp: Date.now() });
+		});
+		const p = requestBestPosition({ desiredAccuracy: 50, maxFixes: 2, timeoutMs: 1000, fastTimeoutMs: 100 });
+		await new Promise((r) => setTimeout(r, 0));
+		await new Promise((r) => setTimeout(r, 0));
+		watchCallback!({ coords: { latitude: 3, longitude: 4, accuracy: 40 }, timestamp: Date.now() });
+		const res = await p;
+		expect(res.accuracy).toBe(40);
+	});
+
+	it('propagates permission denied', async () => {
+		getCurrentPosition.mockImplementation((_s: any, error: any) => {
+			error({ code: 1, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+		});
+		const p = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000, fastTimeoutMs: 100 });
+		await expect(p).rejects.toMatchObject({ code: 'location_permission_denied' });
+	});
+
+	it('skips fast path when fastFirst is false', async () => {
+		const p = requestBestPosition({ desiredAccuracy: 50, maxFixes: 1, timeoutMs: 1000, fastFirst: false });
+		expect(getCurrentPosition).not.toHaveBeenCalled();
+		watchCallback!({ coords: { latitude: 5, longitude: 6, accuracy: 20 }, timestamp: Date.now() });
+		const res = await p;
+		expect(res).toMatchObject({ lat: 5, lng: 6, accuracy: 20 });
+	});
+
+	it('shares one watch when getCurrentPosition absent', async () => {
+		// remove getCurrentPosition
+		const nav = (globalThis as any).navigator;
+		delete nav.geolocation.getCurrentPosition;
+		const p1 = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		const p2 = requestBestPosition({ desiredAccuracy: 50, maxFixes: 3, timeoutMs: 1000 });
+		expect(watchPosition).toHaveBeenCalledTimes(1);
+		watchCallback!({ coords: { latitude: 1, longitude: 2, accuracy: 10 }, timestamp: Date.now() });
+		const [r1, r2] = await Promise.all([p1, p2]);
+		expect(r1).toEqual(r2);
+	});
+});

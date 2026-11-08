@@ -31,9 +31,10 @@ let gpsMarker: any = null;
 let gpsAccuracyCircle: any = null;
 let radiusCircle: any = null;
 
-let locating = $state(false);
-let gpsError = $state<string | null>(null);
-let gpsAccuracy = $state<number | null>(null);
+	let locating = $state(false);
+	let gpsError = $state<string | null>(null);
+	let gpsAccuracy = $state<number | null>(null);
+	let locateAbortController: AbortController | null = null;
 
 	let searchQuery = $state('');
 	let results = $state<LocationSearchResult[]>([]);
@@ -63,30 +64,36 @@ let gpsAccuracy = $state<number | null>(null);
 
 	async function locate() {
 		if (!allowLocate || locating) return;
+		if (!map || !leaflet) {
+			gpsError = 'Map is still loading. Try again in a moment.';
+			return;
+		}
 		locating = true;
 		gpsError = null;
+		const controller = new AbortController();
+		locateAbortController = controller;
 		try {
 			const fix = await requestBestPosition({
 				desiredAccuracy: 50,
 				maxFixes: 3,
-				timeoutMs: 10000
+				timeoutMs: 10000,
+				maxAccuracy: 50,
+				signal: controller.signal
 			});
 			gpsAccuracy = fix.accuracy;
 			lat = fix.lat;
 			lng = fix.lng;
-			if (map && leaflet) {
-				placeMarker(map, leaflet, fix.lat, fix.lng);
-				if (gpsMarker) {
-					gpsMarker.remove();
-					gpsMarker = null;
-				}
-				const icon = leaflet.divIcon({
-					className: 'gps-marker',
-					html: '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 2px #2563eb;"></div>',
-					iconSize: [12, 12]
-				});
-				gpsMarker = leaflet.marker([fix.lat, fix.lng], { icon, interactive: false }).addTo(map);
+			placeMarker(map, leaflet, fix.lat, fix.lng);
+			if (gpsMarker) {
+				gpsMarker.remove();
+				gpsMarker = null;
 			}
+			const icon = leaflet.divIcon({
+				className: 'gps-marker',
+				html: '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 2px #2563eb;"></div>',
+				iconSize: [12, 12]
+			});
+			gpsMarker = leaflet.marker([fix.lat, fix.lng], { icon, interactive: false }).addTo(map);
 			if (gpsAccuracyCircle) {
 				try { gpsAccuracyCircle.remove(); } catch { /* ignore */ }
 				gpsAccuracyCircle = null;
@@ -104,6 +111,7 @@ let gpsAccuracy = $state<number | null>(null);
 			gpsError = e?.message ?? 'Unable to get your location.';
 		} finally {
 			locating = false;
+			locateAbortController = null;
 		}
 	}
 
@@ -216,6 +224,10 @@ let gpsAccuracy = $state<number | null>(null);
 	});
 
 	onDestroy(() => {
+		if (locateAbortController) {
+			try { locateAbortController.abort(); } catch { /* ignore */ }
+			locateAbortController = null;
+		}
 		if (resizeObserver) {
 			resizeObserver.disconnect();
 			resizeObserver = null;
@@ -279,8 +291,6 @@ let gpsAccuracy = $state<number | null>(null);
 		// Touch these so this re-runs on every relevant change.
 		void expanded;
 		void height;
-		void lat;
-		void lng;
 		if (!map) return;
 		const invalidate = () => map.invalidateSize();
 		const raf = requestAnimationFrame(() => setTimeout(invalidate, 0));
