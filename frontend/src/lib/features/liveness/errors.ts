@@ -35,7 +35,8 @@ export const SCAN_ERROR_MESSAGES: Record<string, string> = {
 	internal_error: 'We could not process your attendance right now. Try again later. If the problem persists, contact support.',
 	location_permission_denied: 'Location permission is required to verify your attendance. Enable location access in your device settings.',
 	location_timeout: 'We could not determine your current location in time. Move to an area with a clearer signal and try again.',
-	location_unavailable: 'We could not determine your current location. Enable location services and try again.'
+	location_unavailable: 'We could not determine your current location. Enable location services and try again.',
+	gps_accuracy_too_low: 'Your GPS accuracy is too low to verify attendance. Move to an area with a clearer signal and try again.'
 };
 
 // Friendly translations for the raw backend validation messages that reach
@@ -74,9 +75,24 @@ const translateValidationMessage = (message: string): string => {
 	return cleaned || message;
 };
 
+export const MAP_PICKER_ERROR_MESSAGES: Record<string, string> = {
+	location_permission_denied: 'Location permission is required to set your position. Enable location access in your device settings.',
+	location_timeout: 'We could not determine your location in time. Move to an area with a clearer signal and try again.',
+	location_unavailable: 'We could not determine your location. Enable location services and try again.',
+	location_accuracy_too_low: 'Your GPS accuracy is too low. Move to an area with a clearer signal and try again.'
+};
+
+export const toMapPickerMessage = (error: unknown, fallback: string): string => {
+	if (error instanceof APIError) {
+		if (error.code && MAP_PICKER_ERROR_MESSAGES[error.code]) {
+			return MAP_PICKER_ERROR_MESSAGES[error.code];
+		}
+		return fallback;
+	}
+	return error instanceof Error && error.message ? error.message : fallback;
+};
 export const toScanMessage = (error: unknown, fallback: string): string => {
 	if (error instanceof APIError) {
-		// Surface the backend's specific 422 detail, translated into
 		// student-friendly copy, instead of the generic validation_error
 		// message, so a student can act on the actual failing field.
 		if (

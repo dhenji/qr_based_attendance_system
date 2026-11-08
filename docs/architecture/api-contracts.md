@@ -1250,11 +1250,11 @@ Bulk excuse all absent students.
 | **Errors**       | 404 `attendance_not_found` · 409 `already_excused` · 422 `excuse_not_eligible` |
 #### `GET /professor/excuse-requests`
 
-List pending excuse requests for professor's courses.
+List excuse requests for professor's courses (filterable).
 
 |                  |                                                 |
 | ---------------- | ----------------------------------------------- |
-| **Query**        | `?status=pending                                | approved | rejected&page=1&size=20` |
+| **Query**        | `?status=pending|approved|rejected&search=&course=&section=&initiated_via=quick|prof_with_evidence|request&has_evidence=true|false&original_status=absent|late|rejected|unknown&reviewer=&from=&to=&submitted_from=&submitted_to=&reviewed_from=&reviewed_to=&sort_by=requested_at|reviewed_at|status|student_name|id&sort_dir=asc|desc&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
 
 > The same `ExcuseRequest` shape as the admin view, with the same resolved
@@ -1394,7 +1394,7 @@ Submit attendance scan (online or queued for offline sync).
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ session_id: int, student_number: string, gps?: { lat: number, lng: number, accuracy: number } | null, liveness_evidence: { blink_detected: bool, head_turn_left: bool, head_turn_right: bool, ear_samples: number[], pnp_evidence: object }, live_face_embedding?: string | null, live_face_image?: string | null, scanned_at: ISO-8601 }` (at least one of `live_face_embedding` / `live_face_image` required) |
 | **Response 200** | `{ id, status: "present"                                                                                                                                                                                                                                                          | "late" | "pending" | "rejected", scanned_at, expires_at }` |
-| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `face_not_enrolled` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 422 `session_not_started` · 404 `student_not_found` |
+| **Errors**       | 409 `duplicate_scan` · 403 `outside_geofence` · 403 `liveness_failed` · 403 `face_mismatch` · 403 `face_not_enrolled` · 400 `stub_embedding` · 403 `not_enrolled` · 403 `student_number_mismatch` · 410 `session_expired` · 422 `session_not_started` · 404 `student_not_found` · 422 `gps_accuracy_too_low` |
 | **Notes**        | `student_number` maps `students.student_id` and **must match the authenticated account** (case-insensitive); a body naming a different student is refused with 403 `student_number_mismatch` rather than honoured — the student is resolved from the bearer token, never from the body. `gps` is kept as a nested input object but stored flat as `gps_lat`/`gps_lng`; `accuracy` is folded into `liveness_evidence`. `scanned_at` maps `attendance_records.timestamp`; response `status` maps `validation_status`. `scanned_via` (recorded on `attendance_records`): defaults to `"qr_camera"` because the SPA does not send this field; the schema accepts `"manual_code"`, but no current client sets it. |
 | **Idempotency**  | `X-Idempotency-Key` (≤64 chars). A repeat within 15 minutes returns the first `ScanResponse` instead of 409. The cache key is `user_id:session_id:key` and is process-local, so a repeated key from another student never collides and a key does not survive a restart or expire the window. |
 | **Offline**      | If offline, client stores locally. On sync, server validates `scanned_at` against session window; expired → `rejected` with reason `session_expired` (D16).                                                                                                                                  |

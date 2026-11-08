@@ -1,6 +1,12 @@
 // Client-side quality checks for uploaded face-enrollment photos.
 // Mirrors the backend thresholds in shared/face_quality.py. These are
 // usability hints only; the backend re-validates authoritatively.
+//
+// Intentionally NOT checked here (server-authoritative, see
+// shared/face_quality.py): face count, face size ratio, centering, and
+// eyes-open (EAR). The backend enforces all six gates and returns a
+// photo-named error, so the client mirror stays limited to cheap,
+// dependency-free checks (brightness, sharpness, min dimension).
 
 export type FacePhotoQualityResult = { ok: boolean; reason?: string };
 

@@ -143,12 +143,12 @@ export const exportAnalyticsComparison = async (): Promise<void> => {
 };
 
 export const exportAnalyticsTrends = async (): Promise<void> => {
-	const items = await getAnalyticsTrends();
+	const { items } = await getAnalyticsTrends();
 	downloadCsv(`analytics-trends-${stamp()}.csv`, trendsCsv(items));
 };
 
 export const exportAnalyticsAtRisk = async (): Promise<void> => {
-	const items = await getAtRisk();
+	const { items } = await getAtRisk();
 	downloadCsv(`analytics-atrisk-${stamp()}.csv`, atRiskCsv(items));
 };
 

@@ -441,6 +441,10 @@ export interface AdminAssignmentReopenPayload {
 }
 
 export interface AdminRosterItemResponse {
+	// The student's database primary key (backend RosterItem.id). The printed
+	// student number lives in `student_id` (a string); this is the integer id
+	// that per-record routes such as the professor quick-excuse need.
+	id: number;
 	student_id: string;
 	name: string;
 	email?: string | null;
@@ -449,6 +453,9 @@ export interface AdminRosterItemResponse {
 }
 
 export interface AdminRosterItem {
+	// Database primary key of the student (backend RosterItem.id). Optional for
+	// backward compat with any caller that builds the item without it.
+	id?: number;
 	studentId: string;
 	name: string;
 	email?: string;
@@ -582,6 +589,7 @@ export interface RiskStagingFilters {
 	semester?: string;
 	course_ids?: number[];
 	risk_level?: AnalyticsRiskLevel;
+	q?: string;
 	unpromoted_only?: boolean;
 	page?: number;
 	size?: number;
@@ -599,6 +607,57 @@ export interface AttendanceOverviewItemResponse {
 	sessions_count: number;
 	avg_rate: number;
 	trend: AttendanceTrend;
+	present?: number;
+	late?: number;
+	excused?: number;
+	rejected?: number;
+}
+
+export interface AttendanceRecordItemResponse {
+	id: number;
+	student_id: number;
+	student_name: string;
+	student_number: string;
+	course_id: number;
+	course_code: string;
+	course_name: string;
+	program_code: string | null;
+	year_level_label: string | null;
+	session_code: string | null;
+	status: string;
+	scanned_at: string;
+	professor_name: string | null;
+}
+
+export interface AttendanceSummaryResponse {
+	total_records: number;
+	present: number;
+	late: number;
+	excused: number;
+	rejected: number;
+	compliance_rate: number;
+	participation_rate: number;
+	total_sessions: number;
+	total_students: number;
+	previous_compliance_rate: number;
+	previous_participation_rate: number;
+}
+
+export interface AttendanceOverviewFilters {
+	program_id?: number;
+	year_level_id?: number;
+	semester?: string;
+	course_id?: number;
+	professor_id?: number;
+	session_type?: string;
+	status?: string;
+	student_search?: string;
+	date_from?: string;
+	date_to?: string;
+	page?: number;
+	size?: number;
+	sort_by?: string;
+	sort_dir?: string;
 }
 
 export interface RecentScanResponse {
@@ -636,14 +695,10 @@ export interface AdminAnalyticsFilters {
 	granularity?: AnalyticsGranularity;
 	risk_level?: AnalyticsRiskLevel;
 	session_type?: 'lecture' | 'lab';
+	q?: string;
 }
 
-export interface AttendanceOverviewFilters {
-	course_id?: number;
-	professor_id?: number;
-	date_from?: string;
-	date_to?: string;
-}
+
 
 // --- Admin audit logs (live backend, api-contracts §System Settings & Backups) --
 //

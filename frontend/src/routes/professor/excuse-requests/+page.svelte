@@ -6,12 +6,14 @@
 		EXCUSE_REASON_MIN_LENGTH,
 		listExcuseRequests,
 		quickExcuse,
+		quickExcuseByIds,
 		revokeExcuse,
 		reviewExcuseRequest,
 		type ExcuseFilters
 	} from '$lib/features/excuse/service';
 	import { listSessions } from '$lib/features/session/service';
-	import { isMockMode } from '$lib/api/client';
+	import { listOfferingStudents } from '$lib/features/professor/service';
+	import type { AdminRosterItem } from '$lib/shared/types/admin';	import { isMockMode } from '$lib/api/client';
 	import {
 		ATTACHMENTS_MAX_FILES,
 		uploadAttachments,
@@ -22,13 +24,14 @@
 		initProfessorCourses,
 		professorState
 	} from '$lib/features/professor/store.svelte';
-	import type { ExcuseOriginalStatus, ExcuseRequest, ExcuseStatus } from '$lib/shared/types/excuse';
+	import type { ExcuseInitiatedVia, ExcuseOriginalStatus, ExcuseRequest, ExcuseStatus } from '$lib/shared/types/excuse';
 	import { formatDate } from '$lib/shared/utils/format';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
 
 	type QueueRow = ExcuseRequest;
-
-	const PAGE_SIZE = 10;
 
 	const statusOptions: Array<'All' | ExcuseStatus> = ['All', 'pending', 'approved', 'rejected'];
 	const originalOptions: ExcuseOriginalStatus[] = ['absent', 'late', 'rejected'];
@@ -66,11 +69,25 @@
 		};
 	});
 
+	let searchInput = $state('');
 	let search = $state('');
 	let course = $state('All');
+	let section = $state('All');
+	let initiatedVia = $state<'All' | ExcuseInitiatedVia>('All');
+	let hasEvidence = $state<'All' | 'yes' | 'no'>('All');
+	let originalStatus = $state<'All' | ExcuseOriginalStatus>('All');
+	let reviewer = $state('');
 	let status = $state<'All' | ExcuseStatus>('pending');
 	let from = $state('');
 	let to = $state('');
+	let submittedFrom = $state('');
+	let submittedTo = $state('');
+	let reviewedFrom = $state('');
+	let reviewedTo = $state('');
+	let sortBy = $state<'requested_at' | 'reviewed_at' | 'status' | 'student_name' | 'id'>('requested_at');
+	let sortDir = $state<'asc' | 'desc'>('desc');
+	let pageSize = $state(10);
+	let showAdvanced = $state(false);
 	let currentPage = $state(1);
 	let rows = $state<QueueRow[]>([]);
 	let total = $state(0);
@@ -85,8 +102,15 @@
 	let reviewError = $state<string | null>(null);
 
 	let quickOpen = $state(false);
-	let quickStudentNumber = $state('');
-	let quickStudentName = $state('');
+	// Searchable student selection (replaces manual number/name entry).
+	let quickStudentSearch = $state('');
+	let quickSelectedStudent = $state<AdminRosterItem | null>(null);
+	let quickEnrolledCourseCodes = $state<string[]>([]);
+	let quickEnrolledLoading = $state(false);
+	let quickEnrolledError = $state<string | null>(null);
+	let quickRoster = $state<AdminRosterItem[]>([]);
+	let quickRosterLoading = $state(false);
+	let quickRosterError = $state<string | null>(null);
 	let quickCourse = $state('CS101');
 	let quickOriginal = $state<ExcuseOriginalStatus>('absent');
 	let quickReason = $state('');
@@ -100,8 +124,9 @@
 	// so a single failed file never discards the rest.
 	let quickStagedUrls = $state<string[]>([]);
 	// Real sessions for the quick-excuse picker (warmed when the modal
-	// opens; falls back to the course directory when the list is empty).
-	let quickSessions = $state<Array<{ id: number; code: string }>>([]);
+	// opens). Each carries its offering id so the roster can be loaded for
+	// the selected session.
+	let quickSessions = $state<Array<{ id: number; code: string; offeringId: number }>>([]);
 	let quickSessionId = $state<number | null>(null);
 
 	// Detail-modal edit/revoke for professor-issued rows (quick /
@@ -129,18 +154,94 @@
 		if (!courseOptions.includes(quickCourse)) quickCourse = courseOptions[0] ?? 'CS101';
 	});
 
+	$effect(() => {
+		const value = searchInput;
+		const timer = setTimeout(() => {
+			search = value.trim();
+			currentPage = 1;
+		}, 300);
+		return () => clearTimeout(timer);
+	});
+
+	let urlReady = $state(false);
+
+	onMount(() => {
+		const p = $page.url.searchParams;
+		if (p.get('status')) status = p.get('status') as 'All' | ExcuseStatus;
+		if (p.get('course')) course = p.get('course')!;
+		if (p.get('section')) section = p.get('section')!;
+		if (p.get('initiated_via')) initiatedVia = p.get('initiated_via') as 'All' | ExcuseInitiatedVia;
+		if (p.get('has_evidence')) hasEvidence = p.get('has_evidence') === 'true' ? 'yes' : 'no';
+		if (p.get('original_status')) originalStatus = p.get('original_status') as 'All' | ExcuseOriginalStatus;
+		if (p.get('reviewer')) reviewer = p.get('reviewer')!;
+		if (p.get('search')) searchInput = p.get('search')!;
+		if (p.get('from')) from = p.get('from')!;
+		if (p.get('to')) to = p.get('to')!;
+		if (p.get('submitted_from')) submittedFrom = p.get('submitted_from')!;
+		if (p.get('submitted_to')) submittedTo = p.get('submitted_to')!;
+		if (p.get('reviewed_from')) reviewedFrom = p.get('reviewed_from')!;
+		if (p.get('reviewed_to')) reviewedTo = p.get('reviewed_to')!;
+		if (p.get('sort_by')) sortBy = p.get('sort_by') as typeof sortBy;
+		if (p.get('sort_dir')) sortDir = p.get('sort_dir') as 'asc' | 'desc';
+		if (p.get('size')) pageSize = Number(p.get('size')) || pageSize;
+		if (p.get('page')) currentPage = Number(p.get('page')) || currentPage;
+		urlReady = true;
+	});
+
+	$effect(() => {
+		if (!urlReady) return;
+		const params = new URLSearchParams();
+		if (status !== 'All') params.set('status', status);
+		if (course !== 'All') params.set('course', course);
+		if (section !== 'All') params.set('section', section);
+		if (initiatedVia !== 'All') params.set('initiated_via', initiatedVia);
+		if (hasEvidence !== 'All') params.set('has_evidence', hasEvidence === 'yes' ? 'true' : 'false');
+		if (originalStatus !== 'All') params.set('original_status', originalStatus);
+		if (reviewer) params.set('reviewer', reviewer);
+		if (search) params.set('search', search);
+		if (from) params.set('from', from);
+		if (to) params.set('to', to);
+		if (submittedFrom) params.set('submitted_from', submittedFrom);
+		if (submittedTo) params.set('submitted_to', submittedTo);
+		if (reviewedFrom) params.set('reviewed_from', reviewedFrom);
+		if (reviewedTo) params.set('reviewed_to', reviewedTo);
+		if (sortBy !== 'requested_at') params.set('sort_by', sortBy);
+		if (sortDir !== 'desc') params.set('sort_dir', sortDir);
+		if (pageSize !== 10) params.set('size', String(pageSize));
+		if (currentPage > 1) params.set('page', String(currentPage));
+		const query = params.toString();
+		void goto(query ? `?${query}` : '?', { replaceState: true, keepFocus: true, noScroll: true });
+	});
+
 	const buildFilters = (): ExcuseFilters => {
 		let start = from || undefined;
 		let end = to || undefined;
 		if (start && end && start > end) [start, end] = [end, start];
+		let sStart = submittedFrom || undefined;
+		let sEnd = submittedTo || undefined;
+		if (sStart && sEnd && sStart > sEnd) [sStart, sEnd] = [sEnd, sStart];
+		let rStart = reviewedFrom || undefined;
+		let rEnd = reviewedTo || undefined;
+		if (rStart && rEnd && rStart > rEnd) [rStart, rEnd] = [rEnd, rStart];
 		return {
 			status: status === 'All' ? undefined : status,
 			course: course === 'All' ? undefined : course,
+			section: section === 'All' ? undefined : section,
+			initiatedVia: initiatedVia === 'All' ? undefined : initiatedVia,
+			hasEvidence: hasEvidence === 'All' ? undefined : hasEvidence === 'yes',
+			originalStatus: originalStatus === 'All' ? undefined : originalStatus,
+			reviewer: reviewer || undefined,
 			search: search || undefined,
 			from: start,
 			to: end,
+			submittedFrom: sStart,
+			submittedTo: sEnd,
+			reviewedFrom: rStart,
+			reviewedTo: rEnd,
+			sortBy: sortBy,
+			sortDir: sortDir,
 			page: currentPage,
-			size: PAGE_SIZE
+			size: pageSize
 		};
 	};
 
@@ -173,12 +274,12 @@
 		};
 	});
 
-	const pageCount = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+	const pageCount = $derived(Math.max(1, Math.ceil(total / pageSize)));
 	const pageNumbers = $derived(Array.from({ length: pageCount }, (_, index) => index + 1));
 	const rangeText = $derived.by(() => {
 		if (total === 0) return '0 of 0 requests';
-		const start = (currentPage - 1) * PAGE_SIZE + 1;
-		const end = Math.min(currentPage * PAGE_SIZE, total);
+		const start = (currentPage - 1) * pageSize + 1;
+		const end = Math.min(currentPage * pageSize, total);
 		return `${start}–${end} of ${total} requests`;
 	});
 
@@ -186,12 +287,41 @@
 		`Pending ${counts.pending} · Approved ${counts.approved} · Rejected ${counts.rejected}`
 	);
 
+	const hasActiveFilters = $derived(
+		status !== 'All' ||
+			course !== 'All' ||
+			section !== 'All' ||
+			initiatedVia !== 'All' ||
+			hasEvidence !== 'All' ||
+			originalStatus !== 'All' ||
+			reviewer !== '' ||
+			search !== '' ||
+			from !== '' ||
+			to !== '' ||
+			submittedFrom !== '' ||
+			submittedTo !== '' ||
+			reviewedFrom !== '' ||
+			reviewedTo !== ''
+	);
+
 	const resetFilters = () => {
 		search = '';
 		course = 'All';
-		status = 'pending';
+		section = 'All';
+		initiatedVia = 'All';
+		hasEvidence = 'All';
+		originalStatus = 'All';
+		reviewer = '';
+		status = 'All';
 		from = '';
 		to = '';
+		submittedFrom = '';
+		submittedTo = '';
+		reviewedFrom = '';
+		reviewedTo = '';
+		sortBy = 'requested_at';
+		sortDir = 'desc';
+		pageSize = 10;
 		currentPage = 1;
 	};
 
@@ -245,19 +375,145 @@
 		quickFileErrors = [];
 		quickStagedUrls = [];
 		quickUploadStatus = '';
-		// Warm real sessions so the excuse attaches to an actual session id
-		// instead of a fabricated one (the submit itself stays in-memory:
-		// typed numbers cannot resolve to integer ids without backend help).
+		quickStudentSearch = '';
+		quickSelectedStudent = null;
+		quickRoster = [];
+		quickEnrolledCourseCodes = [];
+		quickEnrolledLoading = false;
+		quickEnrolledError = null;
+		quickRosterError = null;
+		// Warm real sessions so the excuse attaches to an actual session id.
+		// Each carries its offering id so the roster can be loaded for the
+		// selected session (searchable student selector, no manual names).
 		void listSessions({ size: 50 })
 			.then(({ items }) => {
 				if (items.length === 0) return;
-				quickSessions = items.map((item) => ({ id: item.id, code: item.sessionCode }));
+				quickSessions = items.map((item) => ({
+					id: item.id,
+					code: item.sessionCode,
+					offeringId: item.offeringId,
+				}));
 				if (quickSessionId === null || !quickSessions.some((s) => s.id === quickSessionId)) {
 					quickSessionId = quickSessions[0].id;
 				}
 			})
 			.catch(() => undefined);
 	};
+
+	// Load the offering roster whenever the selected session changes, so the
+	// student selector never offers students outside that offering.
+	$effect(() => {
+		if (!quickOpen || quickSessionId === null) return;
+		const session = quickSessions.find((s) => s.id === quickSessionId);
+		if (!session) return;
+		let cancelled = false;
+		quickRosterLoading = true;
+		quickRosterError = null;
+		quickRoster = [];
+		quickSelectedStudent = null;
+		void listOfferingStudents(session.offeringId, { size: 100 })
+			.then(({ items }) => {
+				if (cancelled) return;
+				quickRoster = items;
+				if (items.length === 1) quickSelectedStudent = items[0];
+			})
+			.catch(() => {
+				if (!cancelled) quickRosterError = 'Could not load students for this session.';
+			})
+			.finally(() => {
+				if (!cancelled) quickRosterLoading = false;
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	// Retrieve the selected student's enrolled courses from actual enrollment
+	// records (one roster lookup per offering the professor is assigned to).
+	// The result drives the grouped course picker (enrolled vs. other).
+	$effect(() => {
+		const student = quickSelectedStudent;
+		if (!quickOpen) return;
+		if (student === null || student.id === undefined) {
+			quickEnrolledCourseCodes = [];
+			quickEnrolledLoading = false;
+			quickEnrolledError = null;
+			return;
+		}
+		let cancelled = false;
+		quickEnrolledLoading = true;
+		quickEnrolledError = null;
+		void (async () => {
+			try {
+				if (professorState.courses.length === 0 && !isMockMode()) {
+					await initProfessorCourses();
+				}
+				if (cancelled) return;
+				const courseList =
+					professorState.courses.length > 0
+						? professorState.courses.map((c) => ({
+								offeringId: c.offeringId,
+								courseCode: c.courseCode,
+							}))
+						: directory.map((c) => ({
+								offeringId: c.offeringId,
+								courseCode: c.courseCode,
+							}));
+				const offeringIds = [...new Set(courseList.map((c) => c.offeringId))];
+				const enrolled = new Set<string>();
+				await Promise.all(
+					offeringIds.map(async (offeringId) => {
+						try {
+							const { items } = await listOfferingStudents(offeringId, { size: 100 });
+							if (items.some((row) => row.id === student.id || row.studentId === student.studentId)) {
+								const course = courseList.find((c) => c.offeringId === offeringId);
+								if (course) enrolled.add(course.courseCode);
+							}
+						} catch {
+							// Ignore per-offering failures; other offerings still resolve.
+						}
+					})
+				);
+				if (cancelled) return;
+				const sorted = [...enrolled].sort();
+				quickEnrolledCourseCodes = sorted;
+				if (sorted.length > 0) {
+					quickCourse = sorted[0];
+				}
+			} catch {
+				if (!cancelled) quickEnrolledError = 'Could not load enrolled courses for this student.';
+			} finally {
+				if (!cancelled) quickEnrolledLoading = false;
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	const quickCourseOfferingIds = $derived(
+		new Set(
+			(professorState.courses.length > 0
+				? professorState.courses
+				: directory.map((c) => ({ offeringId: c.offeringId, courseCode: c.courseCode }))
+			)
+				.filter((c) => c.courseCode === quickCourse)
+				.map((c) => c.offeringId)
+		)
+	);
+	const quickVisibleSessions = $derived(
+		quickSessions.filter((s) =>
+			quickCourseOfferingIds.size === 0 ? true : quickCourseOfferingIds.has(s.offeringId)
+		)
+	);
+
+	$effect(() => {
+		const sessions = quickVisibleSessions;
+		if (sessions.length === 0) return;
+		if (!sessions.some((s) => s.id === quickSessionId)) {
+			quickSessionId = sessions[0].id;
+		}
+	});
 
 	const closeQuick = () => {
 		if (quickBusy) return;
@@ -277,17 +533,11 @@
 		quickBusy = true;
 		quickError = null;
 		try {
-			// Typed student numbers cannot resolve to the integer ids the live
-			// per-record routes need (no professor endpoint returns them), so
-			// the quick modal is mock-only. Live callers use queue-row actions
-			// (quickExcuseByIds) or Excuse all absent instead.
-			if (!isMockMode()) {
-				throw new Error(
-					'Quick excuse by student number is unavailable with a live backend — use the review queue row actions or Excuse all absent instead.'
-				);
-			}
 			const offering = directory.find((c) => c.courseCode === quickCourse);
 			const picked = quickSessions.find((s) => s.id === quickSessionId) ?? null;
+			if (quickSelectedStudent === null || quickSelectedStudent.id === undefined) {
+				throw new Error('Select a student before submitting.');
+			}
 			// Files upload first via the D24 presigned flow; their object urls
 			// ride along so the created row mirrors them (Path B). Reason-only
 			// stays Path A. Partial failures keep prior successes staged and
@@ -318,26 +568,26 @@
 					quickUploadStatus = '';
 				}
 			}
-			const created = await quickExcuse({
-				studentNumber: quickStudentNumber,
-				studentName: quickStudentName || quickStudentNumber,
-				section: offering?.section ?? '—',
-				courseCode: quickCourse,
-				courseName: offering?.courseName ?? quickCourse,
-				sessionId: picked?.id ?? offering?.offeringId ?? 1,
-				sessionCode: picked?.code ?? 'QUICK',
-				originalStatus: quickOriginal,
-				reason: quickReason,
-				attachmentUrls
-			});
+			await quickExcuseByIds(
+				picked?.id ?? offering?.offeringId ?? 1,
+				quickSelectedStudent.id as number,
+				quickReason,
+				attachmentUrls,
+				{
+					studentNumber: quickSelectedStudent.studentId,
+					studentName: quickSelectedStudent.name,
+					section: quickSelectedStudent.section ?? undefined,
+				}
+			);
+			const selectedName = quickSelectedStudent?.name ?? 'student';
 			quickOpen = false;
-			quickStudentNumber = '';
-			quickStudentName = '';
+			quickStudentSearch = '';
+			quickSelectedStudent = null;
 			quickReason = '';
 			quickFiles = [];
 			quickFileErrors = [];
 			quickStagedUrls = [];
-			notice = `Quick-excused ${created.studentName} (${created.studentNumber}) — approved immediately.`;
+			notice = `Quick-excused ${selectedName} — approved immediately.`;
 			status = 'approved';
 			currentPage = 1;
 			reloadToken += 1;
@@ -418,6 +668,25 @@
 		<p class="notice" role="status">{notice}</p>
 	{/if}
 
+	<section class="summary-cards" aria-label="Excuse request summary">
+		<div class="summary-card">
+			<span class="summary-label">Total</span>
+			<span class="summary-value">{counts.pending + counts.approved + counts.rejected}</span>
+		</div>
+		<div class="summary-card">
+			<span class="summary-label">Pending</span>
+			<span class="summary-value">{counts.pending}</span>
+		</div>
+		<div class="summary-card">
+			<span class="summary-label">Approved</span>
+			<span class="summary-value">{counts.approved}</span>
+		</div>
+		<div class="summary-card">
+			<span class="summary-label">Rejected</span>
+			<span class="summary-value">{counts.rejected}</span>
+		</div>
+	</section>
+
 	<section class="card filters" aria-label="Excuse filters">
 		<div class="filter-grid">
 			<div class="field">
@@ -480,9 +749,203 @@
 			</div>
 		</div>
 		<div class="filter-actions">
+			<button
+				class="btn btn-ghost"
+				type="button"
+				aria-expanded={showAdvanced}
+				aria-controls="advanced-filters"
+				onclick={() => (showAdvanced = !showAdvanced)}
+			>
+				{showAdvanced ? 'Hide advanced filters' : 'Show advanced filters'}
+			</button>
 			<button class="btn btn-ghost" type="button" onclick={resetFilters}>Reset filters</button>
 		</div>
+
+		{#if showAdvanced}
+			<div id="advanced-filters" class="advanced-filters">
+				<div class="field">
+					<label class="form-label" for="section">Section</label>
+					<select
+						id="section"
+						class="form-input"
+						bind:value={section}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="All">All sections</option>
+						{#each [...new Set(directory.map((c) => c.section))].filter((s) => s && s !== '—') as sec (sec)}
+							<option value={sec}>{sec}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="initiated-via">Type</label>
+					<select
+						id="initiated-via"
+						class="form-input"
+						bind:value={initiatedVia}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="All">All types</option>
+						<option value="quick">Quick</option>
+						<option value="prof_with_evidence">With evidence</option>
+						<option value="request">Student request</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="has-evidence">Has evidence</label>
+					<select
+						id="has-evidence"
+						class="form-input"
+						bind:value={hasEvidence}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="All">All</option>
+						<option value="yes">With attachments</option>
+						<option value="no">Without attachments</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="original-status">Original status</label>
+					<select
+						id="original-status"
+						class="form-input"
+						bind:value={originalStatus}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="All">All</option>
+						<option value="absent">Absent</option>
+						<option value="late">Late</option>
+						<option value="rejected">Rejected</option>
+						<option value="unknown">Unknown</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="reviewer">Reviewer</label>
+					<input
+						id="reviewer"
+						class="form-input"
+						type="search"
+						placeholder="Name or email"
+						bind:value={reviewer}
+						oninput={() => (currentPage = 1)}
+					/>
+				</div>
+				<div class="field">
+					<label class="form-label" for="submitted-from">Submitted from</label>
+					<input
+						id="submitted-from"
+						class="form-input"
+						type="date"
+						bind:value={submittedFrom}
+						onchange={() => (currentPage = 1)}
+					/>
+				</div>
+				<div class="field">
+					<label class="form-label" for="submitted-to">Submitted to</label>
+					<input
+						id="submitted-to"
+						class="form-input"
+						type="date"
+						bind:value={submittedTo}
+						onchange={() => (currentPage = 1)}
+					/>
+				</div>
+				<div class="field">
+					<label class="form-label" for="reviewed-from">Reviewed from</label>
+					<input
+						id="reviewed-from"
+						class="form-input"
+						type="date"
+						bind:value={reviewedFrom}
+						onchange={() => (currentPage = 1)}
+					/>
+				</div>
+				<div class="field">
+					<label class="form-label" for="reviewed-to">Reviewed to</label>
+					<input
+						id="reviewed-to"
+						class="form-input"
+						type="date"
+						bind:value={reviewedTo}
+						onchange={() => (currentPage = 1)}
+					/>
+				</div>
+				<div class="field">
+					<label class="form-label" for="sort-by">Sort by</label>
+					<select
+						id="sort-by"
+						class="form-input"
+						bind:value={sortBy}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="requested_at">Newest first</option>
+						<option value="reviewed_at">Review date</option>
+						<option value="student_name">Student name</option>
+						<option value="status">Status</option>
+						<option value="id">Request ID</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="sort-dir">Direction</label>
+					<select
+						id="sort-dir"
+						class="form-input"
+						bind:value={sortDir}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value="desc">Descending</option>
+						<option value="asc">Ascending</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="page-size">Page size</label>
+					<select
+						id="page-size"
+						class="form-input"
+						bind:value={pageSize}
+						onchange={() => (currentPage = 1)}
+					>
+						<option value={10}>10</option>
+						<option value={25}>25</option>
+						<option value={50}>50</option>
+					</select>
+				</div>
+			</div>
+		{/if}
 	</section>
+
+	{#if hasActiveFilters}
+		<div class="filter-chips" aria-label="Active filters">
+			{#if status !== 'All'}
+				<button class="chip" type="button" onclick={() => { status = 'All'; currentPage = 1; }}>Status: {status} ×</button>
+			{/if}
+			{#if course !== 'All'}
+				<button class="chip" type="button" onclick={() => { course = 'All'; currentPage = 1; }}>Course: {course} ×</button>
+			{/if}
+			{#if section !== 'All'}
+				<button class="chip" type="button" onclick={() => { section = 'All'; currentPage = 1; }}>Section: {section} ×</button>
+			{/if}
+			{#if initiatedVia !== 'All'}
+				<button class="chip" type="button" onclick={() => { initiatedVia = 'All'; currentPage = 1; }}>Type: {initiatedVia} ×</button>
+			{/if}
+			{#if hasEvidence !== 'All'}
+				<button class="chip" type="button" onclick={() => { hasEvidence = 'All'; currentPage = 1; }}>Evidence: {hasEvidence} ×</button>
+			{/if}
+			{#if originalStatus !== 'All'}
+				<button class="chip" type="button" onclick={() => { originalStatus = 'All'; currentPage = 1; }}>Original: {originalStatus} ×</button>
+			{/if}
+			{#if reviewer}
+				<button class="chip" type="button" onclick={() => { reviewer = ''; currentPage = 1; }}>Reviewer: {reviewer} ×</button>
+			{/if}
+			{#if search}
+				<button class="chip" type="button" onclick={() => { searchInput = ''; search = ''; currentPage = 1; }}>Search: {search} ×</button>
+			{/if}
+			{#if from || to}
+				<button class="chip" type="button" onclick={() => { from = ''; to = ''; currentPage = 1; }}>Date: {from || '…'} → {to || '…'} ×</button>
+			{/if}
+			<button class="chip chip-clear" type="button" onclick={resetFilters}>Clear all ×</button>
+		</div>
+	{/if}
 
 	{#if loadError}
 		<section class="card">
@@ -495,7 +958,11 @@
 		<SkeletonTable rows={6} cols={6} label="Loading excuse requests…" />
 	{:else if rows.length === 0}
 		<section class="card">
-			<EmptyState icon="file" title="No excuse requests match these filters" />
+			<EmptyState icon="file" title="No excuse requests match these filters" hint="Try widening the date range or clearing filters.">
+				{#if hasActiveFilters}
+					<button class="btn btn-ghost" type="button" onclick={resetFilters}>Clear all filters</button>
+				{/if}
+			</EmptyState>
 		</section>
 	{:else}
 		<section class="card table-card" aria-label="Excuse requests table">
@@ -819,35 +1286,69 @@
 		>
 			<h2 id="quick-title">New quick-excuse (Path A)</h2>
 			<p class="modal-sub">Approves immediately — for direct-knowledge cases. Min {EXCUSE_REASON_MIN_LENGTH}-char reason.</p>
-			{#if !isMockMode()}
-				<p class="modal-sub" role="note">
-					Live mode: typed numbers cannot resolve to roster records, so this submit is
-					kept locally as a demo — use Excuse all absent or the review queue for real records.
-				</p>
-			{/if}
 			<div class="quick-grid">
 				<div class="field">
-					<label class="form-label" for="quick-number">Student number</label>
+					<label class="form-label" for="quick-student-search">Student</label>
 					<input
-						id="quick-number"
+						id="quick-student-search"
 						class="form-input"
-						placeholder="ID number as printed on the student card"
-						bind:value={quickStudentNumber}
+						type="search"
+						placeholder="Search by name or student number"
+						bind:value={quickStudentSearch}
+						disabled={quickRosterLoading}
 					/>
-				</div>
-				<div class="field">
-					<label class="form-label" for="quick-name">Student name</label>
-					<input
-						id="quick-name"
-						class="form-input"
-						placeholder="Full name"
-						bind:value={quickStudentName}
-					/>
+					{#if quickRosterLoading}
+						<p class="modal-sub">Loading students…</p>
+					{:else if quickRosterError}
+						<p class="error">{quickRosterError}</p>
+					{:else if quickRoster.length === 0}
+						<p class="modal-sub">No students in this offering.</p>
+					{:else}
+						<select
+							id="quick-student"
+							class="form-input"
+							size={Math.min(6, quickRoster.length)}
+							onchange={(e) => {
+								const id = Number(e.currentTarget.value);
+								quickSelectedStudent =
+									quickRoster.find((s) => s.id === id) ?? null;
+							}}
+						>
+							{#each quickRoster.filter((s) => {
+								const q = quickStudentSearch.trim().toLowerCase();
+								if (!q) return true;
+								return (
+									s.name.toLowerCase().includes(q) ||
+									s.studentId.toLowerCase().includes(q)
+								);
+							}) as student (student.id ?? student.studentId)}
+								<option
+									value={student.id}
+									selected={quickSelectedStudent?.id === student.id}
+								>
+									{student.name} · {student.studentId}
+									{student.section ? ` · ${student.section}` : ''}
+								</option>
+							{/each}
+						</select>
+						{#if quickSelectedStudent}
+							<p class="modal-sub">
+								Selected: {quickSelectedStudent.name} ({quickSelectedStudent.studentId})
+								{quickSelectedStudent.section ? ` · Section ${quickSelectedStudent.section}` : ''}
+							</p>
+						{/if}
+					{/if}
 				</div>
 				<div class="field">
 					<label class="form-label" for="quick-course">Course</label>
+					{#if quickEnrolledLoading}
+						<p class="modal-sub" role="status">Loading enrolled courses…</p>
+					{/if}
+					{#if quickEnrolledError}
+						<p class="error">{quickEnrolledError}</p>
+					{/if}
 					<select id="quick-course" class="form-input" bind:value={quickCourse}>
-						{#each courseOptions as option (option)}
+						{#each [...quickEnrolledCourseCodes, ...courseOptions.filter((c) => !quickEnrolledCourseCodes.includes(c))] as option (option)}
 							<option value={option}>{option}</option>
 						{/each}
 					</select>
@@ -860,7 +1361,7 @@
 						class="form-input"
 						bind:value={quickSessionId}
 					>
-						{#each quickSessions as session (session.id)}
+						{#each quickVisibleSessions as session (session.id)}
 							<option value={session.id}>#{session.id} · {session.code}</option>
 						{/each}
 					</select>
@@ -981,6 +1482,43 @@
 		font-weight: 600;
 	}
 
+	.summary-cards {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.summary-card {
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 1rem 1.25rem;
+		box-shadow: var(--shadow-sm);
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.summary-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.summary-value {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	@media (max-width: 640px) {
+		.summary-cards {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
 	.card {
 		background: var(--bg-card);
 		border: 1px solid var(--border);
@@ -1006,6 +1544,15 @@
 		display: grid;
 		gap: 1rem;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
+	}
+
+	.advanced-filters {
+		display: grid;
+		gap: 1rem;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--divider);
 	}
 
 	.field {
@@ -1047,6 +1594,35 @@
 		margin-top: 1rem;
 		display: flex;
 		justify-content: flex-end;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.filter-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+	}
+
+	.chip {
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-secondary);
+		border-radius: 999px;
+		padding: 0.25rem 0.625rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.chip:hover {
+		background: var(--bg-hover);
+	}
+
+	.chip-clear {
+		border-color: var(--danger);
+		color: var(--danger-strong);
 	}
 
 	.btn {

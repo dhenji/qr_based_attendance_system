@@ -107,11 +107,15 @@ export type StudentHistoryFilters = {
 export type StudentHistoryRow = {
 	id: number;
 	sessionId: number;
+	sessionCode?: string;
 	courseCode: string;
 	courseName: string;
 	status: StudentHistoryStatus;
 	originalStatus?: StudentHistoryStatus;
 	excuseReason?: string;
+	reviewNote?: string;
+	reviewedAt?: string;
+	retakeAvailable?: boolean;
 	scannedAt: string;
 	scannedVia?: 'qr' | 'manual' | string;
 };
@@ -163,11 +167,15 @@ export const getSessionHistory = async (params: StudentHistoryFilters = {}) => {
 	const items: StudentHistoryRow[] = (response.items ?? []).map((item) => ({
 		id: item.id,
 		sessionId: item.session_id,
+		sessionCode: item.session_code ?? undefined,
 		courseCode: item.course_code,
 		courseName: item.course_name,
 		status: item.status,
 		originalStatus: (item.original_status ?? undefined) as StudentHistoryRow['originalStatus'],
 		excuseReason: item.excuse_reason ?? undefined,
+		reviewNote: item.review_note ?? undefined,
+		reviewedAt: item.reviewed_at ?? undefined,
+		retakeAvailable: item.retake_available ?? false,
 		scannedAt: item.scanned_at,
 		scannedVia: viaForDisplay(item.scanned_via),
 	}));

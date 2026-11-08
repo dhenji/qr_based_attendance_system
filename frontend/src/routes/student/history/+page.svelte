@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Skeleton from '$lib/components/Skeleton.svelte';
+	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
 	import {
@@ -29,6 +30,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	type Row = {
 		id: number;
 		sessionId: number;
+		sessionCode?: string;
 		date: string;
 		course: string;
 		courseName: string;
@@ -36,6 +38,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		time: string;
 		scannedAt: string;
 		excuseReason?: string;
+		reviewNote?: string;
+		reviewedAt?: string;
+		retakeAvailable?: boolean;
 	};
 	type SortKey = 'date' | 'course' | 'status' | 'time';
 
@@ -83,6 +88,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	const toRow = (item: StudentHistoryRow): Row => ({
 		id: item.id,
 		sessionId: item.sessionId,
+		sessionCode: item.sessionCode,
 		date: formatDate(item.scannedAt),
 		course: item.courseCode,
 		courseName: item.courseName,
@@ -90,6 +96,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		time: formatTime(item.scannedAt),
 		scannedAt: item.scannedAt,
 		excuseReason: item.excuseReason,
+		reviewNote: item.reviewNote,
+		reviewedAt: item.reviewedAt,
+		retakeAvailable: item.retakeAvailable,
 	});
 
 	// Monotonic sequence token shared by both fetch paths: control changes can
@@ -733,6 +742,18 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 										>
 											Request Excuse
 										</button>
+									{/if}
+									{#if r.status === 'rejected' && r.retakeAvailable && r.sessionCode}
+										<button
+											class="btn-ghost btn-small"
+											title={r.reviewNote ? `Rejected: ${r.reviewNote}` : 'Retake attendance for this session'}
+											onclick={() => void goto(`/student/scan?code=${encodeURIComponent(r.sessionCode ?? '')}`)}
+										>
+											Retake Attendance
+										</button>
+									{/if}
+									{#if r.status === 'rejected' && r.reviewNote}
+										<span class="review-note" title={r.reviewNote}>Reason: {r.reviewNote}</span>
 									{/if}
 								</td>
 							</tr>

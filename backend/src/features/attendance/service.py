@@ -7,7 +7,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -29,6 +29,9 @@ from features.attendance.constants import (
     REVIEW_DECISIONS,
     REVIEW_DEFAULT_STATUS,
     REVIEW_NOTE_EVIDENCE_KEY,
+    REVIEWED_AT_EVIDENCE_KEY,
+    REVIEWED_BY_EVIDENCE_KEY,
+    REVIEW_REASON_ACCURACY_LOW,
     REVIEW_REASON_FACE_BAND,
     REVIEW_REASON_GEOFENCE,
     REVIEW_STATUSES,
@@ -38,6 +41,7 @@ from features.attendance.constants import (
 from features.attendance.exceptions import (
     AttendanceDomainException,
     FaceMismatchException,
+    GpsAccuracyTooLowException,
     LivenessFailedException,
     OutsideGeofenceException,
     ReviewNotFoundException,
@@ -45,6 +49,7 @@ from features.attendance.exceptions import (
     StudentNumberMismatchException,
 )
 from features.attendance.model import Attendance
+from features.attendance import notifications as attendance_notifications
 from features.attendance.schema import (
     GPSInput,
     HistoryCounts,
@@ -53,6 +58,9 @@ from features.attendance.schema import (
     HistorySummary,
     LivenessEvidence,
     LivenessReviewItem,
+    AttendanceRecordItem,
+    AttendanceRecordsResponse,
+    AttendanceSummaryResponse,
     OverviewItem,
     OverviewResponse,
     PrecheckRequest,
@@ -64,6 +72,7 @@ from features.attendance.schema import (
     ScanResponse,
 )
 from features.course.model import Course, CourseOffering
+from features.program.model import Program, YearLevel
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.face_enrollment.exceptions import StubEmbeddingException
@@ -80,8 +89,11 @@ from features.student.exceptions import (
     StudentNotFoundException,
 )
 from features.student.model import Student
+from features.professor.model import Professor
+from features.auth.model import User
 from features.sync.model import SyncQueue
 from shared.audit import record_audit
+from shared.email import OutboundEmail, dispatch_emails
 from shared.enums import (
     AuditAction,
     AuditEntity,
@@ -353,9 +365,10 @@ class AttendanceService:
         scanned_at: datetime,
         face_match_score: float,
         geofence_review: bool = False,
+        accuracy_review: bool = False,
     ) -> tuple[str, str | None, bool, str | None]:
         face_review: bool = self._is_review_band(face_match_score)
-        review: bool = face_review or geofence_review
+        review: bool = face_review or geofence_review or accuracy_review
         computed: str = self._compute_status(db_session, scanned_at)
         original: str | None = computed if review else None
         reasons: list[str] = []
@@ -363,6 +376,8 @@ class AttendanceService:
             reasons.append(REVIEW_REASON_FACE_BAND)
         if geofence_review:
             reasons.append(REVIEW_REASON_GEOFENCE)
+        if accuracy_review:
+            reasons.append(REVIEW_REASON_ACCURACY_LOW)
         review_reason: str | None = ",".join(reasons) if reasons else None
         return computed, original, review, review_reason
 
@@ -467,17 +482,28 @@ class AttendanceService:
 
         geofence_review: bool = False
         geofence_details: dict | None = None
+        accuracy_review: bool = False
         if not self._settings.benchmark_mode:
+            if payload.gps is not None:
+                hard_floor = self._settings.gps_hard_floor_meters
+                if hard_floor <= 0:
+                    hard_floor = 1000.0
+                if float(payload.gps.accuracy) > hard_floor:
+                    raise GpsAccuracyTooLowException(float(payload.gps.accuracy), hard_floor)
             geofence_review, geofence_details = self._validate_geofence(
                 db_session, payload.gps
             )
             self._validate_liveness(payload.liveness_evidence)
+            if payload.gps is not None:
+                threshold = self._settings.gps_review_accuracy_threshold
+                if threshold > 0 and float(payload.gps.accuracy) > threshold:
+                    accuracy_review = True
 
         if not geofence_review:
             geofence_details = None
 
         status, original, review, review_reason = self._decide_scan_outcome(
-            db_session, scanned_at, score, geofence_review
+            db_session, scanned_at, score, geofence_review, accuracy_review
         )
 
         return await self._persist_scan(
@@ -518,14 +544,33 @@ class AttendanceService:
             enrolled = False
 
         already_scanned: bool = False
+        retake_available: bool = False
         try:
             await self._require_no_duplicate(student.id, db_session.id)
         except DuplicateScanException:
             already_scanned = True
+            # Determine whether the duplicate is a retake-eligible rejection.
+            rows: Sequence[Attendance] = (
+                await self._session.scalars(
+                    select(Attendance).where(
+                        Attendance.session_id == db_session.id,
+                        Attendance.student_id == student.id,
+                    )
+                )
+            ).all()
+            rejected_only = all(
+                r.validation_status == ValidationStatus.REJECTED.value for r in rows
+            ) and bool(rows)
+            if rejected_only and db_session.expires_at is not None and _ensure_aware(
+                db_session.expires_at
+            ) > _utcnow():
+                retake_available = True
+                already_scanned = False
 
         return PrecheckResponse(
             enrolled=enrolled,
             already_scanned=already_scanned,
+            retake_available=retake_available,
             student={
                 "student_id": student.student_id,
                 "name": f"{student.first_name} {student.last_name}",
@@ -606,18 +651,36 @@ class AttendanceService:
             raise NotEnrolledException(student_id, offering_id)
 
     async def _require_no_duplicate(self, student_id: int, session_id: int) -> None:
-        existing: Attendance | None = (
+        # Retake support: a previously rejected attempt does not block a new
+        # submission, provided the session is still open. Any other status
+        # (present/late/pending/excused) blocks, as does a rejected attempt
+        # against an expired session.
+        rows: Sequence[Attendance] = (
             await self._session.scalars(
-                select(Attendance)
-                .where(
+                select(Attendance).where(
                     Attendance.session_id == session_id,
                     Attendance.student_id == student_id,
                 )
-                .limit(1)
             )
-        ).one_or_none()
+        ).all()
 
-        if existing is not None:
+        if not rows:
+            return
+
+        blocking_statuses = {
+            ValidationStatus.PRESENT.value,
+            ValidationStatus.LATE.value,
+            ValidationStatus.PENDING.value,
+            ValidationStatus.EXCUSED.value,
+        }
+        if any(r.validation_status in blocking_statuses for r in rows):
+            raise DuplicateScanException(student_id, session_id)
+
+        # Only rejected attempts remain. Allow only while the session is open.
+        db_session: Session | None = await self._session.get(Session, session_id)
+        if db_session is None or db_session.expires_at is None:
+            raise DuplicateScanException(student_id, session_id)
+        if _ensure_aware(db_session.expires_at) <= _utcnow():
             raise DuplicateScanException(student_id, session_id)
 
     async def _require_face_enrollment(self, student: Student) -> None:
@@ -658,9 +721,11 @@ class AttendanceService:
 
         radius: float = session.classroom_radius_meters
         # Cap the uncertainty so a wildly inaccurate (or spoofed) fix cannot
-        # neutralise the geofence entirely. 50 m matches the client's
-        # high-accuracy target.
-        uncertainty: float = min(float(gps.accuracy), 50.0)
+        # neutralise the geofence entirely. Configurable via settings.
+        cap = self._settings.geofence_uncertainty_cap_meters
+        if cap <= 0:
+            cap = 50.0
+        uncertainty: float = min(float(gps.accuracy), cap)
 
         details: dict = {
             "distance_meters": round(distance, 2),
@@ -1097,6 +1162,14 @@ class AttendanceService:
 
         items: list[HistoryItem] = []
 
+        # Pairs that already have a non-rejected attempt: those rejected rows
+        # are superseded and no longer retake-eligible.
+        successful_pairs = {
+            (r.student_id, r.session_id)
+            for r in records
+            if r.validation_status != ValidationStatus.REJECTED.value
+        }
+
         for record in records:
             db_session = session_map.get(record.session_id)
             offering = offering_map.get(db_session.offering_id) if db_session else None
@@ -1105,15 +1178,36 @@ class AttendanceService:
             if db_session is None or offering is None or course is None:
                 continue
 
+            evidence = record.liveness_evidence or {}
+            reviewed_at_raw = evidence.get(REVIEWED_AT_EVIDENCE_KEY)
+            reviewed_at = None
+            if isinstance(reviewed_at_raw, str):
+                try:
+                    reviewed_at = datetime.fromisoformat(reviewed_at_raw.replace("Z", "+00:00"))
+                except ValueError:
+                    reviewed_at = None
+
+            retake_available = False
+            if record.validation_status == ValidationStatus.REJECTED.value:
+                if (record.student_id, record.session_id) not in successful_pairs:
+                    if db_session.expires_at is not None and _ensure_aware(
+                        db_session.expires_at
+                    ) > _utcnow():
+                        retake_available = True
+
             items.append(
                 HistoryItem(
                     id=record.id,
                     session_id=record.session_id,
+                    session_code=db_session.session_code,
                     course_code=course.course_code,
                     course_name=course.course_name,
                     status=record.validation_status,  # type: ignore[arg-type]
                     original_status=record.original_status,  # type: ignore[arg-type]
                     excuse_reason=record.excuse_reason,
+                    review_note=evidence.get(REVIEW_NOTE_EVIDENCE_KEY) or evidence.get("review_note"),
+                    reviewed_at=reviewed_at,
+                    retake_available=retake_available,
                     scanned_at=record.timestamp,
                     scanned_via=record.scanned_via,
                 )
@@ -1284,13 +1378,18 @@ class AttendanceService:
         return recomputed
 
     async def _apply_resolution(
-        self, row: Attendance, evidence: dict, status: str, note: str | None
+        self, row: Attendance, evidence: dict, status: str, note: str | None,
+        actor_id: int | None = None,
     ) -> None:
         row.validation_status = status
         evidence.pop("review", None)
 
         if note is not None:
             evidence[REVIEW_NOTE_EVIDENCE_KEY] = note
+
+        if actor_id is not None:
+            evidence[REVIEWED_BY_EVIDENCE_KEY] = actor_id
+            evidence[REVIEWED_AT_EVIDENCE_KEY] = _utcnow().isoformat()
 
         row.liveness_evidence = evidence
         await self._session.flush()
@@ -1318,7 +1417,7 @@ class AttendanceService:
             status = ValidationStatus.REJECTED.value
 
         previous: str = row.validation_status
-        await self._apply_resolution(row, evidence, status, note)
+        await self._apply_resolution(row, evidence, status, note, actor_id=actor_id)
 
         # Approving restores a computed present/late status and rejecting marks
         # the record `rejected`, so both rewrite a student's attendance outcome
@@ -1341,6 +1440,14 @@ class AttendanceService:
             },
         )
 
+        # Notify the student by email when their evidence is rejected. Best-effort:
+        # dispatch_emails never raises, so a relay failure cannot roll back the
+        # decision above. Done last, after the audit row is flushed.
+        if decision == "reject":
+            await self._notify_liveness_rejected(
+                row=row, note=note, actor_id=actor_id
+            )
+
         return ResolveReviewResponse(
             id=row.id,
             status=ValidationStatus(row.validation_status),  # type: ignore[arg-type]
@@ -1348,18 +1455,71 @@ class AttendanceService:
             reviewed_at=_utcnow(),
         )
 
+    async def _notify_liveness_rejected(
+        self, *, row: Attendance, note: str | None, actor_id: int
+    ) -> None:
+        '''Email the affected student about a rejected liveness review.'''
+        now: datetime = _utcnow()
+
+        db_session: Session | None = await self._session.get(Session, row.session_id)
+        if db_session is None:
+            return
+
+        offering: CourseOffering | None = await self._session.get(CourseOffering, db_session.offering_id)
+        course_name: str = "your course"
+        if offering is not None:
+            course: Course | None = await self._session.get(Course, offering.course_id)
+            if course is not None:
+                course_name = f"{course.course_code} - {course.course_name}"
+
+        student: Student | None = await self._session.get(Student, row.student_id)
+        if student is None:
+            return
+
+        email: str | None = None
+        if student.user_id is not None:
+            user: User | None = await self._session.get(User, student.user_id)
+            if user is not None and user.email:
+                email = user.email
+        if not email and student.email:
+            email = student.email
+
+        if not email:
+            return
+
+        retake_available: bool = (
+            db_session.expires_at is not None
+            and _ensure_aware(db_session.expires_at) > now
+        )
+
+        session_date: str = _ensure_aware(db_session.scheduled_start_time).strftime("%Y-%m-%d")
+
+        subject, body = attendance_notifications.liveness_rejected(
+            course=course_name,
+            session_code=db_session.session_code,
+            session_date=session_date,
+            reason=note,
+            retake_available=retake_available,
+        )
+
+        dispatch_emails([OutboundEmail(to=email, subject=subject, body=body)])
+
     async def get_overview(
         self,
         *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
         course_id: int | None = None,
         professor_id: int | None = None,
+        session_type: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> OverviewResponse:
         """Per-course sessions, compliance rate, and trend over the filter set."""
         date_to = _end_of_day(date_to)
         offering_ids: list[int] = await self._overview_offering_ids(
-            course_id, professor_id
+            program_id, year_level_id, semester, course_id, professor_id
         )
 
         if not offering_ids:
@@ -1375,7 +1535,7 @@ class AttendanceService:
             return OverviewResponse(items=[])
 
         sessions: Sequence[Session] = await self._overview_sessions(
-            offering_ids, date_from, date_to
+            offering_ids, date_from, date_to, session_type
         )
         enrolled_by_offering: dict[int, set[int]] = (
             await self._overview_enrollments(offering_ids)
@@ -1424,6 +1584,10 @@ class AttendanceService:
             present, late, excused = self._overview_status_counts(
                 course_sessions, tallies
             )
+            rejected = sum(
+                tallies.get(row.id, Counter()).get(ValidationStatus.REJECTED.value, 0)
+                for row in course_sessions
+            )
             # One rate definition (shared.rates): compliance is present/expected.
             avg_rate: float = attendance_rates(
                 present=present, late=late, excused=excused, enrolled=expected
@@ -1439,6 +1603,10 @@ class AttendanceService:
                     trend=self._overview_trend(
                         course_sessions, tallies, enrolled_by_session
                     ),
+                    present=present,
+                    late=late,
+                    excused=excused,
+                    rejected=rejected,
                 )
             )
 
@@ -1447,9 +1615,17 @@ class AttendanceService:
         return OverviewResponse(items=items)
 
     async def _overview_offering_ids(
-        self, course_id: int | None, professor_id: int | None
+        self,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        professor_id: int | None = None,
     ) -> list[int]:
         stmt = select(CourseOffering.id)
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        stmt = apply_if(stmt, year_level_id, lambda v: CourseOffering.year_level_id == v)
+        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
         stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
 
         if professor_id is not None:
@@ -1472,6 +1648,7 @@ class AttendanceService:
         offering_ids: list[int],
         date_from: datetime | None,
         date_to: datetime | None,
+        session_type: str | None = None,
     ) -> Sequence[Session]:
         if not offering_ids:
             return []
@@ -1479,6 +1656,7 @@ class AttendanceService:
         stmt = select(Session).where(Session.offering_id.in_(offering_ids))
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
 
         return (await self._session.scalars(stmt)).all()
 
@@ -1624,6 +1802,230 @@ class AttendanceService:
 
         return RecentScansResponse(items=items)
 
+    async def get_summary(
+        self,
+        *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        professor_id: int | None = None,
+        session_type: str | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> AttendanceSummaryResponse:
+        date_to = _end_of_day(date_to)
+        offering_ids = await self._overview_offering_ids(
+            program_id, year_level_id, semester, course_id, professor_id
+        )
+        if not offering_ids:
+            return AttendanceSummaryResponse()
+
+        sessions = await self._overview_sessions(
+            offering_ids, date_from, date_to, session_type
+        )
+        enrolled_by_offering = await self._overview_enrollments(offering_ids)
+        tallies = await self._overview_tallies([row.id for row in sessions])
+
+        present = late = excused = rejected = 0
+        for _sid, c in tallies.items():
+            present += c.get(ValidationStatus.PRESENT.value, 0)
+            late += c.get(ValidationStatus.LATE.value, 0)
+            excused += c.get(ValidationStatus.EXCUSED.value, 0)
+            rejected += c.get(ValidationStatus.REJECTED.value, 0)
+        total_records = present + late + excused + rejected
+        expected = sum(
+            len(enrolled_by_offering.get(row.offering_id, set())) for row in sessions
+        )
+        compliance, participation = attendance_rates(
+            present=present, late=late, excused=excused, enrolled=expected
+        )
+        total_students = len(
+            {s for members in enrolled_by_offering.values() for s in members}
+        )
+
+        # Previous period (same length) for delta.
+        prev_compliance = 0.0
+        prev_participation = 0.0
+        if date_from is not None and date_to is not None:
+            delta = date_to - date_from
+            prev_to = date_from - timedelta(days=1)
+            prev_from = date_from - delta
+            prev_sessions = await self._overview_sessions(
+                offering_ids, prev_from, _end_of_day(prev_to), session_type
+            )
+            prev_tallies = await self._overview_tallies(
+                [row.id for row in prev_sessions]
+            )
+            pp = pl = pe = pr = 0
+            for _sid, c in prev_tallies.items():
+                pp += c.get(ValidationStatus.PRESENT.value, 0)
+                pl += c.get(ValidationStatus.LATE.value, 0)
+                pe += c.get(ValidationStatus.EXCUSED.value, 0)
+                pr += c.get(ValidationStatus.REJECTED.value, 0)
+            prev_expected = sum(
+                len(enrolled_by_offering.get(row.offering_id, set()))
+                for row in prev_sessions
+            )
+            prev_compliance, prev_participation = attendance_rates(
+                present=pp, late=pl, excused=pe, enrolled=prev_expected
+            )
+
+        return AttendanceSummaryResponse(
+            total_records=total_records,
+            present=present,
+            late=late,
+            excused=excused,
+            rejected=rejected,
+            compliance_rate=compliance,
+            participation_rate=participation,
+            total_sessions=len(sessions),
+            total_students=total_students,
+            previous_compliance_rate=prev_compliance,
+            previous_participation_rate=prev_participation,
+        )
+
+    async def get_records(
+        self,
+        *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        professor_id: int | None = None,
+        session_type: str | None = None,
+        status: str | None = None,
+        student_search: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+        sort_by: str = "scanned_at",
+        sort_dir: str = "desc",
+    ) -> AttendanceRecordsResponse:
+        page = max(page, 1)
+        size = min(max(size, 1), MAX_PAGE_SIZE)
+        date_to = _end_of_day(date_to)
+
+        offering_ids = await self._overview_offering_ids(
+            program_id, year_level_id, semester, course_id, professor_id
+        )
+        if not offering_ids:
+            return AttendanceRecordsResponse(items=[], total=0, page=page, size=size)
+
+        # Resolve instructor name per offering (current assignment).
+        prof_by_offering: dict[int, str] = {}
+        if offering_ids:
+            today = datetime.now(timezone.utc).date()
+            prof_rows = (
+                await self._session.execute(
+                    select(
+                        CourseProfessor.offering_id,
+                        Professor.first_name,
+                        Professor.last_name,
+                    )
+                    .join(
+                        Professor, Professor.id == CourseProfessor.professor_id
+                    )
+                    .where(CourseProfessor.offering_id.in_(offering_ids))
+                    .where(CourseProfessor.effective_from <= today)
+                    .where(
+                        (CourseProfessor.effective_to.is_(None))
+                        | (CourseProfessor.effective_to >= today)
+                    )
+                )
+            ).all()
+            for offering_id, first, last in prof_rows:
+                prof_by_offering[offering_id] = " ".join(
+                    p for p in (first, last) if p
+                )
+
+        stmt = (
+            select(Attendance, Session, CourseOffering, Course, Student, YearLevel, Program)
+            .join(Session, Session.id == Attendance.session_id)
+            .join(CourseOffering, CourseOffering.id == Session.offering_id)
+            .join(Course, Course.id == CourseOffering.course_id)
+            .join(Student, Student.id == Attendance.student_id)
+            .join(YearLevel, YearLevel.id == Student.year_level_id)
+            .join(Program, Program.id == YearLevel.program_id)
+            .where(Session.offering_id.in_(offering_ids))
+        )
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
+        stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
+        if student_search and student_search.strip():
+            needle = f"%{student_search.strip()}%"
+            stmt = stmt.where(
+                (Student.student_id.ilike(needle))
+                | (Student.first_name.ilike(needle))
+                | (Student.last_name.ilike(needle))
+            )
+
+        # count
+        total = (
+            await self._session.scalar(select(func.count()).select_from(stmt.subquery()))
+            or 0
+        )
+
+        # sort
+        sort_col = Attendance.timestamp
+        if sort_by == "student_name":
+            sort_col = Student.last_name
+        elif sort_by == "course_code":
+            sort_col = Course.course_code
+        elif sort_by == "status":
+            sort_col = Attendance.validation_status
+        if sort_dir == "asc":
+            stmt = stmt.order_by(sort_col.asc(), Attendance.id.asc())
+        else:
+            stmt = stmt.order_by(sort_col.desc(), Attendance.id.desc())
+
+        stmt = stmt.offset((page - 1) * size).limit(size)
+        rows = (await self._session.execute(stmt)).all()
+
+        items: list[AttendanceRecordItem] = []
+        for att, sess, offering, course, student, yl, program in rows:
+            items.append(
+                AttendanceRecordItem(
+                    id=att.id,
+                    student_id=student.id,
+                    student_name=" ".join(
+                        p for p in (student.first_name, student.middle_name, student.last_name) if p
+                    ),
+                    student_number=student.student_id,
+                    course_id=course.id,
+                    course_code=course.course_code,
+                    course_name=course.course_name,
+                    program_code=program.code,
+                    year_level_label=yl.label,
+                    session_code=sess.session_code,
+                    status=att.validation_status,
+                    scanned_at=att.timestamp,
+                    professor_name=prof_by_offering.get(sess.offering_id),
+                )
+            )
+
+        return AttendanceRecordsResponse(items=items, total=total, page=page, size=size)
+
+    async def export_records_csv(
+        self,
+        **kwargs: Any,
+    ) -> str:
+        # reuse get_records with max page
+        resp = await self.get_records(page=1, size=MAX_PAGE_SIZE, **{k: v for k, v in kwargs.items() if k not in ("page", "size")})
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            ["id", "student_number", "student_name", "course_code", "course_name", "program_code", "year_level", "session_code", "status", "scanned_at"]
+        )
+        for r in resp.items:
+            writer.writerow(
+                [r.id, r.student_number, r.student_name, r.course_code, r.course_name, r.program_code, r.year_level_label, r.session_code, r.status, r.scanned_at]
+            )
+        return buffer.getvalue()
+
     async def export_overview_csv(
         self,
         *,
@@ -1649,6 +2051,10 @@ class AttendanceService:
                 "sessions_count",
                 "avg_rate",
                 "trend",
+                "present",
+                "late",
+                "excused",
+                "rejected",
             ]
         )
 
@@ -1661,6 +2067,10 @@ class AttendanceService:
                     item.sessions_count,
                     item.avg_rate,
                     item.trend,
+                    item.present,
+                    item.late,
+                    item.excused,
+                    item.rejected,
                 ]
             )
 

@@ -112,6 +112,8 @@ Server atomically:
 **Permission:** Any professor with an active `course_professors` assignment
 (D7–D9) for the session's course may quick-excuse.
 
+> **Frontend (2026-11):** the quick-excuse modal on `/professor/excuse-requests` now resolves the selected student's enrolled courses from the offering rosters and lists them first in the course picker, followed by the remaining professor courses. The selected course filters the session dropdown. Submission still keys on `session_id` + `student_id`; enrolled and non-enrolled student-course combinations use the same endpoint.
+
 ### Path B: Professor-Initiated with Evidence
 
 **When:** Professor holds physical proof (e.g., excuse letter, medical certificate)
@@ -427,6 +429,15 @@ The four events above are the whole set. `quick_excuse`, `excuse_with_evidence`,
 `edit_excuse` and `revoke_excuse` send nothing: the professor already knows they
 did it, and §8 lists no notice for them.
 
+Attendance liveness review follows the same email-only pattern: rejecting a
+flagged scan in `AttendanceService.resolve_review` dispatches a message built
+by `features/attendance/notifications.py` to the affected student, carrying the
+course, session code, rejection reason, and retake availability. The in-app
+half is delivered through the student notification bell, which polls rejected
+attendance rows by `reviewed_at` (stored in `liveness_evidence`). Retake is
+allowed only while the session is still open and only when all prior attempts
+for that student/session are `rejected`.
+
 ---
 
 ## 9. Reporting Impact (D36)
@@ -474,7 +485,7 @@ As with compliance, the denominator is the enrolled count, not total records.
 | PATCH  | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Update existing excuse (reason, notes)                        |
 | DELETE | `/professor/sessions/{id}/attendance/{sid}/excuse` | Professor | Revoke a prof-initiated excuse (sets status back to original) |
 | POST   | `/professor/sessions/{id}/excuse-all-absent`       | Professor | Bulk excuse all absent (Path: quick, D23)                     |
-| GET    | `/professor/excuse-requests?status=pending`        | Professor | List pending excuse requests for review                       |
+| GET    | `/professor/excuse-requests?...`                  | Professor | List excuse requests for review (status, search, course, section, type, evidence, original status, reviewer, date ranges, sort) |
 | POST   | `/professor/excuse-requests/{rid}/review`          | Professor | Approve or reject a student-initiated request                 |
 | POST   | `/student/excuse-requests`                         | Student   | Submit excuse request (Path C)                                |
 | GET    | `/student/excuse-requests`                         | Student   | List own excuse requests                                      |

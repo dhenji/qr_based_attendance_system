@@ -430,6 +430,12 @@ class AssignmentRead(BaseModel):
 
 
 class RosterItem(BaseModel):
+    # The student's database primary key. The roster's `student_id` is the
+    # printed student number (a string); this is the integer id that the
+    # per-record excuse routes (and other id-keyed endpoints) need. Carrying
+    # both keeps the display value untouched while letting callers act on the
+    # row without a second lookup.
+    id: int
     student_id: str
     name: str
     email: str | None = None

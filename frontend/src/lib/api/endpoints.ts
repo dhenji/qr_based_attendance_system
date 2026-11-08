@@ -43,6 +43,8 @@ import type {
 	AnalyticsOverviewResponse,
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
+	AttendanceRecordItemResponse,
+	AttendanceSummaryResponse,
 	AuditChangeResponse,
 	AuditLogItemResponse,
 	CourseImportResult,
@@ -178,6 +180,7 @@ export const AttendanceScanEndpoint: EndpointDef<AttendanceScanResponse> = {
 export interface AttendancePrecheckResponse {
 	enrolled: boolean;
 	already_scanned: boolean;
+	retake_available?: boolean;
 	student: {
 		student_id: string;
 		name: string;
@@ -651,11 +654,15 @@ export type StudentHistoryStatus =
 export interface StudentHistoryItemResponse {
 	id: number;
 	session_id: number;
+	session_code?: string | null;
 	course_code: string;
 	course_name: string;
 	status: StudentHistoryStatus;
 	original_status?: StudentHistoryStatus | null;
 	excuse_reason?: string | null;
+	review_note?: string | null;
+	reviewed_at?: string | null;
+	retake_available?: boolean;
 	scanned_at: string;
 	scanned_via?: string | null;
 }
@@ -1015,6 +1022,7 @@ export const ProfessorOfferingStudentsEndpoint: EndpointDef<Paginated<AdminRoste
 		const size = Math.min(Math.max(parseInt(params?.size ?? '20', 10) || 20, 1), 100);
 		const rows: AdminRosterItemResponse[] = [
 			{
+				id: 1,
 				student_id: 'S001',
 				name: 'Ada Lovelace',
 				email: 'ada@example.com',
@@ -2687,6 +2695,7 @@ export const AdminOfferingRosterEndpoint: EndpointDef<Paginated<AdminRosterItemR
 	method: 'GET',
 	mock: (params) => {
 		let rows: AdminRosterItemResponse[] = MOCK_ADMIN_STUDENT_ROWS.map((s) => ({
+			id: s.id,
 			student_id: s.student_id,
 			name: [s.first_name, s.middle_name, s.last_name].filter(Boolean).join(' '),
 			section: s.section,
@@ -3184,6 +3193,76 @@ export const AdminAttendanceOverviewEndpoint: EndpointDef<{ items: AttendanceOve
 		}
 		items.sort((a, b) => a.course_code.localeCompare(b.course_code));
 		return { items };
+	},
+};
+
+export const AdminAttendanceSummaryEndpoint: EndpointDef<AttendanceSummaryResponse> = {
+	url: '/admin/attendance/summary',
+	method: 'GET',
+	mock: (params) => {
+		const sessions = filterMockSessions(params);
+		let present = 0;
+		let late = 0;
+		let excused = 0;
+		let rejected = 0;
+		let seats = 0;
+		const students = new Set<number>();
+		for (const s of sessions) {
+			present += s.present;
+			late += s.late;
+			excused += s.excused;
+			rejected += (s as { rejected?: number }).rejected ?? 0;
+			seats += s.enrolled;
+			students.add(s.courseId);
+		}
+		const total = present + late + excused + rejected;
+		return {
+			total_records: total,
+			present,
+			late,
+			excused,
+			rejected,
+			absent: 0,
+			compliance_rate: seats === 0 ? 0 : present / seats,
+			participation_rate: seats === 0 ? 0 : (present + late + excused) / seats,
+			total_sessions: sessions.length,
+			total_students: students.size,
+			previous_compliance_rate: 0,
+			previous_participation_rate: 0,
+		};
+	},
+};
+
+export const AdminAttendanceRecordsEndpoint: EndpointDef<{ items: AttendanceRecordItemResponse[]; total: number; page: number; size: number }> = {
+	url: '/admin/attendance/records',
+	method: 'GET',
+	mock: (params) => {
+		const sessions = filterMockSessions(params);
+		const items: AttendanceRecordItemResponse[] = [];
+		let id = 1;
+		for (const s of sessions) {
+			for (let i = 0; i < s.present; i++) {
+				items.push({
+					id: id++,
+					student_id: i + 1,
+					student_name: `Student ${i + 1}`,
+					student_number: `STU-${i + 1}`,
+					course_id: s.courseId,
+					course_code: s.courseCode,
+					course_name: s.courseName,
+					program_code: s.programCode ?? null,
+					year_level_label: s.yearLevelLabel ?? null,
+					session_code: `S-${s.courseId}`,
+					status: 'present',
+					scanned_at: `${s.date}T08:00:00Z`,
+					professor_name: null,
+				});
+			}
+		}
+		const page = Number(params?.page ?? 1);
+		const size = Number(params?.size ?? 20);
+		const start = (page - 1) * size;
+		return { items: items.slice(start, start + size), total: items.length, page, size };
 	},
 };
 
@@ -4973,6 +5052,8 @@ export const endpoints = {
 	adminRiskStaging: AdminRiskStagingEndpoint,
 	adminRiskStagingPromote: AdminRiskStagingPromoteEndpoint,
 	adminAttendanceOverview: AdminAttendanceOverviewEndpoint,
+	adminAttendanceSummary: AdminAttendanceSummaryEndpoint,
+	adminAttendanceRecords: AdminAttendanceRecordsEndpoint,
 	// Admin audit logs (Phase 8 backend; designed shape)
 	adminAuditLogs: AdminAuditLogsEndpoint,
 	adminStructureChanges: AdminStructureChangesEndpoint,

@@ -543,6 +543,7 @@ class AnalyticsService:
         semester: str | None = None,
         course_ids: Sequence[int] | None = None,
         risk_level: RiskLevel | str | None = None,
+        q: str | None = None,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> AtRiskResponse:
@@ -571,6 +572,15 @@ class AnalyticsService:
             RiskLevel(risk_level) if risk_level is not None else None,
             lambda v: StudentRiskScore.risk_level == v.value,
         )
+        if q:
+            needle = f"%{q.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Student.first_name.ilike(needle),
+                    Student.middle_name.ilike(needle),
+                    Student.last_name.ilike(needle),
+                )
+            )
         ordered = stmt.order_by(
             StudentRiskScore.risk_probability.desc(),
             StudentRiskScore.computed_at.desc(),
@@ -683,6 +693,7 @@ class AnalyticsService:
         semester: str | None = None,
         course_ids: Sequence[int] | None = None,
         risk_level: RiskLevel | str | None = None,
+        q: str | None = None,
         unpromoted_only: bool = False,
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
@@ -722,6 +733,15 @@ class AnalyticsService:
             RiskLevel(risk_level) if risk_level is not None else None,
             lambda v: StudentRiskScoreStaging.risk_level == v.value,
         )
+        if q:
+            needle = f"%{q.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Student.first_name.ilike(needle),
+                    Student.middle_name.ilike(needle),
+                    Student.last_name.ilike(needle),
+                )
+            )
         if unpromoted_only:
             stmt = stmt.where(StudentRiskScoreStaging.promoted_at.is_(None))
         ordered = stmt.order_by(

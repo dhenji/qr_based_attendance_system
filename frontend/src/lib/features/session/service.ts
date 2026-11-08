@@ -287,6 +287,7 @@ export const getActiveSession = async (
 	);
 
 	const students: LiveStudent[] = (response.students ?? []).map((student) => ({
+		studentId: student.student_id,
 		studentNumber: student.student_number,
 		name: student.name,
 		section: student.section,

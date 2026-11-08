@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { searchLocation, type LocationSearchResult, requestBestPosition } from '$lib/shared/utils/geo';
+import { toMapPickerMessage } from '$lib/features/liveness/errors';
 
 	interface Props {
 		lat: number | null;
@@ -31,9 +32,10 @@ let gpsMarker: any = null;
 let gpsAccuracyCircle: any = null;
 let radiusCircle: any = null;
 
-let locating = $state(false);
-let gpsError = $state<string | null>(null);
-let gpsAccuracy = $state<number | null>(null);
+	let locating = $state(false);
+	let gpsError = $state<string | null>(null);
+	let gpsAccuracy = $state<number | null>(null);
+	let locateAbortController: AbortController | null = null;
 
 	let searchQuery = $state('');
 	let results = $state<LocationSearchResult[]>([]);
@@ -45,6 +47,12 @@ let gpsAccuracy = $state<number | null>(null);
 
 	const DEFAULT_CENTER: [number, number] = [14.5995, 120.9842];
 	const DEFAULT_ZOOM = 16;
+
+	function accuracyBandColor(accuracy: number): string {
+		if (accuracy <= 50) return '#16a34a';
+		if (accuracy <= 100) return '#b45309';
+		return '#dc2626';
+	}
 
 	function placeMarker(m: any, L: any, latitude: number, longitude: number) {
 		if (marker) {
@@ -63,47 +71,56 @@ let gpsAccuracy = $state<number | null>(null);
 
 	async function locate() {
 		if (!allowLocate || locating) return;
+		if (!map || !leaflet) {
+			gpsError = 'Map is still loading. Try again in a moment.';
+			return;
+		}
 		locating = true;
 		gpsError = null;
+		const controller = new AbortController();
+		locateAbortController = controller;
 		try {
 			const fix = await requestBestPosition({
 				desiredAccuracy: 50,
 				maxFixes: 3,
-				timeoutMs: 10000
+				timeoutMs: 10000,
+				maxAccuracy: 50,
+				fastMaximumAge: 5000,
+				signal: controller.signal
 			});
 			gpsAccuracy = fix.accuracy;
 			lat = fix.lat;
 			lng = fix.lng;
-			if (map && leaflet) {
-				placeMarker(map, leaflet, fix.lat, fix.lng);
-				if (gpsMarker) {
-					gpsMarker.remove();
-					gpsMarker = null;
-				}
-				const icon = leaflet.divIcon({
-					className: 'gps-marker',
-					html: '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 2px #2563eb;"></div>',
-					iconSize: [12, 12]
-				});
-				gpsMarker = leaflet.marker([fix.lat, fix.lng], { icon, interactive: false }).addTo(map);
+			placeMarker(map, leaflet, fix.lat, fix.lng);
+			if (gpsMarker) {
+				gpsMarker.remove();
+				gpsMarker = null;
 			}
+			const icon = leaflet.divIcon({
+				className: 'gps-marker',
+				html: '<div style="width:12px;height:12px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 2px #2563eb;"></div>',
+				iconSize: [12, 12]
+			});
+			gpsMarker = leaflet.marker([fix.lat, fix.lng], { icon, interactive: false }).addTo(map);
 			if (gpsAccuracyCircle) {
 				try { gpsAccuracyCircle.remove(); } catch { /* ignore */ }
 				gpsAccuracyCircle = null;
 			}
+			const circleColor = accuracyBandColor(fix.accuracy);
 			gpsAccuracyCircle = leaflet.circle([fix.lat, fix.lng], {
 				radius: Math.max(fix.accuracy, 1),
-				color: '#2563eb',
+				color: circleColor,
 				weight: 1,
-				fillColor: '#2563eb',
+				fillColor: circleColor,
 				fillOpacity: 0.08,
 				dashArray: '4 4'
 			}).addTo(map);
 			onChange(fix.lat, fix.lng);
 		} catch (e: any) {
-			gpsError = e?.message ?? 'Unable to get your location.';
+			gpsError = toMapPickerMessage(e, 'Unable to get your location.');
 		} finally {
 			locating = false;
+			locateAbortController = null;
 		}
 	}
 
@@ -179,7 +196,7 @@ let gpsAccuracy = $state<number | null>(null);
 			lat !== null && lng !== null ? [lat, lng] : DEFAULT_CENTER;
 		const zoom = lat !== null && lng !== null ? DEFAULT_ZOOM : 4;
 
-		map = L.map(container).setView(center, zoom);
+		map = L.map(container, { keyboard: false }).setView(center, zoom);
 		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
 			maxZoom: 19,
@@ -216,6 +233,10 @@ let gpsAccuracy = $state<number | null>(null);
 	});
 
 	onDestroy(() => {
+		if (locateAbortController) {
+			try { locateAbortController.abort(); } catch { /* ignore */ }
+			locateAbortController = null;
+		}
 		if (resizeObserver) {
 			resizeObserver.disconnect();
 			resizeObserver = null;
@@ -279,8 +300,6 @@ let gpsAccuracy = $state<number | null>(null);
 		// Touch these so this re-runs on every relevant change.
 		void expanded;
 		void height;
-		void lat;
-		void lng;
 		if (!map) return;
 		const invalidate = () => map.invalidateSize();
 		const raf = requestAnimationFrame(() => setTimeout(invalidate, 0));
@@ -324,17 +343,18 @@ let gpsAccuracy = $state<number | null>(null);
 		{/if}
 	</div>
 	<div class="map-toolbar">
-		<button type="button" class="map-tool-btn" onclick={() => (expanded = !expanded)}>
+		<button type="button" class="map-tool-btn" aria-label="Enlarge or shrink map" onclick={() => (expanded = !expanded)}>
 			{expanded ? 'Shrink' : 'Enlarge'}
 		</button>
 		{#if allowLocate}
-			<button type="button" class="map-tool-btn" disabled={locating} onclick={() => void locate()}>
+			<button type="button" class="map-tool-btn" aria-label="Use my location" disabled={locating} aria-busy={locating} onclick={() => void locate()}>
 				{locating ? 'Locating…' : 'Use my location'}
 			</button>
 		{/if}
 		<button
 			type="button"
 			class="map-tool-btn"
+			aria-label="Recenter map"
 			onclick={() => {
 				if (map && marker) {
 					const pos = marker.getLatLng();
@@ -344,22 +364,46 @@ let gpsAccuracy = $state<number | null>(null);
 		>
 			Recenter
 		</button>
-		<button type="button" class="map-tool-btn" onclick={clearPin}>
+		<button type="button" class="map-tool-btn" aria-label="Clear pin" onclick={clearPin}>
 			Clear pin
 		</button>
 	</div>
 	{#if gpsError}
 		<p class="map-gps-error" role="alert">{gpsError}</p>
+		<button type="button" class="map-tool-btn" disabled={locating} onclick={() => void locate()}>Retry</button>
 	{/if}
 	{#if gpsAccuracy !== null}
-		<p class="map-gps-accuracy" class:good={radius !== null && gpsAccuracy <= radius} class:warn={radius === null || gpsAccuracy > (radius ?? 0)}>
+		<p class="map-gps-accuracy" class:good={gpsAccuracy <= 50} class:warn={gpsAccuracy > 50 && gpsAccuracy <= 100} class:poor={gpsAccuracy > 100} role="status" aria-live="polite">
 			GPS accuracy: {Math.round(gpsAccuracy)} m
 			{#if radius !== null}
 				· radius {radius} m
 			{/if}
 		</p>
 	{/if}
-	<div bind:this={container} class="map-container"></div>
+	{#if lat === null && lng === null}
+		<div class="map-empty-hint" aria-hidden="true">Click the map or use your location to set coordinates</div>
+	{/if}
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<div
+		bind:this={container}
+		class="map-container"
+		tabindex="0"
+		role="application"
+		aria-label="Interactive map"
+		onkeydown={(e) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				if (!map) return;
+				const c = map.getCenter();
+				if (!Number.isFinite(c?.lat) || !Number.isFinite(c?.lng)) return;
+				lat = c.lat;
+				lng = c.lng;
+				placeMarker(map, leaflet, c.lat, c.lng);
+				onChange(c.lat, c.lng);
+			}
+		}}
+	></div>
 </div>
 
 <style>
@@ -458,5 +502,27 @@ let gpsAccuracy = $state<number | null>(null);
 	}
 	.map-gps-accuracy.warn {
 		color: var(--warning-text, #b45309);
+	}
+	.map-gps-accuracy.poor {
+		color: var(--danger, #dc2626);
+	}
+	.map-empty-hint {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		pointer-events: none;
+		opacity: 0.7;
+		font-size: 0.8125rem;
+		color: var(--text-muted, #666);
+		background: var(--bg-card, #fff);
+		padding: 6px 10px;
+		border-radius: 6px;
+		z-index: 1;
+	}
+	.map-tool-btn:focus-visible,
+	.map-container:focus-visible {
+		outline: 2px solid var(--accent, #2563eb);
+		outline-offset: 2px;
 	}
 </style>

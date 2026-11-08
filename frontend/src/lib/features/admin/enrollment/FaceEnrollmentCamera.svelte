@@ -7,17 +7,19 @@
 	import { onDestroy, untrack } from 'svelte';
 	import type { Matrix, NormalizedLandmark } from '@mediapipe/tasks-vision';
 	import { initFaceModel, type LoadedFaceModel } from '$lib/features/liveness/model';
+import { validateFacePhoto } from './quality';
 
-	interface Props {
-		active: boolean;
-		onComplete: (photos: { front: File; left: File; right: File }) => void;
-		onCancel?: () => void;
-		singleSlot?: 'front' | 'left' | 'right' | null;
-		onCapture?: (slot: 'front' | 'left' | 'right', file: File) => void;
-		autoCaptureEnabled?: boolean;
-	}
+interface Props {
+	active: boolean;
+	onComplete: (photos: { front: File; left: File; right: File }) => void;
+	onCancel?: () => void;
+	singleSlot?: 'front' | 'left' | 'right' | null;
+	onCapture?: (slot: 'front' | 'left' | 'right', file: File) => void;
+	autoCaptureEnabled?: boolean;
+	onQualityError?: (reason: string | null) => void;
+}
 
-	let { active, onComplete, onCancel, singleSlot = null, onCapture, autoCaptureEnabled = false }: Props = $props();
+let { active, onComplete, onCancel, singleSlot = null, onCapture, autoCaptureEnabled = false, onQualityError }: Props = $props();
 	let autoCapture = $state(untrack(() => autoCaptureEnabled));
 
 	type Step = 'front' | 'left' | 'right';
@@ -37,6 +39,7 @@
 	let reviewFile = $state<File | null>(null);
 	let reviewPreview = $state<string | null>(null);
 	let reviewSlot = $state<Step | null>(null);
+let checkingQuality = $state(false);
 
 	// Guide oval (normalized video space), matches FaceScanner.
 	const GUIDE_CX = 0.5;
@@ -450,6 +453,7 @@
 			error = 'Could not capture the photo. Please try again.';
 			return;
 		}
+		onQualityError?.(null);
 		reviewFile = file;
 		reviewSlot = step;
 		reviewPreview = URL.createObjectURL(file);
@@ -465,41 +469,53 @@
 		holdFrames = 0;
 	};
 
-	const useReviewPhoto = () => {
-		if (!reviewFile || !reviewSlot) return;
-		const file = reviewFile;
-		const slot = reviewSlot;
-		discardReview();
-
-		if (singleSlot) {
-			onCapture?.(singleSlot, file);
-			stop();
+const useReviewPhoto = async () => {
+	if (!reviewFile || !reviewSlot) return;
+	const file = reviewFile;
+	const slot = reviewSlot;
+	onQualityError?.(null);
+	checkingQuality = true;
+	try {
+		const quality = await validateFacePhoto(file);
+		if (!quality.ok) {
+			onQualityError?.(quality.reason ?? 'Photo rejected.');
 			return;
 		}
+	} finally {
+		checkingQuality = false;
+	}
 
-		captured = { ...captured, [slot]: file };
-		let nextStep: Step;
-		if (slot === 'front') nextStep = 'left';
-		else if (slot === 'left') nextStep = 'right';
-		else {
-			onComplete(captured as { front: File; left: File; right: File });
-			return;
-		}
+	discardReview();
 
-		// Turn auto-capture off when advancing so the next angle is not captured
-		// before the user has repositioned their head.
-		autoCapture = false;
-
-		// Restart the camera stream when changing angles. Preserve the front yaw
-		// baseline so restarting does not make the next pose its own baseline.
-		const savedYawBaseline = yawBaseline;
-		const savedYawSource = yawSource;
+	if (singleSlot) {
+		onCapture?.(singleSlot, file);
 		stop();
-		yawBaseline = savedYawBaseline;
-		yawSource = savedYawSource;
-		step = nextStep;
-		void start(true);
-	};
+		return;
+	}
+
+	captured = { ...captured, [slot]: file };
+	let nextStep: Step;
+	if (slot === 'front') nextStep = 'left';
+	else if (slot === 'left') nextStep = 'right';
+	else {
+		onComplete(captured as { front: File; left: File; right: File });
+		return;
+	}
+
+	// Turn auto-capture off when advancing so the next angle is not captured
+	// before the user has repositioned their head.
+	autoCapture = false;
+
+	// Restart the camera stream when changing angles. Preserve the front yaw
+	// baseline so restarting does not make the next pose its own baseline.
+	const savedYawBaseline = yawBaseline;
+	const savedYawSource = yawSource;
+	stop();
+	yawBaseline = savedYawBaseline;
+	yawSource = savedYawSource;
+	step = nextStep;
+	void start(true);
+};
 
 	const retakeReviewPhoto = () => {
 		discardReview();
@@ -560,8 +576,8 @@
 			<img src={reviewPreview} alt={`Review ${reviewSlot ?? step} photo`} />
 			<p class="status">Review this {reviewSlot ?? step} photo before using it.</p>
 			<div class="actions">
-				<button class="btn primary" onclick={useReviewPhoto}>Use Photo</button>
-				<button class="btn" onclick={retakeReviewPhoto}>Retake Photo</button>
+				<button class="btn primary" onclick={useReviewPhoto} disabled={checkingQuality}>{checkingQuality ? 'Checking photo…' : 'Use Photo'}</button>
+				<button class="btn" onclick={retakeReviewPhoto} disabled={checkingQuality}>{checkingQuality ? 'Checking photo…' : 'Retake Photo'}</button>
 				{#if onCancel}
 					<button class="btn ghost" onclick={() => { discardReview(); onCancel?.(); }}>Cancel</button>
 				{/if}

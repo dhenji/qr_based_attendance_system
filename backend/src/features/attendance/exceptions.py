@@ -23,6 +23,18 @@ class OutsideGeofenceException(AttendanceDomainException):
         )
 
 
+class GpsAccuracyTooLowException(AttendanceDomainException):
+    """422 - reported GPS accuracy is too coarse to verify attendance."""
+
+    status_code: int = 422
+    code: str = "gps_accuracy_too_low"
+
+    def __init__(self, accuracy_m: float, max_m: float) -> None:
+        super().__init__(
+            message=f"GPS accuracy {accuracy_m:.1f}m exceeds max allowed {max_m:.1f}m"
+        )
+
+
 class LivenessFailedException(AttendanceDomainException):
     """403 = liveness challenge (blink/head-turn) verification failed."""
 

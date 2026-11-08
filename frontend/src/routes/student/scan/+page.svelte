@@ -14,6 +14,7 @@
 		type SessionVerification
 	} from '$lib/features/liveness/service';
 	import { generateEmbeddingFromLandmarks, serializeFaceEmbedding } from '$lib/shared/utils/face-embedding';
+	import { acquireGpsFix } from '$lib/features/liveness/gps';
 	import {
 		cacheSession,
 		flushQueue,
@@ -29,8 +30,8 @@
 import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
+	import { GPS_HARD_FLOOR_METERS } from '$lib/shared/utils/geo';
 	import type { LivenessEvidence } from '$lib/shared/types';
-	import { requestBestPosition, calculateDistanceMeters } from '$lib/shared/utils/geo';
 
 	type Step = 'entry' | 'confirm' | 'location' | 'liveness';
 
@@ -49,6 +50,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let verifiedName = $state('');
 	let precheckFailed = $state(false);
 	let alreadyScannedStop = $state(false);
+	let retakeMode = $state(false);
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
@@ -69,6 +71,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let scannedAt = $state('');
 	let pendingLiveness = $state<LivenessEvidence | null>(null);
 	let locatingGps = $state(false);
+	let gpsAbortController: AbortController | null = $state(null);
 	let gpsFix = $state<{ lat: number; lng: number; accuracy: number } | null>(null);
 	let gpsStatus = $state<'locating' | 'high' | 'low' | 'unavailable' | 'permission'>('locating');
 	let gpsDistanceMeters = $state<number | null>(null);
@@ -147,6 +150,10 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		(code && SCAN_ERROR_MESSAGES[code]) || 'The attendance scan was rejected.';
 
 	onDestroy(() => {
+		if (gpsAbortController) {
+			try { gpsAbortController.abort(); } catch { /* ignore */ }
+			gpsAbortController = null;
+		}
 		clearCountdown();
 		clearRetryTimer();
 	});
@@ -347,12 +354,16 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				showFailure = true;
 				return;
 			}
-			if (result.alreadyScanned) {
+			if (result.alreadyScanned && !result.retakeAvailable) {
 				precheckFailed = true;
 				alreadyScannedStop = true;
 				rejectionReason = SCAN_ERROR_MESSAGES.duplicate_scan;
 				showFailure = true;
 				return;
+			}
+			if (result.retakeAvailable) {
+				scanError = null;
+				retakeMode = true;
 			}
 			if (!isMockMode() && studentState.student?.faceEnrolled === false) {
 				precheckFailed = true;
@@ -488,52 +499,6 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		}
 	};
 
-	const getPositionOnce = (
-		options: PositionOptions
-	): Promise<{ lat: number; lng: number; accuracy: number }> =>
-		new Promise((resolve, reject) => {
-			if (!navigator.geolocation) {
-				reject(new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.'));
-				return;
-			}
-
-			navigator.geolocation.getCurrentPosition(
-				({ coords }) =>
-					resolve({
-						lat: coords.latitude,
-						lng: coords.longitude,
-						accuracy: coords.accuracy,
-					}),
-				(err) => {
-					if (err.code === err.PERMISSION_DENIED) {
-						reject(new APIError('location_permission_denied', 'Location permission is required to verify your attendance. Enable location access in your device settings.'));
-					} else if (err.code === err.TIMEOUT) {
-						reject(new APIError('location_timeout', 'We could not determine your current location in time. Move to an area with a clearer signal and try again.'));
-					} else {
-						reject(new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.'));
-					}
-				},
-				options
-			);
-		});
-
-	const getCurrentPosition = async (): Promise<{
-		lat: number;
-		lng: number;
-		accuracy: number;
-	}> => {
-		// High-accuracy first; on timeout fall back once to a faster low-power
-		// fix so a weak GPS signal still yields a scan instead of a hard fail.
-		try {
-			return await getPositionOnce({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
-		} catch (e) {
-			if (e instanceof APIError && (e.code === 'location_timeout' || e.message.includes('timed out'))) {
-				return await getPositionOnce({ enableHighAccuracy: false, maximumAge: 0, timeout: 8000 });
-			}
-			throw e;
-		}
-	};
-
 	const geofenceRequired = $derived(
 		session !== null &&
 			session.geofenceEnabled !== false &&
@@ -544,31 +509,34 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 	const requestGps = async () => {
 		if (!session) return;
+		// Cancel any in-flight acquisition before starting a new one.
+		if (gpsAbortController) {
+			try { gpsAbortController.abort(); } catch { /* ignore */ }
+			gpsAbortController = null;
+		}
+		const controller = new AbortController();
+		gpsAbortController = controller;
 		locatingGps = true;
 		gpsFix = null;
 		gpsError = null;
 		gpsDistanceMeters = null;
 		gpsStatus = 'locating';
 		try {
-			const fix = await requestBestPosition({
-				desiredAccuracy: 50,
-				maxFixes: 3,
-				timeoutMs: 10000
-			});
+			const { fix, distanceMeters, status } = await acquireGpsFix(session, controller.signal);
 			gpsFix = fix;
-			const center = session.geofence;
-			const dist = calculateDistanceMeters(
-				fix.lat,
-				fix.lng,
-				center.lat as number,
-				center.lng as number
-			);
-			gpsDistanceMeters = dist;
-			gpsStatus = fix.accuracy <= 50 ? 'high' : 'low';
+			gpsDistanceMeters = distanceMeters;
+			gpsStatus = status;
 		} catch (e) {
+			if (controller.signal.aborted) {
+				// Cancelled by user/unmount: leave state clean, no error.
+				gpsStatus = 'locating';
+				gpsError = null;
+				return;
+			}
 			if (e instanceof APIError) {
 				if (e.code === 'location_permission_denied') gpsStatus = 'permission';
 				else if (e.code === 'location_timeout') gpsStatus = 'unavailable';
+				else if (e.code === 'location_unavailable') gpsStatus = 'unavailable';
 				else gpsStatus = 'unavailable';
 				gpsError = e.message;
 			} else {
@@ -577,6 +545,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			}
 		} finally {
 			locatingGps = false;
+			gpsAbortController = null;
 		}
 	};
 
@@ -607,6 +576,15 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 		let reachedSubmit = false;
 		try {
+			if (gps && gps.accuracy > GPS_HARD_FLOOR_METERS) {
+				rejectionReason = toScanMessage(
+					new APIError('gps_accuracy_too_low', ''),
+					'Unable to submit the attendance scan'
+				);
+				showFailure = true;
+				return;
+			}
+
 			if (geofenceRequired && gps) {
 				if (
 					!validateGPS(
@@ -961,6 +939,9 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						</button>
 					</div>
 
+					{#if retakeMode}
+						<p class="info" role="status">Retaking attendance for a previously rejected submission.</p>
+					{/if}
 					{#if scanError}
 						<p class="error" role="alert">{scanError}</p>
 					{/if}
@@ -1006,6 +987,18 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					{/if}
 				{/if}
 				<div class="camera-actions" style="margin-top: 1.25rem;">
+					{#if locatingGps}
+						<button
+							class="btn-secondary"
+							onclick={() => {
+								if (gpsAbortController) {
+									try { gpsAbortController.abort(); } catch { /* ignore */ }
+								}
+							}}
+						>
+							Cancel
+						</button>
+					{/if}
 					<button class="btn-secondary" disabled={locatingGps} onclick={() => void requestGps()}>
 						{locatingGps ? 'Locating…' : 'Retry Location'}
 					</button>

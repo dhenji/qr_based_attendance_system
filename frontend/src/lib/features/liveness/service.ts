@@ -41,6 +41,7 @@ export interface AttendanceScanResult {
 export interface AttendancePrecheckResult {
 	enrolled: boolean;
 	alreadyScanned: boolean;
+	retakeAvailable?: boolean;
 	studentId: string;
 	studentName: string;
 	section?: string;
@@ -58,6 +59,7 @@ export const precheckScan = async (input: {
 	return {
 		enrolled: response.enrolled,
 		alreadyScanned: response.already_scanned,
+		retakeAvailable: response.retake_available ?? false,
 		studentId: response.student.student_id,
 		studentName: response.student.name,
 		section: response.student.section ?? undefined,
