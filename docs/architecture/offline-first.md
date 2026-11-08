@@ -270,6 +270,8 @@ When scanning offline:
    explicitly: "Client-side embedding *compare* is a separate future slice … no documented
    decrypt scheme"). Treat the steps below as the design, not the build.
 2. **GPS check** runs against cached session geofence config.
+   Server-side accuracy review band (>100 m → `accuracy_low`) and hard floor
+   (>1000 m → 422 `gps_accuracy_too_low`) apply to synced scans too.
 3. **Liveness** runs client-side (MediaPipe FaceLandmarker WASM, EAR + PnP heuristics).
 4. **Status is tentative**: marked `pending` in queue. Server recomputes on sync.
 
