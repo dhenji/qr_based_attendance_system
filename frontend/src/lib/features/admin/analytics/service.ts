@@ -24,6 +24,8 @@ import type {
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewFilters,
 	AttendanceOverviewItemResponse,
+	AttendanceRecordItemResponse,
+	AttendanceSummaryResponse,
 	Program,
 	PromoteStagingResponse,
 	RiskRefreshResponse,
@@ -230,10 +232,20 @@ export const stagingCsv = (rows: RiskStagingItemResponse[]): string =>
 
 const overviewParams = (f: AttendanceOverviewFilters): Record<string, string> => {
 	const params: Record<string, string> = {};
+	if (f.program_id !== undefined) params.program_id = String(f.program_id);
+	if (f.year_level_id !== undefined) params.year_level_id = String(f.year_level_id);
+	if (f.semester) params.semester = f.semester;
 	if (f.course_id !== undefined) params.course_id = String(f.course_id);
 	if (f.professor_id !== undefined) params.professor_id = String(f.professor_id);
+	if (f.session_type) params.session_type = f.session_type;
+	if (f.status) params.status = f.status;
+	if (f.student_search) params.student_search = f.student_search;
 	if (f.date_from) params.date_from = f.date_from;
 	if (f.date_to) params.date_to = f.date_to;
+	if (f.page !== undefined) params.page = String(f.page);
+	if (f.size !== undefined) params.size = String(f.size);
+	if (f.sort_by) params.sort_by = f.sort_by;
+	if (f.sort_dir) params.sort_dir = f.sort_dir;
 	return params;
 };
 
@@ -246,6 +258,31 @@ export const getAttendanceOverview = async (
 	);
 	return response.items ?? [];
 };
+
+export const getAttendanceSummary = async (
+	filters: AttendanceOverviewFilters = {}
+): Promise<AttendanceSummaryResponse> =>
+	get<AttendanceSummaryResponse>('adminAttendanceSummary', overviewParams(filters));
+
+export const getAttendanceRecords = async (
+	filters: AttendanceOverviewFilters = {}
+): Promise<{ items: AttendanceRecordItemResponse[]; total: number; page: number; size: number }> => {
+	const response = await get<{
+		items: AttendanceRecordItemResponse[];
+		total?: number;
+		page?: number;
+		size?: number;
+	}>('adminAttendanceRecords', overviewParams(filters));
+	return {
+		items: response.items ?? [],
+		total: response.total ?? (response.items?.length ?? 0),
+		page: response.page ?? 1,
+		size: response.size ?? 20,
+	};
+};
+
+export const fetchAttendanceRecordsCsv = (filters: AttendanceOverviewFilters = {}): Promise<string> =>
+	getText(TEXT_EXPORTS.adminAttendanceRecords, overviewParams(filters));
 
 // --- CSV exports (Export tab + attendance overview) --------------------------
 

@@ -179,7 +179,7 @@ async def test_overview_export_downloads_csv(
     assert response.headers["content-type"].startswith("text/csv")
     assert "attachment" in response.headers["content-disposition"]
     lines = response.text.strip().splitlines()
-    assert lines[0] == "course_id,course_code,course_name,sessions_count,avg_rate,trend"
+    assert lines[0] == "course_id,course_code,course_name,sessions_count,avg_rate,trend,present,late,excused,rejected"
     assert len(lines) == 2
     assert "CS101" in lines[1]
     assert "down" in lines[1]

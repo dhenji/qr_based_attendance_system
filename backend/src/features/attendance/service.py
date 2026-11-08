@@ -7,7 +7,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -56,6 +56,9 @@ from features.attendance.schema import (
     HistorySummary,
     LivenessEvidence,
     LivenessReviewItem,
+    AttendanceRecordItem,
+    AttendanceRecordsResponse,
+    AttendanceSummaryResponse,
     OverviewItem,
     OverviewResponse,
     PrecheckRequest,
@@ -67,6 +70,7 @@ from features.attendance.schema import (
     ScanResponse,
 )
 from features.course.model import Course, CourseOffering
+from features.program.model import Program, YearLevel
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.face_enrollment.exceptions import StubEmbeddingException
@@ -83,6 +87,7 @@ from features.student.exceptions import (
     StudentNotFoundException,
 )
 from features.student.model import Student
+from features.professor.model import Professor
 from features.auth.model import User
 from features.sync.model import SyncQueue
 from shared.audit import record_audit
@@ -1484,15 +1489,19 @@ class AttendanceService:
     async def get_overview(
         self,
         *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
         course_id: int | None = None,
         professor_id: int | None = None,
+        session_type: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> OverviewResponse:
         """Per-course sessions, compliance rate, and trend over the filter set."""
         date_to = _end_of_day(date_to)
         offering_ids: list[int] = await self._overview_offering_ids(
-            course_id, professor_id
+            program_id, year_level_id, semester, course_id, professor_id
         )
 
         if not offering_ids:
@@ -1508,7 +1517,7 @@ class AttendanceService:
             return OverviewResponse(items=[])
 
         sessions: Sequence[Session] = await self._overview_sessions(
-            offering_ids, date_from, date_to
+            offering_ids, date_from, date_to, session_type
         )
         enrolled_by_offering: dict[int, set[int]] = (
             await self._overview_enrollments(offering_ids)
@@ -1557,6 +1566,10 @@ class AttendanceService:
             present, late, excused = self._overview_status_counts(
                 course_sessions, tallies
             )
+            rejected = sum(
+                tallies.get(row.id, Counter()).get(ValidationStatus.REJECTED.value, 0)
+                for row in course_sessions
+            )
             # One rate definition (shared.rates): compliance is present/expected.
             avg_rate: float = attendance_rates(
                 present=present, late=late, excused=excused, enrolled=expected
@@ -1572,6 +1585,10 @@ class AttendanceService:
                     trend=self._overview_trend(
                         course_sessions, tallies, enrolled_by_session
                     ),
+                    present=present,
+                    late=late,
+                    excused=excused,
+                    rejected=rejected,
                 )
             )
 
@@ -1580,9 +1597,17 @@ class AttendanceService:
         return OverviewResponse(items=items)
 
     async def _overview_offering_ids(
-        self, course_id: int | None, professor_id: int | None
+        self,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        professor_id: int | None = None,
     ) -> list[int]:
         stmt = select(CourseOffering.id)
+        stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
+        stmt = apply_if(stmt, year_level_id, lambda v: CourseOffering.year_level_id == v)
+        stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
         stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
 
         if professor_id is not None:
@@ -1605,6 +1630,7 @@ class AttendanceService:
         offering_ids: list[int],
         date_from: datetime | None,
         date_to: datetime | None,
+        session_type: str | None = None,
     ) -> Sequence[Session]:
         if not offering_ids:
             return []
@@ -1612,6 +1638,7 @@ class AttendanceService:
         stmt = select(Session).where(Session.offering_id.in_(offering_ids))
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
+        stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
 
         return (await self._session.scalars(stmt)).all()
 
@@ -1757,6 +1784,230 @@ class AttendanceService:
 
         return RecentScansResponse(items=items)
 
+    async def get_summary(
+        self,
+        *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        professor_id: int | None = None,
+        session_type: str | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> AttendanceSummaryResponse:
+        date_to = _end_of_day(date_to)
+        offering_ids = await self._overview_offering_ids(
+            program_id, year_level_id, semester, course_id, professor_id
+        )
+        if not offering_ids:
+            return AttendanceSummaryResponse()
+
+        sessions = await self._overview_sessions(
+            offering_ids, date_from, date_to, session_type
+        )
+        enrolled_by_offering = await self._overview_enrollments(offering_ids)
+        tallies = await self._overview_tallies([row.id for row in sessions])
+
+        present = late = excused = rejected = 0
+        for _sid, c in tallies.items():
+            present += c.get(ValidationStatus.PRESENT.value, 0)
+            late += c.get(ValidationStatus.LATE.value, 0)
+            excused += c.get(ValidationStatus.EXCUSED.value, 0)
+            rejected += c.get(ValidationStatus.REJECTED.value, 0)
+        total_records = present + late + excused + rejected
+        expected = sum(
+            len(enrolled_by_offering.get(row.offering_id, set())) for row in sessions
+        )
+        compliance, participation = attendance_rates(
+            present=present, late=late, excused=excused, enrolled=expected
+        )
+        total_students = len(
+            {s for members in enrolled_by_offering.values() for s in members}
+        )
+
+        # Previous period (same length) for delta.
+        prev_compliance = 0.0
+        prev_participation = 0.0
+        if date_from is not None and date_to is not None:
+            delta = date_to - date_from
+            prev_to = date_from - timedelta(days=1)
+            prev_from = date_from - delta
+            prev_sessions = await self._overview_sessions(
+                offering_ids, prev_from, _end_of_day(prev_to), session_type
+            )
+            prev_tallies = await self._overview_tallies(
+                [row.id for row in prev_sessions]
+            )
+            pp = pl = pe = pr = 0
+            for _sid, c in prev_tallies.items():
+                pp += c.get(ValidationStatus.PRESENT.value, 0)
+                pl += c.get(ValidationStatus.LATE.value, 0)
+                pe += c.get(ValidationStatus.EXCUSED.value, 0)
+                pr += c.get(ValidationStatus.REJECTED.value, 0)
+            prev_expected = sum(
+                len(enrolled_by_offering.get(row.offering_id, set()))
+                for row in prev_sessions
+            )
+            prev_compliance, prev_participation = attendance_rates(
+                present=pp, late=pl, excused=pe, enrolled=prev_expected
+            )
+
+        return AttendanceSummaryResponse(
+            total_records=total_records,
+            present=present,
+            late=late,
+            excused=excused,
+            rejected=rejected,
+            compliance_rate=compliance,
+            participation_rate=participation,
+            total_sessions=len(sessions),
+            total_students=total_students,
+            previous_compliance_rate=prev_compliance,
+            previous_participation_rate=prev_participation,
+        )
+
+    async def get_records(
+        self,
+        *,
+        program_id: int | None = None,
+        year_level_id: int | None = None,
+        semester: str | None = None,
+        course_id: int | None = None,
+        professor_id: int | None = None,
+        session_type: str | None = None,
+        status: str | None = None,
+        student_search: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = DEFAULT_PAGE,
+        size: int = DEFAULT_PAGE_SIZE,
+        sort_by: str = "scanned_at",
+        sort_dir: str = "desc",
+    ) -> AttendanceRecordsResponse:
+        page = max(page, 1)
+        size = min(max(size, 1), MAX_PAGE_SIZE)
+        date_to = _end_of_day(date_to)
+
+        offering_ids = await self._overview_offering_ids(
+            program_id, year_level_id, semester, course_id, professor_id
+        )
+        if not offering_ids:
+            return AttendanceRecordsResponse(items=[], total=0, page=page, size=size)
+
+        # Resolve instructor name per offering (current assignment).
+        prof_by_offering: dict[int, str] = {}
+        if offering_ids:
+            today = datetime.now(timezone.utc).date()
+            prof_rows = (
+                await self._session.execute(
+                    select(
+                        CourseProfessor.offering_id,
+                        Professor.first_name,
+                        Professor.last_name,
+                    )
+                    .join(
+                        Professor, Professor.id == CourseProfessor.professor_id
+                    )
+                    .where(CourseProfessor.offering_id.in_(offering_ids))
+                    .where(CourseProfessor.effective_from <= today)
+                    .where(
+                        (CourseProfessor.effective_to.is_(None))
+                        | (CourseProfessor.effective_to >= today)
+                    )
+                )
+            ).all()
+            for offering_id, first, last in prof_rows:
+                prof_by_offering[offering_id] = " ".join(
+                    p for p in (first, last) if p
+                )
+
+        stmt = (
+            select(Attendance, Session, CourseOffering, Course, Student, YearLevel, Program)
+            .join(Session, Session.id == Attendance.session_id)
+            .join(CourseOffering, CourseOffering.id == Session.offering_id)
+            .join(Course, Course.id == CourseOffering.course_id)
+            .join(Student, Student.id == Attendance.student_id)
+            .join(YearLevel, YearLevel.id == Student.year_level_id)
+            .join(Program, Program.id == YearLevel.program_id)
+            .where(Session.offering_id.in_(offering_ids))
+        )
+        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
+        stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
+        if student_search and student_search.strip():
+            needle = f"%{student_search.strip()}%"
+            stmt = stmt.where(
+                (Student.student_id.ilike(needle))
+                | (Student.first_name.ilike(needle))
+                | (Student.last_name.ilike(needle))
+            )
+
+        # count
+        total = (
+            await self._session.scalar(select(func.count()).select_from(stmt.subquery()))
+            or 0
+        )
+
+        # sort
+        sort_col = Attendance.timestamp
+        if sort_by == "student_name":
+            sort_col = Student.last_name
+        elif sort_by == "course_code":
+            sort_col = Course.course_code
+        elif sort_by == "status":
+            sort_col = Attendance.validation_status
+        if sort_dir == "asc":
+            stmt = stmt.order_by(sort_col.asc(), Attendance.id.asc())
+        else:
+            stmt = stmt.order_by(sort_col.desc(), Attendance.id.desc())
+
+        stmt = stmt.offset((page - 1) * size).limit(size)
+        rows = (await self._session.execute(stmt)).all()
+
+        items: list[AttendanceRecordItem] = []
+        for att, sess, offering, course, student, yl, program in rows:
+            items.append(
+                AttendanceRecordItem(
+                    id=att.id,
+                    student_id=student.id,
+                    student_name=" ".join(
+                        p for p in (student.first_name, student.middle_name, student.last_name) if p
+                    ),
+                    student_number=student.student_id,
+                    course_id=course.id,
+                    course_code=course.course_code,
+                    course_name=course.course_name,
+                    program_code=program.code,
+                    year_level_label=yl.label,
+                    session_code=sess.session_code,
+                    status=att.validation_status,
+                    scanned_at=att.timestamp,
+                    professor_name=prof_by_offering.get(sess.offering_id),
+                )
+            )
+
+        return AttendanceRecordsResponse(items=items, total=total, page=page, size=size)
+
+    async def export_records_csv(
+        self,
+        **kwargs: Any,
+    ) -> str:
+        # reuse get_records with max page
+        resp = await self.get_records(page=1, size=MAX_PAGE_SIZE, **{k: v for k, v in kwargs.items() if k not in ("page", "size")})
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            ["id", "student_number", "student_name", "course_code", "course_name", "program_code", "year_level", "session_code", "status", "scanned_at"]
+        )
+        for r in resp.items:
+            writer.writerow(
+                [r.id, r.student_number, r.student_name, r.course_code, r.course_name, r.program_code, r.year_level_label, r.session_code, r.status, r.scanned_at]
+            )
+        return buffer.getvalue()
+
     async def export_overview_csv(
         self,
         *,
@@ -1782,6 +2033,10 @@ class AttendanceService:
                 "sessions_count",
                 "avg_rate",
                 "trend",
+                "present",
+                "late",
+                "excused",
+                "rejected",
             ]
         )
 
@@ -1794,6 +2049,10 @@ class AttendanceService:
                     item.sessions_count,
                     item.avg_rate,
                     item.trend,
+                    item.present,
+                    item.late,
+                    item.excused,
+                    item.rejected,
                 ]
             )
 
