@@ -51,6 +51,7 @@ export interface BestPositionOptions {
 	fastFirst?: boolean;
 	fastTimeoutMs?: number;
 	fastAccuracyThreshold?: number;
+	fastMaximumAge?: number;
 }
 
 // In-flight promise dedup: concurrent callers with the same option signature
@@ -88,6 +89,12 @@ export const requestBestPosition = async (
 		return v;
 	})();
 	const fastAccuracyThreshold = options?.fastAccuracyThreshold ?? desiredAccuracy;
+	const fastMaximumAge = (() => {
+		const v = options?.fastMaximumAge;
+		if (v === undefined) return 0;
+		if (!Number.isFinite(v) || v < 0) return 0;
+		return v;
+	})();
 
 	if (typeof navigator === 'undefined' || !navigator.geolocation) {
 		throw new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.');
@@ -96,7 +103,7 @@ export const requestBestPosition = async (
 	const effectiveFastFirst =
 		fastFirst && typeof navigator.geolocation.getCurrentPosition === 'function';
 
-	const key = `${desiredAccuracy}|${maxFixes}|${timeoutMs}|${maxAccuracy}|${effectiveFastFirst}|${fastTimeoutMs}|${fastAccuracyThreshold}`;
+	const key = `${desiredAccuracy}|${maxFixes}|${timeoutMs}|${maxAccuracy}|${effectiveFastFirst}|${fastTimeoutMs}|${fastAccuracyThreshold}|${fastMaximumAge}`;
 
 	let promise = inflight.get(key);
 	if (!promise) {
@@ -164,7 +171,7 @@ export const requestBestPosition = async (
 									done(null);
 								}
 							},
-							{ enableHighAccuracy: false, maximumAge: 0, timeout: fastTimeoutMs }
+							{ enableHighAccuracy: false, maximumAge: fastMaximumAge, timeout: fastTimeoutMs }
 						);
 					} catch {
 						done(null);
