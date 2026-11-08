@@ -11,13 +11,15 @@ export interface GpsAcquisitionResult {
 
 export const acquireGpsFix = async (
 	session: SessionVerification,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	fastMaximumAge: number = 5000
 ): Promise<GpsAcquisitionResult> => {
 	const fix = await requestBestPosition({
 		desiredAccuracy: 50,
 		maxFixes: 3,
 		timeoutMs: 10000,
-		signal
+		signal,
+		fastMaximumAge
 	});
 	const center = session.geofence;
 	let distanceMeters: number | null = null;

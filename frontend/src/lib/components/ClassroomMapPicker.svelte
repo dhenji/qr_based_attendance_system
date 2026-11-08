@@ -85,6 +85,7 @@ let radiusCircle: any = null;
 				maxFixes: 3,
 				timeoutMs: 10000,
 				maxAccuracy: 50,
+				fastMaximumAge: 5000,
 				signal: controller.signal
 			});
 			gpsAccuracy = fix.accuracy;
