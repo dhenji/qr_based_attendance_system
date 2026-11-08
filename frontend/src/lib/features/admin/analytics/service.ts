@@ -51,6 +51,7 @@ const analyticsParams = (f: AdminAnalyticsFilters): QueryParams => {
 	if (f.granularity) params.granularity = f.granularity;
 	if (f.risk_level) params.risk_level = f.risk_level;
 	if (f.session_type) params.session_type = f.session_type;
+	if ((f as any).q) params.q = (f as any).q;
 	return params;
 };
 
@@ -92,13 +93,15 @@ export const enrichComparison = (
 export const getAnalyticsComparison = async (
 	filters: AdminAnalyticsFilters = {}
 ): Promise<{ items: AnalyticsComparisonItemResponse[]; total: number }> => {
+	const page = (filters as any).page ?? 1;
+	const size = (filters as any).size ?? COMPARISON_PAGE_SIZE;
 	const response = await get<{
 		items: AnalyticsComparisonItemResponse[];
 		total?: number;
 	}>('adminAnalyticsComparison', {
 		...analyticsParams(filters),
-		page: '1',
-		size: String(COMPARISON_PAGE_SIZE),
+		page: String(page),
+		size: String(size),
 	});
 	const items = response.items ?? [];
 	return { items, total: response.total ?? items.length };
@@ -144,22 +147,30 @@ export const getCourseOptions = async (
 
 export const getAnalyticsTrends = async (
 	filters: AdminAnalyticsFilters = {}
-): Promise<AnalyticsTrendItemResponse[]> => {
-	const response = await get<{ items: AnalyticsTrendItemResponse[] }>(
-		'adminAnalyticsTrends',
-		analyticsParams(filters)
-	);
-	return response.items ?? [];
+): Promise<{ items: AnalyticsTrendItemResponse[]; total: number }> => {
+	const page = (filters as any).page ?? 1;
+	const size = (filters as any).size ?? 20;
+	const params = { ...analyticsParams(filters), page: String(page), size: String(size) };
+	const response = await get<{
+		items: AnalyticsTrendItemResponse[];
+		total?: number;
+	}>('adminAnalyticsTrends', params);
+	const items = response.items ?? [];
+	return { items, total: response.total ?? items.length };
 };
 
 export const getAtRisk = async (
 	filters: AdminAnalyticsFilters = {}
-): Promise<AnalyticsAtRiskItemResponse[]> => {
-	const response = await get<{ items: AnalyticsAtRiskItemResponse[] }>(
-		'adminAnalyticsAtRisk',
-		analyticsParams(filters)
-	);
-	return response.items ?? [];
+): Promise<{ items: AnalyticsAtRiskItemResponse[]; total: number }> => {
+	const page = (filters as any).page ?? 1;
+	const size = (filters as any).size ?? 20;
+	const params = { ...analyticsParams(filters), page: String(page), size: String(size) };
+	const response = await get<{
+		items: AnalyticsAtRiskItemResponse[];
+		total?: number;
+	}>('adminAnalyticsAtRisk', params);
+	const items = response.items ?? [];
+	return { items, total: response.total ?? items.length };
 };
 
 // Manual risk-score recalculation (admin-only). The contract rate-limits to
@@ -179,6 +190,7 @@ const stagingParams = (f: RiskStagingFilters): QueryParams => {
 	if (f.course_ids && f.course_ids.length > 0)
 		params.course_ids = f.course_ids.map(String);
 	if (f.risk_level) params.risk_level = f.risk_level;
+	if ((f as any).q) params.q = (f as any).q;
 	if (f.unpromoted_only !== undefined) params.unpromoted_only = String(f.unpromoted_only);
 	params.page = String(f.page ?? 1);
 	params.size = String(f.size ?? 20);

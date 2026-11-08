@@ -165,6 +165,7 @@ async def get_at_risk(
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
     course_ids: list[int] | None = Query(default=None),
     risk_level: RiskLevel | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=100),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> AtRiskResponse:
@@ -174,6 +175,7 @@ async def get_at_risk(
         semester=semester,
         course_ids=course_ids,
         risk_level=risk_level,
+        q=q,
         page=page,
         size=size,
     )
@@ -212,6 +214,7 @@ async def get_risk_staging(
     semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
     course_ids: list[int] | None = Query(default=None),
     risk_level: RiskLevel | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=100),
     unpromoted_only: bool = Query(default=False),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
@@ -222,6 +225,7 @@ async def get_risk_staging(
         semester=semester,
         course_ids=course_ids,
         risk_level=risk_level,
+        q=q,
         unpromoted_only=unpromoted_only,
         page=page,
         size=size,

@@ -25,7 +25,11 @@ import {
 	downloadCsv,
 	enrichComparison,
 	fetchAnalyticsExportCsv,
+	getAnalyticsComparison,
+	getAnalyticsTrends,
+	getAtRisk,
 	getCourseOptions,
+	listRiskStaging,
 	overviewCsv,
 	stagingCsv,
 	trendsCsv,
@@ -43,6 +47,9 @@ import { subscribeEntity } from '$lib/shared/utils/entityEvents';
 import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
+import Pagination from '$lib/components/Pagination.svelte';
+import { goto } from '$app/navigation';
+import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 
 	// Analytics & Reports (wireframe 4.7, D33): one page, seven tabs —
 	// Overview, Comparison, Trends, At-Risk, Staging, Attendance, Export — over
@@ -81,8 +88,8 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let yearFilter = $state('');
 	let semesterFilter = $state('');
 	let selectedCourseIds = $state<number[]>([]);
-	let dateFrom = $state(initialRange.from);
-	let dateTo = $state(initialRange.to);
+	let dateFrom = $state('');
+	let dateTo = $state('');
 	let granularity = $state<'daily' | 'weekly' | 'monthly'>('daily');
 	let riskLevel = $state<'' | 'low' | 'medium' | 'high'>('');
 	let sessionTypeFilter = $state<'' | 'lecture' | 'lab'>('');
@@ -90,6 +97,18 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	let formError = $state<string | null>(null);
 	let filterNotice = $state<string | null>(null);
 	let refreshBusy = $state(false);
+	// New UX state: date presets, advanced panel, pagination, chips.
+	let datePreset = $state<'custom' | 'today' | 'week' | 'month' | 'semester' | 'year' | 'all'>('custom');
+	let advancedOpen = $state(false);
+	let atRiskSearch = $state('');
+	let atRiskSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	let stagingSearch = $state('');
+	let stagingSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	let atriskPage = $state(1);
+	let stagingPage = $state(1);
+	let comparisonPage = $state(1);
+	let trendsPage = $state(1);
+	const PAGE_SIZE = 20;
 
 	let programOptions = $state<Program[]>([]);
 	let yearOptions = $state<YearLevel[]>([]);
@@ -207,9 +226,67 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		granularity,
 		risk_level: riskLevel || undefined,
 		session_type: sessionTypeFilter || undefined,
+		q: atRiskSearch.trim() || undefined,
 	});
 
+	const advancedActiveCount = $derived(
+		[
+			semesterFilter,
+			riskLevel,
+			selectedCourseIds.length > 0 ? 'x' : '',
+		].filter((v) => String(v).trim() !== '').length
+	);
+
+	const applyPreset = (preset: typeof datePreset) => {
+		datePreset = preset;
+		const now = new Date();
+		const toIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+		if (preset === 'today') {
+			dateFrom = toIso(now);
+			dateTo = toIso(now);
+		} else if (preset === 'week') {
+			const start = new Date(now);
+			start.setDate(now.getDate() - now.getDay());
+			dateFrom = toIso(start);
+			dateTo = toIso(now);
+		} else if (preset === 'month') {
+			const start = new Date(now.getFullYear(), now.getMonth(), 1);
+			dateFrom = toIso(start);
+			dateTo = toIso(now);
+		} else if (preset === 'year') {
+			const start = new Date(now.getFullYear(), 0, 1);
+			dateFrom = toIso(start);
+			dateTo = toIso(now);
+		} else if (preset === 'all') {
+			dateFrom = '';
+			dateTo = '';
+		}
+	};
+
+	const resetFilters = () => {
+		programFilter = '';
+		yearFilter = '';
+		semesterFilter = '';
+		sessionTypeFilter = '';
+		riskLevel = '';
+		selectedCourseIds = [];
+		courseSearch = '';
+		granularity = 'daily';
+		datePreset = 'custom';
+		dateFrom = '';
+		dateTo = '';
+		atriskPage = 1;
+		stagingPage = 1;
+		comparisonPage = 1;
+		trendsPage = 1;
+		void apply();
+	};
+
 	const apply = async () => {
+		atriskPage = 1;
+		stagingPage = 1;
+		comparisonPage = 1;
+		trendsPage = 1;
 		formError = null;
 		const parsed = analyticsFilterSchema.safeParse({
 			// Selects bind their raw option value (Svelte 5), so numeric ids
@@ -409,6 +486,54 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		}
 	};
 
+	const baseFilters = () => currentFilters();
+
+	const loadAtRiskPage = async (p: number) => {
+		atriskPage = p;
+		try {
+			const r = await getAtRisk({ ...baseFilters(), q: atRiskSearch.trim() || undefined, page: p, size: PAGE_SIZE } as any);
+			adminAnalyticsState.atRisk = r.items;
+			adminAnalyticsState.atRiskTotal = r.total;
+		} catch (e) {
+			adminAnalyticsState.error = e instanceof Error ? e.message : 'Failed to load at-risk';
+		}
+	};
+
+	const loadStagingPage = async (p: number) => {
+		stagingPage = p;
+		try {
+			const r = await listRiskStaging({ ...stagingFilters(), q: stagingSearch.trim() || undefined, page: p, size: PAGE_SIZE });
+			adminStagingState.items = r.items ?? [];
+			adminStagingState.total = r.total;
+			adminStagingState.page = r.page;
+			adminStagingState.size = r.size;
+		} catch (e) {
+			adminStagingState.error = e instanceof Error ? e.message : 'Failed to load staging';
+		}
+	};
+
+	const loadComparisonPage = async (p: number) => {
+		comparisonPage = p;
+		try {
+			const r = await getAnalyticsComparison({ ...baseFilters(), page: p, size: PAGE_SIZE } as any);
+			adminAnalyticsState.comparison = r.items;
+			adminAnalyticsState.comparisonTotal = r.total;
+		} catch (e) {
+			adminAnalyticsState.error = e instanceof Error ? e.message : 'Failed to load comparison';
+		}
+	};
+
+	const loadTrendsPage = async (p: number) => {
+		trendsPage = p;
+		try {
+			const r = await getAnalyticsTrends({ ...baseFilters(), page: p, size: PAGE_SIZE } as any);
+			adminAnalyticsState.trends = r.items;
+			adminAnalyticsState.trendsTotal = r.total;
+		} catch (e) {
+			adminAnalyticsState.error = e instanceof Error ? e.message : 'Failed to load trends';
+		}
+	};
+
 	const stamp = (): string => new Date().toISOString().slice(0, 10);
 
 	const exportOverview = () => {
@@ -462,6 +587,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		semester: semesterFilter.trim() || undefined,
 		course_ids: selectedCourseIds,
 		risk_level: riskLevel || undefined,
+		q: stagingSearch.trim() || undefined,
 		unpromoted_only: true,
 	});
 	const stagingSorted = $derived.by(() => {
@@ -526,104 +652,191 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 
 	{#if tab !== 'attendance'}
 		<section class="card filters" aria-label="Analytics filters">
-			<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={changeProgram}>
-				<option value="">All programs</option>
-				{#each programOptions as p (p.id)}
-					<option value={p.id}>{p.code} — {p.name}</option>
+			<p class="eyebrow">Scope</p>
+			<div class="filter-grid">
+				<div class="field">
+					<label class="form-label" for="an-program">Program</label>
+					<select id="an-program" class="form-input" bind:value={programFilter} onchange={changeProgram}>
+						<option value="">All programs</option>
+						{#each programOptions as p (p.id)}
+							<option value={p.id}>{p.code} — {p.name}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="an-year">Year level</label>
+					<select
+						id="an-year"
+						class="form-input"
+						bind:value={yearFilter}
+						onchange={changeYear}
+						disabled={!programFilter}
+						title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
+					>
+						<option value="">All years</option>
+						{#each yearOptions as y (y.id)}
+							<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="an-semester">Semester</label>
+					<select
+						id="an-semester"
+						class="form-input"
+						bind:value={semesterFilter}
+						onchange={changeSemester}
+						disabled={!yearFilter || semesterOptions.length === 0}
+						title={!yearFilter
+							? "Pick a year level first — semesters are the year level's terms"
+							: semesterOptions.length === 0
+								? 'This year level has no terms configured'
+								: undefined}
+					>
+						<option value="">All semesters</option>
+						{#each semesterOptions as t (t.code)}
+							<option value={t.code}>{t.label}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="an-session-type">Session type</label>
+					<select id="an-session-type" class="form-input" bind:value={sessionTypeFilter} onchange={apply}>
+						<option value="">All session types</option>
+						<option value="lecture">Lecture (LEC)</option>
+						<option value="lab">Laboratory (LAB)</option>
+					</select>
+				</div>
+				{#if tab === 'trends'}
+					<div class="field">
+						<label class="form-label" for="an-granularity">Granularity</label>
+						<select id="an-granularity" class="form-input" bind:value={granularity} onchange={apply}>
+							<option value="daily">Daily</option>
+							<option value="weekly">Weekly</option>
+							<option value="monthly">Monthly</option>
+						</select>
+					</div>
+				{/if}
+			</div>
+
+			<p class="eyebrow" style="margin-top:1rem;">Time range</p>
+			<div class="preset-row">
+				{#each [
+					{ id: 'today', label: 'Today' },
+					{ id: 'week', label: 'This week' },
+					{ id: 'month', label: 'This month' },
+					{ id: 'year', label: 'This year' },
+					{ id: 'all', label: 'All time' },
+				] as p (p.id)}
+					<button
+						class="btn btn-ghost"
+						class:selected={datePreset === p.id}
+						type="button"
+						onclick={() => { applyPreset(p.id as any); void apply(); }}
+					>
+						{p.label}
+					</button>
 				{/each}
-			</select>
-			<select
-				class="input"
-				aria-label="Year level filter"
-				bind:value={yearFilter}
-				onchange={changeYear}
-				disabled={!programFilter}
-				title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
-			>
-				<option value="">All years</option>
-				{#each yearOptions as y (y.id)}
-					<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
-				{/each}
-			</select>
-			<select
-				class="input"
-				aria-label="Semester filter"
-				bind:value={semesterFilter}
-				onchange={changeSemester}
-				disabled={!yearFilter || semesterOptions.length === 0}
-				title={!yearFilter
-					? "Pick a year level first — semesters are the year level's terms"
-					: semesterOptions.length === 0
-						? 'This year level has no terms configured'
-						: undefined}
-			>
-				<option value="">All semesters</option>
-				{#each semesterOptions as t (t.code)}
-					<option value={t.code}>{t.label}</option>
-				{/each}
-			</select>
-			<select class="input" aria-label="Session type filter" bind:value={sessionTypeFilter} onchange={apply}>
-				<option value="">All session types</option>
-				<option value="lecture">Lecture (LEC)</option>
-				<option value="lab">Laboratory (LAB)</option>
-			</select>
-			<select class="input" aria-label="Granularity" bind:value={granularity}>
-				<option value="daily">Daily</option>
-				<option value="weekly">Weekly</option>
-				<option value="monthly">Monthly</option>
-			</select>
-			<input class="input" type="date" aria-label="From date" bind:value={dateFrom} onchange={apply} />
-			<input class="input" type="date" aria-label="To date" bind:value={dateTo} onchange={apply} />
+			</div>
+			<div class="filter-grid filter-grid-4">
+				<div class="field">
+					<label class="form-label" for="an-from">From date</label>
+					<input id="an-from" class="form-input" type="date" bind:value={dateFrom} onchange={() => { datePreset = 'custom'; void apply(); }} />
+				</div>
+				<div class="field">
+					<label class="form-label" for="an-to">To date</label>
+					<input id="an-to" class="form-input" type="date" bind:value={dateTo} onchange={() => { datePreset = 'custom'; void apply(); }} />
+				</div>
+				<div class="field">
+					<span class="form-label">&nbsp;</span>
+					<button class="btn btn-secondary" type="button" onclick={resetFilters}>Reset filters</button>
+				</div>
+				<div class="field">
+					<span class="form-label">&nbsp;</span>
+					<button
+						class="btn btn-secondary advanced-toggle"
+						type="button"
+						aria-expanded={advancedOpen}
+						aria-controls="advanced-filters"
+						onclick={() => (advancedOpen = !advancedOpen)}
+					>
+						Advanced filters{#if advancedActiveCount > 0} ({advancedActiveCount}){/if}
+					</button>
+				</div>
+			</div>
+
+
+
+			{#if advancedOpen}
+				<div id="advanced-filters" class="advanced-panel">
+					<fieldset class="courses">
+						<legend>Courses (multi)</legend>
+						<div class="course-picker">
+							<input
+								class="form-input"
+								type="search"
+								placeholder={programFilter ? 'Search courses in scope' : 'Search courses'}
+								aria-label="Search courses"
+								value={courseSearch}
+								oninput={(e) => onCourseSearch((e.currentTarget as HTMLInputElement).value)}
+							/>
+							<span class="muted small">
+								{selectedCourseIds.length} selected{#if selectedCourseIds.length > 0}
+									<button type="button" class="link-btn" onclick={clearCourseSelection}>Clear</button>{/if}
+							</span>
+						</div>
+						<div class="course-grid">
+							{#if courseChoicesLoading && pickerChoices.length === 0}
+								<span class="muted">Loading courses…</span>
+							{:else if pickerChoices.length === 0}
+								<span class="muted">
+									{programFilter
+										? 'No courses are offered in the selected program/year/term.'
+										: 'No courses loaded.'}
+								</span>
+							{:else}
+								{#each visibleChoices as c (c.id)}
+									<label class="check">
+										<input
+											type="checkbox"
+											checked={selectedCourseIds.includes(c.id)}
+											onchange={() => toggleCourse(c.id)}
+										/>
+										{c.code}
+									</label>
+								{:else}
+									<span class="muted">No courses match “{courseSearch}”.</span>
+								{/each}
+								{#if pickerChoices.length < pickerTotal}
+									<span class="muted small">
+										Showing {pickerChoices.length} of {pickerTotal} — search to narrow.
+									</span>
+								{/if}
+							{/if}
+						</div>
+					</fieldset>
+					<div class="field">
+						<label class="form-label" for="an-risk">Risk level</label>
+						<select id="an-risk" class="form-input" bind:value={riskLevel} onchange={apply}>
+							<option value="">All risk levels</option>
+							<option value="high">High</option>
+							<option value="medium">Medium</option>
+							<option value="low">Low</option>
+						</select>
+					</div>
+					<div class="field">
+						<span class="form-label">&nbsp;</span>
+						<button class="btn btn-secondary" type="button" onclick={() => { semesterFilter=''; riskLevel=''; clearCourseSelection(); courseSearch=''; void apply(); }}>Clear advanced</button>
+					</div>
+				</div>
+			{/if}
+
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
 		{/if}
 		{#if filterNotice}
 			<p class="muted" role="status">{filterNotice}</p>
 		{/if}
-		<fieldset class="courses">
-			<legend>Courses (multi)</legend>
-			<div class="course-picker">
-				<input
-					class="input"
-					type="search"
-					placeholder={programFilter ? 'Search courses in scope' : 'Search courses'}
-					aria-label="Search courses"
-					value={courseSearch}
-					oninput={(e) => onCourseSearch((e.currentTarget as HTMLInputElement).value)}
-				/>
-				<span class="muted small">
-					{selectedCourseIds.length} selected{#if selectedCourseIds.length > 0}
-						<button type="button" class="link-btn" onclick={clearCourseSelection}>Clear</button>{/if}
-				</span>
-			</div>
-			{#if courseChoicesLoading && pickerChoices.length === 0}
-				<span class="muted">Loading courses…</span>
-			{:else if pickerChoices.length === 0}
-				<span class="muted">
-					{programFilter
-						? 'No courses are offered in the selected program/year/term.'
-						: 'No courses loaded.'}
-				</span>
-			{:else}
-				{#each visibleChoices as c (c.id)}
-					<label class="check">
-						<input
-							type="checkbox"
-							checked={selectedCourseIds.includes(c.id)}
-							onchange={() => toggleCourse(c.id)}
-						/>
-						{c.code}
-					</label>
-				{:else}
-					<span class="muted">No courses match “{courseSearch}”.</span>
-				{/each}
-				{#if pickerChoices.length < pickerTotal}
-					<span class="muted small">
-						Showing {pickerChoices.length} of {pickerTotal} — search to narrow.
-					</span>
-				{/if}
-			{/if}
-		</fieldset>
 	</section>
 	{/if}
 
@@ -639,7 +852,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		<SkeletonCards count={4} label="Loading analytics…" />
 		<SkeletonTable rows={4} cols={6} />
 	{:else if adminAnalyticsState.error}
-		<section class="card"><p class="error">Could not load analytics: {adminAnalyticsState.error}</p></section>
+		<section class="card">
+			<p class="error">Could not load analytics: {adminAnalyticsState.error}</p>
+			<button class="btn btn-secondary" type="button" onclick={() => void apply()}>Try again</button>
+		</section>
 	{:else if tab === 'overview' && overview}
 		<section class="kpis" aria-busy={adminAnalyticsState.loading}>
 			<div class="kpi"><span class="kpi-value">{overview.total_students}</span><span class="kpi-label">Students</span></div>
@@ -684,7 +900,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 						<tbody>
 							{#each comparison as r (`${r.course_id}-${r.program_id}-${r.year_level_id}`)}
 								<tr>
-									<td class="strong">{r.course_code}{r.courseName ? ` — ${r.courseName}` : ''}</td>
+									<td class="strong">
+										<button class="link" type="button" onclick={() => void goto(adminCourse(r.course_id))}>{r.course_code}</button>
+										{r.courseName ? ` — ${r.courseName}` : ''}
+									</td>
 									<td>{[r.programCode ?? `Program ${r.program_id}`, r.yearLevelLabel ?? `Year ${r.year_level_id}`].join(' · ')}</td>
 									<td>{r.total_sessions}</td>
 									<td>{formatPercentage(r.compliance_rate * 100)}</td>
@@ -694,6 +913,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 						</tbody>
 					</table>
 				</div>
+				{#if adminAnalyticsState.comparisonTotal > PAGE_SIZE}
+					<Pagination page={comparisonPage} totalPages={Math.max(1, Math.ceil(adminAnalyticsState.comparisonTotal / PAGE_SIZE))} onPageChange={(p) => void loadComparisonPage(p)} />
+				{/if}
 			{/if}
 		</section>
 	{:else if tab === 'trends'}
@@ -724,6 +946,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 						</tbody>
 					</table>
 				</div>
+				{#if adminAnalyticsState.trendsTotal > PAGE_SIZE}
+					<Pagination page={trendsPage} totalPages={Math.max(1, Math.ceil(adminAnalyticsState.trendsTotal / PAGE_SIZE))} onPageChange={(p) => void loadTrendsPage(p)} />
+				{/if}
 			{/if}
 		</section>
 	{:else if tab === 'atrisk'}
@@ -748,6 +973,14 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				</p>
 			{/if}
 			<div class="filters inline">
+				<input
+					class="input"
+					type="search"
+					aria-label="Search at-risk students"
+					placeholder="Search by name"
+					bind:value={atRiskSearch}
+					oninput={() => { if (atRiskSearchTimer) clearTimeout(atRiskSearchTimer); atRiskSearchTimer = setTimeout(() => void loadAtRiskPage(1), 250); }}
+				/>
 				<select class="input" aria-label="Risk level filter" bind:value={riskLevel} onchange={apply}>
 					<option value="">All levels</option>
 					<option value="high">High</option>
@@ -786,7 +1019,10 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 						<tbody>
 							{#each atRiskSorted as r (r.student_id)}
 								<tr>
-									<td class="strong">{r.student_name}<div class="muted small">{r.student_id} · {r.program} {r.year_level}</div></td>
+									<td class="strong">
+										<button class="link" type="button" onclick={() => void goto(adminStudent(Number(r.student_id)))}>{r.student_name}</button>
+										<div class="muted small">{r.student_id} · {r.program} {r.year_level}</div>
+									</td>
 									<td>{r.course_code}</td>
 									<td>{formatPercentage(r.absence_rate * 100)}</td>
 									<td>{r.max_streak}</td>
@@ -797,6 +1033,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 						</tbody>
 					</table>
 				</div>
+				{#if adminAnalyticsState.atRiskTotal > PAGE_SIZE}
+					<Pagination page={atriskPage} totalPages={Math.max(1, Math.ceil(adminAnalyticsState.atRiskTotal / PAGE_SIZE))} onPageChange={(p) => void loadAtRiskPage(p)} />
+				{/if}
 			{/if}
 		</section>
 	{:else if tab === 'staging'}
@@ -839,6 +1078,14 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 				</div>
 			{/if}
 			<div class="filters inline">
+				<input
+					class="input"
+					type="search"
+					aria-label="Search staged students"
+					placeholder="Search by name"
+					bind:value={stagingSearch}
+					oninput={() => { if (stagingSearchTimer) clearTimeout(stagingSearchTimer); stagingSearchTimer = setTimeout(() => void loadStagingPage(1), 250); }}
+				/>
 				<select class="input" aria-label="Risk level filter" bind:value={riskLevel} onchange={apply}>
 					<option value="">All levels</option>
 					<option value="high">High</option>
@@ -902,6 +1149,9 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 						</tbody>
 					</table>
 				</div>
+				{#if adminStagingState.total > PAGE_SIZE}
+					<Pagination page={stagingPage} totalPages={Math.max(1, Math.ceil(adminStagingState.total / PAGE_SIZE))} onPageChange={(p) => void loadStagingPage(p)} />
+				{/if}
 			{/if}
 		</section>
 	{:else if tab === 'export'}
@@ -938,6 +1188,8 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
+		max-width: 1400px;
+		margin: 0 auto;
 	}
 
 	.header {
@@ -974,9 +1226,13 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	.card {
 		background: var(--bg-card);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 12px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
+		transition: box-shadow 0.15s ease;
+	}
+	.card:hover {
+		box-shadow: 0 6px 24px rgba(15, 23, 42, 0.1);
 	}
 
 	.card-title {
@@ -1062,7 +1318,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		flex-basis: 100%;
 	}
 
-	.course-picker .input {
+	.course-picker .form-input {
 		flex: 1 1 16rem;
 	}
 
@@ -1115,7 +1371,7 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 	.kpi {
 		background: var(--bg-card);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 12px;
 		padding: 1.25rem;
 		display: flex;
 		flex-direction: column;
@@ -1270,7 +1526,15 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		font-family: inherit;
 		cursor: pointer;
 		white-space: nowrap;
-		transition: background 0.15s ease, border-color 0.15s ease;
+		transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+	}
+	.btn:hover:not(:disabled) {
+		transform: translateY(-1px);
+		box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+	}
+	.btn:active:not(:disabled) {
+		transform: translateY(0);
+		box-shadow: none;
 	}
 
 	.btn:focus-visible {
@@ -1329,6 +1593,166 @@ import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 		}
 	}
 
+	.link {
+		background: none;
+		border: none;
+		padding: 0;
+		color: var(--accent);
+		font: inherit;
+		font-weight: 700;
+		cursor: pointer;
+		text-decoration: none;
+	}
+	.link:hover { text-decoration: underline; }
+
+	.eyebrow {
+		margin: 0 0 0.5rem;
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--text-muted);
+	}
+	.filter-grid {
+		display: grid;
+		gap: 1rem;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+	.filter-grid-4 {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+	}
+	.filter-grid .btn {
+		width: 100%;
+		justify-content: center;
+	}
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4375rem;
+		min-width: 0;
+	}
+	.form-label {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		color: var(--text-secondary);
+	}
+	.form-input {
+		padding: 0.625rem 0.75rem;
+		border: 1px solid var(--border-strong);
+		border-radius: 8px;
+		font-size: 0.9375rem;
+		font-family: inherit;
+		color: var(--text-strong);
+		background: var(--bg-card);
+		width: 100%;
+	}
+	.form-input:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
+		border-color: var(--accent);
+	}
+	.form-input:disabled {
+		background: var(--divider);
+		color: var(--text-muted);
+		cursor: not-allowed;
+	}
+	.preset-row {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		align-items: center;
+		margin: 0.75rem 0;
+	}
+	.btn-ghost {
+		background: var(--bg-card);
+		border: 1px solid var(--border-strong);
+		color: var(--text-strong);
+		padding: 0.5rem 0.9rem;
+		font-size: 0.875rem;
+		border-radius: 8px;
+	}
+	.btn-ghost:hover:not(:disabled) {
+		background: var(--bg-hover, var(--divider));
+	}
+	.btn-ghost.selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
+	}
+	.btn-ghost.selected:hover:not(:disabled) {
+		background: var(--brand-hover);
+		border-color: var(--brand-hover);
+		color: var(--on-brand);
+	}
+	.course-grid {
+		display: flex;
+		gap: 0.5rem 1rem;
+		flex-wrap: wrap;
+		align-items: center;
+		margin-top: 0.5rem;
+	}
+	.advanced-toggle {
+		justify-content: center;
+	}
+	.advanced-panel {
+		display: flex;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		align-items: center;
+		margin-top: 0.75rem;
+		padding: 0.75rem;
+		border: 1px dashed var(--border);
+		border-radius: 8px;
+		background: var(--bg-muted, transparent);
+	}
+
+	.chips {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+		align-items: flex-start;
+	}
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.25rem 0.625rem;
+		border-radius: 999px;
+		background: var(--divider);
+		color: var(--text-secondary);
+		font-size: 0.8125rem;
+		font-weight: 600;
+	}
+	.chip-x {
+		background: none;
+		border: none;
+		padding: 0;
+		color: var(--text-muted);
+		cursor: pointer;
+		font: inherit;
+		line-height: 1;
+	}
+	.chip-x:hover { color: var(--danger); }
+
+	@media (max-width: 860px) {
+		.filter-grid,
+		.filter-grid-4 {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 560px) {
+		.filter-grid,
+		.filter-grid-4 {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+	@media (max-width: 900px) {
+		.kpis {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
 	@media (max-width: 640px) {
 		.card {
 			padding: 1.25rem;

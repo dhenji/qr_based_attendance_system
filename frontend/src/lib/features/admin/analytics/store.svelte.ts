@@ -47,7 +47,9 @@ export const adminAnalyticsState = $state({
 	// the tab shows a truncation hint rather than dropping cohorts silently.
 	comparisonTotal: 0,
 	trends: [] as AnalyticsTrendItemResponse[],
+	trendsTotal: 0,
 	atRisk: [] as AnalyticsAtRiskItemResponse[],
+	atRiskTotal: 0,
 	loading: false,
 	error: null as string | null,
 	actionError: null as string | null,
@@ -110,8 +112,10 @@ export const applyAnalyticsFilters = async (filters: AdminAnalyticsFilters): Pro
 		adminAnalyticsState.overview = overview;
 		adminAnalyticsState.comparison = comparison.items;
 		adminAnalyticsState.comparisonTotal = comparison.total;
-		adminAnalyticsState.trends = trends;
-		adminAnalyticsState.atRisk = atRisk;
+		adminAnalyticsState.trends = trends.items;
+		adminAnalyticsState.trendsTotal = trends.total;
+		adminAnalyticsState.atRisk = atRisk.items;
+		adminAnalyticsState.atRiskTotal = atRisk.total;
 	} catch (e: unknown) {
 		adminAnalyticsState.error = toMessage(e, 'Failed to load analytics');
 	} finally {
@@ -127,7 +131,9 @@ export const refreshAtRisk = async (): Promise<void> => {
 	adminAnalyticsState.actionError = null;
 	try {
 		adminAnalyticsState.lastRefresh = await refreshRiskScores();
-		adminAnalyticsState.atRisk = await getAtRisk(adminAnalyticsState.filters);
+		const r = await getAtRisk(adminAnalyticsState.filters);
+		adminAnalyticsState.atRisk = r.items;
+		adminAnalyticsState.atRiskTotal = r.total;
 	} catch (e: unknown) {
 		adminAnalyticsState.actionError = toMessage(e, 'Failed to refresh risk scores');
 		throw e;
@@ -171,7 +177,9 @@ export const promoteStaging = async (
 		await Promise.all([
 			applyStagingFilters(listFilters),
 			(async () => {
-				adminAnalyticsState.atRisk = await getAtRisk(adminAnalyticsState.filters);
+				const r = await getAtRisk(adminAnalyticsState.filters);
+				adminAnalyticsState.atRisk = r.items;
+				adminAnalyticsState.atRiskTotal = r.total;
 			})(),
 		]);
 	} catch (e: unknown) {

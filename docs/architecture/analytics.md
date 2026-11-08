@@ -80,11 +80,22 @@ Last verified against commit: see `git rev-parse HEAD`.
 ## Admin analytics page
 
 - `frontend/src/routes/admin/analytics/+page.svelte` — filter rail
-  (program/year/semester/course/session type/date), tabs: overview,
-  comparison, trends, at-risk, staging.
+  (program/year/semester/session type/date), tabs: overview,
+  comparison, trends, at-risk, staging, attendance, export.
+  Redesigned to a labeled responsive grid: Scope (Program/Year/Semester/
+  Session type; Granularity shown only on Trends), Time range (presets
+  Today/This week/This month/This year/All time + From/To date + Reset +
+  Advanced toggle in one row), Advanced panel (multi-course picker with
+  search + Risk level + Clear advanced). Filters auto-apply on change (no
+  manual Apply button); default date range is "All time"; pagination via
+  shared `Pagination.svelte` on Comparison/Trends/At-Risk/Staging tabs;
+  drill-down links to admin course/student pages. The Attendance tab
+  delegates to `AttendanceSnapshot.svelte`, which mirrors the same layout.
 - `frontend/src/lib/features/admin/analytics/service.ts` — API calls.
 - `frontend/src/lib/features/admin/analytics/store.svelte.ts` — state.
 - `frontend/src/lib/features/admin/analytics/schema.ts` — types.
+- `frontend/src/lib/components/Pagination.svelte` — shared pagination
+  control reused across analytics and attendance tabs.
 
 ## Course picker
 
@@ -122,9 +133,9 @@ by `require_role(UserRole.ADMIN)` (admin + super_admin).
 | GET | `/admin/analytics/course-comparison` | Cohort rates (paginated) |
 | GET | `/admin/analytics/course-options` | Courses with in-scope offerings |
 | GET | `/admin/analytics/trends` | Bucketed rates (daily/weekly/monthly) |
-| GET | `/admin/analytics/at-risk` | Stored risk rows (paginated) |
+| GET | `/admin/analytics/at-risk` | Stored risk rows (paginated); optional `q` (student name search) |
 | POST | `/admin/analytics/refresh-risk` | Synchronous recalculation |
-| GET | `/admin/analytics/risk-staging` | Staged dry-run rows |
+| GET | `/admin/analytics/risk-staging` | Staged dry-run rows; optional `q` (student name search) |
 | POST | `/admin/analytics/risk-staging/promote` | Promote staged to live |
 | POST | `/admin/analytics/export` | CSV course comparison |
 

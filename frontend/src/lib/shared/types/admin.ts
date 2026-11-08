@@ -589,6 +589,7 @@ export interface RiskStagingFilters {
 	semester?: string;
 	course_ids?: number[];
 	risk_level?: AnalyticsRiskLevel;
+	q?: string;
 	unpromoted_only?: boolean;
 	page?: number;
 	size?: number;
@@ -694,6 +695,7 @@ export interface AdminAnalyticsFilters {
 	granularity?: AnalyticsGranularity;
 	risk_level?: AnalyticsRiskLevel;
 	session_type?: 'lecture' | 'lab';
+	q?: string;
 }
 
 
