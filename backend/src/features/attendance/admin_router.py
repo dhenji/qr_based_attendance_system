@@ -12,7 +12,10 @@ from features.attendance.constants import (
     RECENT_SCANS_MAX_LIMIT,
     REVIEW_STATUS_MAX_LENGTH,
 )
+from shared.constants import SEMESTER_MAX_LENGTH
 from features.attendance.schema import (
+    AttendanceRecordsResponse,
+    AttendanceSummaryResponse,
     LivenessReviewItem,
     OverviewResponse,
     RecentScansResponse,
@@ -20,7 +23,7 @@ from features.attendance.schema import (
     ResolveReviewResponse,
 )
 from features.auth.model import User
-from shared.enums import UserRole
+from shared.enums import SessionType, UserRole
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -50,17 +53,26 @@ OVERVIEW_EXPORT_FILENAME = "attendance-overview.csv"
 async def get_attendance_overview(
     _: AdminUser,
     service: AttendanceServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
     course_id: int | None = Query(default=None, gt=0),
     professor_id: int | None = Query(default=None, gt=0),
+    session_type: SessionType | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
 ) -> OverviewResponse:
     return await service.get_overview(
+        program_id=program_id,
+        year_level_id=year_level_id,
+        semester=semester,
         course_id=course_id,
         professor_id=professor_id,
+        session_type=session_type.value if session_type is not None else None,
         date_from=date_from,
         date_to=date_to,
     )
+
 
 
 @router.get(
@@ -139,4 +151,113 @@ async def resolve_liveness_review(
         decision=body.decision,
         actor_id=user.id,
         note=body.note,
+    )
+
+
+@router.get(
+    "/summary",
+    response_model=AttendanceSummaryResponse,
+    summary="Aggregate attendance KPIs over the filter set",
+)
+async def get_attendance_summary(
+    _: AdminUser,
+    service: AttendanceServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    course_id: int | None = Query(default=None, gt=0),
+    professor_id: int | None = Query(default=None, gt=0),
+    session_type: SessionType | None = Query(default=None),
+    status: str | None = Query(default=None, max_length=20),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+) -> AttendanceSummaryResponse:
+    return await service.get_summary(
+        program_id=program_id,
+        year_level_id=year_level_id,
+        semester=semester,
+        course_id=course_id,
+        professor_id=professor_id,
+        session_type=session_type.value if session_type is not None else None,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+@router.get(
+    "/records",
+    response_model=AttendanceRecordsResponse,
+    summary="Paginated detailed attendance records",
+)
+async def get_attendance_records(
+    _: AdminUser,
+    service: AttendanceServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    course_id: int | None = Query(default=None, gt=0),
+    professor_id: int | None = Query(default=None, gt=0),
+    session_type: SessionType | None = Query(default=None),
+    status: str | None = Query(default=None, max_length=20),
+    student_search: str | None = Query(default=None, max_length=100),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    sort_by: str = Query(default="scanned_at", max_length=30),
+    sort_dir: str = Query(default="desc", max_length=4),
+) -> AttendanceRecordsResponse:
+    return await service.get_records(
+        program_id=program_id,
+        year_level_id=year_level_id,
+        semester=semester,
+        course_id=course_id,
+        professor_id=professor_id,
+        session_type=session_type.value if session_type is not None else None,
+        status=status,
+        student_search=student_search,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        size=size,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+    )
+
+
+@router.get(
+    "/records/export",
+    summary="Download detailed attendance records as CSV",
+)
+async def export_attendance_records(
+    _: AdminUser,
+    service: AttendanceServiceDep,
+    program_id: int | None = Query(default=None, gt=0),
+    year_level_id: int | None = Query(default=None, gt=0),
+    semester: str | None = Query(default=None, max_length=SEMESTER_MAX_LENGTH),
+    course_id: int | None = Query(default=None, gt=0),
+    professor_id: int | None = Query(default=None, gt=0),
+    session_type: SessionType | None = Query(default=None),
+    status: str | None = Query(default=None, max_length=20),
+    student_search: str | None = Query(default=None, max_length=100),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+) -> StreamingResponse:
+    content: str = await service.export_records_csv(
+        program_id=program_id,
+        year_level_id=year_level_id,
+        semester=semester,
+        course_id=course_id,
+        professor_id=professor_id,
+        session_type=session_type.value if session_type is not None else None,
+        status=status,
+        student_search=student_search,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=attendance-records.csv"},
     )

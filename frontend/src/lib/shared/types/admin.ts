@@ -606,6 +606,57 @@ export interface AttendanceOverviewItemResponse {
 	sessions_count: number;
 	avg_rate: number;
 	trend: AttendanceTrend;
+	present?: number;
+	late?: number;
+	excused?: number;
+	rejected?: number;
+}
+
+export interface AttendanceRecordItemResponse {
+	id: number;
+	student_id: number;
+	student_name: string;
+	student_number: string;
+	course_id: number;
+	course_code: string;
+	course_name: string;
+	program_code: string | null;
+	year_level_label: string | null;
+	session_code: string | null;
+	status: string;
+	scanned_at: string;
+	professor_name: string | null;
+}
+
+export interface AttendanceSummaryResponse {
+	total_records: number;
+	present: number;
+	late: number;
+	excused: number;
+	rejected: number;
+	compliance_rate: number;
+	participation_rate: number;
+	total_sessions: number;
+	total_students: number;
+	previous_compliance_rate: number;
+	previous_participation_rate: number;
+}
+
+export interface AttendanceOverviewFilters {
+	program_id?: number;
+	year_level_id?: number;
+	semester?: string;
+	course_id?: number;
+	professor_id?: number;
+	session_type?: string;
+	status?: string;
+	student_search?: string;
+	date_from?: string;
+	date_to?: string;
+	page?: number;
+	size?: number;
+	sort_by?: string;
+	sort_dir?: string;
 }
 
 export interface RecentScanResponse {
@@ -645,12 +696,7 @@ export interface AdminAnalyticsFilters {
 	session_type?: 'lecture' | 'lab';
 }
 
-export interface AttendanceOverviewFilters {
-	course_id?: number;
-	professor_id?: number;
-	date_from?: string;
-	date_to?: string;
-}
+
 
 // --- Admin audit logs (live backend, api-contracts §System Settings & Backups) --
 //

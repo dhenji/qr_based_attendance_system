@@ -466,3 +466,39 @@ section summarizes service-level calculation and persistence behavior.
 - Refresh with `offering_id` requires `semester`.
 - Semester is ignored when both `student_id` and `semester` are supplied.
 
+
+---
+
+# 11 — Admin Attendance Analytics (`/admin/attendance/*`)
+
+Separate from the analytics rail above; provides per-course and per-record
+attendance reporting for administrators. Backed by `AttendanceService` in
+`backend/src/features/attendance/service.py` and `attendance/admin_router.py`.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/attendance/overview` | Per-course sessions, compliance rate, trend + status counts |
+| GET | `/admin/attendance/overview/export` | CSV of the overview |
+| GET | `/admin/attendance/summary` | Aggregate KPIs (records, present/late/excused/rejected, rates, totals, previous-period rates) |
+| GET | `/admin/attendance/records` | Paginated detailed records (student, course, program, year, instructor, session, status, scanned_at) |
+| GET | `/admin/attendance/records/export` | CSV of filtered records |
+| GET | `/admin/attendance/recent-scans` | Latest scans feed |
+
+## Filters (overview / summary / records)
+
+`program_id`, `year_level_id`, `semester`, `course_id`, `professor_id`,
+`session_type` (lecture/lab), `date_from`, `date_to`. Records additionally
+support `status`, `student_search`, `page`, `size`, `sort_by`, `sort_dir`.
+`status` is not accepted by `/overview` (aggregate semantics).
+
+## Notes
+
+- Compliance = present/enrolled; participation = (present+late+excused)/enrolled
+  via `shared/rates.py::attendance_rates`.
+- Overview trend is a half-split (first half vs second half compliance).
+- Instructor name is resolved from the offering's current `CourseProfessor`
+  assignment.
+- Records are paginated (max page size `MAX_PAGE_SIZE`); aggregates computed at
+  DB level.

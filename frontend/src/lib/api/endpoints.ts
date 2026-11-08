@@ -43,6 +43,8 @@ import type {
 	AnalyticsOverviewResponse,
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewItemResponse,
+	AttendanceRecordItemResponse,
+	AttendanceSummaryResponse,
 	AuditChangeResponse,
 	AuditLogItemResponse,
 	CourseImportResult,
@@ -3194,6 +3196,76 @@ export const AdminAttendanceOverviewEndpoint: EndpointDef<{ items: AttendanceOve
 	},
 };
 
+export const AdminAttendanceSummaryEndpoint: EndpointDef<AttendanceSummaryResponse> = {
+	url: '/admin/attendance/summary',
+	method: 'GET',
+	mock: (params) => {
+		const sessions = filterMockSessions(params);
+		let present = 0;
+		let late = 0;
+		let excused = 0;
+		let rejected = 0;
+		let seats = 0;
+		const students = new Set<number>();
+		for (const s of sessions) {
+			present += s.present;
+			late += s.late;
+			excused += s.excused;
+			rejected += (s as { rejected?: number }).rejected ?? 0;
+			seats += s.enrolled;
+			students.add(s.courseId);
+		}
+		const total = present + late + excused + rejected;
+		return {
+			total_records: total,
+			present,
+			late,
+			excused,
+			rejected,
+			absent: 0,
+			compliance_rate: seats === 0 ? 0 : present / seats,
+			participation_rate: seats === 0 ? 0 : (present + late + excused) / seats,
+			total_sessions: sessions.length,
+			total_students: students.size,
+			previous_compliance_rate: 0,
+			previous_participation_rate: 0,
+		};
+	},
+};
+
+export const AdminAttendanceRecordsEndpoint: EndpointDef<{ items: AttendanceRecordItemResponse[]; total: number; page: number; size: number }> = {
+	url: '/admin/attendance/records',
+	method: 'GET',
+	mock: (params) => {
+		const sessions = filterMockSessions(params);
+		const items: AttendanceRecordItemResponse[] = [];
+		let id = 1;
+		for (const s of sessions) {
+			for (let i = 0; i < s.present; i++) {
+				items.push({
+					id: id++,
+					student_id: i + 1,
+					student_name: `Student ${i + 1}`,
+					student_number: `STU-${i + 1}`,
+					course_id: s.courseId,
+					course_code: s.courseCode,
+					course_name: s.courseName,
+					program_code: s.programCode ?? null,
+					year_level_label: s.yearLevelLabel ?? null,
+					session_code: `S-${s.courseId}`,
+					status: 'present',
+					scanned_at: `${s.date}T08:00:00Z`,
+					professor_name: null,
+				});
+			}
+		}
+		const page = Number(params?.page ?? 1);
+		const size = Number(params?.size ?? 20);
+		const start = (page - 1) * size;
+		return { items: items.slice(start, start + size), total: items.length, page, size };
+	},
+};
+
 // --- Admin system settings (live backend) -------------------------------------
 // api-contracts.md §System Settings & Backups: GET/PATCH /admin/system/settings
 // (app_settings KV seeded from env defaults), GET/POST /admin/backups,
@@ -4980,6 +5052,8 @@ export const endpoints = {
 	adminRiskStaging: AdminRiskStagingEndpoint,
 	adminRiskStagingPromote: AdminRiskStagingPromoteEndpoint,
 	adminAttendanceOverview: AdminAttendanceOverviewEndpoint,
+	adminAttendanceSummary: AdminAttendanceSummaryEndpoint,
+	adminAttendanceRecords: AdminAttendanceRecordsEndpoint,
 	// Admin audit logs (Phase 8 backend; designed shape)
 	adminAuditLogs: AdminAuditLogsEndpoint,
 	adminStructureChanges: AdminStructureChangesEndpoint,

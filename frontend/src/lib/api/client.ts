@@ -570,6 +570,7 @@ export const TEXT_EXPORTS = {
 	courseTemplate: '/admin/courses/import/template',
 	studentHistory: '/student/attendance/history/export',
 	adminOverview: '/admin/attendance/overview/export',
+	adminAttendanceRecords: '/admin/attendance/records/export',
 	adminAnalytics: '/admin/analytics/export',
 	professorReports: '/professor/reports/export',
 } as const;

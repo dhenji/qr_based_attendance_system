@@ -16,6 +16,8 @@ import type {
 	AnalyticsTrendItemResponse,
 	AttendanceOverviewFilters,
 	AttendanceOverviewItemResponse,
+	AttendanceRecordItemResponse,
+	AttendanceSummaryResponse,
 	PromoteStagingResponse,
 	RiskRefreshResponse,
 	RiskStagingFilters,
@@ -27,6 +29,8 @@ import {
 	getAnalyticsTrends,
 	getAtRisk,
 	getAttendanceOverview,
+	getAttendanceRecords,
+	getAttendanceSummary,
 	listRiskStaging,
 	promoteRiskStaging,
 	refreshRiskScores,
@@ -52,6 +56,21 @@ export const adminAnalyticsState = $state({
 
 export const adminAttendanceState = $state({
 	items: [] as AttendanceOverviewItemResponse[],
+	loading: false,
+	error: null as string | null,
+});
+
+export const adminAttendanceSummaryState = $state({
+	data: null as AttendanceSummaryResponse | null,
+	loading: false,
+	error: null as string | null,
+});
+
+export const adminAttendanceRecordsState = $state({
+	items: [] as AttendanceRecordItemResponse[],
+	total: 0,
+	page: 1,
+	size: 20,
 	loading: false,
 	error: null as string | null,
 });
@@ -172,6 +191,38 @@ export const initAttendanceOverview = async (
 		adminAttendanceState.error = toMessage(e, 'Failed to load attendance overview');
 	} finally {
 		adminAttendanceState.loading = false;
+	}
+};
+
+export const initAttendanceSummary = async (
+	filters: AttendanceOverviewFilters = {}
+): Promise<void> => {
+	adminAttendanceSummaryState.loading = true;
+	adminAttendanceSummaryState.error = null;
+	try {
+		adminAttendanceSummaryState.data = await getAttendanceSummary(filters);
+	} catch (e: unknown) {
+		adminAttendanceSummaryState.error = toMessage(e, 'Failed to load attendance summary');
+	} finally {
+		adminAttendanceSummaryState.loading = false;
+	}
+};
+
+export const initAttendanceRecords = async (
+	filters: AttendanceOverviewFilters = {}
+): Promise<void> => {
+	adminAttendanceRecordsState.loading = true;
+	adminAttendanceRecordsState.error = null;
+	try {
+		const res = await getAttendanceRecords(filters);
+		adminAttendanceRecordsState.items = res.items;
+		adminAttendanceRecordsState.total = res.total;
+		adminAttendanceRecordsState.page = res.page;
+		adminAttendanceRecordsState.size = res.size;
+	} catch (e: unknown) {
+		adminAttendanceRecordsState.error = toMessage(e, 'Failed to load attendance records');
+	} finally {
+		adminAttendanceRecordsState.loading = false;
 	}
 };
 
