@@ -7,11 +7,10 @@
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import {
-		precheckScan,
-		submitAttendanceScan,
-		validateGPS,
-		verifySessionCode,
-		type SessionVerification
+	precheckScan,
+	submitAttendanceScan,
+	verifySessionCode,
+	type SessionVerification
 	} from '$lib/features/liveness/service';
 	import { generateEmbeddingFromLandmarks, serializeFaceEmbedding } from '$lib/shared/utils/face-embedding';
 	import { acquireGpsFix } from '$lib/features/liveness/gps';
@@ -30,7 +29,7 @@
 import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
-	import { GPS_HARD_FLOOR_METERS } from '$lib/shared/utils/geo';
+	import { GPS_HARD_FLOOR_METERS, isWithinGeofenceWithUncertainty } from '$lib/shared/utils/geo';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
 	type Step = 'entry' | 'confirm' | 'location' | 'liveness';
@@ -275,7 +274,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						courseCode: cached.course_code,
 						courseName: cached.course_name,
 						expiresAt: cached.expires_at,
-						geofence: cached.geofence,
+						geofence: { ...cached.geofence, uncertaintyCapMeters: cached.geofence.uncertaintyCapMeters ?? 50 },
 						geofenceEnabled: cached.geofenceEnabled,
 						isRemote: cached.isRemote,
 						scheduledStartTime: cached.scheduled_start_time ?? cached.expires_at,
@@ -588,12 +587,14 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 			if (geofenceRequired && gps) {
 				if (
-					!validateGPS(
+					!isWithinGeofenceWithUncertainty(
 						gps.lat,
 						gps.lng,
 						session.geofence.lat as number,
 						session.geofence.lng as number,
-						session.geofence.radius
+						session.geofence.radius,
+						gps.accuracy,
+						session.geofence.uncertaintyCapMeters
 					)
 				) {
 					throw new APIError('outside_geofence', 'You are outside the attendance geofence. Move closer to the classroom and try again.');
@@ -981,8 +982,10 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					{#if gpsStatus === 'low'}
 						<p class="footnote" role="status">Low accuracy — you may continue, but the result may be reviewed.</p>
 					{/if}
-					{#if gpsDistanceMeters !== null && session && gpsDistanceMeters > session.geofence.radius}
+					{#if gpsDistanceMeters !== null && session && gpsFix && session.geofence.lat !== null && session.geofence.lng !== null && !isWithinGeofenceWithUncertainty(gpsFix.lat, gpsFix.lng, session.geofence.lat as number, session.geofence.lng as number, session.geofence.radius, gpsFix.accuracy, session.geofence.uncertaintyCapMeters)}
 						<p class="error" role="alert">You appear to be outside the attendance geofence.</p>
+					{:else if gpsDistanceMeters !== null && session && gpsFix && session.geofence.lat !== null && session.geofence.lng !== null && gpsDistanceMeters > session.geofence.radius}
+						<p class="footnote" role="status">Within review band — your result may be reviewed.</p>
 					{:else if gpsDistanceMeters !== null}
 						<p class="footnote" role="status">Within the attendance geofence.</p>
 					{/if}
@@ -1006,7 +1009,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					<button
 						class="btn-primary"
 						disabled={locatingGps || !gpsFix ||
-							(gpsDistanceMeters !== null && session !== null && gpsDistanceMeters > session.geofence.radius)}
+							(gpsFix !== null && session !== null && session.geofence.lat !== null && session.geofence.lng !== null && !isWithinGeofenceWithUncertainty(gpsFix.lat, gpsFix.lng, session.geofence.lat as number, session.geofence.lng as number, session.geofence.radius, gpsFix.accuracy, session.geofence.uncertaintyCapMeters))}
 						onclick={() => {
 							if (gpsFix) {
 								step = 'liveness';

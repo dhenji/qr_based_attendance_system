@@ -432,6 +432,37 @@ export const isWithinGeofence = (
 	return distanceMetres <= radiusMetres;
 };
 
+// True when the student's position is within the classroom's radius once the
+// reported GPS uncertainty is taken into account (review-band acceptance).
+// A position outside the radius but within reported uncertainty is accepted
+// for review rather than rejected outright. Invalid coordinates or a
+// negative radius never match — fail closed.
+export const isWithinGeofenceWithUncertainty = (
+	studentLat: number,
+	studentLng: number,
+	centerLat: number,
+	centerLng: number,
+	radiusMetres: number,
+	accuracy: number,
+	cap: number = 50
+): boolean => {
+	if (
+		!Number.isFinite(studentLat) ||
+		!Number.isFinite(studentLng) ||
+		!Number.isFinite(centerLat) ||
+		!Number.isFinite(centerLng) ||
+		!Number.isFinite(radiusMetres) ||
+		radiusMetres < 0
+	) {
+		return false;
+	}
+	const effectiveCap = Number.isFinite(cap) && cap > 0 ? cap : 50;
+	const clampedAccuracy = Number.isFinite(accuracy) ? Math.max(accuracy, 0) : 0;
+	const uncertainty = Math.min(clampedAccuracy, effectiveCap);
+	const distanceMetres = calculateDistanceMeters(studentLat, studentLng, centerLat, centerLng);
+	return distanceMetres - uncertainty <= radiusMetres;
+};
+
 // A single search result returned by the Photon (Komoot) geocoder.
 export interface LocationSearchResult {
 	label: string;

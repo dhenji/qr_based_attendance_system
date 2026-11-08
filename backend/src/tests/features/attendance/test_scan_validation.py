@@ -1705,3 +1705,11 @@ async def test_face_check_runs_before_geofence_and_liveness(
 
     assert excinfo.value.status_code == 403
     assert excinfo.value.code == "face_not_enrolled"
+
+
+def test_gps_input_rejects_zero_accuracy() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        GPSInput(lat=14.0, lng=121.0, accuracy=0.0)

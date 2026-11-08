@@ -33,7 +33,7 @@ class GPSInput(BaseModel):
 
     lat: float = Field(ge=LATITUDE_MIN, le=LATITUDE_MAX)
     lng: float = Field(ge=LONGITUDE_MIN, le=LONGITUDE_MAX)
-    accuracy: float = Field(ge=GPS_ACCURACY_MIN, le=GPS_ACCURACY_MAX)
+    accuracy: float = Field(gt=GPS_ACCURACY_MIN, le=GPS_ACCURACY_MAX)
 
 
 class LivenessEvidence(BaseModel):

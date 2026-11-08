@@ -86,7 +86,10 @@ Last verified against commit: see `git rev-parse HEAD`.
 - Geofence is skipped when disabled or classroom coords are missing; missing
   GPS is treated as outside; a position outside the radius but within reported
   GPS uncertainty (capped at `GEOFENCE_UNCERTAINTY_CAP_METERS`, default 50 m) is
-  treated as ambiguous and routed to review
+  treated as ambiguous and routed to review; GPS fixes with `accuracy = 0.0` are
+  rejected at schema validation; the configured cap is exposed once via
+  `VerifyGeofence.uncertainty_cap_meters` during session verification; the client
+  pre-submit check uses `isWithinGeofenceWithUncertainty`
   (`attendance/service.py:591-620`).
 
 ---

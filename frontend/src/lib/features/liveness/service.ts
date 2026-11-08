@@ -14,7 +14,7 @@ export interface SessionVerification {
 	expiresAt: string;
 	// Center null = no classroom coordinates; both the server and the scan
 	// page skip the geofence check in that case.
-	geofence: { radius: number; lat: number | null; lng: number | null };
+	geofence: { radius: number; lat: number | null; lng: number | null; uncertaintyCapMeters: number };
 	programCode?: string;
 	yearLevelLabel?: string;
 	sessionType?: 'lecture' | 'lab';
@@ -74,7 +74,15 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		courseCode: response.course_code,
 		courseName: response.course_name,
 		expiresAt: response.expires_at,
-		geofence: response.geofence,
+		geofence: {
+			radius: response.geofence.radius,
+			lat: response.geofence.lat,
+			lng: response.geofence.lng,
+			uncertaintyCapMeters: ((): number => {
+				const raw = response.geofence.uncertainty_cap_meters ?? 50;
+				return Number.isFinite(raw) && raw > 0 ? raw : 50;
+			})(),
+		},
 		programCode: response.program_code,
 		yearLevelLabel: response.year_level_label,
 		sessionType: response.session_type,

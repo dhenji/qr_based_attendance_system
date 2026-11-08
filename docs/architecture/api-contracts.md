@@ -1378,8 +1378,8 @@ Verify a typed session code. The scan page also posts raw decoded QR text as `co
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
-| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_start_time, scheduled_end_time, classroom_name, geofence: { radius, lat, lng }, present_window_minutes, late_window_minutes }` |
-| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`. `scheduled_start_time` is the authoritative class start (including professor overrides; `actual_start_time` is audit-only) and is what the student scan confirmation renders as "Start time". |
+| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_start_time, scheduled_end_time, classroom_name, geofence: { radius, lat, lng, uncertainty_cap_meters }, present_window_minutes, late_window_minutes }` |
+| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`, `uncertainty_cap_meters` → configured `GEOFENCE_UNCERTAINTY_CAP_METERS` (default 50). `scheduled_start_time` is the authoritative class start (including professor overrides; `actual_start_time` is audit-only) and is what the student scan confirmation renders as "Start time". |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` |
 
 ---

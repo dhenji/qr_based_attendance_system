@@ -947,6 +947,7 @@ class SessionService:
                 radius=row.classroom_radius_meters,
                 lat=row.classroom_lat,
                 lng=row.classroom_lng,
+                uncertainty_cap_meters=self._settings.geofence_uncertainty_cap_meters,
             ),
             present_window_minutes=row.present_window_minutes,
             late_window_minutes=row.late_window_minutes,

@@ -6,6 +6,7 @@ import {
 	isLowAccuracy,
 	calculateDistanceMeters,
 	isWithinGeofence,
+	isWithinGeofenceWithUncertainty,
 	searchLocation,
 	requestBestPosition
 } from './geo';
@@ -402,5 +403,24 @@ describe('requestBestPosition fast first fix', () => {
 		watchCallback!({ coords: { latitude: 1, longitude: 2, accuracy: 10 }, timestamp: Date.now() });
 		const [r1, r2] = await Promise.all([p1, p2]);
 		expect(r1).toEqual(r2);
+	});
+});
+
+describe('isWithinGeofenceWithUncertainty', () => {
+	it('returns false for invalid inputs', () => {
+		expect(isWithinGeofenceWithUncertainty(NaN, 0, 0, 0, 10, 5, 50)).toBe(false);
+		expect(isWithinGeofenceWithUncertainty(0, 0, 0, 0, -1, 5, 50)).toBe(false);
+	});
+	it('blocks hard outside positions', () => {
+		// ~111m away with 50m uncertainty -> 61m > 10m radius
+		expect(isWithinGeofenceWithUncertainty(0, 0.001, 0, 0, 10, 50, 50)).toBe(false);
+	});
+	it('allows review-band positions within radius+uncertainty', () => {
+		// ~55m away with 50m uncertainty -> 5m <= 10m radius
+		expect(isWithinGeofenceWithUncertainty(0, 0.0005, 0, 0, 10, 50, 50)).toBe(true);
+	});
+	it('falls back to 50m cap for zero or negative cap', () => {
+		expect(isWithinGeofenceWithUncertainty(0, 0.0005, 0, 0, 10, 50, 0)).toBe(true);
+		expect(isWithinGeofenceWithUncertainty(0, 0.0005, 0, 0, 10, 50, -5)).toBe(true);
 	});
 });
