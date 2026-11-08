@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { searchLocation, type LocationSearchResult, requestBestPosition } from '$lib/shared/utils/geo';
+	import { searchLocation, type LocationSearchResult, requestBestPosition, GPS_HARD_FLOOR_METERS } from '$lib/shared/utils/geo';
 import { toMapPickerMessage } from '$lib/features/liveness/errors';
 
 	interface Props {
@@ -84,7 +84,7 @@ let radiusCircle: any = null;
 				desiredAccuracy: 50,
 				maxFixes: 3,
 				timeoutMs: 10000,
-				maxAccuracy: 50,
+				maxAccuracy: GPS_HARD_FLOOR_METERS,
 				fastMaximumAge: 5000,
 				signal: controller.signal
 			});
@@ -108,7 +108,7 @@ let radiusCircle: any = null;
 			}
 			const circleColor = accuracyBandColor(fix.accuracy);
 			gpsAccuracyCircle = leaflet.circle([fix.lat, fix.lng], {
-				radius: Math.max(fix.accuracy, 1),
+				radius: Math.max(1, Math.min(fix.accuracy, GPS_HARD_FLOOR_METERS)),
 				color: circleColor,
 				weight: 1,
 				fillColor: circleColor,
@@ -348,7 +348,7 @@ let radiusCircle: any = null;
 		</button>
 		{#if allowLocate}
 			<button type="button" class="map-tool-btn" aria-label="Use my location" disabled={locating} aria-busy={locating} onclick={() => void locate()}>
-				{locating ? 'Locating…' : 'Use my location'}
+				{locating ? 'Getting your current location...' : 'Use my location'}
 			</button>
 		{/if}
 		<button

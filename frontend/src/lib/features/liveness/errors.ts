@@ -76,9 +76,10 @@ const translateValidationMessage = (message: string): string => {
 };
 
 export const MAP_PICKER_ERROR_MESSAGES: Record<string, string> = {
-	location_permission_denied: 'Location permission is required to set your position. Enable location access in your device settings.',
-	location_timeout: 'We could not determine your location in time. Move to an area with a clearer signal and try again.',
-	location_unavailable: 'We could not determine your location. Enable location services and try again.',
+	location_permission_denied: 'Location permission is denied. Please enable location access in your device or browser settings.',
+	location_timeout: 'Location request timed out. Please try again.',
+	location_unavailable: 'Unable to determine your current location. Please check your device\'s location services.',
+	location_unsupported: 'Your browser does not support location services.',
 	location_accuracy_too_low: 'Your GPS accuracy is too low. Move to an area with a clearer signal and try again.'
 };
 

@@ -97,7 +97,7 @@ export const requestBestPosition = async (
 	})();
 
 	if (typeof navigator === 'undefined' || !navigator.geolocation) {
-		throw new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.');
+		throw new APIError('location_unsupported', 'Your browser does not support location services.');
 	}
 
 	const effectiveFastFirst =
@@ -188,7 +188,8 @@ export const requestBestPosition = async (
 			}
 
 			// High-accuracy watch phase.
-			return new Promise<BestPosition>((resolve, reject) => {
+			try {
+				return await new Promise<BestPosition>((resolve, reject) => {
 				let best: BestPosition | null = null;
 				let fixes = 0;
 				let watchId: number | null = null;
@@ -300,6 +301,64 @@ export const requestBestPosition = async (
 					fail(new APIError('location_unavailable', 'We could not determine your current location. Enable location services and try again.'));
 				}
 			});
+			} catch (e) {
+				const isPermission =
+					e instanceof APIError && e.code === 'location_permission_denied';
+				const tooCoarse =
+					e instanceof APIError && e.code === 'location_accuracy_too_low';
+				if (
+					isPermission ||
+					tooCoarse ||
+					typeof navigator?.geolocation?.getCurrentPosition !== 'function'
+				) {
+					throw e;
+				}
+				const fallback = await new Promise<BestPosition | null>((resolve) => {
+					let settled = false;
+					const done = (value: BestPosition | null) => {
+						if (settled) return;
+						settled = true;
+						resolve(value);
+					};
+					try {
+						navigator.geolocation.getCurrentPosition(
+							(pos) => {
+								const c = pos?.coords;
+								if (
+									!c ||
+									!Number.isFinite(c.latitude) ||
+									!Number.isFinite(c.longitude) ||
+									!Number.isFinite(c.accuracy) ||
+									c.accuracy <= 0
+								) {
+									done(null);
+									return;
+								}
+								if (c.latitude < -90 || c.latitude > 90) {
+									done(null);
+									return;
+								}
+								if (c.longitude < -180 || c.longitude > 180) {
+									done(null);
+									return;
+								}
+								done({
+									lat: c.latitude,
+									lng: c.longitude,
+									accuracy: c.accuracy,
+									timestamp: pos.timestamp,
+								});
+							},
+							() => done(null),
+							{ enableHighAccuracy: false, maximumAge: 30000, timeout: 5000 }
+						);
+					} catch {
+						done(null);
+					}
+				});
+				if (fallback) return fallback;
+				throw e;
+			}
 		})();
 		inflight.set(key, promise);
 		promise.catch(() => {});
