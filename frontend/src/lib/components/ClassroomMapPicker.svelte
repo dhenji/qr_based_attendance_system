@@ -84,7 +84,6 @@ let radiusCircle: any = null;
 				desiredAccuracy: 50,
 				maxFixes: 3,
 				timeoutMs: 10000,
-				maxAccuracy: 50,
 				fastMaximumAge: 5000,
 				signal: controller.signal
 			});
@@ -348,7 +347,7 @@ let radiusCircle: any = null;
 		</button>
 		{#if allowLocate}
 			<button type="button" class="map-tool-btn" aria-label="Use my location" disabled={locating} aria-busy={locating} onclick={() => void locate()}>
-				{locating ? 'Locating…' : 'Use my location'}
+				{locating ? 'Getting your current location...' : 'Use my location'}
 			</button>
 		{/if}
 		<button

@@ -537,6 +537,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 				if (e.code === 'location_permission_denied') gpsStatus = 'permission';
 				else if (e.code === 'location_timeout') gpsStatus = 'unavailable';
 				else if (e.code === 'location_unavailable') gpsStatus = 'unavailable';
+				else if (e.code === 'location_unsupported') gpsStatus = 'unavailable';
 				else gpsStatus = 'unavailable';
 				gpsError = e.message;
 			} else {
