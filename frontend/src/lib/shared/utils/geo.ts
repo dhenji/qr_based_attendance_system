@@ -4,6 +4,10 @@ import { APIError } from '$lib/api/client';
 
 export type AccuracyStatus = 'high' | 'moderate' | 'low';
 
+// Hard floor for GPS accuracy (metres). Fixes coarser than this are rejected by
+// the backend (gps_accuracy_too_low) and are not queued for offline replay.
+export const GPS_HARD_FLOOR_METERS = 1000;
+
 // Great-circle distance in metres (convenience over calculateDistance).
 export const calculateDistanceMeters = (
 	lat1: number,

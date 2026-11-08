@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { searchLocation, type LocationSearchResult, requestBestPosition } from '$lib/shared/utils/geo';
+import { toMapPickerMessage } from '$lib/features/liveness/errors';
 
 	interface Props {
 		lat: number | null;
@@ -115,7 +116,7 @@ let radiusCircle: any = null;
 			}).addTo(map);
 			onChange(fix.lat, fix.lng);
 		} catch (e: any) {
-			gpsError = e?.message ?? 'Unable to get your location.';
+			gpsError = toMapPickerMessage(e, 'Unable to get your location.');
 		} finally {
 			locating = false;
 			locateAbortController = null;

@@ -30,6 +30,7 @@
 import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
+	import { GPS_HARD_FLOOR_METERS } from '$lib/shared/utils/geo';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
 	type Step = 'entry' | 'confirm' | 'location' | 'liveness';
@@ -575,6 +576,15 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 		let reachedSubmit = false;
 		try {
+			if (gps && gps.accuracy > GPS_HARD_FLOOR_METERS) {
+				rejectionReason = toScanMessage(
+					new APIError('gps_accuracy_too_low', ''),
+					'Unable to submit the attendance scan'
+				);
+				showFailure = true;
+				return;
+			}
+
 			if (geofenceRequired && gps) {
 				if (
 					!validateGPS(
