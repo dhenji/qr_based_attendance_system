@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -101,7 +102,7 @@ class FaceEnrollmentService:
                 max_bytes=self._settings.attachments_max_bytes,
             )
 
-            result = assess_image_bytes(content)
+            result = await asyncio.to_thread(assess_image_bytes, content)
             if not result.ok:
                 detail = f"{name} photo: {result.message or result.code}"
                 code = result.code
@@ -119,7 +120,8 @@ class FaceEnrollmentService:
             preferred_algorithm = (
                 "mobilefacenet-v1" if model == "mobilefacenet" else "mediapipe-v1"
             )
-            embedding_blob, algorithm = generate_embedding_from_images(
+            embedding_blob, algorithm = await asyncio.to_thread(
+                generate_embedding_from_images,
                 front,
                 left,
                 right,

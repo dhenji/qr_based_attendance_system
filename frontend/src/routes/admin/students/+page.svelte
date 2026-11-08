@@ -191,6 +191,13 @@
 	let faceRetakeSlot = $state<'front' | 'left' | 'right' | null>(null);
 	let faceConfirm = $state<'save' | 'remove' | null>(null);
 
+	const resolveFaceErrorCode = (e: unknown): string | undefined => {
+		if (!(e instanceof APIError)) return undefined;
+		if (e.code && FACE_ERROR_MESSAGES[e.code]) return e.code;
+		if (e.status === 500) return 'internal_error';
+		return undefined;
+	};
+
 	const FACE_ERROR_MESSAGES: Record<string, string> = {
 		invalid_image: 'One of the photos could not be read. Use clear JPG, PNG, or WebP images.',
 		no_face_detected: 'No face was detected in one of the photos (front/left/right). Retake with the face centered and well lit.',
@@ -254,6 +261,7 @@
 		faceCameraActive = false;
 		faceCameraMode = false;
 		faceCameraSingleSlot = null;
+		faceError = null;
 	};
 
 	const handleSingleCapture = (slot: 'front' | 'left' | 'right', file: File) => {
@@ -261,6 +269,7 @@
 		faceCameraMode = false;
 		faceCameraActive = false;
 		faceCameraSingleSlot = null;
+		faceError = null;
 	};
 
 	const performUploadFace = async () => {
@@ -290,9 +299,10 @@
 			notifyEntityChanged('students');
 		} catch (e: unknown) {
 			if (e instanceof APIError) {
-				if (e.code && FACE_ERROR_MESSAGES[e.code]) {
+				const code = resolveFaceErrorCode(e);
+				if (code && FACE_ERROR_MESSAGES[code]) {
 					// Prefer the backend detail, which names the failing photo and gate.
-					faceError = e.message && e.message.length > 0 ? e.message : FACE_ERROR_MESSAGES[e.code];
+					faceError = e.message && e.message.length > 0 ? e.message : FACE_ERROR_MESSAGES[code];
 				} else {
 					faceError = e.message || 'Upload failed. Try again.';
 				}
@@ -318,10 +328,15 @@
 			await refreshAdminStudents();
 			notifyEntityChanged('students');
 		} catch (e: unknown) {
-			faceError =
-				e instanceof APIError && e.code && FACE_ERROR_MESSAGES[e.code]
-					? FACE_ERROR_MESSAGES[e.code]
-					: (e instanceof Error && e.message ? e.message : 'Removal failed. Try again.');
+			if (e instanceof APIError) {
+				const code = resolveFaceErrorCode(e);
+				faceError =
+					code && FACE_ERROR_MESSAGES[code]
+						? (e.message && e.message.length > 0 ? e.message : FACE_ERROR_MESSAGES[code])
+						: (e.message || 'Removal failed. Try again.');
+			} else {
+				faceError = e instanceof Error && e.message ? e.message : 'Removal failed. Try again.';
+			}
 		} finally {
 			faceRevokeBusy = false;
 		}
@@ -1044,6 +1059,7 @@
 					singleSlot={faceCameraSingleSlot}
 					onComplete={handleFaceCameraComplete}
 					onCapture={handleSingleCapture}
+					onQualityError={(r) => (faceError = r)}
 					onCancel={() => { faceCameraActive = false; faceCameraMode = false; faceCameraSingleSlot = null; }}
 				/>
 			{:else}
