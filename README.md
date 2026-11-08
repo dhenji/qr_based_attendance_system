@@ -46,7 +46,12 @@ validation failures (e.g. GPS accuracy out of range, missing face frame) are now
 surfaced with their specific field detail, translated into student-friendly copy
 (ear-sample range, low GPS accuracy, missing face image) instead of a single
 generic message; GPS accuracy is clamped to the backend cap (100000 m) and the
-scan page refuses to submit when no face frame was captured.
+scan page refuses to submit when no face frame was captured. The scan page also
+fail-fast rejects GPS fixes above the 1000 m hard floor before submit/queueing
+(`GPS_HARD_FLOOR_METERS`), showing the `gps_accuracy_too_low` copy. The
+classroom map picker surfaces location errors via `toMapPickerMessage`
+(`MAP_PICKER_ERROR_MESSAGES`) in the same module, with the early "Map is still
+loading" path kept as a literal string.
 
 **Review-band face matches** (`review_low <= score < threshold`) store their
 computed status (`present`/`late`) as `validation_status` — not `pending`. The

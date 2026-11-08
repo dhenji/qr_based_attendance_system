@@ -85,7 +85,8 @@ Last verified against commit: see `git rev-parse HEAD`.
   (`attendance/service.py:114-254`, `constants.py:30-35`).
 - Geofence is skipped when disabled or classroom coords are missing; missing
   GPS is treated as outside; a position outside the radius but within reported
-  GPS uncertainty (capped at 50 m) is treated as ambiguous and routed to review
+  GPS uncertainty (capped at `GEOFENCE_UNCERTAINTY_CAP_METERS`, default 50 m) is
+  treated as ambiguous and routed to review
   (`attendance/service.py:591-620`).
 
 ---
@@ -105,10 +106,12 @@ Last verified against commit: see `git rev-parse HEAD`.
 ## GPS flow
 
 - `frontend/src/routes/student/scan/+page.svelte` runs a location check before
-  face liveness: `requestBestPosition()` (watchPosition, up to 3 fixes, early
-  stop at accuracy ≤ 50 m); shows accuracy, distance, radius, within/outside.
-- `frontend/src/lib/shared/utils/geo.ts` — `requestBestPosition`,
-  `calculateDistanceMeters`, `getAccuracyStatus`, `isLowAccuracy`.
+  face liveness: `requestBestPosition()` (fast low-accuracy fix first, then
+  watchPosition up to 3 fixes, early stop at accuracy ≤ 50 m; abortable via
+  `AbortSignal`); shows accuracy, distance, radius, within/outside.
+- `frontend/src/lib/shared/utils/geo.ts` — `requestBestPosition`, `calculateDistanceMeters`,
+  `getAccuracyStatus`, `isLowAccuracy`. Validates fixes (finite, positive accuracy,
+  in-range, not stale), dedups in-flight promises, supports `maxAccuracy`.
 - `Continue` disabled while locating or outside geofence; low accuracy still
   allows continuation.
 
@@ -242,6 +245,9 @@ EAR > 0.2. Used by enrollment.
 - Skip if `geofence_enabled` false or classroom coords missing.
 - Missing GPS → raise `OutsideGeofenceException`.
 - Haversine distance > radius → raise.
+- Uncertainty capped at `GEOFENCE_UNCERTAINTY_CAP_METERS` (default 50 m).
+- Accuracy > 100 m → `accuracy_low` review reason (even inside radius).
+- Accuracy > 1000 m → 422 `gps_accuracy_too_low`.
 
 ## Identity comparison
 
