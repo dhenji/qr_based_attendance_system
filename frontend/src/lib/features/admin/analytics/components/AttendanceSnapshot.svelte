@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
 	import { onDestroy, onMount } from 'svelte';
@@ -49,7 +50,7 @@
 	let recordsPage = $state(1);
 	let dateFrom = $state('');
 	let dateTo = $state('');
-	let datePreset = $state<'custom' | 'today' | 'week' | 'month' | 'semester' | 'year'>('custom');
+	let datePreset = $state<'custom' | 'today' | 'week' | 'month' | 'semester' | 'year' | 'all'>('custom');
 	let advancedOpen = $state(false);
 	let studentSearchTimer: ReturnType<typeof setTimeout> | null = null;
 	let sortBy = $state<SortColumn>('course');
@@ -148,15 +149,13 @@
 			const start = new Date(now.getFullYear(), now.getMonth(), 1);
 			dateFrom = toIso(start);
 			dateTo = toIso(now);
-		} else if (preset === 'semester') {
-			const start = new Date(now);
-			start.setDate(now.getDate() - 120);
-			dateFrom = toIso(start);
-			dateTo = toIso(now);
 		} else if (preset === 'year') {
 			const start = new Date(now.getFullYear(), 0, 1);
 			dateFrom = toIso(start);
 			dateTo = toIso(now);
+		} else if (preset === 'all') {
+			dateFrom = '';
+			dateTo = '';
 		}
 	};
 
@@ -309,76 +308,122 @@
 	{/if}
 
 	<div class="filters" aria-label="Attendance analytics filters">
-		<select class="input" aria-label="Program filter" bind:value={programFilter} onchange={() => { changeProgram(); void load(); }}>
-			<option value="">All programs</option>
-			{#each programOptions as p (p.id)}
-				<option value={p.id}>{p.code} — {p.name}</option>
-			{/each}
-		</select>
-		<select
-			class="input"
-			aria-label="Year level filter"
-			bind:value={yearFilter}
-			onchange={() => void load()}
-			disabled={!programFilter}
-		>
-			<option value="">All years</option>
-			{#each yearOptions as y (y.id)}
-				<option value={y.id}>{y.label}</option>
-			{/each}
-		</select>
-		<select class="input" aria-label="Course filter" bind:value={courseFilter} onchange={() => void load()}>
-			<option value="">All courses</option>
-			{#each courseOptions as c (c.id)}
-				<option value={c.id}>{c.courseCode} — {c.courseName}</option>
-			{/each}
-		</select>
-		<button
-			class="btn btn-secondary advanced-toggle"
-			type="button"
-			aria-expanded={advancedOpen}
-			aria-controls="advanced-filters"
-			onclick={() => (advancedOpen = !advancedOpen)}
-		>
-			Advanced filters{#if advancedActiveCount > 0} ({advancedActiveCount}){/if}
-		</button>
-		{#if advancedOpen}
-			<div id="advanced-filters" class="advanced-panel">
-				<select class="input" aria-label="Semester filter" bind:value={semesterFilter} onchange={() => void load()}>
-					<option value="">All semesters</option>
-				</select>
-				<select class="input" aria-label="Professor filter" bind:value={professorFilter} onchange={() => void load()}>
-					<option value="">All professors</option>
-					{#each professorOptions as p (p.id)}
-						<option value={p.id}>{p.firstName} {p.lastName}</option>
+		<p class="eyebrow">Scope</p>
+		<div class="filter-grid">
+			<div class="field">
+				<label class="form-label" for="att-program">Program</label>
+				<select id="att-program" class="form-input" bind:value={programFilter} onchange={() => { changeProgram(); void load(); }}>
+					<option value="">All programs</option>
+					{#each programOptions as p (p.id)}
+						<option value={p.id}>{p.code} — {p.name}</option>
 					{/each}
 				</select>
-				<select class="input" aria-label="Session type filter" bind:value={sessionTypeFilter} onchange={() => void load()}>
-					<option value="">All types</option>
-					<option value="lecture">Lecture</option>
-					<option value="lab">Lab</option>
-				</select>
-				<select class="input" aria-label="Status filter" bind:value={statusFilter} onchange={() => void load()}>
-					<option value="">All statuses</option>
-					<option value="present">Present</option>
-					<option value="late">Late</option>
-					<option value="excused">Excused</option>
-					<option value="rejected">Rejected</option>
-				</select>
-				<input class="input" type="search" aria-label="Student search" placeholder="Student name or number" bind:value={studentSearch} oninput={() => { if (studentSearchTimer) clearTimeout(studentSearchTimer); studentSearchTimer = setTimeout(() => void load(), 250); }} />
-				<button class="btn btn-secondary" type="button" onclick={() => { semesterFilter=''; professorFilter=''; sessionTypeFilter=''; statusFilter=''; studentSearch=''; }}>Clear advanced</button>
 			</div>
-		{/if}
+			<div class="field">
+				<label class="form-label" for="att-year">Year level</label>
+				<select
+					id="att-year"
+					class="form-input"
+					bind:value={yearFilter}
+					onchange={() => void load()}
+					disabled={!programFilter}
+				>
+					<option value="">All years</option>
+					{#each yearOptions as y (y.id)}
+						<option value={y.id}>{y.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="field">
+				<label class="form-label" for="att-course">Course</label>
+				<select id="att-course" class="form-input" bind:value={courseFilter} onchange={() => void load()}>
+					<option value="">All courses</option>
+					{#each courseOptions as c (c.id)}
+						<option value={c.id}>{c.courseCode} — {c.courseName}</option>
+					{/each}
+				</select>
+			</div>
+		</div>
+
+		<p class="eyebrow" style="margin-top:1rem;">Time range</p>
 		<div class="preset-row">
-			{#each ['today', 'week', 'month', 'semester', 'year'] as p (p)}
-				<button class="btn btn-secondary" class:selected={datePreset === p} onclick={() => { applyPreset(p as any); void load(); }}>
-					{p === 'today' ? 'Today' : p === 'week' ? 'This week' : p === 'month' ? 'This month' : p === 'semester' ? 'This semester' : 'This year'}
+			{#each ['today', 'week', 'month', 'year', 'all'] as p (p)}
+				<button class="btn btn-ghost" class:selected={datePreset === p} onclick={() => { applyPreset(p as any); void load(); }}>
+					{p === 'today' ? 'Today' : p === 'week' ? 'This week' : p === 'month' ? 'This month' : p === 'year' ? 'This year' : 'All time'}
 				</button>
 			{/each}
 		</div>
-		<input class="input" type="date" aria-label="From date" bind:value={dateFrom} onchange={() => { datePreset = 'custom'; void load(); }} />
-		<input class="input" type="date" aria-label="To date" bind:value={dateTo} onchange={() => { datePreset = 'custom'; void load(); }} />
-		<button class="btn btn-secondary" onclick={resetFilters}>Reset</button>
+		<div class="filter-grid filter-grid-4">
+			<div class="field">
+				<label class="form-label" for="att-from">From date</label>
+				<input id="att-from" class="form-input" type="date" bind:value={dateFrom} onchange={() => { datePreset = 'custom'; void load(); }} />
+			</div>
+			<div class="field">
+				<label class="form-label" for="att-to">To date</label>
+				<input id="att-to" class="form-input" type="date" bind:value={dateTo} onchange={() => { datePreset = 'custom'; void load(); }} />
+			</div>
+			<div class="field">
+				<span class="form-label">&nbsp;</span>
+				<button class="btn btn-secondary" onclick={resetFilters}>Reset filters</button>
+			</div>
+			<div class="field">
+				<span class="form-label">&nbsp;</span>
+				<button
+					class="btn btn-secondary advanced-toggle"
+					type="button"
+					aria-expanded={advancedOpen}
+					aria-controls="advanced-filters"
+					onclick={() => (advancedOpen = !advancedOpen)}
+				>
+					Advanced filters{#if advancedActiveCount > 0} ({advancedActiveCount}){/if}
+				</button>
+			</div>
+		</div>
+		{#if advancedOpen}
+			<div id="advanced-filters" class="advanced-panel" style="margin-top:1rem;">
+				<div class="field">
+					<label class="form-label" for="att-semester">Semester</label>
+					<select id="att-semester" class="form-input" bind:value={semesterFilter} onchange={() => void load()}>
+						<option value="">All semesters</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="att-professor">Professor</label>
+					<select id="att-professor" class="form-input" bind:value={professorFilter} onchange={() => void load()}>
+						<option value="">All professors</option>
+						{#each professorOptions as p (p.id)}
+							<option value={p.id}>{p.firstName} {p.lastName}</option>
+						{/each}
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="att-session-type">Session type</label>
+					<select id="att-session-type" class="form-input" bind:value={sessionTypeFilter} onchange={() => void load()}>
+						<option value="">All types</option>
+						<option value="lecture">Lecture</option>
+						<option value="lab">Lab</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="att-status">Status</label>
+					<select id="att-status" class="form-input" bind:value={statusFilter} onchange={() => void load()}>
+						<option value="">All statuses</option>
+						<option value="present">Present</option>
+						<option value="late">Late</option>
+						<option value="excused">Excused</option>
+						<option value="rejected">Rejected</option>
+					</select>
+				</div>
+				<div class="field">
+					<label class="form-label" for="att-student-search">Student search</label>
+					<input id="att-student-search" class="form-input" type="search" placeholder="Student name or number" bind:value={studentSearch} oninput={() => { if (studentSearchTimer) clearTimeout(studentSearchTimer); studentSearchTimer = setTimeout(() => void load(), 250); }} />
+				</div>
+				<div class="field">
+					<span class="form-label">&nbsp;</span>
+					<button class="btn btn-secondary" type="button" onclick={() => { semesterFilter=''; professorFilter=''; sessionTypeFilter=''; statusFilter=''; studentSearch=''; }}>Clear advanced</button>
+				</div>
+			</div>
+		{/if}
 		{#if filterNotice}
 			<p class="muted" role="status">{filterNotice}</p>
 		{/if}
@@ -503,11 +548,11 @@
 			</table>
 		</div>
 		{#if adminAttendanceRecordsState.total > 20}
-			<div class="pagination">
-				<button class="btn btn-secondary" disabled={recordsPage <= 1} onclick={() => void loadRecords(recordsPage - 1)}>Prev</button>
-				<span class="muted small">Page {recordsPage} of {Math.max(1, Math.ceil(adminAttendanceRecordsState.total / 20))}</span>
-				<button class="btn btn-secondary" disabled={recordsPage >= Math.ceil(adminAttendanceRecordsState.total / 20)} onclick={() => void loadRecords(recordsPage + 1)}>Next</button>
-			</div>
+			<Pagination
+				page={recordsPage}
+				totalPages={Math.max(1, Math.ceil(adminAttendanceRecordsState.total / 20))}
+				onPageChange={(p) => void loadRecords(p)}
+			/>
 		{/if}
 	{/if}
 </section>
@@ -528,12 +573,28 @@
 	.card {
 		background: var(--bg-card);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: 12px;
 		padding: 1.5rem;
 		box-shadow: var(--shadow-sm);
+		transition: box-shadow 0.15s ease;
+	}
+	.card:hover {
+		box-shadow: 0 6px 24px rgba(15, 23, 42, 0.1);
 	}
 	.card-title { margin: 0 0 0.375rem; font-size: 1.125rem; font-weight: 700; color: var(--text); }
-	.eyebrow { margin: 0 0 0.25rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+	.eyebrow { margin: 0 0 0.5rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+	.filter-grid { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	.filter-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.filter-grid .btn { width: 100%; justify-content: center; }
+	.field { display: flex; flex-direction: column; gap: 0.4375rem; min-width: 0; }
+	.form-label { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.02em; color: var(--text-secondary); }
+	.form-input { padding: 0.625rem 0.75rem; border: 1px solid var(--border-strong); border-radius: 8px; font-size: 0.9375rem; font-family: inherit; color: var(--text-strong); background: var(--bg-card); width: 100%; }
+	.form-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+	.form-input:disabled { background: var(--divider); color: var(--text-muted); cursor: not-allowed; }
+	.btn-ghost { background: var(--bg-card); border: 1px solid var(--border-strong); color: var(--text-strong); padding: 0.5rem 0.9rem; font-size: 0.875rem; border-radius: 8px; }
+	.btn-ghost:hover:not(:disabled) { background: var(--bg-hover, var(--divider)); }
+	.btn-ghost.selected { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+	.btn-ghost.selected:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); color: var(--on-brand); }
 	.row-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
 	.header-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 	.muted { color: var(--text-muted); font-size: 0.875rem; margin: 0; }
@@ -549,9 +610,9 @@
 	.kpi-delta { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
 	.kpi-delta.up { color: var(--success); }
 	.kpi-delta.down { color: var(--danger); }
-	.preset-row { display: flex; gap: 0.5rem; flex-wrap: wrap; flex-basis: 100%; }
+	.preset-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.75rem 0; }
 	.advanced-panel { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; flex-basis: 100%; padding: 0.75rem; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg-muted, transparent); }
-	.advanced-toggle { flex-basis: 100%; justify-content: flex-start; }
+	.advanced-toggle { justify-content: center; }
 	.table-wrap { overflow-x: auto; margin-top: 1rem; }
 	.pagination { display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; }
 	table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
@@ -582,6 +643,8 @@
 	.badge.status-late { color: var(--warning-text); background: var(--warning-bg); }
 	.badge.status-excused { color: var(--accent); background: var(--accent-bg, var(--divider)); }
 	.badge.status-rejected { color: var(--danger-strong); background: var(--danger-bg); }
+	@media (max-width: 860px) { .filter-grid, .filter-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+	@media (max-width: 560px) { .filter-grid, .filter-grid-4 { grid-template-columns: minmax(0, 1fr); } }
 	@media (max-width: 900px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 	@media (max-width: 640px) { .card { padding: 1.25rem; } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

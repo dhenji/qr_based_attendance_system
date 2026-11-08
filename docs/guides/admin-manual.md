@@ -203,22 +203,25 @@ first_name, middle_name, last_name, email, department
 
 ### 5.1 Accessing Analytics — `/admin/analytics`
 
-[FIG: Analytics & Reports with left filter rail (Program ▸ Year ▸ Term ▸ Courses ▸ Date Range ▸ Granularity), seven tabs: Overview, Course Comparison, Trends, At-Risk, Staging, Attendance, Export]
+[FIG: Analytics & Reports with filter rail (Scope: Program ▸ Year ▸ Term ▸ Session Type; Time range: presets + From/To date; Advanced: Courses ▸ Risk level), seven tabs: Overview, Course Comparison, Trends, At-Risk, Staging, Attendance, Export]
 
-> The **Attendance** tab keeps its own Course ▸ Professor ▸ Date filter row and hides the analytics filter rail — its slice is per course/professor, not per program/year/term ([ADR-083](../project/decision-log.md)).
+> The **Attendance** tab mirrors the same filter rail layout (Scope/Time range/Advanced) and adds its own Course ▸ Professor ▸ Status ▸ Student search fields inside the Advanced panel.
 
 ### 5.2 Filter Rail (Cascading Filters)
 
-| Filter          | Description                                          |
-| --------------- | ---------------------------------------------------- |
-| **Program**     | Select a _program_ (e.g., BSCS)                      |
-| **Year**        | Select _year level_ within that program              |
-| **Term**        | Select _term_ from the year level's _term structure_ |
-| **Courses**     | Multi-select _courses_ (can span cohorts)            |
-| **Date Range**  | From / To date picker                                |
-| **Granularity** | Daily / Weekly / Monthly                             |
+| Filter           | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| **Program**      | Select a _program_ (e.g., BSCS)                                          |
+| **Year**         | Select _year level_ within that program                                   |
+| **Term**         | Select _term_ from the year level's _term structure_                     |
+| **Session Type** | Lecture (LEC) / Laboratory (LAB) / All                                   |
+| **Granularity**  | Daily / Weekly / Monthly — shown **only on the Trends tab**               |
+| **Courses**      | Multi-select _courses_ with search (scoped to program/year/term)          |
+| **Risk level**   | High / Medium / Low / All (Advanced panel)                               |
+| **Date presets** | Today / This week / This month / This year / All time                    |
+| **Date Range**   | From / To date picker (defaults to **All time**)                         |
 
-Click **[Apply Filters]** to refresh all tabs.
+Filters **auto-apply** on change — there is no manual Apply button. Use **Reset filters** to clear. The **Advanced filters** toggle shows an active-count badge and contains the Courses picker, Risk level, and a **Clear advanced** button. At-Risk and Staging tabs also support a **student name search** (`q`). Comparison, Trends, At-Risk, and Staging tabs paginate (First/Prev/numbered/Next/Last); the Attendance tab paginates its records the same way. Comparison and At-Risk rows link to the admin course/student pages.
 
 ### 5.3 Understanding the Two Rate Metrics
 
