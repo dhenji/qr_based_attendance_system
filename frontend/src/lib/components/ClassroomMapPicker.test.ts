@@ -29,7 +29,8 @@ vi.mock('leaflet', () => {
 
 vi.mock('$lib/shared/utils/geo', () => ({
 	searchLocation: vi.fn(async () => []),
-	requestBestPosition: vi.fn()
+	requestBestPosition: vi.fn(),
+	GPS_HARD_FLOOR_METERS: 1000
 }));
 
 import { requestBestPosition } from '$lib/shared/utils/geo';
