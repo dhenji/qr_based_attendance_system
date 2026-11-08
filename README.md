@@ -47,9 +47,11 @@ surfaced with their specific field detail, translated into student-friendly copy
 (ear-sample range, low GPS accuracy, missing face image) instead of a single
 generic message; GPS accuracy is clamped to the backend cap (100000 m) and the
 scan page refuses to submit when no face frame was captured. The scan page also
-fail-fast rejects GPS fixes above the 1000 m hard floor before submit/queueing
-(`GPS_HARD_FLOOR_METERS`), showing the `gps_accuracy_too_low` copy. The
-classroom map picker surfaces location errors via `toMapPickerMessage`
+fail-fast rejects GPS fixes above the configured hard floor
+(`VerifyGeofence.gps_hard_floor_meters`, default 1000 m, exposed during session
+verification) before submit/queueing, showing the `gps_accuracy_too_low` copy; a
+non-positive configured value disables the client fail-fast. The classroom map
+picker surfaces location errors via `toMapPickerMessage`
 (`MAP_PICKER_ERROR_MESSAGES`) in the same module, with the early "Map is still
 loading" path kept as a literal string.
 
@@ -64,7 +66,11 @@ geofence-ambiguous scans (measured position outside the radius but within the
 reported GPS uncertainty, capped at the configured uncertainty cap, default 50 m, now
 propagated through `VerifyGeofence.uncertainty_cap_meters` during session
 verification), which are accepted but routed to
-review instead of rejected outright. Flagged evidence now records
+review instead of rejected outright. The same verification response now also
+carries `gps_hard_floor_meters` (default 1000 m) and
+`gps_review_accuracy_threshold` (default 100 m), so client gating and accuracy
+status/review messaging follow backend configuration instead of hard-coded
+constants. Flagged evidence now records
 `review_reason` (`face_review_band` and/or `geofence_uncertainty`) and, for
 geofence-flagged rows, a `geofence` context object (distance, radius,
 accuracy, uncertainty, classroom coordinates) so the admin review queue can

@@ -29,7 +29,7 @@
 import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
-	import { GPS_HARD_FLOOR_METERS, isWithinGeofenceWithUncertainty } from '$lib/shared/utils/geo';
+	import { isWithinGeofenceWithUncertainty } from '$lib/shared/utils/geo';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
 	type Step = 'entry' | 'confirm' | 'location' | 'liveness';
@@ -72,7 +72,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let locatingGps = $state(false);
 	let gpsAbortController: AbortController | null = $state(null);
 	let gpsFix = $state<{ lat: number; lng: number; accuracy: number } | null>(null);
-	let gpsStatus = $state<'locating' | 'high' | 'low' | 'unavailable' | 'permission'>('locating');
+	let gpsStatus = $state<'locating' | 'high' | 'moderate' | 'low' | 'unavailable' | 'permission'>('locating');
 	let gpsDistanceMeters = $state<number | null>(null);
 	let gpsError = $state<string | null>(null);
 	let countdown = $state(0);
@@ -274,7 +274,18 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						courseCode: cached.course_code,
 						courseName: cached.course_name,
 						expiresAt: cached.expires_at,
-						geofence: { ...cached.geofence, uncertaintyCapMeters: cached.geofence.uncertaintyCapMeters ?? 50 },
+						geofence: {
+							...cached.geofence,
+							uncertaintyCapMeters: cached.geofence.uncertaintyCapMeters ?? 50,
+							gpsHardFloorMeters: ((): number => {
+								const raw = cached.geofence.gpsHardFloorMeters;
+								return typeof raw === 'number' && Number.isFinite(raw) ? raw : 1000;
+							})(),
+							gpsReviewAccuracyThreshold: ((): number => {
+								const raw = cached.geofence.gpsReviewAccuracyThreshold;
+								return typeof raw === 'number' && Number.isFinite(raw) ? raw : 100;
+							})(),
+						},
 						geofenceEnabled: cached.geofenceEnabled,
 						isRemote: cached.isRemote,
 						scheduledStartTime: cached.scheduled_start_time ?? cached.expires_at,
@@ -576,7 +587,11 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 		let reachedSubmit = false;
 		try {
-			if (gps && gps.accuracy > GPS_HARD_FLOOR_METERS) {
+			const effectiveHardFloor =
+				session && Number.isFinite(session.geofence.gpsHardFloorMeters) && session.geofence.gpsHardFloorMeters > 0
+					? session.geofence.gpsHardFloorMeters
+					: null;
+			if (gps && effectiveHardFloor !== null && gps.accuracy > effectiveHardFloor) {
 				rejectionReason = toScanMessage(
 					new APIError('gps_accuracy_too_low', ''),
 					'Unable to submit the attendance scan'

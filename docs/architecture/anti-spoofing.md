@@ -90,7 +90,10 @@ Last verified against commit: see `git rev-parse HEAD`.
   rejected at schema validation; the configured cap is exposed once via
   `VerifyGeofence.uncertainty_cap_meters` during session verification; the client
   pre-submit check uses `isWithinGeofenceWithUncertainty`
-  (`attendance/service.py:591-620`).
+  (`attendance/service.py:591-620`). The same response also exposes
+  `gps_hard_floor_meters` (default 1000 m) and
+  `gps_review_accuracy_threshold` (default 100 m), so the client fail-fast and
+  accuracy status/review messaging follow backend configuration.
 
 ---
 
@@ -115,6 +118,9 @@ Last verified against commit: see `git rev-parse HEAD`.
 - `frontend/src/lib/shared/utils/geo.ts` — `requestBestPosition`, `calculateDistanceMeters`,
   `getAccuracyStatus`, `isLowAccuracy`. Validates fixes (finite, positive accuracy,
   in-range, not stale), dedups in-flight promises, supports `maxAccuracy`.
+- `frontend/src/lib/features/liveness/gps.ts` — `acquireGpsFix` derives
+  `high`/`moderate`/`low` status from `VerifyGeofence.gps_review_accuracy_threshold`
+  (default 100 m); the fast-first path defaults `fastMaximumAge` to 0.
 - `Continue` disabled while locating or outside geofence; low accuracy still
   allows continuation.
 

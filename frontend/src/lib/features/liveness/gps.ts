@@ -6,13 +6,13 @@ import type { SessionVerification } from './service';
 export interface GpsAcquisitionResult {
 	fix: BestPosition;
 	distanceMeters: number | null;
-	status: 'high' | 'low';
+	status: 'high' | 'moderate' | 'low';
 }
 
 export const acquireGpsFix = async (
 	session: SessionVerification,
 	signal?: AbortSignal,
-	fastMaximumAge: number = 5000
+	fastMaximumAge: number = 0
 ): Promise<GpsAcquisitionResult> => {
 	const fix = await requestBestPosition({
 		desiredAccuracy: 50,
@@ -26,6 +26,20 @@ export const acquireGpsFix = async (
 	if (center.lat !== null && center.lng !== null) {
 		distanceMeters = calculateDistanceMeters(fix.lat, fix.lng, center.lat, center.lng);
 	}
-	const status: 'high' | 'low' = fix.accuracy <= 50 ? 'high' : 'low';
+	const reviewThreshold = session.geofence.gpsReviewAccuracyThreshold;
+	const hasReviewThreshold =
+		typeof reviewThreshold === 'number' &&
+		Number.isFinite(reviewThreshold) &&
+		reviewThreshold > 0;
+	let status: 'high' | 'moderate' | 'low';
+	if (hasReviewThreshold && fix.accuracy > (reviewThreshold as number)) {
+		status = 'low';
+	} else if (fix.accuracy <= 50) {
+		status = 'high';
+	} else if (hasReviewThreshold && fix.accuracy <= (reviewThreshold as number)) {
+		status = 'moderate';
+	} else {
+		status = 'high';
+	}
 	return { fix, distanceMeters, status };
 };

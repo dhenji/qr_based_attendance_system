@@ -272,8 +272,10 @@ When scanning offline:
 2. **GPS check** runs against cached session geofence config.
    Server-side accuracy review band (>100 m → `accuracy_low`) and hard floor
    (>1000 m → 422 `gps_accuracy_too_low`) apply to synced scans too. The scan
-   page also fail-fast rejects fixes above the hard floor (`GPS_HARD_FLOOR_METERS`,
-   1000 m) before enqueueing, showing `gps_accuracy_too_low` copy.
+   page also fail-fast rejects fixes above the configured hard floor
+   (`VerifyGeofence.gps_hard_floor_meters`, default 1000 m) before enqueueing,
+   showing `gps_accuracy_too_low` copy; a non-positive value disables the
+   client fail-fast.
 3. **Liveness** runs client-side (MediaPipe FaceLandmarker WASM, EAR + PnP heuristics).
 4. **Status is tentative**: marked `pending` in queue. Server recomputes on sync.
 
