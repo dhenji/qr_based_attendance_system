@@ -5,7 +5,7 @@ FastAPI backend (18 feature slices, 21 models, 25 Alembic revisions) + SvelteKit
 ## Repo state
 
 - Remote `git@github.com:dhenji/qr_based_attendance_system.git`; PRs against `main`.
-- Layout: `frontend/`, `backend/` (`src/` + `alembic/` + `Dockerfile.dev`), `demo/` (`seed_demo.py` + `rosters/`, runbook in `demo/README.md`), root `docker-compose.dev.yml`, `docs/`.
+- Layout: `frontend/`, `backend/` (`src/` + `alembic/` + `Dockerfile.dev`), `demo/` (`seed_demo.py` + `rosters/`, runbook in `demo/README.md`), root `docker-compose.dev.yml` (dev) and `docker-compose.demo.yml` (demo + Cloudflare tunnel profile), `docs/`. Demo env templates: `backend/.env.demo.example`, `frontend/.env.demo.example`.
 - Root `.gitignore` ignores `.env`/`.env.*` except `.env.example`/`.env.test`. `backend/.env` exists (ignored) — never commit it.
 - Frontend landing page brands the app "Attendly"; docs still say "QR-Based Attendance System".
 
@@ -14,6 +14,7 @@ FastAPI backend (18 feature slices, 21 models, 25 Alembic revisions) + SvelteKit
 ```bash
 docker compose -f docker-compose.dev.yml up --build          # API :8000, Postgres :5432, frontend :5173, migrations auto-run
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test  # backend suite in Docker
+docker compose -f docker-compose.demo.yml --profile tunnel up --build  # demo stack + Cloudflare tunnel (HTTPS URL in tunnel logs)
 ```
 
 Manual backend (must run from `backend/` — imports are `features.*`, not `src.features.*`):

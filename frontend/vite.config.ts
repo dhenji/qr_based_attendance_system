@@ -4,6 +4,11 @@ import { defineConfig } from 'vitest/config';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { svelteTesting } from '@testing-library/svelte/vite';
 
+// Dev proxy target. Defaults to localhost for manual dev; in Docker Compose set
+// VITE_API_PROXY_TARGET=http://api:8000 so the frontend container can reach
+// the api service. Read at config-load time (Node), not in the browser.
+const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000';
+
 // Optional later upgrade to full offline precaching:
 //   npm i -D vite-plugin-pwa
 // and add VitePWA() here + a post-build script (see docs/architecture/frontend-architecture.md).
@@ -12,6 +17,22 @@ export default defineConfig({
 	// Vite only exposes VITE_* to the browser by default, so without this the
 	// PUBLIC_* values never reach the bundle and mock mode can never engage.
 	envPrefix: ['VITE_', 'PUBLIC_'],
+	// Dev-only proxy: lets a single tunneled frontend origin (e.g. a
+	// Cloudflare quick tunnel) reach the backend without a second tunnel or
+	// CORS changes. Backend stays on localhost and is never exposed directly.
+	server: {
+		// Allow the dev server to be reached through a tunnel (e.g. Cloudflare
+		// quick tunnels) in addition to localhost. Dev-only; not for production.
+		allowedHosts: ['.trycloudflare.com', 'localhost', '127.0.0.1'],
+		proxy: {
+			'/api': {
+				target: API_PROXY_TARGET,
+				changeOrigin: true,
+				xfwd: true,
+				headers: { origin: 'http://localhost:5173' }
+			}
+		}
+	},
 	build: {
 		rollupOptions: {
 			output: {

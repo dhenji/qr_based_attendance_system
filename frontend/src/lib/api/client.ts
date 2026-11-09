@@ -8,7 +8,13 @@ import { endpoints } from './endpoints';
 // Warns once in dev when PUBLIC_API_URL is unset so a misconfigured
 // deployment surfaces early instead of silently hitting localhost.
 const RAW_BASE_URL = import.meta.env.PUBLIC_API_URL as string | undefined;
-const BASE_URL = (RAW_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+// When PUBLIC_API_URL is unset, fall back to the current origin in the browser
+// so the same build works behind a tunnel/proxy (single origin) without
+// editing .env per run. Outside the browser (SSR/tests) keep localhost.
+const BASE_URL = (
+	RAW_BASE_URL ||
+	(typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000')
+).replace(/\/+$/, '');
 
 if (!RAW_BASE_URL && import.meta.env.DEV) {
 	console.warn('[api] PUBLIC_API_URL is unset — falling back to http://localhost:8000');
