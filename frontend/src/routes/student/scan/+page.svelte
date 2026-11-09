@@ -14,6 +14,7 @@
 	} from '$lib/features/liveness/service';
 	import { generateEmbeddingFromLandmarks, serializeFaceEmbedding } from '$lib/shared/utils/face-embedding';
 	import { acquireGpsFix } from '$lib/features/liveness/gps';
+	import { queryPermissionStatus } from '$lib/shared/location/manager';
 	import {
 		cacheSession,
 		flushQueue,
@@ -73,6 +74,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let gpsAbortController: AbortController | null = $state(null);
 	let gpsFix = $state<{ lat: number; lng: number; accuracy: number } | null>(null);
 	let gpsStatus = $state<'locating' | 'high' | 'moderate' | 'low' | 'unavailable' | 'permission'>('locating');
+	let gpsPermissionStatus = $state<'granted' | 'denied' | 'prompt' | 'unsupported'>('unsupported');
 	let gpsDistanceMeters = $state<number | null>(null);
 	let gpsError = $state<string | null>(null);
 	let countdown = $state(0);
@@ -159,6 +161,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 	onMount(() => {
 		void initFaceModel();
+		void queryPermissionStatus().then((s) => (gpsPermissionStatus = s));
 		const codeParam = page.url.searchParams.get('code');
 		if (codeParam) {
 			void (async () => {
@@ -587,11 +590,15 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 		let reachedSubmit = false;
 		try {
+			// Mirror the backend fallback (AttendanceService.submit_scan treats
+			// a non-positive hard floor as 1000 m) so client gating never
+			// disagrees with the server.
+			const rawHardFloor = session?.geofence?.gpsHardFloorMeters;
 			const effectiveHardFloor =
-				session && Number.isFinite(session.geofence.gpsHardFloorMeters) && session.geofence.gpsHardFloorMeters > 0
-					? session.geofence.gpsHardFloorMeters
-					: null;
-			if (gps && effectiveHardFloor !== null && gps.accuracy > effectiveHardFloor) {
+				Number.isFinite(rawHardFloor) && (rawHardFloor as number) > 0
+					? (rawHardFloor as number)
+					: 1000;
+			if (gps && gps.accuracy > effectiveHardFloor) {
 				rejectionReason = toScanMessage(
 					new APIError('gps_accuracy_too_low', ''),
 					'Unable to submit the attendance scan'
@@ -978,6 +985,11 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			</div>
 			<section class="card">
 				<h2 class="section-title">Location Check</h2>
+				{#if gpsPermissionStatus === 'prompt'}
+					<p class="footnote" role="status">Your browser will ask for location permission. Allow it to verify your attendance.</p>
+				{:else if gpsPermissionStatus === 'denied'}
+					<p class="error" role="alert">Location permission is blocked. Enable it in your browser settings, then retry.</p>
+				{/if}
 				{#if locatingGps}
 					<p class="footnote">Acquiring your location…</p>
 				{:else if gpsStatus === 'permission'}

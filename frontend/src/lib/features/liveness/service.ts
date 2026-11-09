@@ -5,7 +5,6 @@ import type {
 	SessionVerificationResponse,
 } from '$lib/api/endpoints';
 import type { LivenessEvidence } from '$lib/shared/types';
-import { isWithinGeofence } from '$lib/shared/utils/geo';
 
 export interface SessionVerification {
 	sessionId: number;
@@ -100,16 +99,6 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		isRemote: response.is_remote,
 		geofenceEnabled: response.geofence_enabled,
 	};
-};
-
-export const validateGPS = (
-	studentLat: number,
-	studentLng: number,
-	centerLat: number,
-	centerLng: number,
-	radiusMetres: number
-) => {
-	return isWithinGeofence(studentLat, studentLng, centerLat, centerLng, radiusMetres);
 };
 
 export const submitAttendanceScan = async (input: {

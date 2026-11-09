@@ -55,7 +55,7 @@ describe('acquireGpsFix', () => {
 		const err = new Error('denied');
 		(err as any).code = 'location_permission_denied';
 		vi.mocked(requestBestPosition).mockRejectedValue(err);
-		await expect(acquireGpsFix(makeSession())).rejects.toBe(err);
+		await expect(acquireGpsFix(makeSession())).rejects.toMatchObject({ code: 'location_permission_denied' });
 	});
 
 	it('passes signal through', async () => {

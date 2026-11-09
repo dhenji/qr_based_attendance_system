@@ -172,6 +172,28 @@ class Settings(BaseSettings):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_gps_thresholds(self) -> "Settings":
+        # Keep the three GPS thresholds internally consistent so a
+        # misconfigured deployment fails fast instead of silently producing
+        # an unreachable review band or a neutralised geofence.
+        if self.gps_hard_floor_meters <= 0:
+            raise ValueError("gps_hard_floor_meters must be > 0")
+        if self.gps_review_accuracy_threshold <= 0:
+            raise ValueError("gps_review_accuracy_threshold must be > 0")
+        if self.gps_review_accuracy_threshold > self.gps_hard_floor_meters:
+            raise ValueError(
+                "gps_review_accuracy_threshold must be <= gps_hard_floor_meters"
+            )
+        if self.geofence_uncertainty_cap_meters <= 0:
+            raise ValueError("geofence_uncertainty_cap_meters must be > 0")
+        if self.geofence_uncertainty_cap_meters > self.gps_review_accuracy_threshold:
+            raise ValueError(
+                "geofence_uncertainty_cap_meters must be <= gps_review_accuracy_threshold"
+            )
+
+        return self
+
 
 @lru_cache
 def get_settings() -> Settings:
