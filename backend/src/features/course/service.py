@@ -103,7 +103,6 @@ from features.course.constants import (
     DURATION_MAX,
     DURATION_MIN,
     NAME_MAX_LENGTH,
-    UNITS_MAX,
     UNITS_MIN,
 )
 
@@ -270,10 +269,10 @@ def _validate_course_row(row: _CourseRow) -> str | None:
         units = int(row.units.strip())
     except ValueError:
         return f"invalid units for course {row.course_code}"
-    if not (UNITS_MIN <= units <= UNITS_MAX):
+    if units < UNITS_MIN:
         return (
             f"invalid units for course {row.course_code}: "
-            f"must be {UNITS_MIN}-{UNITS_MAX}"
+            f"must be at least {UNITS_MIN}"
         )
     try:
         duration = float(row.session_duration_hours.strip())
