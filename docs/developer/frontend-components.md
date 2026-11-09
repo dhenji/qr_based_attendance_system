@@ -7,6 +7,7 @@ components live under their slice's `components/` directory.
 
 | Component | Purpose |
 |---|---|
+| `AcademicYearPicker` | Native-select academic-year picker (`YYYY-YYYY`) |
 | `AppIcon` | Icon wrapper |
 | `ClassroomMapPicker` | Leaflet map picker with radius/GPS controls |
 | `ConfirmExportDialog` | Export confirmation dialog |

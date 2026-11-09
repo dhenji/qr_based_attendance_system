@@ -57,6 +57,7 @@ let radiusCircle: any = null;
 	}
 
 	function placeMarker(m: any, L: any, latitude: number, longitude: number) {
+		if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 		if (marker) {
 			marker.setLatLng([latitude, longitude]);
 		} else {
@@ -209,9 +210,15 @@ let radiusCircle: any = null;
 			shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 		});
 
-		const center: [number, number] =
-			lat !== null && lng !== null ? [lat, lng] : DEFAULT_CENTER;
-		const zoom = lat !== null && lng !== null ? DEFAULT_ZOOM : 4;
+		const hasPin =
+			lat !== null &&
+			lng !== null &&
+			Number.isFinite(lat) &&
+			Number.isFinite(lng);
+		const center: [number, number] = hasPin
+			? [lat as number, lng as number]
+			: DEFAULT_CENTER;
+		const zoom = hasPin ? DEFAULT_ZOOM : 4;
 
 		map = L.map(container, { keyboard: false }).setView(center, zoom);
 		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -219,7 +226,7 @@ let radiusCircle: any = null;
 			maxZoom: 19,
 		}).addTo(map);
 
-		if (lat !== null && lng !== null) placeMarker(map, L, lat, lng);
+		if (hasPin) placeMarker(map, L, lat as number, lng as number);
 
 		map.on('click', (e: any) => {
 			const { lat: la, lng: lo } = e.latlng;
@@ -278,7 +285,14 @@ let radiusCircle: any = null;
 
 	// React to external lat/lng changes (e.g. "use my location").
 	$effect(() => {
-		if (map && leaflet && lat !== null && lng !== null) {
+		if (
+			map &&
+			leaflet &&
+			lat !== null &&
+			lng !== null &&
+			Number.isFinite(lat) &&
+			Number.isFinite(lng)
+		) {
 			// Only re-place if marker missing or position differs notably
 			const ll = marker?.getLatLng?.();
 			if (!ll || Math.abs(ll.lat - lat) > 1e-9 || Math.abs(ll.lng - lng) > 1e-9) {

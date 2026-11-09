@@ -8,6 +8,7 @@
 		blankMeeting,
 		type MeetingDraft,
 	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
+	import AcademicYearPicker from '$lib/components/AcademicYearPicker.svelte';
 	import { findDuplicateMeetings, findOverlappingMeetings, totalExpectedSessions, weeklyHoursBreakdown, weeklySessionCount } from '$lib/shared/utils/schedule';
 	import {
 		adminOfferingsState,
@@ -64,6 +65,7 @@
 
 	let formOpen = $state(false);
 	let formError = $state<string | null>(null);
+	let fieldErrors = $state<Record<string, string>>({});
 	let formBusy = $state(false);
 	// 409 rescue: the conflicting offering may sit under a different year
 	// level than the one being scheduled, so link straight to it.
@@ -280,6 +282,7 @@
 
 	const openCreate = async () => {
 		formError = null;
+		fieldErrors = {};
 		conflictOffering = null;
 		meetingErrors = [];
 		m_course_id = '';
@@ -431,6 +434,7 @@
 
 	const submitForm = async (openAfter = false) => {
 		formError = null;
+		fieldErrors = {};
 		conflictOffering = null;
 		meetingErrors = [];
 		formBusy = true;
@@ -458,6 +462,12 @@
 				default_late_window_minutes: m_late,
 			});
 			if (!parsed.success) {
+				const errs: Record<string, string> = {};
+				for (const issue of parsed.error.issues) {
+					const key = issue.path.join('.') || '_';
+					if (!errs[key]) errs[key] = issue.message;
+				}
+				fieldErrors = errs;
 				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
 				return;
 			}
@@ -838,28 +848,34 @@
 				</p>
 			{/if}
 			<div class="form">
+				<h3 class="section-title">Identity</h3>
 				<div class="grid2">
-					<label>Course
-						<select class="input" bind:value={m_course_id}>
+					<label>Course *
+						<select class="input" bind:value={m_course_id} disabled={formBusy} aria-required="true">
 							<option value="">Pick a course…</option>
 							{#each courseOptions as c (c.id)}
 								<option value={c.id}>{c.courseCode} — {c.courseName}</option>
 							{/each}
 						</select>
+						{#if fieldErrors.course_id}<p class="field-error">{fieldErrors.course_id}</p>{/if}
 					</label>
-					<label>Academic year<input class="input" bind:value={m_academic_year} placeholder="2025-2026" /></label>
+					<label>Academic year *
+						<AcademicYearPicker bind:value={m_academic_year} disabled={formBusy} />
+						{#if fieldErrors.academic_year}<p class="field-error">{fieldErrors.academic_year}</p>{/if}
+					</label>
 				</div>
 				<div class="grid2">
-					<label>Program
-						<select class="input" bind:value={m_program_id} onchange={changeModalProgram}>
+					<label>Program *
+						<select class="input" bind:value={m_program_id} onchange={changeModalProgram} disabled={formBusy} aria-required="true">
 							<option value="">Pick a program…</option>
 							{#each programOptions as p (p.id)}
 								<option value={p.id}>{p.code} — {p.name}</option>
 							{/each}
 						</select>
+						{#if fieldErrors.program_id}<p class="field-error">{fieldErrors.program_id}</p>{/if}
 					</label>
-					<label>Year level
-						<select class="input" bind:value={m_year_level_id} disabled={!m_program_id} onchange={changeModalYear}>
+					<label>Year level *
+						<select class="input" bind:value={m_year_level_id} disabled={!m_program_id || formBusy} onchange={changeModalYear} aria-required="true">
 							<option value="">Pick a year…</option>
 							{#each m_yearOptions as y (y.id)}
 								<option value={y.id} disabled={y.terms.length === 0}>
@@ -867,15 +883,17 @@
 								</option>
 							{/each}
 						</select>
+						{#if fieldErrors.year_level_id}<p class="field-error">{fieldErrors.year_level_id}</p>{/if}
 					</label>
 				</div>
-				<label>Semester
-					<select class="input" bind:value={m_semester} aria-label="Pick a semester" disabled={!m_year_level_id} title={!m_year_level_id ? 'Pick a year level first' : undefined}>
+				<label>Semester *
+					<select class="input" bind:value={m_semester} aria-label="Pick a semester" disabled={!m_year_level_id || formBusy} title={!m_year_level_id ? 'Pick a year level first' : undefined} aria-required="true">
 						<option value="">{m_year_level_id ? 'Pick a term…' : 'Pick a year level first…'}</option>
 						{#each modalSemesterOptions as t (t.code)}
 							<option value={t.code}>{t.label}</option>
 						{/each}
 					</select>
+					{#if fieldErrors.semester}<p class="field-error">{fieldErrors.semester}</p>{/if}
 				</label>
 				<p class="hint">Meetings per week: {modalSessionsPerWeek} (counted automatically — one per meeting day).</p>
 				{#if m_semester && modalTerm}
@@ -887,7 +905,9 @@
 					<p class="hint">Pick a semester to see the expected session total.</p>
 				{/if}
 				<p class="hint">One offering per course + program + term + academic year — the year level doesn't disambiguate, so re-offering the same course in the same term fails as a duplicate.</p>
-				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} />
+
+				<h3 class="section-title">Schedule</h3>
+				<MeetingRowsEditor bind:rows={meetings} rowErrors={meetingErrors} busy={formBusy} showMap={true} />
 				{#if overlapNotes.length > 0}
 					{#each overlapNotes as note (note)}
 						<p class="warn" role="note">
@@ -904,9 +924,11 @@
 						<p class="error" role="alert">{modalBreakdown.scheduled}h scheduled of {modalBreakdown.limit}h weekly requirement ({modalCourse?.courseCode} · {modalBreakdown.remaining}h short) across {meetings.length} {meetings.length === 1 ? 'meeting' : 'meetings'}.</p>
 					{/if}
 				{/if}
+
+				<h3 class="section-title">Attendance windows</h3>
 				<div class="grid2">
-					<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={m_present} /></label>
-					<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={m_late} /></label>
+					<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={m_present} disabled={formBusy} /></label>
+					<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={m_late} disabled={formBusy} /></label>
 				</div>
 				<p class="hint">Course, program, year, semester, and academic year are identity — they cannot be changed after creation.</p>
 			</div>
@@ -1307,11 +1329,35 @@
 		margin: 0;
 	}
 
+	.section-title {
+		font-size: 0.875rem;
+		font-weight: 700;
+		color: var(--text-strong);
+		margin: 0.5rem 0 0;
+		padding-top: 0.5rem;
+		border-top: 1px solid var(--divider);
+	}
+
+	.section-title:first-child {
+		border-top: none;
+		padding-top: 0;
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
+	}
+
 	.modal-actions {
 		display: flex;
 		gap: 0.75rem;
 		justify-content: flex-end;
 		margin-top: 1.5rem;
+		position: sticky;
+		bottom: 0;
+		background: var(--bg-card);
+		padding-top: 0.75rem;
 	}
 
 	.table-wrap {

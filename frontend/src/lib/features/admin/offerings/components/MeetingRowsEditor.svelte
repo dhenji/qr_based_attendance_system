@@ -27,6 +27,7 @@
 
 <script lang="ts">
 	import DayPicker from '$lib/features/admin/offerings/components/DayPicker.svelte';
+	import ClassroomMapPicker from '$lib/components/ClassroomMapPicker.svelte';
 
 	// One row per meeting: each row has its own days, type, time, and room —
 	// e.g. a lecture on Monday/Wednesday plus a laboratory Friday, or two
@@ -43,6 +44,7 @@
 		busy?: boolean;
 		maxRows?: number;
 		addLabel?: string;
+		showMap?: boolean;
 	}
 
 	let {
@@ -51,6 +53,7 @@
 		busy = false,
 		maxRows = 7,
 		addLabel = 'Add another meeting',
+		showMap = false,
 	}: Props = $props();
 
 	const removeAt = (index: number) => {
@@ -65,6 +68,18 @@
 		const lastType = rows.length > 0 ? rows[rows.length - 1].type : 'lecture';
 		rows = [...rows, blankMeeting(lastType)];
 	};
+
+	const toNumber = (raw: string): number | null => {
+		const v = Number(raw.trim());
+		return Number.isFinite(v) ? v : null;
+	};
+
+	let mapOpen = $state<boolean[]>([]);
+	$effect(() => {
+		if (mapOpen.length !== rows.length) {
+			mapOpen = rows.map((_, i) => mapOpen[i] ?? (i === 0 && showMap));
+		}
+	});
 </script>
 
 <div class="field">
@@ -112,6 +127,36 @@
 			<label>Latitude (optional)<input class="input" inputmode="decimal" bind:value={m.lat} placeholder="14.5995" disabled={busy} /></label>
 			<label>Longitude (optional)<input class="input" inputmode="decimal" bind:value={m.lng} placeholder="120.9842" disabled={busy} /></label>
 		</div>
+		{#if showMap}
+			<button
+				type="button"
+				class="link"
+				disabled={busy}
+				onclick={() => {
+					mapOpen[i] = !mapOpen[i];
+					mapOpen = [...mapOpen];
+				}}
+			>
+				{mapOpen[i] ? 'Hide location map' : 'Set location on map'}
+			</button>
+			{#if mapOpen[i]}
+				<div class="map-wrap">
+					<ClassroomMapPicker
+						lat={toNumber(m.lat)}
+						lng={toNumber(m.lng)}
+						onChange={(la, lo) => {
+							m.lat = String(la);
+							m.lng = String(lo);
+						}}
+						onClear={() => {
+							m.lat = '';
+							m.lng = '';
+						}}
+						height="260px"
+					/>
+				</div>
+			{/if}
+		{/if}
 		{#if m.type === 'lab'}
 			<p class="hint">Laboratory sessions enforce the geofence: opening one without coordinates fails.</p>
 		{/if}
@@ -255,6 +300,10 @@
 
 	.btn-secondary:hover:not(:disabled) {
 		background: var(--divider);
+	}
+
+	.map-wrap {
+		margin-top: 0.5rem;
 	}
 
 	@media (max-width: 640px) {
