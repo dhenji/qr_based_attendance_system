@@ -19,6 +19,7 @@
 		blankMeeting,
 		type MeetingDraft,
 	} from '$lib/features/admin/offerings/components/MeetingRowsEditor.svelte';
+	import AcademicYearPicker from '$lib/components/AcademicYearPicker.svelte';
 	import { DEFAULT_TERM_WEEKS } from '$lib/shared/constants/terms';
 	import {
 		findDuplicateMeetings,
@@ -553,7 +554,9 @@
 							{/each}
 						</select>
 					</label>
-					<label>Academic year<input class="input" bind:value={f_academic_year} placeholder="2025-2026" /></label>
+					<label>Academic year
+						<AcademicYearPicker bind:value={f_academic_year} disabled={formBusy} />
+					</label>
 				</div>
 				<div class="grid2">
 					<label>Year level
