@@ -14,7 +14,6 @@ NAME_MIN_LENGTH: int = 1
 NAME_MAX_LENGTH: int = 100
 
 UNITS_MIN: int = 1
-UNITS_MAX: int = 6
 
 DURATION_MIN: float = 0.5
 DURATION_MAX: float = 8.0

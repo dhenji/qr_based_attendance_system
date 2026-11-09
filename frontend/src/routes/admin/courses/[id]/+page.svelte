@@ -16,7 +16,9 @@
 		setCourseActive,
 		updateCourse,
 	} from '$lib/features/admin/courses/service';
-	import { courseUpdateSchema } from '$lib/features/admin/courses/schema';
+	import { APIError } from '$lib/api/client';
+import { courseUpdateSchema } from '$lib/features/admin/courses/schema';
+import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 	import {
 		enrichOfferings,
 		listOfferings,
@@ -49,6 +51,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 	let e_units = $state('');
 	let e_duration = $state('');
 	let editError = $state<string | null>(null);
+	let editFieldErrors = $state<Record<string, string>>({});
 	let editBusy = $state(false);
 
 	let archiveBusy = $state(false);
@@ -105,6 +108,7 @@ import { sessionMixLabel } from '$lib/shared/types';
 	const openEdit = () => {
 		if (!course) return;
 		editError = null;
+		editFieldErrors = {};
 		e_code = course.courseCode;
 		e_name = course.courseName;
 		e_units = String(course.units);
@@ -112,9 +116,14 @@ import { sessionMixLabel } from '$lib/shared/types';
 		editOpen = true;
 	};
 
+	const clearEditFieldError = (field: string) => {
+		if (editFieldErrors[field]) editFieldErrors = { ...editFieldErrors, [field]: '' };
+	};
+
 	const submitEdit = async () => {
 		if (!course) return;
 		editError = null;
+		editFieldErrors = {};
 		editBusy = true;
 		try {
 			const parsed = courseUpdateSchema.safeParse({
@@ -124,7 +133,16 @@ import { sessionMixLabel } from '$lib/shared/types';
 				session_duration_hours: e_duration,
 			});
 			if (!parsed.success) {
-				editError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				const fe: Record<string, string> = {};
+				for (const issue of parsed.error.issues) {
+					const key = String(issue.path[0] ?? '');
+					if (key && !fe[key]) fe[key] = issue.message;
+				}
+				editFieldErrors = fe;
+				editError =
+					Object.keys(fe).length > 0
+						? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+						: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 				return;
 			}
 			await updateCourse(course.id, {
@@ -133,11 +151,20 @@ import { sessionMixLabel } from '$lib/shared/types';
 				units: parsed.data.units,
 				session_duration_hours: parsed.data.session_duration_hours,
 			});
+			editFieldErrors = {};
 			editOpen = false;
 			await refreshAdminCourseDetail(course.id);
 			notifyEntityChanged('courses');
 		} catch (e: unknown) {
-			editError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+			if (e instanceof APIError && e.code === 'validation_error') {
+				editError =
+					'Some information needs your attention. Review the highlighted fields and correct the indicated errors.';
+			} else {
+				editError = friendlyActionError(
+					e,
+					'We couldn’t save the course due to an unexpected error. Please try again.'
+				);
+			}
 		} finally {
 			editBusy = false;
 		}
@@ -334,22 +361,102 @@ import { sessionMixLabel } from '$lib/shared/types';
 			aria-modal="true"
 			aria-labelledby="course-edit-title"
 			tabindex="-1"
-			use:trapFocus={{ onEscape: () => (editOpen = false) }}
+			use:trapFocus={{ onEscape: () => (editBusy ? undefined : (editOpen = false)) }}
 		>
 			<h2 id="course-edit-title" class="modal-title">Edit course</h2>
 			{#if editError}
-				<p class="error" role="alert">{editError}</p>
+				<p class="error form-error" role="alert">{editError}</p>
 			{/if}
 			<div class="form">
-				<div class="grid2">
-					<label>Code<input class="input" bind:value={e_code} /></label>
-					<label>Units (1–6)<input class="input" inputmode="numeric" bind:value={e_units} /></label>
-				</div>
-				<label>Name<input class="input" bind:value={e_name} /></label>
-				<label>Default session length, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={e_duration} /></label>
+				<section class="form-section">
+					<h3 class="form-section-title">Course details</h3>
+					<div class="grid2">
+						<label>
+							Course code *
+							<input
+								class="input"
+								class:invalid={!!editFieldErrors.course_code}
+								bind:value={e_code}
+								maxlength="20"
+								aria-required="true"
+								aria-invalid={!!editFieldErrors.course_code}
+								aria-describedby="edit-course-code-help"
+								oninput={() => clearEditFieldError('course_code')}
+							/>
+							{#if editFieldErrors.course_code}
+								<p class="field-error" role="alert">{editFieldErrors.course_code}</p>
+							{:else}
+								<p class="hint" id="edit-course-code-help">2–20 characters. Stored in uppercase.</p>
+							{/if}
+						</label>
+						<label>
+							Units *
+							<input
+								class="input"
+								class:invalid={!!editFieldErrors.units}
+								type="text"
+								inputmode="numeric"
+								bind:value={e_units}
+								min="1"
+								step="1"
+								aria-required="true"
+								aria-invalid={!!editFieldErrors.units}
+								aria-describedby="edit-course-units-help"
+								oninput={() => clearEditFieldError('units')}
+							/>
+							{#if editFieldErrors.units}
+								<p class="field-error" role="alert">{editFieldErrors.units}</p>
+							{:else}
+								<p class="hint" id="edit-course-units-help">Whole number of credit units (1 or more). Example: 3 units = 3 hours of scheduled class time per week.</p>
+							{/if}
+						</label>
+					</div>
+					<label>
+						Course name *
+						<input
+							class="input"
+							class:invalid={!!editFieldErrors.course_name}
+							bind:value={e_name}
+							maxlength="100"
+							aria-required="true"
+							aria-invalid={!!editFieldErrors.course_name}
+							aria-describedby="edit-course-name-help"
+							oninput={() => clearEditFieldError('course_name')}
+						/>
+						{#if editFieldErrors.course_name}
+							<p class="field-error" role="alert">{editFieldErrors.course_name}</p>
+						{:else}
+							<p class="hint" id="edit-course-name-help">Up to 100 characters.</p>
+						{/if}
+					</label>
+				</section>
+				<section class="form-section">
+					<h3 class="form-section-title">Credit &amp; session defaults</h3>
+					<label>
+						Default session length (hours) *
+						<input
+							class="input"
+							class:invalid={!!editFieldErrors.session_duration_hours}
+							inputmode="decimal"
+							bind:value={e_duration}
+							min="0.5"
+							max="8"
+							step="0.5"
+							aria-required="true"
+							aria-invalid={!!editFieldErrors.session_duration_hours}
+							aria-describedby="edit-course-duration-help"
+							oninput={() => clearEditFieldError('session_duration_hours')}
+						/>
+						{#if editFieldErrors.session_duration_hours}
+							<p class="field-error" role="alert">{editFieldErrors.session_duration_hours}</p>
+						{:else}
+							<p class="hint" id="edit-course-duration-help">Typical length of one class session (0.5–8 hours). Used for attendance windows and fallback session expiry.</p>
+						{/if}
+					</label>
+				</section>
 			</div>
 			<div class="modal-actions">
-				<button class="btn btn-ghost" onclick={() => (editOpen = false)}>Cancel</button>
+				<button class="btn btn-ghost" disabled={editBusy} onclick={() => (editOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" aria-busy={editBusy} disabled={editBusy} onclick={submitEdit}>
 					{editBusy ? 'Saving…' : 'Save'}
 				</button>
@@ -558,6 +665,35 @@ import { sessionMixLabel } from '$lib/shared/types';
 		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
+	}
+
+	.form-error {
+		margin-bottom: 0.5rem;
+	}
+
+	.form-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+	}
+
+	.form-section-title {
+		margin: 0;
+		font-size: 0.8125rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
 	}
 
 	.btn {

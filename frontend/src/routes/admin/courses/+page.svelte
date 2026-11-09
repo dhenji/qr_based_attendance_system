@@ -25,7 +25,8 @@
 	import { notifyEntityChanged, subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
-	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
+	import { APIError } from '$lib/api/client';
+import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	// Course template list: standalone reusable templates (D44) — no program,
 	// scheduling, or classroom columns (those live on offerings). The list
@@ -42,6 +43,7 @@
 	let formOpen = $state(false);
 	let editing = $state<AdminCourse | null>(null);
 	let formError = $state<string | null>(null);
+	let fieldErrors = $state<Record<string, string>>({});
 	let formBusy = $state(false);
 
 	let deleteTarget = $state<AdminCourse | null>(null);
@@ -141,6 +143,7 @@
 	const openCreate = () => {
 		editing = null;
 		formError = null;
+		fieldErrors = {};
 		f_code = '';
 		f_name = '';
 		f_units = '';
@@ -151,6 +154,7 @@
 	const openEdit = (c: AdminCourse) => {
 		editing = c;
 		formError = null;
+		fieldErrors = {};
 		f_code = c.courseCode;
 		f_name = c.courseName;
 		f_units = String(c.units);
@@ -158,8 +162,13 @@
 		formOpen = true;
 	};
 
+	const clearFieldError = (field: string) => {
+		if (fieldErrors[field]) fieldErrors = { ...fieldErrors, [field]: '' };
+	};
+
 	const submitForm = async () => {
 		formError = null;
+		fieldErrors = {};
 		formBusy = true;
 		try {
 			if (editing) {
@@ -170,7 +179,16 @@
 					session_duration_hours: f_duration,
 				});
 				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+					const fe: Record<string, string> = {};
+					for (const issue of parsed.error.issues) {
+						const key = String(issue.path[0] ?? '');
+						if (key && !fe[key]) fe[key] = issue.message;
+					}
+					fieldErrors = fe;
+					formError =
+						Object.keys(fe).length > 0
+							? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+							: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 					return;
 				}
 				await updateCourse(editing.id, {
@@ -187,7 +205,16 @@
 					session_duration_hours: f_duration,
 				});
 				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+					const fe: Record<string, string> = {};
+					for (const issue of parsed.error.issues) {
+						const key = String(issue.path[0] ?? '');
+						if (key && !fe[key]) fe[key] = issue.message;
+					}
+					fieldErrors = fe;
+					formError =
+						Object.keys(fe).length > 0
+							? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+							: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 					return;
 				}
 				await createCourse({
@@ -197,11 +224,20 @@
 					session_duration_hours: parsed.data.session_duration_hours,
 				});
 			}
+			fieldErrors = {};
 			formOpen = false;
 			await refreshAdminCourses();
 			notifyEntityChanged('courses');
 		} catch (e: unknown) {
-			formError = friendlyActionError(e, 'Save failed. Please try again.');
+			if (e instanceof APIError && e.code === 'validation_error') {
+				formError =
+					'Some information needs your attention. Review the highlighted fields and correct the indicated errors.';
+			} else {
+				formError = friendlyActionError(
+					e,
+					'We couldn’t save the course due to an unexpected error. Please try again.'
+				);
+			}
 		} finally {
 			formBusy = false;
 		}
@@ -384,23 +420,107 @@
 			aria-modal="true"
 			aria-labelledby="course-form-title"
 			tabindex="-1"
-			use:trapFocus={{ onEscape: () => (formOpen = false) }}
+			use:trapFocus={{ onEscape: () => (formBusy ? undefined : (formOpen = false)) }}
 		>
 			<h2 id="course-form-title" class="modal-title">{editing ? 'Edit course' : 'Add course'}</h2>
 			{#if formError}
-				<p class="error" role="alert">{formError}</p>
+				<p class="error form-error" role="alert">{formError}</p>
 			{/if}
 			<div class="form">
-				<div class="grid2">
-					<label>Code<input class="input" bind:value={f_code} placeholder="CS101" /></label>
-					<label>Units (1–6)<input class="input" inputmode="numeric" bind:value={f_units} placeholder="3" /></label>
-				</div>
-				<label>Name<input class="input" bind:value={f_name} placeholder="Software Engineering 1" /></label>
-				<label>Default session length, hours (0.5–8)<input class="input" inputmode="decimal" bind:value={f_duration} placeholder="1.5" /></label>
-				<p class="hint">Attendance window budget and fallback session length — actual meeting lengths are set per offering meeting and must total within the units limit per week. Program, schedule, and classroom attach later via offerings. Lecture/laboratory sessions are scheduled per offering, so one course can mix both.</p>
+				<section class="form-section">
+					<h3 class="form-section-title">Course details</h3>
+					<div class="grid2">
+						<label>
+							Course code *
+							<input
+								class="input"
+								class:invalid={!!fieldErrors.course_code}
+								bind:value={f_code}
+								placeholder="CS101"
+								maxlength="20"
+								aria-required="true"
+								aria-invalid={!!fieldErrors.course_code}
+								aria-describedby="course-code-help"
+								oninput={() => clearFieldError('course_code')}
+							/>
+							{#if fieldErrors.course_code}
+								<p class="field-error" role="alert">{fieldErrors.course_code}</p>
+							{:else}
+								<p class="hint" id="course-code-help">2–20 characters. Stored in uppercase.</p>
+							{/if}
+						</label>
+						<label>
+							Units *
+							<input
+								class="input"
+								class:invalid={!!fieldErrors.units}
+								type="text"
+								inputmode="numeric"
+								bind:value={f_units}
+								placeholder="3"
+								min="1"
+								step="1"
+								aria-required="true"
+								aria-invalid={!!fieldErrors.units}
+								aria-describedby="course-units-help"
+								oninput={() => clearFieldError('units')}
+							/>
+							{#if fieldErrors.units}
+								<p class="field-error" role="alert">{fieldErrors.units}</p>
+							{:else}
+								<p class="hint" id="course-units-help">Whole number of credit units (1 or more). Example: 3 units = 3 hours of scheduled class time per week.</p>
+							{/if}
+						</label>
+					</div>
+					<label>
+						Course name *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.course_name}
+							bind:value={f_name}
+							placeholder="Software Engineering 1"
+							maxlength="100"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.course_name}
+							aria-describedby="course-name-help"
+							oninput={() => clearFieldError('course_name')}
+						/>
+						{#if fieldErrors.course_name}
+							<p class="field-error" role="alert">{fieldErrors.course_name}</p>
+						{:else}
+							<p class="hint" id="course-name-help">Up to 100 characters.</p>
+						{/if}
+					</label>
+				</section>
+				<section class="form-section">
+					<h3 class="form-section-title">Credit &amp; session defaults</h3>
+					<label>
+						Default session length (hours) *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.session_duration_hours}
+							inputmode="decimal"
+							bind:value={f_duration}
+							placeholder="1.5"
+							min="0.5"
+							max="8"
+							step="0.5"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.session_duration_hours}
+							aria-describedby="course-duration-help"
+							oninput={() => clearFieldError('session_duration_hours')}
+						/>
+						{#if fieldErrors.session_duration_hours}
+							<p class="field-error" role="alert">{fieldErrors.session_duration_hours}</p>
+						{:else}
+							<p class="hint" id="course-duration-help">Typical length of one class session (0.5–8 hours). Used for attendance windows and fallback session expiry.</p>
+						{/if}
+					</label>
+					<p class="hint">Attendance window budget and fallback session length — actual meeting lengths are set per offering meeting and must total within the units requirement per week. Program, schedule, and classroom attach later via offerings. Lecture/laboratory sessions are scheduled per offering, so one course can mix both.</p>
+				</section>
 			</div>
 			<div class="modal-actions">
-				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
+				<button class="btn btn-ghost" disabled={formBusy} onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-course" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
 				</button>
@@ -641,6 +761,35 @@
 		color: var(--danger);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
+	}
+
+	.form-error {
+		margin-bottom: 0.5rem;
+	}
+
+	.form-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+	}
+
+	.form-section-title {
+		margin: 0;
+		font-size: 0.8125rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
 	}
 
 	.btn {

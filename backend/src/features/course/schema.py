@@ -31,7 +31,6 @@ from features.course.constants import (
     SCHEDULE_DAYS_MIN_LENGTH,
     SESSIONS_PER_WEEK_MAX,
     SESSIONS_PER_WEEK_MIN,
-    UNITS_MAX,
     UNITS_MIN,
     WINDOW_MINUTES_MAX,
     WINDOW_MINUTES_MIN,
@@ -41,7 +40,7 @@ from features.course.constants import (
 class CourseCreate(BaseModel):
     course_code: str = Field(min_length=CODE_MIN_LENGTH, max_length=CODE_MAX_LENGTH)
     course_name: str = Field(min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH)
-    units: int = Field(ge=UNITS_MIN, le=UNITS_MAX)
+    units: int = Field(ge=UNITS_MIN)
     session_duration_hours: float = Field(ge=DURATION_MIN, le=DURATION_MAX)
 
     @field_validator("course_code")
@@ -70,7 +69,7 @@ class CourseUpdate(BaseModel):
     course_name: str | None = Field(
         default=None, min_length=NAME_MIN_LENGTH, max_length=NAME_MAX_LENGTH
     )
-    units: int | None = Field(default=None, ge=UNITS_MIN, le=UNITS_MAX)
+    units: int | None = Field(default=None, ge=UNITS_MIN)
     session_duration_hours: float | None = Field(
         default=None, ge=DURATION_MIN, le=DURATION_MAX
     )

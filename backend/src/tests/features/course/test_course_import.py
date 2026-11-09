@@ -76,7 +76,7 @@ def test_import_roster_creates_duplicates_and_errors() -> None:
         "CS101,Software Engineering 1,3,1.5\n"
         "CS101,Software Engineering 1,3,1.5\n"
         "CS102,,3,1.5\n"
-        "CS103,Bad Units,99,1.5\n"
+        "CS103,Bad Units,0,1.5\n"
     ).encode()
 
     result = _run(CourseService(session).import_roster(content=content, actor_id=None))
