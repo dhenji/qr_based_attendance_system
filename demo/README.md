@@ -94,3 +94,17 @@ and offers two ways forward:
 - **Select Different Start Time** — opens the date/time picker, prefilled
   with the current time. Confirm it and the session opens with that start,
   recorded on the session as an override with the reason you gave.
+
+## Demo with a public tunnel
+
+For external access during the demo, use `docker-compose.demo.yml` instead of
+the dev compose file:
+
+```bash
+docker compose -f docker-compose.demo.yml --profile tunnel up --build
+docker compose -f docker-compose.demo.yml logs -f tunnel   # https://*.trycloudflare.com
+```
+
+This uses `backend/.env.demo` (gitignored). Set a strong `JWT_SECRET` and SMTP
+values there if you want OTP codes delivered by email; otherwise the claim flow
+cannot complete with `DEBUG=false`. See `docs/developer/demo-tunnel.md`.

@@ -291,6 +291,19 @@ python demo/seed_demo.py   # idempotent: super_admin (super@attendly.demo / Demo
 
 then import `demo/rosters/students.csv`, `professors.csv`, and `enrollments.csv` as shown in the runbook.
 
+### Live demo via secure tunnel (optional)
+
+For external access during a demo, use the demo compose file (keeps `docker-compose.dev.yml` unchanged):
+
+```bash
+cp backend/.env.demo.example backend/.env.demo   # fill in JWT_SECRET (+ SMTP for OTP emails)
+docker compose -f docker-compose.demo.yml --profile tunnel up --build
+docker compose -f docker-compose.demo.yml logs -f tunnel   # share the https://*.trycloudflare.com URL
+```
+
+Only the frontend is exposed; `/api` is proxied by Vite to the local backend.
+See [`docs/developer/demo-tunnel.md`](docs/developer/demo-tunnel.md).
+
 ## Environment Variables
 
 Backend (`backend/.env.example`):
@@ -534,6 +547,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 - [`docs/developer/backend-setup.md`](docs/developer/backend-setup.md) — Docker Compose, env setup, Alembic, seed script
 - [`docs/developer/frontend-setup.md`](docs/developer/frontend-setup.md) — Node, runes mode, service worker
+- [`docs/developer/demo-tunnel.md`](docs/developer/demo-tunnel.md) — temporary secure tunnel for live demos (Cloudflare)
 - [`docs/developer/coding-standards.md`](docs/developer/coding-standards.md) — Python, TypeScript/Svelte, git conventions
 - [`docs/developer/feature-template.md`](docs/developer/feature-template.md) — vertical-slice checklist (model→router→frontend)
 
