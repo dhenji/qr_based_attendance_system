@@ -5,7 +5,6 @@ import type {
 	SessionVerificationResponse,
 } from '$lib/api/endpoints';
 import type { LivenessEvidence } from '$lib/shared/types';
-import { isWithinGeofence } from '$lib/shared/utils/geo';
 
 export interface SessionVerification {
 	sessionId: number;
@@ -14,7 +13,7 @@ export interface SessionVerification {
 	expiresAt: string;
 	// Center null = no classroom coordinates; both the server and the scan
 	// page skip the geofence check in that case.
-	geofence: { radius: number; lat: number | null; lng: number | null };
+	geofence: { radius: number; lat: number | null; lng: number | null; uncertaintyCapMeters: number; gpsHardFloorMeters: number; gpsReviewAccuracyThreshold: number };
 	programCode?: string;
 	yearLevelLabel?: string;
 	sessionType?: 'lecture' | 'lab';
@@ -74,7 +73,23 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		courseCode: response.course_code,
 		courseName: response.course_name,
 		expiresAt: response.expires_at,
-		geofence: response.geofence,
+		geofence: {
+			radius: response.geofence.radius,
+			lat: response.geofence.lat,
+			lng: response.geofence.lng,
+			uncertaintyCapMeters: ((): number => {
+				const raw = response.geofence.uncertainty_cap_meters ?? 50;
+				return Number.isFinite(raw) && raw > 0 ? raw : 50;
+			})(),
+			gpsHardFloorMeters: ((): number => {
+				const raw = response.geofence.gps_hard_floor_meters;
+				return Number.isFinite(raw) ? (raw as number) : 1000;
+			})(),
+			gpsReviewAccuracyThreshold: ((): number => {
+				const raw = response.geofence.gps_review_accuracy_threshold;
+				return Number.isFinite(raw) ? (raw as number) : 100;
+			})(),
+		},
 		programCode: response.program_code,
 		yearLevelLabel: response.year_level_label,
 		sessionType: response.session_type,
@@ -84,16 +99,6 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		isRemote: response.is_remote,
 		geofenceEnabled: response.geofence_enabled,
 	};
-};
-
-export const validateGPS = (
-	studentLat: number,
-	studentLng: number,
-	centerLat: number,
-	centerLng: number,
-	radiusMetres: number
-) => {
-	return isWithinGeofence(studentLat, studentLng, centerLat, centerLng, radiusMetres);
 };
 
 export const submitAttendanceScan = async (input: {

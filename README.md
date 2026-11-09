@@ -42,14 +42,16 @@ window. On the Session Confirmation step, status messages (`scanError` and the
 missing-ID footnote) render below the Confirm/Cancel button row, and error
 messages are styled as alert banners. The `session_not_started` copy now points
 to the scheduled start time rather than a manual professor action. Pydantic 422
-validation failures (e.g. GPS accuracy out of range, missing face frame) are now
+validation failures (e.g. GPS accuracy out of range or zero, missing face frame) are now
 surfaced with their specific field detail, translated into student-friendly copy
 (ear-sample range, low GPS accuracy, missing face image) instead of a single
 generic message; GPS accuracy is clamped to the backend cap (100000 m) and the
 scan page refuses to submit when no face frame was captured. The scan page also
-fail-fast rejects GPS fixes above the 1000 m hard floor before submit/queueing
-(`GPS_HARD_FLOOR_METERS`), showing the `gps_accuracy_too_low` copy. The
-classroom map picker surfaces location errors via `toMapPickerMessage`
+fail-fast rejects GPS fixes above the configured hard floor
+(`VerifyGeofence.gps_hard_floor_meters`, default 1000 m, exposed during session
+verification) before submit/queueing, showing the `gps_accuracy_too_low` copy; a
+non-positive configured value disables the client fail-fast. The classroom map
+picker surfaces location errors via `toMapPickerMessage`
 (`MAP_PICKER_ERROR_MESSAGES`) in the same module, with the early "Map is still
 loading" path kept as a literal string.
 
@@ -61,8 +63,14 @@ via `POST /admin/attendance/review/{id}/resolve`. The review queue keys on the
 is in the band reads as `present`/`late` everywhere (student history, professor
 active session, and admin queue alike). The same flag is set for
 geofence-ambiguous scans (measured position outside the radius but within the
-reported GPS uncertainty, capped at 50 m), which are accepted but routed to
-review instead of rejected outright. Flagged evidence now records
+reported GPS uncertainty, capped at the configured uncertainty cap, default 50 m, now
+propagated through `VerifyGeofence.uncertainty_cap_meters` during session
+verification), which are accepted but routed to
+review instead of rejected outright. The same verification response now also
+carries `gps_hard_floor_meters` (default 1000 m) and
+`gps_review_accuracy_threshold` (default 100 m), so client gating and accuracy
+status/review messaging follow backend configuration instead of hard-coded
+constants. Flagged evidence now records
 `review_reason` (`face_review_band` and/or `geofence_uncertainty`) and, for
 geofence-flagged rows, a `geofence` context object (distance, radius,
 accuracy, uncertainty, classroom coordinates) so the admin review queue can
@@ -376,7 +384,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**1062 cases across 82 files**) against the dedicated
+This runs the suite (**1076 cases across 82 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at
@@ -446,7 +454,7 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite is 1062 cases
+There are no linters or formatters configured. The backend suite is 1076 cases
 across 82 files (282 sync + 647 async test functions, plus parametrized expansions).
 The frontend suite uses Vitest + @testing-library/svelte (jsdom) under `frontend/src/**/*.test.ts`;
 run it with `npm run test` / `npm run test:coverage`.
@@ -458,7 +466,7 @@ run it with `npm run test` / `npm run test:coverage`.
 
 | Job          | Gate                                                            | Needs                          |
 | ------------ | --------------------------------------------------------------- | ------------------------------ |
-| `backend`    | `python -m pytest src/tests -q` — 1062 cases on in-memory SQLite | nothing                        || `migrations` | `alembic upgrade head && alembic check`                         | a `postgres:16-alpine` service |
+| `backend`    | `python -m pytest src/tests -q` — 1076 cases on in-memory SQLite | nothing                        || `migrations` | `alembic upgrade head && alembic check`                         | a `postgres:16-alpine` service |
 | `frontend`   | `npm ci && npm run check && npm run test:coverage && npm run build` | nothing                        |
 
 No job reads a secret. The `migrations` job is the one that matters: the test

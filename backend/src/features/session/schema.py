@@ -395,6 +395,9 @@ class VerifyGeofence(BaseModel):
     radius: int
     lat: float | None = None
     lng: float | None = None
+    uncertainty_cap_meters: float = 50.0
+    gps_hard_floor_meters: float = 1000.0
+    gps_review_accuracy_threshold: float = 100.0
 
 
 class VerifyCodeResponse(BaseModel):

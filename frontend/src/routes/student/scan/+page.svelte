@@ -7,14 +7,14 @@
 	import QRScanner from '$lib/features/liveness/components/QRScanner.svelte';
 	import FaceScanner from '$lib/features/liveness/components/FaceScanner.svelte';
 	import {
-		precheckScan,
-		submitAttendanceScan,
-		validateGPS,
-		verifySessionCode,
-		type SessionVerification
+	precheckScan,
+	submitAttendanceScan,
+	verifySessionCode,
+	type SessionVerification
 	} from '$lib/features/liveness/service';
 	import { generateEmbeddingFromLandmarks, serializeFaceEmbedding } from '$lib/shared/utils/face-embedding';
 	import { acquireGpsFix } from '$lib/features/liveness/gps';
+	import { queryPermissionStatus } from '$lib/shared/location/manager';
 	import {
 		cacheSession,
 		flushQueue,
@@ -30,7 +30,7 @@
 import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
-	import { GPS_HARD_FLOOR_METERS } from '$lib/shared/utils/geo';
+	import { isWithinGeofenceWithUncertainty } from '$lib/shared/utils/geo';
 	import type { LivenessEvidence } from '$lib/shared/types';
 
 	type Step = 'entry' | 'confirm' | 'location' | 'liveness';
@@ -73,7 +73,8 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let locatingGps = $state(false);
 	let gpsAbortController: AbortController | null = $state(null);
 	let gpsFix = $state<{ lat: number; lng: number; accuracy: number } | null>(null);
-	let gpsStatus = $state<'locating' | 'high' | 'low' | 'unavailable' | 'permission'>('locating');
+	let gpsStatus = $state<'locating' | 'high' | 'moderate' | 'low' | 'unavailable' | 'permission'>('locating');
+	let gpsPermissionStatus = $state<'granted' | 'denied' | 'prompt' | 'unsupported'>('unsupported');
 	let gpsDistanceMeters = $state<number | null>(null);
 	let gpsError = $state<string | null>(null);
 	let countdown = $state(0);
@@ -160,6 +161,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 	onMount(() => {
 		void initFaceModel();
+		void queryPermissionStatus().then((s) => (gpsPermissionStatus = s));
 		const codeParam = page.url.searchParams.get('code');
 		if (codeParam) {
 			void (async () => {
@@ -275,7 +277,18 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						courseCode: cached.course_code,
 						courseName: cached.course_name,
 						expiresAt: cached.expires_at,
-						geofence: cached.geofence,
+						geofence: {
+							...cached.geofence,
+							uncertaintyCapMeters: cached.geofence.uncertaintyCapMeters ?? 50,
+							gpsHardFloorMeters: ((): number => {
+								const raw = cached.geofence.gpsHardFloorMeters;
+								return typeof raw === 'number' && Number.isFinite(raw) ? raw : 1000;
+							})(),
+							gpsReviewAccuracyThreshold: ((): number => {
+								const raw = cached.geofence.gpsReviewAccuracyThreshold;
+								return typeof raw === 'number' && Number.isFinite(raw) ? raw : 100;
+							})(),
+						},
 						geofenceEnabled: cached.geofenceEnabled,
 						isRemote: cached.isRemote,
 						scheduledStartTime: cached.scheduled_start_time ?? cached.expires_at,
@@ -577,7 +590,15 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 		let reachedSubmit = false;
 		try {
-			if (gps && gps.accuracy > GPS_HARD_FLOOR_METERS) {
+			// Mirror the backend fallback (AttendanceService.submit_scan treats
+			// a non-positive hard floor as 1000 m) so client gating never
+			// disagrees with the server.
+			const rawHardFloor = session?.geofence?.gpsHardFloorMeters;
+			const effectiveHardFloor =
+				Number.isFinite(rawHardFloor) && (rawHardFloor as number) > 0
+					? (rawHardFloor as number)
+					: 1000;
+			if (gps && gps.accuracy > effectiveHardFloor) {
 				rejectionReason = toScanMessage(
 					new APIError('gps_accuracy_too_low', ''),
 					'Unable to submit the attendance scan'
@@ -588,12 +609,14 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 
 			if (geofenceRequired && gps) {
 				if (
-					!validateGPS(
+					!isWithinGeofenceWithUncertainty(
 						gps.lat,
 						gps.lng,
 						session.geofence.lat as number,
 						session.geofence.lng as number,
-						session.geofence.radius
+						session.geofence.radius,
+						gps.accuracy,
+						session.geofence.uncertaintyCapMeters
 					)
 				) {
 					throw new APIError('outside_geofence', 'You are outside the attendance geofence. Move closer to the classroom and try again.');
@@ -962,6 +985,11 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			</div>
 			<section class="card">
 				<h2 class="section-title">Location Check</h2>
+				{#if gpsPermissionStatus === 'prompt'}
+					<p class="footnote" role="status">Your browser will ask for location permission. Allow it to verify your attendance.</p>
+				{:else if gpsPermissionStatus === 'denied'}
+					<p class="error" role="alert">Location permission is blocked. Enable it in your browser settings, then retry.</p>
+				{/if}
 				{#if locatingGps}
 					<p class="footnote">Acquiring your location…</p>
 				{:else if gpsStatus === 'permission'}
@@ -981,8 +1009,10 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					{#if gpsStatus === 'low'}
 						<p class="footnote" role="status">Low accuracy — you may continue, but the result may be reviewed.</p>
 					{/if}
-					{#if gpsDistanceMeters !== null && session && gpsDistanceMeters > session.geofence.radius}
+					{#if gpsDistanceMeters !== null && session && gpsFix && session.geofence.lat !== null && session.geofence.lng !== null && !isWithinGeofenceWithUncertainty(gpsFix.lat, gpsFix.lng, session.geofence.lat as number, session.geofence.lng as number, session.geofence.radius, gpsFix.accuracy, session.geofence.uncertaintyCapMeters)}
 						<p class="error" role="alert">You appear to be outside the attendance geofence.</p>
+					{:else if gpsDistanceMeters !== null && session && gpsFix && session.geofence.lat !== null && session.geofence.lng !== null && gpsDistanceMeters > session.geofence.radius}
+						<p class="footnote" role="status">Within review band — your result may be reviewed.</p>
 					{:else if gpsDistanceMeters !== null}
 						<p class="footnote" role="status">Within the attendance geofence.</p>
 					{/if}
@@ -1006,7 +1036,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					<button
 						class="btn-primary"
 						disabled={locatingGps || !gpsFix ||
-							(gpsDistanceMeters !== null && session !== null && gpsDistanceMeters > session.geofence.radius)}
+							(gpsFix !== null && session !== null && session.geofence.lat !== null && session.geofence.lng !== null && !isWithinGeofenceWithUncertainty(gpsFix.lat, gpsFix.lng, session.geofence.lat as number, session.geofence.lng as number, session.geofence.radius, gpsFix.accuracy, session.geofence.uncertaintyCapMeters))}
 						onclick={() => {
 							if (gpsFix) {
 								step = 'liveness';

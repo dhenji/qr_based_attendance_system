@@ -91,7 +91,7 @@ export interface SessionVerificationResponse {
 	// Center is null when the session has no classroom coordinates — the
 	// backend skips its geofence check in that case (and so does the scan
 	// page pre-check).
-	geofence: { radius: number; lat: number | null; lng: number | null };
+	geofence: { radius: number; lat: number | null; lng: number | null; uncertainty_cap_meters?: number; gps_hard_floor_meters?: number; gps_review_accuracy_threshold?: number };
 	present_window_minutes: number;
 	late_window_minutes: number;
 	classroom_name?: string | null;

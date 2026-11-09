@@ -4,8 +4,10 @@ import { APIError } from '$lib/api/client';
 
 export type AccuracyStatus = 'high' | 'moderate' | 'low';
 
-// Hard floor for GPS accuracy (metres). Fixes coarser than this are rejected by
-// the backend (gps_accuracy_too_low) and are not queued for offline replay.
+// Fallback hard floor for GPS accuracy (metres), used by consumers that do
+// not have a session context (e.g. the classroom map picker). The student
+// scan flow reads the configured value from VerifyGeofence.gps_hard_floor_meters
+// instead. Keep in sync with the backend default in core/config.py.
 export const GPS_HARD_FLOOR_METERS = 1000;
 
 // Great-circle distance in metres (convenience over calculateDistance).
@@ -432,6 +434,37 @@ export const isWithinGeofence = (
 	return distanceMetres <= radiusMetres;
 };
 
+// True when the student's position is within the classroom's radius once the
+// reported GPS uncertainty is taken into account (review-band acceptance).
+// A position outside the radius but within reported uncertainty is accepted
+// for review rather than rejected outright. Invalid coordinates or a
+// negative radius never match — fail closed.
+export const isWithinGeofenceWithUncertainty = (
+	studentLat: number,
+	studentLng: number,
+	centerLat: number,
+	centerLng: number,
+	radiusMetres: number,
+	accuracy: number,
+	cap: number = 50
+): boolean => {
+	if (
+		!Number.isFinite(studentLat) ||
+		!Number.isFinite(studentLng) ||
+		!Number.isFinite(centerLat) ||
+		!Number.isFinite(centerLng) ||
+		!Number.isFinite(radiusMetres) ||
+		radiusMetres < 0
+	) {
+		return false;
+	}
+	const effectiveCap = Number.isFinite(cap) && cap > 0 ? cap : 50;
+	const clampedAccuracy = Number.isFinite(accuracy) ? Math.max(accuracy, 0) : 0;
+	const uncertainty = Math.min(clampedAccuracy, effectiveCap);
+	const distanceMetres = calculateDistanceMeters(studentLat, studentLng, centerLat, centerLng);
+	return distanceMetres - uncertainty <= radiusMetres;
+};
+
 // A single search result returned by the Photon (Komoot) geocoder.
 export interface LocationSearchResult {
 	label: string;
@@ -472,5 +505,34 @@ export const searchLocation = async (
 		return out;
 	} catch {
 		return [];
+	}
+};
+
+// Reverse-geocode a coordinate to a human-readable label. Uses Photon
+// (Komoot), which supports CORS and needs no API key, matching searchLocation.
+// Returns null on network/parse failure or when no feature is found, so
+// callers can degrade gracefully (e.g. fall back to "lat, lng").
+export const reverseGeocode = async (
+	lat: number,
+	lng: number
+): Promise<string | null> => {
+	if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+	if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+	try {
+		const url = `https://photon.komoot.io/reverse?lon=${encodeURIComponent(lng)}&lat=${encodeURIComponent(lat)}`;
+		const response = await fetch(url, { headers: { Accept: 'application/json' } });
+		if (!response.ok) return null;
+		const data = (await response.json()) as {
+			features?: Array<{
+				properties?: { name?: string; street?: string; city?: string; country?: string };
+			}>;
+		};
+		const feature = data.features?.[0];
+		if (!feature) return null;
+		const p = feature.properties ?? {};
+		const label = [p.name, p.street, p.city, p.country].filter(Boolean).join(', ');
+		return label || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+	} catch {
+		return null;
 	}
 };

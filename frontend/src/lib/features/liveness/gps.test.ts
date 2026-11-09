@@ -14,7 +14,9 @@ const makeSession = (geofence: { lat: number | null; lng: number | null; radius:
 		courseCode: 'CS101',
 		courseName: 'Intro',
 		expiresAt: '2026-01-01T00:00:00Z',
-		geofence: geofence ?? { lat: null, lng: null, radius: 0 },
+		geofence: geofence
+			? { ...geofence, uncertaintyCapMeters: 50, gpsHardFloorMeters: 1000, gpsReviewAccuracyThreshold: 100 }
+			: { lat: null, lng: null, radius: 0, uncertaintyCapMeters: 50, gpsHardFloorMeters: 1000, gpsReviewAccuracyThreshold: 100 },
 		geofenceEnabled: true
 	}) as SessionVerification;
 
@@ -31,8 +33,14 @@ describe('acquireGpsFix', () => {
 		expect(res.distanceMeters).toBe(42);
 	});
 
-	it('returns low status for coarse fix', async () => {
+	it('returns moderate status for 80m fix', async () => {
 		vi.mocked(requestBestPosition).mockResolvedValue({ lat: 1, lng: 2, accuracy: 80, timestamp: 1 });
+		const res = await acquireGpsFix(makeSession());
+		expect(res.status).toBe('moderate');
+	});
+
+	it('returns low status for 150m fix', async () => {
+		vi.mocked(requestBestPosition).mockResolvedValue({ lat: 1, lng: 2, accuracy: 150, timestamp: 1 });
 		const res = await acquireGpsFix(makeSession());
 		expect(res.status).toBe('low');
 	});
@@ -47,7 +55,7 @@ describe('acquireGpsFix', () => {
 		const err = new Error('denied');
 		(err as any).code = 'location_permission_denied';
 		vi.mocked(requestBestPosition).mockRejectedValue(err);
-		await expect(acquireGpsFix(makeSession())).rejects.toBe(err);
+		await expect(acquireGpsFix(makeSession())).rejects.toMatchObject({ code: 'location_permission_denied' });
 	});
 
 	it('passes signal through', async () => {

@@ -30,6 +30,7 @@ vi.mock('leaflet', () => {
 vi.mock('$lib/shared/utils/geo', () => ({
 	searchLocation: vi.fn(async () => []),
 	requestBestPosition: vi.fn(),
+	reverseGeocode: vi.fn(async () => null),
 	GPS_HARD_FLOOR_METERS: 1000
 }));
 

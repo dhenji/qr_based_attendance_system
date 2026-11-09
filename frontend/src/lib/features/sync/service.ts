@@ -64,7 +64,7 @@ export type CachedSession = {
 	scheduled_end_time?: string;
 	// Center null = no classroom coordinates (mirrors VerifyGeofence); the
 	// scan pre-check skips geofence in that case, same as the server.
-	geofence: { radius: number; lat: number | null; lng: number | null };
+	geofence: { radius: number; lat: number | null; lng: number | null; uncertaintyCapMeters?: number; gpsHardFloorMeters?: number; gpsReviewAccuracyThreshold?: number };
 	// Cached so the offline path can decide whether location is required
 	// without re-deriving it from the (possibly stale) geofence center.
 	geofenceEnabled?: boolean;

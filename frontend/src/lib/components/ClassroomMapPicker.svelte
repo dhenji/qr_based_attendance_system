@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { searchLocation, type LocationSearchResult, requestBestPosition, GPS_HARD_FLOOR_METERS } from '$lib/shared/utils/geo';
+	import { searchLocation, type LocationSearchResult, reverseGeocode } from '$lib/shared/utils/geo';
+	import { acquire } from '$lib/shared/location/manager';
 import { toMapPickerMessage } from '$lib/features/liveness/errors';
 
 	interface Props {
@@ -35,6 +36,7 @@ let radiusCircle: any = null;
 	let locating = $state(false);
 	let gpsError = $state<string | null>(null);
 	let gpsAccuracy = $state<number | null>(null);
+	let gpsAddress = $state<string | null>(null);
 	let locateAbortController: AbortController | null = null;
 
 	let searchQuery = $state('');
@@ -77,20 +79,34 @@ let radiusCircle: any = null;
 		}
 		locating = true;
 		gpsError = null;
+		gpsAddress = null;
 		const controller = new AbortController();
 		locateAbortController = controller;
 		try {
-			const fix = await requestBestPosition({
+			const state = await acquire({
 				desiredAccuracy: 50,
 				maxFixes: 3,
 				timeoutMs: 10000,
-				maxAccuracy: GPS_HARD_FLOOR_METERS,
+				maxAccuracy: 1000,
 				fastMaximumAge: 5000,
 				signal: controller.signal
 			});
+			if (state.error || state.latitude === null || state.longitude === null || state.accuracy === null) {
+				const err = new Error(state.error?.message ?? 'Unable to get your location.');
+				(err as any).code = state.error?.code ?? 'location_unavailable';
+				gpsError = toMapPickerMessage(err, 'Unable to get your location.');
+				return;
+			}
+			const fix = { lat: state.latitude, lng: state.longitude, accuracy: state.accuracy };
 			gpsAccuracy = fix.accuracy;
 			lat = fix.lat;
 			lng = fix.lng;
+			// Best-effort reverse geocode for display; never blocks the pin.
+			if (typeof reverseGeocode === 'function') {
+				reverseGeocode(fix.lat, fix.lng).then((label) => {
+					if (label) gpsAddress = label;
+				});
+			}
 			placeMarker(map, leaflet, fix.lat, fix.lng);
 			if (gpsMarker) {
 				gpsMarker.remove();
@@ -108,7 +124,7 @@ let radiusCircle: any = null;
 			}
 			const circleColor = accuracyBandColor(fix.accuracy);
 			gpsAccuracyCircle = leaflet.circle([fix.lat, fix.lng], {
-				radius: Math.max(1, Math.min(fix.accuracy, GPS_HARD_FLOOR_METERS)),
+				radius: Math.max(1, Math.min(fix.accuracy, 1000)),
 				color: circleColor,
 				weight: 1,
 				fillColor: circleColor,
@@ -166,6 +182,7 @@ let radiusCircle: any = null;
 			gpsAccuracyCircle = null;
 		}
 		gpsAccuracy = null;
+		gpsAddress = null;
 		gpsError = null;
 		searchQuery = '';
 		onClear?.();
@@ -380,6 +397,9 @@ let radiusCircle: any = null;
 			{/if}
 		</p>
 	{/if}
+	{#if gpsAddress}
+		<p class="map-gps-address" role="status">{gpsAddress}</p>
+	{/if}
 	{#if lat === null && lng === null}
 		<div class="map-empty-hint" aria-hidden="true">Click the map or use your location to set coordinates</div>
 	{/if}
@@ -505,6 +525,11 @@ let radiusCircle: any = null;
 	}
 	.map-gps-accuracy.poor {
 		color: var(--danger, #dc2626);
+	}
+	.map-gps-address {
+		margin: 0 0.5rem 0.5rem;
+		font-size: 0.75rem;
+		color: var(--text-muted, #666);
 	}
 	.map-empty-hint {
 		position: absolute;
