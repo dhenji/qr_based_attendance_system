@@ -37,6 +37,7 @@
 
 	let formOpen = $state(false);
 	let formError = $state<string | null>(null);
+	let fieldErrors = $state<Record<string, string>>({});
 	let formBusy = $state(false);
 
 	let deleteTarget = $state<Program | null>(null);
@@ -46,6 +47,8 @@
 	// immediate since it only restores).
 	let deactivateTarget = $state<Program | null>(null);
 	let deactivateBusy = $state(false);
+	let reactivateTarget = $state<Program | null>(null);
+	let reactivateBusy = $state(false);
 
 	let f_code = $state('');
 	let f_name = $state('');
@@ -153,8 +156,13 @@
 				: 'descending'
 			: 'none';
 
+	const clearFieldError = (field: string) => {
+		if (fieldErrors[field]) fieldErrors = { ...fieldErrors, [field]: '' };
+	};
+
 	const openCreate = () => {
 		formError = null;
+		fieldErrors = {};
 		f_code = '';
 		f_name = '';
 		f_description = '';
@@ -164,6 +172,7 @@
 
 	const submitForm = async () => {
 		formError = null;
+		fieldErrors = {};
 		formBusy = true;
 		try {
 			const parsed = programCreateSchema.safeParse({
@@ -173,7 +182,16 @@
 				total_years: f_total_years,
 			});
 			if (!parsed.success) {
-				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				const fe: Record<string, string> = {};
+				for (const issue of parsed.error.issues) {
+					const key = String(issue.path[0] ?? '');
+					if (key && !fe[key]) fe[key] = issue.message;
+				}
+				fieldErrors = fe;
+				formError =
+					Object.keys(fe).length > 0
+						? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+						: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 				return;
 			}
 			await createProgram({
@@ -222,6 +240,22 @@
 	const closeDeactivate = () => {
 		adminProgramsState.actionError = null;
 		deactivateTarget = null;
+	};
+
+	const confirmReactivate = async () => {
+		if (!reactivateTarget || reactivateBusy) return;
+		reactivateBusy = true;
+		try {
+			await toggleProgramActive(reactivateTarget);
+			if (!adminProgramsState.actionError) reactivateTarget = null;
+		} finally {
+			reactivateBusy = false;
+		}
+	};
+
+	const closeReactivate = () => {
+		adminProgramsState.actionError = null;
+		reactivateTarget = null;
 	};
 </script>
 
@@ -324,8 +358,8 @@
 										</button>
 									{:else}
 										<button
-											class="link"
-											onclick={() => void toggleProgramActive(p)}
+											class="link success"
+											onclick={() => { adminProgramsState.actionError = null; reactivateTarget = p; }}
 										>
 											Reactivate
 										</button>
@@ -381,17 +415,116 @@
 			{/if}
 			<div class="form">
 				<div class="grid2">
-					<label>Code<input class="input" bind:value={f_code} placeholder="BSCS" /></label>
-					<label>Total years<input class="input" inputmode="numeric" bind:value={f_total_years} placeholder="4" /></label>
+					<label>
+						Code *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.code}
+							bind:value={f_code}
+							placeholder="BSCS"
+							maxlength="20"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.code}
+							aria-describedby="program-code-help"
+							oninput={() => clearFieldError('code')}
+						/>
+						{#if fieldErrors.code}
+							<p class="field-error" role="alert">{fieldErrors.code}</p>
+						{:else}
+							<p class="hint" id="program-code-help">2–20 characters. Stored in uppercase.</p>
+						{/if}
+					</label>
+					<label>
+						Total years *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.total_years}
+							inputmode="numeric"
+							bind:value={f_total_years}
+							placeholder="4"
+							min="1"
+							max="10"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.total_years}
+							aria-describedby="program-years-help"
+							oninput={() => clearFieldError('total_years')}
+						/>
+						{#if fieldErrors.total_years}
+							<p class="field-error" role="alert">{fieldErrors.total_years}</p>
+						{:else}
+							<p class="hint" id="program-years-help">Number of year levels (1–10).</p>
+						{/if}
+					</label>
 				</div>
-				<label>Name<input class="input" bind:value={f_name} placeholder="BS Computer Science" /></label>
-				<label>Description (optional)<input class="input" bind:value={f_description} /></label>
+				<label>
+					Name *
+					<input
+						class="input"
+						class:invalid={!!fieldErrors.name}
+						bind:value={f_name}
+						placeholder="BS Computer Science"
+						maxlength="100"
+						aria-required="true"
+						aria-invalid={!!fieldErrors.name}
+						aria-describedby="program-name-help"
+						oninput={() => clearFieldError('name')}
+					/>
+					{#if fieldErrors.name}
+						<p class="field-error" role="alert">{fieldErrors.name}</p>
+					{:else}
+						<p class="hint" id="program-name-help">Up to 100 characters.</p>
+					{/if}
+				</label>
+				<label>
+					Description (optional)
+					<input
+						class="input"
+						class:invalid={!!fieldErrors.description}
+						bind:value={f_description}
+						maxlength="1000"
+						aria-invalid={!!fieldErrors.description}
+						aria-describedby="program-desc-help"
+						oninput={() => clearFieldError('description')}
+					/>
+					{#if fieldErrors.description}
+						<p class="field-error" role="alert">{fieldErrors.description}</p>
+					{:else}
+						<p class="hint" id="program-desc-help">Optional. Up to 1000 characters.</p>
+					{/if}
+				</label>
 				<p class="hint">Year levels and term structures are added next, on the program detail page.</p>
 			</div>
 			<div class="modal-actions">
 				<button class="btn btn-ghost" onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-program" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reactivate-program-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reactivateBusy ? undefined : (reactivateTarget = null)) }}
+		>
+			<h2 id="reactivate-program-title" class="modal-title">Reactivate {reactivateTarget.code}?</h2>
+			<p class="modal-text">
+				{reactivateTarget.name} will be restored to the active list.
+			</p>
+			{#if adminProgramsState.actionError}
+				<p class="error" role="alert">{adminProgramsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={reactivateBusy} onclick={closeReactivate}>Cancel</button>
+				<button class="btn btn-success" disabled={reactivateBusy} onclick={confirmReactivate}>
+					{reactivateBusy ? 'Reactivating…' : 'Reactivate'}
 				</button>
 			</div>
 		</div>
@@ -605,6 +738,20 @@
 		color: var(--danger);
 	}
 
+	.link.success {
+		color: var(--success);
+	}
+
+	.btn-success {
+		background: var(--success);
+		border: 1px solid var(--success);
+		color: var(--on-brand);
+	}
+
+	.btn-success:hover:not(:disabled) {
+		filter: brightness(1.05);
+	}
+
 	.link.strong {
 		font-size: 0.875rem;
 		font-weight: 700;
@@ -760,6 +907,16 @@
 
 	.table-wrap {
 		overflow-x: auto;
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
 	}
 
 	@media (max-width: 640px) {

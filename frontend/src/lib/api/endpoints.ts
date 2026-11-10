@@ -1135,7 +1135,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Santos',
 		email: 'alice.santos@isu.edu.ph',
 		program_code: 'BSCS',
+		program_id: 1,
 		year_level_label: '3rd Year',
+		year_level_id: 3,
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
@@ -1151,7 +1153,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Cruz',
 		email: 'bob.cruz@isu.edu.ph',
 		program_code: 'BSIT',
+		program_id: 2,
 		year_level_label: '2nd Year',
+		year_level_id: 8,
 		section: 'B',
 		is_active: true,
 		face_enrolled: false,
@@ -1167,7 +1171,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Reyes',
 		email: 'carla.reyes@isu.edu.ph',
 		program_code: 'BSCS',
+		program_id: 1,
 		year_level_label: '3rd Year',
+		year_level_id: 3,
 		section: 'A',
 		is_active: false,
 		face_enrolled: false,
@@ -1183,7 +1189,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Aquino',
 		email: 'dan.aquino@isu.edu.ph',
 		program_code: 'BSECE',
+		program_id: 1,
 		year_level_label: '1st Year',
+		year_level_id: 1,
 		section: 'C',
 		is_active: true,
 		face_enrolled: true,
@@ -1199,7 +1207,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Bautista',
 		email: 'ella.bautista@isu.edu.ph',
 		program_code: 'BSIT',
+		program_id: 2,
 		year_level_label: '2nd Year',
+		year_level_id: 8,
 		section: 'B',
 		is_active: false,
 		face_enrolled: false,
@@ -1215,7 +1225,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Ocampo',
 		email: 'felix.ocampo@isu.edu.ph',
 		program_code: 'BSCS',
+		program_id: 1,
 		year_level_label: '4th Year',
+		year_level_id: 4,
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
@@ -1231,7 +1243,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Navarro',
 		email: 'gia.navarro@isu.edu.ph',
 		program_code: 'BSECE',
+		program_id: 1,
 		year_level_label: '1st Year',
+		year_level_id: 1,
 		section: 'C',
 		is_active: true,
 		face_enrolled: false,
@@ -1247,7 +1261,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Torres',
 		email: 'hugo.torres@isu.edu.ph',
 		program_code: 'BSIT',
+		program_id: 2,
 		year_level_label: '3rd Year',
+		year_level_id: 9,
 		section: 'A',
 		is_active: true,
 		face_enrolled: true,
@@ -1263,7 +1279,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Lim',
 		email: 'ivy.lim@isu.edu.ph',
 		program_code: 'BSCS',
+		program_id: 1,
 		year_level_label: '2nd Year',
+		year_level_id: 2,
 		section: 'B',
 		is_active: true,
 		face_enrolled: false,
@@ -1279,7 +1297,9 @@ const MOCK_ADMIN_STUDENT_ROWS: AdminStudentResponse[] = [
 		last_name: 'Mendoza',
 		email: 'jonas.mendoza@isu.edu.ph',
 		program_code: 'BSECE',
+		program_id: 1,
 		year_level_label: '2nd Year',
+		year_level_id: 2,
 		section: 'A',
 		is_active: false,
 		face_enrolled: true,
@@ -1421,7 +1441,9 @@ export const AdminStudentCreateEndpoint: EndpointDef<AdminStudentResponse> = {
 			last_name: String(p.last_name ?? ''),
 			email,
 			program_code: mockProgramCodeFor(Number(p.program_id)),
+			program_id: Number(p.program_id),
 			year_level_label: mockYearLabelFor(Number(p.year_level_id)),
+			year_level_id: Number(p.year_level_id),
 			section: p.section ? String(p.section) : null,
 			is_active: true,
 			claim_status: 'Unclaimed',
@@ -1452,10 +1474,14 @@ export const AdminStudentDetailEndpoint: EndpointDef<AdminStudentDetailResponse>
 			if (p.email !== undefined) row.email = String(p.email).trim().toLowerCase();
 			if (p.section !== undefined) row.section = p.section ? String(p.section) : null;
 			if (typeof p.is_active === 'boolean') row.is_active = p.is_active;
-			if (p.program_id !== undefined)
+			if (p.program_id !== undefined) {
 				row.program_code = mockProgramCodeFor(Number(p.program_id));
-			if (p.year_level_id !== undefined)
+				row.program_id = Number(p.program_id);
+			}
+			if (p.year_level_id !== undefined) {
 				row.year_level_label = mockYearLabelFor(Number(p.year_level_id));
+				row.year_level_id = Number(p.year_level_id);
+			}
 			return toMockDetail(row);
 		}
 		return toMockDetail(findMockStudentRow(suffix));

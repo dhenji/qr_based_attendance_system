@@ -53,6 +53,8 @@ import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 	// immediate since it only restores).
 	let deactivateTarget = $state<AdminCourse | null>(null);
 	let deactivateBusy = $state(false);
+	let reactivateTarget = $state<AdminCourse | null>(null);
+	let reactivateBusy = $state(false);
 
 	let f_code = $state('');
 	let f_name = $state('');
@@ -274,6 +276,22 @@ import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 		adminCoursesState.actionError = null;
 		deactivateTarget = null;
 	};
+
+	const confirmReactivate = async () => {
+		if (!reactivateTarget || reactivateBusy) return;
+		reactivateBusy = true;
+		try {
+			await toggleCourseActive(reactivateTarget);
+			if (!adminCoursesState.actionError) reactivateTarget = null;
+		} finally {
+			reactivateBusy = false;
+		}
+	};
+
+	const closeReactivate = () => {
+		adminCoursesState.actionError = null;
+		reactivateTarget = null;
+	};
 </script>
 
 <div class="page page-enter">
@@ -371,8 +389,8 @@ import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 										</button>
 									{:else}
 										<button
-											class="link"
-											onclick={() => void toggleCourseActive(c)}
+											class="link success"
+											onclick={() => { adminCoursesState.actionError = null; reactivateTarget = c; }}
 										>
 											Reactivate
 										</button>
@@ -523,6 +541,33 @@ import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 				<button class="btn btn-ghost" disabled={formBusy} onclick={() => (formOpen = false)}>Cancel</button>
 				<button class="btn btn-primary" data-testid="save-course" aria-busy={formBusy} disabled={formBusy} onclick={submitForm}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reactivate-course-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reactivateBusy ? undefined : (reactivateTarget = null)) }}
+		>
+			<h2 id="reactivate-course-title" class="modal-title">Reactivate {reactivateTarget.courseCode}?</h2>
+			<p class="modal-text">
+				{reactivateTarget.courseName} will be restored to the active list.
+			</p>
+			{#if adminCoursesState.actionError}
+				<p class="error" role="alert">{adminCoursesState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={reactivateBusy} onclick={closeReactivate}>Cancel</button>
+				<button class="btn btn-success" disabled={reactivateBusy} onclick={confirmReactivate}>
+					{reactivateBusy ? 'Reactivating…' : 'Reactivate'}
 				</button>
 			</div>
 		</div>
@@ -734,6 +779,20 @@ import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 
 	.link.danger {
 		color: var(--danger);
+	}
+
+	.link.success {
+		color: var(--success);
+	}
+
+	.btn-success {
+		background: var(--success);
+		border: 1px solid var(--success);
+		color: var(--on-brand);
+	}
+
+	.btn-success:hover:not(:disabled) {
+		filter: brightness(1.05);
 	}
 
 	.link.strong {

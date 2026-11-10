@@ -47,6 +47,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	let e_name = $state('');
 	let e_description = $state('');
 	let editError = $state<string | null>(null);
+	let editFieldErrors = $state<Record<string, string>>({});
 	let editBusy = $state(false);
 
 	let yearOpen = $state(false);
@@ -95,6 +96,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	const openEdit = () => {
 		if (!program) return;
 		editError = null;
+		editFieldErrors = {};
 		e_name = program.name;
 		e_description = program.description ?? '';
 		editOpen = true;
@@ -103,14 +105,24 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 	const submitEdit = async () => {
 		if (!program) return;
 		editError = null;
+		editFieldErrors = {};
 		editBusy = true;
 		try {
 			const parsed = programUpdateSchema.safeParse({
-				name: e_name || undefined,
+				name: e_name,
 				description: e_description || undefined,
 			});
 			if (!parsed.success) {
-				editError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				const fe: Record<string, string> = {};
+				for (const issue of parsed.error.issues) {
+					const key = String(issue.path[0] ?? '');
+					if (key && !fe[key]) fe[key] = issue.message;
+				}
+				editFieldErrors = fe;
+				editError =
+					Object.keys(fe).length > 0
+						? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+						: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 				return;
 			}
 			await updateProgram(program.id, {
@@ -325,6 +337,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 
 	let archiveBusy = $state(false);
 	let archiveConfirm = $state(false);
+	let reactivateConfirm = $state(false);
 
 	const setActive = async (active: boolean, failure: string) => {
 		if (!program || archiveBusy) return;
@@ -452,7 +465,7 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 						Archive program
 					</button>
 				{:else}
-					<button class="btn btn-secondary" disabled={archiveBusy} onclick={onReactivate}>
+					<button class="btn btn-success" disabled={archiveBusy} onclick={() => (reactivateConfirm = true)}>
 						{archiveBusy ? 'Reactivating…' : 'Reactivate program'}
 					</button>
 				{/if}
@@ -487,8 +500,41 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 				<p class="error" role="alert">{editError}</p>
 			{/if}
 			<div class="form">
-				<label>Name<input class="input" bind:value={e_name} /></label>
-				<label>Description<input class="input" bind:value={e_description} /></label>
+				<label>
+					Name *
+					<input
+						class="input"
+						class:invalid={!!editFieldErrors.name}
+						bind:value={e_name}
+						maxlength="100"
+						aria-required="true"
+						aria-invalid={!!editFieldErrors.name}
+						aria-describedby="edit-program-name-help"
+						oninput={() => { if (editFieldErrors.name) editFieldErrors = { ...editFieldErrors, name: '' }; }}
+					/>
+					{#if editFieldErrors.name}
+						<p class="field-error" role="alert">{editFieldErrors.name}</p>
+					{:else}
+						<p class="hint" id="edit-program-name-help">Up to 100 characters.</p>
+					{/if}
+				</label>
+				<label>
+					Description (optional)
+					<input
+						class="input"
+						class:invalid={!!editFieldErrors.description}
+						bind:value={e_description}
+						maxlength="1000"
+						aria-invalid={!!editFieldErrors.description}
+						aria-describedby="edit-program-desc-help"
+						oninput={() => { if (editFieldErrors.description) editFieldErrors = { ...editFieldErrors, description: '' }; }}
+					/>
+					{#if editFieldErrors.description}
+						<p class="field-error" role="alert">{editFieldErrors.description}</p>
+					{:else}
+						<p class="hint" id="edit-program-desc-help">Optional. Up to 1000 characters.</p>
+					{/if}
+				</label>
 				<p class="hint">Code and total years are immutable after creation.</p>
 			</div>
 			<div class="modal-actions">
@@ -669,6 +715,33 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
 				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reactivateConfirm && program}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="program-reactivate-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reactivateConfirm = false) }}
+		>
+			<h2 id="program-reactivate-title" class="modal-title">Reactivate {program.code}?</h2>
+			<p class="modal-text">
+				{program.name} will be restored to the active list.
+			</p>
+			{#if adminProgramDetailState.actionError}
+				<p class="error" role="alert">{adminProgramDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={archiveBusy} onclick={() => (reactivateConfirm = false)}>Cancel</button>
+				<button class="btn btn-success" disabled={archiveBusy} onclick={async () => { await onReactivate(); if (program && program.isActive) reactivateConfirm = false; }}>
+					{archiveBusy ? 'Reactivating…' : 'Reactivate'}
 				</button>
 			</div>
 		</div>
@@ -1132,6 +1205,26 @@ import TermRowsEditor from '$lib/features/admin/programs/components/TermRowsEdit
 		font-size: 0.75rem;
 		line-height: 1.45;
 		color: var(--text-muted);
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
+	}
+
+	.btn-success {
+		background: var(--success);
+		border: 1px solid var(--success);
+		color: var(--on-brand);
+	}
+
+	.btn-success:hover:not(:disabled) {
+		filter: brightness(1.05);
 	}
 
 	.modal-actions {

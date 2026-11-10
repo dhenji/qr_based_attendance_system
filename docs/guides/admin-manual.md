@@ -420,3 +420,12 @@ Notes:
 - Successful password login resets the escalation level.
 - Admins created or reset with a temporary password set a security question
   during their first login; super-admin accounts use the password-only flow.
+
+## Admin form conventions (student/professor/program/offerings)
+
+- Add and Edit modals follow the `/admin/courses` pattern: required fields are marked with `*`, each field shows either an inline error or a helper hint, and validation prevents invalid submissions.
+- Optional fields (Middle name, Section, Department, Description) can be left empty; on edit, clearing an optional field sends `null` and clears the stored value.
+- Required fields on edit (First name, Last name, Email, Program, Year level, Program name) cannot be cleared; an empty value shows a field error and blocks save instead of silently keeping the old value.
+- Student edit pre-populates the current Program and Year level from the roster response; change both together or leave them as-is.
+- Reactivate actions use a confirmation modal and a success (green) color scheme; deactivate/delete remain danger (red).
+- Offering settings (present/late windows, radius, classroom, coordinates) validate ranges inline and fall back to system defaults when blank.

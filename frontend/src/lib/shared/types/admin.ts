@@ -12,6 +12,8 @@ export interface AdminStudentResponse {
 	middle_name: string | null;
 	last_name: string;
 	email: string;
+	program_id: number;
+	year_level_id: number;
 	program_code: string;
 	year_level_label: string;
 	section: string | null;
@@ -34,6 +36,8 @@ export interface AdminStudent {
 	middleName?: string;
 	lastName: string;
 	email: string;
+	programId: number;
+	yearLevelId: number;
 	programCode: string;
 	yearLevelLabel: string;
 	section?: string;

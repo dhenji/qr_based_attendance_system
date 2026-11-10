@@ -128,6 +128,7 @@
 	let formOpen = $state(false);
 	let editing = $state<AdminStudent | null>(null);
 	let formError = $state<string | null>(null);
+	let fieldErrors = $state<Record<string, string>>({});
 	let formBusy = $state(false);
 	let deleteTarget = $state<AdminStudent | null>(null);
 	let deleteBusy = $state(false);
@@ -543,9 +544,14 @@
 	const fullName = (s: AdminStudent) =>
 		[s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ');
 
+	const clearFieldError = (field: string) => {
+		if (fieldErrors[field]) fieldErrors = { ...fieldErrors, [field]: '' };
+	};
+
 	const openCreate = () => {
 		editing = null;
 		formError = null;
+		fieldErrors = {};
 		f_student_id = '';
 		f_first_name = '';
 		f_middle_name = '';
@@ -563,23 +569,44 @@
 	const openEdit = (s: AdminStudent) => {
 		editing = s;
 		formError = null;
+		fieldErrors = {};
 		f_student_id = s.studentId;
 		f_first_name = s.firstName;
 		f_middle_name = s.middleName ?? '';
 		f_last_name = s.lastName;
 		f_email = s.email;
-		// Empty = "unchanged": PATCH omits the cohort unless both are picked.
-		f_program_id = '';
-		f_year_level_id = '';
+		// Pre-populate the actual assigned cohort so administrators see the
+		// current program/year immediately. PATCH still sends both ids; the
+		// backend resolves the same row when unchanged.
+		f_program_id = String(s.programId);
+		f_year_level_id = String(s.yearLevelId);
 		f_section = s.section ?? '';
 		modalYearOptions = [];
 		modalYearsError = null;
 		formOpen = true;
 		void ensureModalPrograms();
+		void loadEditYears(s.programId, s.yearLevelId);
+	};
+
+	const loadEditYears = async (programId: number, yearLevelId: number) => {
+		modalYearsLoading = true;
+		try {
+			const years = await listYearLevels(programId);
+			modalYearOptions = years;
+			if (!years.some((y) => y.id === yearLevelId)) {
+				f_year_level_id = '';
+			}
+		} catch {
+			modalYearOptions = [];
+			modalYearsError = 'Could not load year levels. Re-pick the program to retry.';
+		} finally {
+			modalYearsLoading = false;
+		}
 	};
 
 	const submitForm = async () => {
 		formError = null;
+		fieldErrors = {};
 		formBusy = true;
 		try {
 			if (editing === null) {
@@ -594,7 +621,16 @@
 					section: f_section || undefined,
 				});
 				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+					const fe: Record<string, string> = {};
+					for (const issue of parsed.error.issues) {
+						const key = String(issue.path[0] ?? '');
+						if (key && !fe[key]) fe[key] = issue.message;
+					}
+					fieldErrors = fe;
+					formError =
+						Object.keys(fe).length > 0
+							? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+							: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 					return;
 				}
 				const d = parsed.data;
@@ -609,21 +645,31 @@
 					section: d.section || undefined,
 				});
 			} else {
-				if ((f_program_id && !f_year_level_id) || (!f_program_id && f_year_level_id)) {
-					formError = 'Pick both a program and a year level, or leave both unchanged.';
+				if (!f_program_id || !f_year_level_id) {
+					fieldErrors = { program_id: 'Pick a program.', year_level_id: 'Pick a year level.' };
+					formError = 'Program and year level are required.';
 					return;
 				}
 			const parsed = adminStudentUpdateSchema.safeParse({
-				first_name: f_first_name || undefined,
+				first_name: f_first_name,
 				middle_name: f_middle_name || undefined,
-				last_name: f_last_name || undefined,
-				email: f_email || undefined,
-				program_id: f_program_id || undefined,
-				year_level_id: f_year_level_id || undefined,
+				last_name: f_last_name,
+				email: f_email,
+				program_id: f_program_id,
+				year_level_id: f_year_level_id,
 				section: f_section || undefined,
 			});
 			if (!parsed.success) {
-				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				const fe: Record<string, string> = {};
+				for (const issue of parsed.error.issues) {
+					const key = String(issue.path[0] ?? '');
+					if (key && !fe[key]) fe[key] = issue.message;
+				}
+				fieldErrors = fe;
+				formError =
+					Object.keys(fe).length > 0
+						? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+						: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 				return;
 			}
 			const d = parsed.data;
@@ -871,62 +917,235 @@
 			{/if}
 			<div class="form">
 				{#if !editing}
-					<label>Student ID<input class="input" bind:value={f_student_id} placeholder="ID number as printed on the student card" /></label>
+					<label>
+						Student ID *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.student_id}
+							bind:value={f_student_id}
+							placeholder="ID number as printed on the student card"
+							maxlength="50"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.student_id}
+							aria-describedby="student-id-help"
+							oninput={() => clearFieldError('student_id')}
+						/>
+						{#if fieldErrors.student_id}
+							<p class="field-error" role="alert">{fieldErrors.student_id}</p>
+						{:else}
+							<p class="hint" id="student-id-help">1–50 characters. Stored in uppercase.</p>
+						{/if}
+					</label>
 				{/if}
 				<div class="grid2">
-					<label>First name<input class="input" bind:value={f_first_name} /></label>
-					<label>Middle name<input class="input" bind:value={f_middle_name} /></label>
+					<label>
+						First name *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.first_name}
+							bind:value={f_first_name}
+							maxlength="100"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.first_name}
+							aria-describedby="student-first-help"
+							oninput={() => clearFieldError('first_name')}
+						/>
+						{#if fieldErrors.first_name}
+							<p class="field-error" role="alert">{fieldErrors.first_name}</p>
+						{:else}
+							<p class="hint" id="student-first-help">Up to 100 characters.</p>
+						{/if}
+					</label>
+					<label>
+						Middle name (optional)
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.middle_name}
+							bind:value={f_middle_name}
+							maxlength="100"
+							aria-invalid={!!fieldErrors.middle_name}
+							aria-describedby="student-middle-help"
+							oninput={() => clearFieldError('middle_name')}
+						/>
+						{#if fieldErrors.middle_name}
+							<p class="field-error" role="alert">{fieldErrors.middle_name}</p>
+						{:else}
+							<p class="hint" id="student-middle-help">Optional. Leave blank if the student has no middle name.</p>
+						{/if}
+					</label>
 				</div>
 				<div class="grid2">
-					<label>Last name<input class="input" bind:value={f_last_name} /></label>
-					<label>Email<input class="input" type="email" bind:value={f_email} /></label>
+					<label>
+						Last name *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.last_name}
+							bind:value={f_last_name}
+							maxlength="100"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.last_name}
+							aria-describedby="student-last-help"
+							oninput={() => clearFieldError('last_name')}
+						/>
+						{#if fieldErrors.last_name}
+							<p class="field-error" role="alert">{fieldErrors.last_name}</p>
+						{:else}
+							<p class="hint" id="student-last-help">Up to 100 characters.</p>
+						{/if}
+					</label>
+					<label>
+						Email *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.email}
+							type="email"
+							bind:value={f_email}
+							maxlength="255"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.email}
+							aria-describedby="student-email-help"
+							oninput={() => clearFieldError('email')}
+						/>
+						{#if fieldErrors.email}
+							<p class="field-error" role="alert">{fieldErrors.email}</p>
+						{:else}
+							<p class="hint" id="student-email-help">Valid email, up to 255 characters.</p>
+						{/if}
+					</label>
 				</div>
 				{#if !editing}
 					<div class="grid2">
-						<label>Program
-							<select class="input" aria-label="Program" bind:value={f_program_id} onchange={() => void changeModalProgram()}>
+						<label>
+							Program *
+							<select
+								class="input"
+								class:invalid={!!fieldErrors.program_id}
+								aria-label="Program"
+								aria-required="true"
+								aria-invalid={!!fieldErrors.program_id}
+								bind:value={f_program_id}
+								onchange={() => void changeModalProgram()}
+							>
 								<option value="">Select program…</option>
 								{#each programOptions as p (p.id)}
 									<option value={String(p.id)}>{p.code} — {p.name}</option>
 								{/each}
 							</select>
+							{#if fieldErrors.program_id}
+								<p class="field-error" role="alert">{fieldErrors.program_id}</p>
+							{:else}
+								<p class="hint">Pick a program to load its year levels.</p>
+							{/if}
 						</label>
-						<label>Year level
-							<select class="input" aria-label="Year level" bind:value={f_year_level_id} disabled={!f_program_id || modalYearsLoading}>
+						<label>
+							Year level *
+							<select
+								class="input"
+								class:invalid={!!fieldErrors.year_level_id}
+								aria-label="Year level"
+								aria-required="true"
+								aria-invalid={!!fieldErrors.year_level_id}
+								bind:value={f_year_level_id}
+								disabled={!f_program_id || modalYearsLoading}
+							>
 								<option value="">{modalYearsLoading ? 'Loading…' : 'Select year level…'}</option>
 								{#each modalYearOptions as y (y.id)}
 									<option value={String(y.id)}>{y.label}</option>
 								{/each}
 							</select>
+							{#if fieldErrors.year_level_id}
+								<p class="field-error" role="alert">{fieldErrors.year_level_id}</p>
+							{:else if modalYearsError}
+								<p class="hint" role="status">{modalYearsError}</p>
+							{:else}
+								<p class="hint">Year levels belong to the selected program.</p>
+							{/if}
 						</label>
 					</div>
-					{#if modalYearsError}
-						<p class="hint" role="status">{modalYearsError}</p>
-					{/if}
-					<label>Section<input class="input" bind:value={f_section} placeholder="A" /></label>
+					<label>
+						Section
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.section}
+							bind:value={f_section}
+							placeholder="A"
+							maxlength="20"
+							aria-invalid={!!fieldErrors.section}
+							aria-describedby="student-section-help"
+							oninput={() => clearFieldError('section')}
+						/>
+						{#if fieldErrors.section}
+							<p class="field-error" role="alert">{fieldErrors.section}</p>
+						{:else}
+							<p class="hint" id="student-section-help">Optional. Up to 20 characters.</p>
+						{/if}
+					</label>
 				{:else}
 					<div class="grid2">
-						<label>Program
-							<select class="input" aria-label="Program" bind:value={f_program_id} onchange={() => void changeModalProgram()}>
-								<option value="">Unchanged (keep current)</option>
+						<label>
+							Program *
+							<select
+								class="input"
+								class:invalid={!!fieldErrors.program_id}
+								aria-label="Program"
+								aria-required="true"
+								aria-invalid={!!fieldErrors.program_id}
+								bind:value={f_program_id}
+								onchange={() => void changeModalProgram()}
+							>
+								<option value="">Select program…</option>
 								{#each programOptions as p (p.id)}
 									<option value={String(p.id)}>{p.code} — {p.name}</option>
 								{/each}
 							</select>
+							{#if fieldErrors.program_id}
+								<p class="field-error" role="alert">{fieldErrors.program_id}</p>
+							{:else}
+								<p class="hint">Leave blank to keep the current program.</p>
+							{/if}
 						</label>
-						<label>Year level
-							<select class="input" aria-label="Year level" bind:value={f_year_level_id} disabled={!f_program_id || modalYearsLoading}>
-								<option value="">{modalYearsLoading ? 'Loading…' : 'Unchanged (keep current)'}</option>
+						<label>
+							Year level *
+							<select
+								class="input"
+								class:invalid={!!fieldErrors.year_level_id}
+								aria-label="Year level"
+								aria-required="true"
+								aria-invalid={!!fieldErrors.year_level_id}
+								bind:value={f_year_level_id}
+								disabled={!f_program_id || modalYearsLoading}
+							>
+								<option value="">{modalYearsLoading ? 'Loading…' : 'Select year level…'}</option>
 								{#each modalYearOptions as y (y.id)}
 									<option value={String(y.id)}>{y.label}</option>
 								{/each}
 							</select>
+							{#if fieldErrors.year_level_id}
+								<p class="field-error" role="alert">{fieldErrors.year_level_id}</p>
+							{:else if modalYearsError}
+								<p class="hint" role="status">{modalYearsError}</p>
+							{:else}
+								<p class="hint">Leave blank to keep the current year level.</p>
+							{/if}
 						</label>
 					</div>
-					{#if modalYearsError}
-						<p class="hint" role="status">{modalYearsError}</p>
-					{/if}
-					<label>Section<input class="input" bind:value={f_section} /></label>
+					<label>
+						Section
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.section}
+							bind:value={f_section}
+							maxlength="20"
+							aria-invalid={!!fieldErrors.section}
+							aria-describedby="student-section-edit-help"
+							oninput={() => clearFieldError('section')}
+						/>
+						{#if fieldErrors.section}
+							<p class="field-error" role="alert">{fieldErrors.section}</p>
+						{:else}
+							<p class="hint" id="student-section-edit-help">Optional. Up to 20 characters.</p>
+						{/if}
+					</label>
 				{/if}
 			</div>
 			<div class="modal-actions">
@@ -1526,6 +1745,16 @@
 
 	.table-wrap {
 		overflow-x: auto;
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
 	}
 
 	@media (max-width: 640px) {

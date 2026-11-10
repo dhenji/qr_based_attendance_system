@@ -994,7 +994,7 @@ List students with search and filters (wireframes.md 4.2).
 |                  |                                                                                                                              |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | **Query**        | `?search?&program_id?&year_level_id?&section?&is_active?&sort_by?&sort_dir?&page=1&size=20`                                  |
-| **Response 200** | `{ items: [{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count }], total, page, size }` |
+| **Response 200** | `{ items: [{ id, student_id, first_name, middle_name, last_name, email, program_id, year_level_id, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count }], total, page, size }` |
 | **Notes**        | `search` matches `student_id`/name/email; `face_enrolled`/`created_at`/`scan_count` feed the roster + profile (wireframes.md 2.10). |
 
 #### `POST /admin/students`
@@ -1004,7 +1004,7 @@ Create a student (wireframes.md 4.2 -> Create Student).
 |                  |                                                                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ student_id, first_name, middle_name?, last_name, email, program_id, year_level_id, section }`                        |
-| **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active }`                          |
+| **Response 201** | `{ id, student_id, first_name, middle_name, last_name, email, program_id, year_level_id, program_code, year_level_label, section, is_active }`                          |
 | **Notes**        | Identity is by email only, and email is unique across users. There is no `username` field anywhere in the contract (removed in ADR-073). Re-creating a roster row for an address whose login was deactivated by a prior hard-delete reclaims that login: fresh CLAIM OTP proof + exactly one live unclaimed roster match required (D72); otherwise 409 `user_exists` / `ambiguous_account` / `unrecognized_email` / `roster_link_impossible`. |
 
 | **Errors**       | 404 `year_level_not_found` · 409 `student_email_exists` · 409 `student_id_exists` · 422 `year_level_program_mismatch` |
@@ -1014,7 +1014,7 @@ Single student detail.
 
 |                  |                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| **Response 200** | `{ id, student_id, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, created_at, scan_count, face_enrolled: bool, face_enrolled_at?, face_embedding_version? }` |
+| **Response 200** | `{ id, student_id, first_name, middle_name, last_name, email, program_id, year_level_id, program_code, year_level_label, section, is_active, created_at, scan_count, face_enrolled: bool, face_enrolled_at?, face_embedding_version? }` |
 | **Notes**        | Detail response also carries `student_number` (same `students.student_id` column) — see `GET /student/profile`. |
 
 | **Errors**       | 404 `student_not_found` · 404 `year_level_not_found` |
@@ -1501,7 +1501,7 @@ Read-only identity fields.
 
 |                  |                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Response 200** | `{ student_number, first_name, middle_name, last_name, email, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count, face_enrolled_at?, face_embedding_version }` |
+| **Response 200** | `{ student_number, first_name, middle_name, last_name, email, program_id, year_level_id, program_code, year_level_label, section, is_active, face_enrolled: bool, created_at, scan_count, face_enrolled_at?, face_embedding_version }` |
 | **Notes**        | Also carries `student_id` alongside `student_number` — the same `students.student_id` column under the name the admin roster rows use (:615/:634). Both spellings are emitted on this response and on `GET /admin/students/{student_id}` so either client reads the name it expects. |
 | **Notes**        | `created_at` (Account date) + `scan_count` + face-enrollment meta feed wireframes.md 2.10 ("Account: Jun 2026 · Scans: 42", "Enrolled (vN)"). |
 

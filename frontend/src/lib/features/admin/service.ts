@@ -68,6 +68,8 @@ const toStudent = (s: AdminStudentResponse | AdminStudentDetailResponse): AdminS
 	middleName: s.middle_name ?? undefined,
 	lastName: s.last_name,
 	email: s.email,
+	programId: s.program_id,
+	yearLevelId: s.year_level_id,
 	programCode: s.program_code,
 	yearLevelLabel: s.year_level_label,
 	section: s.section ?? undefined,
