@@ -61,6 +61,8 @@ class StudentRead(BaseModel):
     middle_name: str | None = None
     last_name: str
     email: str
+    program_id: int
+    year_level_id: int
     program_code: str
     year_level_label: str
     section: str | None = None

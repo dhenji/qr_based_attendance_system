@@ -78,6 +78,8 @@
 	// immediate since it only restores).
 	let deactivateTarget = $state<AdminOffering | null>(null);
 	let deactivateBusy = $state(false);
+	let reactivateTarget = $state<AdminOffering | null>(null);
+	let reactivateBusy = $state(false);
 
 	// Create-form fields (strings for inputs; ids coerced by zod on submit).
 	// Meetings (D77): one row per weekly meeting, each with its own type,
@@ -639,6 +641,22 @@
 		deactivateTarget = null;
 	};
 
+	const confirmReactivate = async () => {
+		if (!reactivateTarget || reactivateBusy) return;
+		reactivateBusy = true;
+		try {
+			await toggleOfferingActive(reactivateTarget);
+			if (!adminOfferingsState.actionError) reactivateTarget = null;
+		} finally {
+			reactivateBusy = false;
+		}
+	};
+
+	const closeReactivate = () => {
+		adminOfferingsState.actionError = null;
+		reactivateTarget = null;
+	};
+
 	const rowTitle = (o: AdminOffering) => offeringTitle(o);
 </script>
 
@@ -783,8 +801,8 @@
 										</button>
 									{:else}
 										<button
-											class="link"
-											onclick={() => void toggleOfferingActive(o)}
+											class="link success"
+											onclick={() => { adminOfferingsState.actionError = null; reactivateTarget = o; }}
 										>
 											Reactivate
 										</button>
@@ -939,6 +957,33 @@
 				</button>
 				<button class="btn btn-primary" data-testid="save-offering" aria-busy={formBusy} disabled={formBusy} onclick={() => void submitForm(false)}>
 					{formBusy ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reactivateTarget}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="reactivate-offering-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reactivateBusy ? undefined : (reactivateTarget = null)) }}
+		>
+			<h2 id="reactivate-offering-title" class="modal-title">Reactivate this offering?</h2>
+			<p class="modal-text">
+				{rowTitle(reactivateTarget)} will be restored to the active list.
+			</p>
+			{#if adminOfferingsState.actionError}
+				<p class="error" role="alert">{adminOfferingsState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={reactivateBusy} onclick={closeReactivate}>Cancel</button>
+				<button class="btn btn-success" disabled={reactivateBusy} onclick={confirmReactivate}>
+					{reactivateBusy ? 'Reactivating…' : 'Reactivate'}
 				</button>
 			</div>
 		</div>
@@ -1166,6 +1211,20 @@
 
 	.link.danger {
 		color: var(--danger);
+	}
+
+	.link.success {
+		color: var(--success);
+	}
+
+	.btn-success {
+		background: var(--success);
+		border: 1px solid var(--success);
+		color: var(--on-brand);
+	}
+
+	.btn-success:hover:not(:disabled) {
+		filter: brightness(1.05);
 	}
 
 	.link.strong {

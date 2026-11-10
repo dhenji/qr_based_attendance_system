@@ -144,6 +144,57 @@ export const offeringUpdateSchema = z
 
 export type OfferingUpdateInput = z.infer<typeof offeringUpdateSchema>;
 
+// Settings form on the offering detail page (mutable windows, radius, classroom).
+// Blank means "follow the system default" (D93); validation mirrors the backend
+// ranges (1–480 minutes, 1–1000 metres, lat/lng ranges).
+export const offeringSettingsSchema = z
+	.object({
+		present: z.string().trim().optional().or(z.literal('')),
+		late: z.string().trim().optional().or(z.literal('')),
+		radius: z.string().trim().optional().or(z.literal('')),
+		room: z.string().trim().max(100, 'Room name is optional. Enter up to 100 characters.').optional().or(z.literal('')),
+		lat: z.string().trim().optional().or(z.literal('')),
+		lng: z.string().trim().optional().or(z.literal('')),
+	})
+	.superRefine((value, ctx) => {
+		const checkWindow = (raw: string | undefined, field: 'present' | 'late') => {
+			if (!raw) return;
+			const n = Number(raw);
+			if (!Number.isInteger(n) || n < 1 || n > 480) {
+				ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Must be a whole number of minutes between 1 and 480', path: [field] });
+			}
+		};
+		checkWindow(value.present, 'present');
+		checkWindow(value.late, 'late');
+
+		if (value.radius) {
+			const n = Number(value.radius);
+			if (!Number.isInteger(n) || n < 1 || n > 1000) {
+				ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Must be a whole number of metres between 1 and 1000', path: ['radius'] });
+			}
+		}
+
+		const hasLat = !!value.lat;
+		const hasLng = !!value.lng;
+		if (hasLat !== hasLng) {
+			ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Both latitude and longitude are required to pin a classroom', path: [hasLat ? 'lng' : 'lat'] });
+		}
+		if (hasLat) {
+			const lat = Number(value.lat);
+			if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+				ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Latitude must be between -90 and 90', path: ['lat'] });
+			}
+		}
+		if (hasLng) {
+			const lng = Number(value.lng);
+			if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+				ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Longitude must be between -180 and 180', path: ['lng'] });
+			}
+		}
+	});
+
+export type OfferingSettingsInput = z.infer<typeof offeringSettingsSchema>;
+
 export const assignmentCreateSchema = z
 	.object({
 		professor_id: z.coerce.number().int().gt(0, 'Pick a professor'),

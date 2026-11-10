@@ -44,6 +44,7 @@
 	let formOpen = $state(false);
 	let editing = $state<AdminProfessor | null>(null);
 	let formError = $state<string | null>(null);
+	let fieldErrors = $state<Record<string, string>>({});
 	let formBusy = $state(false);
 	let deleteTarget = $state<AdminProfessor | null>(null);
 	let deleteBusy = $state(false);
@@ -189,9 +190,14 @@
 	const fullName = (p: AdminProfessor) =>
 		[p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ');
 
+	const clearFieldError = (field: string) => {
+		if (fieldErrors[field]) fieldErrors = { ...fieldErrors, [field]: '' };
+	};
+
 	const openCreate = () => {
 		editing = null;
 		formError = null;
+		fieldErrors = {};
 		f_first_name = '';
 		f_middle_name = '';
 		f_last_name = '';
@@ -206,6 +212,7 @@
 	const openEdit = (p: AdminProfessor) => {
 		editing = p;
 		formError = null;
+		fieldErrors = {};
 		f_first_name = p.firstName;
 		f_middle_name = p.middleName ?? '';
 		f_last_name = p.lastName;
@@ -219,6 +226,7 @@
 
 	const submitForm = async () => {
 		formError = null;
+		fieldErrors = {};
 		formBusy = true;
 		try {
 			if (editing === null) {
@@ -231,7 +239,16 @@
 					courses: f_courses,
 				});
 				if (!parsed.success) {
-					formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+					const fe: Record<string, string> = {};
+					for (const issue of parsed.error.issues) {
+						const key = String(issue.path[0] ?? '');
+						if (key && !fe[key]) fe[key] = issue.message;
+					}
+					fieldErrors = fe;
+					formError =
+						Object.keys(fe).length > 0
+							? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+							: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 					return;
 				}
 				const d = parsed.data;
@@ -245,15 +262,24 @@
 				});
 			} else {
 			const parsed = adminProfessorUpdateSchema.safeParse({
-				first_name: f_first_name || undefined,
+				first_name: f_first_name,
 				middle_name: f_middle_name || undefined,
-				last_name: f_last_name || undefined,
-				email: f_email || undefined,
+				last_name: f_last_name,
+				email: f_email,
 				department: f_department || undefined,
 				courses: f_courses,
 			});
 			if (!parsed.success) {
-				formError = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+				const fe: Record<string, string> = {};
+				for (const issue of parsed.error.issues) {
+					const key = String(issue.path[0] ?? '');
+					if (key && !fe[key]) fe[key] = issue.message;
+				}
+				fieldErrors = fe;
+				formError =
+					Object.keys(fe).length > 0
+						? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+						: (parsed.error.issues[0]?.message ?? 'Check the form and try again.');
 				return;
 			}
 			const d = parsed.data;
@@ -458,23 +484,110 @@
 			{/if}
 			<div class="form">
 				<div class="grid2">
-					<label>First name<input class="input" bind:value={f_first_name} /></label>
-					<label>Middle name<input class="input" bind:value={f_middle_name} /></label>
+					<label>
+						First name *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.first_name}
+							bind:value={f_first_name}
+							maxlength="100"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.first_name}
+							aria-describedby="prof-first-help"
+							oninput={() => clearFieldError('first_name')}
+						/>
+						{#if fieldErrors.first_name}
+							<p class="field-error" role="alert">{fieldErrors.first_name}</p>
+						{:else}
+							<p class="hint" id="prof-first-help">Up to 100 characters.</p>
+						{/if}
+					</label>
+					<label>
+						Middle name (optional)
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.middle_name}
+							bind:value={f_middle_name}
+							maxlength="100"
+							aria-invalid={!!fieldErrors.middle_name}
+							aria-describedby="prof-middle-help"
+							oninput={() => clearFieldError('middle_name')}
+						/>
+						{#if fieldErrors.middle_name}
+							<p class="field-error" role="alert">{fieldErrors.middle_name}</p>
+						{:else}
+							<p class="hint" id="prof-middle-help">Optional. Leave blank if no middle name.</p>
+						{/if}
+					</label>
 				</div>
 				<div class="grid2">
-					<label>Last name<input class="input" bind:value={f_last_name} /></label>
-					<label>Email<input class="input" type="email" bind:value={f_email} /></label>
+					<label>
+						Last name *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.last_name}
+							bind:value={f_last_name}
+							maxlength="100"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.last_name}
+							aria-describedby="prof-last-help"
+							oninput={() => clearFieldError('last_name')}
+						/>
+						{#if fieldErrors.last_name}
+							<p class="field-error" role="alert">{fieldErrors.last_name}</p>
+						{:else}
+							<p class="hint" id="prof-last-help">Up to 100 characters.</p>
+						{/if}
+					</label>
+					<label>
+						Email *
+						<input
+							class="input"
+							class:invalid={!!fieldErrors.email}
+							type="email"
+							bind:value={f_email}
+							maxlength="255"
+							aria-required="true"
+							aria-invalid={!!fieldErrors.email}
+							aria-describedby="prof-email-help"
+							oninput={() => clearFieldError('email')}
+						/>
+						{#if fieldErrors.email}
+							<p class="field-error" role="alert">{fieldErrors.email}</p>
+						{:else}
+							<p class="hint" id="prof-email-help">Valid email, up to 255 characters.</p>
+						{/if}
+					</label>
 				</div>
-				<label>Department (optional)<input class="input" bind:value={f_department} list="department-suggestions" autocomplete="off" placeholder="Type or pick a program…" /></label>
+				<label>
+					Department (optional)
+					<input
+						class="input"
+						class:invalid={!!fieldErrors.department}
+						bind:value={f_department}
+						list="department-suggestions"
+						autocomplete="off"
+						placeholder="Type or pick a program…"
+						maxlength="100"
+						aria-invalid={!!fieldErrors.department}
+						aria-describedby="prof-dept-help"
+						oninput={() => clearFieldError('department')}
+					/>
+					{#if fieldErrors.department}
+						<p class="field-error" role="alert">{fieldErrors.department}</p>
+					{:else}
+						<p class="hint" id="prof-dept-help">Optional org unit — teaching scope comes from the offerings below.</p>
+					{/if}
+				</label>
 				<datalist id="department-suggestions">
 					{#each programOptions as p (p.id)}
 						<option value={p.code}>{p.name}</option>
 						<option value={p.name}>{p.code}</option>
 					{/each}
 				</datalist>
-				<p class="hint">Optional org unit — teaching scope comes from the offerings below.</p>
-				<fieldset class="courses">
+				<fieldset class="courses" aria-describedby="prof-courses-help">
 					<legend>Course assignments (offerings) · {f_courses.length} selected</legend>
+					<p class="hint" id="prof-courses-help">Select one or more offerings; leave empty if none.</p>
 					{#if offeringsLoading}
 						<div class="skeleton-stack" role="status" aria-busy="true">
 							<span class="sr-only">Loading offerings…</span>
@@ -940,6 +1053,16 @@
 
 	.table-wrap {
 		overflow-x: auto;
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
 	}
 
 	@media (max-width: 640px) {

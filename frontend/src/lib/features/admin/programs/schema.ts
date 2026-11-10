@@ -7,17 +7,17 @@
 import { z } from 'zod';
 
 export const programCreateSchema = z.object({
-	code: z.string().trim().toUpperCase().min(2).max(20),
-	name: z.string().trim().min(1, 'Required').max(100),
-	description: z.string().trim().max(1000).optional().or(z.literal('')),
-	total_years: z.coerce.number().int().min(1).max(10),
+	code: z.string().trim().toUpperCase().min(2, 'Program code is required. Enter 2–20 characters.').max(20, 'Program code is required. Enter 2–20 characters.'),
+	name: z.string().trim().min(1, 'Program name is required. Enter up to 100 characters.').max(100, 'Program name is required. Enter up to 100 characters.'),
+	description: z.string().trim().max(1000, 'Description is optional. Enter up to 1000 characters.').optional().or(z.literal('')),
+	total_years: z.coerce.number().int().min(1, 'Total years is required. Enter 1–10.').max(10, 'Total years is required. Enter 1–10.'),
 });
 
 export type ProgramCreateInput = z.infer<typeof programCreateSchema>;
 
 export const programUpdateSchema = z.object({
-	name: z.string().trim().min(1, 'Required').max(100).optional(),
-	description: z.string().trim().max(1000).optional().or(z.literal('')),
+	name: z.string().trim().min(1, 'Program name is required. Enter up to 100 characters.').max(100, 'Program name is required. Enter up to 100 characters.').optional(),
+	description: z.string().trim().max(1000, 'Description is optional. Enter up to 1000 characters.').optional().or(z.literal('')),
 	is_active: z.boolean().optional(),
 });
 

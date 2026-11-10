@@ -38,6 +38,7 @@
 		assignmentCreateSchema,
 		assignmentReassignSchema,
 		componentCreateSchema,
+		offeringSettingsSchema,
 		windowsWithinDuration,
 	} from '$lib/features/admin/offerings/schema';
 	import type { AssignmentCreateInput, AssignmentReassignInput } from '$lib/features/admin/offerings/schema';
@@ -125,6 +126,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		null
 	);
 	let settingsError = $state<string | null>(null);
+	let settingsFieldErrors = $state<Record<string, string>>({});
 	let settingsBusy = $state(false);
 	let settingsOpen = $state(false);
 	let archiveBusy = $state(false);
@@ -383,6 +385,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		const o = adminOfferingDetailState.offering;
 		if (!o) return;
 		settingsError = null;
+		settingsFieldErrors = {};
 		// A blank field means "follow the system default" (D93), so a NULL
 		// on the offering reads as an empty input rather than the text
 		// "null".
@@ -435,6 +438,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	let deleteOpen = $state(false);
 	let deleteBusy = $state(false);
 	let archiveConfirm = $state(false);
+	let reactivateConfirm = $state(false);
 
 	const confirmDelete = async () => {
 		if (!offering || deleteBusy) return;
@@ -457,8 +461,30 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	const submitSettings = async () => {
 		if (!offering) return;
 		settingsError = null;
+		settingsFieldErrors = {};
 		settingsBusy = true;
 		try {
+			const parsedSettings = offeringSettingsSchema.safeParse({
+				present: s_present,
+				late: s_late,
+				radius: s_radius,
+				room: s_room,
+				lat: s_lat,
+				lng: s_lng,
+			});
+			if (!parsedSettings.success) {
+				const fe: Record<string, string> = {};
+				for (const issue of parsedSettings.error.issues) {
+					const key = String(issue.path[0] ?? '');
+					if (key && !fe[key]) fe[key] = issue.message;
+				}
+				settingsFieldErrors = fe;
+				settingsError =
+					Object.keys(fe).length > 0
+						? 'Some information needs your attention. Review the highlighted fields and correct the indicated errors.'
+						: (parsedSettings.error.issues[0]?.message ?? 'Check the settings and try again.');
+				return;
+			}
 			// A blank field means "follow the system default" (D93): the
 			// offering stores NULL and the session resolves the value from
 			// Admin -> System Settings.
@@ -1562,19 +1588,105 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 						<p class="hint">{detailSessionCount} sessions/week × {offering.semesterWeeks} weeks = {detailExpectedTotal} expected sessions this term. Edit the term's weeks in Program Management → Year Levels → Manage Terms.</p>
 					{/if}
 					<div class="grid2">
-						<label>Present window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'} bind:value={s_present} /></label>
-						<label>Late window, min<input class="input" inputmode="numeric" placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'} bind:value={s_late} /></label>
+						<label>
+							Present window, min
+							<input
+								class="input"
+								class:invalid={!!settingsFieldErrors.present}
+								inputmode="numeric"
+								placeholder={systemDefaults ? `System default (${systemDefaults.present})` : 'System default'}
+								bind:value={s_present}
+								aria-invalid={!!settingsFieldErrors.present}
+								aria-describedby="offering-present-help"
+								oninput={() => { if (settingsFieldErrors.present) settingsFieldErrors = { ...settingsFieldErrors, present: '' }; }}
+							/>
+							{#if settingsFieldErrors.present}
+								<p class="field-error" role="alert">{settingsFieldErrors.present}</p>
+							{:else}
+								<p class="hint" id="offering-present-help">1–480 minutes. Blank follows the system default.</p>
+							{/if}
+						</label>
+						<label>
+							Late window, min
+							<input
+								class="input"
+								class:invalid={!!settingsFieldErrors.late}
+								inputmode="numeric"
+								placeholder={systemDefaults ? `System default (${systemDefaults.late})` : 'System default'}
+								bind:value={s_late}
+								aria-invalid={!!settingsFieldErrors.late}
+								aria-describedby="offering-late-help"
+								oninput={() => { if (settingsFieldErrors.late) settingsFieldErrors = { ...settingsFieldErrors, late: '' }; }}
+							/>
+							{#if settingsFieldErrors.late}
+								<p class="field-error" role="alert">{settingsFieldErrors.late}</p>
+							{:else}
+								<p class="hint" id="offering-late-help">1–480 minutes. Blank follows the system default.</p>
+							{/if}
+						</label>
 					</div>
 					<p class="hint">
 						Present + late windows must fit the course session duration. Leave a field
 						blank to follow the system default.
 					</p>
-					<label>Default classroom (optional)<input class="input" bind:value={s_room} placeholder="Room 301" /></label>
+					<label>
+						Default classroom (optional)
+						<input
+							class="input"
+							class:invalid={!!settingsFieldErrors.room}
+							bind:value={s_room}
+							placeholder="Room 301"
+							maxlength="100"
+							aria-invalid={!!settingsFieldErrors.room}
+							aria-describedby="offering-room-help"
+							oninput={() => { if (settingsFieldErrors.room) settingsFieldErrors = { ...settingsFieldErrors, room: '' }; }}
+						/>
+						{#if settingsFieldErrors.room}
+							<p class="field-error" role="alert">{settingsFieldErrors.room}</p>
+						{:else}
+							<p class="hint" id="offering-room-help">Optional. Used when a meeting has no classroom of its own.</p>
+						{/if}
+					</label>
 					<p class="hint">Used when a class meeting has no classroom of its own. Meetings can override this per row.</p>
 					<div class="grid2">
-						<label>Default latitude (optional)<input class="input" inputmode="decimal" bind:value={s_lat} placeholder="14.5995" /></label>
-						<label>Default longitude (optional)<input class="input" inputmode="decimal" bind:value={s_lng} placeholder="120.9842" /></label>
+						<label>
+							Default latitude (optional)
+							<input
+								class="input"
+								class:invalid={!!settingsFieldErrors.lat}
+								inputmode="decimal"
+								bind:value={s_lat}
+								placeholder="14.5995"
+								aria-invalid={!!settingsFieldErrors.lat}
+								aria-describedby="offering-lat-help"
+								oninput={() => { if (settingsFieldErrors.lat) settingsFieldErrors = { ...settingsFieldErrors, lat: '' }; }}
+							/>
+							{#if settingsFieldErrors.lat}
+								<p class="field-error" role="alert">{settingsFieldErrors.lat}</p>
+							{:else}
+								<p class="hint" id="offering-lat-help">-90 to 90. Optional.</p>
+							{/if}
+						</label>
+						<label>
+							Default longitude (optional)
+							<input
+								class="input"
+								class:invalid={!!settingsFieldErrors.lng}
+								inputmode="decimal"
+								bind:value={s_lng}
+								placeholder="120.9842"
+								aria-invalid={!!settingsFieldErrors.lng}
+								aria-describedby="offering-lng-help"
+								oninput={() => { if (settingsFieldErrors.lng) settingsFieldErrors = { ...settingsFieldErrors, lng: '' }; }}
+							/>
+							{#if settingsFieldErrors.lng}
+								<p class="field-error" role="alert">{settingsFieldErrors.lng}</p>
+							{:else}
+								<p class="hint" id="offering-lng-help">-180 to 180. Optional.</p>
+							{/if}
+						</label>
 					</div>
+					<p class="hint">Both latitude and longitude are required to pin a classroom.</p>
 					<ClassroomMapPicker
 						lat={s_lat.trim() === '' ? null : Number(s_lat)}
 						lng={s_lng.trim() === '' ? null : Number(s_lng)}
@@ -1592,10 +1704,14 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 							onDefault={() => (s_radius = '')}
 							onChange={(v) => (s_radius = String(v))}
 						/>
-						<p class="hint">
-							Blank inherits the value set in System Settings. A value here applies to this
-							offering's sessions only.
-						</p>
+						{#if settingsFieldErrors.radius}
+							<p class="field-error" role="alert">{settingsFieldErrors.radius}</p>
+						{:else}
+							<p class="hint">
+								Blank inherits the value set in System Settings. A value here applies to this
+								offering's sessions only.
+							</p>
+						{/if}
 					</div>
 				</div>
 				<div class="modal-actions">
@@ -1623,10 +1739,10 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 						</button>
 					{:else}
 						<button
-							class="btn btn-secondary"
+							class="btn btn-success"
 							disabled={archiveBusy || (!!course && !!detailBreakdown && detailBreakdown.status !== 'ok')}
 							title={!!course && !!detailBreakdown && detailBreakdown.status !== 'ok' ? 'Weekly scheduled hours do not match the course units requirement — fix the meetings first' : undefined}
-							onclick={onReactivate}
+							onclick={() => (reactivateConfirm = true)}
 						>
 							{archiveBusy ? 'Reactivating…' : 'Reactivate offering'}
 						</button>
@@ -2115,6 +2231,37 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 				<button class="btn btn-ghost" onclick={() => (archiveConfirm = false)}>Cancel</button>
 				<button class="btn btn-danger" aria-busy={archiveBusy} disabled={archiveBusy} onclick={confirmArchive}>
 					{archiveBusy ? 'Archiving…' : 'Archive'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if reactivateConfirm && offering}
+	<div class="modal-overlay" role="presentation">
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="offering-reactivate-title"
+			tabindex="-1"
+			use:trapFocus={{ onEscape: () => (reactivateConfirm = false) }}
+		>
+			<h2 id="offering-reactivate-title" class="modal-title">Reactivate this offering?</h2>
+			<p class="modal-text">
+				{course ? `${course.courseCode} — ${course.courseName}` : `Offering ${offering.id}`} will be restored to the active list.
+			</p>
+			{#if adminOfferingDetailState.actionError}
+				<p class="error" role="alert">{adminOfferingDetailState.actionError}</p>
+			{/if}
+			<div class="modal-actions">
+				<button class="btn btn-ghost" disabled={archiveBusy} onclick={() => (reactivateConfirm = false)}>Cancel</button>
+				<button
+					class="btn btn-success"
+					disabled={archiveBusy}
+					onclick={async () => { await onReactivate(); if (offering && offering.isActive) reactivateConfirm = false; }}
+				>
+					{archiveBusy ? 'Reactivating…' : 'Reactivate'}
 				</button>
 			</div>
 		</div>
@@ -2697,6 +2844,26 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		margin: 0 0 1.5rem;
 		font-size: 0.9375rem;
 		color: var(--text-secondary);
+	}
+
+	.input.invalid {
+		border-color: var(--danger);
+	}
+
+	.field-error {
+		color: var(--danger);
+		font-size: 0.75rem;
+		margin: 0;
+	}
+
+	.btn-success {
+		background: var(--success);
+		border: 1px solid var(--success);
+		color: var(--on-brand);
+	}
+
+	.btn-success:hover:not(:disabled) {
+		filter: brightness(1.05);
 	}
 
 	.modal-actions {

@@ -6,30 +6,30 @@
 
 import { z } from 'zod';
 
-const nameField = z.string().trim().min(1, 'Required').max(100);
-const emailField = z.string().trim().toLowerCase().email('Enter a valid email').max(255);
+const nameField = z.string().trim().min(1, 'Required').max(100, 'Enter up to 100 characters.');
+const emailField = z.string().trim().toLowerCase().email('Enter a valid email').max(255, 'Enter a valid email (up to 255 characters).');
 
 export const adminStudentCreateSchema = z.object({
-	student_id: z.string().trim().toUpperCase().min(3).max(50),
+	student_id: z.string().trim().toUpperCase().min(1, 'Student ID is required. Enter 1–50 characters.').max(50, 'Student ID is required. Enter 1–50 characters.'),
 	first_name: nameField,
-	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
+	middle_name: z.string().trim().max(100, 'Middle name is optional. Enter up to 100 characters.').optional().or(z.literal('')),
 	last_name: nameField,
 	email: emailField,
 	program_id: z.coerce.number().int().positive('Pick a program'),
 	year_level_id: z.coerce.number().int().positive('Pick a year level'),
-	section: z.string().trim().max(50).optional().or(z.literal('')),
+	section: z.string().trim().max(20, 'Section is optional. Enter up to 20 characters.').optional().or(z.literal('')),
 });
 
 export type AdminStudentCreateInput = z.infer<typeof adminStudentCreateSchema>;
 
 export const adminStudentUpdateSchema = z.object({
 	first_name: nameField.optional(),
-	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
+	middle_name: z.string().trim().max(100, 'Middle name is optional. Enter up to 100 characters.').optional().or(z.literal('')),
 	last_name: nameField.optional(),
 	email: emailField.optional(),
-	program_id: z.coerce.number().int().positive().optional(),
-	year_level_id: z.coerce.number().int().positive().optional(),
-	section: z.string().trim().max(50).optional().or(z.literal('')),
+	program_id: z.coerce.number().int().positive('Pick a program').optional(),
+	year_level_id: z.coerce.number().int().positive('Pick a year level').optional(),
+	section: z.string().trim().max(20, 'Section is optional. Enter up to 20 characters.').optional().or(z.literal('')),
 	is_active: z.boolean().optional(),
 });
 
@@ -37,10 +37,10 @@ export type AdminStudentUpdateInput = z.infer<typeof adminStudentUpdateSchema>;
 
 export const adminProfessorCreateSchema = z.object({
 	first_name: nameField,
-	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
+	middle_name: z.string().trim().max(100, 'Middle name is optional. Enter up to 100 characters.').optional().or(z.literal('')),
 	last_name: nameField,
 	email: emailField,
-	department: z.string().trim().max(100).optional().or(z.literal('')),
+	department: z.string().trim().max(100, 'Department is optional. Enter up to 100 characters.').optional().or(z.literal('')),
 	courses: z.array(z.coerce.number().int().positive()).default([]),
 });
 
@@ -48,10 +48,10 @@ export type AdminProfessorCreateInput = z.infer<typeof adminProfessorCreateSchem
 
 export const adminProfessorUpdateSchema = z.object({
 	first_name: nameField.optional(),
-	middle_name: z.string().trim().max(100).optional().or(z.literal('')),
+	middle_name: z.string().trim().max(100, 'Middle name is optional. Enter up to 100 characters.').optional().or(z.literal('')),
 	last_name: nameField.optional(),
 	email: emailField.optional(),
-	department: z.string().trim().max(100).optional().or(z.literal('')),
+	department: z.string().trim().max(100, 'Department is optional. Enter up to 100 characters.').optional().or(z.literal('')),
 	is_active: z.boolean().optional(),
 	courses: z.array(z.coerce.number().int().positive()).optional(),
 });

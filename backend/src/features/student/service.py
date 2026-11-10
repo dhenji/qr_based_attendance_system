@@ -949,6 +949,8 @@ class StudentService:
             middle_name=student.middle_name,
             last_name=student.last_name,
             email=student.email,
+            program_id=year_level.program_id,
+            year_level_id=student.year_level_id,
             program_code=program.code if program is not None else "",
             year_level_label=year_level.label,
             section=student.section,
