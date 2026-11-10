@@ -86,6 +86,12 @@ Timing: OTP emails are sent **inline**, so the request waits up to
 handed to an executor thread and return immediately; nothing survives a
 process restart.
 
+OTP emails are now **purpose-specific** (`claim` / `login` / `forget_password`)
+and delivered as `multipart/alternative` (plain text + responsive HTML) via
+`shared/otp_email.py`. Subjects and headings differ per purpose, and the
+expiration line reflects `OTP_EXPIRES_MINUTES` exactly. Excuse notifications
+remain plain text.
+
 ---
 
 ## 4. Choosing a relay

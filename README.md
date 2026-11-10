@@ -197,7 +197,7 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot + cron scheduler, AppException handler)
 │   │   ├── core/         # config.py (pydantic-settings), database.py (async engine + Base), security.py (Argon2id/JWT/OTP/recovery-grant/backup-code fingerprint, HMAC session codes + versioned QR payload), scheduler.py (APScheduler lifecycle), exceptions.py
-│   │   ├── shared/       # enums.py (16 enums), mixins.py, base.py (CRUD base), pagination.py, email.py, validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py, constants.py, query.py, audit.py, rates.py, storage.py, datetimes.py
+│   │   ├── shared/       # enums.py (16 enums), mixins.py, base.py (CRUD base), pagination.py, email.py (+ otp_email.py renderer), validators.py, captcha.py, rate_limit.py, cache.py, dependencies.py, csv_import.py, constants.py, query.py, audit.py, rates.py, storage.py, datetimes.py
  │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 15 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 18 slices: admin, analytics, attendance, auth, course, course_professor, dashboard, enrollment, excuse, face_enrollment, professor, program, reports, session, student, sync, system, upload
 │   │   │   └── */        # model.py in 13 slices (21 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
@@ -310,7 +310,7 @@ Backend (`backend/.env.example`):
 
 | Variable                          | Default                                                                | Purpose                                                                       |
 | --------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `APP_NAME`                        | `QR Attendance System API`                                             | API name                                                                      |
+| `APP_NAME`                        | `Attendly`                                                             | API name / email brand name                                                   |
 | `DEBUG`                           | `false`                                                                | Enables SQL echo; skips JWT_SECRET validation when `true`                     |
 | `DATABASE_URL`                    | `postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys` | Async PostgreSQL connection                                                   |
 | `CORS_ORIGINS`                    | `http://localhost:5173`                                                | Allowed browser origins                                                       |

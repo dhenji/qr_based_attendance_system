@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "QR Attendance System API"
+    app_name: str = "Attendly"
     debug: bool = False
     database_url: str = (
         "postgresql+asyncpg://postgres:postgres@localhost:5432/attendance_sys"
