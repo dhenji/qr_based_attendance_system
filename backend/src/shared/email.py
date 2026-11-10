@@ -37,6 +37,9 @@ from logging import Logger, getLogger
 
 from core.config import Settings, get_settings
 
+from shared.enums import OtpPurpose
+from shared.otp_email import render_otp_email
+
 logger: Logger = getLogger(__name__)
 
 # Used only when neither SMTP_FROM nor SMTP_USER names a sender, so the header
@@ -56,10 +59,16 @@ class OutboundEmail:
     to: str
     subject: str
     body: str
+    html: str | None = None
 
 
 def send_email(
-    to: str, subject: str, body: str, *, settings: Settings | None = None
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    html: str | None = None,
+    settings: Settings | None = None,
 ) -> bool:
     """Deliver one message. Returns True when SMTP accepted it.
 
@@ -83,7 +92,7 @@ def send_email(
         logger.info("SMTP_HOST unset; not sending email to=%s subject=%s", to, subject)
         return False
 
-    message: EmailMessage = _build_message(to, subject, body, current)
+    message: EmailMessage = _build_message(to, subject, body, current, html=html)
 
     try:
         with _smtp_client(current) as client:
@@ -100,10 +109,34 @@ def send_email(
 def send_otp_email(
     to: str,
     otp_code: str,
-    subject: str = "Your OTP code",
+    *,
+    purpose: OtpPurpose | str = OtpPurpose.CLAIM,
+    settings: Settings | None = None,
 ) -> None:
-    body: str = f"Your verification code is: {otp_code}"
-    send_email(to, subject, body)
+    """Render and deliver a purpose-specific OTP email (plain text + HTML)."""
+
+    current: Settings = settings or get_settings()
+
+    if isinstance(purpose, str):
+        try:
+            purpose = OtpPurpose(purpose)
+        except ValueError:
+            purpose = OtpPurpose.CLAIM
+
+    rendered = render_otp_email(
+        purpose,
+        otp_code,
+        app_name=current.app_name,
+        expires_minutes=current.otp_expires_minutes,
+    )
+
+    send_email(
+        to,
+        rendered.subject,
+        rendered.text,
+        html=rendered.html,
+        settings=current,
+    )
 
 
 def dispatch_email(to: str, subject: str, body: str) -> None:
@@ -150,7 +183,9 @@ def dispatch_emails(
 
 def _deliver(batch: Sequence[OutboundEmail], settings: Settings) -> None:
     for message in batch:
-        send_email(message.to, message.subject, message.body, settings=settings)
+        send_email(
+            message.to, message.subject, message.body, html=message.html, settings=settings
+        )
 
 
 def _settle(future: asyncio.Future[None]) -> None:
@@ -166,13 +201,21 @@ def _settle(future: asyncio.Future[None]) -> None:
 
 
 def _build_message(
-    to: str, subject: str, body: str, settings: Settings
+    to: str,
+    subject: str,
+    body: str,
+    settings: Settings,
+    *,
+    html: str | None = None,
 ) -> EmailMessage:
     message: EmailMessage = EmailMessage()
     message["From"] = settings.smtp_from or settings.smtp_user or DEFAULT_FROM_ADDRESS
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
+
+    if html:
+        message.add_alternative(html, subtype="html")
 
     return message
 

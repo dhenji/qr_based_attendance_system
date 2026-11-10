@@ -355,7 +355,7 @@ class AuthService:
             expires_at=now + timedelta(minutes=self._settings.otp_expires_minutes),
         )
 
-        send_otp_email(email, code)
+        send_otp_email(email, code, purpose=purpose, settings=self._settings)
 
     def _assert_recovery_grant(self, email: str, recovery_token: str | None) -> None:
         """Gate step 3 on a valid step-2 grant for the same address.

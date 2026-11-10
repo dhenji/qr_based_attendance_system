@@ -294,8 +294,13 @@ def test_otp_email_still_routes_through_send_email(
 
     message: EmailMessage = recorder.messages[0]
     assert message["To"] == "student@test.local"
-    assert message["Subject"] == "Your OTP code"
-    assert "998877" in message.get_content()
+    assert message["Subject"] == "Your Verification Code \u2013 Attendly"
+    plain_part = message.get_body(preferencelist=("plain",))
+    assert plain_part is not None
+    assert "998877" in plain_part.get_content()
+    html_part = message.get_body(preferencelist=("html",))
+    assert html_part is not None
+    assert "998877" in html_part.get_content()
 
 
 def _capture_sends(
@@ -307,7 +312,12 @@ def _capture_sends(
     threads: list[str] = []
 
     def _fake_send(
-        to: str, subject: str, body: str, *, settings: Settings | None = None
+        to: str,
+        subject: str,
+        body: str,
+        *,
+        html: str | None = None,
+        settings: Settings | None = None,
     ) -> bool:
         sent.append((to, subject, body))
         threads.append(threading.current_thread().name)
