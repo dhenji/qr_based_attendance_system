@@ -7,7 +7,7 @@
 // request comes back unauthorized we exchange the refresh token once, push the
 // new access token into the api client, and let the caller retry.
 
-import { APIError, post, setAuthToken, setUnauthorizedHandler } from '$lib/api/client';
+import { APIError, isMockMode, post, setAuthToken, setUnauthorizedHandler } from '$lib/api/client';
 import type { TokenResponse } from '$lib/shared/types';
 import { browser } from '$app/environment';
 
@@ -61,23 +61,60 @@ export const hydrateTokens = (): void => {
 // In-flight refresh, shared so parallel 401s trigger exactly one round trip.
 let refreshInFlight: Promise<string | null> | null = null;
 
-// Guards against re-entrancy: the refresh request itself goes through the api
-// client, so a 401 on it would call straight back into here. See
-// refreshAccessToken for why this is checked ahead of refreshInFlight.
-let isRefreshing = false;
-
 const exchangeRefreshToken = async (): Promise<string | null> => {
 	const refreshToken = getRefreshToken();
-	if (!refreshToken) return null;
-
-	isRefreshing = true;
+	if (!refreshToken) {
+		refreshInFlight = null;
+		return null;
+	}
 
 	try {
-		const response = await post<TokenResponse>('authRefresh', {
-			refresh_token: refreshToken,
-		});
+		let response: TokenResponse;
 
-		if (!response.access_token) return null;
+		if (isMockMode()) {
+			// Mock mode never hits the network and never returns a 401, so it is
+			// safe to go through the normal client (which also serves fixtures).
+			response = await post<TokenResponse>('authRefresh', {
+				refresh_token: refreshToken,
+			});
+		} else {
+			// Use a raw fetch for the refresh call itself so a 401 on it does NOT
+			// re-enter `refreshAccessToken` (which would deadlock on the in-flight
+			// promise). Every other request keeps going through the client and its
+			// 401-retry handler, so concurrent 401s still await this promise.
+			const rawBase = import.meta.env.PUBLIC_API_URL as string | undefined;
+			const baseUrl = (
+				rawBase ||
+				(typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000')
+			).replace(/\/+$/, '');
+			const url = `${baseUrl}/api/auth/refresh`;
+
+			const res = await fetch(url, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ refresh_token: refreshToken }),
+				credentials: 'include',
+			});
+
+			if (!res.ok) {
+				// Any HTTP failure here means the refresh credential is unusable,
+				// so drop the session. (Network failures throw and skip this.)
+				clearTokens();
+				return null;
+			}
+
+			try {
+				response = (await res.json()) as TokenResponse;
+			} catch {
+				clearTokens();
+				return null;
+			}
+		}
+
+		if (!response.access_token) {
+			clearTokens();
+			return null;
+		}
 
 		setTokens({
 			access: response.access_token,
@@ -87,27 +124,23 @@ const exchangeRefreshToken = async (): Promise<string | null> => {
 		return response.access_token;
 	} catch (error) {
 		// A rejected refresh token means the session is genuinely over, so clear
-		// it. A network blip (no APIError) leaves the tokens alone so the next
-		// attempt can still succeed.
+		// it. A network blip (no APIError / fetch rejection) leaves the tokens
+		// alone so the next attempt can still succeed.
 		if (error instanceof APIError) {
 			clearTokens();
 		}
 		return null;
 	} finally {
-		isRefreshing = false;
 		refreshInFlight = null;
 	}
 };
 
 // Returns a new access token, or null when the session cannot be recovered.
 //
-// `isRefreshing` is tested *before* `refreshInFlight` on purpose. The refresh
-// request itself goes through this client, so a 401 on it re-enters here — and
-// by then `refreshInFlight` is already set to the promise we are inside.
-// Returning that promise would await itself and hang forever, so a re-entrant
-// call must bail out immediately with null and let the 401 propagate.
+// Single-flighted via `refreshInFlight`, so parallel 401s all await the same
+// refresh and retry afterwards. The refresh request itself uses a raw fetch (see
+// above), so it never re-enters this function and cannot deadlock.
 export const refreshAccessToken = (): Promise<string | null> => {
-	if (isRefreshing) return Promise.resolve(null);
 	if (refreshInFlight) return refreshInFlight;
 	refreshInFlight = exchangeRefreshToken();
 	return refreshInFlight;

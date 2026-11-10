@@ -126,6 +126,12 @@ them needs a per-user `tokens_valid_from` / session-version column checked at
 refresh — not built. Until then, disabling MFA reduces the *next* login's
 exposure; it is not a way to kick an existing session out.
 
+### Session and token lifecycle (current)
+
+- Access tokens expire after 15 minutes; refresh tokens after 7 days. The client transparently refreshes on 401 and retries once; concurrent 401s share a single in-flight refresh.
+- There is no idle timeout and no server-side revocation; logout clears client storage only, so issued refresh tokens remain valid until expiry.
+- Tokens are stored in `localStorage` (XSS exposure). See the idle-session implementation plan for the proposed hardening.
+
 ---
 
 ## Biometric Security
