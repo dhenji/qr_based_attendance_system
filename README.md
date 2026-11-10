@@ -133,6 +133,13 @@ session is `closed`. Scanned students keep their server-decided status.
 | 4   | Face Liveness + Match   | Photos, replay & distortion tricks; requires prior face enrollment | Blink/turn challenge + embedding similarity |
 | 5   | Uniqueness + Enrollment | Same ID used twice / non-enrolled students                         | DB Constraint + FK Check                    |
 
+## Authentication & Sessions
+
+- Short-lived JWT access tokens (15 min) with 7-day refresh tokens; the client transparently refreshes on 401 and retries once.
+- Concurrent 401 responses share a single in-flight refresh to avoid spurious failures; a browser refresh re-validates via `/auth/me`.
+- There is **no idle timeout** yet; sessions last until refresh-token expiry. Logout is client-side only, so issued refresh tokens remain valid server-side until expiry.
+- Tokens are stored in `localStorage` (see `docs/architecture/security-model.md` T6 for the XSS exposure and revocation limitations).
+
 ## Features
 
 | Feature          | Purpose                                                                                                                     |
