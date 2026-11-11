@@ -1599,6 +1599,8 @@ lock after 5 failed attempts.
 | POST   | `/auth/login/verify`               | Verify login OTP → tokens (or MFA challenge for admins with MFA) | 400 `invalid_credentials` · 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 423 `login_otp_locked` · 429 `rate_limited` |
 | POST   | `/auth/login/resend`               | Resend login OTP (burns the previous code) | 400 `invalid_credentials` |
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
+| POST   | `/auth/logout`                     | Invalidate all outstanding sessions for the current account | 401 unauthorized |
+| GET    | `/auth/session-policy`             | Idle-session policy for the current account (`{ idle_timeout_minutes, idle_warning_minutes }`) | 401 unauthorized |
 | POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
 | POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
 | POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` |

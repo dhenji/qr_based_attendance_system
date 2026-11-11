@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, status
@@ -73,6 +74,19 @@ async def _get_current_user(
     if user is None:
         raise _unauthorized("user_not_found", "User not found or inactive")
 
+    now: datetime = datetime.now(timezone.utc)
+    timeout_seconds: int = _idle_timeout_seconds(user, settings)
+    last_activity: datetime | None = getattr(user, "last_activity_at", None)
+    if (
+        last_activity is not None
+        and timeout_seconds > 0
+        and (now - last_activity).total_seconds() > timeout_seconds
+    ):
+        raise _unauthorized("session_idle", "Session expired due to inactivity")
+
+    # Activity tracking is handled on login/refresh; this check is read-only
+    # so it does not mutate rows during request handling.
+
     # Revoke outstanding tokens when the account's session version moved
     # (logout, password change/reset, MFA disable, admin deactivation).
     token_version: int | None = payload.get("tv")
@@ -105,6 +119,19 @@ async def _get_optional_current_user(
     if user is None:
         return None
 
+    now: datetime = datetime.now(timezone.utc)
+    timeout_seconds: int = _idle_timeout_seconds(user, settings)
+    last_activity: datetime | None = getattr(user, "last_activity_at", None)
+    if (
+        last_activity is not None
+        and timeout_seconds > 0
+        and (now - last_activity).total_seconds() > timeout_seconds
+    ):
+        raise _unauthorized("session_idle", "Session expired due to inactivity")
+
+    # Activity tracking is handled on login/refresh; this check is read-only
+    # so it does not mutate rows during request handling.
+
     token_version: int | None = payload.get("tv")
     if token_version is None or int(token_version) != (user.token_version or 0):
         return None
@@ -116,6 +143,17 @@ async def _get_active_user(session: AsyncSession, user_id: int) -> User | None:
     user = await session.get(entity=User, ident=user_id)
 
     return user if user is not None and user.is_active else None
+
+
+def _idle_timeout_seconds(user: User, settings: Settings) -> int:
+    role = getattr(user, "role", "student")
+    if role in ("admin", "super_admin"):
+        minutes = settings.idle_timeout_minutes_admin
+    elif role == "professor":
+        minutes = settings.idle_timeout_minutes_professor
+    else:
+        minutes = settings.idle_timeout_minutes_student
+    return int(minutes) * 60
 
 
 def _unauthorized(code: str, message: str) -> HTTPException:

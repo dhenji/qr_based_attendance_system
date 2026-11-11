@@ -13,7 +13,7 @@
 	} from '$lib/features/auth/store.svelte';
 	import { startIdleWatcher } from '$lib/features/auth/idle';
 import { getSessionPolicy } from '$lib/features/auth/service';
-	import { startTokenSync } from '$lib/features/auth/tokens';
+	import { clearTokens, startTokenSync } from '$lib/features/auth/tokens';
 	import NotificationBell, {
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
@@ -122,7 +122,11 @@ let visibilityHandler: (() => void) | null = null;
 
 			tokenSyncCleanup = startTokenSync({
 				onCleared: () => {
-					void doLogout();
+					clearTokens();
+					if (typeof window !== 'undefined') {
+						sessionStorage.setItem('attendly_signed_out_elsewhere', '1');
+						window.location.href = `${Routes.LOGIN}?reason=signed_out_elsewhere`;
+					}
 				},
 				onChanged: () => {
 					void restoreSession();

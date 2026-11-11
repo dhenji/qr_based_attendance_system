@@ -129,8 +129,21 @@ exposure; it is not a way to kick an existing session out.
 ### Session and token lifecycle (current)
 
 - Access tokens expire after 15 minutes; refresh tokens after 7 days. The client transparently refreshes on 401 and retries once; concurrent 401s share a single in-flight refresh.
-- There is no idle timeout and no server-side revocation; logout clears client storage only, so issued refresh tokens remain valid until expiry.
+- Idle timeout is backend-owned and role-based (student 45 min, professor 30 min, admin 15 min by default), exposed via `GET /auth/session-policy`. Server-side idle enforcement rejects requests whose `last_activity_at` exceeds the configured window.
+- Logout and security-sensitive changes increment `token_version`, invalidating all outstanding JWTs. `POST /auth/logout` revokes server-side.
+- Cross-tab logout redirects to login with `?reason=signed_out_elsewhere` and shows a notice.
 - Tokens are stored in `localStorage` (XSS exposure). See the idle-session implementation plan for the proposed hardening.
+
+---
+
+## Session & Token Lifecycle
+
+- Access tokens expire after 15 minutes; refresh tokens after 7 days (absolute ceiling, never extended by activity).
+- Idle timeout is backend-owned and role-based (student 45 min, professor 30 min, admin 15 min by default), exposed via `GET /auth/session-policy`; the frontend mirrors it for the warning modal and countdown, with `PUBLIC_IDLE_*` as early-load fallbacks.
+- Server-side idle enforcement rejects requests whose `last_activity_at` is older than the configured window; `last_activity_at` is updated at most once per minute per account.
+- Logout and security-sensitive changes (password change/reset, MFA disable, admin deactivation, lockout actions) increment `token_version`, invalidating all outstanding JWTs.
+- Logout is best-effort server-side: the client refreshes the access token first if needed so revocation still succeeds after expiry.
+- There is no cross-device session list; revocation is coarse (all sessions for the account).
 
 ---
 

@@ -14,7 +14,7 @@ export interface IdleWatcherOptions {
 	onIdle: () => void;
 }
 
-const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'visibilitychange'] as const;
+const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart', 'click', 'visibilitychange'] as const;
 
 export function startIdleWatcher(options: IdleWatcherOptions): () => void {
 	if (!browser) return () => {};

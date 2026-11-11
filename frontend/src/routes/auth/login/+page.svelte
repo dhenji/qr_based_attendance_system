@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Routes } from '$lib/shared/constants/routes';
@@ -50,6 +50,15 @@ let error = $state('');
 
 	// Shared OTP window: remaining = code validity (display), resendIn = cooldown gate
 	const win = createOtpWindow();
+
+	onMount(() => {
+		const reason = page.url.searchParams.get('reason');
+		const flag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('attendly_signed_out_elsewhere') : null;
+		if (reason === 'signed_out_elsewhere' || flag) {
+			error = 'You were signed out in another tab.';
+			if (flag) sessionStorage.removeItem('attendly_signed_out_elsewhere');
+		}
+	});
 
 	onDestroy(() => {
 		win.stop();

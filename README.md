@@ -137,8 +137,11 @@ session is `closed`. Scanned students keep their server-decided status.
 
 - Short-lived JWT access tokens (15 min) with 7-day refresh tokens; the client transparently refreshes on 401 and retries once.
 - Concurrent 401 responses share a single in-flight refresh to avoid spurious failures; a browser refresh re-validates via `/auth/me`.
-- There is **no idle timeout** yet; sessions last until refresh-token expiry. Logout is client-side only, so issued refresh tokens remain valid server-side until expiry.
-- Tokens are stored in `localStorage` (see `docs/architecture/security-model.md` T6 for the XSS exposure and revocation limitations).
+- Idle session policy is **backend-owned** and role-based (student 45 min, professor 30 min, admin 15 min by default), exposed via `GET /auth/session-policy`. The frontend mirrors it for the warning modal/countdown; `PUBLIC_IDLE_*` are early-load fallbacks only.
+- Server-side idle enforcement rejects requests whose `last_activity_at` exceeds the configured window; `last_activity_at` is updated on login and refresh.
+- Logout and security-sensitive changes (password change/reset, MFA disable, admin deactivation, lockout actions) increment `token_version`, invalidating all outstanding JWTs. `POST /auth/logout` revokes server-side; the client refreshes the access token first if needed so revocation still succeeds after expiry.
+- Cross-tab logout shows "You were signed out in another tab."
+- Tokens are stored in `localStorage` (see `docs/architecture/security-model.md` for XSS exposure and revocation details).
 
 ## Features
 

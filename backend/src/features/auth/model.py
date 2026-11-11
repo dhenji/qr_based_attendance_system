@@ -46,6 +46,11 @@ class User(CreatedAtMixin, Base):
     # when it no longer matches.
     token_version: Mapped[int] = mapped_column(Integer, server_default="0")
 
+    # Last meaningful activity, used for server-side idle enforcement.
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Incremental lockout state (consecutive lockout count + decay anchor).
     lockout_level: Mapped[int] = mapped_column(Integer, server_default="0")
     last_lockout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

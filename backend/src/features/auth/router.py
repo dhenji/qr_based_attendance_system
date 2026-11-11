@@ -22,6 +22,7 @@ from features.auth.schema import (
     OTPRequest,
     OTPVerifyRequest,
     RecoveryGrantResponse,
+    LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,

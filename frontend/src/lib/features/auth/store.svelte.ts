@@ -29,6 +29,7 @@ import {
 	clearTokens,
 	hasTokens,
 	hydrateTokens,
+	refreshAccessToken,
 	scheduleProactiveRefresh,
 	setTokens,
 } from '$lib/features/auth/tokens';
@@ -439,6 +440,12 @@ export const doChangePassword = async (
 
 export const doLogout = async (): Promise<void> => {
 	cancelProactiveRefresh();
+	// Best-effort: ensure a valid access token exists so the backend can revoke.
+	try {
+		await refreshAccessToken();
+	} catch {
+		// ignore
+	}
 	try {
 		await logout();
 	} catch {

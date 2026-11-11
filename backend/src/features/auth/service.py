@@ -287,6 +287,8 @@ async def _register_failed_attempt(user_id: int, lockout_attempts: int) -> None:
             user.is_locked = True
             user.locked_at = now
             user.last_lockout_at = now
+            if hasattr(user, "token_version"):
+                user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             session,
@@ -610,6 +612,7 @@ class AuthService:
         user.lockout_level = 0
         user.last_lockout_at = None
         user.last_login = now
+        user.last_activity_at = now
         await self._session.flush()
 
         # Second factor, by role. Students and professors who enrolled in MFA
@@ -780,9 +783,26 @@ class AuthService:
         if user is None or not user.is_active:
             raise InvalidCredentialsException()
 
+        # Server-side idle enforcement on refresh.
+        now: datetime = datetime.now(timezone.utc)
+        if user.role in ("admin", "super_admin"):
+            timeout_minutes = self._settings.idle_timeout_minutes_admin
+        elif user.role == "professor":
+            timeout_minutes = self._settings.idle_timeout_minutes_professor
+        else:
+            timeout_minutes = self._settings.idle_timeout_minutes_student
+        last_activity: datetime | None = getattr(user, "last_activity_at", None)
+        if (
+            last_activity is not None
+            and (now - last_activity).total_seconds() > timeout_minutes * 60
+        ):
+            raise InvalidCredentialsException()
+
         # Revoke outstanding sessions when the token's version no longer matches.
         if int(payload.get("tv", 0) or 0) != (user.token_version or 0):
             raise InvalidCredentialsException()
+
+        user.last_activity_at = now
 
         return self._build_tokens(user)
 
@@ -1152,6 +1172,8 @@ class AuthService:
         user.failed_login_attempts = 0
         user.lockout_level = 0
         user.last_lockout_at = None
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1187,6 +1209,8 @@ class AuthService:
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_level = 0
         user.last_lockout_at = None
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1225,6 +1249,8 @@ class AuthService:
         now: datetime = datetime.now(timezone.utc)
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = now + timedelta(minutes=duration_minutes)
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1258,6 +1284,8 @@ class AuthService:
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = None
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
