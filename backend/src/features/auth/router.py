@@ -22,10 +22,12 @@ from features.auth.schema import (
     OTPRequest,
     OTPVerifyRequest,
     RecoveryGrantResponse,
+    LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
     SecurityQuestionResponse,
+    SessionPolicyResponse,
     SetSecurityQuestionRequest,
     TokenResponse,
 )
@@ -313,6 +315,18 @@ async def mfa_disable(
     await service.disable_mfa(current_user, payload.password)
 
 
+@router.get(
+    "/session-policy",
+    response_model=SessionPolicyResponse,
+    summary="Idle-session policy for the current account",
+)
+async def session_policy(
+    current_user: CurrentUserDep, service: AuthServiceDep
+) -> SessionPolicyResponse:
+    policy = service.get_session_policy(current_user)
+    return SessionPolicyResponse(**policy)
+
+
 @router.post(
     "/security-question",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -324,3 +338,15 @@ async def security_question(
     service: AuthServiceDep,
 ) -> None:
     await service.set_security_question(current_user, payload.question, payload.answer)
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Invalidate all outstanding sessions for the current account",
+)
+async def logout(
+    current_user: CurrentUserDep,
+    service: AuthServiceDep,
+) -> None:
+    await service.logout(current_user)

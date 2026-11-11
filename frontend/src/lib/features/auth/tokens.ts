@@ -42,6 +42,7 @@ export const setTokens = (tokens: {
 	}
 
 	setAuthToken(tokens.access);
+	scheduleProactiveRefresh();
 };
 
 export const clearTokens = (): void => {
@@ -49,6 +50,7 @@ export const clearTokens = (): void => {
 	localStorage.removeItem(ACCESS_KEY);
 	localStorage.removeItem(REFRESH_KEY);
 	setAuthToken(null);
+	cancelProactiveRefresh();
 };
 
 // Re-arm the api client from storage on first load so a page refresh keeps the
@@ -144,6 +146,79 @@ export const refreshAccessToken = (): Promise<string | null> => {
 	if (refreshInFlight) return refreshInFlight;
 	refreshInFlight = exchangeRefreshToken();
 	return refreshInFlight;
+};
+
+// Proactive refresh: schedule a refresh ~2 minutes before the access token
+// expires so active users never hit a request-time 401.
+let proactiveTimer: ReturnType<typeof setTimeout> | null = null;
+
+const decodeAccessExp = (token: string): number | null => {
+	try {
+		const part = token.split('.')[1];
+		if (!part) return null;
+		const json = atob(part.replace(/-/g, '+').replace(/_/g, '/'));
+		const payload = JSON.parse(json) as { exp?: unknown };
+		return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+	} catch {
+		return null;
+	}
+};
+
+export const cancelProactiveRefresh = (): void => {
+	if (proactiveTimer) {
+		clearTimeout(proactiveTimer);
+		proactiveTimer = null;
+	}
+};
+
+export const scheduleProactiveRefresh = (): void => {
+	cancelProactiveRefresh();
+	if (!browser) return;
+	const token = getAccessToken();
+	if (!token) return;
+	const exp = decodeAccessExp(token);
+	if (!exp) return;
+	const leadMs = 2 * 60 * 1000;
+	const delay = exp - Date.now() - leadMs;
+	if (delay <= 0) {
+		void refreshAccessToken().then((fresh) => {
+			if (fresh) {
+				scheduleProactiveRefresh();
+			} else if (getAccessToken() || getRefreshToken()) {
+				// Transient (network) failure: retry shortly without clearing.
+				proactiveTimer = setTimeout(scheduleProactiveRefresh, 60 * 1000);
+			}
+		});
+		return;
+	}
+	proactiveTimer = setTimeout(() => {
+		void refreshAccessToken().then((fresh) => {
+			if (fresh) {
+				scheduleProactiveRefresh();
+			} else if (getAccessToken() || getRefreshToken()) {
+				proactiveTimer = setTimeout(scheduleProactiveRefresh, 60 * 1000);
+			}
+		});
+	}, delay);
+};
+
+// Cross-tab synchronisation: react to token changes made in another tab.
+export const startTokenSync = (handlers: {
+	onCleared: () => void;
+	onChanged: () => void;
+}): (() => void) => {
+	if (!browser) return () => {};
+	const handler = (event: StorageEvent) => {
+		if (event.key !== ACCESS_KEY && event.key !== REFRESH_KEY) return;
+		if (!getAccessToken() && !getRefreshToken()) {
+			handlers.onCleared();
+		} else {
+			hydrateTokens();
+			handlers.onChanged();
+		}
+	};
+	window.addEventListener('storage', handler);
+	return () => window.removeEventListener('storage', handler);
 };
 
 setUnauthorizedHandler(refreshAccessToken);

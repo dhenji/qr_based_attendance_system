@@ -4,7 +4,7 @@ import csv
 import io
 from collections import Counter
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -62,6 +62,29 @@ def _pick_rate(
             return participation
         case _:
             return compliance
+
+
+def _coerce_utc(value: datetime | None) -> datetime | None:
+    """Attach UTC to a naive bound, mirroring SessionService."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _end_of_day(value: datetime | None) -> datetime | None:
+    """Treat a midnight ``date_to`` as the end of that day.
+
+    Date-only query parameters parse to midnight, which would otherwise
+    exclude every record after 00:00. An explicit non-midnight value is
+    preserved so callers can still bound a precise instant.
+    """
+    if value is None:
+        return None
+    if value.timetuple()[3:6] == (0, 0, 0) and value.microsecond == 0:
+        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return value
 
 
 class ReportsService:
@@ -359,6 +382,9 @@ class ReportsService:
                 CourseOffering, CourseOffering.id == Session.offering_id
             ).where(CourseOffering.course_id == course_id)
 
+        date_from = _coerce_utc(date_from)
+        date_to = _end_of_day(_coerce_utc(date_to))
+
         stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
         stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
         stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
@@ -536,6 +562,9 @@ class ReportsService:
         if not offering_ids:
             return []
 
+        date_from = _coerce_utc(date_from)
+        date_to = _end_of_day(_coerce_utc(date_to))
+
         stmt = select(Session).where(Session.offering_id.in_(offering_ids))
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
@@ -585,6 +614,9 @@ class ReportsService:
         date_to: datetime | None,
     ) -> tuple[dict[date, list[Session]], dict[date, Counter[str]]]:
         """Sessions and their attendance tallies grouped by period start."""
+        date_from = _coerce_utc(date_from)
+        date_to = _end_of_day(_coerce_utc(date_to))
+
         buckets: dict[date, list[Session]] = {}
 
         for row in sessions:

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pyotp
+from jwt import PyJWTError
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -286,6 +287,8 @@ async def _register_failed_attempt(user_id: int, lockout_attempts: int) -> None:
             user.is_locked = True
             user.locked_at = now
             user.last_lockout_at = now
+            if hasattr(user, "token_version"):
+                user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             session,
@@ -609,6 +612,7 @@ class AuthService:
         user.lockout_level = 0
         user.last_lockout_at = None
         user.last_login = now
+        user.last_activity_at = now
         await self._session.flush()
 
         # Second factor, by role. Students and professors who enrolled in MFA
@@ -769,12 +773,58 @@ class AuthService:
         if payload is None or payload.get("type") != REFRESH_TOKEN_TYPE:
             raise InvalidCredentialsException()
 
-        user: User | None = await self._users.get(extract_user_id(payload))
+        try:
+            user_id: int = extract_user_id(payload)
+        except PyJWTError:
+            raise InvalidCredentialsException()
+
+        user: User | None = await self._users.get(user_id)
 
         if user is None or not user.is_active:
             raise InvalidCredentialsException()
 
+        # Server-side idle enforcement on refresh.
+        now: datetime = datetime.now(timezone.utc)
+        if user.role in ("admin", "super_admin"):
+            timeout_minutes = self._settings.idle_timeout_minutes_admin
+        elif user.role == "professor":
+            timeout_minutes = self._settings.idle_timeout_minutes_professor
+        else:
+            timeout_minutes = self._settings.idle_timeout_minutes_student
+        last_activity: datetime | None = getattr(user, "last_activity_at", None)
+        if (
+            last_activity is not None
+            and (now - last_activity).total_seconds() > timeout_minutes * 60
+        ):
+            raise InvalidCredentialsException()
+
+        # Revoke outstanding sessions when the token's version no longer matches.
+        if int(payload.get("tv", 0) or 0) != (user.token_version or 0):
+            raise InvalidCredentialsException()
+
+        user.last_activity_at = now
+
         return self._build_tokens(user)
+
+    async def logout(self, user: User) -> None:
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        await self._session.flush()
+
+    def get_session_policy(self, user: User) -> dict[str, int]:
+        settings = self._settings
+        role = getattr(user, "role", "student")
+        if role in ("admin", "super_admin"):
+            timeout = settings.idle_timeout_minutes_admin
+        elif role == "professor":
+            timeout = settings.idle_timeout_minutes_professor
+        else:
+            timeout = settings.idle_timeout_minutes_student
+        warning = min(settings.idle_warning_minutes, max(1, timeout // 6))
+        return {
+            "idle_timeout_minutes": timeout,
+            "idle_warning_minutes": warning,
+        }
 
     async def forgot_password(self, email: str) -> SecurityQuestionResponse:
         """Return the security question for step 2 of the recovery flow.
@@ -885,6 +935,7 @@ class AuthService:
         user.is_locked = False
         user.locked_at = None
         user.must_change_password = False
+        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -948,7 +999,7 @@ class AuthService:
 
         user.password_hash = hash_password(new_password)
         user.must_change_password = False
-
+        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
         if security_question is not None or security_answer is not None:
             if not security_question or not security_answer:
                 raise PasswordPolicyException(field="security_question")
@@ -1010,6 +1061,7 @@ class AuthService:
         user.lockout_level = 0
         user.last_lockout_at = None
         user.lockout_override_until = None
+        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1120,6 +1172,8 @@ class AuthService:
         user.failed_login_attempts = 0
         user.lockout_level = 0
         user.last_lockout_at = None
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1155,6 +1209,8 @@ class AuthService:
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_level = 0
         user.last_lockout_at = None
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1193,6 +1249,8 @@ class AuthService:
         now: datetime = datetime.now(timezone.utc)
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = now + timedelta(minutes=duration_minutes)
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1226,6 +1284,8 @@ class AuthService:
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = None
+        if hasattr(user, "token_version"):
+            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         await record_audit(
             self._session,
@@ -1294,6 +1354,7 @@ class AuthService:
 
         user.mfa_enabled = False
         user.mfa_secret = None
+        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
 
         # `_account_snapshot` deliberately omits every MFA field, so this audit
         # row carries its own snapshot rather than widening the three other
@@ -1457,8 +1518,12 @@ class AuthService:
 
     def _build_tokens(self, user: User) -> TokenResponse:
         return TokenResponse(
-            access_token=create_access_token(user.id, user.role, self._settings),
-            refresh_token=create_refresh_token(user.id, self._settings),
+            access_token=create_access_token(
+                user.id, user.role, self._settings, token_version=getattr(user, "token_version", 0) or 0
+            ),
+            refresh_token=create_refresh_token(
+                user.id, self._settings, token_version=getattr(user, "token_version", 0) or 0
+            ),
             must_change_password=user.must_change_password,
         )
 

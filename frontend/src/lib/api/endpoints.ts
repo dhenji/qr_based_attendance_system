@@ -505,6 +505,18 @@ export const AuthChangePasswordEndpoint: EndpointDef<void> = {
 	mock: () => undefined,
 };
 
+export const AuthLogoutEndpoint: EndpointDef<void> = {
+	url: '/auth/logout',
+	method: 'POST',
+	mock: () => undefined,
+};
+
+export const AuthSessionPolicyEndpoint: EndpointDef<{ idle_timeout_minutes: number; idle_warning_minutes: number }> = {
+	url: '/auth/session-policy',
+	method: 'GET',
+	mock: () => ({ idle_timeout_minutes: 45, idle_warning_minutes: 5 }),
+};
+
 // Forgot-password recovery (ADR-056). Four steps against the live backend
 // (features/auth/router.py + service.py):
 //  1. POST /auth/forgot-password {email, turnstile_token?} -> {question, set}
@@ -4999,6 +5011,8 @@ export const endpoints = {
 	authMfaBackupCodesGenerate: AuthMfaBackupCodesGenerateEndpoint,
 	authMfaBackupCodesSummary: AuthMfaBackupCodesSummaryEndpoint,
 	authChangePassword: AuthChangePasswordEndpoint,
+	authLogout: AuthLogoutEndpoint,
+	authSessionPolicy: AuthSessionPolicyEndpoint,
 	authForgotPassword: ForgotPasswordEndpoint,
 	authForgotPasswordVerify: ForgotPasswordVerifyEndpoint,
 	authResetPassword: ResetPasswordEndpoint,

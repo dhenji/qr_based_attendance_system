@@ -281,6 +281,22 @@ async def test_trends_carries_course_identity(
     assert item["date"] == NOW.date().isoformat()
 
 
+async def test_all_courses_includes_sessions_on_date_to_day(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    setup = await _teaching_setup(factories)
+
+    response = await api_client.get(
+        f"/api/professor/reports/all-courses?date_to={NOW.date().isoformat()}",
+        headers=await _professor_headers(auth_headers, setup),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"]) == 1
+    assert body["items"][0]["total_sessions"] == 1
+
+
 async def test_unclaimed_professor_is_404(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:

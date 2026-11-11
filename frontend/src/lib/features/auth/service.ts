@@ -313,3 +313,22 @@ export const setSecurityQuestion = async (question: string, answer: string): Pro
 		answer: answer.trim()
 	});
 };
+
+export const logout = async (): Promise<void> => {
+	if (isMockMode()) return mockNoop();
+	try {
+		await post<void>('authLogout', {});
+	} catch {
+		// Best-effort: clear locally regardless.
+	}
+};
+
+export const getSessionPolicy = async (): Promise<{
+	idle_timeout_minutes: number;
+	idle_warning_minutes: number;
+}> => {
+	if (isMockMode()) {
+		return { idle_timeout_minutes: 45, idle_warning_minutes: 5 };
+	}
+	return get<{ idle_timeout_minutes: number; idle_warning_minutes: number }>('authSessionPolicy');
+};

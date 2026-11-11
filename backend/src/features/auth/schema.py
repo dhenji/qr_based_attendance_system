@@ -69,6 +69,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str | None = None
     refresh_token: str | None = None
@@ -261,3 +265,8 @@ class LockoutReasonRequest(BaseModel):
 class LockoutOverrideRequest(BaseModel):
     duration_minutes: int = Field(..., ge=1)
     reason: str = Field(..., min_length=3, max_length=500)
+
+
+class SessionPolicyResponse(BaseModel):
+    idle_timeout_minutes: int
+    idle_warning_minutes: int
