@@ -611,7 +611,9 @@ async def auth_headers(
         if user is None:
             user = await factories.user(**overrides)
 
-        token: str = create_access_token(user.id, user.role, settings)
+        token: str = create_access_token(
+            user.id, user.role, settings, token_version=getattr(user, "token_version", 0) or 0
+        )
         return {"Authorization": f"Bearer {token}"}
 
     return _headers

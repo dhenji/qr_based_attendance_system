@@ -73,6 +73,12 @@ async def _get_current_user(
     if user is None:
         raise _unauthorized("user_not_found", "User not found or inactive")
 
+    # Revoke outstanding tokens when the account's session version moved
+    # (logout, password change/reset, MFA disable, admin deactivation).
+    token_version: int | None = payload.get("tv")
+    if token_version is None or int(token_version) != (user.token_version or 0):
+        raise _unauthorized("invalid_token", "Invalid or expired token")
+
     return user
 
 
@@ -95,7 +101,15 @@ async def _get_optional_current_user(
     except PyJWTError:
         return None
 
-    return await _get_active_user(session, user_id)
+    user: User | None = await _get_active_user(session, user_id)
+    if user is None:
+        return None
+
+    token_version: int | None = payload.get("tv")
+    if token_version is None or int(token_version) != (user.token_version or 0):
+        return None
+
+    return user
 
 
 async def _get_active_user(session: AsyncSession, user_id: int) -> User | None:

@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     gps_hard_floor_meters: float = 1000.0
     geofence_uncertainty_cap_meters: float = 50.0
 
+    # Idle session policy (minutes). Backend is the source of truth; the frontend
+    # mirrors these for the warning modal and countdown. Role-specific so admin
+    # sessions can be shorter than student sessions.
+    idle_timeout_minutes_student: int = 45
+    idle_timeout_minutes_professor: int = 30
+    idle_timeout_minutes_admin: int = 15
+    idle_warning_minutes: int = 5
+
     # Backup-attachment fields
     backup_storage_type: str = "local"
     backup_local_dir: str = "./backups"

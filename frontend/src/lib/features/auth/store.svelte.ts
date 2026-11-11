@@ -15,6 +15,7 @@ import {
 	changePassword,
 	disableMfa,
 	login,
+	logout,
 	me,
 	register,
 	resendLoginOtp,
@@ -24,9 +25,11 @@ import {
 	verifyMfa,
 } from '$lib/features/auth/service';
 import {
+	cancelProactiveRefresh,
 	clearTokens,
 	hasTokens,
 	hydrateTokens,
+	scheduleProactiveRefresh,
 	setTokens,
 } from '$lib/features/auth/tokens';
 import { resetStudentState } from '$lib/features/student/store.svelte';
@@ -172,6 +175,7 @@ const establishSession = async (tokens: TokenResponse): Promise<User> => {
 	// Drop any course join warmed for a previous account so the new session
 	// re-warms from GET /professor/courses instead of serving stale identity.
 	invalidateCourseCache();
+	scheduleProactiveRefresh();
 	// Face-embedding pull (D29): background, never blocks the sign-in.
 	if (current.role === 'student') {
 		void refreshFaceCache(current.email, current.face_enrolled ?? false);
@@ -213,6 +217,7 @@ export const restoreSession = (): Promise<User | null> => {
 			authState.status = 'authenticated';
 			authState.mustChangePassword = current.must_change_password;
 			invalidateCourseCache();
+			scheduleProactiveRefresh();
 			if (current.role === 'student') {
 				void refreshFaceCache(current.email, current.face_enrolled ?? false);
 			}
@@ -433,6 +438,12 @@ export const doChangePassword = async (
 };
 
 export const doLogout = async (): Promise<void> => {
+	cancelProactiveRefresh();
+	try {
+		await logout();
+	} catch {
+		// Best-effort server-side revocation; always clear locally.
+	}
 	clearTokens();
 	endSession();
 	// Account data must not survive a logout on shared devices: each store

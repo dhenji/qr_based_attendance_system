@@ -47,7 +47,10 @@ def create_preauth_token(user_id: int, settings: Settings | None = None) -> str:
 
 
 def create_access_token(
-    user_id: int, role: str, settings: Settings | None = None
+    user_id: int,
+    role: str,
+    settings: Settings | None = None,
+    token_version: int = 0,
 ) -> str:
     settings = settings or get_settings()
     now: datetime = datetime.now(timezone.utc)
@@ -55,6 +58,7 @@ def create_access_token(
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "role": role,
+        "tv": token_version,
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
     }
@@ -62,13 +66,18 @@ def create_access_token(
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(user_id: int, settings: Settings | None = None) -> str:
+def create_refresh_token(
+    user_id: int,
+    settings: Settings | None = None,
+    token_version: int = 0,
+) -> str:
     settings = settings or get_settings()
     now: datetime = datetime.now(timezone.utc)
 
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "type": REFRESH_TOKEN_TYPE,
+        "tv": token_version,
         "iat": now,
         "exp": now + timedelta(days=settings.refresh_token_expire_days),
     }

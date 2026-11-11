@@ -40,6 +40,12 @@ class User(CreatedAtMixin, Base):
     is_locked: Mapped[bool] = mapped_column(server_default=false())
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Session revocation: incremented to invalidate all outstanding JWTs for
+    # this account (logout, password change/reset, MFA disable, admin
+    # deactivation). Tokens carry the value at issuance and are rejected
+    # when it no longer matches.
+    token_version: Mapped[int] = mapped_column(Integer, server_default="0")
+
     # Incremental lockout state (consecutive lockout count + decay anchor).
     lockout_level: Mapped[int] = mapped_column(Integer, server_default="0")
     last_lockout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

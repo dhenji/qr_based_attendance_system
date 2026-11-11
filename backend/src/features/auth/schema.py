@@ -261,3 +261,8 @@ class LockoutReasonRequest(BaseModel):
 class LockoutOverrideRequest(BaseModel):
     duration_minutes: int = Field(..., ge=1)
     reason: str = Field(..., min_length=3, max_length=500)
+
+
+class SessionPolicyResponse(BaseModel):
+    idle_timeout_minutes: int
+    idle_warning_minutes: int

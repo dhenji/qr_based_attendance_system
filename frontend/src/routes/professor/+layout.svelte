@@ -7,9 +7,13 @@
 		authState,
 		defaultRouteFor,
 		doLogout,
+		isAuthenticated,
 		isProfessor,
 		restoreSession
 	} from '$lib/features/auth/store.svelte';
+import { startIdleWatcher } from '$lib/features/auth/idle';
+import { getSessionPolicy } from '$lib/features/auth/service';
+import { startTokenSync } from '$lib/features/auth/tokens';
 	import NotificationBell, {
 		type NotificationBellItem,
 	} from '$lib/components/NotificationBell.svelte';
@@ -65,6 +69,12 @@
 		void refreshNotif();
 	};
 
+	const onVisibilityChange = () => {
+		if (document.visibilityState !== 'visible') return;
+		void refreshNotif();
+		if (isAuthenticated()) void restoreSession();
+	};
+
 	// Lazy preview for the bell panel: newest pending requests, fail-soft
 	// (the badge count is the source of truth; a failed preview just shows
 	// the empty state, never an error).
@@ -91,6 +101,10 @@
 	// run — attaching the interval/listeners afterwards would leak them until
 	// the next full page unload.
 	let notifAlive = true;
+	let idleWarning = $state(false);
+	let idleCleanup: (((() => void) & { reset?: () => void }) | null) = null;
+	let tokenSyncCleanup: (() => void) | null = null;
+	let visibilityHandler: (() => void) | null = null;
 
 	onMount(async () => {
 		const user = await restoreSession();
@@ -108,7 +122,48 @@
 				if (!document.hidden) void refreshNotif();
 			}, POLL_INTERVAL_MS);
 			window.addEventListener('focus', onNotifFocus);
-			document.addEventListener('visibilitychange', onNotifFocus);
+			document.addEventListener('visibilitychange', onVisibilityChange);
+
+			idleCleanup = startIdleWatcher({
+				timeoutMs: (Number(import.meta.env.PUBLIC_IDLE_TIMEOUT_MINUTES) || 30) * 60 * 1000,
+				warningMs: (Number(import.meta.env.PUBLIC_IDLE_WARNING_MINUTES) || 2) * 60 * 1000,
+				onWarning: () => { idleWarning = true; },
+				onIdle: async () => { idleWarning = false; await doLogout(); }
+			});
+
+			tokenSyncCleanup = startTokenSync({
+				onCleared: () => { void doLogout(); },
+				onChanged: () => { void restoreSession(); }
+			});
+
+		void getSessionPolicy()
+			.then((policy) => {
+				if (idleCleanup) {
+					idleCleanup();
+					idleCleanup = null;
+				}
+				idleCleanup = startIdleWatcher({
+					timeoutMs: policy.idle_timeout_minutes * 60 * 1000,
+					warningMs: policy.idle_warning_minutes * 60 * 1000,
+					onWarning: () => {
+						idleWarning = true;
+					},
+					onIdle: async () => {
+						idleWarning = false;
+						await doLogout();
+					}
+				});
+			})
+			.catch(() => {
+				// Keep the env-based fallback already started.
+			});
+
+			visibilityHandler = () => {
+				if (document.visibilityState !== 'visible') return;
+				if (!isAuthenticated()) return;
+				void restoreSession();
+			};
+			document.addEventListener('visibilitychange', visibilityHandler);
 		}
 	});
 
@@ -124,6 +179,9 @@
 		}
 		window.removeEventListener('focus', onNotifFocus);
 		document.removeEventListener('visibilitychange', onNotifFocus);
+		if (idleCleanup) { idleCleanup(); idleCleanup = null; }
+		if (tokenSyncCleanup) { tokenSyncCleanup(); tokenSyncCleanup = null; }
+		document.removeEventListener('visibilitychange', onVisibilityChange);
 	});
 
 	// Professor portal nav: Dashboard, My Courses, Sessions, History,
@@ -159,6 +217,18 @@
 		await doLogout();
 	};
 </script>
+
+{#if idleWarning}
+	<div class="modal-overlay" role="presentation">
+		<div class="modal" role="dialog" aria-modal="true" tabindex="-1">
+			<h2 class="modal-title">Session expiring</h2>
+			<p class="modal-text">You have been inactive. You will be signed out shortly.</p>
+			<div class="modal-actions">
+				<button class="btn btn-ghost" onclick={() => { idleWarning = false; idleCleanup?.reset?.(); }}>Stay signed in</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <div class="shell">
 	<header class="topbar" data-navbar>
