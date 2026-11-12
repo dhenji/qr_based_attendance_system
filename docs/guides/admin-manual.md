@@ -420,6 +420,11 @@ Notes:
 - Successful password login resets the escalation level.
 - Admins created or reset with a temporary password set a security question
   during their first login; super-admin accounts use the password-only flow.
+- Super Admins manage their break-glass recovery code from **Profile → Recovery Code**
+  (password-verified). The code is single-use: after a successful password
+  recovery it is consumed and must be rotated via the same form. Forgot-password
+  step 1 reports `recovery_code_mode: true` for Super Admin accounts that have a
+  code set.
 
 ## Admin form conventions (student/professor/program/offerings)
 

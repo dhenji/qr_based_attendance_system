@@ -1601,9 +1601,10 @@ lock after 5 failed attempts.
 | POST   | `/auth/refresh`                    | Refresh-token rotation | 400 `invalid_credentials` |
 | POST   | `/auth/logout`                     | Invalidate all outstanding sessions for the current account | 401 unauthorized |
 | GET    | `/auth/session-policy`             | Idle-session policy for the current account (`{ idle_timeout_minutes, idle_warning_minutes }`) | 401 unauthorized |
-| POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question | — |
-| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
-| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` |
+| POST   | `/auth/forgot-password`            | Forgot-password step 1 — returns the security question (or `recovery_code_mode: true` for Super Admin break-glass accounts) | — |
+| POST   | `/auth/forgot-password/verify`     | Step 2 — verify answer or recovery code (3-attempt cap, then lock) → 200 `RecoveryGrantResponse` | 400 `security_answer_invalid` · 423 `recovery_locked` |
+| POST   | `/auth/reset-password`             | Step 4 — reset password with OTP, returns the session (or an MFA challenge) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` · 429 `rate_limited` (10 req/300s by email) |
+| POST   | `/auth/recovery-code`              | Set/rotate the Super Admin break-glass recovery code (authenticated, password-verified) | 400 `current_password_invalid` |
 | POST   | `/auth/password-recovery/start`    | Start recovery for the authenticated user — mints a grant, sends OTP, returns `{ recovery_token, masked_email }` | 401 unauthorized |
 | POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
 | POST   | `/auth/change-password`            | Change password (authenticated; optional `security_question`/`security_answer`) | 400 `current_password_invalid` · 400 `password_reused` · 422 `password_policy_violation` |

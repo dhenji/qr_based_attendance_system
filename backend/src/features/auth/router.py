@@ -28,6 +28,7 @@ from features.auth.schema import (
     ResetPasswordRequest,
     SecurityQuestionResponse,
     SessionPolicyResponse,
+    SetRecoveryCodeRequest,
     SetSecurityQuestionRequest,
     TokenResponse,
 )
@@ -179,7 +180,9 @@ async def forgot_password_verify(
     service: AuthServiceDep,
     _: None = Depends(rate_limit(5, 60, key="email")),
 ) -> RecoveryGrantResponse:
-    return await service.forgot_password_step2(payload.email, payload.answer)
+    return await service.forgot_password_step2(
+        payload.email, payload.answer, payload.recovery_code
+    )
 
 
 @router.post(
@@ -190,6 +193,7 @@ async def forgot_password_verify(
 async def reset_password(
     payload: ResetPasswordRequest,
     service: AuthServiceDep,
+    _: None = Depends(rate_limit(10, 300, key="email")),
 ) -> TokenResponse:
     return await service.reset_password(
         payload.email, payload.otp_code, payload.new_password
@@ -338,6 +342,21 @@ async def security_question(
     service: AuthServiceDep,
 ) -> None:
     await service.set_security_question(current_user, payload.question, payload.answer)
+
+
+@router.post(
+    "/recovery-code",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Set or rotate the break-glass recovery code (authenticated)",
+)
+async def recovery_code(
+    payload: SetRecoveryCodeRequest,
+    current_user: CurrentUserDep,
+    service: AuthServiceDep,
+) -> None:
+    await service.set_recovery_code(
+        current_user, payload.code, payload.current_password
+    )
 
 
 @router.post(

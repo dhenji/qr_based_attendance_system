@@ -26,7 +26,13 @@ venv activation or `PYTHONPATH` is needed. It also defaults `DEBUG=true` and a d
 Default login: `super@attendly.demo` / `Demo!1234` (override with
 `--email`, `--password`, or `DEMO_SUPER_ADMIN_PASSWORD`; `--update-password`
 resets the password on an existing account). Safe to re-run — it reuses
-existing rows. For a guaranteed-clean slate instead, reset the database
+existing rows.
+
+The seed also sets a break-glass recovery code (`DemoRec1!234` by
+default; override with `--recovery-code` or `DEMO_SUPER_ADMIN_RECOVERY_CODE`)
+so the Super Admin forgot-password flow can be exercised without setting one
+manually. After a recovery code is consumed it is cleared; set a new one via
+`POST /api/auth/recovery-code` while logged in. For a guaranteed-clean slate instead, reset the database
 first (`docker compose -f docker-compose.dev.yml down -v`, then `up` to
 recreate and re-migrate before seeding).
 

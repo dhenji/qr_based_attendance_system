@@ -107,9 +107,17 @@ class SetSecurityQuestionRequest(BaseModel):
     )
 
 
+class SetRecoveryCodeRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=128)
+    current_password: str
+
+
 class SecurityQuestionResponse(BaseModel):
     question: str | None = None
     set: bool = False
+    # When True the account has no security question but does have a break-glass
+    # recovery code; step 2 must collect the recovery code instead of an answer.
+    recovery_code_mode: bool = False
 
 
 class RecoveryGrantResponse(BaseModel):
@@ -135,9 +143,10 @@ class ForgotPasswordStep1Request(OTPRequest):
 
 class ForgotPasswordStep2Request(BaseModel):
     email: EmailStr
-    answer: str = Field(
-        min_length=SECURITY_ANSWER_MIN_LENGTH, max_length=SECURITY_ANSWER_MAX_LENGTH
+    answer: str | None = Field(
+        default=None, max_length=SECURITY_ANSWER_MAX_LENGTH
     )
+    recovery_code: str | None = Field(default=None, max_length=128)
 
 
 class _NewPasswordRequest(BaseModel):

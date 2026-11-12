@@ -160,6 +160,7 @@ async def seed_demo(
     password: str,
     update_password: bool,
     database_url: str | None = None,
+    recovery_code: str | None = None,
 ) -> dict[str, int]:
     from sqlalchemy import func, select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -172,6 +173,9 @@ async def seed_demo(
 
     counts = {"programs": 0, "year_levels": 0, "courses": 0, "offerings": 0,
               "offerings_repaired": 0, "super_admin": 0}
+    recovery_code = recovery_code or os.environ.get(
+        "DEMO_SUPER_ADMIN_RECOVERY_CODE", "DemoRecovery!1234"
+    )
     engine = create_async_engine(database_url or _database_url())
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
@@ -362,6 +366,7 @@ async def seed_demo(
                         password_hash=hash_password(password),
                         role=UserRole.SUPER_ADMIN.value,
                         must_change_password=False,
+                        recovery_code_hash=hash_password(recovery_code),
                     )
                 )
                 counts["super_admin"] = 1
@@ -370,6 +375,11 @@ async def seed_demo(
                     existing.role = UserRole.SUPER_ADMIN.value
                 if update_password:
                     existing.password_hash = hash_password(password)
+                    existing.recovery_code_hash = hash_password(recovery_code)
+                    existing.recovery_code_used_at = None
+                elif getattr(existing, "recovery_code_hash", None) is None:
+                    existing.recovery_code_hash = hash_password(recovery_code)
+                    existing.recovery_code_used_at = None
                 existing.is_active = True
                 existing.is_locked = False
                 existing.failed_login_attempts = 0
@@ -383,6 +393,7 @@ def main(argv: list[str] | None = None) -> dict[str, int]:
     parser = argparse.ArgumentParser(description="Seed demo super_admin + academic structure.")
     parser.add_argument("--email", default="super@attendly.demo")
     parser.add_argument("--password", default=os.environ.get("DEMO_SUPER_ADMIN_PASSWORD", "Demo!1234"))
+    parser.add_argument("--recovery-code", default=os.environ.get("DEMO_SUPER_ADMIN_RECOVERY_CODE", "DemoRec1!234"))
     parser.add_argument("--update-password", action="store_true",
                         help="Overwrite the password if the account already exists.")
     parser.add_argument("--database-url", default=None)
@@ -394,12 +405,14 @@ def main(argv: list[str] | None = None) -> dict[str, int]:
             password=args.password,
             update_password=args.update_password,
             database_url=args.database_url,
+            recovery_code=args.recovery_code,
         )
     )
     print("Demo seed complete:")
     for key, value in counts.items():
         print(f"  {key}: {value} created")
     print(f"super_admin login -> email: {args.email}")
+    print(f"super_admin recovery code -> {args.recovery_code}")
     return counts
 
 

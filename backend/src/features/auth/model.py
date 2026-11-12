@@ -51,6 +51,14 @@ class User(CreatedAtMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Break-glass recovery code (Super Admin only): Argon2id hash of a
+    # single-use, offline-stored code that can replace the security question
+    # on the recovery path. NULL means "use the security question instead".
+    recovery_code_hash: Mapped[str | None] = mapped_column(String(255))
+    recovery_code_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Incremental lockout state (consecutive lockout count + decay anchor).
     lockout_level: Mapped[int] = mapped_column(Integer, server_default="0")
     last_lockout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -75,6 +83,10 @@ class OtpCodes(CreatedAtMixin, Base):
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+
+    # JTI of the recovery grant that authorised this OTP (FORGET_PASSWORD only).
+    # Lets the reset step bind the OTP to the grant that minted it.
+    recovery_grant_jti: Mapped[str | None] = mapped_column(String(64))
 
     user: Mapped[User | None] = relationship()
 

@@ -232,6 +232,7 @@ export const changePassword = async (
 export interface ForgotPasswordQuestion {
 	question: string;
 	set: boolean;
+	recovery_code_mode?: boolean;
 }
 
 export const forgotPassword = async (
@@ -249,14 +250,15 @@ export const forgotPassword = async (
 
 export const forgotPasswordVerify = async (
 	email: string,
-	answer: string
+	answer: string,
+	recoveryCode?: string
 ): Promise<{ recoveryToken: string }> => {
 	if (isMockMode()) return mockForgotPasswordVerify();
 
-	const response = await post<{ recovery_token: string }>('authForgotPasswordVerify', {
-		email: email.trim().toLowerCase(),
-		answer: answer.trim()
-	});
+	const body: Record<string, string> = { email: email.trim().toLowerCase() };
+	if (recoveryCode) body.recovery_code = recoveryCode.trim();
+	else body.answer = answer.trim();
+	const response = await post<{ recovery_token: string }>('authForgotPasswordVerify', body);
 	return { recoveryToken: response.recovery_token };
 };
 
@@ -311,6 +313,17 @@ export const setSecurityQuestion = async (question: string, answer: string): Pro
 	await post<void>('authSecurityQuestion', {
 		question: question.trim(),
 		answer: answer.trim()
+	});
+};
+
+// Set or rotate the break-glass recovery code for the signed-in account.
+// Super Admin only in practice; password-verified server-side.
+export const setRecoveryCode = async (code: string, currentPassword: string): Promise<void> => {
+	if (isMockMode()) return mockNoop();
+
+	await post<void>('authRecoveryCode', {
+		code: code.trim(),
+		current_password: currentPassword
 	});
 };
 
