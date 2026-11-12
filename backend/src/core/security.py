@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import base64
 import hashlib
 import hmac
@@ -96,13 +98,16 @@ def decode_access_token(
 
 
 def create_recovery_token(
-    user_id: int, email: str, settings: Settings | None = None
+    user_id: int, email: str, settings: Settings | None = None, jti: str | None = None
 ) -> str:
     """Short-lived proof that the security-answer gate was passed (ADR-052).
 
     Issued by forgot-password step 2 and required before a FORGET_PASSWORD OTP
     can be minted. Because it carries a `type` claim it is rejected outright by
     the access-token dependency, so it can never be replayed for API access.
+
+    A `jti` is always minted so the grant can be bound to the OTP it authorises
+    and treated as single-use once that OTP is consumed.
     """
 
     settings = settings or get_settings()
@@ -112,6 +117,7 @@ def create_recovery_token(
         "sub": str(user_id),
         "email": email.lower(),
         "type": RECOVERY_TOKEN_TYPE,
+        "jti": jti or uuid.uuid4().hex,
         "iat": now,
         "exp": now + timedelta(minutes=settings.recovery_token_expire_minutes),
     }

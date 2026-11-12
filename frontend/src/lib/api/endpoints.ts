@@ -584,6 +584,14 @@ export const SecurityQuestionEndpoint: EndpointDef<void> = {
 	mock: () => undefined,
 };
 
+// Set or rotate the break-glass recovery code (authenticated) —
+// POST /auth/recovery-code {code, current_password} -> 204.
+export const RecoveryCodeEndpoint: EndpointDef<void> = {
+	url: '/auth/recovery-code',
+	method: 'POST',
+	mock: () => undefined,
+};
+
 // --- Student ----------------------------------------------------------------
 
 export const StudentProfileEndpoint: EndpointDef<StudentProfileResponse> = {
@@ -5019,6 +5027,7 @@ export const endpoints = {
 	authPasswordRecoveryStart: AuthPasswordRecoveryStartEndpoint,
 	authPasswordRecoveryReset: AuthPasswordRecoveryResetEndpoint,
 	authSecurityQuestion: SecurityQuestionEndpoint,
+	authRecoveryCode: RecoveryCodeEndpoint,
 	// Student
 	studentProfile: StudentProfileEndpoint,
 	studentDashboard: StudentDashboardEndpoint,

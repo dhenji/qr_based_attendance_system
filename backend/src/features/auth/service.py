@@ -342,8 +342,23 @@ class AuthService:
         normalized: str = email.lower()
         now: datetime = datetime.now(timezone.utc)
 
+        recovery_grant_jti: str | None = None
+
         if purpose is OtpPurpose.FORGET_PASSWORD:
             self._assert_recovery_grant(normalized, recovery_token)
+            if recovery_token:
+                payload = decode_recovery_token(recovery_token, self._settings)
+                if payload is not None:
+                    recovery_grant_jti = payload.get("jti")
+                    if recovery_grant_jti is not None:
+                        reuse_stmt = select(OtpCodes).where(
+                            OtpCodes.recovery_grant_jti == recovery_grant_jti,
+                            OtpCodes.consumed_at.is_not(None),
+                        )
+                        if (
+                            await self._session.scalars(reuse_stmt)
+                        ).first() is not None:
+                            raise RecoveryGrantRequiredException()
 
         # Resending must not leave a second code valid: burn any unconsumed OTP
         # for the same (email, purpose) so only the newest one can be verified.
@@ -356,6 +371,7 @@ class AuthService:
             purpose=purpose.value,
             otp_hash=hash_otp(code),
             expires_at=now + timedelta(minutes=self._settings.otp_expires_minutes),
+            recovery_grant_jti=recovery_grant_jti,
         )
 
         send_otp_email(email, code, purpose=purpose, settings=self._settings)
@@ -840,7 +856,21 @@ class AuthService:
         normalized: str = email.lower()
         user: User | None = await self._users.get_by(email=normalized)
 
-        if user is None or user.security_question_hash is None:
+        if user is None:
+            return SecurityQuestionResponse(
+                question=_decoy_question(normalized, self._settings), set=True
+            )
+
+        # Break-glass recovery code (Super Admin path): no security question is
+        # stored, but a recovery code is, so step 2 collects the code instead.
+        if user.security_question_hash is None and getattr(
+            user, "recovery_code_hash", None
+        ):
+            return SecurityQuestionResponse(
+                question="Enter your recovery code.", set=False, recovery_code_mode=True
+            )
+
+        if user.security_question_hash is None:
             return SecurityQuestionResponse(
                 question=_decoy_question(normalized, self._settings), set=True
             )
@@ -848,7 +878,10 @@ class AuthService:
         return SecurityQuestionResponse(question=user.security_question_hash, set=True)
 
     async def forgot_password_step2(
-        self, email: str, answer: str
+        self,
+        email: str,
+        answer: str | None = None,
+        recovery_code: str | None = None,
     ) -> RecoveryGrantResponse:
         """Verify the security answer and issue a short-lived recovery grant.
 
@@ -876,13 +909,27 @@ class AuthService:
 
         user: User | None = await self._users.get_by(email=normalized)
 
-        if (
-            user is None
-            or user.security_answer_hash is None
-            or not verify_password(
-                self._normalize_answer(answer), user.security_answer_hash
-            )
-        ):
+        now: datetime = datetime.now(timezone.utc)
+
+        # Determine which verification factor applies. A break-glass recovery
+        # code, when present on the account, takes precedence over the security
+        # answer so Super Admins without a security question can still recover.
+        verified: bool = False
+
+        if user is not None and getattr(user, "recovery_code_hash", None):
+            if recovery_code is not None and getattr(
+                user, "recovery_code_used_at", None
+            ) is None:
+                verified = verify_password(
+                    (recovery_code or "").strip(), user.recovery_code_hash
+                )
+        elif user is not None and user.security_answer_hash is not None:
+            if answer is not None:
+                verified = verify_password(
+                    self._normalize_answer(answer), user.security_answer_hash
+                )
+
+        if not verified:
             await _recovery_limiter.hit(
                 limiter_key,
                 SECURITY_RECOVERY_MAX_ATTEMPTS,
@@ -890,6 +937,10 @@ class AuthService:
             )
             await self._session.flush()
             raise SecurityAnswerInvalidException()
+
+        # Consume a break-glass code so it cannot be reused.
+        if user is not None and getattr(user, "recovery_code_hash", None) and recovery_code is not None:
+            user.recovery_code_used_at = now
 
         return RecoveryGrantResponse(
             recovery_token=create_recovery_token(user.id, user.email, self._settings)
@@ -928,6 +979,40 @@ class AuthService:
         if user is None or not user.is_active:
             raise UnrecognizedEmailException()
 
+        # Super Admins must not reuse their current password on recovery.
+        if (
+            str(getattr(user, "role", "")).lower() == "super_admin"
+            and verify_password(new_password, user.password_hash)
+        ):
+            raise PasswordReusedException()
+
+        # Grant binding: if the consumed OTP was minted from a recovery grant,
+        # ensure no earlier OTP from the same grant was already consumed.
+        stmt = (
+            select(OtpCodes)
+            .where(
+                OtpCodes.email == normalized,
+                OtpCodes.purpose == OtpPurpose.FORGET_PASSWORD.value,
+                OtpCodes.consumed_at.is_not(None),
+            )
+            .order_by(OtpCodes.id.desc())
+        )
+        consumed_record: OtpCodes | None = (
+            await self._session.scalars(stmt)
+        ).first()
+        if consumed_record is not None and getattr(
+            consumed_record, "recovery_grant_jti", None
+        ):
+            jti = consumed_record.recovery_grant_jti
+            reuse_stmt = select(OtpCodes).where(
+                OtpCodes.recovery_grant_jti == jti,
+                OtpCodes.consumed_at.is_not(None),
+                OtpCodes.id != consumed_record.id,
+            )
+            reused = (await self._session.scalars(reuse_stmt)).first()
+            if reused is not None:
+                raise RecoveryGrantRequiredException()
+
         old_value: dict[str, Any] = _account_snapshot(user)
 
         user.password_hash = hash_password(new_password)
@@ -947,6 +1032,26 @@ class AuthService:
             new_value=_account_snapshot(user),
         )
         await self._session.flush()
+
+        # Security notification (best-effort, last step).
+        try:
+            from shared.email import OutboundEmail, dispatch_emails
+
+            dispatch_emails(
+                [
+                    OutboundEmail(
+                        to=user.email,
+                        subject="Your password was changed",
+                        body=(
+                            "Your account password was changed via password recovery. "
+                            "If you did not do this, contact an administrator immediately."
+                        ),
+                    )
+                ],
+                settings=self._settings,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Password-change notification failed")
 
         if user.mfa_enabled:
             return TokenResponse(
@@ -1008,6 +1113,36 @@ class AuthService:
                 self._normalize_answer(security_answer)
             )
 
+        await self._session.flush()
+
+    async def set_recovery_code(
+        self,
+        user: User,
+        code: str,
+        current_password: str,
+    ) -> None:
+        """Set or rotate the break-glass recovery code for an account.
+
+        Requires the current password. The code is hashed (Argon2id) and a
+        previous code (if any) is overwritten. A used code is reset so a fresh
+        one becomes usable again.
+        """
+
+        if not verify_password(current_password, user.password_hash):
+            raise CurrentPasswordInvalid()
+
+        user.recovery_code_hash = hash_password((code or "").strip())
+        user.recovery_code_used_at = None
+
+        await record_audit(
+            self._session,
+            actor_id=user.id,
+            action=AuditAction.UPDATE,
+            entity_type=AuditEntity.USER,
+            entity_id=user.id,
+            old_value={"recovery_code_set": False},
+            new_value={"recovery_code_set": True},
+        )
         await self._session.flush()
 
     async def admin_reset_password(
@@ -1073,6 +1208,28 @@ class AuthService:
             new_value=_account_snapshot(user),
         )
         await self._session.flush()
+
+        # Security notification (best-effort, last step). The temporary password
+        # itself is never emailed; the admin hands it over out of band.
+        try:
+            from shared.email import OutboundEmail, dispatch_emails
+
+            dispatch_emails(
+                [
+                    OutboundEmail(
+                        to=user.email,
+                        subject="Your password was reset by an administrator",
+                        body=(
+                            "An administrator reset your account password. "
+                            "Contact them for the temporary password and sign in to choose "
+                            "a new one."
+                        ),
+                    )
+                ],
+                settings=self._settings,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Admin password-reset notification failed")
 
         return temp_password
 

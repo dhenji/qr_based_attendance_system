@@ -32,6 +32,8 @@
 	let step = $state(1);
 	let email = $state('');
 	let answer = $state('');
+	let recoveryCode = $state('');
+	let recoveryCodeMode = $state(false);
 	let otp = $state<string[]>(['', '', '', '', '', '']);
 	let newPwd = $state('');
 	let confirmPwd = $state('');
@@ -89,7 +91,9 @@
 			return e.message;
 		}
 		if (e instanceof APIError && e.code === 'security_answer_invalid')
-			return 'Incorrect answer. Check your security answer and try again.';
+			return recoveryCodeMode
+				? 'Incorrect recovery code. Check your code and try again.'
+				: 'Incorrect answer. Check your security answer and try again.';
 		if (e instanceof APIError && (e.code === 'otp_invalid' || e.code === 'otp_expired' || e.code === 'otp_max_attempts'))
 			return e.code === 'otp_expired' ? 'That code has expired. Request a new one.' : e.code === 'otp_max_attempts' ? 'Too many incorrect codes. Request a new code.' : 'That code is incorrect. Check your email and try again.';
 		if (e instanceof APIError && e.code === 'unrecognized_email')
@@ -98,6 +102,10 @@
 			return 'Password does not meet the required policy.';
 		if (e instanceof APIError && e.code === 'password_reused')
 			return 'New password must be different from your current one.';
+		if (e instanceof APIError && e.code === 'validation_error')
+			return recoveryCodeMode
+				? 'Recovery code is invalid. Check the length and try again.'
+				: 'Invalid input. Check your entries and try again.';
 		return e instanceof Error && e.message ? e.message : fallback;
 	};
 
@@ -111,6 +119,7 @@
 		try {
 			const result = await forgotPassword(email, turnstile?.getToken() ?? null);
 			securityQuestion = result.question;
+			recoveryCodeMode = result.recovery_code_mode ?? false;
 			step = 2;
 		} catch (e: unknown) {
 			error = toMessage(e, 'Could not start recovery. Please try again.');
@@ -121,14 +130,21 @@
 	}
 
 	async function handleStep2() {
-		if (!answer.trim()) {
+		if (recoveryCodeMode) {
+			if (!recoveryCode.trim()) {
+				error = 'Recovery code is required';
+				return;
+			}
+		} else if (!answer.trim()) {
 			error = 'Answer is required';
 			return;
 		}
 		busy = true;
 		error = '';
 		try {
-			const grant = await forgotPasswordVerify(email, answer);
+			const grant = recoveryCodeMode
+				? await forgotPasswordVerify(email, '', recoveryCode)
+				: await forgotPasswordVerify(email, answer);
 			recoveryToken = grant.recoveryToken;
 			await requestOtp(email, 'forget_password', grant.recoveryToken);
 			step = 3;
@@ -259,13 +275,23 @@
 						<div class="error-banner">{error}</div>
 					{/if}
 
-					<div class="question-panel">"{securityQuestion}"</div>
+					{#if recoveryCodeMode}
+						<div class="question-panel">Enter your recovery code.</div>
 
-					<div class="field">
-						<label class="form-label" for="fp-answer">Your Answer</label>
-						<input class="form-input" id="fp-answer" placeholder="Your answer..."
-							value={answer} oninput={(e) => { answer = (e.target as HTMLInputElement).value; }} />
-					</div>
+						<div class="field">
+							<label class="form-label" for="fp-recovery-code">Recovery Code</label>
+							<input class="form-input" id="fp-recovery-code" placeholder="Your recovery code..."
+								value={recoveryCode} oninput={(e) => { recoveryCode = (e.target as HTMLInputElement).value; }} />
+						</div>
+					{:else}
+						<div class="question-panel">"{securityQuestion}"</div>
+
+						<div class="field">
+							<label class="form-label" for="fp-answer">Your Answer</label>
+							<input class="form-input" id="fp-answer" placeholder="Your answer..."
+								value={answer} oninput={(e) => { answer = (e.target as HTMLInputElement).value; }} />
+						</div>
+					{/if}
 
 					<button class="btn-primary" onclick={handleStep2} disabled={busy} aria-busy={busy}>
 						{busy ? 'Verifying…' : 'Verify'}

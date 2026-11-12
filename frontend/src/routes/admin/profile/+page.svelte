@@ -2,7 +2,7 @@
 	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { me, setSecurityQuestion } from '$lib/features/auth/service';
+	import { me, setRecoveryCode, setSecurityQuestion } from '$lib/features/auth/service';
 	import MfaSettings from '$lib/components/MfaSettings.svelte';
 	import { SECURITY_QUESTIONS } from '$lib/features/auth/security';
 	import {
@@ -46,6 +46,7 @@
 	let formError = $state<string | null>(null);
 	let formOk = $state<string | null>(null);
 	let formBusy = $state(false);
+	let passwordOpen = $state(false);
 
 	// Security Question — only for non-super-admin admins; mirrors student/professor.
 	let questionOpen = $state(false);
@@ -55,6 +56,39 @@
 	let answer = $state('');
 	let securityError = $state('');
 	let securityMsg = $state('');
+
+	// Break-glass recovery code (Super Admin only).
+	let recoveryOpen = $state(false);
+	let recoveryBusy = $state(false);
+	let recoveryCode = $state('');
+	let recoveryPassword = $state('');
+	let recoveryError = $state('');
+	let recoveryMsg = $state('');
+
+	async function onSaveRecoveryCode() {
+		recoveryError = '';
+		recoveryMsg = '';
+		if (!recoveryCode.trim()) {
+			recoveryError = 'Recovery code is required';
+			return;
+		}
+		if (!recoveryPassword) {
+			recoveryError = 'Current password is required';
+			return;
+		}
+		recoveryBusy = true;
+		try {
+			await setRecoveryCode(recoveryCode.trim(), recoveryPassword);
+			recoveryMsg = 'Recovery code saved.';
+			recoveryOpen = false;
+			recoveryCode = '';
+			recoveryPassword = '';
+		} catch (e: unknown) {
+			recoveryError = e instanceof Error && e.message ? e.message : 'Save failed. Please try again.';
+		} finally {
+			recoveryBusy = false;
+		}
+	}
 
 	async function onSaveQuestion() {
 		securityError = '';
@@ -128,6 +162,7 @@
 		try {
 			await doChangePassword(currentPassword, newPassword);
 			formOk = 'Password changed.';
+			passwordOpen = false;
 			currentPassword = '';
 			newPassword = '';
 			confirmPassword = '';
@@ -183,40 +218,72 @@
 			<h2 class="section-title">Security</h2>
 			{#if isSuperAdmin()}
 				<h3 class="sub-title">Change password</h3>
-				{#if formError}
-					<p class="error" role="alert">{formError}</p>
+				{#if formOk && !passwordOpen}<p class="ok" role="status">{formOk}</p>{/if}
+				{#if !passwordOpen}
+					<button class="btn ghost" onclick={() => (passwordOpen = true)}>
+						Change Password
+					</button>
+				{:else}
+					{#if formError}
+						<p class="error" role="alert">{formError}</p>
+					{/if}
+					<form onsubmit={submitPassword}>
+						<div class="form">
+							<label>Current password
+								<input class="input" type="password" autocomplete="current-password" bind:value={currentPassword} />
+							</label>
+							<label>New password
+								<input class="input" type="password" autocomplete="new-password" bind:value={newPassword} />
+							</label>
+							<ul class="req-list">
+								<li class:met={passwordReq.length}>At least 8 characters</li>
+								<li class:met={passwordReq.upper}>One uppercase letter</li>
+								<li class:met={passwordReq.lower}>One lowercase letter</li>
+								<li class:met={passwordReq.number}>One number</li>
+								<li class:met={passwordReq.symbol}>One symbol</li>
+							</ul>
+							<label>Confirm new password
+								<input class="input" type="password" autocomplete="new-password" bind:value={confirmPassword} />
+								{#if confirmPassword && !passwordsMatch}
+									<span class="hint warn">Passwords do not match.</span>
+								{/if}
+							</label>
+						</div>
+						<div class="modal-actions">
+							<button class="btn" type="submit" aria-busy={formBusy} disabled={formBusy}>
+								{formBusy ? 'Saving…' : 'Change password'}
+							</button>
+							<button class="btn ghost" type="button" onclick={() => (passwordOpen = false)}>Cancel</button>
+						</div>
+					</form>
 				{/if}
-				{#if formOk}
-					<p class="ok" role="status">{formOk}</p>
-				{/if}
-				<form onsubmit={submitPassword}>
-					<div class="form">
-						<label>Current password
-							<input class="input" type="password" autocomplete="current-password" bind:value={currentPassword} />
-						</label>
-						<label>New password
-							<input class="input" type="password" autocomplete="new-password" bind:value={newPassword} />
-						</label>
-						<ul class="req-list">
-							<li class:met={passwordReq.length}>At least 8 characters</li>
-							<li class:met={passwordReq.upper}>One uppercase letter</li>
-							<li class:met={passwordReq.lower}>One lowercase letter</li>
-							<li class:met={passwordReq.number}>One number</li>
-							<li class:met={passwordReq.symbol}>One symbol</li>
-						</ul>
-						<label>Confirm new password
-							<input class="input" type="password" autocomplete="new-password" bind:value={confirmPassword} />
-							{#if confirmPassword && !passwordsMatch}
-								<span class="hint warn">Passwords do not match.</span>
-							{/if}
-						</label>
+
+				<hr class="divider" />
+
+				<h3 class="sub-title">Recovery Code</h3>
+				<p class="muted">Break-glass code used for password recovery instead of a security question.</p>
+				{#if !recoveryOpen}
+					<button class="btn ghost" onclick={() => (recoveryOpen = true)}>
+						Set / Rotate Recovery Code
+					</button>
+					{#if recoveryMsg && !recoveryOpen}<p class="success">{recoveryMsg}</p>{/if}
+				{:else}
+					<div class="field">
+						<label for="recovery-code">New Recovery Code</label>
+						<input id="recovery-code" bind:value={recoveryCode} placeholder="Recovery code" />
 					</div>
-					<div class="modal-actions">
-						<button class="btn" type="submit" aria-busy={formBusy} disabled={formBusy}>
-							{formBusy ? 'Saving…' : 'Change password'}
+					<div class="field">
+						<label for="recovery-password">Current Password</label>
+						<input id="recovery-password" type="password" bind:value={recoveryPassword} placeholder="Current password" />
+					</div>
+					{#if recoveryError}<p class="error">{recoveryError}</p>{/if}
+					<div class="action-row">
+						<button class="btn" aria-busy={recoveryBusy} onclick={onSaveRecoveryCode} disabled={recoveryBusy}>
+							{recoveryBusy ? 'Saving…' : 'Save'}
 						</button>
+						<button class="btn ghost" onclick={() => (recoveryOpen = false)}>Cancel</button>
 					</div>
-				</form>
+				{/if}
 			{:else}
 				<h3 class="sub-title">Change Password</h3>
 				<a class="btn" href={Routes.FORGOT_PASSWORD}>Change Password</a>

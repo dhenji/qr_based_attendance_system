@@ -449,3 +449,87 @@ def test_change_password_rejects_reused_password() -> None:
         asyncio.run(
             _service(user).change_password(user, "OldPass1!", "OldPass1!")
         )
+
+
+# --- break-glass recovery code (Super Admin) -------------------------------
+
+
+def test_step1_reports_recovery_code_mode() -> None:
+    from features.auth.schema import SecurityQuestionResponse
+
+    user = _user(
+        security_question_hash=None,
+        recovery_code_hash=hash_password("BRKGLASS1"),
+        recovery_code_used_at=None,
+    )
+
+    result = asyncio.run(_service(user).forgot_password("u@example.com"))
+
+    assert isinstance(result, SecurityQuestionResponse)
+    assert result.recovery_code_mode is True
+    assert result.set is False
+
+
+def test_step2_accepts_recovery_code() -> None:
+    user = _user(
+        security_question_hash=None,
+        recovery_code_hash=hash_password("BRKGLASS1"),
+        recovery_code_used_at=None,
+    )
+
+    result = asyncio.run(
+        _service(user).forgot_password_step2(
+            "u@example.com", recovery_code="BRKGLASS1"
+        )
+    )
+
+    assert result.recovery_token is not None
+
+
+def test_step2_rejects_wrong_recovery_code() -> None:
+    user = _user(
+        security_question_hash=None,
+        recovery_code_hash=hash_password("BRKGLASS1"),
+        recovery_code_used_at=None,
+    )
+
+    with pytest.raises(SecurityAnswerInvalidException):
+        asyncio.run(
+            _service(user).forgot_password_step2(
+                "u@example.com", recovery_code="wrong"
+            )
+        )
+
+
+def test_step2_rejects_used_recovery_code() -> None:
+    from datetime import datetime, timezone
+
+    user = _user(
+        security_question_hash=None,
+        recovery_code_hash=hash_password("BRKGLASS1"),
+        recovery_code_used_at=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(SecurityAnswerInvalidException):
+        asyncio.run(
+            _service(user).forgot_password_step2(
+                "u@example.com", recovery_code="BRKGLASS1"
+            )
+        )
+
+
+def test_set_recovery_code_requires_current_password() -> None:
+    from features.auth.exceptions import CurrentPasswordInvalid
+
+    user = _user(password_hash=hash_password("OldPass1!"))
+
+    with pytest.raises(CurrentPasswordInvalid):
+        asyncio.run(
+            _service(user).set_recovery_code(user, "NEWCODE1", "wrong")
+        )
+
+    asyncio.run(
+        _service(user).set_recovery_code(user, "NEWCODE1", "OldPass1!")
+    )
+    assert user.recovery_code_hash is not None
+    assert user.recovery_code_used_at is None
