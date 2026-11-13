@@ -55,6 +55,7 @@ export type SessionHistoryRow = {
 	session_code: string;
 	created_at: string;
 	expires_at: string | null;
+	scheduled_end_time: string;
 	present_count: number;
 	late_count: number;
 	absent_count: number;
@@ -156,6 +157,7 @@ export const listSessions = async (params?: {
 		sessionCode: item.session_code,
 		createdAt: item.created_at,
 		expiresAt: item.expires_at,
+		scheduledEndTime: item.scheduled_end_time,
 		durationMinutes: item.duration_minutes,
 		presentCount: item.present_count,
 		lateCount: item.late_count,
@@ -390,6 +392,7 @@ export const listSessionHistory = async (params?: SessionHistoryFilters) => {
 		session_code: item.session_code,
 		created_at: item.created_at,
 		expires_at: item.expires_at,
+		scheduled_end_time: item.scheduled_end_time,
 		present_count: item.present_count,
 		late_count: item.late_count,
 		absent_count: item.absent_count,

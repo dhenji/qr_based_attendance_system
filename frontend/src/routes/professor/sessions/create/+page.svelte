@@ -261,11 +261,18 @@ let selectedOfferingId = $state<number | null>(null);
 	const scheduledStartTime = $derived(
 		scheduleOverride ? overrideStart : (plan?.start_time ?? '').slice(0, 5)
 	);
+	// Class length for an override follows the offering's meeting length (a
+	// timetable fact), not the scan window duration — so editing the duration
+	// never moves the class end. Falls back to the requested duration when no
+	// meeting is configured.
+	const overrideClassLength = $derived(
+		inherited !== null && inherited.duration > 0 ? inherited.duration : durationMinutes
+	);
 	const scheduledEndTime = $derived.by(() => {
 		if (!scheduleOverride) return (plan?.end_time ?? '').slice(0, 5);
 		const start = parseTimeToMinutes(overrideStart);
 		if (start === null) return '';
-		const minutes = (start + durationMinutes) % (24 * 60);
+		const minutes = (start + overrideClassLength) % (24 * 60);
 		const hours = String(Math.floor(minutes / 60)).padStart(2, '0');
 		const rest = String(minutes % 60).padStart(2, '0');
 		return `${hours}:${rest}`;
@@ -401,12 +408,34 @@ let selectedOfferingId = $state<number | null>(null);
 		return `${day} ${time}`.trim();
 	});
 
-	// D12/D49: the scan window ends at `created_at + duration`, capped by the
-	// class end while the class is still ahead. The preview mirrors the
-	// server's rule so the form and the projector agree.
-	const expiryPreview = $derived.by(() => {
+	// Widths for the visual timeline bar: class length vs scan duration,
+	// scaled to the longer of the two so both always fit.
+	const timelineWidths = $derived.by(() => {
+		const classLen = inherited !== null && inherited.duration > 0 ? inherited.duration : durationMinutes;
+		const scanLen = durationMinutes;
+		const maxLen = Math.max(classLen, scanLen, 1);
+		return {
+			classPct: (classLen / maxLen) * 100,
+			scanPct: (scanLen / maxLen) * 100,
+		};
+	});
+
+	// Preview of the two time concepts the session will carry: the scan
+	// window (start + duration) and the class end (offering schedule, or
+	// start + duration in override mode). Shown so the professor sees the
+	// effect of the duration field before opening.
+	const previewTimes = $derived.by(() => {
 		if (durationInvalid) return null;
-		return { at: new Date(Date.now() + durationMinutes * 60 * 1000) };
+		const start = parseTimeToMinutes(scheduledStartTime);
+		if (start === null) return null;
+		const scanEndMin = (start + durationMinutes) % (24 * 60);
+		const scanEnd = `${String(Math.floor(scanEndMin / 60)).padStart(2, '0')}:${String(scanEndMin % 60).padStart(2, '0')}`;
+		const classEnd = scheduledEndTime || '—';
+		const overtime =
+			scheduledEndTime !== '' &&
+			parseTimeToMinutes(scheduledEndTime) !== null &&
+			((parseTimeToMinutes(scheduledEndTime)! - start + 24 * 60) % (24 * 60)) < durationMinutes;
+		return { scanStart: scheduledStartTime, scanEnd, classEnd, overtime };
 	});
 
 	const RADII = [10, 20, 30, 50, 100] as const;
@@ -562,18 +591,24 @@ let selectedOfferingId = $state<number | null>(null);
 			// untouched field stays absent, so the server resolves it from the
 			// offering's plan rather than from a copy the page happened to
 			// load.
-			const changed = inherited === null
-				? {}
-				: {
-						...(durationMinutes !== inherited.duration ? { durationMinutes } : {}),
-						...(presentWindow !== inherited.present
-							? { presentWindowMinutes: presentWindow }
-							: {}),
-						...(lateWindow !== inherited.late ? { lateWindowMinutes: lateWindow } : {}),
-						...(radius !== inherited.radius && !locationCleared
-							? { geofenceRadius: radius }
-							: {})
-				};
+			// Always send a value the professor actually edited, even when the
+			// plan failed to load (inherited === null): otherwise a stale/empty
+			// baseline would silently drop the professor's input and the server
+			// would fall back to the offering's defaults.
+			const changed = {
+				...(inherited === null || durationMinutes !== inherited.duration
+					? { durationMinutes }
+					: {}),
+				...(inherited === null || presentWindow !== inherited.present
+					? { presentWindowMinutes: presentWindow }
+					: {}),
+				...(inherited === null || lateWindow !== inherited.late
+					? { lateWindowMinutes: lateWindow }
+					: {}),
+				...( (inherited === null || radius !== inherited.radius) && !locationCleared
+					? { geofenceRadius: radius }
+					: {})
+			};
 
 			const created = await openSession(course.offeringId, {
 				sessionType: sessionType,
@@ -1089,8 +1124,23 @@ let selectedOfferingId = $state<number | null>(null);
 			</p>
 		{/if}
 
+			<p class="hint" style="margin-bottom: 0.5rem;">
+				Class time comes from the offering's schedule. The scan window is how long students can scan (can be shorter or longer than the class).
+			</p>
 			<div class="field">
-				<label class="form-label" for="duration">Duration (minutes)</label>
+				<label class="form-label" for="duration">Scan window duration (minutes)</label>
+				<div class="duration-chips">
+					{#if inherited !== null && inherited.duration > 0}
+						<button type="button" class="chip" class:chip-selected={durationMinutes === inherited!.duration} onclick={() => (durationMinutes = inherited!.duration)}>
+							Class length ({inherited!.duration})
+						</button>
+					{/if}
+					{#each [30, 45, 60, 90, 120] as preset (preset)}
+						<button type="button" class="chip" class:chip-selected={durationMinutes === preset} onclick={() => (durationMinutes = preset)}>
+							{preset}
+						</button>
+					{/each}
+				</div>
 				<input
 					id="duration"
 					class="form-input"
@@ -1099,18 +1149,48 @@ let selectedOfferingId = $state<number | null>(null);
 					min="1"
 					bind:value={durationMinutes}
 				/>
-				{#if expiryPreview}
-					<p class="hint">
-						Scan window closes {dateTimeText(expiryPreview.at)} ({durationMinutes}m from now)
-					</p>
-				{/if}
-
 				{#if inherited !== null}
 					<p class="hint">
-						{inherited.duration} m — the length of the scheduled meeting
+						Class runs {plan?.start_time?.slice(0, 5) ?? '—'}–{plan?.end_time?.slice(0, 5) ?? '—'} ({inherited.duration} m) — the scheduled meeting length
 						{#if durationOverridden}
 							<span class="location-tag">Override</span>
 						{/if}
+					</p>
+				{/if}
+				{#if previewTimes}
+					<div class="session-timeline" aria-label="Class time vs scan window">
+						<div class="tl-row">
+							<span class="tl-label">Class</span>
+							<div class="tl-track">
+								<div class="tl-bar tl-class" style="width: {timelineWidths.classPct}%;"></div>
+							</div>
+							<span class="tl-time">{previewTimes.scanStart}–{previewTimes.classEnd}</span>
+						</div>
+						<div class="tl-row">
+							<span class="tl-label">Scan</span>
+							<div class="tl-track">
+								<div
+									class="tl-bar tl-scan"
+									class:tl-overtime={previewTimes.overtime}
+									style="width: {timelineWidths.scanPct}%;"
+								></div>
+							</div>
+							<span class="tl-time">{previewTimes.scanStart}–{previewTimes.scanEnd}</span>
+						</div>
+					</div>
+					<p class="hint">
+						Scan window {previewTimes.scanStart} → {previewTimes.scanEnd}
+						· Class ends {previewTimes.classEnd}
+						{#if previewTimes.overtime}
+							<span class="location-tag">Extends past class end</span>
+						{:else if previewTimes.scanEnd !== previewTimes.classEnd && previewTimes.scanEnd < previewTimes.classEnd}
+							<span class="location-tag">Closes before class ends</span>
+						{/if}
+					</p>
+				{/if}
+				{#if scheduleOverride}
+					<p class="hint">
+						Class end follows the offering's meeting length (start + class length); the scan window follows the duration.
 					</p>
 				{/if}
 			</div>
@@ -1428,6 +1508,21 @@ let selectedOfferingId = $state<number | null>(null);
 						</span>
 					</div>
 					<div class="confirm-generate-row">
+						<span class="confirm-generate-label">Scan window</span>
+						<span>{scheduledStartTime || 'Now'}–{previewTimes?.scanEnd ?? scheduledEndTime}</span>
+					</div>
+					<div class="confirm-generate-row">
+						<span class="confirm-generate-label">Class ends</span>
+						<span>
+							{scheduledEndTime || '—'}
+							{#if previewTimes?.overtime}
+								(extended)
+							{:else if previewTimes && previewTimes.scanEnd !== previewTimes.classEnd && previewTimes.scanEnd < previewTimes.classEnd}
+								(shortened)
+							{/if}
+						</span>
+					</div>
+					<div class="confirm-generate-row">
 						<span class="confirm-generate-label">Duration</span>
 						<span>{durationMinutes} min</span>
 					</div>
@@ -1649,6 +1744,100 @@ let selectedOfferingId = $state<number | null>(null);
 		background: var(--warning-bg);
 		border-color: var(--warning-text);
 		color: var(--warning-text);
+	}
+
+	/* --- Session timing timeline -------------------------------------------- */
+	.session-timeline {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		margin: 0.5rem 0 0.25rem;
+		padding: 0.625rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--bg-muted);
+	}
+
+	.tl-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.tl-label {
+		flex: 0 0 3rem;
+		font-size: 0.75rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+	}
+
+	.tl-track {
+		flex: 1 1 auto;
+		height: 0.625rem;
+		border-radius: 999px;
+		background: var(--bg-page);
+		border: 1px solid var(--border);
+		overflow: hidden;
+		position: relative;
+	}
+
+	.tl-bar {
+		height: 100%;
+		border-radius: 999px;
+		transition: width 0.15s ease;
+	}
+
+	.tl-class {
+		background: var(--text-muted);
+		opacity: 0.45;
+	}
+
+	.tl-scan {
+		background: var(--brand);
+	}
+
+	.tl-scan.tl-overtime {
+		background: var(--warning-text);
+	}
+
+	.tl-time {
+		flex: 0 0 auto;
+		font-family: var(--font-data);
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		white-space: nowrap;
+	}
+
+	.duration-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.chip {
+		padding: 0.3125rem 0.625rem;
+		border-radius: 999px;
+		border: 1px solid var(--border-strong);
+		background: var(--bg-card);
+		color: var(--text-secondary);
+		font-size: 0.8125rem;
+		font-weight: 600;
+		cursor: pointer;
+		font-family: inherit;
+	}
+
+	.chip:hover {
+		background: var(--bg-hover);
+		color: var(--text-strong);
+	}
+
+	.chip-selected {
+		background: var(--brand);
+		border-color: var(--brand);
+		color: var(--on-brand);
 	}
 
 	.location-tag {
@@ -2136,6 +2325,19 @@ let selectedOfferingId = $state<number | null>(null);
 	}
 
 	@media (max-width: 640px) {
+		.session-timeline {
+			padding: 0.5rem;
+		}
+
+		.tl-label {
+			flex: 0 0 2.5rem;
+			font-size: 0.6875rem;
+		}
+
+		.tl-time {
+			font-size: 0.6875rem;
+		}
+
 		.card {
 			padding: 1.25rem;
 		}

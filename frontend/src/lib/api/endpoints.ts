@@ -218,6 +218,7 @@ export const SessionListEndpoint: EndpointDef<Paginated<SessionListItemResponse>
 				session_code: '7X-9K2M',
 				created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
 				expires_at: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+				scheduled_end_time: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 				duration_minutes: 60,
 				present_count: 15,
 				late_count: 3,

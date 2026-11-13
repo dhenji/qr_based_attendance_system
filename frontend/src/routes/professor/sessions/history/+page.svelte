@@ -550,6 +550,11 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 									<span class="status-badge" class:is-active={row.status === 'active'} class:is-closed={row.status === 'closed'} class:is-scheduled={row.status === 'scheduled'}>
 										{row.status}
 									</span>
+									{#if row.expires_at && new Date(row.expires_at).getTime() > new Date(row.scheduled_end_time).getTime() + 60000}
+										<span class="overtime-badge">Extended</span>
+									{:else if row.expires_at && new Date(row.expires_at).getTime() < new Date(row.scheduled_end_time).getTime() - 60000}
+										<span class="shortened-badge">Shortened</span>
+									{/if}
 								</td>
 								<td class="numeric">{plaText(row)}</td>
 								<td>
@@ -902,6 +907,31 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.status-badge.is-closed {
 		color: var(--text-muted);
 		background: var(--bg-page);
+	}
+
+	.overtime-badge,
+	.shortened-badge {
+		display: inline-block;
+		margin-left: 0.375rem;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+	}
+
+	.overtime-badge {
+		color: var(--warning-text);
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-text);
+	}
+
+	.shortened-badge {
+		color: var(--info-text);
+		background: var(--info-bg);
+		border: 1px solid var(--info-text);
 	}
 
 	.status-badge.is-scheduled {

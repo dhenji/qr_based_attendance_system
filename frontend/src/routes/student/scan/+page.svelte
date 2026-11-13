@@ -520,6 +520,28 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			session.geofence.lng !== null
 	);
 
+	// A location is "accepted" when a fix has been acquired and Continue is
+	// enabled: either there is no classroom center to check against, or the
+	// fix falls inside the geofence (including the uncertainty review band).
+	// Defined once here so Retry visibility and the Continue gate can never
+	// drift apart.
+	const locationAccepted = $derived(
+		gpsFix !== null &&
+			!locatingGps &&
+			(session === null ||
+				session.geofence.lat === null ||
+				session.geofence.lng === null ||
+				isWithinGeofenceWithUncertainty(
+					gpsFix.lat,
+					gpsFix.lng,
+					session.geofence.lat as number,
+					session.geofence.lng as number,
+					session.geofence.radius,
+					gpsFix.accuracy,
+					session.geofence.uncertaintyCapMeters
+				))
+	);
+
 	const requestGps = async () => {
 		if (!session) return;
 		// Cancel any in-flight acquisition before starting a new one.
@@ -1030,13 +1052,14 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 							Cancel
 						</button>
 					{/if}
-					<button class="btn-secondary" disabled={locatingGps} onclick={() => void requestGps()}>
-						{locatingGps ? 'Locating…' : 'Retry Location'}
-					</button>
+					{#if !locationAccepted}
+						<button class="btn-secondary" disabled={locatingGps} onclick={() => void requestGps()}>
+							{locatingGps ? 'Locating…' : 'Retry Location'}
+						</button>
+					{/if}
 					<button
 						class="btn-primary"
-						disabled={locatingGps || !gpsFix ||
-							(gpsFix !== null && session !== null && session.geofence.lat !== null && session.geofence.lng !== null && !isWithinGeofenceWithUncertainty(gpsFix.lat, gpsFix.lng, session.geofence.lat as number, session.geofence.lng as number, session.geofence.radius, gpsFix.accuracy, session.geofence.uncertaintyCapMeters))}
+						disabled={!locationAccepted}
 						onclick={() => {
 							if (gpsFix) {
 								step = 'liveness';
@@ -1418,10 +1441,17 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
 	}
 
-	.btn-primary:hover {
+	.btn-primary:hover:not(:disabled) {
 		background: var(--brand-hover);
 		border-color: var(--brand-hover);
 		transform: translateY(-1px);
+	}
+
+	.btn-primary:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+		box-shadow: none;
+		transform: none;
 	}
 
 	.btn-secondary {
@@ -1430,8 +1460,13 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		color: var(--text-strong);
 	}
 
-	.btn-secondary:hover {
+	.btn-secondary:hover:not(:disabled) {
 		background: var(--bg-hover);
+	}
+
+	.btn-secondary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.btn-danger {
@@ -1440,8 +1475,13 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		color: var(--danger);
 	}
 
-	.btn-danger:hover {
+	.btn-danger:hover:not(:disabled) {
 		background: var(--danger-bg);
+	}
+
+	.btn-danger:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.viewport {
