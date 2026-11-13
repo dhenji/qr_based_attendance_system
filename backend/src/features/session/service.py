@@ -528,8 +528,16 @@ class SessionService:
                 scheduled_start.astimezone(zone).strftime("%Y-%m-%d %H:%M")
             )
 
+        # Class length comes from the offering's meeting, not from the scan
+        # window: duration_minutes is scan policy and must not redefine the
+        # timetable. When no meeting is configured (meeting_minutes == 0),
+        # fall back to the requested duration so a class with no schedule
+        # still gets a sensible end.
+        class_length: int = (
+            plan.meeting_minutes if plan.meeting_minutes and plan.meeting_minutes > 0 else duration_minutes
+        )
         scheduled_end: datetime = scheduled_start + timedelta(
-            minutes=duration_minutes
+            minutes=class_length
         )
 
         if scheduled_end <= scheduled_start:
@@ -1100,6 +1108,7 @@ class SessionService:
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
+            scheduled_end_time=row.scheduled_end_time,
             duration_minutes=row.duration_minutes,
             present_count=counts.present,
             late_count=counts.late,
@@ -1189,6 +1198,7 @@ class SessionService:
             session_code=row.session_code,
             created_at=row.created_at,
             expires_at=row.expires_at,
+            scheduled_end_time=row.scheduled_end_time,
             duration_minutes=row.duration_minutes,
             present_count=counts.present,
             late_count=counts.late,

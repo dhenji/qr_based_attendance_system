@@ -359,6 +359,21 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		classRemainingSeconds !== null && classRemainingSeconds <= 0
 	);
 
+	// Scan window and class end are the same instant in override mode (both =
+	// start + duration). Detect that so the UI can collapse the duplicate
+	// timer instead of showing two identical countdowns.
+	const scanAndClassCoincide = $derived(
+		scanExpiresAt !== null &&
+			classEndsAt !== null &&
+			Math.abs(scanExpiresAt - classEndsAt) <= 60_000
+	);
+	// Overtime: scanning stays open past the scheduled class end.
+	const scanExtendsBeyondClass = $derived(
+		scanExpiresAt !== null &&
+			classEndsAt !== null &&
+			scanExpiresAt > classEndsAt + 60_000
+	);
+
 	const isClosed = $derived(session?.status === 'closed');
 	const isScheduled = $derived(session?.status === 'scheduled');
 	const closedSession = $derived(isClosed ? session : null);
@@ -634,20 +649,47 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				<span class="code-label">Session Code · Show on projector</span>
 				<span class="code">{session.sessionCode}</span>
 				<div class="timers">
-					<div class="timer" class:urgent={expiringSoon || scanExpired}>
-						<span class="timer-label">Scan window</span>
+					<div class="timer" class:urgent={expiringSoon || scanExpired} aria-live="polite">
+						<span class="timer-label">Scan window closes in</span>
 						<span class="timer-value">{formatCountdown(scanRemainingSeconds)}</span>
-					</div>
-					<div class="timer" class:urgent={classEnded}>
-						<span class="timer-label">{isScheduled ? 'Class starts in' : classEnded ? 'Class ended' : 'Class ends in'}</span>
-						<span class="timer-value">{isScheduled ? formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000))) : isClosed ? formatClock(session.scheduledEndTime) : formatCountdown(classRemainingSeconds ?? 0)}</span>
-						{#if !isClosed && !isScheduled}
-							<span class="timer-sub">at {formatClock(session.scheduledEndTime)}</span>
+						{#if scanExpiresAt !== null && scanSnapshotRemaining !== null}
+							<div class="scan-progress" aria-hidden="true">
+								<div
+									class="scan-progress-bar"
+									style="width: {Math.min(100, Math.max(0, ((scanSnapshotRemaining * 1000 - (scanExpiresAt - now)) / (scanSnapshotRemaining * 1000)) * 100))}%;"
+								></div>
+							</div>
 						{/if}
-						{#if isScheduled}
+						{#if scanExtendsBeyondClass}
+							<span class="timer-sub">extended past class end</span>
+						{:else if !scanAndClassCoincide && classEndsAt !== null && scanExpiresAt !== null && scanExpiresAt < classEndsAt}
+							<span class="timer-sub">closes before class ends</span>
+						{/if}
+					</div>
+					{#if isScheduled}
+						<div class="timer" class:urgent={classEnded}>
+							<span class="timer-label">Class starts in</span>
+							<span class="timer-value">{formatCountdown(Math.max(0, Math.floor((new Date(session.scheduledStartTime).getTime() - now) / 1000)))}</span>
 							<span class="timer-sub">at {formatClock(session.scheduledStartTime)}</span>
-						{/if}
-					</div>
+						</div>
+					{:else if isClosed}
+						<div class="timer" class:urgent={classEnded}>
+							<span class="timer-label">
+								{classEndsAt !== null && classEndsAt <= now ? 'Class ended' : 'Closed early'}
+							</span>
+							<span class="timer-value">{formatClock(session.scheduledEndTime)}</span>
+						</div>
+					{:else if scanAndClassCoincide}
+						<div class="timer">
+							<span class="timer-label">Class ends</span>
+							<span class="timer-sub">when scanning closes</span>
+						</div>
+					{:else}
+						<div class="timer" class:urgent={classEnded}>
+							<span class="timer-label">{classEnded ? 'Class ended' : 'Class ends at'}</span>
+							<span class="timer-value">{formatClock(session.scheduledEndTime)}</span>
+						</div>
+					{/if}
 				</div>
 			</div>
 			<div class="qr-side">
@@ -751,39 +793,58 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				</div>
 				{#if session.scheduleOverridden}
 					<div>
-						<dt>Original scheduled start</dt>
-						<dd>{session.originalScheduledStartTime ? formatDateTime(new Date(session.originalScheduledStartTime).getTime()) : '—'}</dd>
+						<dt>Schedule override</dt>
+						<dd>
+							Yes — {session.originalScheduledStartTime ? formatDateTime(new Date(session.originalScheduledStartTime).getTime()) : '—'} → {formatDateTime(new Date(session.scheduledStartTime).getTime())}
+						</dd>
 					</div>
 					<div>
 						<dt>Override reason</dt>
-						<dd>{session.overrideReason ?? '—'}</dd>
+						<dd>{session.overrideReason && session.overrideReason.trim() !== '' ? session.overrideReason : 'not provided'}</dd>
 					</div>
 				{:else}
 					<div>
-						<dt>Override</dt>
+						<dt>Schedule override</dt>
 						<dd>No</dd>
 					</div>
 				{/if}
 				<div>
 					<dt>Scan window expires</dt>
-					<dd>{session.expiresAt ? formatDateTime(new Date(session.expiresAt).getTime()) : '—'}</dd>
-				</div>
-				<div>
-					<dt>Remaining to scheduled end</dt>
-					<dd>{classRemainingSeconds !== null ? formatCountdown(classRemainingSeconds) : '—'}</dd>
-				</div>
-				<div>
-					<dt>Actual end (if closed)</dt>
-					<dd>{isClosed && session.expiresAt ? formatDateTime(new Date(session.expiresAt).getTime()) : '—'}</dd>
-				</div>
-				<div>
-					<dt>Actual duration (if closed)</dt>
 					<dd>
-						{isClosed && session.actualStartTime && session.expiresAt
-							? formatCountdown(Math.max(0, Math.floor((new Date(session.expiresAt).getTime() - new Date(session.actualStartTime).getTime()) / 1000)))
-							: '—'}
+						{session.expiresAt ? formatDateTime(new Date(session.expiresAt).getTime()) : '—'}
+						{#if session.expiresAt}
+							<span class="detail-note">
+								{#if new Date(session.expiresAt).getTime() > new Date(session.scheduledEndTime).getTime() + 60000}
+									(extended past class end)
+								{:else if new Date(session.expiresAt).getTime() < new Date(session.scheduledEndTime).getTime() - 60000}
+									(closes before class ends)
+								{:else}
+									(matches class end)
+								{/if}
+							</span>
+						{/if}
 					</dd>
 				</div>
+				{#if !isClosed}
+					<div>
+						<dt>Remaining to scheduled end</dt>
+						<dd>{classRemainingSeconds !== null ? formatCountdown(classRemainingSeconds) : '—'}</dd>
+					</div>
+				{/if}
+				{#if isClosed}
+					<div>
+						<dt>Actual end</dt>
+						<dd>{session.expiresAt ? formatDateTime(new Date(session.expiresAt).getTime()) : '—'}</dd>
+					</div>
+					<div>
+						<dt>Actual duration</dt>
+						<dd>
+							{session.actualStartTime && session.expiresAt
+								? formatCountdown(Math.max(0, Math.floor((new Date(session.expiresAt).getTime() - new Date(session.actualStartTime).getTime()) / 1000)))
+								: '—'}
+						</dd>
+					</div>
+				{/if}
 			</dl>
 		</details>
 
@@ -1330,6 +1391,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	.timer {
 		display: flex;
 		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
 		gap: 0.125rem;
 		min-width: 11rem;
 		padding: 0.75rem 1rem;
@@ -1359,6 +1423,27 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-size: 1.375rem;
 		font-weight: 800;
 		color: var(--success);
+	}
+
+	.scan-progress {
+		width: 100%;
+		height: 0.375rem;
+		border-radius: 999px;
+		background: var(--bg-page);
+		border: 1px solid var(--border);
+		overflow: hidden;
+		margin-top: 0.25rem;
+	}
+
+	.scan-progress-bar {
+		height: 100%;
+		background: var(--success);
+		border-radius: 999px;
+		transition: width 0.3s linear;
+	}
+
+	.timer.urgent .scan-progress-bar {
+		background: var(--danger);
 	}
 
 	.timer-sub {
@@ -1462,6 +1547,13 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		color: var(--text-strong);
 		font-size: 0.9375rem;
 		word-break: break-word;
+	}
+
+	.detail-note {
+		margin-left: 0.375rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--text-muted);
 	}
 
 	.tiles {

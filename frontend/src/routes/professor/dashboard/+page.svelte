@@ -102,10 +102,7 @@
 					code: item.courseCode,
 					name: item.courseName,
 					section: item.section,
-					endsAt:
-						item.status === 'active'
-							? formatClock(item.expiresAt)
-							: formatClock(item.expiresAt ?? item.createdAt),
+					endsAt: formatClock(item.scheduledEndTime),
 					scanned: tile?.scanned ?? item.presentCount + item.lateCount,
 					enrolled: seats,
 					status: item.status,

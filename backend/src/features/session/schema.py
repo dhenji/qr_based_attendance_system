@@ -238,6 +238,7 @@ class SessionListItem(BaseModel):
     session_code: str
     created_at: datetime
     expires_at: datetime | None = None
+    scheduled_end_time: datetime
     duration_minutes: int
     present_count: int = 0
     late_count: int = 0

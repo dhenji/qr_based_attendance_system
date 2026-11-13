@@ -26,6 +26,7 @@ export interface SessionListItemResponse {
 	session_code: string;
 	created_at: string;
 	expires_at: string | null;
+	scheduled_end_time: string;
 	duration_minutes: number;
 	present_count: number;
 	late_count: number;
@@ -243,6 +244,7 @@ export interface SessionSummary {
 	sessionCode: string;
 	createdAt: string;
 	expiresAt: string | null;
+	scheduledEndTime: string;
 	durationMinutes: number;
 	presentCount: number;
 	lateCount: number;

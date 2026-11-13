@@ -49,4 +49,18 @@ aggregates (`counts`, `total_students`, `total_sessions`) for the filtered set.
 - `docs/architecture/api-contracts.md` — endpoint contract (scan `student_number` is comparison-only)
 - `docs/project/decision-log.md` — decision IDs (D27, D31, D15, D16, D17, …)
 
+## Session timing note
+
+A session carries two independent time concepts: the **scan window** (`expires_at =
+max(scheduled_start_time, created_at) + duration_minutes`, scan policy — can be
+shortened or extended past the class) and the **class end** (`scheduled_end_time`,
+a timetable fact from the offering's meeting, or `scheduled_start + meeting_minutes`
+for an override). Duration never redefines the class end. `SessionListItem` (and
+the frontend `SessionSummary`) now carry `scheduled_end_time` so the professor
+dashboard and the session-history overtime/shortened badges use the timetable
+fact. The professor active-session page (`/professor/sessions/active/{id}`)
+surfaces both via the "Scan window" countdown and the "Scheduled end" entry in
+the "Schedule and time" details card, with an in-place note when the scan window
+is extended past or closes before the class end.
+
 Last verified against commit: see `git rev-parse HEAD`.
