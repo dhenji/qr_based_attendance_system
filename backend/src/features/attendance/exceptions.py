@@ -102,3 +102,15 @@ class ReviewNotPendingException(AttendanceDomainException):
 
     def __init__(self, record_id: int) -> None:
         super().__init__(message=f"Review record {record_id} is not pending review")
+
+
+class AttendanceAttemptLimitReachedException(AttendanceDomainException):
+    """409 - the student has exhausted the allowed scan attempts for this session."""
+
+    status_code: int = 409
+    code: str = "attendance_attempt_limit_reached"
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            message=f"Maximum of {limit} attendance attempts reached for this session (0 remaining)"
+        )

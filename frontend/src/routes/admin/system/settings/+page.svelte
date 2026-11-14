@@ -37,6 +37,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	let lateOpen = $state('0');
 	let retentionDaily = $state('30');
 	let retentionMonthly = $state('12');
+	let attemptLimit = $state('3');
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
 	let saveNote = $state<string | null>(null);
@@ -77,6 +78,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 			lateOpen = String(fetched.session_late_open_minutes ?? 0);
 			retentionDaily = String(fetched.backup_retention_daily ?? 30);
 			retentionMonthly = String(fetched.backup_retention_monthly ?? 12);
+			attemptLimit = String(fetched.attendance_attempt_limit_default ?? 3);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Unable to load system settings.';
 		} finally {
@@ -115,8 +117,13 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		const lateGrace = parseNonNegativeInt(lateOpen);
 		const daily = parsePositiveInt(retentionDaily);
 		const monthly = parsePositiveInt(retentionMonthly);
+		const attempts = parseNonNegativeInt(attemptLimit);
 		if (present === null || late === null || daily === null || monthly === null) {
 			saveError = 'Geofence, windows, and retention must all be whole numbers of at least 1.';
+			return;
+		}
+		if (attempts === null || attempts > 10) {
+			saveError = 'Attendance attempt limit must be a whole number between 0 and 10.';
 			return;
 		}
 		if (early === null || lateGrace === null) {
@@ -132,7 +139,8 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 				session_early_open_minutes: early,
 				session_late_open_minutes: lateGrace,
 				backup_retention_daily: daily,
-				backup_retention_monthly: monthly
+				backup_retention_monthly: monthly,
+				attendance_attempt_limit_default: attempts
 			});
 			// These persist: `app_settings` is a real table and this route commits
 			// through the request dependency, so a success message must not imply
@@ -250,14 +258,17 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 				<div class="field">
 					<label class="form-label" for="set-geofence">Geofence radius (meters)</label>
 					<RadiusSelector value={geofence} min={10} max={1000} onChange={(v) => (geofence = v)} />
+					<p class="hint">Default classroom geofence radius applied to new sessions.</p>
 				</div>
 				<div class="field">
 					<label class="form-label" for="set-present">Default present window (min)</label>
 					<input id="set-present" class="form-input" inputmode="numeric" bind:value={presentWin} />
+					<p class="hint">Minutes after class start counted as on time.</p>
 				</div>
 				<div class="field">
 					<label class="form-label" for="set-late">Default late window (min)</label>
 					<input id="set-late" class="form-input" inputmode="numeric" bind:value={lateWin} />
+					<p class="hint">Minutes after the present window still counted as late.</p>
 				</div>
 				<div class="field">
 					<label class="form-label" for="set-early-open">Session open grace, early (min)</label>
@@ -272,10 +283,17 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 				<div class="field">
 					<label class="form-label" for="set-retention-daily">Backup retention daily (days)</label>
 					<input id="set-retention-daily" class="form-input" inputmode="numeric" bind:value={retentionDaily} />
+					<p class="hint">Days of daily backups to keep.</p>
 				</div>
 				<div class="field">
 					<label class="form-label" for="set-retention-monthly">Backup retention monthly (months)</label>
 					<input id="set-retention-monthly" class="form-input" inputmode="numeric" bind:value={retentionMonthly} />
+					<p class="hint">Months of monthly backups to keep.</p>
+				</div>
+				<div class="field">
+					<label class="form-label" for="set-attempt-limit">Attendance attempt limit default (0 = unlimited)</label>
+					<input id="set-attempt-limit" class="form-input" inputmode="numeric" bind:value={attemptLimit} />
+					<p class="hint">Max scan attempts per student per session. New sessions inherit this default.</p>
 				</div>
 			</div>
 			{#if saveError}
@@ -440,6 +458,13 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin: 0;
+	}
+
+	.hint {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+		opacity: 0.7;
 	}
 
 	.card {

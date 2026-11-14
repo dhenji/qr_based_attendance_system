@@ -55,7 +55,7 @@ async def verify_session_code(
     _: None = Depends(_verify_code_limiter),
 ) -> VerifyCodeResponse:
     # `user` is consumed only as a role gate; no student scoping is needed for verify.
-    return await service.verify_code(code=payload.code)
+    return await service.verify_code(code=payload.code, user_id=user.id)
 
 
 @router.get(

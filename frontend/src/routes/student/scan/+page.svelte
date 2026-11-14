@@ -50,7 +50,22 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let verifiedName = $state('');
 	let precheckFailed = $state(false);
 	let alreadyScannedStop = $state(false);
+	let attemptLimitReached = $state(false);
+	let attemptLimitTimer: ReturnType<typeof setTimeout> | null = null;
+	// Errors raised before the durable attempt counter is incremented.
+	const PRE_INCREMENT_ERRORS = new Set([
+		'session_not_found',
+		'session_expired',
+		'session_not_started',
+		'student_not_found',
+		'student_number_mismatch',
+		'not_enrolled',
+		'duplicate_scan',
+		'rate_limited'
+	]);
 	let retakeMode = $state(false);
+	let attemptLimit = $state<number | null>(null);
+	let attemptsRemaining = $state<number | null>(null);
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
@@ -304,7 +319,7 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					return;
 				}
 			}
-			scanError = toScanMessage(error, 'Unable to verify the session code');
+			scanError = toScanMessage(error, 'Unable to verify the session code', attemptsRemaining);
 		} finally {
 			verifying = false;
 		}
@@ -377,6 +392,20 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			if (result.retakeAvailable) {
 				scanError = null;
 				retakeMode = true;
+			}
+			attemptLimit = result.attendanceAttemptLimit ?? null;
+			attemptsRemaining = result.attemptsRemaining ?? null;
+			if (result.limitReached) {
+				attemptsRemaining = 0;
+				attemptLimitReached = true;
+				rejectionReason = SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached;
+				showFailure = true;
+				attemptLimitTimer = setTimeout(() => {
+					showFailure = false;
+					attemptLimitReached = false;
+					void goto(Routes.DASHBOARD);
+				}, 2500);
+				return;
 			}
 			if (!isMockMode() && studentState.student?.faceEnrolled === false) {
 				precheckFailed = true;
@@ -473,6 +502,13 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 		alreadyScannedStop = false;
 		verifiedNumber = '';
 		verifiedName = '';
+		attemptLimit = null;
+		attemptsRemaining = null;
+		attemptLimitReached = false;
+		if (attemptLimitTimer) {
+			clearTimeout(attemptLimitTimer);
+			attemptLimitTimer = null;
+		}
 		session = null;
 		sessionCode = '';
 		scanError = null;
@@ -693,12 +729,27 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 					livenessActive = false;
 					showQueued = true;
 					queuedCode = sessionCode;
-				} catch {
-					rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan');
+				} catch (err) {
+					const consumed = !(
+						err instanceof APIError && PRE_INCREMENT_ERRORS.has(err.code)
+					);
+					if (consumed && attemptsRemaining !== null) {
+						attemptsRemaining = Math.max(0, attemptsRemaining - 1);
+					}
+					rejectionReason = toScanMessage(err, 'Unable to submit the attendance scan', attemptsRemaining);
+					if (err instanceof APIError && err.code === 'attendance_attempt_limit_reached') {
+						attemptsRemaining = 0;
+						attemptLimitReached = true;
+						attemptLimitTimer = setTimeout(() => {
+							showFailure = false;
+							attemptLimitReached = false;
+							void goto(Routes.DASHBOARD);
+						}, 2500);
+					}
 					showFailure = true;
 				}
 			} else {
-				rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan');
+				rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan', attemptsRemaining);
 				showFailure = true;
 			}
 		} finally {
@@ -926,6 +977,16 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 						<p class="ticket-line">
 							<span class="ticket-label">Session ends</span>
 							<span class="ticket-value mono-data">{formatLocalDateTime(session.expiresAt)}</span>
+						</p>
+						<p class="ticket-line">
+							<span class="ticket-label">Attempts remaining</span>
+							<span class="ticket-value">
+								{#if attemptLimit !== null && attemptLimit > 0}
+									{attemptsRemaining ?? '—'} of {attemptLimit}
+								{:else}
+									Unlimited
+								{/if}
+							</span>
 						</p>
 						<p class="ticket-line">
 							<span class="ticket-label">Class ends</span>
@@ -1230,7 +1291,20 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 			>
 				<h3 id="scan-failure-title" class="result-title">Attendance Rejected</h3>
 				<div class="reject-reason">{rejectionReason || 'The scan could not be accepted'}</div>
-				{#if alreadyScannedStop}
+				{#if attemptLimitReached}
+					<button
+						class="btn-primary try-again"
+						onclick={() => {
+							if (attemptLimitTimer) clearTimeout(attemptLimitTimer);
+							attemptLimitTimer = null;
+							showFailure = false;
+							attemptLimitReached = false;
+							void goto(Routes.DASHBOARD);
+						}}
+					>
+						Go to Dashboard
+					</button>
+				{:else if alreadyScannedStop}
 					<button class="btn-primary try-again" onclick={() => goto(Routes.HISTORY)}>
 						View History
 					</button>

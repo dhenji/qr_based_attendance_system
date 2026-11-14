@@ -50,6 +50,11 @@ class SessionCreate(BaseModel):
     # Whether the geofence is enforced for this session. Defaults to True;
     # set False for an in-person session with no known classroom.
     geofence_enabled: bool = True
+    # Per-student attempt cap for this session. None inherits the admin
+    # default; 0 means unlimited. Bounded 0..10.
+    attendance_attempt_limit: int | None = Field(
+        default=None, ge=0, le=10
+    )
     # Whether the professor explicitly overrode the offering's classroom. When
     # True, the payload's classroom fields are used as-is (including None),
     # so an intentionally cleared room is not replaced by the offering's
@@ -119,6 +124,8 @@ class SessionRead(BaseModel):
     # Whether the geofence is enforced for this session. Defaults to True;
     # set False for an in-person session with no known classroom.
     geofence_enabled: bool = True
+    # Per-student attempt cap for this session. 0 means unlimited.
+    attendance_attempt_limit: int = 0
     qr_payload: QRPayload
     expires_at: datetime | None = None
     # The scheduled window (D93): the offering's plan, or the override the
@@ -198,6 +205,8 @@ class SessionPlanRead(BaseModel):
     # Whether a professor may override the time at all — there is nothing to
     # override when no meeting is configured.
     override_capable: bool = False
+    # Per-student attempt cap default inherited by new sessions. 0 = unlimited.
+    attendance_attempt_limit_default: int = 0
     # Whether the session may be opened right now (D94).
     start_window: StartWindowRead | None = None
 
@@ -235,6 +244,8 @@ class SessionListItem(BaseModel):
     # Whether the geofence is enforced for this session. Defaults to True;
     # set False for an in-person session with no known classroom.
     geofence_enabled: bool = True
+    # Per-student attempt cap for this session. 0 means unlimited.
+    attendance_attempt_limit: int = 0
     session_code: str
     created_at: datetime
     expires_at: datetime | None = None
@@ -291,6 +302,8 @@ class SessionActiveResponse(BaseModel):
     # Whether the geofence is enforced for this session. Defaults to True;
     # set False for an in-person session with no known classroom.
     geofence_enabled: bool = True
+    # Per-student attempt cap for this session. 0 means unlimited.
+    attendance_attempt_limit: int = 0
     session_code: str
     scan_window_remaining: int = Field(
         description=(
@@ -411,6 +424,8 @@ class VerifyCodeResponse(BaseModel):
     # Whether the geofence is enforced for this session. Defaults to True;
     # set False for an in-person session with no known classroom.
     geofence_enabled: bool = True
+    # Per-student attempt cap for this session. 0 means unlimited.
+    attendance_attempt_limit: int = 0
     course_code: str
     course_name: str
     program_code: str

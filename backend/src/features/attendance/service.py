@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Boolean, Select, cast, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
 from core.config import Settings, get_settings
@@ -38,7 +38,9 @@ from features.attendance.constants import (
     SYNC_STALE_SECONDS,
     _IDEMPOTENCY_MAX_ENTRIES,
 )
+from core.exceptions import AppException
 from features.attendance.exceptions import (
+    AttendanceAttemptLimitReachedException,
     AttendanceDomainException,
     FaceMismatchException,
     GpsAccuracyTooLowException,
@@ -48,7 +50,7 @@ from features.attendance.exceptions import (
     ReviewNotPendingException,
     StudentNumberMismatchException,
 )
-from features.attendance.model import Attendance
+from features.attendance.model import Attendance, AttendanceAttemptCounter
 from features.attendance import notifications as attendance_notifications
 from features.attendance.schema import (
     GPSInput,
@@ -453,58 +455,78 @@ class AttendanceService:
             payload.session_id, scanned_at, now, user_id, payload.student_number,
             allow_expired=idempotency_key is not None,
         )
-        await self._require_face_enrollment(student)
+        attempt_limit: int = getattr(db_session, "attendance_attempt_limit", 0) or 0
 
-        if student.face_embedding is None or is_stub_embedding(student.face_embedding):
-            raise StubEmbeddingException("Face enrollment requires re-enrollment")
-
-        try:
-            if getattr(payload, "live_face_image", None):
-                raw = payload.live_face_image
-                if "," in raw and raw.strip().lower().startswith("data:"):
-                    raw = raw.split(",", 1)[1]
-                content = base64.b64decode(raw)
-                live_emb = generate_embedding_from_image(content)
-            else:
-                live_emb = embedding_from_base64(payload.live_face_embedding)  # type: ignore[arg-type]
-            ref_emb, _algo, _ver = deserialize_embedding(student.face_embedding)
-        except (FaceEmbeddingError, FaceEmbeddingGenerationError, ValueError) as e:
-            raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
-
-        try:
-            score = cosine_similarity(ref_emb, live_emb)
-        except ValueError as e:
-            raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
-        threshold = self._settings.face_match_threshold
-        review_low = self._settings.face_review_band_low
-        if score < review_low:
-            raise FaceMismatchException(score, threshold)
-
-        geofence_review: bool = False
-        geofence_details: dict | None = None
-        accuracy_review: bool = False
-        if not self._settings.benchmark_mode:
-            if payload.gps is not None:
-                hard_floor = self._settings.gps_hard_floor_meters
-                if hard_floor <= 0:
-                    hard_floor = 1000.0
-                if float(payload.gps.accuracy) > hard_floor:
-                    raise GpsAccuracyTooLowException(float(payload.gps.accuracy), hard_floor)
-            geofence_review, geofence_details = self._validate_geofence(
-                db_session, payload.gps
+        # Durable per-student attempt counter. Incremented in its own
+        # committed transaction so that attempts that fail validation (and
+        # roll back the main transaction) still count toward the cap.
+        remaining: int | None = None
+        if attempt_limit > 0:
+            attempt_count: int = await self._increment_attempt_counter(
+                student.id, db_session.id
             )
-            self._validate_liveness(payload.liveness_evidence)
-            if payload.gps is not None:
-                threshold = self._settings.gps_review_accuracy_threshold
-                if threshold > 0 and float(payload.gps.accuracy) > threshold:
-                    accuracy_review = True
+            remaining = max(0, attempt_limit - attempt_count)
+            if attempt_count > attempt_limit:
+                raise AttendanceAttemptLimitReachedException(attempt_limit)
 
-        if not geofence_review:
-            geofence_details = None
+        try:
+            await self._require_face_enrollment(student)
 
-        status, original, review, review_reason = self._decide_scan_outcome(
-            db_session, scanned_at, score, geofence_review, accuracy_review
-        )
+            if student.face_embedding is None or is_stub_embedding(student.face_embedding):
+                raise StubEmbeddingException("Face enrollment requires re-enrollment")
+
+            try:
+                if getattr(payload, "live_face_image", None):
+                    raw = payload.live_face_image
+                    if "," in raw and raw.strip().lower().startswith("data:"):
+                        raw = raw.split(",", 1)[1]
+                    content = base64.b64decode(raw)
+                    live_emb = generate_embedding_from_image(content)
+                else:
+                    live_emb = embedding_from_base64(payload.live_face_embedding)  # type: ignore[arg-type]
+                ref_emb, _algo, _ver = deserialize_embedding(student.face_embedding)
+            except (FaceEmbeddingError, FaceEmbeddingGenerationError, ValueError) as e:
+                raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+
+            try:
+                score = cosine_similarity(ref_emb, live_emb)
+            except ValueError as e:
+                raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+            threshold = self._settings.face_match_threshold
+            review_low = self._settings.face_review_band_low
+            if score < review_low:
+                raise FaceMismatchException(score, threshold)
+
+            geofence_review: bool = False
+            geofence_details: dict | None = None
+            accuracy_review: bool = False
+            if not self._settings.benchmark_mode:
+                if payload.gps is not None:
+                    hard_floor = self._settings.gps_hard_floor_meters
+                    if hard_floor <= 0:
+                        hard_floor = 1000.0
+                    if float(payload.gps.accuracy) > hard_floor:
+                        raise GpsAccuracyTooLowException(float(payload.gps.accuracy), hard_floor)
+                geofence_review, geofence_details = self._validate_geofence(
+                    db_session, payload.gps
+                )
+                self._validate_liveness(payload.liveness_evidence)
+                if payload.gps is not None:
+                    threshold = self._settings.gps_review_accuracy_threshold
+                    if threshold > 0 and float(payload.gps.accuracy) > threshold:
+                        accuracy_review = True
+
+            if not geofence_review:
+                geofence_details = None
+
+            status, original, review, review_reason = self._decide_scan_outcome(
+                db_session, scanned_at, score, geofence_review, accuracy_review
+            )
+
+        except AppException as exc:
+            if remaining is not None and 'remaining' not in (exc.message or ''):
+                exc.message = f"{exc.message} ({remaining} attempts remaining)"
+            raise
 
         return await self._persist_scan(
             payload,
@@ -567,10 +589,24 @@ class AttendanceService:
                 retake_available = True
                 already_scanned = False
 
+        attempt_limit: int = getattr(db_session, "attendance_attempt_limit", 0) or 0
+        attempt_count: int = 0
+        if attempt_limit > 0:
+            attempt_count = await self._get_attempt_count(student.id, db_session.id)
+            remaining: int | None = max(0, attempt_limit - attempt_count)
+            limit_reached: bool = attempt_count >= attempt_limit
+        else:
+            remaining = None
+            limit_reached = False
+
         return PrecheckResponse(
             enrolled=enrolled,
             already_scanned=already_scanned,
             retake_available=retake_available,
+            attendance_attempt_limit=attempt_limit,
+            attempts_used=attempt_count,
+            attempts_remaining=remaining,
+            limit_reached=limit_reached,
             student={
                 "student_id": student.student_id,
                 "name": f"{student.first_name} {student.last_name}",
@@ -691,6 +727,42 @@ class AttendanceService:
         """
         if student.face_embedding is None:
             raise FaceNotEnrolledException(student.id)
+
+    async def _increment_attempt_counter(self, student_id: int, session_id: int) -> int:
+        """Atomically increment the durable attempt counter.
+
+        Runs in its own committed transaction so the increment survives a
+        rollback of the main scan transaction.
+        """
+        dialect = self._session.bind.dialect.name
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+
+        factory = async_sessionmaker(self._session.bind, expire_on_commit=False)
+        async with factory() as counter_session:
+            stmt = dialect_insert(AttendanceAttemptCounter).values(
+                student_id=student_id, session_id=session_id, attempts=1
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["student_id", "session_id"],
+                set_={"attempts": AttendanceAttemptCounter.attempts + 1},
+            )
+            stmt = stmt.returning(AttendanceAttemptCounter.attempts)
+            result = await counter_session.execute(stmt)
+            await counter_session.commit()
+            return int(result.scalar_one())
+
+    async def _get_attempt_count(self, student_id: int, session_id: int) -> int:
+        """Read the current durable attempt count (0 if absent)."""
+        row = await self._session.scalar(
+            select(AttendanceAttemptCounter.attempts).where(
+                AttendanceAttemptCounter.student_id == student_id,
+                AttendanceAttemptCounter.session_id == session_id,
+            )
+        )
+        return int(row or 0)
 
     def _validate_geofence(
         self, session: Session, gps: GPSInput | None

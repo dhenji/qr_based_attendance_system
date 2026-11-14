@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Integer,
     DateTime,
     Float,
     ForeignKey,
@@ -13,9 +14,11 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from core.database import Base
 from features.auth.model import User
@@ -37,6 +40,7 @@ class Attendance(CreatedAtMixin, Base):
     # index can only serve by filtering on student_id afterwards.
     __table_args__ = (
         Index("ix_attendance_records_student_id_timestamp", "student_id", "timestamp"),
+        Index("ix_attendance_records_student_session", "student_id", "session_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -75,3 +79,34 @@ class Attendance(CreatedAtMixin, Base):
     session: Mapped[Session] = relationship()
     excused_by_user: Mapped[User | None] = relationship(foreign_keys=[excused_by])
     excuse_request: Mapped[ExcuseRequest | None] = relationship()
+
+
+class AttendanceAttemptCounter(Base):
+    """Durable per-(student, session) attempt counter.
+
+    Incremented in its own committed transaction so that attempts that fail
+    validation (and roll back the main transaction) still count toward the
+    per-student attempt cap.
+    """
+
+    __tablename__ = "attendance_attempt_counters"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id", "session_id", name="uq_attendance_attempt_counters_student_session"
+        ),
+        CheckConstraint(
+            "attempts >= 0", name="ck_attendance_attempt_counters_attempts_nonnegative"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("students.id", ondelete="RESTRICT"), index=True
+    )
+    session_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

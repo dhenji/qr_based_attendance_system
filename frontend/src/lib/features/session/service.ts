@@ -211,6 +211,8 @@ export const openSession = async (
 		isRemote?: boolean;
 		// Whether the geofence is enforced for this session.
 		geofenceEnabled?: boolean;
+		// Per-student attempt cap for this session. 0 = unlimited, omit = default.
+		attendanceAttemptLimit?: number;
 		// D93: the schedule exception.
 		sessionDate?: string;
 		startTime?: string;
@@ -233,6 +235,8 @@ export const openSession = async (
 	if (options?.classroomOverride !== undefined) body.classroom_override = options.classroomOverride;
 	if (options?.isRemote !== undefined) body.is_remote = options.isRemote;
 	if (options?.geofenceEnabled !== undefined) body.geofence_enabled = options.geofenceEnabled;
+	if (options?.attendanceAttemptLimit !== undefined)
+		body.attendance_attempt_limit = options.attendanceAttemptLimit;
 	if (options?.sessionDate !== undefined) body.session_date = options.sessionDate;
 	if (options?.startTime !== undefined) body.start_time = options.startTime;
 	if (options?.overrideReason !== undefined && options.overrideReason.trim() !== '')
@@ -255,6 +259,7 @@ export const openSession = async (
 		originalScheduledStartTime: response.original_scheduled_start_time ?? null,
 		overrideReason: response.override_reason ?? null,
 		createdAt: response.created_at,
+		attendanceAttemptLimit: response.attendance_attempt_limit,
 	};
 };
 
@@ -325,6 +330,7 @@ export const getActiveSession = async (
 		remaining: response.remaining,
 		pendingSyncCount: response.pending_sync_count,
 		durationMinutes: response.duration_minutes,
+		attendanceAttemptLimit: response.attendance_attempt_limit,
 		presentWindowMinutes: response.present_window_minutes,
 		lateWindowMinutes: response.late_window_minutes,
 		classroomName: response.classroom_name,

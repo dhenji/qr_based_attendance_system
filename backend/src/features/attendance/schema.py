@@ -215,6 +215,11 @@ class PrecheckResponse(BaseModel):
     enrolled: bool
     already_scanned: bool
     retake_available: bool = False
+    # Per-student attempt cap for the session. 0 means unlimited.
+    attendance_attempt_limit: int = 0
+    attempts_used: int = 0
+    attempts_remaining: int | None = None
+    limit_reached: bool = False
     student: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -32,6 +32,7 @@ export interface SessionListItemResponse {
 	late_count: number;
 	absent_count: number;
 	pending_count?: number;
+	attendance_attempt_limit?: number;
 	status: SessionRowStatus;
 }
 
@@ -57,6 +58,7 @@ export interface SessionReadResponse {
 	session_type: CourseType;
 	is_remote: boolean;
 	geofence_enabled?: boolean;
+	attendance_attempt_limit?: number;
 	qr_payload: {
 		v: 1;
 		code: string;
@@ -107,6 +109,8 @@ export interface SessionPlanResponse {
 	classroom_lng: number | null;
 	radius_meters: number;
 	override_capable: boolean;
+	// Per-student attempt cap default inherited by new sessions. 0 = unlimited.
+	attendance_attempt_limit_default?: number;
 	// D94: whether the session may be opened right now. The server's own
 	// answer — the form never re-derives the window.
 	start_window: SessionStartWindow | null;
@@ -153,6 +157,7 @@ export interface SessionActiveResponse {
 	session_type: CourseType;
 	is_remote?: boolean;
 	geofence_enabled?: boolean;
+	attendance_attempt_limit?: number;
 	session_code: string;
 	scan_window_remaining: number;
 	scheduled_start_time: string;
@@ -295,6 +300,7 @@ export interface LiveSession {
 	durationMinutes?: number;
 	presentWindowMinutes?: number;
 	lateWindowMinutes?: number;
+	attendanceAttemptLimit?: number;
 	classroomName?: string | null;
 	classroomLat?: number | null;
 	classroomLng?: number | null;
@@ -343,6 +349,7 @@ export interface OpenedSession {
 	originalScheduledStartTime: string | null;
 	overrideReason: string | null;
 	createdAt: string;
+	attendanceAttemptLimit?: number;
 }
 export interface Session {
   id: number;

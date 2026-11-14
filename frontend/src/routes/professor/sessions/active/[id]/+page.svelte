@@ -760,6 +760,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					<dd>{session.durationMinutes ?? 0} min</dd>
 				</div>
 				<div>
+					<dt>Attendance attempt limit</dt>
+					<dd>{session.attendanceAttemptLimit ? session.attendanceAttemptLimit : 'Unlimited'}</dd>
+				</div>
+				<div>
 					<dt>Present window</dt>
 					<dd>{session.presentWindowMinutes ?? 0} min</dd>
 				</div>

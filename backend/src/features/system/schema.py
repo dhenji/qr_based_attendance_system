@@ -6,6 +6,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from features.system.constants import (
+    ATTENDANCE_ATTEMPT_LIMIT_MAX,
+    ATTENDANCE_ATTEMPT_LIMIT_MIN,
     GEOFENCE_RADIUS_MAX,
     GEOFENCE_RADIUS_MIN,
     OPEN_GRACE_MAX_MINUTES,
@@ -30,6 +32,8 @@ class SystemSettingsRead(BaseModel):
     session_late_open_minutes: int
     backup_retention_daily: int
     backup_retention_monthly: int
+    # Per-student attempt cap for a single attendance session. 0 = unlimited.
+    attendance_attempt_limit_default: int
     pending_sync_count: int
 
 
@@ -55,7 +59,11 @@ class SystemSettingsUpdate(BaseModel):
     backup_retention_monthly: int | None = Field(
         default=None, ge=RETENTION_MONTHLY_MIN, le=RETENTION_MONTHLY_MAX
     )
-
+    attendance_attempt_limit_default: int | None = Field(
+        default=None,
+        ge=ATTENDANCE_ATTEMPT_LIMIT_MIN,
+        le=ATTENDANCE_ATTEMPT_LIMIT_MAX,
+    )
 
 class BackupRead(BaseModel):
     id: int
