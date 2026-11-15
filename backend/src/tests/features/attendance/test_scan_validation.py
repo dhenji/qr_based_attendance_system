@@ -1814,6 +1814,51 @@ async def test_attempt_counter_increments_return_exact_counts(
     ) == 2
 
 
+async def test_attempt_counter_supports_a_connection_bound_session(
+    test_db_session: AsyncSession,
+    test_engine: Any,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """The counter UPSERT stays independent even for a connection-bound session.
+
+    Every current caller is engine-bound, so resolving `AsyncSession.bind`
+    directly works; a connection-bound request session (`.bind` is an
+    `AsyncConnection`) must still produce a counter session built from the
+    owning engine — one that owns its transaction instead of joining the
+    caller's. SQLite in-memory shares one StaticPool connection, so this pins
+    the bind-resolution logic, not true cross-connection isolation.
+
+    The seed is committed first: on Postgres the counter session is a
+    separate pooled connection that cannot see the test session's
+    uncommitted rows (SQLite's StaticPool shares one connection).
+    """
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    student = stack["student"]
+    session_row = stack["session"]
+    await test_db_session.commit()
+
+    async with test_engine.connect() as conn:
+        async with AsyncSession(bind=conn, expire_on_commit=False) as bound:
+            service = AttendanceService(bound, settings)
+            first = await service._increment_attempt_counter(
+                student.id, session_row.id
+            )
+            second = await service._increment_attempt_counter(
+                student.id, session_row.id
+            )
+
+    assert (first, second) == (1, 2)
+    assert (
+        await test_db_session.scalar(
+            select(AttendanceAttemptCounter.attempts).where(
+                AttendanceAttemptCounter.student_id == student.id,
+                AttendanceAttemptCounter.session_id == session_row.id,
+            )
+        )
+    ) == 2
+
+
 async def test_precheck_reports_unenrolled_without_raising(
     test_db_session: AsyncSession,
     factories: Factories,

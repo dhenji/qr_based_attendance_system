@@ -11,7 +11,10 @@ from __future__ import annotations
 from datetime import date, time, timedelta
 from typing import Any, Callable, Coroutine
 
+from sqlalchemy import select
+
 from features.course.model import OfferingComponent
+from features.system.model import AppSetting
 from shared.enums import UserRole
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
@@ -172,3 +175,70 @@ async def test_opening_with_a_date_in_the_past_is_422(
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "session_date_in_past"
+
+
+# -- the read-only guarantee (same rule the dashboard pins) -------------------
+
+
+async def test_the_plan_endpoint_does_not_write_settings(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+    test_db_session: Any,
+) -> None:
+    """`GET .../session-plan` must not create AppSetting rows.
+
+    The plan's `attendance_attempt_limit_default` used to come from
+    `SystemService._stored_settings`, which INSERTs every missing setting row
+    and flushes — turning the open form's GET into a write. The read-only
+    lookup pins that a GET leaves `app_settings` empty; the settings page
+    (`GET /admin/system/settings`) stays the designated seeding workflow.
+    """
+    offering = await _seed(factories, db_factory)
+    headers = await _professor_headers(auth_headers, factories, offering)
+    await test_db_session.commit()
+
+    response = await api_client.get(
+        PLAN.format(offering_id=offering.id), headers=headers
+    )
+
+    assert response.status_code == 200, response.text
+    # The env default (Settings.default_attendance_attempt_limit = 3), not a
+    # seeded row.
+    assert response.json()["attendance_attempt_limit_default"] == 3
+
+    rows = (await test_db_session.scalars(select(AppSetting))).all()
+    assert rows == []
+
+
+async def test_the_plan_endpoint_reads_a_stored_setting_without_seeding(
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    db_factory: Callable[..., Coroutine[Any, Any, Any]],
+    test_db_session: Any,
+) -> None:
+    """A stored attempt default wins over the env default — and only it.
+
+    The read-only lookup reads the single key it needs; the other seven
+    setting keys must stay unseeded by a GET.
+    """
+    offering = await _seed(factories, db_factory)
+    headers = await _professor_headers(auth_headers, factories, offering)
+    await db_factory(
+        AppSetting,
+        key="attendance_attempt_limit_default",
+        value="5",
+    )
+    await test_db_session.commit()
+
+    response = await api_client.get(
+        PLAN.format(offering_id=offering.id), headers=headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["attendance_attempt_limit_default"] == 5
+
+    rows = (await test_db_session.scalars(select(AppSetting))).all()
+    assert [row.key for row in rows] == ["attendance_attempt_limit_default"]

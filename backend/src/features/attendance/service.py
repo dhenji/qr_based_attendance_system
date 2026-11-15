@@ -12,7 +12,12 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Boolean, Select, cast, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+)
 from sqlalchemy.orm import DeclarativeBase
 
 from core.config import Settings, get_settings
@@ -759,13 +764,22 @@ class AttendanceService:
         Runs in its own committed transaction so the increment survives a
         rollback of the main scan transaction.
         """
-        dialect = self._session.bind.dialect.name
+        # Resolve the request session's AsyncEngine explicitly. Every current
+        # caller is engine-bound, but a connection-bound AsyncSession would
+        # make `.bind` an AsyncConnection whose transaction the inner session
+        # would join — committing the caller's work mid-request. Building the
+        # factory from the owning engine keeps the counter session independent
+        # of how the request session was bound. (`session.get_bind()` is NOT
+        # an alternative: on AsyncSession it returns the sync Engine.)
+        bind: AsyncEngine | AsyncConnection = self._session.bind
+        engine: AsyncEngine = bind if isinstance(bind, AsyncEngine) else bind.engine
+        dialect = engine.dialect.name
         if dialect == "postgresql":
             from sqlalchemy.dialects.postgresql import insert as dialect_insert
         else:
             from sqlalchemy.dialects.sqlite import insert as dialect_insert
 
-        factory = async_sessionmaker(self._session.bind, expire_on_commit=False)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as counter_session:
             stmt = dialect_insert(AttendanceAttemptCounter).values(
                 student_id=student_id, session_id=session_id, attempts=1
