@@ -308,7 +308,12 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 					return;
 				}
 			}
-			scanError = toScanMessage(error, 'Unable to verify the session code', attemptsRemaining);
+			const effectiveRemaining =
+				error instanceof APIError && error.code === 'attendance_attempt_limit_reached'
+					? 0
+					: attemptsRemaining;
+			if (effectiveRemaining === 0) attemptsRemaining = 0;
+			scanError = toScanMessage(error, 'Unable to verify the session code', effectiveRemaining);
 		} finally {
 			verifying = false;
 		}
@@ -387,7 +392,11 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 			if (result.limitReached) {
 				attemptsRemaining = 0;
 				attemptLimitReached = true;
-				rejectionReason = SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached;
+				rejectionReason = toScanMessage(
+					new APIError('attendance_attempt_limit_reached', ''),
+					SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached,
+					0
+				);
 				showFailure = true;
 				attemptLimitTimer = setTimeout(() => {
 					showFailure = false;

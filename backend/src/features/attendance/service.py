@@ -523,26 +523,25 @@ class AttendanceService:
                 db_session, scanned_at, score, geofence_review, accuracy_review
             )
 
+            return await self._persist_scan(
+                payload,
+                student.id,
+                db_session,
+                scanned_at,
+                status,
+                review,
+                original,
+                now,
+                cache_key,
+                idempotency_key,
+                score,
+                review_reason,
+                geofence_details,
+            )
         except AppException as exc:
-            if remaining is not None and 'remaining' not in (exc.message or ''):
+            if remaining is not None and "remaining" not in (exc.message or ""):
                 exc.message = f"{exc.message} ({remaining} attempts remaining)"
             raise
-
-        return await self._persist_scan(
-            payload,
-            student.id,
-            db_session,
-            scanned_at,
-            status,
-            review,
-            original,
-            now,
-            cache_key,
-            idempotency_key,
-            score,
-            review_reason,
-            geofence_details,
-        )
 
     async def precheck_scan(
         self, *, session_id: int, user_id: int, student_number: str

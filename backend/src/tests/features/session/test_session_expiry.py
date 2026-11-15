@@ -28,7 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from features.attendance.model import Attendance
+from features.attendance.exceptions import AttendanceAttemptLimitReachedException
+from features.attendance.model import Attendance, AttendanceAttemptCounter
 from features.course.exceptions import (
     OfferingNotFoundException,
     WindowsExceedDurationException,
@@ -44,6 +45,7 @@ from features.session.model import Session
 from features.session.schema import SessionCreate
 from features.professor.model import Professor
 from features.session.service import SessionService
+from features.sync.model import SyncQueue
 from shared.enums import ValidationStatus
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
@@ -1185,3 +1187,164 @@ async def test_student_and_session_rows_stay_consistent_after_close(
     assert await test_db_session.scalar(
         select(Attendance.id).where(Attendance.session_id == read.id)
     ) is None
+
+
+# --- verify_code attempt exhaustion ---------------------------------------
+
+
+async def _link_student_user(
+    test_db_session: AsyncSession, factories: Factories, stack: dict[str, Any]
+) -> int:
+    """Attach an auth user to the seeded student and return the user id."""
+    student_user = await factories.user(role="student")
+    stack["student"].user_id = student_user.id
+    await test_db_session.flush()
+    return student_user.id
+
+
+async def test_verify_code_rejects_exhausted_student(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A student at the session attempt cap is blocked before scanning."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=1,
+        ),
+    )
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=stack["student"].id,
+            session_id=read.id,
+            attempts=1,
+        )
+    )
+    await test_db_session.flush()
+
+    with pytest.raises(AttendanceAttemptLimitReachedException) as excinfo:
+        await service.verify_code(code=read.session_code, user_id=user_id)
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.code == "attendance_attempt_limit_reached"
+    assert "(0 attempts remaining)" in excinfo.value.message
+
+    attempts = await test_db_session.scalar(
+        select(AttendanceAttemptCounter.attempts).where(
+            AttendanceAttemptCounter.student_id == stack["student"].id,
+            AttendanceAttemptCounter.session_id == read.id,
+        )
+    )
+    assert attempts == 1
+    assert (
+        await test_db_session.scalar(
+            select(Attendance.id).where(Attendance.session_id == read.id)
+        )
+    ) is None
+    assert (await test_db_session.scalar(select(SyncQueue.id))) is None
+
+
+async def test_verify_code_repeated_exhaustion_does_not_consume_attempts(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Repeated exhausted verify attempts leave the counter unchanged."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=2,
+        ),
+    )
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=stack["student"].id,
+            session_id=read.id,
+            attempts=2,
+        )
+    )
+    await test_db_session.flush()
+
+    for _ in range(2):
+        with pytest.raises(AttendanceAttemptLimitReachedException):
+            await service.verify_code(code=read.session_code, user_id=user_id)
+
+    attempts = await test_db_session.scalar(
+        select(AttendanceAttemptCounter.attempts).where(
+            AttendanceAttemptCounter.student_id == stack["student"].id,
+            AttendanceAttemptCounter.session_id == read.id,
+        )
+    )
+    assert attempts == 2
+
+
+async def test_verify_code_allows_student_with_remaining_attempts(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A student below the cap can still verify the session code."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=2,
+        ),
+    )
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=stack["student"].id,
+            session_id=read.id,
+            attempts=1,
+        )
+    )
+    await test_db_session.flush()
+
+    verified = await service.verify_code(code=read.session_code, user_id=user_id)
+
+    assert verified.session_id == read.id
+    attempts = await test_db_session.scalar(
+        select(AttendanceAttemptCounter.attempts).where(
+            AttendanceAttemptCounter.student_id == stack["student"].id,
+            AttendanceAttemptCounter.session_id == read.id,
+        )
+    )
+    assert attempts == 1
+
+
+async def test_verify_code_does_not_block_unlimited_session(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Unlimited sessions (limit 0) never report exhaustion."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=0,
+        ),
+    )
+
+    verified = await service.verify_code(code=read.session_code, user_id=user_id)
+
+    assert verified.session_id == read.id
+    assert verified.attendance_attempt_limit == 0

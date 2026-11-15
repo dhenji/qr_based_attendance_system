@@ -112,5 +112,8 @@ class AttendanceAttemptLimitReachedException(AttendanceDomainException):
 
     def __init__(self, limit: int) -> None:
         super().__init__(
-            message=f"Maximum of {limit} attendance attempts reached for this session (0 remaining)"
+            message=(
+                f"Maximum of {limit} attendance attempts reached for this session "
+                "(0 attempts remaining)"
+            )
         )
