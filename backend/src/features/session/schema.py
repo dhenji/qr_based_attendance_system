@@ -424,8 +424,15 @@ class VerifyCodeResponse(BaseModel):
     # Whether the geofence is enforced for this session. Defaults to True;
     # set False for an in-person session with no known classroom.
     geofence_enabled: bool = True
-    # Per-student attempt cap for this session. 0 means unlimited.
+    # Per-session attempt cap. 0 means unlimited. The caller's attempt
+    # state is populated only when the caller resolves to a student row
+    # (student role); other roles read None. The exhaustion case never
+    # appears in a 200 — it raises 409 attendance_attempt_limit_reached
+    # with attempt metadata (consumed=False) instead.
     attendance_attempt_limit: int = 0
+    attempts_used: int | None = None
+    attempts_remaining: int | None = None
+    limit_reached: bool = False
     course_code: str
     course_name: str
     program_code: str

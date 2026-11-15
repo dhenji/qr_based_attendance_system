@@ -62,6 +62,12 @@ export type CachedSession = {
 	// instead of the scan-window expiry. Optional for entries cached by older
 	// clients; those fall back to expires_at.
 	scheduled_end_time?: string;
+	// Immutable per-session attempt cap (0 = unlimited). Safe to cache
+	// because it never changes after the session is created — unlike the
+	// remaining count, which the offline path must NOT cache (it goes
+	// stale by design and the server re-decides on sync). Optional for
+	// entries cached before the attempt-metadata contract.
+	attendance_attempt_limit?: number;
 	// Center null = no classroom coordinates (mirrors VerifyGeofence); the
 	// scan pre-check skips geofence in that case, same as the server.
 	geofence: { radius: number; lat: number | null; lng: number | null; uncertaintyCapMeters?: number; gpsHardFloorMeters?: number; gpsReviewAccuracyThreshold?: number };

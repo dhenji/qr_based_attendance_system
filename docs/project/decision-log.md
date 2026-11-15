@@ -2346,3 +2346,10 @@
   embedding stored as ciphertext with no decrypt-and-compare path
   (`offline-first.md` §Offline Verification).
 - In-app notification table — unimplemented by design (no table).
+
+### ADR-092: Authoritative Attempt-Limit Metadata in the API Contract
+
+- **Decision:** Remaining-attempt information is carried as machine-readable metadata straight from the durable `attendance_attempt_counters` state, not parsed out of error-message text. `AppException` gains an optional additive `details` dict (`to_dict` includes it only when set); a single helper (`features/attendance/attempt_meta.py`) is the one definition of `limit / used / remaining / consumed`, reused by `submit_scan`, `precheck_scan`, and `verify_code`. `ScanResponse` and `VerifyCodeResponse` carry the same fields on their 200 bodies. Semantics: the scan increments the durable counter before validating, so every outcome from the increment on — including the exhaustion rejection — reports `attempt_consumed: true` with the post-increment count (`attempts_used` is raw and can exceed the limit because blocked retries keep incrementing); `verify_code` only reads the counter, so its exhaustion raise reports `attempt_consumed: false`; pre-increment failures carry no metadata at all (absence means "this response does not speak to consumption"); unlimited sessions report `attempts_remaining: null` and no error metadata; idempotent replays return the original cached response (and its metadata) without consuming again. The client updates state metadata-first, keeps the legacy `"(N attempts remaining)"` message parse only as a transition fallback, never optimistically decrements, and performs one read-only precheck re-sync only when consumption status is genuinely unknowable (transport failure after submit).
+- **Date:** 2026-11-15
+- **Status:** Accepted
+- **Consequences:** No migration (the counter table and `sessions.attendance_attempt_limit` already exist); the backend message suffix stays during rollout and loses contract status; `PRE_INCREMENT_ERRORS` (the frontend duplicate of backend increment ordering) is deleted; offline caches the immutable limit only, never the remaining count.

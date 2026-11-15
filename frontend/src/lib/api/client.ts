@@ -43,7 +43,12 @@ export class APIError extends Error {
 		// HTTP status, when the failure came from a response. Absent for
 		// transport failures, which surface as APIError with code
 		// 'network_error' (or 'request_timeout' / 'request_cancelled').
-		public status?: number
+		public status?: number,
+		// Machine-readable structured context from the backend error
+		// envelope (`detail.details`, e.g. the attendance attempt-limit
+		// metadata). Absent for legacy servers and for errors the backend
+		// raises without metadata (e.g. pre-increment failures).
+		public details?: Record<string, unknown>
 	) {
 		super(message);
 		this.name = 'APIError';
@@ -59,6 +64,7 @@ export interface APIResponseError {
 		code?: string;
 		message?: string;
 		field?: string;
+		details?: Record<string, unknown>;
 	};
 }
 
@@ -204,7 +210,10 @@ export const parseError = async (response: Response): Promise<APIError> => {
 		const code = typeof detail.code === 'string' ? detail.code : 'request_failed';
 		const message = typeof detail.message === 'string' ? detail.message : 'Request failed';
 		const field = typeof detail.field === 'string' ? detail.field : undefined;
-		return new APIError(code, message, field, status);
+		// Structured metadata (e.g. attendance attempt state) passes through
+		// untouched: legacy servers omit it, so absence stays meaningful.
+		const details = isRecord(detail.details) ? detail.details : undefined;
+		return new APIError(code, message, field, status, details);
 	}
 
 	if (Array.isArray(detail)) {

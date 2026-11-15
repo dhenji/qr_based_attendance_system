@@ -84,6 +84,7 @@ vi.mock('$lib/features/liveness/components/FaceScanner.svelte', async () => ({
 }));
 
 import { goto } from '$app/navigation';
+import { APIError } from '$lib/api/client';
 import { precheckScan, verifySessionCode } from '$lib/features/liveness/service';
 import { Routes } from '$lib/shared/constants/routes';
 import Page from './+page.svelte';
@@ -197,6 +198,65 @@ describe('student scan page', () => {
 		await vi.advanceTimersByTimeAsync(5000);
 		await flushAsync();
 
+		expect(vi.mocked(goto)).not.toHaveBeenCalled();
+	});
+
+	it('shows the authoritative attempt count on the confirm screen from the verify response', async () => {
+		// Option A contract: verify-code carries the caller's attempt state,
+		// so the confirm screen is accurate before precheck re-reads it.
+		vi.mocked(verifySessionCode).mockResolvedValue({
+			...sessionFixture,
+			attendanceAttemptLimit: 3,
+			attemptsUsed: 1,
+			attemptsRemaining: 2,
+			limitReached: false
+		});
+		await driveToConfirm();
+
+		expect(screen.getByText('2 of 3')).toBeInTheDocument();
+	});
+
+	it('reports unlimited attempts when the verify response carries a zero cap', async () => {
+		vi.mocked(verifySessionCode).mockResolvedValue({
+			...sessionFixture,
+			attendanceAttemptLimit: 0,
+			attemptsUsed: null,
+			attemptsRemaining: null,
+			limitReached: false
+		});
+		await driveToConfirm();
+
+		expect(screen.getByText('Unlimited')).toBeInTheDocument();
+	});
+
+	it('shows zero remaining on verify-code exhaustion without the redirect banner', async () => {
+		// verify_code only reads the counter (consumed=false), so the
+		// remaining count is genuinely 0; the inline scanError shows it and
+		// no exhaustion redirect timer starts.
+		vi.mocked(verifySessionCode).mockRejectedValue(
+			new APIError(
+				'attendance_attempt_limit_reached',
+				'Maximum of 3 attendance attempts reached for this session (0 attempts remaining)',
+				undefined,
+				409,
+				{
+					attempt_limit: 3,
+					attempts_used: 5,
+					attempts_remaining: 0,
+					attempt_consumed: false
+				}
+			)
+		);
+		render(Page);
+		await flushAsync();
+
+		await fireEvent.input(screen.getByLabelText('Session code'), {
+			target: { value: 'ABC123' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Verify Code' }));
+		await flushAsync();
+
+		expect(screen.getByText(/0 attempts remaining/i)).toBeInTheDocument();
 		expect(vi.mocked(goto)).not.toHaveBeenCalled();
 	});
 });

@@ -23,6 +23,11 @@ export interface SessionVerification {
 	isRemote?: boolean;
 	geofenceEnabled?: boolean;
 	attendanceAttemptLimit?: number;
+	// Caller attempt state from the verify response (authoritative when
+	// present; null/undefined = unlimited session or legacy server).
+	attemptsUsed?: number | null;
+	attemptsRemaining?: number | null;
+	limitReached?: boolean;
 }
 
 export interface AttendanceScanResult {
@@ -30,6 +35,12 @@ export interface AttendanceScanResult {
 	status: 'present' | 'late' | 'rejected' | 'pending';
 	scannedAt: string;
 	expiresAt: string;
+	// Post-operation attempt state for this request (authoritative when the
+	// backend sends it; a 200 `rejected` outcome consumes an attempt while
+	// still being retakeable, so the success path must carry it too).
+	attendanceAttemptLimit?: number;
+	attemptsUsed?: number;
+	attemptsRemaining?: number | null;
 }
 
 // Scan precheck (D27 step-2 gate) — read-only, never writes attendance.
@@ -108,6 +119,9 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		isRemote: response.is_remote,
 		geofenceEnabled: response.geofence_enabled,
 		attendanceAttemptLimit: response.attendance_attempt_limit,
+		attemptsUsed: response.attempts_used ?? null,
+		attemptsRemaining: response.attempts_remaining ?? null,
+		limitReached: response.limit_reached ?? false,
 	};
 };
 
@@ -163,5 +177,8 @@ export const submitAttendanceScan = async (input: {
 		status: response.status,
 		scannedAt: response.scanned_at,
 		expiresAt: response.expires_at,
+		attendanceAttemptLimit: response.attendance_attempt_limit,
+		attemptsUsed: response.attempts_used,
+		attemptsRemaining: response.attempts_remaining ?? null,
 	};
 };

@@ -27,6 +27,44 @@ describe("scan error envelopes -> toScanMessage", () => {
     expect(toScanMessage(err, fallback)).toContain("already been recorded");
   });
 
+  it("attempt metadata in the envelope passes through as err.details", async () => {
+    const r = resp(403, {
+      detail: {
+        code: "face_mismatch",
+        message: "Face match score 0.400 is below threshold 0.750",
+        details: {
+          attempt_limit: 3,
+          attempts_used: 1,
+          attempts_remaining: 2,
+          attempt_consumed: true,
+        },
+      },
+    });
+    const err = await parseError(r);
+    expect(err.details).toEqual({
+      attempt_limit: 3,
+      attempts_used: 1,
+      attempts_remaining: 2,
+      attempt_consumed: true,
+    });
+  });
+
+  it("legacy envelopes without metadata leave err.details undefined", async () => {
+    const r = resp(403, {
+      detail: { code: "face_mismatch", message: "below threshold" },
+    });
+    const err = await parseError(r);
+    expect(err.details).toBeUndefined();
+  });
+
+  it("non-record details payloads are dropped, not trusted", async () => {
+    const r = resp(409, {
+      detail: { code: "duplicate_scan", message: "dup", details: "0 of 3" },
+    });
+    const err = await parseError(r);
+    expect(err.details).toBeUndefined();
+  });
+
   it("attempt exhaustion envelope defaults to 0 attempts remaining", async () => {
     const r = resp(409, {
       detail: {
