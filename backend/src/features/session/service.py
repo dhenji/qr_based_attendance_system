@@ -1695,6 +1695,12 @@ class SessionService:
             settings=self._settings,
         )
 
+        # Read-only lookup: a GET must not seed `app_settings` rows (the
+        # seeding variant would flush, turning this GET into a write).
+        attempt_limit_default: int = await SystemService(
+            self._session, self._settings
+        ).get_attendance_attempt_limit_stored()
+
         return SessionPlanRead(
             offering_id=offering.id,
             session_type=session_type,
@@ -1713,9 +1719,7 @@ class SessionService:
             classroom_lng=plan.classroom_lng,
             radius_meters=plan.radius_meters,
             override_capable=plan.has_meeting,
-            attendance_attempt_limit_default=await SystemService(
-                self._session, self._settings
-            ).get_attendance_attempt_limit_default(),
+            attendance_attempt_limit_default=attempt_limit_default,
             # D94: whether the session may be opened right now, and why not.
             # The open form renders this instead of re-deriving the window.
             start_window=StartWindowRead(

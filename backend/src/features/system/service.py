@@ -689,6 +689,27 @@ class SystemService:
         values = await self._stored_settings()
         return int(values[SETTING_ATTENDANCE_ATTEMPT_LIMIT])
 
+    async def get_attendance_attempt_limit_stored(self) -> int:
+        """Read-only variant of `get_attendance_attempt_limit_default`.
+
+        Reads the stored value without seeding: a GET must not write, so the
+        session-plan lookup uses this instead of `_stored_settings`, which
+        INSERTs missing `AppSetting` rows. Absent (or non-integer) values
+        fall back to the env default, exactly as `_stored_settings` would
+        resolve them. Settings initialization stays with the settings page
+        (`get_system_settings`) and the session-create POST.
+        """
+        raw: str | None = await self._session.scalar(
+            select(AppSetting.value).where(
+                AppSetting.key == SETTING_ATTENDANCE_ATTEMPT_LIMIT
+            )
+        )
+        fallback: int = self._setting_default(SETTING_ATTENDANCE_ATTEMPT_LIMIT)
+        try:
+            return int(raw) if raw is not None else fallback
+        except (TypeError, ValueError):
+            return fallback
+
     async def get_system_settings(self) -> SystemSettingsRead:
         """Persisted tunables plus the live pending-sync count."""
         values = await self._stored_settings()
