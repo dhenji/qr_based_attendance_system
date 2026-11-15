@@ -97,6 +97,7 @@ export interface SessionVerificationResponse {
 	classroom_name?: string | null;
 	is_remote?: boolean;
 	geofence_enabled?: boolean;
+	attendance_attempt_limit?: number;
 }
 
 export interface AttendanceScanResponse {
@@ -181,6 +182,10 @@ export interface AttendancePrecheckResponse {
 	enrolled: boolean;
 	already_scanned: boolean;
 	retake_available?: boolean;
+	attendance_attempt_limit?: number;
+	attempts_used?: number;
+	attempts_remaining?: number | null;
+	limit_reached?: boolean;
 	student: {
 		student_id: string;
 		name: string;
@@ -3331,6 +3336,7 @@ export interface SystemSettingsResponse {
 	session_late_open_minutes: number;
 	backup_retention_daily: number;
 	backup_retention_monthly: number;
+	attendance_attempt_limit_default: number;
 	pending_sync_count: number;
 }
 
@@ -3353,6 +3359,7 @@ const MOCK_SYSTEM_SETTINGS: SystemSettingsResponse = {
 	session_late_open_minutes: 0,
 	backup_retention_daily: 30,
 	backup_retention_monthly: 12,
+	attendance_attempt_limit_default: 3,
 	pending_sync_count: 3
 };
 

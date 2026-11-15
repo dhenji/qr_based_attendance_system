@@ -57,6 +57,7 @@ from features.system.constants import (
     SETTING_PRESENT_WINDOW,
     SETTING_RETENTION_DAILY,
     SETTING_RETENTION_MONTHLY,
+    SETTING_ATTENDANCE_ATTEMPT_LIMIT,
     SETTING_SESSION_EARLY_OPEN,
     SETTING_SESSION_LATE_OPEN,
     S3_PREFIX_FALLBACK,
@@ -626,6 +627,8 @@ class SystemService:
                 return int(settings.session_late_open_minutes)
             case _ if key == SETTING_RETENTION_DAILY:
                 return int(settings.backup_retention_daily)
+            case _ if key == SETTING_ATTENDANCE_ATTEMPT_LIMIT:
+                return int(settings.default_attendance_attempt_limit)
             case _:
                 return int(settings.backup_retention_monthly)
 
@@ -639,6 +642,7 @@ class SystemService:
             SETTING_SESSION_LATE_OPEN,
             SETTING_RETENTION_DAILY,
             SETTING_RETENTION_MONTHLY,
+            SETTING_ATTENDANCE_ATTEMPT_LIMIT,
         )
         rows = (
             await self._session.scalars(
@@ -676,6 +680,15 @@ class SystemService:
         )
         return int(total or 0)
 
+    async def get_attendance_attempt_limit_default(self) -> int:
+        """Current admin-configured per-student attempt default.
+
+        Reads (and seeds) the single `app_settings` row. Used by session
+        creation so it does not pull the pending-sync count (a write) along.
+        """
+        values = await self._stored_settings()
+        return int(values[SETTING_ATTENDANCE_ATTEMPT_LIMIT])
+
     async def get_system_settings(self) -> SystemSettingsRead:
         """Persisted tunables plus the live pending-sync count."""
         values = await self._stored_settings()
@@ -687,6 +700,7 @@ class SystemService:
             session_late_open_minutes=values[SETTING_SESSION_LATE_OPEN],
             backup_retention_daily=values[SETTING_RETENTION_DAILY],
             backup_retention_monthly=values[SETTING_RETENTION_MONTHLY],
+            attendance_attempt_limit_default=values[SETTING_ATTENDANCE_ATTEMPT_LIMIT],
             pending_sync_count=await self.pending_sync_total(),
         )
 
@@ -711,6 +725,7 @@ class SystemService:
             (SETTING_SESSION_LATE_OPEN, "session_late_open_minutes"),
             (SETTING_RETENTION_DAILY, "backup_retention_daily"),
             (SETTING_RETENTION_MONTHLY, "backup_retention_monthly"),
+            (SETTING_ATTENDANCE_ATTEMPT_LIMIT, "attendance_attempt_limit_default"),
         ):
             if field not in updates:
                 continue

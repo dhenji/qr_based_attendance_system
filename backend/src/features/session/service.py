@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.security import build_qr_payload, generate_session_code
 from core.timezones import resolve_timezone
-from features.attendance.model import Attendance
+from features.attendance.exceptions import AttendanceAttemptLimitReachedException
+from features.attendance.model import Attendance, AttendanceAttemptCounter
 from features.course.exceptions import (
     OfferingNotFoundException,
     WindowsExceedDurationException,
@@ -38,6 +39,7 @@ from features.session.exceptions import (
     OfferingScheduleMismatchException,
 )
 from features.session.model import Session
+from features.system.service import SystemService
 from features.session.plan import (
     SessionPlan,
     active_components,
@@ -290,6 +292,14 @@ class SessionService:
 
         radius: int = payload.classroom_radius_meters or plan.radius_meters
 
+        # Per-student attempt cap: professor override, else admin default.
+        if payload.attendance_attempt_limit is None:
+            effective_attempt_limit: int = await SystemService(
+                self._session, self._settings
+            ).get_attendance_attempt_limit_default()
+        else:
+            effective_attempt_limit = int(payload.attendance_attempt_limit)
+
         # The classroom falls back payload -> matching active component ->
         # offering, which the plan has already resolved. An explicit
         # override (D93/D94) is taken verbatim, so a professor who clears the
@@ -359,6 +369,7 @@ class SessionService:
             ),
             now=moment,
             created_by=actor_id,
+            attendance_attempt_limit=effective_attempt_limit,
         )
         await self._stamp_session(row, duration, moment)
 
@@ -392,6 +403,7 @@ class SessionService:
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
+            attendance_attempt_limit=getattr(row, "attendance_attempt_limit", 0) or 0,
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_start_time=row.scheduled_start_time,
@@ -646,6 +658,7 @@ class SessionService:
         original_scheduled_start: datetime | None,
         now: datetime,
         created_by: int | None,
+        attendance_attempt_limit: int = 0,
     ) -> Session:
         row = Session(
             offering_id=offering.id,
@@ -671,6 +684,7 @@ class SessionService:
             classroom_lng=classroom_lng,
             is_remote=payload.is_remote,
             geofence_enabled=payload.geofence_enabled,
+            attendance_attempt_limit=attendance_attempt_limit,
         )
         self._session.add(row)
         await self._session.flush()
@@ -752,6 +766,7 @@ class SessionService:
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
+            attendance_attempt_limit=getattr(row, "attendance_attempt_limit", 0) or 0,
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_start_time=row.scheduled_start_time,
@@ -896,9 +911,12 @@ class SessionService:
             ),
             "override_reason": row.override_reason,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+            "attendance_attempt_limit": getattr(row, "attendance_attempt_limit", 0) or 0,
         }
 
-    async def verify_code(self, *, code: str) -> VerifyCodeResponse:
+    async def verify_code(
+        self, *, code: str, user_id: int | None = None
+    ) -> VerifyCodeResponse:
         """Resolve a student-typed/scanned session code to its session config.
 
         404 when the code matches no session, 410 when the session's window
@@ -938,12 +956,32 @@ class SessionService:
             # access.
             raise SessionNotFoundException(row.id)
 
+        # Block students who have exhausted the per-session attempt cap.
+        limit: int = getattr(row, "attendance_attempt_limit", 0) or 0
+        if user_id is not None and limit > 0:
+            student: Student | None = await self._session.scalar(
+                select(Student).where(Student.user_id == user_id).limit(1)
+            )
+            if student is not None:
+                attempt_count: int = int(
+                    await self._session.scalar(
+                        select(AttendanceAttemptCounter.attempts).where(
+                            AttendanceAttemptCounter.student_id == student.id,
+                            AttendanceAttemptCounter.session_id == row.id,
+                        )
+                    )
+                    or 0
+                )
+                if limit > 0 and attempt_count >= limit:
+                    raise AttendanceAttemptLimitReachedException(limit)
+
         return VerifyCodeResponse(
             session_id=row.id,
             offering_id=row.offering_id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
+            attendance_attempt_limit=getattr(row, "attendance_attempt_limit", 0) or 0,
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
@@ -1659,6 +1697,9 @@ class SessionService:
             classroom_lng=plan.classroom_lng,
             radius_meters=plan.radius_meters,
             override_capable=plan.has_meeting,
+            attendance_attempt_limit_default=await SystemService(
+                self._session, self._settings
+            ).get_attendance_attempt_limit_default(),
             # D94: whether the session may be opened right now, and why not.
             # The open form renders this instead of re-deriving the window.
             start_window=StartWindowRead(

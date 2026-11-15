@@ -8,8 +8,21 @@
 
 import { APIError } from '$lib/api/client';
 
+// Error codes raised before the durable attempt counter is incremented.
+export const PRE_INCREMENT_ERRORS: ReadonlySet<string> = new Set([
+	'session_not_found',
+	'session_expired',
+	'session_not_started',
+	'student_not_found',
+	'student_number_mismatch',
+	'not_enrolled',
+	'duplicate_scan',
+	'rate_limited'
+]);
+
 export const SCAN_ERROR_MESSAGES: Record<string, string> = {
 	duplicate_scan: 'Your attendance has already been recorded for this session. Check your attendance record.',
+	attendance_attempt_limit_reached: 'You have used all available attendance attempts for this session. Contact your professor if you need another try.',
 	outside_geofence: 'You are outside the permitted attendance area. Move closer to the designated location and try again.',
 	liveness_failed: 'Liveness check failed. Try again in good lighting.',
 	face_mismatch: 'Face did not match the enrolled record. Try again.',
@@ -92,7 +105,7 @@ export const toMapPickerMessage = (error: unknown, fallback: string): string => 
 	}
 	return error instanceof Error && error.message ? error.message : fallback;
 };
-export const toScanMessage = (error: unknown, fallback: string): string => {
+export const toScanMessage = (error: unknown, fallback: string, remaining?: number | null): string => {
 	if (error instanceof APIError) {
 		// student-friendly copy, instead of the generic validation_error
 		// message, so a student can act on the actual failing field.
@@ -104,7 +117,11 @@ export const toScanMessage = (error: unknown, fallback: string): string => {
 			return translateValidationMessage(error.message);
 		}
 		if (error.code && SCAN_ERROR_MESSAGES[error.code]) {
-			return SCAN_ERROR_MESSAGES[error.code];
+			const base = SCAN_ERROR_MESSAGES[error.code];
+			if (remaining !== undefined && remaining !== null && !base.includes('remaining')) {
+				return `${base} (${remaining} attempts remaining)`;
+			}
+			return base;
 		}
 		if (error.status === 410) {
 			return 'This session has closed for scanning.';

@@ -93,9 +93,12 @@ class Settings(BaseSettings):
     default_present_window_minutes: int = 5
     default_late_window_minutes: int = 10
     default_geofence_radius_meters: int = 50
+    # Per-student attempt cap for a single attendance session. 0 means
+    # unlimited. New sessions inherit this when the professor does not set
+    # an explicit value; legacy rows stay unlimited (backfilled to 0).
+    default_attendance_attempt_limit: int = 3
     otp_expires_minutes: int = 5
     otp_max_attempts: int = 5
-
     # Wall-clock class times (`course_offerings.schedule_start_time` /
     # `schedule_end_time`) are naive local times: "09:00" means nine in the
     # morning wherever the class is held. This zone says where. The session

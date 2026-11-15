@@ -22,6 +22,7 @@ export interface SessionVerification {
 	classroomName?: string | null;
 	isRemote?: boolean;
 	geofenceEnabled?: boolean;
+	attendanceAttemptLimit?: number;
 }
 
 export interface AttendanceScanResult {
@@ -41,6 +42,10 @@ export interface AttendancePrecheckResult {
 	enrolled: boolean;
 	alreadyScanned: boolean;
 	retakeAvailable?: boolean;
+	attendanceAttemptLimit?: number;
+	attemptsUsed?: number;
+	attemptsRemaining?: number | null;
+	limitReached?: boolean;
 	studentId: string;
 	studentName: string;
 	section?: string;
@@ -59,6 +64,10 @@ export const precheckScan = async (input: {
 		enrolled: response.enrolled,
 		alreadyScanned: response.already_scanned,
 		retakeAvailable: response.retake_available ?? false,
+		attendanceAttemptLimit: response.attendance_attempt_limit,
+		attemptsUsed: response.attempts_used,
+		attemptsRemaining: response.attempts_remaining ?? null,
+		limitReached: response.limit_reached ?? false,
 		studentId: response.student.student_id,
 		studentName: response.student.name,
 		section: response.student.section ?? undefined,
@@ -98,6 +107,7 @@ export const verifySessionCode = async (code: string): Promise<SessionVerificati
 		classroomName: response.classroom_name,
 		isRemote: response.is_remote,
 		geofenceEnabled: response.geofence_enabled,
+		attendanceAttemptLimit: response.attendance_attempt_limit,
 	};
 };
 

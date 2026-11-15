@@ -36,16 +36,18 @@ SETTING_SESSION_EARLY_OPEN: str = "session_early_open_minutes"
 SETTING_SESSION_LATE_OPEN: str = "session_late_open_minutes"
 SETTING_RETENTION_DAILY: str = "backup_retention_daily"
 SETTING_RETENTION_MONTHLY: str = "backup_retention_monthly"
-
+SETTING_ATTENDANCE_ATTEMPT_LIMIT: str = "attendance_attempt_limit_default"
 SETTING_KEY_MAX_LENGTH: int = 100
 
 # Per-setting bounds enforced on PATCH; values are stored as text and
 # parsed back to int on read.
 GEOFENCE_RADIUS_MIN: int = 10
 GEOFENCE_RADIUS_MAX: int = 1000
+# Per-student attempt cap for a single attendance session. 0 = unlimited.
+ATTENDANCE_ATTEMPT_LIMIT_MIN: int = 0
+ATTENDANCE_ATTEMPT_LIMIT_MAX: int = 10
 WINDOW_MIN_MINUTES: int = 1
-WINDOW_MAX_MINUTES: int = 120
-# The open-window grace (D94). Zero is a legal value on both sides — "no
+WINDOW_MAX_MINUTES: int = 120# The open-window grace (D94). Zero is a legal value on both sides — "no
 # early opening" and "no late opening" are exactly what a strict
 # institution wants — so the lower bound is 0 and not 1.
 OPEN_GRACE_MIN_MINUTES: int = 0

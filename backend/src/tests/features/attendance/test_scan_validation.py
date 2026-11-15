@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from features.attendance.exceptions import (
+    AttendanceAttemptLimitReachedException,
     FaceMismatchException,
     LivenessFailedException,
     OutsideGeofenceException,
@@ -985,6 +986,78 @@ async def test_second_scan_raises_duplicate(
     assert excinfo.value.code == "duplicate_scan"
 
 
+async def test_attendance_attempt_limit_blocks_second_attempt(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 1
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    first = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=20),
+        ),
+    )
+    assert first.status == ValidationStatus.REJECTED.value
+
+    with pytest.raises(AttendanceAttemptLimitReachedException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=21),
+            ),
+        )
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.code == "attendance_attempt_limit_reached"
+
+
+async def test_face_mismatch_counts_as_attempt(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 1
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    mismatch_payload = scan_request(
+        stack["session"],
+        student.student_id,
+        scanned_at=stack["session"].created_at + timedelta(minutes=2),
+    )
+    mismatch_payload.live_face_embedding = _make_live_emb(0.40)
+
+    with pytest.raises(FaceMismatchException):
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=mismatch_payload,
+        )
+
+    # Second attempt is blocked by the cap, even though the first never
+    # persisted an attendance row.
+    with pytest.raises(AttendanceAttemptLimitReachedException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=3),
+            ),
+        )
+
+    assert excinfo.value.code == "attendance_attempt_limit_reached"
+
+
 # --- idempotency ----------------------------------------------------------
 
 
@@ -1298,6 +1371,60 @@ async def test_precheck_reports_enrolled_and_unscanned(
     assert precheck.already_scanned is False
     assert precheck.student["student_id"] == stack["student"].student_id
     assert precheck.student["section"] == "A1"
+
+
+async def test_precheck_reports_attempt_fields(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 2
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    # First attempt (rejected on time) consumes one attempt.
+    await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=20),
+        ),
+    )
+
+    precheck = await service.precheck_scan(
+        user_id=stack["student"].user_id,
+        session_id=stack["session"].id,
+        student_number=student.student_id,
+    )
+
+    assert precheck.attendance_attempt_limit == 2
+    assert precheck.attempts_used == 1
+    assert precheck.attempts_remaining == 1
+    assert precheck.limit_reached is False
+
+
+async def test_precheck_reports_unlimited_attempts(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 0
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    precheck = await service.precheck_scan(
+        user_id=stack["student"].user_id,
+        session_id=stack["session"].id,
+        student_number=student.student_id,
+    )
+
+    assert precheck.attendance_attempt_limit == 0
+    assert precheck.attempts_used == 0
+    assert precheck.attempts_remaining is None
+    assert precheck.limit_reached is False
 
 
 async def test_precheck_reports_unenrolled_without_raising(

@@ -10,6 +10,18 @@ describe('toScanMessage', () => {
 		expect(toScanMessage(err, fallback)).toBe(SCAN_ERROR_MESSAGES.duplicate_scan);
 	});
 
+	it('appends remaining attempts when provided', () => {
+		const err = new APIError('face_mismatch', 'nope');
+		expect(toScanMessage(err, fallback, 2)).toBe(
+			`${SCAN_ERROR_MESSAGES.face_mismatch} (2 attempts remaining)`
+		);
+	});
+
+	it('does not append remaining attempts when null', () => {
+		const err = new APIError('face_mismatch', 'nope');
+		expect(toScanMessage(err, fallback, null)).toBe(SCAN_ERROR_MESSAGES.face_mismatch);
+	});
+
 	it('returns closed copy for 410 status with unknown code', () => {
 		const err = new APIError('some_unknown_code', 'gone', undefined, 410);
 		expect(toScanMessage(err, fallback)).toBe('This session has closed for scanning.');

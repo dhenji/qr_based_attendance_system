@@ -90,6 +90,8 @@ let selectedOfferingId = $state<number | null>(null);
 	let chosenType = $state<CourseType | null>(null);
 	let radius = $state(50);
 	let durationMinutes = $state(90);
+	let attemptLimit = $state<number | null>(null);
+	let defaultAttemptLimit = $state<number | null>(null);
 	let presentWindow = $state(15);
 	let lateWindow = $state(5);
 	// The plan's own values, kept as the inherited baseline (D93). A field is
@@ -164,6 +166,8 @@ let selectedOfferingId = $state<number | null>(null);
 		try {
 			const loaded = await getSessionPlan(offeringId, type);
 			plan = loaded;
+			defaultAttemptLimit = loaded.attendance_attempt_limit_default ?? null;
+			attemptLimit = loaded.attendance_attempt_limit_default ?? 3;
 			inherited = {
 				duration: loaded.duration_minutes,
 				present: loaded.present_window_minutes,
@@ -188,6 +192,8 @@ let selectedOfferingId = $state<number | null>(null);
 			// No baseline: nothing is sent for the inherited fields, so the
 			// server resolves them from the offering.
 			inherited = null;
+			defaultAttemptLimit = null;
+			attemptLimit = 3;
 			planError = e instanceof Error ? e.message : 'Could not load the session plan';
 			// D95: the offering no longer meets this type — the list the
 			// page rendered is stale, so it is refreshed and the toggle
@@ -292,6 +298,15 @@ let selectedOfferingId = $state<number | null>(null);
 		inherited !== null && presentWindow !== inherited.present
 	);
 	const lateOverridden = $derived(inherited !== null && lateWindow !== inherited.late);
+	const attemptInvalid = $derived(
+		attemptLimit !== null &&
+			(Number.isNaN(attemptLimit) || attemptLimit < 0 || attemptLimit > 10)
+	);
+	const attemptOverridden = $derived(
+		attemptLimit !== null &&
+			defaultAttemptLimit !== null &&
+			attemptLimit !== defaultAttemptLimit
+	);
 	const radiusOverridden = $derived(inherited !== null && radius !== inherited.radius);
 	const overrideTimeValid = $derived(
 		!scheduleOverride || /^([01]\d|2[0-3]):([0-5]\d)$/.test(overrideStart)
@@ -626,6 +641,10 @@ let selectedOfferingId = $state<number | null>(null);
 					: {}),
 				...(remoteSession ? { isRemote: true, classroomOverride: true } : {}),
 				geofenceEnabled: !noClassroom && !remoteSession,
+				...(attemptLimit !== null &&
+				(defaultAttemptLimit === null || attemptLimit !== defaultAttemptLimit)
+					? { attendanceAttemptLimit: attemptLimit }
+					: {}),
 				...(noClassroom ? { classroomOverride: true } : {}),
 				// D93: the schedule exception, in the institution's wall
 				// clock. Both fields travel together so the override is
@@ -1208,7 +1227,7 @@ let selectedOfferingId = $state<number | null>(null);
 					/>
 					{#if inherited !== null}
 						<p class="hint">
-							{inherited.present} min from the offering
+							{inherited.present} min from the offering — minutes after class start still counted as on time
 							{#if presentOverridden}
 								<span class="location-tag">Override</span>
 							{/if}
@@ -1227,11 +1246,34 @@ let selectedOfferingId = $state<number | null>(null);
 					/>
 					{#if inherited !== null}
 						<p class="hint">
-							{inherited.late} min from the offering
+							{inherited.late} min from the offering — minutes after the present window still counted as late
 							{#if lateOverridden}
 								<span class="location-tag">Override</span>
 							{/if}
 						</p>
+					{/if}
+				</div>
+				<div class="field">
+					<label class="form-label" for="attempt-limit">Max attempts per student</label>
+					<input
+						id="attempt-limit"
+						class="form-input"
+						class:invalid={attemptInvalid}
+						type="number"
+						min="0"
+						max="10"
+						bind:value={attemptLimit}
+					/>
+					{#if defaultAttemptLimit !== null}
+						<p class="hint">
+							{defaultAttemptLimit} from the administrator default (0 = unlimited, blank = default)
+							{#if attemptOverridden}
+								<span class="location-tag">Override</span>
+							{/if}
+						</p>
+					{/if}
+					{#if attemptInvalid}
+						<p class="field-error">Must be a whole number between 0 and 10.</p>
 					{/if}
 				</div>
 			</div>

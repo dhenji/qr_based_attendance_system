@@ -110,6 +110,12 @@ class Session(CreatedAtMixin, Base):
     geofence_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    # Per-student attempt cap for this session. 0 means unlimited. Stored
+    # (not re-derived) so existing sessions keep their value even if the
+    # admin default changes later.
+    attendance_attempt_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
 
     @property
     def computed_expires_at(self) -> datetime:

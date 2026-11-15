@@ -44,6 +44,7 @@ export type SettingsPatch = Partial<
 		| 'session_late_open_minutes'
 		| 'backup_retention_daily'
 		| 'backup_retention_monthly'
+		| 'attendance_attempt_limit_default'
 	>
 >;
 
