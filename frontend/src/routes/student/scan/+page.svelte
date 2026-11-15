@@ -55,6 +55,7 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 	let retakeMode = $state(false);
 	let attemptLimit = $state<number | null>(null);
 	let attemptsRemaining = $state<number | null>(null);
+	let precheckSeq = 0;
 	let showPermission = $state(false);
 	let qrActive = $state(false);
 	let livenessActive = $state(false);
@@ -154,10 +155,41 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 	const rejectedMessage = (code: string | null): string =>
 		(code && SCAN_ERROR_MESSAGES[code]) || 'The attendance scan was rejected.';
 
+	const ATTEMPT_LIMIT_REDIRECT_MS = 2500;
+
+	// Best-effort: backend appends "(N attempts remaining)" to limited scan
+	// AppException messages. Prefer this authoritative value when present;
+	// precheck remains the source of truth for refreshed attempt counts.
+	const remainingFromError = (error: unknown): number | null => {
+		if (!(error instanceof APIError) || !error.message) return null;
+		const match = error.message.match(/\((\d+)\s+attempts?\s+remaining\)/i);
+		if (!match) return null;
+		const value = Number(match[1]);
+		return Number.isFinite(value) ? value : null;
+	};
+
+	const startAttemptLimitExhaustion = (message: string) => {
+		attemptsRemaining = 0;
+		attemptLimitReached = true;
+		rejectionReason = message;
+		showFailure = true;
+		if (attemptLimitTimer) clearTimeout(attemptLimitTimer);
+		attemptLimitTimer = setTimeout(() => {
+			showFailure = false;
+			attemptLimitReached = false;
+			attemptLimitTimer = null;
+			void goto(Routes.DASHBOARD);
+		}, ATTEMPT_LIMIT_REDIRECT_MS);
+	};
+
 	onDestroy(() => {
 		if (gpsAbortController) {
 			try { gpsAbortController.abort(); } catch { /* ignore */ }
 			gpsAbortController = null;
+		}
+		if (attemptLimitTimer) {
+			clearTimeout(attemptLimitTimer);
+			attemptLimitTimer = null;
 		}
 		clearCountdown();
 		clearRetryTimer();
@@ -366,10 +398,12 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 			return;
 		}
 
+		const seq = ++precheckSeq;
 		checkingId = true;
 		scanError = null;
 		try {
 			const result = await precheckScan({ sessionId: session.sessionId, studentNumber: entered });
+			if (seq !== precheckSeq) return;
 			if (!result.enrolled) {
 				precheckFailed = true;
 				rejectionReason = SCAN_ERROR_MESSAGES.not_enrolled;
@@ -390,19 +424,13 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 			attemptLimit = result.attendanceAttemptLimit ?? null;
 			attemptsRemaining = result.attemptsRemaining ?? null;
 			if (result.limitReached) {
-				attemptsRemaining = 0;
-				attemptLimitReached = true;
-				rejectionReason = toScanMessage(
-					new APIError('attendance_attempt_limit_reached', ''),
-					SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached,
-					0
+				startAttemptLimitExhaustion(
+					toScanMessage(
+						new APIError('attendance_attempt_limit_reached', ''),
+						SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached,
+						0
+					)
 				);
-				showFailure = true;
-				attemptLimitTimer = setTimeout(() => {
-					showFailure = false;
-					attemptLimitReached = false;
-					void goto(Routes.DASHBOARD);
-				}, 2500);
 				return;
 			}
 			if (!isMockMode() && studentState.student?.faceEnrolled === false) {
@@ -425,6 +453,7 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 				startLiveness();
 			}
 		} catch (error) {
+			if (seq !== precheckSeq) return;
 			if (isNetworkError(error)) {
 				// Offline: proceed without the gate; submit queues for sync.
 				verifiedNumber = entered;
@@ -443,7 +472,7 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 			}
 			scanError = toScanMessage(error, 'Unable to check your ID number');
 		} finally {
-			checkingId = false;
+			if (seq === precheckSeq) checkingId = false;
 		}
 	};
 
@@ -728,25 +757,42 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 					showQueued = true;
 					queuedCode = sessionCode;
 				} catch (err) {
-					const consumed = !(
-						err instanceof APIError && PRE_INCREMENT_ERRORS.has(err.code)
-					);
-					if (consumed && attemptsRemaining !== null) {
-						attemptsRemaining = Math.max(0, attemptsRemaining - 1);
+					if (err instanceof APIError && err.code === 'attendance_attempt_limit_reached') {
+						startAttemptLimitExhaustion(
+							toScanMessage(err, 'Unable to submit the attendance scan', 0)
+						);
+						return;
+					}
+					const reportedRemaining = remainingFromError(err);
+					if (reportedRemaining !== null) {
+						attemptsRemaining = reportedRemaining;
+					} else {
+						// Queue-enqueue failed after a network submit attempt; without an
+						// authoritative remaining count, apply a best-effort local decrement
+						// for likely consumed attempts (pre-increment errors excluded).
+						const consumed = !(
+							err instanceof APIError && PRE_INCREMENT_ERRORS.has(err.code)
+						);
+						if (consumed && attemptsRemaining !== null) {
+							attemptsRemaining = Math.max(0, attemptsRemaining - 1);
+						}
 					}
 					rejectionReason = toScanMessage(err, 'Unable to submit the attendance scan', attemptsRemaining);
-					if (err instanceof APIError && err.code === 'attendance_attempt_limit_reached') {
-						attemptsRemaining = 0;
-						attemptLimitReached = true;
-						attemptLimitTimer = setTimeout(() => {
-							showFailure = false;
-							attemptLimitReached = false;
-							void goto(Routes.DASHBOARD);
-						}, 2500);
-					}
 					showFailure = true;
 				}
 			} else {
+				if (error instanceof APIError && error.code === 'attendance_attempt_limit_reached') {
+					startAttemptLimitExhaustion(
+						toScanMessage(error, 'Unable to submit the attendance scan', 0)
+					);
+					return;
+				}
+				const reportedRemaining = remainingFromError(error);
+				if (reportedRemaining !== null) {
+					attemptsRemaining = reportedRemaining;
+				}
+				// Without an authoritative remaining count, avoid speculative decrements;
+				// precheck refreshes the count from the backend when re-run.
 				rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan', attemptsRemaining);
 				showFailure = true;
 			}
