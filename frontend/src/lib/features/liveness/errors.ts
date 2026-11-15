@@ -8,6 +8,18 @@
 
 import { APIError } from '$lib/api/client';
 
+// Error codes raised before the durable attempt counter is incremented.
+export const PRE_INCREMENT_ERRORS: ReadonlySet<string> = new Set([
+	'session_not_found',
+	'session_expired',
+	'session_not_started',
+	'student_not_found',
+	'student_number_mismatch',
+	'not_enrolled',
+	'duplicate_scan',
+	'rate_limited'
+]);
+
 export const SCAN_ERROR_MESSAGES: Record<string, string> = {
 	duplicate_scan: 'Your attendance has already been recorded for this session. Check your attendance record.',
 	attendance_attempt_limit_reached: 'You have used all available attendance attempts for this session. Contact your professor if you need another try.',

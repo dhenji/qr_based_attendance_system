@@ -957,12 +957,12 @@ class SessionService:
             raise SessionNotFoundException(row.id)
 
         # Block students who have exhausted the per-session attempt cap.
-        if user_id is not None and getattr(row, "attendance_attempt_limit", 0):
+        limit: int = getattr(row, "attendance_attempt_limit", 0) or 0
+        if user_id is not None and limit > 0:
             student: Student | None = await self._session.scalar(
                 select(Student).where(Student.user_id == user_id).limit(1)
             )
             if student is not None:
-                limit: int = getattr(row, "attendance_attempt_limit", 0) or 0
                 attempt_count: int = int(
                     await self._session.scalar(
                         select(AttendanceAttemptCounter.attempts).where(

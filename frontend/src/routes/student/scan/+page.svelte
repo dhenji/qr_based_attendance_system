@@ -27,7 +27,7 @@
 	} from '$lib/features/sync/service';
 	import { initStudent, studentState } from '$lib/features/student/store.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
-import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
+import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import { isWithinGeofenceWithUncertainty } from '$lib/shared/utils/geo';
@@ -52,17 +52,6 @@ import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/error
 	let alreadyScannedStop = $state(false);
 	let attemptLimitReached = $state(false);
 	let attemptLimitTimer: ReturnType<typeof setTimeout> | null = null;
-	// Errors raised before the durable attempt counter is incremented.
-	const PRE_INCREMENT_ERRORS = new Set([
-		'session_not_found',
-		'session_expired',
-		'session_not_started',
-		'student_not_found',
-		'student_number_mismatch',
-		'not_enrolled',
-		'duplicate_scan',
-		'rate_limited'
-	]);
 	let retakeMode = $state(false);
 	let attemptLimit = $state<number | null>(null);
 	let attemptsRemaining = $state<number | null>(null);
