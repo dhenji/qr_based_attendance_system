@@ -98,6 +98,13 @@ export interface SessionVerificationResponse {
 	is_remote?: boolean;
 	geofence_enabled?: boolean;
 	attendance_attempt_limit?: number;
+	// Caller attempt state (Option A contract): populated only when the
+	// caller resolves to a student row and the session caps attempts;
+	// attempts_remaining is null for unlimited sessions. Absent on legacy
+	// servers — treat absence as "keep last-known".
+	attempts_used?: number | null;
+	attempts_remaining?: number | null;
+	limit_reached?: boolean;
 }
 
 export interface AttendanceScanResponse {
@@ -105,6 +112,13 @@ export interface AttendanceScanResponse {
 	status: ScanStatus;
 	scanned_at: string;
 	expires_at: string;
+	// Post-operation attempt state for this request (authoritative;
+	// attempts_used can exceed attendance_attempt_limit when blocked
+	// retries keep incrementing the durable counter). Null remaining =
+	// unlimited session. Optional: absent on legacy servers.
+	attendance_attempt_limit?: number;
+	attempts_used?: number;
+	attempts_remaining?: number | null;
 }
 
 // Shared shape for the paginated collection endpoints.

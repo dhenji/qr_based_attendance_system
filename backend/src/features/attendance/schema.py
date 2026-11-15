@@ -97,12 +97,23 @@ class ScanRequest(BaseModel):
 
 
 class ScanResponse(BaseModel):
-    """Scan result; status maps attendance_records.validation_status."""
+    """Scan result; status maps attendance_records.validation_status.
+
+    Attempt fields are additive and authoritative for the request that
+    produced them (docs/architecture/api-contracts.md): ``attempts_used``
+    is the post-operation durable counter value and can exceed
+    ``attendance_attempt_limit`` when blocked retries keep incrementing;
+    ``attempts_remaining`` is ``None`` for unlimited sessions.
+    """
 
     id: int
     status: Literal["present", "late", "pending", "rejected"]
     scanned_at: datetime
     expires_at: datetime | None = None
+    # Per-session attempt cap. 0 means unlimited.
+    attendance_attempt_limit: int = 0
+    attempts_used: int = 0
+    attempts_remaining: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

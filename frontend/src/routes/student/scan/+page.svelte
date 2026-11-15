@@ -27,7 +27,8 @@
 	} from '$lib/features/sync/service';
 	import { initStudent, studentState } from '$lib/features/student/store.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
-import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
+import { SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/features/liveness/errors';
+import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 	import { Routes } from '$lib/shared/constants/routes';
 	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import { isWithinGeofenceWithUncertainty } from '$lib/shared/utils/geo';
@@ -157,15 +158,40 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 
 	const ATTEMPT_LIMIT_REDIRECT_MS = 2500;
 
-	// Best-effort: backend appends "(N attempts remaining)" to limited scan
-	// AppException messages. Prefer this authoritative value when present;
-	// precheck remains the source of truth for refreshed attempt counts.
-	const remainingFromError = (error: unknown): number | null => {
-		if (!(error instanceof APIError) || !error.message) return null;
-		const match = error.message.match(/\((\d+)\s+attempts?\s+remaining\)/i);
-		if (!match) return null;
-		const value = Number(match[1]);
-		return Number.isFinite(value) ? value : null;
+	// Update attempt state from an error response via the shared policy in
+	// attempts.ts: metadata wins, legacy message suffix updates the count
+	// only, and neither leaves last-known standing (never optimistically
+	// decremented).
+	const applyAttemptError = (error: unknown): void => {
+		const update = attemptUpdateFromError(error);
+		if (update?.limit !== undefined) attemptLimit = update.limit;
+		if (update?.remaining !== undefined) attemptsRemaining = update.remaining;
+	};
+
+	// Defensive re-sync when the current response could not say whether an
+	// attempt was consumed: a transport failure after the submit reached
+	// the wire (or an offline-queue enqueue failure) leaves consumption
+	// unknown. Precheck is strictly read-only, never creates attempts,
+	// and a failed refresh keeps last-known. Serialized through the same
+	// `precheckSeq` guard as the ID-step gate.
+	const refreshAttemptState = async (): Promise<void> => {
+		if (!session || !verifiedNumber) return;
+		const seq = ++precheckSeq;
+		try {
+			const result = await precheckScan({
+				sessionId: session.sessionId,
+				studentNumber: verifiedNumber
+			});
+			if (seq !== precheckSeq) return;
+			if (result.attendanceAttemptLimit !== undefined && result.attendanceAttemptLimit !== null) {
+				attemptLimit = result.attendanceAttemptLimit;
+			}
+			if (result.attemptsRemaining !== null && result.attemptsRemaining !== undefined) {
+				attemptsRemaining = result.attemptsRemaining;
+			}
+		} catch {
+			// Refresh failure: keep last-known; never fabricate a count.
+		}
 	};
 
 	const startAttemptLimitExhaustion = (message: string) => {
@@ -280,6 +306,21 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 			const verifiedSession = await verifySessionCode(normalizedCode);
 			sessionCode = normalizedCode;
 			session = verifiedSession;
+			// Authoritative attempt state from the verify response (Option A
+			// contract): precheck re-reads it at the ID step, but the confirm
+			// screen renders before that, so sync here instead of showing '—'.
+			if (
+				verifiedSession.attendanceAttemptLimit !== undefined &&
+				verifiedSession.attendanceAttemptLimit !== null
+			) {
+				attemptLimit = verifiedSession.attendanceAttemptLimit;
+			}
+			if (
+				verifiedSession.attemptsRemaining !== null &&
+				verifiedSession.attemptsRemaining !== undefined
+			) {
+				attemptsRemaining = verifiedSession.attemptsRemaining;
+			}
 			void cacheSession({
 				session_id: verifiedSession.sessionId,
 				code: normalizedCode,
@@ -290,7 +331,8 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 				scheduled_end_time: verifiedSession.scheduledEndTime,
 				geofence: verifiedSession.geofence,
 				geofenceEnabled: verifiedSession.geofenceEnabled,
-				isRemote: verifiedSession.isRemote
+				isRemote: verifiedSession.isRemote,
+				attendance_attempt_limit: verifiedSession.attendanceAttemptLimit
 			}).catch(() => undefined);
 			showFailure = false;
 			rejectionReason = '';
@@ -327,6 +369,10 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 						},
 						geofenceEnabled: cached.geofenceEnabled,
 						isRemote: cached.isRemote,
+						// The immutable per-session cap survives the cache; the
+						// remaining count does not (the server re-decides on
+						// sync), so offline shows the limit without a count.
+						attendanceAttemptLimit: cached.attendance_attempt_limit,
 						scheduledStartTime: cached.scheduled_start_time ?? cached.expires_at,
 						scheduledEndTime: cached.scheduled_end_time ?? cached.expires_at
 					};
@@ -340,12 +386,15 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 					return;
 				}
 			}
-			const effectiveRemaining =
-				error instanceof APIError && error.code === 'attendance_attempt_limit_reached'
-					? 0
-					: attemptsRemaining;
-			if (effectiveRemaining === 0) attemptsRemaining = 0;
-			scanError = toScanMessage(error, 'Unable to verify the session code', effectiveRemaining);
+			// verify_code exhaustion: the counter was read, not incremented
+			// (consumed=False), so the remaining count is genuinely 0.
+			applyAttemptError(error);
+			if (error instanceof APIError && error.code === 'attendance_attempt_limit_reached') {
+				attemptsRemaining = 0;
+				scanError = toScanMessage(error, 'Unable to verify the session code', 0);
+			} else {
+				scanError = toScanMessage(error, 'Unable to verify the session code', attemptsRemaining);
+			}
 		} finally {
 			verifying = false;
 		}
@@ -719,6 +768,20 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 				idempotencyKey,
 			});
 
+			// Authoritative post-consumption attempt state straight from the
+			// response (Option A contract). A 200 `rejected` outcome consumes
+			// an attempt while still being retakeable, so the success path
+			// syncs too — no follow-up precheck needed.
+			if (
+				result.attendanceAttemptLimit !== undefined &&
+				result.attendanceAttemptLimit !== null
+			) {
+				attemptLimit = result.attendanceAttemptLimit;
+			}
+			if (result.attemptsRemaining !== null && result.attemptsRemaining !== undefined) {
+				attemptsRemaining = result.attemptsRemaining;
+			}
+
 			if (result.status === 'rejected') {
 				rejectionReason = 'This attendance was submitted outside the permitted time window. Check the attendance schedule with your professor.';
 				showFailure = true;
@@ -756,43 +819,40 @@ import { PRE_INCREMENT_ERRORS, SCAN_ERROR_MESSAGES, toScanMessage } from '$lib/f
 					livenessActive = false;
 					showQueued = true;
 					queuedCode = sessionCode;
+					// The submit may have reached the server before the signal
+					// dropped — the queue will replay it. Re-sync the attempt
+					// count from the read-only precheck; offline it is a no-op.
+					void refreshAttemptState();
 				} catch (err) {
 					if (err instanceof APIError && err.code === 'attendance_attempt_limit_reached') {
+						applyAttemptError(err);
 						startAttemptLimitExhaustion(
 							toScanMessage(err, 'Unable to submit the attendance scan', 0)
 						);
 						return;
 					}
-					const reportedRemaining = remainingFromError(err);
-					if (reportedRemaining !== null) {
-						attemptsRemaining = reportedRemaining;
-					} else {
-						// Queue-enqueue failed after a network submit attempt; without an
-						// authoritative remaining count, apply a best-effort local decrement
-						// for likely consumed attempts (pre-increment errors excluded).
-						const consumed = !(
-							err instanceof APIError && PRE_INCREMENT_ERRORS.has(err.code)
-						);
-						if (consumed && attemptsRemaining !== null) {
-							attemptsRemaining = Math.max(0, attemptsRemaining - 1);
-						}
-					}
+					// Queue-enqueue failed after a network submit attempt.
+					// Whether the server consumed the attempt is unknown, so
+					// take any metadata the error carries and re-sync from the
+					// read-only precheck — never guess with a local decrement.
+					applyAttemptError(err);
 					rejectionReason = toScanMessage(err, 'Unable to submit the attendance scan', attemptsRemaining);
 					showFailure = true;
+					void refreshAttemptState();
 				}
 			} else {
 				if (error instanceof APIError && error.code === 'attendance_attempt_limit_reached') {
+					applyAttemptError(error);
 					startAttemptLimitExhaustion(
 						toScanMessage(error, 'Unable to submit the attendance scan', 0)
 					);
 					return;
 				}
-				const reportedRemaining = remainingFromError(error);
-				if (reportedRemaining !== null) {
-					attemptsRemaining = reportedRemaining;
-				}
-				// Without an authoritative remaining count, avoid speculative decrements;
-				// precheck refreshes the count from the backend when re-run.
+				// Metadata present → authoritative; message suffix → legacy
+				// fallback; neither → keep last-known. On a modern backend a
+				// metadata-absent rejection is pre-increment by contract, so
+				// nothing was consumed and last-known stays accurate.
+				applyAttemptError(error);
 				rejectionReason = toScanMessage(error, 'Unable to submit the attendance scan', attemptsRemaining);
 				showFailure = true;
 			}

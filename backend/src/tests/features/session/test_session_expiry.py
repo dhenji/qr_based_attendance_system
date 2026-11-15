@@ -1348,3 +1348,131 @@ async def test_verify_code_does_not_block_unlimited_session(
 
     assert verified.session_id == read.id
     assert verified.attendance_attempt_limit == 0
+
+
+# --- verify_code attempt metadata ------------------------------------------
+
+
+async def test_verify_code_exhaustion_error_carries_attempt_details(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """verify_code only reads the counter, so its exhaustion raise reports
+    consumed=False — unlike submit_scan's own rejection (consumed=True)."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=2,
+        ),
+    )
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=stack["student"].id,
+            session_id=read.id,
+            attempts=5,
+        )
+    )
+    await test_db_session.flush()
+
+    with pytest.raises(AttendanceAttemptLimitReachedException) as excinfo:
+        await service.verify_code(code=read.session_code, user_id=user_id)
+
+    assert excinfo.value.details == {
+        "attempt_limit": 2,
+        "attempts_used": 5,
+        "attempts_remaining": 0,
+        "attempt_consumed": False,
+    }
+
+
+async def test_verify_code_reports_attempt_fields(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A below-cap student gets used/remaining in the 200 body."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=3,
+        ),
+    )
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=stack["student"].id,
+            session_id=read.id,
+            attempts=1,
+        )
+    )
+    await test_db_session.flush()
+
+    verified = await service.verify_code(code=read.session_code, user_id=user_id)
+
+    assert verified.attendance_attempt_limit == 3
+    assert verified.attempts_used == 1
+    assert verified.attempts_remaining == 2
+    assert verified.limit_reached is False
+
+
+async def test_verify_code_attempt_fields_absent_for_unlimited_session(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Unlimited sessions report no caller attempt state at all."""
+    stack, service = await open_session(factories, settings)
+    user_id = await _link_student_user(test_db_session, factories, stack)
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=0,
+        ),
+    )
+
+    verified = await service.verify_code(code=read.session_code, user_id=user_id)
+
+    assert verified.attendance_attempt_limit == 0
+    assert verified.attempts_used is None
+    assert verified.attempts_remaining is None
+    assert verified.limit_reached is False
+
+
+async def test_verify_code_attempt_fields_absent_without_student_link(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A caller with no resolvable student row (e.g. a professor reading the
+    QR payload) gets None attempt state instead of a fabricated count."""
+    stack, service = await open_session(factories, settings)
+    professor_user = await factories.user(role="professor")
+    read = await service.create_session(
+        professor_id=stack["professor"].id,
+        payload=SessionCreate(
+            offering_id=stack["offering"].id,
+            duration_minutes=60,
+            attendance_attempt_limit=3,
+        ),
+    )
+
+    verified = await service.verify_code(
+        code=read.session_code, user_id=professor_user.id
+    )
+
+    assert verified.attendance_attempt_limit == 3
+    assert verified.attempts_used is None
+    assert verified.attempts_remaining is None
+    assert verified.limit_reached is False

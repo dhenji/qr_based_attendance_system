@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password
-from features.attendance.model import Attendance
+from features.attendance.model import Attendance, AttendanceAttemptCounter
 from shared.enums import UserRole, ValidationStatus
 from shared.face_embeddings import embedding_to_base64, serialize_embedding
 from tests.conftest import Factories
@@ -851,3 +851,119 @@ async def test_review_note_is_dropped_when_absent(
     assert response.status_code == 200
     await test_db_session.refresh(record)
     assert "review_note" not in (record.liveness_evidence or {})
+
+# --- attempt metadata over HTTP (machine-readable contract) ----------------
+
+
+def _enroll_http_face(student: Any) -> None:
+    """Set a real reference embedding on the linked student."""
+
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    student.face_embedding = serialize_embedding(ref / np.linalg.norm(ref))
+
+
+def _mismatch_http_embedding() -> str:
+    """An embedding far from any enrolled reference (score well below band)."""
+
+    return embedding_to_base64(np.random.RandomState(999).randn(128).astype(np.float32))
+
+
+async def test_scan_exhaustion_envelope_carries_attempt_details(
+    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+) -> None:
+    """The 409 body carries `detail.details` with the post-increment state.
+
+    This is the envelope the frontend actually parses; service-level
+    assertions on `exc.details` never prove it survives serialization.
+    """
+
+    stack = await linked_stack(factories, attendance_attempt_limit=1)
+    student = stack["student"]
+    _enroll_http_face(student)
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=student.id, session_id=stack["session"].id, attempts=1
+        )
+    )
+    # `api_client` commits on success only, and this test's first request
+    # fails — commit the seed up front or the counter row rolls back.
+    await test_db_session.commit()
+
+    response = await api_client.post(
+        "/api/student/attendance/scan",
+        json=scan_body(
+            stack["session"].id,
+            student.student_id,
+            stack["session"].created_at + timedelta(minutes=2),
+        ),
+        headers=await auth_headers(stack["user"]),
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "attendance_attempt_limit_reached"
+    assert detail["details"] == {
+        "attempt_limit": 1,
+        "attempts_used": 2,
+        "attempts_remaining": 0,
+        "attempt_consumed": True,
+    }
+
+
+async def test_scan_success_response_carries_attempt_fields(
+    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+) -> None:
+    """A 200 scan reports limit/used/remaining in the body the client maps."""
+
+    stack = await linked_stack(factories, attendance_attempt_limit=3)
+    student = stack["student"]
+    _enroll_http_face(student)
+    await test_db_session.commit()
+
+    response = await api_client.post(
+        "/api/student/attendance/scan",
+        json=scan_body(
+            stack["session"].id,
+            student.student_id,
+            stack["session"].created_at + timedelta(minutes=2),
+        ),
+        headers=await auth_headers(stack["user"]),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["attendance_attempt_limit"] == 3
+    assert body["attempts_used"] == 1
+    assert body["attempts_remaining"] == 2
+
+
+async def test_post_increment_mismatch_envelope_carries_attempt_details(
+    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+) -> None:
+    """A consuming failure (face mismatch) reports the updated remaining count."""
+
+    stack = await linked_stack(factories, attendance_attempt_limit=3)
+    student = stack["student"]
+    _enroll_http_face(student)
+    await test_db_session.commit()
+
+    body = scan_body(
+        stack["session"].id,
+        student.student_id,
+        stack["session"].created_at + timedelta(minutes=2),
+    )
+    body["live_face_embedding"] = _mismatch_http_embedding()
+
+    response = await api_client.post(
+        "/api/student/attendance/scan", json=body, headers=await auth_headers(stack["user"])
+    )
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["code"] == "face_mismatch"
+    assert detail["details"] == {
+        "attempt_limit": 3,
+        "attempts_used": 1,
+        "attempts_remaining": 2,
+        "attempt_consumed": True,
+    }

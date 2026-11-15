@@ -16,6 +16,7 @@ covered on both sides of every boundary.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -1426,6 +1427,391 @@ async def test_precheck_reports_unlimited_attempts(
     assert precheck.attempts_used == 0
     assert precheck.attempts_remaining is None
     assert precheck.limit_reached is False
+
+
+# --- attempt metadata contract (machine-readable remaining attempts) -------
+
+
+async def test_post_increment_failure_carries_attempt_details(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A validation failure after the increment reports consumed=True and the
+    post-increment remaining count — the authoritative value, not a guess."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 3
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    mismatch_payload = scan_request(
+        stack["session"],
+        student.student_id,
+        scanned_at=stack["session"].created_at + timedelta(minutes=2),
+    )
+    mismatch_payload.live_face_embedding = _make_live_emb(0.40)
+
+    with pytest.raises(FaceMismatchException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=mismatch_payload,
+        )
+
+    assert excinfo.value.details == {
+        "attempt_limit": 3,
+        "attempts_used": 1,
+        "attempts_remaining": 2,
+        "attempt_consumed": True,
+    }
+
+    # The response body the API client sees carries the same payload.
+    assert excinfo.value.to_dict()["details"] == excinfo.value.details
+
+
+async def test_pre_increment_failure_carries_no_attempt_details(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Failures raised before the increment carry no attempt metadata at all.
+
+    Absence is the signal "this response does not speak to consumption": the
+    durable counter was never touched, so the client's last-known count is
+    still accurate and must not be decremented.
+    """
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 3
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    with pytest.raises(SessionNotFoundException) as not_found:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=2),
+                session_id=UNKNOWN_SESSION_ID,
+            ),
+        )
+    assert not_found.value.details is None
+
+    # duplicate_scan: the first scan persists, the second is pre-increment.
+    await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=3),
+        ),
+    )
+    with pytest.raises(DuplicateScanException) as duplicate:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=4),
+            ),
+        )
+    assert duplicate.value.details is None
+
+
+async def test_exhaustion_error_carries_attempt_details(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """The exhaustion rejection still reports consumed=True (increment-then-
+    reject, preserving existing semantics) with remaining clamped to 0 and a
+    raw used count that may exceed the limit."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 1
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    first = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=20),
+        ),
+    )
+    assert first.status == ValidationStatus.REJECTED.value
+
+    with pytest.raises(AttendanceAttemptLimitReachedException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=21),
+            ),
+        )
+
+    assert excinfo.value.details == {
+        "attempt_limit": 1,
+        "attempts_used": 2,
+        "attempts_remaining": 0,
+        "attempt_consumed": True,
+    }
+
+
+async def test_successful_scan_reports_attempt_fields(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A 200 scan carries the authoritative post-consumption attempt state."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 3
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    result = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=2),
+        ),
+    )
+
+    assert result.status == ValidationStatus.PRESENT.value
+    assert result.attendance_attempt_limit == 3
+    assert result.attempts_used == 1
+    assert result.attempts_remaining == 2
+
+
+async def test_rejected_status_scan_reports_attempt_fields(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A 200 rejected outcome consumes an attempt (retake-eligible) and the
+    response must say so — the case the old message-only contract missed."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 3
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    result = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=20),
+        ),
+    )
+
+    assert result.status == ValidationStatus.REJECTED.value
+    assert result.attendance_attempt_limit == 3
+    assert result.attempts_used == 1
+    assert result.attempts_remaining == 2
+
+
+async def test_unlimited_session_scan_reports_no_attempt_state(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """limit=0: success fields stay 0/0/None and errors carry no details."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 0
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    # A 200 rejected outcome (outside the windows) reports no attempt state.
+    result = await service.submit_scan(
+        user_id=stack["student"].user_id,
+        payload=scan_request(
+            stack["session"],
+            student.student_id,
+            scanned_at=stack["session"].created_at + timedelta(minutes=20),
+        ),
+    )
+    assert result.status == ValidationStatus.REJECTED.value
+    assert result.attendance_attempt_limit == 0
+    assert result.attempts_used == 0
+    assert result.attempts_remaining is None
+
+    # An unlimited session has no cap to exhaust: a mismatch consumes nothing
+    # and, with remaining=None, the error gains neither details nor a suffix.
+    # The all-rejected history keeps the rescan retake-eligible.
+    mismatch_payload = scan_request(
+        stack["session"],
+        student.student_id,
+        scanned_at=stack["session"].created_at + timedelta(minutes=21),
+    )
+    mismatch_payload.live_face_embedding = _make_live_emb(0.40)
+    with pytest.raises(FaceMismatchException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=mismatch_payload,
+        )
+    assert excinfo.value.details is None
+    assert "remaining" not in excinfo.value.message
+
+
+async def test_idempotent_replay_returns_original_attempt_metadata(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """A cached replay returns the original request's attempt values and does
+    not consume again."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 3
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    payload = scan_request(
+        stack["session"],
+        student.student_id,
+        scanned_at=stack["session"].created_at + timedelta(minutes=2),
+    )
+    first = await service.submit_scan(
+        user_id=stack["student"].user_id, payload=payload, idempotency_key="replay-1"
+    )
+    replay = await service.submit_scan(
+        user_id=stack["student"].user_id, payload=payload, idempotency_key="replay-1"
+    )
+
+    assert replay.model_dump() == first.model_dump()
+    assert replay.attempts_used == 1
+    assert replay.attempts_remaining == 2
+    # The counter must not have moved for the replay.
+    count = await test_db_session.scalar(
+        select(AttendanceAttemptCounter.attempts).where(
+            AttendanceAttemptCounter.student_id == student.id,
+            AttendanceAttemptCounter.session_id == stack["session"].id,
+        )
+    )
+    assert count == 1
+
+
+async def test_precheck_reports_zero_remaining_for_exhausted_student(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Precheck reports used > limit with remaining clamped to 0."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 2
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=student.id, session_id=stack["session"].id, attempts=5
+        )
+    )
+    await test_db_session.flush()
+
+    precheck = await service.precheck_scan(
+        user_id=stack["student"].user_id,
+        session_id=stack["session"].id,
+        student_number=student.student_id,
+    )
+
+    assert precheck.attendance_attempt_limit == 2
+    assert precheck.attempts_used == 5
+    assert precheck.attempts_remaining == 0
+    assert precheck.limit_reached is True
+
+
+async def test_precheck_reports_positive_remaining(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Precheck reports the exact remaining count below the cap."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 3
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    test_db_session.add(
+        AttendanceAttemptCounter(
+            student_id=student.id, session_id=stack["session"].id, attempts=1
+        )
+    )
+    await test_db_session.flush()
+
+    precheck = await service.precheck_scan(
+        user_id=stack["student"].user_id,
+        session_id=stack["session"].id,
+        student_number=student.student_id,
+    )
+
+    assert precheck.attendance_attempt_limit == 3
+    assert precheck.attempts_used == 1
+    assert precheck.attempts_remaining == 2
+    assert precheck.limit_reached is False
+
+
+async def test_precheck_never_consumes_attempts(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Read-only guarantee: precheck leaves the durable counter untouched."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 2
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    for _ in range(3):
+        await service.precheck_scan(
+            user_id=stack["student"].user_id,
+            session_id=stack["session"].id,
+            student_number=student.student_id,
+        )
+
+    # No counter row was created at all — precheck only ever reads.
+    assert (
+        await test_db_session.scalar(
+            select(AttendanceAttemptCounter.attempts).where(
+                AttendanceAttemptCounter.student_id == student.id,
+                AttendanceAttemptCounter.session_id == stack["session"].id,
+            )
+        )
+    ) is None
+
+
+async def test_attempt_counter_increments_return_exact_counts(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+) -> None:
+    """Each increment returns its own exact post-increment count.
+
+    `_increment_attempt_counter` opens its own session and commits an
+    atomic UPSERT ... RETURNING, so racing calls (gathered here on one
+    event loop; SQLite serialises them) can never share or lose a count —
+    the numbers always come back as a 1..N permutation and the stored
+    value is N.
+    """
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    student = stack["student"]
+    session_row = stack["session"]
+    service = AttendanceService(test_db_session, settings)
+
+    counts = await asyncio.gather(
+        service._increment_attempt_counter(student.id, session_row.id),
+        service._increment_attempt_counter(student.id, session_row.id),
+    )
+
+    assert sorted(counts) == [1, 2]
+    assert (
+        await test_db_session.scalar(
+            select(AttendanceAttemptCounter.attempts).where(
+                AttendanceAttemptCounter.student_id == student.id,
+                AttendanceAttemptCounter.session_id == session_row.id,
+            )
+        )
+    ) == 2
 
 
 async def test_precheck_reports_unenrolled_without_raising(

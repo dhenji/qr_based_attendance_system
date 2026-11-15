@@ -129,10 +129,14 @@ session is `closed`. Scanned students keep their server-decided status.
 > (default from `DEFAULT_ATTENDANCE_ATTEMPT_LIMIT`, 0 = unlimited). Every scan
 > attempt — including face-mismatch, liveness, and geofence failures — increments a
 > durable counter; once the cap is reached the scan is rejected with
-> `409 attendance_attempt_limit_reached` (and the response/UI message indicates
-> `(0 attempts remaining)`). Scan/verification errors for limited sessions include
-> the remaining attempt count where applicable. The admin default is configurable
-> via `PATCH /admin/system/settings`.
+> `409 attendance_attempt_limit_reached`. Remaining attempts are authoritative
+> machine-readable metadata, not message text (ADR-092): scan responses carry
+> `attendance_attempt_limit`/`attempts_used`/`attempts_remaining`, consuming
+> errors carry the same via `detail.details` with `attempt_consumed: true`, and
+> `verify_code` reports the caller's attempt state on both its 200 and its
+> exhaustion 409 (`attempt_consumed: false` — it only reads the counter). The
+> legacy `(N attempts remaining)` message suffix is a transition fallback only.
+> The admin default is configurable via `PATCH /admin/system/settings`.
 
 | #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
 | --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
@@ -220,7 +224,7 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
  │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 15 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 18 slices: admin, analytics, attendance, auth, course, course_professor, dashboard, enrollment, excuse, face_enrollment, professor, program, reports, session, student, sync, system, upload
 │   │   │   └── */        # model.py in 13 slices (21 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
- │   │   └── tests/        # pytest suite — 1060 cases in 82 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini │   ├── alembic/          # env.py imports all 13 feature models; 25 revisions — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), a562c3f8a6f7 (FK restrict), d4e5f6a7b8c9 (risk-score staging), e7f8a9b0c1d2 (app_settings), f4a9c2b7d103 (audit_logs), b1c4e7f0a2d6, 1e1582c4e9f8 (timestamp indexes), c9d4e5f6a7b8 (drop users.username, ADR-073), e8f9a0b1c2d3 (sessions.session_type + offering_components, D77), f1a2b3c4d5e6 (term-scoped session weeks), b2c3d4e5f6a7 (drop course_professors.semester), c3d4e5f6a7b8 (repair assignment date ranges), d5e6f7a8b9c0 (demote duplicate primaries), e6f7a8b9c0d1 (audit_logs action index, ADR-089), ff8df9fe1302 (otp failed_attempts), g8h9i0j1k2l3 (face embedding algorithm), 850d6b2e1652 (lockout escalation), a8b9c0d1e2f3 (nullable offering window defaults), 199665127004 (session is_remote), 2a3b4c5d6e7f (session geofence_enabled), b9c0d1e2f3a4 (session start-window columns, D94) → head b9c0d1e2f3a4│   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
+ │   │   └── tests/        # pytest suite — 1109 cases in 82 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini │   ├── alembic/          # env.py imports all 13 feature models; 25 revisions — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), a562c3f8a6f7 (FK restrict), d4e5f6a7b8c9 (risk-score staging), e7f8a9b0c1d2 (app_settings), f4a9c2b7d103 (audit_logs), b1c4e7f0a2d6, 1e1582c4e9f8 (timestamp indexes), c9d4e5f6a7b8 (drop users.username, ADR-073), e8f9a0b1c2d3 (sessions.session_type + offering_components, D77), f1a2b3c4d5e6 (term-scoped session weeks), b2c3d4e5f6a7 (drop course_professors.semester), c3d4e5f6a7b8 (repair assignment date ranges), d5e6f7a8b9c0 (demote duplicate primaries), e6f7a8b9c0d1 (audit_logs action index, ADR-089), ff8df9fe1302 (otp failed_attempts), g8h9i0j1k2l3 (face embedding algorithm), 850d6b2e1652 (lockout escalation), a8b9c0d1e2f3 (nullable offering window defaults), 199665127004 (session is_remote), 2a3b4c5d6e7f (session geofence_enabled), b9c0d1e2f3a4 (session start-window columns, D94) → head b9c0d1e2f3a4│   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
 │   ├── locustfile.py     # Concurrent-scan load harness (locust; 30 VUs over a pool of SEED-LOAD-* sessions)
 │   ├── bench_timings.py  # One-shot risk-batch / backup timings + the import-safe helpers locustfile reuses
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)

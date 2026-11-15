@@ -32,7 +32,7 @@ This file consolidates the former layered docs 01–09 in order.
 - `docs/architecture/data-flow.md` — system-wide flow diagrams
 - `docs/architecture/offline-first.md` — offline storage and sync
 - `docs/architecture/attendance-workflow/` — attendance scan flow and data layer
-- `docs/project/decision-log.md` — D27, D31, D16, D17, ADR-083
+- `docs/project/decision-log.md` — D27, D31, D16, D17, ADR-083, ADR-092
 
 Last verified against commit: see `git rev-parse HEAD`.
 
@@ -412,9 +412,14 @@ scan page (Svelte)
 - 403 `student_number_mismatch`, `outside_geofence`, `liveness_failed`,
   `face_mismatch`, `face_not_enrolled`.
 - 404 `student_not_found`, `session_not_found`, `review_not_found`.
-- 409 `duplicate_scan`, `review_not_pending`.
-- 422 `session_expired`, `session_not_started`.
+- 409 `duplicate_scan`, `review_not_pending`,
+  `attendance_attempt_limit_reached`.
+- 410 `session_expired`; 422 `session_not_started`.
 - Client maps codes via `toScanMessage()`; network errors queue for sync.
+- Attempt metadata (ADR-092): errors raised after the durable attempt-counter
+  increment carry `detail.details` — `{ attempt_limit, attempts_used,
+  attempts_remaining, attempt_consumed: true }`; errors raised before it carry
+  no `details` key, which means nothing was consumed by that request.
 
 ---
 

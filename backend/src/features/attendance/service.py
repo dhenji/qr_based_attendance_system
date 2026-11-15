@@ -39,6 +39,7 @@ from features.attendance.constants import (
     _IDEMPOTENCY_MAX_ENTRIES,
 )
 from core.exceptions import AppException
+from features.attendance.attempt_meta import AttemptMeta, meta_for, remaining_after
 from features.attendance.exceptions import (
     AttendanceAttemptLimitReachedException,
     AttendanceDomainException,
@@ -398,6 +399,7 @@ class AttendanceService:
         face_match_score: float,
         review_reason: str | None = None,
         geofence_details: dict | None = None,
+        attempt_meta: AttemptMeta | None = None,
     ) -> ScanResponse:
         """Write the attendance row and build the response.
 
@@ -407,6 +409,13 @@ class AttendanceService:
         MissingGreenlet in async (coding-standards §1.6). It resolved
         before only because the same request had incidentally loaded this
         Session into the identity map.
+
+        `attempt_meta` (when the session caps attempts) rides into the
+        response so the client learns the authoritative post-consumption
+        count without a follow-up precheck — including for 200 `rejected`
+        outcomes, which consume an attempt while still being retakeable.
+        The cached idempotency copy replays the original request's values,
+        which is correct: a replay must not consume again.
         """
         row: Attendance = await self._write_attendance(
             payload,
@@ -429,6 +438,9 @@ class AttendanceService:
             status=status,  # type: ignore[arg-type]
             scanned_at=row.timestamp,
             expires_at=db_session.expires_at,
+            attendance_attempt_limit=attempt_meta.limit if attempt_meta else 0,
+            attempts_used=attempt_meta.used if attempt_meta else 0,
+            attempts_remaining=attempt_meta.remaining if attempt_meta else None,
         )
         _store_response(cache_key, response)
         return response
@@ -460,14 +472,20 @@ class AttendanceService:
         # Durable per-student attempt counter. Incremented in its own
         # committed transaction so that attempts that fail validation (and
         # roll back the main transaction) still count toward the cap.
-        remaining: int | None = None
+        attempt_meta: AttemptMeta | None = None
         if attempt_limit > 0:
             attempt_count: int = await self._increment_attempt_counter(
                 student.id, db_session.id
             )
-            remaining = max(0, attempt_limit - attempt_count)
+            # The increment is this request's own consumption, so every
+            # outcome from here on — success, post-increment failure, and
+            # the exhaustion rejection — reports consumed=True with the
+            # post-increment count (attempt_meta.remaining clamps at 0).
+            attempt_meta = meta_for(attempt_limit, attempt_count, consumed=True)
             if attempt_count > attempt_limit:
-                raise AttendanceAttemptLimitReachedException(attempt_limit)
+                exc = AttendanceAttemptLimitReachedException(attempt_limit)
+                exc.details = attempt_meta.to_details()
+                raise exc
 
         try:
             await self._require_face_enrollment(student)
@@ -537,10 +555,18 @@ class AttendanceService:
                 score,
                 review_reason,
                 geofence_details,
+                attempt_meta,
             )
         except AppException as exc:
-            if remaining is not None and "remaining" not in (exc.message or ""):
-                exc.message = f"{exc.message} ({remaining} attempts remaining)"
+            if attempt_meta is not None:
+                # Machine-readable attempt state for this request's outcome
+                # (authoritative; the message suffix below stays only as the
+                # legacy human-readable carrier during the contract rollout).
+                exc.details = attempt_meta.to_details()
+                if "remaining" not in (exc.message or ""):
+                    exc.message = (
+                        f"{exc.message} ({attempt_meta.remaining} attempts remaining)"
+                    )
             raise
 
     async def precheck_scan(
@@ -592,10 +618,8 @@ class AttendanceService:
         attempt_count: int = 0
         if attempt_limit > 0:
             attempt_count = await self._get_attempt_count(student.id, db_session.id)
-            remaining: int | None = max(0, attempt_limit - attempt_count)
             limit_reached: bool = attempt_count >= attempt_limit
         else:
-            remaining = None
             limit_reached = False
 
         return PrecheckResponse(
@@ -604,7 +628,9 @@ class AttendanceService:
             retake_available=retake_available,
             attendance_attempt_limit=attempt_limit,
             attempts_used=attempt_count,
-            attempts_remaining=remaining,
+            # Same single definition the scan path reports from, so precheck
+            # can never diverge from scan/verify-code numbers.
+            attempts_remaining=remaining_after(attempt_limit, attempt_count),
             limit_reached=limit_reached,
             student={
                 "student_id": student.student_id,

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.security import build_qr_payload, generate_session_code
 from core.timezones import resolve_timezone
+from features.attendance.attempt_meta import AttemptMeta, meta_for
 from features.attendance.exceptions import AttendanceAttemptLimitReachedException
 from features.attendance.model import Attendance, AttendanceAttemptCounter
 from features.course.exceptions import (
@@ -956,8 +957,14 @@ class SessionService:
             # access.
             raise SessionNotFoundException(row.id)
 
-        # Block students who have exhausted the per-session attempt cap.
+        # Block students who have exhausted the per-session attempt cap, and
+        # report the caller's attempt state in the response. Read-only:
+        # verify_code consumes nothing, so the exhaustion raise carries
+        # consumed=False while submit_scan's own rejection reports True.
         limit: int = getattr(row, "attendance_attempt_limit", 0) or 0
+        attempts_used: int | None = None
+        meta: AttemptMeta | None = None
+        limit_reached: bool = False
         if user_id is not None and limit > 0:
             student: Student | None = await self._session.scalar(
                 select(Student).where(Student.user_id == user_id).limit(1)
@@ -972,8 +979,12 @@ class SessionService:
                     )
                     or 0
                 )
-                if limit > 0 and attempt_count >= limit:
-                    raise AttendanceAttemptLimitReachedException(limit)
+                meta = meta_for(limit, attempt_count, consumed=False)
+                if attempt_count >= limit:
+                    exc = AttendanceAttemptLimitReachedException(limit)
+                    exc.details = meta.to_details()
+                    raise exc
+                attempts_used = attempt_count
 
         return VerifyCodeResponse(
             session_id=row.id,
@@ -981,7 +992,12 @@ class SessionService:
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
-            attendance_attempt_limit=getattr(row, "attendance_attempt_limit", 0) or 0,
+            attendance_attempt_limit=limit,
+            attempts_used=attempts_used,
+            # Same single definition the scan path reports from; None when
+            # unlimited or the caller has no resolvable student row.
+            attempts_remaining=meta.remaining if meta is not None else None,
+            limit_reached=limit_reached,
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,
