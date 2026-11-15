@@ -118,8 +118,14 @@ export const toScanMessage = (error: unknown, fallback: string, remaining?: numb
 		}
 		if (error.code && SCAN_ERROR_MESSAGES[error.code]) {
 			const base = SCAN_ERROR_MESSAGES[error.code];
-			if (remaining !== undefined && remaining !== null && !base.includes('remaining')) {
-				return `${base} (${remaining} attempts remaining)`;
+			const effectiveRemaining =
+				remaining ?? (error.code === 'attendance_attempt_limit_reached' ? 0 : undefined);
+			if (
+				effectiveRemaining !== undefined &&
+				effectiveRemaining !== null &&
+				!base.includes('remaining')
+			) {
+				return `${base} (${effectiveRemaining} attempts remaining)`;
 			}
 			return base;
 		}

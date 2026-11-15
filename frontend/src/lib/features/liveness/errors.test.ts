@@ -22,6 +22,30 @@ describe('toScanMessage', () => {
 		expect(toScanMessage(err, fallback, null)).toBe(SCAN_ERROR_MESSAGES.face_mismatch);
 	});
 
+	it('appends 0 attempts remaining for exhaustion', () => {
+		const err = new APIError('attendance_attempt_limit_reached', 'limit reached');
+		expect(toScanMessage(err, fallback, 0)).toBe(
+			`${SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached} (0 attempts remaining)`
+		);
+	});
+
+	it('defaults exhaustion to 0 attempts remaining when remaining is omitted', () => {
+		const err = new APIError('attendance_attempt_limit_reached', 'limit reached');
+		expect(toScanMessage(err, fallback)).toBe(
+			`${SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached} (0 attempts remaining)`
+		);
+	});
+
+	it('returns a single normalized remaining-attempt suffix for exhaustion errors', () => {
+		const err = new APIError(
+			'attendance_attempt_limit_reached',
+			'Maximum of 3 attendance attempts reached for this session (0 attempts remaining)'
+		);
+		expect(toScanMessage(err, fallback, 0)).toBe(
+			`${SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached} (0 attempts remaining)`
+		);
+	});
+
 	it('returns closed copy for 410 status with unknown code', () => {
 		const err = new APIError('some_unknown_code', 'gone', undefined, 410);
 		expect(toScanMessage(err, fallback)).toBe('This session has closed for scanning.');

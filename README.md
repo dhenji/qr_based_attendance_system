@@ -129,8 +129,10 @@ session is `closed`. Scanned students keep their server-decided status.
 > (default from `DEFAULT_ATTENDANCE_ATTEMPT_LIMIT`, 0 = unlimited). Every scan
 > attempt — including face-mismatch, liveness, and geofence failures — increments a
 > durable counter; once the cap is reached the scan is rejected with
-> `409 attendance_attempt_limit_reached`. The admin default is configurable via
-> `PATCH /admin/system/settings`.
+> `409 attendance_attempt_limit_reached` (and the response/UI message indicates
+> `(0 attempts remaining)`). Scan/verification errors for limited sessions include
+> the remaining attempt count where applicable. The admin default is configurable
+> via `PATCH /admin/system/settings`.
 
 | #   | Layer                   | What It Prevents                                                   | CS Concept                                  |
 | --- | ----------------------- | ------------------------------------------------------------------ | ------------------------------------------- |

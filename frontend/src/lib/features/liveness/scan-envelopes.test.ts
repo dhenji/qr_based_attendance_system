@@ -27,6 +27,22 @@ describe("scan error envelopes -> toScanMessage", () => {
     expect(toScanMessage(err, fallback)).toContain("already been recorded");
   });
 
+  it("attempt exhaustion envelope defaults to 0 attempts remaining", async () => {
+    const r = resp(409, {
+      detail: {
+        code: "attendance_attempt_limit_reached",
+        message:
+          "Maximum of 3 attendance attempts reached for this session (0 attempts remaining)",
+      },
+    });
+    const err = await parseError(r);
+    expect(err.code).toBe("attendance_attempt_limit_reached");
+    expect(err.status).toBe(409);
+    expect(toScanMessage(err, fallback)).toBe(
+      `${SCAN_ERROR_MESSAGES.attendance_attempt_limit_reached} (0 attempts remaining)`,
+    );
+  });
+
   it("FastAPI 422 list becomes validation_error", async () => {
     const r = resp(422, {
       detail: [

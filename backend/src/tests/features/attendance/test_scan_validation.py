@@ -29,12 +29,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings
 from features.attendance.exceptions import (
     AttendanceAttemptLimitReachedException,
+    AttendanceDomainException,
     FaceMismatchException,
     LivenessFailedException,
     OutsideGeofenceException,
     StudentNumberMismatchException,
 )
-from features.attendance.model import Attendance
+from features.attendance.model import Attendance, AttendanceAttemptCounter
 from features.attendance import service as attendance_service
 from features.attendance.schema import (
     GPSInput,
@@ -1840,3 +1841,45 @@ def test_gps_input_rejects_zero_accuracy() -> None:
 
     with pytest.raises(ValidationError):
         GPSInput(lat=14.0, lng=121.0, accuracy=0.0)
+
+
+async def test_persist_scan_exception_receives_remaining_suffix(
+    test_db_session: AsyncSession,
+    factories: Factories,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persistence-path AppExceptions must include remaining attempts."""
+    stack: dict[str, Any] = await seed(factories, duration_minutes=200)
+    stack["session"].attendance_attempt_limit = 2
+    student = stack["student"]
+    service = AttendanceService(test_db_session, settings)
+
+    async def boom(*args: Any, **kwargs: Any) -> None:
+        raise AttendanceDomainException(
+            message="Persist failed", code="persist_failed"
+        )
+
+    monkeypatch.setattr(service, "_persist_scan", boom)
+
+    with pytest.raises(AttendanceDomainException) as excinfo:
+        await service.submit_scan(
+            user_id=stack["student"].user_id,
+            payload=scan_request(
+                stack["session"],
+                student.student_id,
+                scanned_at=stack["session"].created_at + timedelta(minutes=20),
+            ),
+        )
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.code == "persist_failed"
+    assert excinfo.value.message == "Persist failed (1 attempts remaining)"
+
+    attempts = await test_db_session.scalar(
+        select(AttendanceAttemptCounter.attempts).where(
+            AttendanceAttemptCounter.student_id == student.id,
+            AttendanceAttemptCounter.session_id == stack["session"].id,
+        )
+    )
+    assert attempts == 1
