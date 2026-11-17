@@ -86,9 +86,25 @@ import { getSessionPolicy } from '$lib/features/auth/service';
 	// the next full page unload.
 	let notifAlive = true;
 	let idleWarning = $state(false);
+	// True once the idle timeout has fired and the sign-out is in progress; the
+	// warning modal switches to an end-state copy until the navigation unmounts
+	// the layout, so the dialog never blinks out of existence unexplained.
+	let idleSigningOut = $state(false);
 	let idleCleanup: (((() => void) & { reset?: () => void }) | null) = null;
 	let tokenSyncCleanup: (() => void) | null = null;
-let visibilityHandler: (() => void) | null = null;
+	let visibilityHandler: (() => void) | null = null;
+
+	// Shared by the env-fallback watcher and the policy-driven replacement so
+	// both stay in sync. Idle timeout lands on the login page with a reason —
+	// never the landing page, which reads as "nothing happened".
+	const onIdleWarning = () => {
+		idleWarning = true;
+	};
+	const onIdleSignOut = () => {
+		idleWarning = true;
+		idleSigningOut = true;
+		void doLogout(`${Routes.LOGIN}?reason=idle`);
+	};
 
 	onMount(async () => {
 		const user = await restoreSession();
@@ -111,13 +127,8 @@ let visibilityHandler: (() => void) | null = null;
 			idleCleanup = startIdleWatcher({
 				timeoutMs: (Number(import.meta.env.PUBLIC_IDLE_TIMEOUT_MINUTES) || 30) * 60 * 1000,
 				warningMs: (Number(import.meta.env.PUBLIC_IDLE_WARNING_MINUTES) || 2) * 60 * 1000,
-				onWarning: () => {
-					idleWarning = true;
-				},
-				onIdle: async () => {
-					idleWarning = false;
-					await doLogout();
-				}
+				onWarning: onIdleWarning,
+				onIdle: onIdleSignOut
 			});
 
 			tokenSyncCleanup = startTokenSync({
@@ -142,13 +153,8 @@ let visibilityHandler: (() => void) | null = null;
 				idleCleanup = startIdleWatcher({
 					timeoutMs: policy.idle_timeout_minutes * 60 * 1000,
 					warningMs: policy.idle_warning_minutes * 60 * 1000,
-					onWarning: () => {
-						idleWarning = true;
-					},
-					onIdle: async () => {
-						idleWarning = false;
-						await doLogout();
-					}
+					onWarning: onIdleWarning,
+					onIdle: onIdleSignOut
 				});
 			})
 			.catch(() => {
@@ -339,11 +345,17 @@ let visibilityHandler: (() => void) | null = null;
 {#if idleWarning}
 	<div class="modal-overlay" role="presentation">
 		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="idle-title" tabindex="-1">
-			<h2 id="idle-title" class="modal-title">Session expiring</h2>
-			<p class="modal-text">You have been inactive. You will be signed out shortly.</p>
-			<div class="modal-actions">
-				<button class="btn btn-ghost" onclick={() => { idleWarning = false; idleCleanup?.reset?.(); }}>Stay signed in</button>
-			</div>
+			<h2 id="idle-title" class="modal-title">{idleSigningOut ? 'Signed out' : 'Session expiring'}</h2>
+			<p class="modal-text">
+				{idleSigningOut
+					? 'You were signed out due to inactivity. Taking you to sign in…'
+					: 'You have been inactive. You will be signed out shortly.'}
+			</p>
+			{#if !idleSigningOut}
+				<div class="modal-actions">
+					<button class="btn btn-ghost" onclick={() => { idleWarning = false; idleCleanup?.reset?.(); }}>Stay signed in</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

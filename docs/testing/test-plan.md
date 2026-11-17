@@ -300,6 +300,7 @@
 | SH-AU-6 | ADR-053     | Turnstile captcha key-gating                            | No `TURNSTILE_SECRET_KEY` (dev)    | Login / forgot-password step 1 with and without `turnstile_token` | Pass-through (no enforcement) with empty key; with key set: valid token passes, invalid token → 400 `invalid_captcha` |
 | SH-AU-7 | ADR-054     | MFA backup codes                                       | User with MFA enabled              | Generate backup codes → logout → login + MFA via backup code | 10 single-use codes returned once; a code verifies MFA once and is rejected on reuse; regenerating invalidates old codes |
 | SH-AU-8 | —           | Password policy incl. symbol                           | Register / change / reset password | Submit password without a symbol                 | Rejected (policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol — wireframes.md:1903)                           |
+| SH-AU-9 | —           | Session-expiry redirects land on `/auth/login` with a reason | Logged into any portal          | A: let the idle timer fire (shortened `IDLE_TIMEOUT_MINUTES_*` + `IDLE_WARNING_MINUTES`); B: corrupt `attendly_refresh_token` in localStorage (or change the password in another session) then trigger any authenticated request; C: sign out in a second tab | A → `/auth/login?reason=idle` (never the landing page), and the warning modal flips to its "Signed out" end-state (Stay signed in hidden) instead of vanishing; B → transparent refresh fails, tokens cleared, `/auth/login?reason=session_expired`; C → the other tab lands on `?reason=signed_out_elsewhere`; the login page renders the matching notice for each reason |
 
 ---
 
@@ -317,6 +318,7 @@
 | SEC-8  | Embedding tampering      | D28, D29      | Client modifies cached embedding              | Tamper with IndexedDB data                          | Scan flow                        | **N/A** — the scan never reads a cached embedding; no comparison exists, so there is nothing to tamper with.                                                                  |
 | SEC-9  | Backup encryption        | D39           | Backup file accessed without key              | Obtain backup file; attempt pg_restore without key  | Restore attempt                  | Decryption fails; data inaccessible without AES-256-GCM key                                                                                                                   |
 | SEC-10 | Rate limiting            | —             | Brute-force login attempts                    | 10+ failed login attempts in rapid succession       | Continue attempting login        | Account locked; rate limit enforced                                                                                                                                           |
+| SEC-11 | Native browser auth popup | —            | 401 must never carry `WWW-Authenticate`       | Any protected route; no auth header, then a corrupt JWT | Call the route without `Authorization`, then with `Bearer not-a-jwt` | 401 is JSON-only — `{"detail": {"code", "message"}}` with `code` = `missing_token` (no header) or `invalid_token` (corrupt JWT) — and carries no `WWW-Authenticate` header, so the browser never raises its native auth dialog; the SPA owns the failure UX (`/auth/login?reason=session_expired`). Automated in `backend/src/tests/test_unauthorized_response_headers.py` |
 
 ---
 
@@ -454,3 +456,11 @@ BACKUP_ENCRYPTION_KEY=<test-key>
 Tests must validate that changing these env vars shifts the corresponding thresholds
 (e.g., setting `RISK_ABSENCE_RATE_HIGH=0.20` should flag students at 21% absence
 as high-risk instead of waiting for 31%).
+
+Shorten the idle/token timers for the manual session-expiry tests (`SH-AU-9`):
+set the relevant role's `IDLE_TIMEOUT_MINUTES_*` with `IDLE_WARNING_MINUTES`
+below it to walk the idle-warning → timeout redirect (`?reason=idle`), or
+shorten `ACCESS_TOKEN_EXPIRE_MINUTES` on its own to force the transparent-refresh
+path (`?reason=session_expired`). Shorten only one group at a time — a short
+access token makes a concurrently short idle timer expire via refresh first,
+changing which redirect reason is under test.

@@ -153,7 +153,7 @@ session is `closed`. Scanned students keep their server-decided status.
 - Idle session policy is **backend-owned** and role-based (student 45 min, professor 30 min, admin 15 min by default), exposed via `GET /auth/session-policy`. The frontend mirrors it for the warning modal/countdown; `PUBLIC_IDLE_*` are early-load fallbacks only.
 - Server-side idle enforcement rejects requests whose `last_activity_at` exceeds the configured window; `last_activity_at` is updated on login and refresh.
 - Logout and security-sensitive changes (password change/reset, MFA disable, admin deactivation, lockout actions) increment `token_version`, invalidating all outstanding JWTs. `POST /auth/logout` revokes server-side; the client refreshes the access token first if needed so revocation still succeeds after expiry.
-- Cross-tab logout shows "You were signed out in another tab."
+- Idle timeout signs the user out and lands on `/auth/login?reason=idle` with a notice; an unrecoverable refresh (expired or revoked refresh token) redirects same-tab to `/auth/login?reason=session_expired`; a sign-out in another tab lands on `/auth/login?reason=signed_out_elsewhere`.
 - Tokens are stored in `localStorage` (see `docs/architecture/security-model.md` for XSS exposure and revocation details).
 
 ## Features

@@ -67,7 +67,7 @@
 			<div class="hero-actions">
 				{#if isAuthenticated()}
 					<a class="btn-primary" href={authLink()}>Go to {authLabel()}</a>
-					<button class="btn-ghost" onclick={doLogout}>Logout</button>
+					<button class="btn-ghost" onclick={() => doLogout()}>Logout</button>
 				{:else}
 					<a class="btn-primary" href="/auth/login">Login to your account</a>
 					<a class="btn-ghost" href="/auth/register">Create an account</a>

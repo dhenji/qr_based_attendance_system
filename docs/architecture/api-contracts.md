@@ -1586,7 +1586,13 @@ backup retention pruning never touches them.
 Phase 2 auth surface. Schemas live in `backend/src/features/auth/schema.py`.
 The register is an exact-one roster match and captures the security question;
 login applies the OTP + MFA gates; refresh returns tokens in the body; accounts
-lock after 5 failed attempts.
+lock after 5 failed attempts. Every 401 is a JSON body — `detail` carrying
+`code` + `message` (`missing_token` / `invalid_token` from the shared auth
+dependency) — and never a `WWW-Authenticate` header: the browser must not raise
+its native auth dialog, so the SPA owns the auth-failure UX (transparent
+refresh, then a redirect to `/auth/login?reason=session_expired`; the login page
+also renders `?reason=idle` and `?reason=signed_out_elsewhere` notices). Header
+regression: `backend/src/tests/test_unauthorized_response_headers.py`.
 
 | Method | Path                               | Purpose                                              |
 | Errors |
