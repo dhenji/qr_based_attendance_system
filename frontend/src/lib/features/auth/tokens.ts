@@ -60,6 +60,33 @@ export const hydrateTokens = (): void => {
 	setAuthToken(getAccessToken());
 };
 
+// Session-ended notification — fired when the refresh flow concludes the
+// session is unrecoverable (the backend rejected the refresh token: expired,
+// revoked via token-version bump, or a malformed response) and clears the
+// stored tokens. The auth store registers a handler to route the user back to
+// the login page with a reason; navigation stays out of this module (and the
+// store import out of here — circular-import guard, same trick as the client's
+// setUnauthorizedHandler).
+let sessionEndedHandler: (() => void) | null = null;
+
+export const setSessionEndedHandler = (handler: (() => void) | null): void => {
+	sessionEndedHandler = handler;
+};
+
+// Explicit logout suppresses the notification: a refresh failure inside
+// doLogout is not an unexpected session end (the session is going away either
+// way), and doLogout itself decides where to send the user.
+let sessionEndedSuppressed = false;
+
+export const setSessionEndedSuppressed = (suppressed: boolean): void => {
+	sessionEndedSuppressed = suppressed;
+};
+
+const notifySessionEnded = (): void => {
+	if (sessionEndedSuppressed) return;
+	sessionEndedHandler?.();
+};
+
 // In-flight refresh, shared so parallel 401s trigger exactly one round trip.
 let refreshInFlight: Promise<string | null> | null = null;
 
@@ -102,6 +129,7 @@ const exchangeRefreshToken = async (): Promise<string | null> => {
 				// Any HTTP failure here means the refresh credential is unusable,
 				// so drop the session. (Network failures throw and skip this.)
 				clearTokens();
+				notifySessionEnded();
 				return null;
 			}
 
@@ -109,12 +137,14 @@ const exchangeRefreshToken = async (): Promise<string | null> => {
 				response = (await res.json()) as TokenResponse;
 			} catch {
 				clearTokens();
+				notifySessionEnded();
 				return null;
 			}
 		}
 
 		if (!response.access_token) {
 			clearTokens();
+			notifySessionEnded();
 			return null;
 		}
 
@@ -130,6 +160,7 @@ const exchangeRefreshToken = async (): Promise<string | null> => {
 		// alone so the next attempt can still succeed.
 		if (error instanceof APIError) {
 			clearTokens();
+			notifySessionEnded();
 		}
 		return null;
 	} finally {

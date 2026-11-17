@@ -9,7 +9,7 @@ Core tooling (from README):
 - Python 3.12+
 - Node.js 22+ (`.npmrc` sets `engine-strict=true`)
 - Docker & Docker Compose (required for this workflow)
-- Git (feature branch `feat/dev-tunnel-cloudflare`)
+- Git
 
 Tunnel/demo tooling:
 
@@ -31,7 +31,7 @@ Runtime configuration (demo env, gitignored):
 ## 1. Start the stack with the tunnel
 
 ```bash
-docker compose -f docker-compose.dev.yml --profile tunnel up --build
+docker compose -f docker-compose.demo.yml --profile tunnel up --build
 ```
 
 This starts Postgres, migrations, the API, the frontend, and the Cloudflare
@@ -48,7 +48,7 @@ curl -s http://localhost:8000/health   # {"status":"ok"}
 Get the public URL from the tunnel container logs:
 
 ```bash
-docker compose -f docker-compose.dev.yml logs -f tunnel
+docker compose -f docker-compose.demo.yml logs -f tunnel
 ```
 
 Copy the `https://<random>.trycloudflare.com` URL.
@@ -66,21 +66,23 @@ Copy the `https://<random>.trycloudflare.com` URL.
 
 ## 3. Configure the backend for the demo
 
-In `backend/.env` (gitignored) or the compose `api` service env:
+Secrets live in `backend/.env.demo` (gitignored) — the demo compose `api` and
+`migrate` services load it via `env_file`:
 
 ```env
-CORS_ORIGINS=http://localhost:5173,https://<tunnel-host>
-TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
-DEBUG=false
 JWT_SECRET=<strong-random>
-SCHEDULER_ENABLED=false
-BENCHMARK_MODE=false
 ```
 
-Restart the `api` service after changing env. `DEBUG=false` requires a real
-`JWT_SECRET`.
+The compose pins the demo-safe runtime values in its `environment:` blocks
+(those override the file): `DEBUG=false`, `SCHEDULER_ENABLED=false`,
+`BENCHMARK_MODE=false`, `CORS_ORIGINS=http://localhost:5173`,
+`TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128`. The Vite proxy rewrites the Origin
+header, so the tunnel hostname needs no CORS entry (see Runtime configuration
+above). Restart the `api` service after editing the file:
+`docker compose -f docker-compose.demo.yml up -d api`. `DEBUG=false` requires a
+real `JWT_SECRET`.
 
-## 3. Seed demo data and rosters (aligns with demo/README.md)
+## 4. Seed demo data and rosters (aligns with demo/README.md)
 
 1. Migrate the database (automatic via the `migrate` service when using
    `docker-compose.demo.yml`).
@@ -101,13 +103,13 @@ Restart the `api` service after changing env. `DEBUG=false` requires a real
    delivered by SMTP (because `DEBUG=false` in the demo compose). With no SMTP
    configured, codes are not logged and cannot be delivered.
 
-## 4. Prepare demo content
+## 5. Prepare demo content
 
 - Enroll faces for any student who will scan.
 - Open sessions with `geofence_enabled=false` when participants are remote.
 - Use seeded demo accounts only; never real student data.
 
-## 5. Test from an external device
+## 6. Test from an external device
 
 Use a phone on mobile data (not the demo machine's Wi-Fi):
 
@@ -116,7 +118,7 @@ Use a phone on mobile data (not the demo machine's Wi-Fi):
 3. Open a session and scan (GPS + face).
 4. Confirm the attendance record appears on the professor view.
 
-## 6. Teardown
+## 7. Teardown
 
 1. Stop the compose stack (this also stops the tunnel container).
 2. Disable/rotate demo credentials; clear demo data if required.

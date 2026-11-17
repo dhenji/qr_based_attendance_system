@@ -31,6 +31,8 @@ import {
 	hydrateTokens,
 	refreshAccessToken,
 	scheduleProactiveRefresh,
+	setSessionEndedHandler,
+	setSessionEndedSuppressed,
 	setTokens,
 } from '$lib/features/auth/tokens';
 import { resetStudentState } from '$lib/features/student/store.svelte';
@@ -438,21 +440,10 @@ export const doChangePassword = async (
 	});
 };
 
-export const doLogout = async (): Promise<void> => {
-	cancelProactiveRefresh();
-	// Best-effort: ensure a valid access token exists so the backend can revoke.
-	try {
-		await refreshAccessToken();
-	} catch {
-		// ignore
-	}
-	try {
-		await logout();
-	} catch {
-		// Best-effort server-side revocation; always clear locally.
-	}
-	clearTokens();
-	endSession();
+// Wipe every per-account cache when the session ends. Shared by the explicit
+// logout and the session-ended flow so an unexpected sign-out leaves the same
+// clean slate a deliberate one does.
+const clearSessionData = (): void => {
 	// Account data must not survive a logout on shared devices: each store
 	// re-inits for the next login, and stale caches otherwise keep (or
 	// briefly serve) the previous user's profile, rosters, and course lists
@@ -467,8 +458,50 @@ export const doLogout = async (): Promise<void> => {
 	resetAdminCoursesStates();
 	resetAdminOfferingsStates();
 	invalidateAttendanceDirectory();
-	await goto(Routes.HOME);
 };
+
+export const doLogout = async (redirectTo: string = Routes.HOME): Promise<void> => {
+	cancelProactiveRefresh();
+	// Suppress the session-ended redirect while we work: a refresh failure in
+	// here is not an unexpected session end (the session is going away either
+	// way), and doLogout owns the destination.
+	setSessionEndedSuppressed(true);
+	try {
+		// Best-effort: ensure a valid access token exists so the backend can revoke.
+		try {
+			await refreshAccessToken();
+		} catch {
+			// ignore
+		}
+		try {
+			await logout();
+		} catch {
+			// Best-effort server-side revocation; always clear locally.
+		}
+	} finally {
+		setSessionEndedSuppressed(false);
+	}
+	clearTokens();
+	endSession();
+	clearSessionData();
+	await goto(redirectTo);
+};
+
+// Same-tab counterpart of the layouts' cross-tab onCleared redirect: the
+// refresh flow has declared the session unrecoverable (expired or revoked
+// refresh token, token-version bump), so clear everything doLogout clears and
+// land on the login page with an explanation — instead of leaving the user on
+// a page full of failing requests. Guarded on 'authenticated' so an in-flight
+// restore or an already-anonymous state never double-navigates (the layout
+// gate and restoreSession's own null path handle those).
+const handleSessionEnded = async (): Promise<void> => {
+	if (authState.status !== 'authenticated') return;
+	endSession();
+	clearSessionData();
+	await goto(`${Routes.LOGIN}?reason=session_expired`);
+};
+
+if (browser) setSessionEndedHandler(() => { void handleSessionEnded(); });
 
 // --- MFA ---------------------------------------------------------------------
 //

@@ -57,6 +57,10 @@ let error = $state('');
 		if (reason === 'signed_out_elsewhere' || flag) {
 			error = 'You were signed out in another tab.';
 			if (flag) sessionStorage.removeItem('attendly_signed_out_elsewhere');
+		} else if (reason === 'idle') {
+			error = 'You were signed out after a period of inactivity. Please sign in again.';
+		} else if (reason === 'session_expired') {
+			error = 'Your session has expired. Please sign in again.';
 		}
 	});
 

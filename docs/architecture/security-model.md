@@ -132,7 +132,7 @@ exposure; it is not a way to kick an existing session out.
 - Access tokens expire after 15 minutes; refresh tokens after 7 days. The client transparently refreshes on 401 and retries once; concurrent 401s share a single in-flight refresh.
 - Idle timeout is backend-owned and role-based (student 45 min, professor 30 min, admin 15 min by default), exposed via `GET /auth/session-policy`. Server-side idle enforcement rejects requests whose `last_activity_at` exceeds the configured window.
 - Logout and security-sensitive changes increment `token_version`, invalidating all outstanding JWTs. `POST /auth/logout` revokes server-side.
-- Cross-tab logout redirects to login with `?reason=signed_out_elsewhere` and shows a notice.
+- Cross-tab logout redirects to login with `?reason=signed_out_elsewhere` and shows a notice; idle timeout and same-tab session expiry redirect to `?reason=idle` / `?reason=session_expired` respectively.
 - Tokens are stored in `localStorage` (XSS exposure). See the idle-session implementation plan for the proposed hardening.
 
 ---
@@ -144,6 +144,7 @@ exposure; it is not a way to kick an existing session out.
 - Server-side idle enforcement rejects requests whose `last_activity_at` is older than the configured window; `last_activity_at` is updated at most once per minute per account.
 - Logout and security-sensitive changes (password change/reset, MFA disable, admin deactivation, lockout actions) increment `token_version`, invalidating all outstanding JWTs.
 - Logout is best-effort server-side: the client refreshes the access token first if needed so revocation still succeeds after expiry.
+- Expiry always resolves to the login page with a reason parameter: idle timeout → `?reason=idle`, an unrecoverable refresh (expired/revoked refresh token) → `?reason=session_expired`, a sign-out in another tab → `?reason=signed_out_elsewhere`. A rejected refresh also clears tokens and notifies the auth store, which performs the same-tab redirect; 401 responses never carry `WWW-Authenticate`, so the browser's native auth dialog cannot appear.
 - There is no cross-device session list; revocation is coarse (all sessions for the account).
 
 ---
