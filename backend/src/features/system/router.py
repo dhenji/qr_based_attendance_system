@@ -5,6 +5,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from shared.enums import UserRole
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+
 from api.deps import SystemServiceDep, require_role
 from features.auth.model import User
 from features.system.constants import (
@@ -22,8 +25,6 @@ from features.system.schema import (
     SystemSettingsRead,
     SystemSettingsUpdate,
 )
-from shared.enums import UserRole
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 # This module owns /admin/system/*, /admin/backups/* and /admin/audit-logs
 # ONLY. All three paths are unique across the mounted admin routers, so one

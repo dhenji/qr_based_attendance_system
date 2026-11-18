@@ -37,6 +37,7 @@ from uuid import uuid4
 
 from core.config import Settings, get_settings
 from core.exceptions import AppException
+
 from features.excuse.constants import ALLOWED_ATTACHMENT_EXTENSIONS
 
 logger: Logger = getLogger(__name__)

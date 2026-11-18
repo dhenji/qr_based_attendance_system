@@ -7,39 +7,6 @@ from typing import Any
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.course.model import CourseOffering
-from features.program.exceptions import (
-    ProgramCodeExistsException,
-    ProgramHasOfferingsException,
-    ProgramHasStudentsException,
-    ProgramNotArchivedException,
-    ProgramNotFoundException,
-    YearLevelHasCoursesException,
-    YearLevelNotFoundException,
-    YearLevelNumberExistsException,
-    YearLevelTermInUseException,
-)
-from features.program.constants import (
-    CODE_MAX_LENGTH,
-    CODE_MIN_LENGTH,
-    DESCRIPTION_MAX_LENGTH,
-    TOTAL_YEARS_MAX,
-    TOTAL_YEARS_MIN,
-)
-from features.admin.constants import NAME_MAX_LENGTH
-from features.program.model import Program, YearLevel
-from features.student.model import Student
-from features.program.schema import (
-    ProgramCreate,
-    ProgramDetail,
-    ProgramImportError,
-    ProgramImportResult,
-    ProgramRead,
-    ProgramUpdate,
-    YearLevelCreate,
-    YearLevelRead,
-    YearLevelUpdate,
-)
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.csv_import import (
@@ -53,6 +20,40 @@ from shared.csv_import import (
 from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
+
+from features.admin.constants import NAME_MAX_LENGTH
+from features.course.model import CourseOffering
+from features.program.constants import (
+    CODE_MAX_LENGTH,
+    CODE_MIN_LENGTH,
+    DESCRIPTION_MAX_LENGTH,
+    TOTAL_YEARS_MAX,
+    TOTAL_YEARS_MIN,
+)
+from features.program.exceptions import (
+    ProgramCodeExistsException,
+    ProgramHasOfferingsException,
+    ProgramHasStudentsException,
+    ProgramNotArchivedException,
+    ProgramNotFoundException,
+    YearLevelHasCoursesException,
+    YearLevelNotFoundException,
+    YearLevelNumberExistsException,
+    YearLevelTermInUseException,
+)
+from features.program.model import Program, YearLevel
+from features.program.schema import (
+    ProgramCreate,
+    ProgramDetail,
+    ProgramImportError,
+    ProgramImportResult,
+    ProgramRead,
+    ProgramUpdate,
+    YearLevelCreate,
+    YearLevelRead,
+    YearLevelUpdate,
+)
+from features.student.model import Student
 
 PROGRAM_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn("code", normalize=strip_upper, required_reason="missing code"),

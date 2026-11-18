@@ -4,6 +4,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 
+from shared.enums import UserRole
+from shared.rate_limit import rate_limit
+
 from api.deps import SessionServiceDep, StudentServiceDep, require_role
 from features.auth.model import User
 from features.session.schema import VerifyCodeRequest, VerifyCodeResponse
@@ -17,8 +20,6 @@ from features.student.schema import (
     ScheduleResponse,
     StudentDetail,
 )
-from shared.enums import UserRole
-from shared.rate_limit import rate_limit
 
 # ALREADY MOUNTED at /api/student (see api/router.py). Student-facing routes
 # only: profile, schedule, attendance scan/history, excuse requests, face status.

@@ -41,13 +41,14 @@ from typing import Any, Iterable, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import AuditAction, AuditEntity
+
 from features.auth.model import User
 from features.course.model import Course, CourseOffering
 from features.professor.model import Professor
 from features.program.model import Program, YearLevel
 from features.student.model import Student
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 
 # --- Vocabulary -------------------------------------------------------------
 
@@ -252,7 +253,11 @@ def _term_text(value: Any) -> str:
 def _days_text(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         return "—"
-    days = [DAY_INITIALS[letter] for letter in value.strip().upper() if letter in DAY_INITIALS]
+    days = [
+        DAY_INITIALS[letter]
+        for letter in value.strip().upper()
+        if letter in DAY_INITIALS
+    ]
     return ", ".join(days) if days else value
 
 
@@ -448,7 +453,12 @@ class AuditChange:
 def _deep_equal(left: Any, right: Any) -> bool:
     if left == right:
         return True
-    if left is None or right is None or not isinstance(left, (dict, list)) or not isinstance(right, (dict, list)):
+    if (
+        left is None
+        or right is None
+        or not isinstance(left, (dict, list))
+        or not isinstance(right, (dict, list))
+    ):
         return False
     return str(left) == str(right)
 
@@ -572,18 +582,14 @@ class AuditLookups:
 
     def professor_label(self, professor_id: Any) -> str:
         professor = (
-            self.professors.get(professor_id)
-            if isinstance(professor_id, int)
-            else None
+            self.professors.get(professor_id) if isinstance(professor_id, int) else None
         )
         if professor is None:
             return f"Professor #{professor_id}"
         return _full_name(professor.first_name, professor.last_name) or professor.email
 
     def student_label(self, student_id: Any) -> str:
-        student = (
-            self.students.get(student_id) if isinstance(student_id, int) else None
-        )
+        student = self.students.get(student_id) if isinstance(student_id, int) else None
         if student is None:
             return f"Student #{student_id}"
         return f"{student.student_id} · {_full_name(student.first_name, student.last_name)}"
@@ -695,8 +701,8 @@ class AuditLabelResolver:
             for snapshot in (row.old_value, row.new_value):
                 if not snapshot:
                     continue
-                for field, target in _SNAPSHOT_ID_FIELDS.items():
-                    collected[target].update(_ids(snapshot.get(field)))
+                for field_name, target in _SNAPSHOT_ID_FIELDS.items():
+                    collected[target].update(_ids(snapshot.get(field_name)))
 
         user_ids = collected["user"]
         program_ids = collected["program"]
@@ -879,7 +885,9 @@ class AuditLabelResolver:
             return AuditSubject(
                 type=entity_type,
                 id=entity_id,
-                label=f"{code} · {name}" if code and name else code or name or f"Program #{entity_id}",
+                label=f"{code} · {name}"
+                if code and name
+                else code or name or f"Program #{entity_id}",
                 sublabel=str(snapshot.get("description") or "") or None,
             )
 
@@ -942,9 +950,7 @@ class AuditLabelResolver:
             caption = " · ".join(
                 part
                 for part in (
-                    self._program_label(program_id)
-                    if program_id is not None
-                    else "",
+                    self._program_label(program_id) if program_id is not None else "",
                     self._year_label(year_level_id)
                     if year_level_id is not None
                     else "",

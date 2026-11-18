@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from shared.enums import UserRole
+
 from tests.conftest import Factories
 
 
@@ -34,7 +35,9 @@ async def _seed(factories: Factories) -> dict[str, Any]:
 
 
 def _unenroll_path(seed: dict[str, Any], student_number: str | None = None) -> str:
-    number = student_number if student_number is not None else seed["student"].student_id
+    number = (
+        student_number if student_number is not None else seed["student"].student_id
+    )
     return f"/api/admin/offerings/{seed['offering'].id}/students/{number}"
 
 

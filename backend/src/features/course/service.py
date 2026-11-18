@@ -8,6 +8,38 @@ from typing import Any
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.csv_import import (
+    CsvColumn,
+    CsvEmailCheck,
+    CsvGroup,
+    CsvRow,
+    CsvSchema,
+    parse_import_csv,
+    strip_upper,
+)
+from shared.enums import AuditAction, AuditEntity, SessionType
+from shared.pagination import PaginatedResponse
+from shared.query import apply_if
+from shared.schedule import (
+    distinct_day_count,
+    meeting_length_minutes,
+    meeting_minutes,
+    openable_session_types,
+    term_weeks,
+)
+
+from features.course.constants import (
+    CODE_MAX_LENGTH,
+    CODE_MIN_LENGTH,
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    DURATION_MAX,
+    DURATION_MIN,
+    NAME_MAX_LENGTH,
+    UNITS_MIN,
+)
 from features.course.exceptions import (
     AssignmentAlreadyEndedException,
     ComponentExistsException,
@@ -17,9 +49,8 @@ from features.course.exceptions import (
     CourseNotArchivedException,
     CourseNotFoundException,
     EnrollmentNotFoundException,
-    OfferingAssignmentNotFoundException,
-    ProfessorNotEligibleException,
     InvalidEffectiveFromException,
+    OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingHasAssignmentsException,
     OfferingHasEnrollmentsException,
@@ -27,6 +58,7 @@ from features.course.exceptions import (
     OfferingNotArchivedException,
     OfferingNotFoundException,
     OfferingScheduleWindowException,
+    ProfessorNotEligibleException,
     ScheduleMismatchException,
     WeeklyHoursBelowUnitsException,
     WeeklyHoursExceedUnitsException,
@@ -62,49 +94,18 @@ from features.course_professor.exceptions import (
 from features.course_professor.model import CourseProfessor
 from features.course_professor.service import CourseProfessorService
 from features.enrollment.model import Enrollment
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.professor.exceptions import ProfessorNotFoundException
 from features.professor.model import Professor
-from features.excuse.exceptions import ProfessorNotAssignedException
-from features.session.exceptions import LabCoordinatesRequiredException
-from features.session.model import Session
 from features.program.exceptions import (
     ProgramNotFoundException,
     YearLevelNotFoundException,
 )
 from features.program.model import Program, YearLevel
+from features.session.exceptions import LabCoordinatesRequiredException
+from features.session.model import Session
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
-from shared.audit import record_audit
-from shared.base import BaseCRUD
-from shared.csv_import import (
-    CsvColumn,
-    CsvEmailCheck,
-    CsvGroup,
-    CsvRow,
-    CsvSchema,
-    parse_import_csv,
-    strip_upper,
-)
-from shared.enums import AuditAction, AuditEntity, SessionType
-from shared.pagination import PaginatedResponse
-from shared.query import apply_if
-from shared.schedule import (
-    distinct_day_count,
-    meeting_length_minutes,
-    meeting_minutes,
-    openable_session_types,
-    term_weeks,
-)
-from features.course.constants import (
-    CODE_MAX_LENGTH,
-    CODE_MIN_LENGTH,
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    DURATION_MAX,
-    DURATION_MIN,
-    NAME_MAX_LENGTH,
-    UNITS_MIN,
-)
 
 BULK_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn("student_id", required_reason="missing student_id"),
@@ -271,8 +272,7 @@ def _validate_course_row(row: _CourseRow) -> str | None:
         return f"invalid units for course {row.course_code}"
     if units < UNITS_MIN:
         return (
-            f"invalid units for course {row.course_code}: "
-            f"must be at least {UNITS_MIN}"
+            f"invalid units for course {row.course_code}: must be at least {UNITS_MIN}"
         )
     try:
         duration = float(row.session_duration_hours.strip())
@@ -442,9 +442,7 @@ class CourseService:
 
         return CourseRead.model_validate(course)
 
-    async def hard_delete(
-        self, *, course_id: int, actor_id: int | None = None
-    ) -> None:
+    async def hard_delete(self, *, course_id: int, actor_id: int | None = None) -> None:
         """Permanently delete an archived course with no offerings."""
         course: Course = await self._get_or_404(course_id)
 
@@ -514,9 +512,7 @@ class CourseService:
                     course_code=row.course_code,
                     course_name=row.course_name.strip(),
                     units=int(row.units.strip()),
-                    session_duration_hours=float(
-                        row.session_duration_hours.strip()
-                    ),
+                    session_duration_hours=float(row.session_duration_hours.strip()),
                 )
             )
             imported += 1
@@ -717,7 +713,10 @@ class CourseService:
         # checked, before the row is dirtied — deactivation, unrelated
         # PATCHes, and already-active rows are unaffected, including the
         # zero-meeting case, which mismatches every positive units value.
-        if bool(changes.get("is_active", offering.is_active)) and not offering.is_active:
+        if (
+            bool(changes.get("is_active", offering.is_active))
+            and not offering.is_active
+        ):
             await self._require_exact_for_activation(offering)
 
         for field, value in changes.items():
@@ -890,9 +889,9 @@ class CourseService:
             tzinfo=timezone.utc
         )
         end = (
-            datetime.combine(
-                row.effective_to + timedelta(days=1), time.min
-            ).replace(tzinfo=timezone.utc)
+            datetime.combine(row.effective_to + timedelta(days=1), time.min).replace(
+                tzinfo=timezone.utc
+            )
             if row.effective_to is not None
             else None
         )
@@ -925,9 +924,13 @@ class CourseService:
         payload: ProfessorAssignment,
         assigned_by: int,
     ) -> AssignmentRead:
-        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        # Presence check only: the helper raises 404 when the offering is gone.
+        # The returned row is intentionally unused here.
+        await self._get_offering_or_404(offering_id)
 
-        professor: Professor | None = await self._session.get(Professor, payload.professor_id)
+        professor: Professor | None = await self._session.get(
+            Professor, payload.professor_id
+        )
         if professor is None:
             raise ProfessorNotFoundException(payload.professor_id)
         if not professor.is_active:
@@ -1009,9 +1012,7 @@ class CourseService:
                 | (CourseProfessor.effective_to >= today)
             ).order_by(CourseProfessor.effective_from.desc())
 
-        rows: Sequence[CourseProfessor] = (
-            await self._session.scalars(stmt)
-        ).all()
+        rows: Sequence[CourseProfessor] = (await self._session.scalars(stmt)).all()
 
         if not rows:
             raise OfferingAssignmentNotFoundException(offering_id, professor_id)
@@ -1494,9 +1495,7 @@ class CourseService:
         """
         offering: CourseOffering = await self._get_offering_or_404(offering_id)
 
-        student: Student | None = await self._students.get_by(
-            student_id=student_number
-        )
+        student: Student | None = await self._students.get_by(student_id=student_number)
 
         if student is None:
             raise StudentNotFoundException(student_number)
@@ -1781,9 +1780,7 @@ class CourseService:
         on the activation transition; deactivation never reaches here.
         """
         course: Course = await self._get_or_404(offering.course_id)
-        active: Sequence[OfferingComponent] = await self._active_components(
-            offering.id
-        )
+        active: Sequence[OfferingComponent] = await self._active_components(offering.id)
         total_minutes = sum(
             meeting_minutes(
                 row.schedule_days, row.schedule_start_time, row.schedule_end_time
@@ -2050,9 +2047,7 @@ class CourseService:
 
         return row
 
-    async def _active_components(
-        self, offering_id: int
-    ) -> Sequence[OfferingComponent]:
+    async def _active_components(self, offering_id: int) -> Sequence[OfferingComponent]:
         return (
             await self._session.scalars(
                 select(OfferingComponent)
@@ -2074,9 +2069,7 @@ class CourseService:
         syncs to 0 (internal sync only — the API input floor of 1 still
         applies to client payloads). Flush-only, like `_mirror_single_component`.
         """
-        active: Sequence[OfferingComponent] = await self._active_components(
-            offering.id
-        )
+        active: Sequence[OfferingComponent] = await self._active_components(offering.id)
         offering.sessions_per_week = sum(
             distinct_day_count(row.schedule_days) for row in active
         )
@@ -2095,9 +2088,7 @@ class CourseService:
         is no single truth to mirror, so the columns are left untouched.
         Flush-only, like every other mutation here.
         """
-        active: Sequence[OfferingComponent] = await self._active_components(
-            offering.id
-        )
+        active: Sequence[OfferingComponent] = await self._active_components(offering.id)
 
         if len(active) != 1:
             return
@@ -2168,9 +2159,7 @@ class CourseService:
         to fit inside the *shortest* one — a mixed offering with a 90-minute
         lecture and a 45-minute lab budgets against the lab (D93).
         """
-        lengths = [
-            meeting_length_minutes(start, end) for start, end in rows
-        ]
+        lengths = [meeting_length_minutes(start, end) for start, end in rows]
 
         return min(lengths) if lengths else 0
 

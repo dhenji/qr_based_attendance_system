@@ -4,10 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
 
+from shared.enums import UserRole
+
 from api.deps import FaceEnrollmentServiceDep, require_role
 from features.auth.model import User
 from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
-from shared.enums import UserRole
 
 # This module owns /admin/face-enrollment ONLY.
 #

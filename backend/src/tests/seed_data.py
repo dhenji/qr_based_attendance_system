@@ -188,8 +188,10 @@ async def seed(
     database_url: str | None = None,
 ) -> dict[str, int]:
     from sqlalchemy import delete, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    from core.database import Base
+    from shared.enums import UserRole
+
     from features.analytics.model import StudentRiskScore
     from features.attendance.model import Attendance
     from features.auth.model import User
@@ -203,12 +205,9 @@ async def seed(
     from features.student.model import Student
     from features.sync.model import SyncQueue
     from features.system.model import BackupLog
-    from shared.enums import UserRole
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     counts = {
-        k: 0 for k in ("courses", "students", "sessions", "records",
-                       "load_sessions")
+        k: 0 for k in ("courses", "students", "sessions", "records", "load_sessions")
     }
     engine = create_async_engine(database_url or _database_url())
     maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -264,8 +263,11 @@ async def seed(
                 course, made = await _get_or_create(
                     db,
                     Course,
-                    {"course_name": name, "units": units,
-                     "session_duration_hours": hours},
+                    {
+                        "course_name": name,
+                        "units": units,
+                        "session_duration_hours": hours,
+                    },
                     course_code=code,
                 )
                 courses[code] = course
@@ -276,9 +278,7 @@ async def seed(
             for program in programs.values():
                 rows = (
                     await db.scalars(
-                        select(YearLevel).where(
-                            YearLevel.program_id == program.id
-                        )
+                        select(YearLevel).where(YearLevel.program_id == program.id)
                     )
                 ).all()
                 year_of[program.code] = {r.year_number: r for r in rows}
@@ -362,28 +362,83 @@ async def seed(
             await db.commit()
 
             assignments = [
-                ("prof.delacruz@uni.edu", ("GE101", "BSCS", 1), True,
-                 date(2026, 6, 1), None),
-                ("prof.delacruz@uni.edu", ("CS101", "BSCS", 1), True,
-                 date(2026, 6, 1), None),
-                ("prof.delacruz@uni.edu", ("CS201", "BSCS", 2), True,
-                 date(2026, 6, 1), None),
-                ("prof.delacruz@uni.edu", ("CS301", "BSCS", 3), True,
-                 date(2026, 6, 1), date(2026, 6, 20)),
-                ("prof.santos@uni.edu", ("CS301", "BSCS", 3), True,
-                 date(2026, 6, 22), None),
-                ("prof.santos@uni.edu", ("GE101", "BSCS", 1), False,
-                 date(2026, 6, 1), None),
-                ("prof.reyes@uni.edu", ("IT101", "BSIT", 1), True,
-                 date(2026, 6, 1), None),
-                ("prof.reyes@uni.edu", ("IT201", "BSIT", 2), True,
-                 date(2026, 6, 1), None),
-                ("prof.reyes@uni.edu", ("GE101", "BSIT", 1), True,
-                 date(2026, 6, 1), None),
-                ("prof.garcia@uni.edu", ("ECE101", "BSECE", 1), True,
-                 date(2026, 6, 1), None),
-                ("prof.garcia@uni.edu", ("GE101", "BSECE", 1), True,
-                 date(2026, 6, 1), None),
+                (
+                    "prof.delacruz@uni.edu",
+                    ("GE101", "BSCS", 1),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.delacruz@uni.edu",
+                    ("CS101", "BSCS", 1),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.delacruz@uni.edu",
+                    ("CS201", "BSCS", 2),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.delacruz@uni.edu",
+                    ("CS301", "BSCS", 3),
+                    True,
+                    date(2026, 6, 1),
+                    date(2026, 6, 20),
+                ),
+                (
+                    "prof.santos@uni.edu",
+                    ("CS301", "BSCS", 3),
+                    True,
+                    date(2026, 6, 22),
+                    None,
+                ),
+                (
+                    "prof.santos@uni.edu",
+                    ("GE101", "BSCS", 1),
+                    False,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.reyes@uni.edu",
+                    ("IT101", "BSIT", 1),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.reyes@uni.edu",
+                    ("IT201", "BSIT", 2),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.reyes@uni.edu",
+                    ("GE101", "BSIT", 1),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.garcia@uni.edu",
+                    ("ECE101", "BSECE", 1),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
+                (
+                    "prof.garcia@uni.edu",
+                    ("GE101", "BSECE", 1),
+                    True,
+                    date(2026, 6, 1),
+                    None,
+                ),
             ]
             for email, key, primary, start, end in assignments:
                 offering = offerings[key]
@@ -417,16 +472,20 @@ async def seed(
                 prog = program_cycle[i % 3]
                 prefix = {"BSCS": "24-0", "BSIT": "24-1", "BSECE": "24-2"}[prog]
                 roster.append(
-                    (f"{prefix}{9000 + i}", f"Seed{i}", f"Student{i}",
-                     "A" if i % 2 == 0 else "B")
+                    (
+                        f"{prefix}{9000 + i}",
+                        f"Seed{i}",
+                        f"Student{i}",
+                        "A" if i % 2 == 0 else "B",
+                    )
                 )
                 i += 1
 
             spec_of = {}
             for sid, first, last, section in roster:
-                spec_of[sid] = BASE_PROGRAM_OF.get(sid[:4], program_cycle[
-                    (len(spec_of)) % 3
-                ])
+                spec_of[sid] = BASE_PROGRAM_OF.get(
+                    sid[:4], program_cycle[(len(spec_of)) % 3]
+                )
 
             students: dict[str, Student] = {}
             for idx, (sid, first, last, section) in enumerate(roster):
@@ -466,9 +525,7 @@ async def seed(
                     # slot; migrate it rather than minting a second user.
                     legacy = f"{slot}@load.test"
                     row = (
-                        await db.scalars(
-                            select(User).where(User.email == legacy)
-                        )
+                        await db.scalars(select(User).where(User.email == legacy))
                     ).one_or_none()
                     if row is not None:
                         row.email = email
@@ -516,8 +573,7 @@ async def seed(
                         await _get_or_create(
                             db,
                             Enrollment,
-                            {"semester": "1st_sem",
-                             "academic_year": "2026-2027"},
+                            {"semester": "1st_sem", "academic_year": "2026-2027"},
                             student_id=student.id,
                             offering_id=offerings[key].id,
                             academic_year="2026-2027",
@@ -530,9 +586,11 @@ async def seed(
                     continue
                 offering = offerings[("GE101", prog, 1)]
                 owner = profs[
-                    {"BSCS": "prof.delacruz@uni.edu",
-                     "BSIT": "prof.reyes@uni.edu",
-                     "BSECE": "prof.garcia@uni.edu"}[prog]
+                    {
+                        "BSCS": "prof.delacruz@uni.edu",
+                        "BSIT": "prof.reyes@uni.edu",
+                        "BSECE": "prof.garcia@uni.edu",
+                    }[prog]
                 ]
                 rows = []
                 for idx, day in enumerate(GE101_DATES):
@@ -567,10 +625,13 @@ async def seed(
             await db.commit()
 
             extra_specs = [
-                (("CS101", "BSCS", 1), "prof.delacruz@uni.edu", time(9, 0),
-                 time(10, 30)),
-                (("IT101", "BSIT", 1), "prof.reyes@uni.edu", time(13, 0),
-                 time(14, 30)),
+                (
+                    ("CS101", "BSCS", 1),
+                    "prof.delacruz@uni.edu",
+                    time(9, 0),
+                    time(10, 30),
+                ),
+                (("IT101", "BSIT", 1), "prof.reyes@uni.edu", time(13, 0), time(14, 30)),
             ]
             if scale == "small":
                 for key, email, start_t, end_t in extra_specs:
@@ -620,20 +681,25 @@ async def seed(
                     if existing is not None:
                         continue
                     if scale != "small" and sid not in ABSENT_SESSIONS:
-                        status = "absent" if idx % 12 == 11 else (
-                            "late" if idx % 5 == 4 else "present"
+                        status = (
+                            "absent"
+                            if idx % 12 == 11
+                            else ("late" if idx % 5 == 4 else "present")
                         )
                     else:
-                        status = "absent" if idx in absent else (
-                            "late" if (idx * 7 + len(sid)) % 9 == 0 else "present"
+                        status = (
+                            "absent"
+                            if idx in absent
+                            else (
+                                "late" if (idx * 7 + len(sid)) % 9 == 0 else "present"
+                            )
                         )
                     db.add(
                         Attendance(
                             student_id=student.id,
                             session_id=sess.id,
-                            timestamp=sess.scheduled_start_time + timedelta(
-                                minutes=3 if status == "present" else 8
-                            ),
+                            timestamp=sess.scheduled_start_time
+                            + timedelta(minutes=3 if status == "present" else 8),
                             gps_lat=14.5995,
                             gps_lng=120.9842,
                             validation_status=status,
@@ -648,14 +714,33 @@ async def seed(
 
             if scale == "small":
                 excuses = [
-                    ("24-0006", 4, "professor", "quick",
-                     "Family emergency reported", "approved", None),
-                    ("24-0007", 6, "professor", "prof_with_evidence",
-                     "Hospitalized — attached medical cert", "approved",
-                     ["https://files.test/medical_cert.pdf"]),
-                    ("24-0009", 8, "student", "request",
-                     "Sick leave — attached BRGY certificate", "pending",
-                     ["https://files.test/brgy_cert.pdf"]),
+                    (
+                        "24-0006",
+                        4,
+                        "professor",
+                        "quick",
+                        "Family emergency reported",
+                        "approved",
+                        None,
+                    ),
+                    (
+                        "24-0007",
+                        6,
+                        "professor",
+                        "prof_with_evidence",
+                        "Hospitalized — attached medical cert",
+                        "approved",
+                        ["https://files.test/medical_cert.pdf"],
+                    ),
+                    (
+                        "24-0009",
+                        8,
+                        "student",
+                        "request",
+                        "Sick leave — attached BRGY certificate",
+                        "pending",
+                        ["https://files.test/brgy_cert.pdf"],
+                    ),
                 ]
                 for sid, sess_idx, by, via, reason, status, urls in excuses:
                     student = students[sid]
@@ -698,26 +783,38 @@ async def seed(
                 await db.commit()
 
                 enrolled_ids = {
-                    "24-0001", "24-0002", "24-0003", "24-0004", "24-0005",
-                    "24-0006", "24-0007", "24-0008", "24-0009", "24-0010",
-                    "24-0011", "24-0012", "24-0013", "24-0014",
-                    "24-1001", "24-1002", "24-1003", "24-1004", "24-1005",
-                    "24-1006", "24-1007",
+                    "24-0001",
+                    "24-0002",
+                    "24-0003",
+                    "24-0004",
+                    "24-0005",
+                    "24-0006",
+                    "24-0007",
+                    "24-0008",
+                    "24-0009",
+                    "24-0010",
+                    "24-0011",
+                    "24-0012",
+                    "24-0013",
+                    "24-0014",
+                    "24-1001",
+                    "24-1002",
+                    "24-1003",
+                    "24-1004",
+                    "24-1005",
+                    "24-1006",
+                    "24-1007",
                 }
                 for sid, student in students.items():
                     if sid in enrolled_ids:
                         student.face_embedding = b"seed-embedding-v1"
-                        student.face_enrolled_at = datetime(
-                            2026, 6, 10, tzinfo=UTC
-                        )
+                        student.face_enrolled_at = datetime(2026, 6, 10, tzinfo=UTC)
                         student.face_embedding_version = 1
                 await db.commit()
 
                 pending = (
                     await db.scalars(
-                        select(SyncQueue).where(
-                            SyncQueue.status == "pending"
-                        ).limit(1)
+                        select(SyncQueue).where(SyncQueue.status == "pending").limit(1)
                     )
                 ).one_or_none()
                 if pending is None:
@@ -730,9 +827,8 @@ async def seed(
                                     "student_id": student.id,
                                     "session_id": sess.id,
                                     "scanned_at": (
-                                        sess.scheduled_start_time + timedelta(
-                                            minutes=10
-                                        )
+                                        sess.scheduled_start_time
+                                        + timedelta(minutes=10)
                                     ).isoformat(),
                                     "gps_lat": 14.5995,
                                     "gps_lng": 120.9842,
@@ -752,8 +848,7 @@ async def seed(
                                 StudentRiskScore.student_id == student.id,
                                 StudentRiskScore.offering_id == offering.id,
                                 StudentRiskScore.semester == "1st_sem",
-                                StudentRiskScore.computed_day
-                                == date(2026, 7, 9),
+                                StudentRiskScore.computed_day == date(2026, 7, 9),
                             )
                         )
                     ).one_or_none()
@@ -766,16 +861,13 @@ async def seed(
                                 risk_probability=Decimal(prob),
                                 risk_level=level,
                                 features={"absence_rate": float(prob)},
-                                computed_at=datetime(2026, 7, 9, 2, 0,
-                                                     tzinfo=UTC),
+                                computed_at=datetime(2026, 7, 9, 2, 0, tzinfo=UTC),
                                 computed_day=date(2026, 7, 9),
                             )
                         )
                 await db.commit()
 
-                logged = (
-                    await db.scalars(select(BackupLog).limit(1))
-                ).one_or_none()
+                logged = (await db.scalars(select(BackupLog).limit(1))).one_or_none()
                 if logged is None:
                     db.add(
                         BackupLog(
@@ -842,29 +934,38 @@ def ordinal(n: int) -> str:
 
 
 def label(term: str) -> str:
-    return {"1st_sem": "1st Semester", "2nd_sem": "2nd Semester",
-            "midyear": "Midyear", "summer": "Summer"}.get(term, term)
+    return {
+        "1st_sem": "1st Semester",
+        "2nd_sem": "2nd Semester",
+        "midyear": "Midyear",
+        "summer": "Summer",
+    }.get(term, term)
 
 
 def main(argv: list[str] | None = None) -> dict[str, int]:
     parser = argparse.ArgumentParser(description="Seed the attendance database.")
     parser.add_argument(
-        "--scale", choices=sorted(SCALE_COUNTS), default="small",
+        "--scale",
+        choices=sorted(SCALE_COUNTS),
+        default="small",
         help="Seed volume (default: small)",
     )
     parser.add_argument(
-        "--reset", action="store_true",
+        "--reset",
+        action="store_true",
         help="Delete previously seeded rows before seeding",
     )
     parser.add_argument(
-        "--load-fixtures", type=int, default=0, metavar="N",
+        "--load-fixtures",
+        type=int,
+        default=0,
+        metavar="N",
         help="Create N active load sessions (SEED-LOAD-###) anchored at now "
         "and enroll the load-test students in GE101-BSCS for the run",
     )
     args = parser.parse_args(argv)
     result = asyncio.run(
-        seed(scale=args.scale, reset=args.reset,
-             load_sessions=args.load_fixtures)
+        seed(scale=args.scale, reset=args.reset, load_sessions=args.load_fixtures)
     )
     print(f"seeded scale={args.scale}: {result}")
     return result

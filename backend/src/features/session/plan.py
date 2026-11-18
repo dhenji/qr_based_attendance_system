@@ -42,6 +42,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from core.timezones import resolve_timezone
+
+from shared.enums import SessionType
+from shared.schedule import day_weekdays, meeting_length_minutes
+
 from features.course.model import Course, CourseOffering, OfferingComponent
 from features.system.constants import (
     SETTING_GEOFENCE_RADIUS,
@@ -51,8 +55,6 @@ from features.system.constants import (
     SETTING_SESSION_LATE_OPEN,
 )
 from features.system.model import AppSetting
-from shared.enums import SessionType
-from shared.schedule import day_weekdays, meeting_length_minutes
 
 # Where the plan came from.
 # - "component": the offering's active component for this session type (D77).
@@ -442,11 +444,7 @@ async def resolve_session_plan(
 
     meeting = _meeting_for(components, offering, session_type)
     component = next(
-        (
-            row
-            for row in components
-            if row.session_type == session_type.value
-        ),
+        (row for row in components if row.session_type == session_type.value),
         None,
     )
 
@@ -467,9 +465,7 @@ async def resolve_session_plan(
     if meeting is not None:
         _source, days, start, end = meeting
         meeting_minutes = meeting_length_minutes(start, end)
-        found = next_meeting(
-            days=days, start=start, end=end, now=now, zone=zone
-        )
+        found = next_meeting(days=days, start=start, end=end, now=now, zone=zone)
 
         if found is not None:
             session_date, scheduled_start, scheduled_end = found
@@ -492,9 +488,7 @@ async def resolve_session_plan(
     # found. A meeting whose days name no weekday, or whose end is not after
     # its start, resolves to no occurrence and reads as no meeting at all.
     if scheduled_start is not None:
-        source: PlanSource = (
-            "component" if component is not None else "offering_legacy"
-        )
+        source: PlanSource = "component" if component is not None else "offering_legacy"
     elif course is not None:
         source = "course_default"
     else:
@@ -517,29 +511,20 @@ async def resolve_session_plan(
     # means "follow the system default" — the offering-level columns are
     # nullable for exactly that reason.
     present_window = (
-        offering.default_present_window_minutes
-        or defaults[SETTING_PRESENT_WINDOW]
+        offering.default_present_window_minutes or defaults[SETTING_PRESENT_WINDOW]
     )
-    late_window = (
-        offering.default_late_window_minutes or defaults[SETTING_LATE_WINDOW]
-    )
+    late_window = offering.default_late_window_minutes or defaults[SETTING_LATE_WINDOW]
     radius = (
-        offering.default_classroom_radius_meters
-        or defaults[SETTING_GEOFENCE_RADIUS]
+        offering.default_classroom_radius_meters or defaults[SETTING_GEOFENCE_RADIUS]
     )
 
     classroom_name = (
-        (component.classroom_name if component is not None else None)
-        or offering.classroom_name
-    )
-    classroom_lat = (
-        component.classroom_lat if component is not None else None
-    )
+        component.classroom_name if component is not None else None
+    ) or offering.classroom_name
+    classroom_lat = component.classroom_lat if component is not None else None
     if classroom_lat is None:
         classroom_lat = offering.classroom_lat
-    classroom_lng = (
-        component.classroom_lng if component is not None else None
-    )
+    classroom_lng = component.classroom_lng if component is not None else None
     if classroom_lng is None:
         classroom_lng = offering.classroom_lng
 

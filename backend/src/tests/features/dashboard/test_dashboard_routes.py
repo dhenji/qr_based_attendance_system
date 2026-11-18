@@ -31,6 +31,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import QueueStatus, UserRole
+
 from features.attendance.model import Attendance
 from features.auth.model import User
 from features.enrollment.model import Enrollment
@@ -39,7 +41,6 @@ from features.session.model import Session
 from features.student.model import Student
 from features.student.service import _meets_on
 from features.sync.model import SyncQueue
-from shared.enums import QueueStatus, UserRole
 from tests.conftest import Factories
 
 
@@ -99,9 +100,9 @@ def test_every_day_initial_maps_to_its_weekday() -> None:
         assert _meets_on(letter, day), f"{letter} should match {day:%A}"
         # And nothing else matches that day.
         others = [other for other in letters if other != letter]
-        assert not any(
-            _meets_on(other, day) for other in others
-        ), f"{letter} should not be the only match confusion-free on {day:%A}"
+        assert not any(_meets_on(other, day) for other in others), (
+            f"{letter} should not be the only match confusion-free on {day:%A}"
+        )
 
 
 def test_multi_day_schedules_match_every_listed_day() -> None:
@@ -247,7 +248,9 @@ async def test_student_dashboard_never_shows_another_student(
     their_user = theirs_graph["user"]
     their_user.email = "dash.other@isu.edu.ph"
     await factories.attendance(
-        theirs_graph["student"], theirs_graph["session"], timestamp=datetime.now(timezone.utc)
+        theirs_graph["student"],
+        theirs_graph["session"],
+        timestamp=datetime.now(timezone.utc),
     )
 
     body = (
@@ -267,9 +270,7 @@ async def test_student_dashboard_handles_an_empty_account(
     """No scans and no enrollments: zeros and empty lists, not a 500."""
     program = await factories.program()
     user = await factories.user(role=UserRole.STUDENT.value)
-    student = await factories.student(
-        year_level=await factories.year_level(program)
-    )
+    student = await factories.student(year_level=await factories.year_level(program))
     student.user_id = user.id
 
     response = await api_client.get(
@@ -333,9 +334,7 @@ async def test_professor_dashboard_counts_todays_sessions(
             scheduled_end_time=started + timedelta(minutes=30),
             expires_at=min(started + timedelta(minutes=20), now - timedelta(minutes=1)),
         )
-        await factories.attendance(
-            graph["student"], db_session, timestamp=started
-        )
+        await factories.attendance(graph["student"], db_session, timestamp=started)
 
     body = (
         await api_client.get(
@@ -387,12 +386,8 @@ async def test_professor_dashboard_excludes_yesterdays_sessions(
     # Only `full_stack`'s own session (created today) is in scope; yesterday's
     # must not be counted, and the tile list must not merely be the right length.
     assert body["sessions_today"] == 1
-    assert [tile["session_id"] for tile in body["today_sessions"]] == [
-        today_session.id
-    ]
-    assert stale.id not in {
-        tile["session_id"] for tile in body["today_sessions"]
-    }
+    assert [tile["session_id"] for tile in body["today_sessions"]] == [today_session.id]
+    assert stale.id not in {tile["session_id"] for tile in body["today_sessions"]}
 
 
 async def test_professor_dashboard_handles_a_professor_with_nothing(
@@ -449,7 +444,9 @@ async def test_professor_dashboard_avg_rate_matches_the_reports_endpoint(
 
     headers = await auth_headers(user)
     dashboard = await api_client.get("/api/professor/dashboard", headers=headers)
-    reports = await api_client.get("/api/professor/reports/all-courses", headers=headers)
+    reports = await api_client.get(
+        "/api/professor/reports/all-courses", headers=headers
+    )
 
     assert dashboard.json()["avg_rate"] == reports.json()["avg_compliance"]
 
@@ -501,7 +498,8 @@ async def test_admin_dashboard_counts_the_active_roster(
 
     body = (
         await api_client.get(
-            "/api/admin/dashboard", headers=await auth_headers(role=UserRole.ADMIN.value)
+            "/api/admin/dashboard",
+            headers=await auth_headers(role=UserRole.ADMIN.value),
         )
     ).json()
 
@@ -518,7 +516,8 @@ async def test_admin_dashboard_excludes_archived_programs(
 
     body = (
         await api_client.get(
-            "/api/admin/dashboard", headers=await auth_headers(role=UserRole.ADMIN.value)
+            "/api/admin/dashboard",
+            headers=await auth_headers(role=UserRole.ADMIN.value),
         )
     ).json()
 
@@ -542,7 +541,8 @@ async def test_admin_dashboard_counts_scans_today_and_backlog(
 
     body = (
         await api_client.get(
-            "/api/admin/dashboard", headers=await auth_headers(role=UserRole.ADMIN.value)
+            "/api/admin/dashboard",
+            headers=await auth_headers(role=UserRole.ADMIN.value),
         )
     ).json()
 
@@ -619,7 +619,8 @@ async def test_admin_dashboard_requires_an_admin(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:
     response = await api_client.get(
-        "/api/admin/dashboard", headers=await auth_headers(role=UserRole.PROFESSOR.value)
+        "/api/admin/dashboard",
+        headers=await auth_headers(role=UserRole.PROFESSOR.value),
     )
 
     assert response.status_code == 403

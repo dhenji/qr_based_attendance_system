@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.enums import UserRole, ValidationStatus
+
 from tests.conftest import Factories
 
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
@@ -105,7 +106,13 @@ async def test_export_include_masks_columns(
 
     assert response.status_code == 200
     lines = response.text.strip().splitlines()
-    assert lines[0].split(",") == ["session_id", "session_type", "name", "timestamp", "status"]
+    assert lines[0].split(",") == [
+        "session_id",
+        "session_type",
+        "name",
+        "timestamp",
+        "status",
+    ]
     assert len(lines) == 2
 
 
@@ -162,9 +169,7 @@ async def test_export_excludes_unrelated_offering(
     other_course = await factories.course()
     program_year = await factories.program()
     other_year = await factories.year_level(program_year)
-    other_offering = await factories.offering(
-        other_course, program_year, other_year
-    )
+    other_offering = await factories.offering(other_course, program_year, other_year)
     other_student = await factories.student(other_year, await factories.user())
     await factories.enrollment(other_student, other_offering)
     other_session = await factories.session(
@@ -195,9 +200,7 @@ async def test_export_requires_professor_role(
 ) -> None:
     await _teaching_setup(factories)
     student_headers = await auth_headers(await factories.user())
-    admin_headers = await auth_headers(
-        await factories.user(role=UserRole.ADMIN.value)
-    )
+    admin_headers = await auth_headers(await factories.user(role=UserRole.ADMIN.value))
     await test_db_session.commit()
 
     for headers in (student_headers, admin_headers):

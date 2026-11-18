@@ -10,7 +10,9 @@ from main import app
 _PROTECTED_ROUTE = "/api/student/dashboard"
 
 
-async def _get_without_www_authenticate(headers: dict[str, str] | None = None) -> httpx.Response:
+async def _get_without_www_authenticate(
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -37,7 +39,9 @@ async def test_missing_token_401_is_json_without_www_authenticate() -> None:
 
 async def test_invalid_token_401_is_json_without_www_authenticate() -> None:
     """The expired/corrupt-token path must not trigger the browser dialog either."""
-    response = await _get_without_www_authenticate({"Authorization": "Bearer not-a-jwt"})
+    response = await _get_without_www_authenticate(
+        {"Authorization": "Bearer not-a-jwt"}
+    )
 
     assert response.status_code == 401
     assert "www-authenticate" not in response.headers

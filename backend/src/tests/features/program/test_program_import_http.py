@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from shared.enums import UserRole
+
 from tests.conftest import Factories
 
 HEADER = "code,name,description,total_years"
@@ -38,7 +39,9 @@ async def test_import_creates_programs_and_template_downloads(
     assert listing.status_code == 200
     assert listing.json()["total"] == 2
 
-    template = await api_client.get("/api/admin/programs/import/template", headers=headers)
+    template = await api_client.get(
+        "/api/admin/programs/import/template", headers=headers
+    )
     assert template.status_code == 200
     assert template.text.strip() == HEADER
 
@@ -51,7 +54,9 @@ async def test_import_second_run_counts_duplicates(
     content = f"{HEADER}\nBSCS,BS Computer Science,,4\n".encode()
     files = {"file": ("programs.csv", content, "text/csv")}
 
-    first = await api_client.post("/api/admin/programs/import", files=files, headers=headers)
+    first = await api_client.post(
+        "/api/admin/programs/import", files=files, headers=headers
+    )
     assert first.status_code == 200
 
     second = await api_client.post(

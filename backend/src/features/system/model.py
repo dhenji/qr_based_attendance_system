@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
+
 from shared.enums import BackupKind, BackupStatus, BackupStorage
 from shared.mixins import TimestampMixin
 

@@ -33,6 +33,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import ValidationStatus
+
 from features.analytics.service import AnalyticsService
 from features.attendance.model import Attendance
 from features.attendance.schema import RecentScanItem
@@ -47,8 +49,8 @@ from features.dashboard.schema import (
     TodayScheduleEntry,
 )
 from features.enrollment.model import Enrollment
-from features.program.model import Program
 from features.professor.model import Professor
+from features.program.model import Program
 from features.reports.service import ReportsService
 from features.session.model import Session
 from features.session.service import SessionService
@@ -56,7 +58,6 @@ from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from features.student.schema import ScheduleItem
 from features.student.service import StudentService, _meets_on
-from shared.enums import ValidationStatus
 
 # How many rows the student feed shows. Matches the recent-scans default so the
 # two dashboards agree on what "recent" means.
@@ -126,7 +127,9 @@ class DashboardService:
             total_scans=await self._total_scans(student.id),
             today_schedule=[
                 _to_today_entry(item)
-                for item in (await self._students.get_schedule(user_id=user_id)).offerings
+                for item in (
+                    await self._students.get_schedule(user_id=user_id)
+                ).offerings
                 if _meets_on(item.schedule_days, today)
             ],
             recent_activity=[

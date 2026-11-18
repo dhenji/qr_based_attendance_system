@@ -13,6 +13,7 @@ import pytest
 from starlette.requests import Request
 
 from core.config import Settings
+
 from shared import rate_limit as rate_limit_module
 from shared.rate_limit import RateLimitedException, client_ip, rate_limit
 
@@ -136,7 +137,6 @@ async def test_dependency_ignores_spoofed_header_from_untrusted_peer(
 
 
 async def test_release_refunds_a_single_hit() -> None:
-    limiter = rate_limit_module._limiter
     # Use a fresh limiter to avoid cross-test state.
     from shared.rate_limit import FixedWindowLimiter
 

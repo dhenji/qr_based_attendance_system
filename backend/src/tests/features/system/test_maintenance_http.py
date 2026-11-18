@@ -17,13 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from core.scheduler import JOB_BACKUP, track
+
+from shared.enums import AuditAction, AuditEntity, QueueStatus, UserRole
+
 from features.auth.model import OtpCodes
 from features.sync.model import SyncQueue
 from features.system import service as system_service
 from features.system.exceptions import MaintenanceBusyException
 from features.system.model import AuditLog
 from features.system.service import SystemService
-from shared.enums import AuditAction, AuditEntity, QueueStatus, UserRole
 from tests.conftest import Factories
 
 FLUSH_ENDPOINT = "/api/admin/system/sync/flush"
@@ -121,9 +123,7 @@ async def test_flush_marks_orphan_rows_failed(
     test_db_session: AsyncSession,
 ) -> None:
     queued = SyncQueue(
-        record_data=_queue_payload(
-            attendance_id=999999, session_id=1, student_id=1
-        ),
+        record_data=_queue_payload(attendance_id=999999, session_id=1, student_id=1),
         status=QueueStatus.PENDING.value,
     )
     test_db_session.add(queued)
@@ -274,14 +274,12 @@ async def test_cleanup_prunes_expired_rows(
     assert response.json() == {"removed": 3}
 
     remaining_otps = sorted(
-        row.email
-        for row in (await test_db_session.scalars(select(OtpCodes))).all()
+        row.email for row in (await test_db_session.scalars(select(OtpCodes))).all()
     )
     assert remaining_otps == ["fresh@test.local", "recent@test.local"]
 
     remaining_queue = sorted(
-        row.status
-        for row in (await test_db_session.scalars(select(SyncQueue))).all()
+        row.status for row in (await test_db_session.scalars(select(SyncQueue))).all()
     )
     assert remaining_queue == [QueueStatus.DONE.value, QueueStatus.PENDING.value]
 

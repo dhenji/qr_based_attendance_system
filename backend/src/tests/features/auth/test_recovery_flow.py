@@ -14,14 +14,19 @@ from core.security import (
     decode_recovery_token,
     hash_password,
 )
-from features.auth.constants import SECURITY_QUESTION_POOL, SECURITY_RECOVERY_MAX_ATTEMPTS
+
+from shared.enums import OtpPurpose
+
+from features.auth.constants import (
+    SECURITY_QUESTION_POOL,
+    SECURITY_RECOVERY_MAX_ATTEMPTS,
+)
 from features.auth.exceptions import (
     RecoveryGrantRequiredException,
     RecoveryLockedException,
     SecurityAnswerInvalidException,
 )
 from features.auth.service import AuthService, _decoy_question
-from shared.enums import OtpPurpose
 
 QUESTION = "What was the name of your first pet?"
 
@@ -226,9 +231,7 @@ def test_unknown_email_spends_the_same_failure_budget() -> None:
 
     for _ in range(SECURITY_RECOVERY_MAX_ATTEMPTS):
         with pytest.raises(SecurityAnswerInvalidException):
-            asyncio.run(
-                service.forgot_password_step2("nobody@example.com", "bluebell")
-            )
+            asyncio.run(service.forgot_password_step2("nobody@example.com", "bluebell"))
 
     with pytest.raises(RecoveryLockedException):
         asyncio.run(service.forgot_password_step2("nobody@example.com", "bluebell"))
@@ -378,9 +381,9 @@ def _resettable_user(**kwargs):
 def test_reset_password_returns_tokens() -> None:
     record = _resettable_user()
 
-    tokens = asyncio.run(_service(record).reset_password(
-        "reset.me@example.com", "123456", "NewPass2@"
-    ))
+    tokens = asyncio.run(
+        _service(record).reset_password("reset.me@example.com", "123456", "NewPass2@")
+    )
 
     assert tokens.access_token
     assert tokens.refresh_token
@@ -391,9 +394,9 @@ def test_reset_password_returns_tokens() -> None:
 def test_reset_password_returns_mfa_challenge_when_enabled() -> None:
     record = _resettable_user(mfa_enabled=True)
 
-    tokens = asyncio.run(_service(record).reset_password(
-        "reset.me@example.com", "123456", "NewPass2@"
-    ))
+    tokens = asyncio.run(
+        _service(record).reset_password("reset.me@example.com", "123456", "NewPass2@")
+    )
 
     assert tokens.mfa_pending is True
     assert tokens.preauth_token
@@ -413,8 +416,10 @@ async def test_reset_password_route_returns_the_session(
     from datetime import datetime, timedelta, timezone
 
     from core.security import hash_otp
-    from features.auth.model import OtpCodes
+
     from shared.enums import OtpPurpose
+
+    from features.auth.model import OtpCodes
 
     email = "reset.route@isu.edu.ph"
     await factories.user(email=email, password_hash=hash_password("OldPass1!"))
@@ -446,9 +451,7 @@ def test_change_password_rejects_reused_password() -> None:
     user = _user(password_hash=hash_password("OldPass1!"))
 
     with pytest.raises(PasswordReusedException):
-        asyncio.run(
-            _service(user).change_password(user, "OldPass1!", "OldPass1!")
-        )
+        asyncio.run(_service(user).change_password(user, "OldPass1!", "OldPass1!"))
 
 
 # --- break-glass recovery code (Super Admin) -------------------------------
@@ -478,9 +481,7 @@ def test_step2_accepts_recovery_code() -> None:
     )
 
     result = asyncio.run(
-        _service(user).forgot_password_step2(
-            "u@example.com", recovery_code="BRKGLASS1"
-        )
+        _service(user).forgot_password_step2("u@example.com", recovery_code="BRKGLASS1")
     )
 
     assert result.recovery_token is not None
@@ -495,9 +496,7 @@ def test_step2_rejects_wrong_recovery_code() -> None:
 
     with pytest.raises(SecurityAnswerInvalidException):
         asyncio.run(
-            _service(user).forgot_password_step2(
-                "u@example.com", recovery_code="wrong"
-            )
+            _service(user).forgot_password_step2("u@example.com", recovery_code="wrong")
         )
 
 
@@ -524,12 +523,8 @@ def test_set_recovery_code_requires_current_password() -> None:
     user = _user(password_hash=hash_password("OldPass1!"))
 
     with pytest.raises(CurrentPasswordInvalid):
-        asyncio.run(
-            _service(user).set_recovery_code(user, "NEWCODE1", "wrong")
-        )
+        asyncio.run(_service(user).set_recovery_code(user, "NEWCODE1", "wrong"))
 
-    asyncio.run(
-        _service(user).set_recovery_code(user, "NEWCODE1", "OldPass1!")
-    )
+    asyncio.run(_service(user).set_recovery_code(user, "NEWCODE1", "OldPass1!"))
     assert user.recovery_code_hash is not None
     assert user.recovery_code_used_at is None

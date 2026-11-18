@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, status
 
+from shared.captcha import verify_turnstile_token
+from shared.rate_limit import client_ip, rate_limit
+
 from api.deps import AuthServiceDep, CurrentUserDep, OptionalUserDep
 from features.auth.exceptions import AccountLockedException
 from features.auth.schema import (
     BackupCodesResponse,
     BackupCodesSummaryResponse,
     ChangePasswordRequest,
-    PasswordRecoveryResetRequest,
-    PasswordRecoveryStartResponse,
     ForgotPasswordStep1Request,
     ForgotPasswordStep2Request,
     LoginOtpResendRequest,
@@ -21,8 +22,9 @@ from features.auth.schema import (
     MFAVerifyRequest,
     OTPRequest,
     OTPVerifyRequest,
+    PasswordRecoveryResetRequest,
+    PasswordRecoveryStartResponse,
     RecoveryGrantResponse,
-    LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -32,8 +34,6 @@ from features.auth.schema import (
     SetSecurityQuestionRequest,
     TokenResponse,
 )
-from shared.captcha import verify_turnstile_token
-from shared.rate_limit import client_ip, rate_limit
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
 router = APIRouter(prefix="/auth")

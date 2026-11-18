@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+from shared.enums import AuditAction, AuditEntity
+
 from features.professor.exceptions import (
     ProfessorHasRecordsException,
     ProfessorNotArchivedException,
@@ -13,7 +15,6 @@ from features.professor.exceptions import (
 from features.professor.model import Professor
 from features.professor.service import ProfessorService, parse_professor_roster_csv
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 

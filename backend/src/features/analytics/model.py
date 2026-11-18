@@ -18,9 +18,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
+from shared.enums import RiskLevel
+
 from features.course.model import CourseOffering
 from features.student.model import Student
-from shared.enums import RiskLevel
 
 
 class StudentRiskScore(Base):

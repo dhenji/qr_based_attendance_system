@@ -12,13 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.database import database
 from core.security import decode_access_token, extract_user_id
+
+from shared.enums import UserRole
+
 from features.admin.service import AdminService
 from features.analytics.service import AnalyticsService
 from features.attendance.service import AttendanceService
-from features.dashboard.service import DashboardService
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.course.service import CourseService
+from features.dashboard.service import DashboardService
 from features.excuse.service import ExcuseService
 from features.face_enrollment.service import FaceEnrollmentService
 from features.professor.service import ProfessorService
@@ -27,7 +30,6 @@ from features.reports.service import ReportsService
 from features.session.service import SessionService
 from features.student.service import StudentService
 from features.system.service import SystemService
-from shared.enums import UserRole
 
 settings: Settings = get_settings()
 security = HTTPBearer(auto_error=False)

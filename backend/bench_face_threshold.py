@@ -60,9 +60,13 @@ def main() -> None:
     diff_scores = _pair_scores(diff_embs)
 
     print("same-person pairs:", len(same_scores))
-    print(f"  min={min(same_scores):.4f} mean={np.mean(same_scores):.4f} max={max(same_scores):.4f}")
+    print(
+        f"  min={min(same_scores):.4f} mean={np.mean(same_scores):.4f} max={max(same_scores):.4f}"
+    )
     print("different-person pairs:", len(diff_scores))
-    print(f"  min={min(diff_scores):.4f} mean={np.mean(diff_scores):.4f} max={max(diff_scores):.4f}")
+    print(
+        f"  min={min(diff_scores):.4f} mean={np.mean(diff_scores):.4f} max={max(diff_scores):.4f}"
+    )
 
     suggested = (min(same_scores) + max(diff_scores)) / 2.0
     print(f"suggested FACE_MATCH_THRESHOLD (midpoint): {suggested:.4f}")

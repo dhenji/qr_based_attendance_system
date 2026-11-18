@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-import sqlalchemy
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,

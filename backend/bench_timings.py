@@ -74,9 +74,7 @@ class SlotAssigner:
         return slot
 
 
-def discover_session_pool(
-    *, prefix: str, dsn: str, explicit: str = ""
-) -> list[int]:
+def discover_session_pool(*, prefix: str, dsn: str, explicit: str = "") -> list[int]:
     """Session ids for the load pool, oldest first.
 
     Explicit ``"1,2,3"`` wins; otherwise one indexed lookup by session-code
@@ -117,9 +115,7 @@ asyncio.run(main())
         timeout=60,
     )
     if completed.returncode != 0:
-        raise RuntimeError(
-            f"session pool discovery failed: {completed.stderr.strip()}"
-        )
+        raise RuntimeError(f"session pool discovery failed: {completed.stderr.strip()}")
     return [int(part) for part in completed.stdout.split()]
 
 

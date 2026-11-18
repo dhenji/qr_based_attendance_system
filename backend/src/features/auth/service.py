@@ -15,12 +15,11 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
-from core.exceptions import ForbiddenException
 from core.database import database
+from core.exceptions import ForbiddenException
 from core.security import (
     LOGIN_OTP_TOKEN_TYPE,
     PREAUTH_TOKEN_TYPE,
-    RECOVERY_TOKEN_TYPE,
     REFRESH_TOKEN_TYPE,
     backup_code_fingerprint,
     create_access_token,
@@ -36,9 +35,22 @@ from core.security import (
     hash_otp,
     hash_password,
     normalize_backup_code,
+    verify_password,
 )
 from core.security import verify_otp as verify_otp_hash
-from core.security import verify_password
+
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.email import send_otp_email
+from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
+from shared.rate_limit import FixedWindowLimiter, RateLimitedException
+from shared.user_management_policy import (
+    can_manage_target,
+    can_mutate_lockout,
+    can_read_lockout,
+    hide_sensitive_fields,
+)
+
 from features.auth.constants import (
     BACKUP_CODE_COUNT,
     BACKUP_CODE_GROUPS,
@@ -54,17 +66,17 @@ from features.auth.exceptions import (
     AmbiguousAccountException,
     CurrentPasswordInvalid,
     InvalidCredentialsException,
-    InvalidOverrideDurationException,    LoginOtpLockedException,
-    PermanentAccountLockedException,
-
+    InvalidOverrideDurationException,
+    LoginOtpLockedException,
     MfaAlreadyEnabledException,
     MfaNotEnabledException,
     MfaVerifyException,
-    OtpInvalidException,
     OtpExpiredException,
+    OtpInvalidException,
     OtpMaxAttemptsException,
-    PermanentAccountLockedException,
+    PasswordPolicyException,
     PasswordReusedException,
+    PermanentAccountLockedException,
     RecoveryGrantRequiredException,
     RecoveryLockedException,
     SecurityAnswerInvalidException,
@@ -85,18 +97,6 @@ from features.auth.schema import (
 )
 from features.professor.model import Professor
 from features.student.model import Student
-from shared.audit import record_audit
-from shared.base import BaseCRUD
-from shared.email import send_otp_email
-from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
-from shared.user_management_policy import (
-    can_manage_target,
-    can_mutate_lockout,
-    can_read_lockout,
-    can_view_target,
-    hide_sensitive_fields,
-)
-from shared.rate_limit import FixedWindowLimiter, RateLimitedException
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -273,7 +273,13 @@ async def _register_failed_attempt(user_id: int, lockout_attempts: int) -> None:
                 from core.config import get_settings
 
                 table_len: int = len(
-                    [p for p in (get_settings().lockout_escalation_minutes or "").split(",") if p.strip()]
+                    [
+                        p
+                        for p in (
+                            get_settings().lockout_escalation_minutes or ""
+                        ).split(",")
+                        if p.strip()
+                    ]
                 )
             except Exception:
                 table_len = 6
@@ -321,9 +327,15 @@ class AuthService:
         actor_role: UserRole | str | None = None,
     ) -> UserRole:
         if actor_role is not None:
-            return actor_role if isinstance(actor_role, UserRole) else UserRole(actor_role)
+            return (
+                actor_role if isinstance(actor_role, UserRole) else UserRole(actor_role)
+            )
         if viewer_role is not None:
-            return viewer_role if isinstance(viewer_role, UserRole) else UserRole(viewer_role)
+            return (
+                viewer_role
+                if isinstance(viewer_role, UserRole)
+                else UserRole(viewer_role)
+            )
         if actor_id is not None:
             try:
                 user: User | None = await self._users.get(actor_id)
@@ -599,7 +611,9 @@ class AuthService:
         override_active: bool = _override_active(user)
 
         # Permanent lock: never auto-clears, even after the normal window.
-        if (user.lockout_level or 0) > _escalation_table_len(self._settings) and user.is_locked:
+        if (user.lockout_level or 0) > _escalation_table_len(
+            self._settings
+        ) and user.is_locked:
             raise PermanentAccountLockedException()
 
         if user.is_locked and user.locked_at is not None and not override_active:
@@ -765,9 +779,7 @@ class AuthService:
         and the preauth branch of `verify_mfa`.
         """
 
-        payload: dict[str, Any] | None = decode_access_token(
-            otp_token, self._settings
-        )
+        payload: dict[str, Any] | None = decode_access_token(otp_token, self._settings)
 
         if payload is None or payload.get("type") != LOGIN_OTP_TOKEN_TYPE:
             raise InvalidCredentialsException()
@@ -917,9 +929,10 @@ class AuthService:
         verified: bool = False
 
         if user is not None and getattr(user, "recovery_code_hash", None):
-            if recovery_code is not None and getattr(
-                user, "recovery_code_used_at", None
-            ) is None:
+            if (
+                recovery_code is not None
+                and getattr(user, "recovery_code_used_at", None) is None
+            ):
                 verified = verify_password(
                     (recovery_code or "").strip(), user.recovery_code_hash
                 )
@@ -939,7 +952,11 @@ class AuthService:
             raise SecurityAnswerInvalidException()
 
         # Consume a break-glass code so it cannot be reused.
-        if user is not None and getattr(user, "recovery_code_hash", None) and recovery_code is not None:
+        if (
+            user is not None
+            and getattr(user, "recovery_code_hash", None)
+            and recovery_code is not None
+        ):
             user.recovery_code_used_at = now
 
         return RecoveryGrantResponse(
@@ -980,9 +997,8 @@ class AuthService:
             raise UnrecognizedEmailException()
 
         # Super Admins must not reuse their current password on recovery.
-        if (
-            str(getattr(user, "role", "")).lower() == "super_admin"
-            and verify_password(new_password, user.password_hash)
+        if str(getattr(user, "role", "")).lower() == "super_admin" and verify_password(
+            new_password, user.password_hash
         ):
             raise PasswordReusedException()
 
@@ -997,9 +1013,7 @@ class AuthService:
             )
             .order_by(OtpCodes.id.desc())
         )
-        consumed_record: OtpCodes | None = (
-            await self._session.scalars(stmt)
-        ).first()
+        consumed_record: OtpCodes | None = (await self._session.scalars(stmt)).first()
         if consumed_record is not None and getattr(
             consumed_record, "recovery_grant_jti", None
         ):
@@ -1061,7 +1075,9 @@ class AuthService:
 
         return self._build_tokens(user)
 
-    async def start_password_recovery(self, user: User) -> PasswordRecoveryStartResponse:
+    async def start_password_recovery(
+        self, user: User
+    ) -> PasswordRecoveryStartResponse:
         """Issue a recovery grant and OTP for the authenticated user's email.
 
         The recipient is derived from the session, never from client input, so
@@ -1072,9 +1088,7 @@ class AuthService:
         normalized: str = user.email.lower()
         recovery_token: str = create_recovery_token(user.id, normalized, self._settings)
 
-        await self.request_otp(
-            normalized, OtpPurpose.FORGET_PASSWORD, recovery_token
-        )
+        await self.request_otp(normalized, OtpPurpose.FORGET_PASSWORD, recovery_token)
 
         return PasswordRecoveryStartResponse(
             recovery_token=recovery_token,
@@ -1252,7 +1266,10 @@ class AuthService:
             raise ForbiddenException()
 
         hide = hide_sensitive_fields(
-            resolved_actor_role, UserRole(user.role), actor_id=actor_id, target_id=user.id
+            resolved_actor_role,
+            UserRole(user.role),
+            actor_id=actor_id,
+            target_id=user.id,
         )
 
         now: datetime = datetime.now(timezone.utc)
@@ -1277,10 +1294,13 @@ class AuthService:
                 remaining_minutes = 1
 
         override_remaining: int | None = None
-        if user.lockout_override_until is not None and now < user.lockout_override_until:
-            override_remaining = int(
-                (user.lockout_override_until - now).total_seconds() // 60
-            ) + 1
+        if (
+            user.lockout_override_until is not None
+            and now < user.lockout_override_until
+        ):
+            override_remaining = (
+                int((user.lockout_override_until - now).total_seconds() // 60) + 1
+            )
             if override_remaining < 1:
                 override_remaining = 1
 
@@ -1390,8 +1410,13 @@ class AuthService:
         viewer_role: UserRole | str | None = None,
         actor_role: UserRole | str | None = None,
     ) -> None:
-        if duration_minutes < 1 or duration_minutes > self._settings.lockout_override_max_minutes:
-            raise InvalidOverrideDurationException(self._settings.lockout_override_max_minutes)
+        if (
+            duration_minutes < 1
+            or duration_minutes > self._settings.lockout_override_max_minutes
+        ):
+            raise InvalidOverrideDurationException(
+                self._settings.lockout_override_max_minutes
+            )
 
         user: User | None = await self._users.get(user_id)
         if user is None:
@@ -1676,10 +1701,15 @@ class AuthService:
     def _build_tokens(self, user: User) -> TokenResponse:
         return TokenResponse(
             access_token=create_access_token(
-                user.id, user.role, self._settings, token_version=getattr(user, "token_version", 0) or 0
+                user.id,
+                user.role,
+                self._settings,
+                token_version=getattr(user, "token_version", 0) or 0,
             ),
             refresh_token=create_refresh_token(
-                user.id, self._settings, token_version=getattr(user, "token_version", 0) or 0
+                user.id,
+                self._settings,
+                token_version=getattr(user, "token_version", 0) or 0,
             ),
             must_change_password=user.must_change_password,
         )

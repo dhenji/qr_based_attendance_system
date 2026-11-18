@@ -97,8 +97,7 @@ def bulk_excused(
 
     subject: str = SUBJECT_BULK_EXCUSED.format(course=course)
     body: str = (
-        f"You have been excused for {course} on {session_date}.\n\n"
-        f"Reason: {reason}"
+        f"You have been excused for {course} on {session_date}.\n\nReason: {reason}"
     )
 
     return subject, body

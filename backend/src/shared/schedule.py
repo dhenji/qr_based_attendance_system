@@ -136,12 +136,7 @@ def meeting_length_minutes(start: time, end: time) -> int:
         return 0
 
     return int(
-        (
-            end.hour * 60
-            + end.minute
-            + end.second / 60
-            + end.microsecond / 60000000
-        )
+        (end.hour * 60 + end.minute + end.second / 60 + end.microsecond / 60000000)
         - (
             start.hour * 60
             + start.minute
@@ -154,12 +149,7 @@ def meeting_length_minutes(start: time, end: time) -> int:
 def meeting_minutes(schedule_days: str, start: time, end: time) -> float:
     """Weekly minutes contributed by one meeting entry, second precision."""
     return (
-        (
-            end.hour * 60
-            + end.minute
-            + end.second / 60
-            + end.microsecond / 60000000
-        )
+        (end.hour * 60 + end.minute + end.second / 60 + end.microsecond / 60000000)
         - (
             start.hour * 60
             + start.minute

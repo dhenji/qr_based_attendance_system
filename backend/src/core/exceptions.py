@@ -68,5 +68,7 @@ class ForbiddenException(AppException):
     status_code: int = 403
     code: str = "insufficient_permissions"
 
-    def __init__(self, message: str = "You do not have permissions to access this resource") -> None:
+    def __init__(
+        self, message: str = "You do not have permissions to access this resource"
+    ) -> None:
         super().__init__(message=message)

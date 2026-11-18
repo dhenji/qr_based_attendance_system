@@ -4,6 +4,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from shared.enums import UserRole
+
 from api.deps import ProfessorServiceDep, require_role
 from features.auth.model import User
 from features.professor.schema import (
@@ -11,7 +13,6 @@ from features.professor.schema import (
     MessageResponse,
     ProfessorProfileRead,
 )
-from shared.enums import UserRole
 
 # ALREADY MOUNTED at /api/professor (see api/router.py). Professor-facing
 # self-service routes only: profile (+ password change).

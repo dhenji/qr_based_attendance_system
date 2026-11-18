@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.exceptions import AppException, DatabaseException, DomainException
+from core.exceptions import AppException, DomainException
 
 
 class AuthException(AppException):
@@ -84,7 +84,6 @@ class AccountLockedException(AuthDomainException):
         )
 
 
-
 class PermanentAccountLockedException(AppException):
     """423 - account is permanently locked; only an admin can release it."""
 
@@ -95,6 +94,7 @@ class PermanentAccountLockedException(AppException):
         super().__init__(
             message="This account has been permanently locked. Contact an administrator."
         )
+
 
 class InvalidOverrideDurationException(AuthDomainException):
     """422 - override duration outside allowed range."""
@@ -239,9 +239,7 @@ class LoginOtpLockedException(AuthDomainException):
 
     def __init__(self, retry_after_minutes: int) -> None:
         super().__init__(
-            message=(
-                "Too many incorrect codes. Start over or request a new code."
-            )
+            message=("Too many incorrect codes. Start over or request a new code.")
         )
 
 

@@ -18,6 +18,10 @@ __pycache__/
 # pytest
 .pytest_cache/
 
+# ruff lint/format cache, written by `ruff check` / `ruff format` (ADR-094;
+# the cache also self-ignores, this keeps the artifact policy explicit)
+.ruff_cache/
+
 # pytest-cov
 .coverage
 .coverage.*

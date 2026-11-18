@@ -4,8 +4,10 @@ from sqlalchemy import BigInteger, ForeignKey, String, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
-from features.auth.model import User
+
 from shared.mixins import TimestampMixin
+
+from features.auth.model import User
 
 
 class Professor(TimestampMixin, Base):

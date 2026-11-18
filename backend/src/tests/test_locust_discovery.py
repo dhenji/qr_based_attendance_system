@@ -28,10 +28,11 @@ def test_wait_accepts_user_and_returns_positive() -> None:
 
 
 def test_explicit_session_ids_skip_discovery() -> None:
-    assert (
-        discover_session_pool(prefix="X-", dsn="unused", explicit="7, 8,9")
-        == [7, 8, 9]
-    )
+    assert discover_session_pool(prefix="X-", dsn="unused", explicit="7, 8,9") == [
+        7,
+        8,
+        9,
+    ]
 
 
 def test_discovery_probe_compiles_and_parses_ids(
@@ -39,9 +40,7 @@ def test_discovery_probe_compiles_and_parses_ids(
 ) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_run(
-        argv: list[str], **kwargs: Any
-    ) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         captured["argv"] = argv
         return subprocess.CompletedProcess(
             args=argv, returncode=0, stdout="11 12 13\n", stderr=""
@@ -51,10 +50,11 @@ def test_discovery_probe_compiles_and_parses_ids(
 
     monkeypatch.setattr(bench_timings.subprocess, "run", fake_run)
 
-    assert (
-        discover_session_pool(prefix="SEED-LOAD-", dsn="postgresql://db")
-        == [11, 12, 13]
-    )
+    assert discover_session_pool(prefix="SEED-LOAD-", dsn="postgresql://db") == [
+        11,
+        12,
+        13,
+    ]
 
     import ast
 
@@ -64,9 +64,7 @@ def test_discovery_probe_compiles_and_parses_ids(
 
 
 def test_discovery_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(
-        argv: list[str], **kwargs: Any
-    ) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=argv, returncode=1, stdout="", stderr="boom"
         )

@@ -8,14 +8,15 @@ from typing import Any
 import pytest
 
 from core.config import Settings
+
 from features.attendance.model import Attendance
 from features.course.exceptions import (
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
-from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course.model import Course, CourseOffering
 from features.course_professor.model import CourseProfessor
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.session.exceptions import (
     SessionAlreadyActiveException,
     SessionNotFoundException,
@@ -25,8 +26,8 @@ from features.session.schema import SessionCreate
 from features.session.service import SessionService
 from features.student.model import Student
 from features.sync.model import SyncQueue
-
 from tests.conftest import SESSION_TEST_NOW as NOW
+
 SETTINGS = Settings(
     debug=True,
     jwt_secret="test-secret-0123456789abcdef",
@@ -213,7 +214,6 @@ def test_create_session_copies_offering_defaults() -> None:
         counts=[None],
     )
     service = SessionService(session, SETTINGS)  # type: ignore[arg-type]
-    before = datetime.now(timezone.utc)
 
     read = _run(
         service.create_session(professor_id=3, payload=SessionCreate(offering_id=10))

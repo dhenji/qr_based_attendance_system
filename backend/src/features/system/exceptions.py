@@ -75,9 +75,7 @@ class AuditFilterInvalidException(SystemDomainException):
     code: str = "invalid_audit_filter"
 
     def __init__(self, field: str, value: str) -> None:
-        super().__init__(
-            message=f"Unknown {field} '{value}'", field=field
-        )
+        super().__init__(message=f"Unknown {field} '{value}'", field=field)
 
 
 class AuditDateRangeInvalidException(SystemDomainException):

@@ -71,8 +71,7 @@ class AttendanceNotFoundException(ExcuseDomainException):
     def __init__(self, student_id: int, session_id: int) -> None:
         super().__init__(
             message=(
-                f"No attendance record for student {student_id} "
-                f"in session {session_id}"
+                f"No attendance record for student {student_id} in session {session_id}"
             )
         )
 
@@ -84,9 +83,7 @@ class ProfessorNotAssignedException(ExcuseDomainException):
     code: str = "not_assigned"
 
     def __init__(self, offering_id: int) -> None:
-        super().__init__(
-            message=f"Professor is not assigned to offering {offering_id}"
-        )
+        super().__init__(message=f"Professor is not assigned to offering {offering_id}")
 
 
 class ProfessorNotFoundException(ExcuseDomainException):
@@ -96,9 +93,7 @@ class ProfessorNotFoundException(ExcuseDomainException):
     code: str = "professor_not_found"
 
     def __init__(self, user_id: int) -> None:
-        super().__init__(
-            message=f"No professor profile found for user {user_id}"
-        )
+        super().__init__(message=f"No professor profile found for user {user_id}")
 
 
 class ExcuseNotEligibleException(ExcuseDomainException):
@@ -116,8 +111,7 @@ class ExcuseNotEligibleException(ExcuseDomainException):
     def __init__(self, student_id: int, session_id: int) -> None:
         super().__init__(
             message=(
-                f"Student {student_id} has no excusable record "
-                f"for session {session_id}"
+                f"Student {student_id} has no excusable record for session {session_id}"
             )
         )
 
@@ -130,9 +124,7 @@ class NotEnrolledException(ExcuseDomainException):
 
     def __init__(self, student_id: int, offering_id: int) -> None:
         super().__init__(
-            message=(
-                f"Student {student_id} is not enrolled in offering {offering_id}"
-            )
+            message=(f"Student {student_id} is not enrolled in offering {offering_id}")
         )
 
 
@@ -145,8 +137,7 @@ class AlreadyExcusedException(ExcuseDomainException):
     def __init__(self, student_id: int, session_id: int) -> None:
         super().__init__(
             message=(
-                f"Student {student_id} is already excused "
-                f"for session {session_id}"
+                f"Student {student_id} is already excused for session {session_id}"
             )
         )
 
@@ -158,9 +149,7 @@ class ExcuseNotPendingException(ExcuseDomainException):
     code: str = "excuse_not_pending"
 
     def __init__(self, request_id: int) -> None:
-        super().__init__(
-            message=f"Excuse request {request_id} is not pending review"
-        )
+        super().__init__(message=f"Excuse request {request_id} is not pending review")
 
 
 class DuplicateExcuseException(ExcuseDomainException):

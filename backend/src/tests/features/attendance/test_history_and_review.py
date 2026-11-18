@@ -30,20 +30,21 @@ rejects a resolve with 409 `review_not_pending`.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.enums import ValidationStatus
-from tests.conftest import Factories
+
 from features.attendance.exceptions import (
     ReviewNotFoundException,
     ReviewNotPendingException,
 )
 from features.attendance.model import Attendance
 from features.attendance.service import AttendanceService
+from tests.conftest import Factories
 
 PENDING = ValidationStatus.PENDING.value
 PRESENT = ValidationStatus.PRESENT.value
@@ -322,9 +323,7 @@ async def test_sort_by_date_orders_the_page_both_ways(
     desc = await service.get_history(user_id=user.id, sort_by="date", sort_dir="desc")
 
     assert len(asc.items) == 3
-    assert [i.scanned_at for i in asc.items] == sorted(
-        i.scanned_at for i in asc.items
-    )
+    assert [i.scanned_at for i in asc.items] == sorted(i.scanned_at for i in asc.items)
     assert [i.scanned_at for i in desc.items] == sorted(
         (i.scanned_at for i in desc.items), reverse=True
     )
@@ -376,7 +375,9 @@ async def _flag_for_review(
 async def test_pending_rows_appear_in_the_default_queue(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
-    record, graph = await _flag_for_review(factories, status=PENDING, review=True, original_status=PRESENT)
+    record, graph = await _flag_for_review(
+        factories, status=PENDING, review=True, original_status=PRESENT
+    )
     assert record.id is not None
 
     page = await _service(test_db_session).list_liveness_review()

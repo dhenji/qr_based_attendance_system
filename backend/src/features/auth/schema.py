@@ -5,6 +5,9 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from pydantic.fields import Field
 
+from shared.enums import OtpPurpose, UserRole
+from shared.validators import password_strength
+
 from features.auth.constants import (
     BACKUP_CODE_MAX_INPUT_LENGTH,
     OTP_CODE_LENGTH,
@@ -15,8 +18,6 @@ from features.auth.constants import (
     SECURITY_QUESTION_MAX_LENGTH,
     SECURITY_QUESTION_MIN_LENGTH,
 )
-from shared.enums import OtpPurpose, UserRole
-from shared.validators import password_strength
 
 
 class OTPRequest(BaseModel):
@@ -143,9 +144,7 @@ class ForgotPasswordStep1Request(OTPRequest):
 
 class ForgotPasswordStep2Request(BaseModel):
     email: EmailStr
-    answer: str | None = Field(
-        default=None, max_length=SECURITY_ANSWER_MAX_LENGTH
-    )
+    answer: str | None = Field(default=None, max_length=SECURITY_ANSWER_MAX_LENGTH)
     recovery_code: str | None = Field(default=None, max_length=128)
 
 

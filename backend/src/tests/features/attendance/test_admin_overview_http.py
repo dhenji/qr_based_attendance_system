@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.enums import UserRole, ValidationStatus
+
 from tests.conftest import Factories
 
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
@@ -48,15 +49,9 @@ async def _seed_two_sessions(factories: Factories) -> dict[str, Any]:
         scheduled_end_time=NOW - timedelta(days=1) + timedelta(minutes=60),
         expires_at=NOW - timedelta(days=1) + timedelta(minutes=60),
     )
-    await factories.attendance(
-        student_a, first, timestamp=NOW - timedelta(days=2)
-    )
-    await factories.attendance(
-        student_b, first, timestamp=NOW - timedelta(days=2)
-    )
-    await factories.attendance(
-        student_a, second, timestamp=NOW - timedelta(days=1)
-    )
+    await factories.attendance(student_a, first, timestamp=NOW - timedelta(days=2))
+    await factories.attendance(student_b, first, timestamp=NOW - timedelta(days=2))
+    await factories.attendance(student_a, second, timestamp=NOW - timedelta(days=1))
     return {
         "program": program,
         "year_level": year_level,
@@ -179,7 +174,10 @@ async def test_overview_export_downloads_csv(
     assert response.headers["content-type"].startswith("text/csv")
     assert "attachment" in response.headers["content-disposition"]
     lines = response.text.strip().splitlines()
-    assert lines[0] == "course_id,course_code,course_name,sessions_count,avg_rate,trend,present,late,excused,rejected"
+    assert (
+        lines[0]
+        == "course_id,course_code,course_name,sessions_count,avg_rate,trend,present,late,excused,rejected"
+    )
     assert len(lines) == 2
     assert "CS101" in lines[1]
     assert "down" in lines[1]

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import uuid
-
 import base64
 import hashlib
 import hmac
 import json
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 

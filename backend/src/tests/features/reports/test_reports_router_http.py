@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.enums import UserRole, ValidationStatus
+
 from tests.conftest import Factories
 
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
@@ -66,9 +67,7 @@ async def test_reports_require_professor_role(
 ) -> None:
     await _teaching_setup(factories)
     student_headers = await auth_headers(await factories.user())
-    admin_headers = await auth_headers(
-        await factories.user(role=UserRole.ADMIN.value)
-    )
+    admin_headers = await auth_headers(await factories.user(role=UserRole.ADMIN.value))
     # Two failing requests in one test: the first one's rollback would take
     # the seed (including both users) down with it, so the seed commits first
     # and the headers are minted before that commit expires the rows.
@@ -237,9 +236,7 @@ async def test_trends_metric_selects_rate(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:
     setup = await _teaching_setup(factories)
-    late_student = await factories.student(
-        setup["year_level"], await factories.user()
-    )
+    late_student = await factories.student(setup["year_level"], await factories.user())
     await factories.enrollment(late_student, setup["offering"])
     await factories.attendance(
         late_student,

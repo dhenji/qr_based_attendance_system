@@ -5,8 +5,6 @@ from datetime import date, datetime, time
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from shared.constants import (
-    DEFAULT_LATE_WINDOW_MINUTES,
-    DEFAULT_PRESENT_WINDOW_MINUTES,
     LATITUDE_MAX,
     LATITUDE_MIN,
     LONGITUDE_MAX,
@@ -17,6 +15,7 @@ from shared.constants import (
     SEMESTER_MIN_LENGTH,
 )
 from shared.enums import SessionType
+
 from features.course.constants import (
     ACADEMIC_YEAR_MAX_LENGTH,
     ACADEMIC_YEAR_MIN_LENGTH,
@@ -115,9 +114,7 @@ class ComponentCreate(BaseModel):
     classroom_name: str | None = Field(
         default=None, max_length=CLASSROOM_NAME_MAX_LENGTH
     )
-    classroom_lat: float | None = Field(
-        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
-    )
+    classroom_lat: float | None = Field(default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX)
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
@@ -161,9 +158,7 @@ class ComponentUpdate(BaseModel):
     schedule_start_time: time | None = None
     schedule_end_time: time | None = None
     classroom_name: str | None = None
-    classroom_lat: float | None = Field(
-        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
-    )
+    classroom_lat: float | None = Field(default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX)
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
@@ -212,9 +207,7 @@ class OfferingCreate(BaseModel):
     classroom_name: str | None = Field(
         default=None, max_length=CLASSROOM_NAME_MAX_LENGTH
     )
-    classroom_lat: float | None = Field(
-        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
-    )
+    classroom_lat: float | None = Field(default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX)
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
@@ -307,9 +300,7 @@ class OfferingUpdate(BaseModel):
     schedule_start_time: time | None = None
     schedule_end_time: time | None = None
     classroom_name: str | None = None
-    classroom_lat: float | None = Field(
-        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
-    )
+    classroom_lat: float | None = Field(default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX)
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
@@ -393,7 +384,11 @@ class ProfessorReassignment(BaseModel):
 
     @model_validator(mode="after")
     def _dates_order(self) -> "ProfessorReassignment":
-        if self.effective_to is not None and self.effective_from is not None and self.effective_to <= self.effective_from:
+        if (
+            self.effective_to is not None
+            and self.effective_from is not None
+            and self.effective_to <= self.effective_from
+        ):
             raise ValueError("effective_to must be after effective_from")
 
         return self

@@ -5,9 +5,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from features.analytics.schema import TrendGranularity
 from shared.enums import ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE
+
+from features.analytics.schema import TrendGranularity
 
 ReportMetric = Literal["compliance", "participation"]
 

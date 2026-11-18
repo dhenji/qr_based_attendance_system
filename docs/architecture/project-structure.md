@@ -1,7 +1,7 @@
 # Project Folder Structure — QR Attendance System
 
 > Historical intent, not current state: this doc shows the planned layout.
-> Truth is `README.md` + the code — 18 feature slices, 21 tables, 23 routers over 15 mounts, 51 `+page.svelte` files.
+> Truth is `README.md` + the code — 18 feature slices, 22 tables, 23 routers over 15 mounts, 51 `+page.svelte` files.
 ```
 attendance-system/
 │

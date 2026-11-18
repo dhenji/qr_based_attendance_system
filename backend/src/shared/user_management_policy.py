@@ -21,7 +21,9 @@ def can_manage_users(actor_role: UserRole | str | None) -> bool:
     return role in {UserRole.SUPER_ADMIN, UserRole.ADMIN}
 
 
-def can_view_target(actor_role: UserRole | str | None, target_role: UserRole | str | None) -> bool:
+def can_view_target(
+    actor_role: UserRole | str | None, target_role: UserRole | str | None
+) -> bool:
     """Whether the actor may see a target account in lists/details."""
     actor = _role(actor_role)
     target = _role(target_role)
@@ -32,7 +34,9 @@ def can_view_target(actor_role: UserRole | str | None, target_role: UserRole | s
     return False
 
 
-def can_manage_target(actor_role: UserRole | str | None, target_role: UserRole | str | None) -> bool:
+def can_manage_target(
+    actor_role: UserRole | str | None, target_role: UserRole | str | None
+) -> bool:
     """Whether the actor may mutate (deactivate/reactivate/reset/lockout-mutate) a target."""
     actor = _role(actor_role)
     target = _role(target_role)
@@ -43,7 +47,9 @@ def can_manage_target(actor_role: UserRole | str | None, target_role: UserRole |
     return False
 
 
-def can_assign_role(actor_role: UserRole | str | None, role_to_assign: UserRole | str | None) -> bool:
+def can_assign_role(
+    actor_role: UserRole | str | None, role_to_assign: UserRole | str | None
+) -> bool:
     """Whether the actor may create an account with the given role."""
     actor = _role(actor_role)
     role = _role(role_to_assign)
@@ -72,9 +78,13 @@ def hide_sensitive_fields(
     return actor == UserRole.ADMIN and target == UserRole.ADMIN
 
 
-def can_read_lockout(actor_role: UserRole | str | None, target_role: UserRole | str | None) -> bool:
+def can_read_lockout(
+    actor_role: UserRole | str | None, target_role: UserRole | str | None
+) -> bool:
     return can_view_target(actor_role, target_role)
 
 
-def can_mutate_lockout(actor_role: UserRole | str | None, target_role: UserRole | str | None) -> bool:
+def can_mutate_lockout(
+    actor_role: UserRole | str | None, target_role: UserRole | str | None
+) -> bool:
     return can_manage_target(actor_role, target_role)

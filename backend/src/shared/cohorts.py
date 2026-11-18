@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """The one definition of an attendance cohort.
 
 A *cohort* is a course offered to one program at one year level — the unit the
@@ -20,6 +18,8 @@ The key is the (course, program, year level) triple. Semester and dates are
 *filter* axes, not identity: D34 slices comparison "within term durations", so
 callers narrow by semester and the key stays cohort-shaped.
 """
+
+from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Protocol, TypeVar

@@ -20,7 +20,7 @@ than a stored flag, because there is no flag to drift.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -28,14 +28,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
+
+from shared.enums import ValidationStatus
+
 from features.attendance.exceptions import AttendanceAttemptLimitReachedException
 from features.attendance.model import Attendance, AttendanceAttemptCounter
 from features.course.exceptions import (
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
-from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course_professor.model import CourseProfessor
+from features.excuse.exceptions import ProfessorNotAssignedException
+from features.professor.model import Professor
 from features.session.exceptions import (
     SessionAlreadyActiveException,
     SessionExpiredException,
@@ -43,10 +47,8 @@ from features.session.exceptions import (
 )
 from features.session.model import Session
 from features.session.schema import SessionCreate
-from features.professor.model import Professor
 from features.session.service import SessionService
 from features.sync.model import SyncQueue
-from shared.enums import ValidationStatus
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
 
@@ -197,9 +199,7 @@ async def test_create_session_copies_offering_window_defaults(
 
     read = await service.create_session(
         professor_id=stack["professor"].id,
-        payload=SessionCreate(
-            offering_id=stack["offering"].id, duration_minutes=60
-        ),
+        payload=SessionCreate(offering_id=stack["offering"].id, duration_minutes=60),
     )
 
     assert read.qr_payload.pw == 3
@@ -275,9 +275,7 @@ async def test_second_active_session_for_an_offering_is_rejected(
 ) -> None:
     stack, service = await open_session(factories, settings)
     payload = SessionCreate(offering_id=stack["offering"].id, duration_minutes=60)
-    await service.create_session(
-        professor_id=stack["professor"].id, payload=payload
-    )
+    await service.create_session(professor_id=stack["professor"].id, payload=payload)
 
     with pytest.raises(SessionAlreadyActiveException) as excinfo:
         await service.create_session(
@@ -318,9 +316,7 @@ async def test_verify_code_rejects_expired_session(
         professor_id=stack["professor"].id,
         payload=SessionCreate(offering_id=stack["offering"].id),
     )
-    await service.close_session(
-        session_id=read.id, professor_id=stack["professor"].id
-    )
+    await service.close_session(session_id=read.id, professor_id=stack["professor"].id)
 
     with pytest.raises(SessionExpiredException) as excinfo:
         await service.verify_code(code=read.session_code)
@@ -390,9 +386,7 @@ async def test_close_session_stamps_expiry_with_now(
     )
     before = SESSION_NOW
 
-    await service.close_session(
-        session_id=read.id, professor_id=stack["professor"].id
-    )
+    await service.close_session(session_id=read.id, professor_id=stack["professor"].id)
 
     row: Session = (
         await test_db_session.scalars(select(Session).where(Session.id == read.id))
@@ -418,8 +412,10 @@ async def test_close_session_is_idempotent(
         session_id=read.id, professor_id=stack["professor"].id
     )
     stamp_after_first: datetime = (
-        await test_db_session.scalars(select(Session).where(Session.id == read.id))
-    ).one().expires_at
+        (await test_db_session.scalars(select(Session).where(Session.id == read.id)))
+        .one()
+        .expires_at
+    )
 
     second = await service.close_session(
         session_id=read.id, professor_id=stack["professor"].id
@@ -430,8 +426,10 @@ async def test_close_session_is_idempotent(
     # The second close left the first stamp in place rather than overwriting
     # it with a later `now`.
     stamp_after_second: datetime = (
-        await test_db_session.scalars(select(Session).where(Session.id == read.id))
-    ).one().expires_at
+        (await test_db_session.scalars(select(Session).where(Session.id == read.id)))
+        .one()
+        .expires_at
+    )
     assert stamp_after_second == stamp_after_first
 
 
@@ -477,9 +475,7 @@ async def test_a_coteacher_can_close_a_shared_session(
         payload=SessionCreate(offering_id=stack["offering"].id),
     )
     coteacher = await factories.professor()
-    await factories.assignment(
-        stack["offering"], coteacher, assigned_by=stack["admin"]
-    )
+    await factories.assignment(stack["offering"], coteacher, assigned_by=stack["admin"])
 
     closed = await service.close_session(
         session_id=opened.id, professor_id=coteacher.id
@@ -721,9 +717,7 @@ async def test_unknown_session_id_raises_not_found(
     service = SessionService(test_db_session, settings)
 
     with pytest.raises(SessionNotFoundException):
-        await service.get_active_session(
-            session_id=UNKNOWN_SESSION_ID, professor_id=1
-        )
+        await service.get_active_session(session_id=UNKNOWN_SESSION_ID, professor_id=1)
 
 
 async def test_expired_session_row_is_not_reopenable_by_a_scan(
@@ -744,9 +738,7 @@ async def test_expired_session_row_is_not_reopenable_by_a_scan(
         professor_id=stack["professor"].id,
         payload=SessionCreate(offering_id=stack["offering"].id),
     )
-    await service.close_session(
-        session_id=read.id, professor_id=stack["professor"].id
-    )
+    await service.close_session(session_id=read.id, professor_id=stack["professor"].id)
 
     with pytest.raises(SessionExpiredException):
         await service.verify_code(code=read.session_code)
@@ -773,9 +765,7 @@ async def test_session_list_reports_the_derived_status(
     stack = await factories.full_stack(expires_at=past(5))
     service = SessionService(test_db_session, settings)
 
-    listed = await service.list_professor_sessions(
-        professor_id=stack["professor"].id
-    )
+    listed = await service.list_professor_sessions(professor_id=stack["professor"].id)
 
     assert listed.total == 1
     assert listed.items[0].status == "closed"
@@ -789,9 +779,7 @@ async def test_session_list_reports_active_and_its_counts(
     stack = await factories.full_stack()
     service = SessionService(test_db_session, settings)
 
-    listed = await service.list_professor_sessions(
-        professor_id=stack["professor"].id
-    )
+    listed = await service.list_professor_sessions(professor_id=stack["professor"].id)
 
     item = listed.items[0]
     assert item.status == "active"
@@ -842,9 +830,7 @@ async def test_a_coteacher_sees_the_shared_sessions(
         validation_status=ValidationStatus.PRESENT.value,
     )
     coteacher = await factories.professor()
-    await factories.assignment(
-        stack["offering"], coteacher, assigned_by=stack["admin"]
-    )
+    await factories.assignment(stack["offering"], coteacher, assigned_by=stack["admin"])
 
     listed = await service.list_professor_sessions(professor_id=coteacher.id)
     ledger = await service.get_professor_attendance(professor_id=coteacher.id)
@@ -877,10 +863,14 @@ async def test_past_sessions_stay_visible_after_an_assignment_ends(
         Session(id=opened.id, offering_id=stack["offering"].id),
         validation_status=ValidationStatus.LATE.value,
     )
-    await service.close_session(session_id=opened.id, professor_id=stack["professor"].id)
+    await service.close_session(
+        session_id=opened.id, professor_id=stack["professor"].id
+    )
     # Every assignment on the offering ends, including the one the seed created.
     ended = await test_db_session.scalar(
-        select(CourseProfessor).where(CourseProfessor.offering_id == stack["offering"].id)
+        select(CourseProfessor).where(
+            CourseProfessor.offering_id == stack["offering"].id
+        )
     )
     assert ended is not None
     ended.effective_to = factories.now.date() - timedelta(days=1)
@@ -888,9 +878,7 @@ async def test_past_sessions_stay_visible_after_an_assignment_ends(
 
     listed = await service.list_professor_sessions(professor_id=stack["professor"].id)
     history = await service.get_session_history(professor_id=stack["professor"].id)
-    ledger = await service.get_professor_attendance(
-        professor_id=stack["professor"].id
-    )
+    ledger = await service.get_professor_attendance(professor_id=stack["professor"].id)
 
     assert [item.id for item in listed.items] == [opened.id]
     assert [item.id for item in history.items] == [opened.id]
@@ -915,7 +903,9 @@ async def test_a_lapsed_assignment_stops_showing_shared_history(
         professor_id=stack["professor"].id,
         payload=SessionCreate(offering_id=stack["offering"].id),
     )
-    await service.close_session(session_id=opened.id, professor_id=stack["professor"].id)
+    await service.close_session(
+        session_id=opened.id, professor_id=stack["professor"].id
+    )
     previous = await factories.professor()
     await factories.assignment(
         stack["offering"],
@@ -943,9 +933,7 @@ async def test_session_list_normalizes_out_of_range_paging(
     await factories.full_stack()
     service = SessionService(test_db_session, settings)
 
-    listed = await service.list_professor_sessions(
-        professor_id=1, page=0, size=0
-    )
+    listed = await service.list_professor_sessions(professor_id=1, page=0, size=0)
 
     assert listed.page == 1
     assert listed.size == 1
@@ -1038,9 +1026,7 @@ async def test_professor_attendance_lists_scanned_rows(
         validation_status=ValidationStatus.LATE.value,
     )
 
-    listed = await service.get_professor_attendance(
-        professor_id=stack["professor"].id
-    )
+    listed = await service.get_professor_attendance(professor_id=stack["professor"].id)
 
     assert listed.total == 1
     assert listed.items[0].status == ValidationStatus.LATE.value
@@ -1171,9 +1157,7 @@ async def test_student_and_session_rows_stay_consistent_after_close(
         professor_id=stack["professor"].id,
         payload=SessionCreate(offering_id=stack["offering"].id),
     )
-    await service.close_session(
-        session_id=read.id, professor_id=stack["professor"].id
-    )
+    await service.close_session(session_id=read.id, professor_id=stack["professor"].id)
 
     row: Session = (
         await test_db_session.scalars(select(Session).where(Session.id == read.id))
@@ -1184,9 +1168,12 @@ async def test_student_and_session_rows_stay_consistent_after_close(
     assert row.expires_at is not None
     assert row.expires_at <= SESSION_NOW
     assert stack["student"].id is not None
-    assert await test_db_session.scalar(
-        select(Attendance.id).where(Attendance.session_id == read.id)
-    ) is None
+    assert (
+        await test_db_session.scalar(
+            select(Attendance.id).where(Attendance.session_id == read.id)
+        )
+        is None
+    )
 
 
 # --- verify_code attempt exhaustion ---------------------------------------

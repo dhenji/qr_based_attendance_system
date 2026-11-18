@@ -11,12 +11,14 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
+
 from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.query import apply_if
 from shared.rates import attendance_rates
+
 from features.analytics.batch import run_risk_batch
 from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.analytics.schema import (
@@ -280,7 +282,9 @@ class AnalyticsService:
             avg_compliance_rate=compliance,
             avg_participation_rate=participation,
             total_sessions=len(sessions),
-            lecture_sessions=sum(1 for row in sessions if row.session_type == "lecture"),
+            lecture_sessions=sum(
+                1 for row in sessions if row.session_type == "lecture"
+            ),
             lab_sessions=sum(1 for row in sessions if row.session_type == "lab"),
         )
 
@@ -564,9 +568,7 @@ class AnalyticsService:
             stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
         )
         stmt = apply_if(stmt, semester, lambda v: StudentRiskScore.semester == v)
-        stmt = apply_if(
-            stmt, course_ids, lambda v: CourseOffering.course_id.in_(v)
-        )
+        stmt = apply_if(stmt, course_ids, lambda v: CourseOffering.course_id.in_(v))
         stmt = apply_if(
             stmt,
             RiskLevel(risk_level) if risk_level is not None else None,
@@ -592,12 +594,10 @@ class AnalyticsService:
             )
             or 0
         )
-        rows: Sequence[tuple[
-            StudentRiskScore, Student, Program, YearLevel, CourseOffering, Course
-        ]] = (
-            await self._session.execute(
-                ordered.offset((page - 1) * size).limit(size)
-            )
+        rows: Sequence[
+            tuple[StudentRiskScore, Student, Program, YearLevel, CourseOffering, Course]
+        ] = (
+            await self._session.execute(ordered.offset((page - 1) * size).limit(size))
         ).all()  # type: ignore[assignment]
         items: list[AtRiskItem] = [
             _to_at_risk_item(score, student, program, year_level, course)
@@ -641,9 +641,7 @@ class AnalyticsService:
                 CourseOffering, CourseOffering.id == Enrollment.offering_id
             ).where(CourseOffering.is_active.is_(True))
 
-        rows: Sequence[tuple[int, int, str]] = (
-            await self._session.execute(stmt)
-        ).all()  # type: ignore[assignment]
+        rows: Sequence[tuple[int, int, str]] = (await self._session.execute(stmt)).all()  # type: ignore[assignment]
 
         return list(dict.fromkeys(rows))
 
@@ -722,12 +720,8 @@ class AnalyticsService:
         stmt = apply_if(
             stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
         )
-        stmt = apply_if(
-            stmt, semester, lambda v: StudentRiskScoreStaging.semester == v
-        )
-        stmt = apply_if(
-            stmt, course_ids, lambda v: CourseOffering.course_id.in_(v)
-        )
+        stmt = apply_if(stmt, semester, lambda v: StudentRiskScoreStaging.semester == v)
+        stmt = apply_if(stmt, course_ids, lambda v: CourseOffering.course_id.in_(v))
         stmt = apply_if(
             stmt,
             RiskLevel(risk_level) if risk_level is not None else None,
@@ -755,12 +749,17 @@ class AnalyticsService:
             )
             or 0
         )
-        rows: Sequence[tuple[
-            StudentRiskScoreStaging, Student, Program, YearLevel, CourseOffering, Course
-        ]] = (
-            await self._session.execute(
-                ordered.offset((page - 1) * size).limit(size)
-            )
+        rows: Sequence[
+            tuple[
+                StudentRiskScoreStaging,
+                Student,
+                Program,
+                YearLevel,
+                CourseOffering,
+                Course,
+            ]
+        ] = (
+            await self._session.execute(ordered.offset((page - 1) * size).limit(size))
         ).all()  # type: ignore[assignment]
         items: list[RiskStagingItem] = [
             _to_staging_item(staged, student, program, year_level, course)
@@ -799,8 +798,12 @@ class AnalyticsService:
         stmt = select(StudentRiskScoreStaging).where(
             StudentRiskScoreStaging.promoted_at.is_(None)
         )
-        stmt = apply_if(stmt, student_id, lambda v: StudentRiskScoreStaging.student_id == v)
-        stmt = apply_if(stmt, offering_id, lambda v: StudentRiskScoreStaging.offering_id == v)
+        stmt = apply_if(
+            stmt, student_id, lambda v: StudentRiskScoreStaging.student_id == v
+        )
+        stmt = apply_if(
+            stmt, offering_id, lambda v: StudentRiskScoreStaging.offering_id == v
+        )
         semester_scoped = offering_id is not None or (
             student_id is None and semester is not None
         )
@@ -825,7 +828,9 @@ class AnalyticsService:
             skipped_stmt, student_id, lambda v: StudentRiskScoreStaging.student_id == v
         )
         skipped_stmt = apply_if(
-            skipped_stmt, offering_id, lambda v: StudentRiskScoreStaging.offering_id == v
+            skipped_stmt,
+            offering_id,
+            lambda v: StudentRiskScoreStaging.offering_id == v,
         )
         skipped_stmt = apply_if(
             skipped_stmt,

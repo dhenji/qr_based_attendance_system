@@ -13,6 +13,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import AuditAction, AuditEntity, UserRole
+
 from features.course.exceptions import (
     CourseHasOfferingsException,
     CourseNotArchivedException,
@@ -27,7 +29,6 @@ from features.course.model import CourseOffering, OfferingComponent
 from features.course.schema import CourseUpdate, OfferingUpdate
 from features.course.service import CourseService
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity, UserRole
 from tests.conftest import Factories
 
 
@@ -124,7 +125,9 @@ async def test_course_hard_delete_routes_over_http(
     )
     assert archived.status_code == 200
 
-    deleted = await api_client.delete(f"/api/admin/courses/{course_id}", headers=headers)
+    deleted = await api_client.delete(
+        f"/api/admin/courses/{course_id}", headers=headers
+    )
     assert deleted.status_code == 204
 
     fetched = await api_client.get(f"/api/admin/courses/{course_id}", headers=headers)
@@ -140,7 +143,9 @@ async def test_course_hard_delete_requires_admin(
     course = await factories.course()
     headers = await auth_headers(role="student")
 
-    response = await api_client.delete(f"/api/admin/courses/{course.id}", headers=headers)
+    response = await api_client.delete(
+        f"/api/admin/courses/{course.id}", headers=headers
+    )
 
     assert response.status_code == 403
 
@@ -263,13 +268,17 @@ async def test_offering_hard_delete_clean_removes_components_and_audits(
 
 
 async def test_offering_hard_delete_routes_over_http(
-    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
 ) -> None:
     headers = await auth_headers(role="admin")
     seed = await _offering_seed(factories)
     offering_id = seed["offering"].id
     # The first DELETE below 409s, and a failing request rolls back the seed
-    # (see AGENTS.md) — commit first so the rows survive it.
+    # through the api_client override (which mirrors _get_db) — commit first
+    # so the rows survive it.
     await test_db_session.commit()
 
     active = await api_client.delete(
@@ -279,7 +288,9 @@ async def test_offering_hard_delete_routes_over_http(
     assert active.json()["detail"]["code"] == "not_archived"
 
     archived = await api_client.patch(
-        f"/api/admin/offerings/{offering_id}", json={"is_active": False}, headers=headers
+        f"/api/admin/offerings/{offering_id}",
+        json={"is_active": False},
+        headers=headers,
     )
     assert archived.status_code == 200
 
@@ -288,7 +299,9 @@ async def test_offering_hard_delete_routes_over_http(
     )
     assert deleted.status_code == 204
 
-    fetched = await api_client.get(f"/api/admin/offerings/{offering_id}", headers=headers)
+    fetched = await api_client.get(
+        f"/api/admin/offerings/{offering_id}", headers=headers
+    )
     assert fetched.status_code == 404
 
     missing = await api_client.delete("/api/admin/offerings/9999", headers=headers)

@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+from shared.enums import AuditAction, AuditEntity
+
 from features.course.service import CourseService, parse_course_csv
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -122,11 +123,7 @@ def test_import_roster_duplicate_against_database() -> None:
 
 def test_import_roster_rejects_bad_duration() -> None:
     session = _FakeSession(rows=[[], []])
-    content = (
-        f"{HEADER}\n"
-        "CS104,Bad Duration,3,99\n"
-        "CS105,Also Bad,3,abc\n"
-    ).encode()
+    content = (f"{HEADER}\nCS104,Bad Duration,3,99\nCS105,Also Bad,3,abc\n").encode()
 
     result = _run(CourseService(session).import_roster(content=content, actor_id=None))
 

@@ -22,6 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import database
 from core.security import hash_password
+
+from shared.enums import AuditAction, AuditEntity
+
 from features.auth.exceptions import (
     AccountLockedException,
     InvalidCredentialsException,
@@ -29,7 +32,6 @@ from features.auth.exceptions import (
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 from tests.conftest import Factories
 
 PASSWORD = "correct-horse-battery-staple"
@@ -147,7 +149,7 @@ async def test_locked_account_reports_the_remaining_window(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
     user = await _user(factories, is_locked=True)
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timezone
 
     user.locked_at = datetime.now(timezone.utc)
     await test_db_session.commit()
@@ -166,9 +168,7 @@ async def test_expired_lock_releases_and_allows_login(
     from datetime import datetime, timedelta, timezone
 
     user = await _user(factories, is_locked=True)
-    user.locked_at = datetime.now(timezone.utc) - timedelta(
-        minutes=LOCKOUT_MINUTES + 1
-    )
+    user.locked_at = datetime.now(timezone.utc) - timedelta(minutes=LOCKOUT_MINUTES + 1)
     user.failed_login_attempts = LOCKOUT_ATTEMPTS
     await test_db_session.commit()
     service = await _service(test_db_session)
@@ -249,9 +249,7 @@ async def test_expired_lock_writes_an_unlock_row(
     from datetime import datetime, timedelta, timezone
 
     user = await _user(factories, is_locked=True)
-    user.locked_at = datetime.now(timezone.utc) - timedelta(
-        minutes=LOCKOUT_MINUTES + 1
-    )
+    user.locked_at = datetime.now(timezone.utc) - timedelta(minutes=LOCKOUT_MINUTES + 1)
     await test_db_session.commit()
     service = await _service(test_db_session)
 
@@ -369,6 +367,7 @@ async def test_audit_row_survives_the_400_rollback(
     rows = await _audit_rows(test_db_session, user)
     assert [row.action for row in rows] == [AuditAction.LOGIN_FAILED.value]
 
+
 # --- escalation observable across two lockouts -------------------------------
 
 
@@ -380,10 +379,13 @@ async def test_second_lockout_escalates_to_five_minutes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from core.config import get_settings
+
     from api import deps
 
     monkeypatch.setattr(deps.settings, "lockout_escalation_minutes", "1,5,15,30,60,120")
-    monkeypatch.setattr(get_settings(), "lockout_escalation_minutes", "1,5,15,30,60,120")
+    monkeypatch.setattr(
+        get_settings(), "lockout_escalation_minutes", "1,5,15,30,60,120"
+    )
     monkeypatch.setattr(deps.settings, "lockout_duration_minutes", 1)
     monkeypatch.setattr(get_settings(), "lockout_duration_minutes", 1)
 
@@ -393,7 +395,9 @@ async def test_second_lockout_escalates_to_five_minutes(
     await test_db_session.commit()
 
     async def _post(e: str, p: str) -> Any:
-        return await api_client.post("/api/auth/login", json={"email": e, "password": p})
+        return await api_client.post(
+            "/api/auth/login", json={"email": e, "password": p}
+        )
 
     for _ in range(LOCKOUT_ATTEMPTS):
         assert (await _post(email, WRONG)).status_code == 400
@@ -403,10 +407,14 @@ async def test_second_lockout_escalates_to_five_minutes(
 
     # Expire the lock.
     from datetime import datetime, timedelta, timezone
+
     from sqlalchemy import select
+
     from features.auth.model import User
 
-    row = (await test_db_session.execute(select(User).where(User.id == uid))).scalar_one()
+    row = (
+        await test_db_session.execute(select(User).where(User.id == uid))
+    ).scalar_one()
     row.locked_at = datetime.now(timezone.utc) - timedelta(minutes=5)
     await test_db_session.commit()
 

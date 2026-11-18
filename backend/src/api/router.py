@@ -8,10 +8,10 @@ from features.attendance.admin_router import router as attendance_admin_router
 from features.attendance.router import router as attendance_router
 from features.auth.router import router as auth_router
 from features.course.offering_router import router as offering_router
+from features.course.router import router as course_router
 from features.dashboard.admin_router import router as dashboard_admin_router
 from features.dashboard.professor_router import router as dashboard_professor_router
 from features.dashboard.student_router import router as dashboard_student_router
-from features.course.router import router as course_router
 from features.excuse.admin_router import router as excuse_admin_router
 from features.excuse.professor_router import router as excuse_professor_router
 from features.excuse.student_router import router as excuse_student_router

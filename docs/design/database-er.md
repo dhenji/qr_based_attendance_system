@@ -1,13 +1,14 @@
 # Database Entity–Relationship Diagram (ERD)
 
 > Crow's-foot notation for the QR-based attendance system — **Target Schema** (canonical ERD).
-> Source: `docs/project/migration-strategy.md` steps 1–9.
+> Source: `docs/architecture/migration-strategy.md` steps 1–9.
 > New tables: `programs`, `year_levels`, `course_offerings`, `course_professors`, `excuse_requests`, `student_risk_scores`, `backup_log`.
 > `mfa_backup_codes` landed in Phase 2 (ADR-054), so the 16-table baseline became 17.
 > Later additions — `audit_logs` (`f4a9c2b7d103`, Phase 8.5),
 > `app_settings` (`e7f8a9b0c1d2`, Phase 12.0), `student_risk_scores_staging`
-> (`d4e5f6a7b8c9`), and `offering_components` (D77, migration
-> `e8f9a0b1c2d3`) — bring the target documented below to **21 tables / 228 columns**.
+> (`d4e5f6a7b8c9`), `offering_components` (D77, migration
+> `e8f9a0b1c2d3`), and `attendance_attempt_counters` (`55d6238fab9f`) — bring the
+> target documented below to **22 tables / 239 columns**.
 >
 > `audit_logs` is written by `shared/audit.record_audit` from every sensitive mutation
 > (ADR-064) and read by `GET /admin/audit-logs`; `GET /admin/system/academic-structure`
@@ -29,9 +30,9 @@
 
 | Table                 | Attributes |
 | --------------------- | ---------- |
-| `users`               | id (PK), role (super_admin/admin/professor/student), email, password_hash (Argon2id), security_question_hash (**readable plaintext** — ADR-056), security_answer_hash (Argon2id), mfa_enabled, mfa_secret, failed_login_attempts, must_change_password, is_active, is_locked (DEF false), locked_at (NULL), lockout_level (DEF 0), last_lockout_at (NULL), lockout_override_until (NULL), created_at, last_login |
+| `users`               | id (PK), role (super_admin/admin/professor/student), email, password_hash (Argon2id), security_question_hash (**readable plaintext** — ADR-056), security_answer_hash (Argon2id), mfa_enabled, mfa_secret, failed_login_attempts, must_change_password, is_active, is_locked (DEF false), locked_at (NULL), lockout_level (DEF 0), last_lockout_at (NULL), lockout_override_until (NULL), token_version (INT DEF 0), last_activity_at (TIMESTAMPTZ NULL), recovery_code_hash (String 255 NULL), recovery_code_used_at (TIMESTAMPTZ NULL), created_at, last_login |
 | `mfa_backup_codes`    | id (PK), user_id (FK → users CASCADE), code_hash (Argon2id, **never plaintext**), code_fingerprint (HMAC-SHA256, indexed — single-lookup verify), used_at (NULL = unconsumed), created_at |
-| `otp_codes`           | id (PK), email (index), purpose (claim/forget_password/login), otp_hash (Argon2id), expires_at (5-min TTL), consumed_at (single-use), failed_attempts (DEF 0), user_id (FK → users, nullable), created_at, index `ix_otp_codes_email_purpose` (email, purpose) |
+| `otp_codes`           | id (PK), email (index), purpose (claim/forget_password/login), otp_hash (Argon2id), expires_at (5-min TTL), consumed_at (single-use), failed_attempts (DEF 0), user_id (FK → users, nullable), recovery_grant_jti (String 64 NULL), created_at, index `ix_otp_codes_email_purpose` (email, purpose) |
 | `programs`            | id (PK), code (UK), name, description, total_years, is_active, created_at, updated_at |
 | `year_levels`         | id (PK), program_id (FK → programs CASCADE), year_number, label, term_structure (JSONB; `{terms: [{code, label, weeks?}]}`), sort_order, UNIQUE(program_id, year_number) |
 | `courses`             | id (PK), course_code (UK), course_name, units, session_duration_hours (NUMERIC(3,1)), is_active, created_at, updated_at |
@@ -43,6 +44,7 @@
 | `enrollments`         | id (PK), student_id (FK → students), offering_id (FK → course_offerings) NOT NULL, academic_year NOT NULL, semester NOT NULL (validated against year_level.term_structure), created_at, UNIQUE(student_id, offering_id, academic_year) |
 | `sessions`            | id (PK), offering_id (FK → course_offerings), professor_id (FK → professors), session_code (UK), duration_minutes, present_window_minutes, late_window_minutes, CHECK (present_window_minutes + late_window_minutes <= duration_minutes), scheduled_start_time (TIMESTAMPTZ), scheduled_end_time (TIMESTAMPTZ), schedule_overridden (BOOL DEF false), actual_start_time (TIMESTAMPTZ DEF now), original_scheduled_start_time (TIMESTAMPTZ NULL), override_reason (String 255 NULL), created_by (FK → users RESTRICT NULL), expires_at (TIMESTAMPTZ, set by application), classroom_radius_meters (DEF 50), classroom_name (NULL), classroom_lat (NULL), classroom_lng (NULL), session_type (String 20 DEF 'lecture', CHECK lecture/lab), is_remote (BOOL DEF false), geofence_enabled (BOOL DEF true), created_at |
 | `attendance_records`  | id (PK), student_id (FK → students), session_id (FK → sessions), timestamp, gps_lat, gps_lng, validation_status (present/late/absent/excused/pending/rejected), sync_status, liveness_evidence (JSONB), face_match_score (NUMERIC(5,4)), scanned_via (qr_camera/manual_code), original_status (NULL), excuse_reason (NULL), excused_by (FK → users NULL), excused_at (NULL), excuse_type (quick/prof_with_evidence/request_approved NULL), excuse_request_id (FK NULL), created_at |
+| `attendance_attempt_counters` | id (PK), student_id (FK → students RESTRICT, indexed), session_id (FK → sessions RESTRICT, indexed), attempts (INT DEF 0, CHECK >= 0), updated_at, UNIQUE(student_id, session_id) |
 | `excuse_requests`     | id (PK), student_id (FK), session_id (FK), initiated_by (professor/student), initiated_via (quick/prof_with_evidence/request), reason, attachment_urls (JSONB), status (pending/approved/rejected DEF pending), requested_at, reviewed_by (FK → users NULL), reviewed_at (NULL), review_notes (NULL) |
 | `student_risk_scores` | id (PK), student_id (FK → students), offering_id (FK → course_offerings), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high), features (JSONB), computed_at, computed_day (DATE), UNIQUE(student_id, offering_id, semester, computed_day) |
 | `student_risk_scores_staging` | id (PK), student_id (FK → students RESTRICT), offering_id (FK → course_offerings RESTRICT), semester, risk_probability (NUMERIC(5,4)), risk_level (low/medium/high, CHECK `ck_student_risk_scores_staging_risk_level`), features (JSONB), computed_at, computed_day (DATE), promoted_at (TIMESTAMPTZ NULL — set when a dry-run batch is promoted), UNIQUE(student_id, offering_id, semester, computed_day) |
@@ -82,6 +84,8 @@ erDiagram
     students ||--o{ student_risk_scores_staging : "scored (dry run)"
     course_offerings ||--o{ student_risk_scores_staging : "evaluates"
     sessions ||--o{ attendance_records : "collects"
+    students ||--o{ attendance_attempt_counters : "counts attempts"
+    sessions ||--o{ attendance_attempt_counters : "counts attempts"
     sessions ||--o{ excuse_requests : "for session"
     excuse_requests ||--o{ attendance_records : "originates"
     course_professors ||--o{ sessions : "professor of record (via effective range)"
@@ -100,6 +104,13 @@ erDiagram
         boolean is_active
         boolean is_locked
         timestamp locked_at
+        integer token_version
+        timestamp last_activity_at
+        varchar recovery_code_hash
+        timestamp recovery_code_used_at
+        integer lockout_level
+        timestamp last_lockout_at
+        timestamp lockout_override_until
         timestamp created_at
         timestamp last_login
     }
@@ -119,6 +130,7 @@ erDiagram
         timestamp expires_at
         timestamp consumed_at
         bigint user_id FK
+        varchar recovery_grant_jti
         timestamp created_at
     }
     programs {
@@ -254,6 +266,13 @@ erDiagram
         bigint excuse_request_id FK
         timestamp created_at
     }
+    attendance_attempt_counters {
+        bigint id PK
+        bigint student_id FK
+        bigint session_id FK
+        integer attempts
+        timestamp updated_at
+    }
     excuse_requests {
         bigint id PK
         bigint student_id FK
@@ -345,6 +364,9 @@ erDiagram
                       │ security_question_hash, security_answer_hash                 │
                       │ mfa_enabled, mfa_secret, failed_login_attempts               │
                       │ must_change_password, is_active, created_at, last_login      │
+                      │token_version, last_activity_at, recovery_code_hash,          │
+                      │  recovery_code_used_at, lockout_level, last_lockout_at,      │
+                      │  lockout_override_until                                      │
    ┬──────────────────┼───────────────────────────┬──────────────────────────────────┘
    │                  │                           │
    │  (claims) 1      │  (claims) 1               │  (opens) 1
@@ -480,6 +502,16 @@ erDiagram
    │  │UNIQUE(student_id, offering_id,              │
    │  │  semester, computed_day)                    │
    │  └─────────────────────────────────────────────┘
+   │  ┌─────────────────────────────────────────────┐
+   │  │         attendance_attempt_counters         │
+   │  │─────────────────────────────────────────────│
+   │  │ id PK                                       │
+   │  │ student_id FK → students (RESTRICT)         │
+   │  │ session_id FK → sessions (RESTRICT)         │
+   │  │ attempts INT DEF 0 (CHECK >= 0)             │
+   │  │ updated_at                                  │
+   │  │ UNIQUE(student_id, session_id)              │
+   │  └─────────────────────────────────────────────┘
    │
    │  ┌───────────────────────────────────────────┐
    │  │                 backup_log                │
@@ -531,6 +563,7 @@ erDiagram
    │  │ expires_at (5-min), consumed_at (1-use)   │
    │  │ user_id FK → users (nullable)             │
    │  │ created_at                                │
+   │  │ recovery_grant_jti (String 64 NULL)       │
    │  └───────────────────────────────────────────┘
 
    │  ┌────────────────────────────────────────┐
@@ -576,6 +609,8 @@ erDiagram
 | `students`          | `‖──○{`     | `excuse_requests`     | one student has many excuse requests                                                                            |
 | `students`          | `‖──○{`     | `student_risk_scores` | one student has many risk scores                                                                                |
 | `sessions`          | `‖──○{`     | `attendance_records`  | one session has many records                                                                                    |
+| `students`          | `‖──○{`     | `attendance_attempt_counters` | one student has at most one counter per session (UNIQUE(student_id, session_id))                              |
+| `sessions`          | `‖──○{`     | `attendance_attempt_counters` | one session has at most one counter per student (UNIQUE(student_id, session_id))                              |
 | `sessions`          | `‖──○{`     | `excuse_requests`     | one session has many excuse requests                                                                            |
 | `course_professors` | `‖──○{`     | `sessions`            | one assignment covers many sessions _(professor of record determined by effective range at session.created_at)_ |
 

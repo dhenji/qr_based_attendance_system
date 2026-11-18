@@ -15,6 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
 from shared.enums import OtpPurpose, UserRole
 from shared.mixins import CreatedAtMixin
 
@@ -64,7 +65,9 @@ class User(CreatedAtMixin, Base):
     last_lockout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Temporary admin override: while now < this timestamp the locked gate is
     # bypassed. NULL means no active override.
-    lockout_override_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lockout_override_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class OtpCodes(CreatedAtMixin, Base):

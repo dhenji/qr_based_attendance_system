@@ -10,8 +10,9 @@ from __future__ import annotations
 from datetime import time
 from typing import Any, Callable, Coroutine
 
-from features.course.model import OfferingComponent
 from shared.enums import UserRole
+
+from features.course.model import OfferingComponent
 from tests.conftest import Factories
 
 SESSIONS = "/api/professor/sessions"
@@ -49,9 +50,7 @@ async def _seed_offering_with(
     return offering
 
 
-async def _open(
-    api_client: Any, headers: dict[str, str], offering_id: int
-) -> Any:
+async def _open(api_client: Any, headers: dict[str, str], offering_id: int) -> Any:
     return await api_client.post(
         SESSIONS, json={"offering_id": offering_id}, headers=headers
     )

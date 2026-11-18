@@ -19,7 +19,6 @@ scheduled for that hour is inside its window (D94).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine
 from datetime import time
 from typing import Any
 
@@ -27,11 +26,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
+
+from shared.enums import UserRole
+
 from features.course.model import OfferingComponent
 from features.session.exceptions import SessionTypeNotConfiguredException
 from features.session.schema import SessionCreate
 from features.session.service import SessionService
-from shared.enums import UserRole
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
 
@@ -126,9 +127,7 @@ async def test_a_lab_session_needs_a_lab_meeting(
     with pytest.raises(SessionTypeNotConfiguredException) as exc_info:
         await service.create_session(
             professor_id=stack["professor"].id,
-            payload=SessionCreate(
-                offering_id=stack["offering"].id, session_type="lab"
-            ),
+            payload=SessionCreate(offering_id=stack["offering"].id, session_type="lab"),
             now=SESSION_NOW,
         )
 
@@ -166,15 +165,11 @@ async def test_a_configured_type_opens(
 ) -> None:
     """A laboratory session on an offering that meets one is unaffected."""
 
-    stack, service = await _offering(
-        factories, settings, components=["lecture", "lab"]
-    )
+    stack, service = await _offering(factories, settings, components=["lecture", "lab"])
 
     read = await service.create_session(
         professor_id=stack["professor"].id,
-        payload=SessionCreate(
-            offering_id=stack["offering"].id, session_type="lab"
-        ),
+        payload=SessionCreate(offering_id=stack["offering"].id, session_type="lab"),
         now=SESSION_NOW,
     )
 
@@ -200,16 +195,12 @@ async def test_an_offering_without_a_meeting_meets_a_lecture(
 
     # The lecture session is closed first: an offering with a live session
     # refuses a second open before the type is even looked at.
-    await service.close_session(
-        session_id=read.id, professor_id=stack["professor"].id
-    )
+    await service.close_session(session_id=read.id, professor_id=stack["professor"].id)
 
     with pytest.raises(SessionTypeNotConfiguredException):
         await service.create_session(
             professor_id=stack["professor"].id,
-            payload=SessionCreate(
-                offering_id=stack["offering"].id, session_type="lab"
-            ),
+            payload=SessionCreate(offering_id=stack["offering"].id, session_type="lab"),
             now=SESSION_NOW,
         )
 
@@ -237,9 +228,7 @@ async def test_an_inactive_meeting_does_not_count(
     with pytest.raises(SessionTypeNotConfiguredException):
         await service.create_session(
             professor_id=stack["professor"].id,
-            payload=SessionCreate(
-                offering_id=stack["offering"].id, session_type="lab"
-            ),
+            payload=SessionCreate(offering_id=stack["offering"].id, session_type="lab"),
             now=SESSION_NOW,
         )
 

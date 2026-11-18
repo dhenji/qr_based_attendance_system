@@ -5,28 +5,31 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
-    Integer,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from core.database import Base
+
+from shared.enums import SyncStatus, ValidationStatus
+from shared.mixins import CreatedAtMixin
+
 from features.auth.model import User
 from features.excuse.model import ExcuseRequest
 from features.session.model import Session
 from features.student.model import Student
-from shared.enums import SyncStatus, ValidationStatus
-from shared.mixins import CreatedAtMixin
 
 
 class Attendance(CreatedAtMixin, Base):
@@ -92,7 +95,9 @@ class AttendanceAttemptCounter(Base):
     __tablename__ = "attendance_attempt_counters"
     __table_args__ = (
         UniqueConstraint(
-            "student_id", "session_id", name="uq_attendance_attempt_counters_student_session"
+            "student_id",
+            "session_id",
+            name="uq_attendance_attempt_counters_student_session",
         ),
         CheckConstraint(
             "attempts >= 0", name="ck_attendance_attempt_counters_attempts_nonnegative"
@@ -106,7 +111,9 @@ class AttendanceAttemptCounter(Base):
     session_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
     )
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

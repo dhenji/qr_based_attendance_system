@@ -296,7 +296,7 @@
 | SH-AU-2 | D25          | No security-disabled session option                       | Inspect session creation form     | Check form fields                | No toggle/option to disable security features on a session                   |
 | SH-AU-3 | D26          | Remote class uses relaxed geofence but liveness mandatory | Session created with large radius | Student scans remotely           | Geofence passes (large radius); liveness challenge still required            |
 | SH-AU-4 | —            | MFA setup                                                 | Professor/student logged in       | Enable MFA in settings           | MFA secret generated; QR code for authenticator app displayed; TOTP verified |
-| SH-AU-5 | D52         | Forgot password flow                                      | User exists                       | Step 1: email → step 2: answer security question (3-attempt cap then lock) → step 3: OTP sent → step 4: password reset completes after OTP verification. Security question is mandatory (set at registration). See `api-contracts.md` Shared Auth. |
+| SH-AU-5 | D52         | Forgot password flow                                      | User exists                       | Step 1: email → step 2: answer security question (3-attempt cap then lock) → step 3: OTP sent → step 4: password reset completes after OTP verification. Security question is mandatory (set at registration). See `api-contracts.md` Shared Auth. |  |
 | SH-AU-6 | ADR-053     | Turnstile captcha key-gating                            | No `TURNSTILE_SECRET_KEY` (dev)    | Login / forgot-password step 1 with and without `turnstile_token` | Pass-through (no enforcement) with empty key; with key set: valid token passes, invalid token → 400 `invalid_captcha` |
 | SH-AU-7 | ADR-054     | MFA backup codes                                       | User with MFA enabled              | Generate backup codes → logout → login + MFA via backup code | 10 single-use codes returned once; a code verifies MFA once and is rejected on reuse; regenerating invalidates old codes |
 | SH-AU-8 | —           | Password policy incl. symbol                           | Register / change / reset password | Submit password without a symbol                 | Rejected (policy: 8+ chars, 1 upper, 1 lower, 1 number, 1 symbol — wireframes.md:1903)                           |
@@ -398,16 +398,19 @@ Every decision D1–D48 is covered by at least one test case above.
 
 Sections 1–7 are the *specification* — what a case must prove. This section is
 what actually **executes** on every push to `main` and every pull request.
-Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md).
+Rationale and rejected alternatives are in [ADR-069](../project/decision-log.md)
+and [ADR-094](../project/decision-log.md).
 
 | Job | Command | Runs against | Fails on |
 | --- | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1060 cases |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1121 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
 | `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
+| `lint` | `ruff check . && ruff format --check .` (from `backend/`) | — | a lint violation or formatting drift |
 
 Python 3.12 and Node 22, matching `backend/Dockerfile.dev` and
-`frontend/Dockerfile.dev`. No job reads a secret; `permissions: contents: read`.
+`frontend/Dockerfile.dev`. The `lint` job installs the Ruff pin from
+`backend/requirements.txt`. No job reads a secret; `permissions: contents: read`.
 
 **Why `migrations` is not redundant with `backend`.** `conftest.py` builds the
 test schema with `Base.metadata.create_all`, straight from the models, so the

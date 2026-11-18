@@ -8,6 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
+
+from shared.enums import RiskLevel
+
 from features.analytics.batch import (
     compute_features,
     compute_weekly_absences,
@@ -17,14 +20,11 @@ from features.analytics.batch import (
 )
 from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from features.analytics.service import AnalyticsService
-from shared.enums import RiskLevel
 from tests.conftest import Factories
 
 
 def _record(status: str, moment: datetime, sync: str = "synced") -> SimpleNamespace:
-    return SimpleNamespace(
-        validation_status=status, sync_status=sync, timestamp=moment
-    )
+    return SimpleNamespace(validation_status=status, sync_status=sync, timestamp=moment)
 
 
 def test_slope_flat_is_zero() -> None:
@@ -262,9 +262,7 @@ async def test_dry_run_is_idempotent_same_day(
     dry = _dry_run_settings(settings)
     await run_risk_batch(test_db_session, now=now, settings=dry)
     await run_risk_batch(test_db_session, now=now, settings=dry)
-    count = len(
-        (await test_db_session.scalars(select(StudentRiskScoreStaging))).all()
-    )
+    count = len((await test_db_session.scalars(select(StudentRiskScoreStaging))).all())
     assert count == 1
 
 
@@ -275,9 +273,7 @@ async def test_promote_copies_to_live_and_stamps(
     settings: Settings,
 ) -> None:
     stack = await _high_absence_stack(factories, now)
-    await run_risk_batch(
-        test_db_session, now=now, settings=_dry_run_settings(settings)
-    )
+    await run_risk_batch(test_db_session, now=now, settings=_dry_run_settings(settings))
     service = AnalyticsService(test_db_session)
 
     listed = await service.list_staged()

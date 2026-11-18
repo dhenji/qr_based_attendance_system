@@ -4,6 +4,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
+from shared.csv_import import csv_template_header
+from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
+
 from api.deps import CourseServiceDep, require_role
 from features.auth.model import User
 from features.course.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -14,9 +18,6 @@ from features.course.schema import (
     CourseUpdate,
 )
 from features.course.service import COURSE_CSV_COLUMNS
-from shared.csv_import import csv_template_header
-from shared.enums import UserRole
-from shared.pagination import PaginatedResponse
 
 # This module owns /admin/courses ONLY.
 #

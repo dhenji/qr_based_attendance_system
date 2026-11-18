@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
 from core.exceptions import DomainException
+
+from shared.enums import BackupKind, BackupStatus, QueueStatus, UserRole
+
 from features.sync.model import SyncQueue
 from features.system.model import AppSetting, BackupLog
 from features.system.service import SystemService
-from shared.enums import BackupKind, BackupStatus, QueueStatus, UserRole
 from tests.conftest import Factories
 
 
@@ -142,9 +144,8 @@ async def test_trigger_lists_and_downloads_backup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from main import app
-
     from api.deps import _get_system_service
+    from main import app
 
     cfg = settings.model_copy(
         update={
@@ -214,8 +215,12 @@ async def test_backups_require_admin(
     await test_db_session.commit()
     headers = await auth_headers(student_user)
 
-    assert (await api_client.get("/api/admin/backups", headers=headers)).status_code == 403
-    assert (await api_client.post("/api/admin/backups", headers=headers)).status_code == 403
+    assert (
+        await api_client.get("/api/admin/backups", headers=headers)
+    ).status_code == 403
+    assert (
+        await api_client.post("/api/admin/backups", headers=headers)
+    ).status_code == 403
 
 
 async def test_export_analytics_persists_csv_and_log(

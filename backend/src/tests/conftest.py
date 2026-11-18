@@ -62,6 +62,9 @@ from sqlalchemy.ext.compiler import compiles  # noqa: E402
 
 from core.config import Settings  # noqa: E402
 from core.database import Base  # noqa: E402
+
+from shared.enums import SyncStatus, UserRole, ValidationStatus  # noqa: E402
+
 from features.attendance.model import Attendance  # noqa: E402
 from features.auth.model import User  # noqa: E402
 from features.course.model import Course, CourseOffering  # noqa: E402
@@ -71,7 +74,6 @@ from features.professor.model import Professor  # noqa: E402
 from features.program.model import Program, YearLevel  # noqa: E402
 from features.session.model import Session  # noqa: E402
 from features.student.model import Student  # noqa: E402
-from shared.enums import SyncStatus, UserRole, ValidationStatus  # noqa: E402
 
 SQLITE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -391,15 +393,11 @@ class Factories:
             duration_minutes=overrides.pop("duration_minutes", 60),
             present_window_minutes=overrides.pop("present_window_minutes", 5),
             late_window_minutes=overrides.pop("late_window_minutes", 10),
-            scheduled_start_time=overrides.pop(
-                "scheduled_start_time", self.now
-            ),
+            scheduled_start_time=overrides.pop("scheduled_start_time", self.now),
             scheduled_end_time=overrides.pop(
                 "scheduled_end_time", self.now + timedelta(minutes=60)
             ),
-            expires_at=overrides.pop(
-                "expires_at", self.now + timedelta(minutes=60)
-            ),
+            expires_at=overrides.pop("expires_at", self.now + timedelta(minutes=60)),
             **overrides,
         )
 
@@ -544,8 +542,9 @@ async def api_client(
     under test sees the same transaction boundaries it sees in production.
     """
 
-    from api.deps import _get_db
     from httpx import ASGITransport, AsyncClient
+
+    from api.deps import _get_db
     from main import app
 
     async def _override() -> AsyncIterator[AsyncSession]:
@@ -612,7 +611,10 @@ async def auth_headers(
             user = await factories.user(**overrides)
 
         token: str = create_access_token(
-            user.id, user.role, settings, token_version=getattr(user, "token_version", 0) or 0
+            user.id,
+            user.role,
+            settings,
+            token_version=getattr(user, "token_version", 0) or 0,
         )
         return {"Authorization": f"Bearer {token}"}
 
@@ -658,10 +660,11 @@ def reset_process_globals() -> Any:
     """
 
     from core import scheduler as core_scheduler
+
+    from shared import cache, email, face_embedding_generator, face_quality, rate_limit
+
     from features.attendance import service as attendance_service
     from features.auth import service as auth_service
-    from shared import cache, email, rate_limit
-    from shared import face_embedding_generator, face_quality
 
     def _clear() -> None:
         attendance_service._IDEMPOTENCY_STORE.clear()
@@ -700,9 +703,7 @@ def pinned_session_clock(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     from features.session import service as session_service
 
-    monkeypatch.setattr(
-        session_service, "_utcnow", lambda: SESSION_TEST_NOW
-    )
+    monkeypatch.setattr(session_service, "_utcnow", lambda: SESSION_TEST_NOW)
 
 
 @pytest.fixture(autouse=True)

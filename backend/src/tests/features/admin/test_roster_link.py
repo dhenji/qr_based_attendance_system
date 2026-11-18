@@ -6,10 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from shared.enums import UserRole
+
 from features.admin.exceptions import RosterLinkImpossible
 from features.admin.schema import AdminUserCreate
 from features.admin.service import AdminService
-from shared.enums import UserRole
 
 STUDENT_EMAIL = "s@example.com"
 # The super_admin performing the creation; lands in audit_logs.performed_by.

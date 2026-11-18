@@ -70,8 +70,8 @@ from locust import HttpUser, events, task
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from bench_timings import SlotAssigner
-from bench_timings import discover_session_pool as _discover, poisson_wait
+from bench_timings import SlotAssigner, poisson_wait
+from bench_timings import discover_session_pool as _discover
 
 MEAN_WAIT_S = float(os.environ.get("LOCUST_MEAN_WAIT_S", "2.5"))
 POOL_SIZE = int(os.environ.get("LOCUST_POOL_SIZE", "30"))
@@ -218,8 +218,10 @@ class ScanningStudent(HttpUser):
         for attempt in range(1, LOGIN_ATTEMPTS + 1):
             with self.client.post(
                 "/api/auth/login",
-                json={"email": f"{self.slot_label}@{EMAIL_DOMAIN}",
-                      "password": PASSWORD},
+                json={
+                    "email": f"{self.slot_label}@{EMAIL_DOMAIN}",
+                    "password": PASSWORD,
+                },
                 catch_response=True,
             ) as response:
                 if response.status_code == 200:
@@ -427,9 +429,7 @@ def _report(environment, **kwargs) -> None:
         (
             "queue drain",
             f"<{MAX_DRAIN_S:g}s",
-            f"{_drain['worst_s']:.1f}s"
-            if _drain["batches"]
-            else "no replays recorded",
+            f"{_drain['worst_s']:.1f}s" if _drain["batches"] else "no replays recorded",
             _drain["batches"] > 0 and _drain["worst_s"] < MAX_DRAIN_S,
         ),
     )

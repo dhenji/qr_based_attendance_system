@@ -39,12 +39,8 @@ UNREACHABLE = frozenset(
     {
         "internal_error",  # default AppException code; nothing constructs one bare
         "database_error",  # DatabaseException has a handler, no raise site
-
         "invalid_semester",  # never raised; semester is free text
         "role_mismatch",  # never raised; require_role uses HTTPException
-        # never raised; policy runs as a Pydantic validator, failing as 422
-        # validation_error instead of this custom code
-        "password_policy_violation",
         "stub_embedding",  # handled differently now
     }
 )

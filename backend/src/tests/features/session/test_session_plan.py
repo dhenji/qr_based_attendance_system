@@ -21,6 +21,10 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 
 from core.config import Settings
+
+from shared.enums import SessionType
+from shared.schedule import day_weekdays, meeting_length_minutes
+
 from features.course.model import CourseOffering, OfferingComponent
 from features.session.plan import (
     active_components,
@@ -28,8 +32,6 @@ from features.session.plan import (
     resolve_session_plan,
 )
 from features.system.model import AppSetting
-from shared.enums import SessionType
-from shared.schedule import day_weekdays, meeting_length_minutes
 
 NOW = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)  # a Wednesday
 SETTINGS = Settings(debug=True, jwt_secret="test-secret-0123456789abcdef")
@@ -91,9 +93,7 @@ def _offering(**overrides: Any) -> CourseOffering:
     return CourseOffering(**values)
 
 
-def _component(
-    session_type: str = "lecture", **overrides: Any
-) -> OfferingComponent:
+def _component(session_type: str = "lecture", **overrides: Any) -> OfferingComponent:
     values: dict[str, Any] = {
         "id": 1,
         "offering_id": 10,
@@ -431,9 +431,7 @@ def test_an_explicit_offering_window_beats_the_system_default() -> None:
 
 
 def test_the_late_window_follows_the_system_default_too() -> None:
-    session = _FakeSession(
-        rows={AppSetting: [_setting("late_window_default", "20")]}
-    )
+    session = _FakeSession(rows={AppSetting: [_setting("late_window_default", "20")]})
 
     plan = _run(
         resolve_session_plan(

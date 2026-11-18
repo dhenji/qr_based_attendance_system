@@ -1,0 +1,30 @@
+# Editor defaults for the repository. Ruff (backend/pyproject.toml, ADR-094)
+# enforces the Python side in CI; this file encodes the conventions already in
+# use so editors agree with the formatter instead of carrying opinions of
+# their own.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+# The frontend is tab-indented throughout (SvelteKit convention -- .svelte,
+# .ts, .css, .html and the JSON configs all use tabs).
+[*.{js,ts,svelte,css,html,json}]
+indent_style = tab
+
+# YAML does not allow tabs for indentation.
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Markdown uses trailing double-spaces for hard line breaks in places.
+[*.md]
+trim_trailing_whitespace = false

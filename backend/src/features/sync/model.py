@@ -6,6 +6,7 @@ from sqlalchemy import JSON, BigInteger, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
+
 from shared.enums import QueueStatus
 from shared.mixins import TimestampMixin
 

@@ -7,19 +7,26 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from shared.enums import AuditAction, AuditEntity
+
 from features.course.exceptions import (
     CourseNotFoundException,
     EnrollmentNotFoundException,
-    OfferingAssignmentNotFoundException,
-    ProfessorNotEligibleException,
     InvalidEffectiveFromException,
+    OfferingAssignmentNotFoundException,
     OfferingExistsException,
     OfferingNotFoundException,
     OfferingScheduleWindowException,
+    ProfessorNotEligibleException,
     WindowsExceedDurationException,
 )
 from features.course.model import Course, CourseOffering, OfferingComponent
-from features.course.schema import OfferingCreate, OfferingUpdate, ProfessorAssignment, ProfessorReassignment
+from features.course.schema import (
+    OfferingCreate,
+    OfferingUpdate,
+    ProfessorAssignment,
+    ProfessorReassignment,
+)
 from features.course.service import CourseService, parse_enrollment_csv
 from features.course_professor.exceptions import OverlappingAssignmentException
 from features.course_professor.model import CourseProfessor
@@ -30,7 +37,6 @@ from features.program.model import Program, YearLevel
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -408,9 +414,7 @@ def test_update_offering_rejects_bad_times_at_the_schema() -> None:
     """
 
     with pytest.raises(ValidationError):
-        OfferingUpdate(
-            schedule_start_time=time(11, 0), schedule_end_time=time(10, 0)
-        )
+        OfferingUpdate(schedule_start_time=time(11, 0), schedule_end_time=time(10, 0))
 
 
 def test_update_offering_rejects_a_start_moved_past_the_stored_end() -> None:

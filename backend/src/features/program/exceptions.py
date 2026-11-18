@@ -143,7 +143,9 @@ class YearLevelTermInUseException(ProgramDomainException):
     status_code: int = 409
     code: str = "term_code_in_use"
 
-    def __init__(self, year_level_id: int, term_codes: list[str] | tuple[str, ...]) -> None:
+    def __init__(
+        self, year_level_id: int, term_codes: list[str] | tuple[str, ...]
+    ) -> None:
         joined = ", ".join(sorted(term_codes))
         super().__init__(
             message=f"Year level {year_level_id} term code(s) in use by offerings: {joined}"

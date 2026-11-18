@@ -4,8 +4,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 from shared.enums import UserRole
+
+from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 
 _CREATABLE_ROLES: set[UserRole] = {UserRole.ADMIN, UserRole.PROFESSOR, UserRole.STUDENT}
 

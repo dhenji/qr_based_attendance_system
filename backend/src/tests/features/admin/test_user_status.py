@@ -11,9 +11,10 @@ from typing import Any
 
 import pytest
 
+from shared.enums import UserRole
+
 from features.admin.exceptions import SelfDeactivationForbidden
 from features.admin.service import AdminService
-from shared.enums import UserRole
 from tests.conftest import Factories
 
 ADMIN_EMAIL = "status.admin@isu.edu.ph"
@@ -84,9 +85,7 @@ async def test_deactivate_unknown_user_raises(
     await test_db_session.commit()
 
     with pytest.raises(Exception) as exc_info:
-        await AdminService(test_db_session).deactivate_user(
-            actor_id=1, user_id=9999
-        )
+        await AdminService(test_db_session).deactivate_user(actor_id=1, user_id=9999)
     assert exc_info.value.__class__.__name__ == "AdminUserNotFound"
 
 
@@ -97,9 +96,7 @@ async def test_reactivate_unknown_user_raises(
     await test_db_session.commit()
 
     with pytest.raises(Exception) as exc_info:
-        await AdminService(test_db_session).reactivate_user(
-            actor_id=1, user_id=9999
-        )
+        await AdminService(test_db_session).reactivate_user(actor_id=1, user_id=9999)
     assert exc_info.value.__class__.__name__ == "AdminUserNotFound"
 
 
@@ -195,7 +192,7 @@ async def test_deactivate_unknown_user_returns_404(
 async def test_non_super_admin_cannot_reactivate(
     api_client: Any, auth_headers: Any, factories: Factories, test_db_session: Any
 ) -> None:
-    admin = await _admin(factories)
+    await _admin(factories)
     plain_admin = await factories.user(
         email="plain.admin@isu.edu.ph", role=UserRole.ADMIN.value
     )
@@ -215,7 +212,7 @@ async def test_non_super_admin_cannot_reactivate(
 async def test_non_super_admin_cannot_deactivate(
     api_client: Any, auth_headers: Any, factories: Factories, test_db_session: Any
 ) -> None:
-    admin = await _admin(factories)
+    await _admin(factories)
     plain_admin = await factories.user(
         email="plain.admin@isu.edu.ph", role=UserRole.ADMIN.value
     )

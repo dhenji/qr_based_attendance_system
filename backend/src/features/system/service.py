@@ -28,7 +28,8 @@ import logging
 import os
 import tempfile
 import time
-from datetime import date, datetime, time as dt_time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -39,10 +40,26 @@ from core.config import Settings, get_settings
 from core.database import database
 from core.exceptions import DomainException
 from core.scheduler import JOB_BACKUP, scheduled_job_running, track
+
+from shared.audit import record_audit
+from shared.datetimes import ensure_aware
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    BackupKind,
+    BackupStatus,
+    BackupStorage,
+    QueueStatus,
+)
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.query import apply_if
+from shared.storage import StorageUnconfiguredException, s3_client
+
 from features.attendance.model import Attendance
 from features.auth.model import OtpCodes, User
 from features.professor.model import Professor
 from features.student.model import Student
+from features.sync.model import SyncQueue
 from features.system.audit_labels import AuditLabelResolver, AuditRowView
 from features.system.constants import (
     ERROR_MAX_CHARS,
@@ -52,15 +69,15 @@ from features.system.constants import (
     LOCAL_FILE_MODE,
     OTP_RETENTION_DAYS,
     READ_CHUNK_BYTES,
+    S3_PREFIX_FALLBACK,
+    SETTING_ATTENDANCE_ATTEMPT_LIMIT,
     SETTING_GEOFENCE_RADIUS,
     SETTING_LATE_WINDOW,
     SETTING_PRESENT_WINDOW,
     SETTING_RETENTION_DAILY,
     SETTING_RETENTION_MONTHLY,
-    SETTING_ATTENDANCE_ATTEMPT_LIMIT,
     SETTING_SESSION_EARLY_OPEN,
     SETTING_SESSION_LATE_OPEN,
-    S3_PREFIX_FALLBACK,
     SIDECAR_SUFFIX,
     STDERR_TAIL_CHARS,
     STRUCTURAL_ENTITY_TYPES,
@@ -93,20 +110,6 @@ from features.system.schema import (
     SystemSettingsRead,
     SystemSettingsUpdate,
 )
-from features.sync.model import SyncQueue
-from shared.audit import record_audit
-from shared.datetimes import ensure_aware
-from shared.enums import (
-    AuditAction,
-    AuditEntity,
-    BackupKind,
-    BackupStatus,
-    BackupStorage,
-    QueueStatus,
-)
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.query import apply_if
-from shared.storage import StorageUnconfiguredException, s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -132,11 +135,7 @@ def maintenance_busy() -> bool:
     scheduled batch (seen through the scheduler tracker) or a backup
     (seen through its lock, which also covers manual triggers).
     """
-    return (
-        _MAINTENANCE_LOCK.locked()
-        or scheduled_job_running()
-        or is_backup_running()
-    )
+    return _MAINTENANCE_LOCK.locked() or scheduled_job_running() or is_backup_running()
 
 
 def _queue_id(payload: dict[str, Any], key: str) -> int:
@@ -468,9 +467,7 @@ class SystemService:
             await self._session.flush()
         return {"removed": len(doomed)}
 
-    async def flush_sync_queue(
-        self, actor_id: int | None = None
-    ) -> SyncFlushResponse:
+    async def flush_sync_queue(self, actor_id: int | None = None) -> SyncFlushResponse:
         """Reconcile every pending offline-sync row and report the outcome.
 
         Each queued entry mirrors a scan that already landed in
@@ -543,14 +540,9 @@ class SystemService:
         record = await self._session.get(Attendance, attendance_id)
         if record is None:
             return False
-        return (
-            record.session_id == session_id
-            and record.student_id == student_id
-        )
+        return record.session_id == session_id and record.student_id == student_id
 
-    async def cleanup_expired(
-        self, actor_id: int | None = None
-    ) -> CleanupResponse:
+    async def cleanup_expired(self, actor_id: int | None = None) -> CleanupResponse:
         """Delete expired login artifacts and finished sync rows.
 
         OTP codes older than `OTP_RETENTION_DAYS` and finished (`done`
@@ -586,8 +578,7 @@ class SystemService:
                                 ]
                             ),
                             SyncQueue.created_at
-                            < now
-                            - timedelta(days=SYNC_FINISHED_RETENTION_DAYS),
+                            < now - timedelta(days=SYNC_FINISHED_RETENTION_DAYS),
                         )
                     )
                 ).all()
@@ -654,13 +645,13 @@ class SystemService:
         for key in keys:
             raw = stored.get(key)
             try:
-                resolved[key] = int(raw) if raw is not None else self._setting_default(key)
+                resolved[key] = (
+                    int(raw) if raw is not None else self._setting_default(key)
+                )
             except (TypeError, ValueError):
                 resolved[key] = self._setting_default(key)
             if key not in stored:
-                self._session.add(
-                    AppSetting(key=key, value=str(resolved[key]))
-                )
+                self._session.add(AppSetting(key=key, value=str(resolved[key])))
         if any(key not in stored for key in keys):
             await self._session.flush()
         return resolved
@@ -779,7 +770,9 @@ class SystemService:
 
         return await self.get_system_settings()
 
-    async def list_backups(self, *, page: int = DEFAULT_PAGE, size: int = DEFAULT_PAGE_SIZE) -> BackupListResponse:
+    async def list_backups(
+        self, *, page: int = DEFAULT_PAGE, size: int = DEFAULT_PAGE_SIZE
+    ) -> BackupListResponse:
         """Newest-first backup log page."""
         page = max(page, 1)
         size = min(max(size, 1), MAX_PAGE_SIZE)
@@ -805,7 +798,9 @@ class SystemService:
         """Newest-first page of structural audit rows."""
         page = max(page, 1)
         size = min(max(size, 1), MAX_PAGE_SIZE)
-        scope = select(AuditLog).where(AuditLog.entity_type.in_(STRUCTURAL_ENTITY_TYPES))
+        scope = select(AuditLog).where(
+            AuditLog.entity_type.in_(STRUCTURAL_ENTITY_TYPES)
+        )
         total = await self._session.scalar(
             select(func.count()).select_from(scope.subquery())
         )
@@ -894,9 +889,7 @@ class SystemService:
         ):
             scope = apply_if(scope, value, lambda v, c=column: c == v)
 
-        scope = apply_if(
-            scope, performed_by, lambda v: AuditLog.performed_by == v
-        )
+        scope = apply_if(scope, performed_by, lambda v: AuditLog.performed_by == v)
 
         if actor is not None:
             scope = scope.where(AuditLog.performed_by.in_(_actor_ids(actor)))
@@ -905,15 +898,19 @@ class SystemService:
         scope = apply_if(
             scope,
             date_from,
-            lambda v: AuditLog.performed_at
-            >= datetime.combine(v, dt_time.min, tzinfo=timezone.utc),
+            lambda v: (
+                AuditLog.performed_at
+                >= datetime.combine(v, dt_time.min, tzinfo=timezone.utc)
+            ),
         )
         scope = apply_if(
             scope,
             date_to,
-            lambda v: AuditLog.performed_at
-            < datetime.combine(
-                v + timedelta(days=1), dt_time.min, tzinfo=timezone.utc
+            lambda v: (
+                AuditLog.performed_at
+                < datetime.combine(
+                    v + timedelta(days=1), dt_time.min, tzinfo=timezone.utc
+                )
             ),
         )
 
@@ -1215,9 +1212,7 @@ async def run_scheduled_backup(settings: Settings | None = None) -> int | None:
     """
     cfg = settings or get_settings()
     if not cfg.backup_encryption_key:
-        logger.critical(
-            "Scheduled backup skipped: BACKUP_ENCRYPTION_KEY is not set"
-        )
+        logger.critical("Scheduled backup skipped: BACKUP_ENCRYPTION_KEY is not set")
         return None
 
     started = time.perf_counter()
@@ -1232,9 +1227,7 @@ async def run_scheduled_backup(settings: Settings | None = None) -> int | None:
             await session.commit()
         except BackupInProgressException:
             await session.rollback()
-            logger.warning(
-                "Scheduled backup skipped: a backup is already running"
-            )
+            logger.warning("Scheduled backup skipped: a backup is already running")
             return None
         except Exception:
             await session.rollback()

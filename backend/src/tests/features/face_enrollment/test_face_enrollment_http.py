@@ -11,10 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+
 from shared.enums import UserRole
 from shared.face_quality import FaceQualityResult
-from tests.conftest import Factories
 
+from tests.conftest import Factories
 
 ENDPOINT = "/api/admin/face-enrollment"
 VALID_BYTES = b"\xff\xd8\xff fake-jpeg-bytes"
@@ -31,11 +32,16 @@ def _stub_quality_and_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     import features.face_enrollment.service as fe_service
 
-    monkeypatch.setattr(fe_service, "assess_image_bytes", lambda _content: FaceQualityResult(ok=True))
+    monkeypatch.setattr(
+        fe_service, "assess_image_bytes", lambda _content: FaceQualityResult(ok=True)
+    )
     monkeypatch.setattr(
         fe_service,
         "generate_embedding_from_images",
-        lambda front, left, right, algorithm="mobilefacenet-v1": (b"blob", "mobilefacenet-v1"),
+        lambda front, left, right, algorithm="mobilefacenet-v1": (
+            b"blob",
+            "mobilefacenet-v1",
+        ),
     )
 
 
@@ -177,14 +183,19 @@ async def test_oversized_photo_is_400(
 
 
 async def test_corrupt_photo_is_400(
-    api_client: Any, auth_headers: Any, factories: Factories, monkeypatch: pytest.MonkeyPatch
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import features.face_enrollment.service as fe_service
 
     monkeypatch.setattr(
         fe_service,
         "assess_image_bytes",
-        lambda _content: FaceQualityResult(ok=False, code="invalid_image", message="invalid image"),
+        lambda _content: FaceQualityResult(
+            ok=False, code="invalid_image", message="invalid image"
+        ),
     )
 
     admin = await factories.user(role=UserRole.ADMIN.value)
@@ -206,14 +217,19 @@ async def test_corrupt_photo_is_400(
 
 
 async def test_quality_failure_is_422(
-    api_client: Any, auth_headers: Any, factories: Factories, monkeypatch: pytest.MonkeyPatch
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import features.face_enrollment.service as fe_service
 
     monkeypatch.setattr(
         fe_service,
         "assess_image_bytes",
-        lambda _content: FaceQualityResult(ok=False, code="quality_too_low", message="Face too small"),
+        lambda _content: FaceQualityResult(
+            ok=False, code="quality_too_low", message="Face too small"
+        ),
     )
 
     admin = await factories.user(role=UserRole.ADMIN.value)
@@ -235,14 +251,19 @@ async def test_quality_failure_is_422(
 
 
 async def test_no_face_detected_is_400(
-    api_client: Any, auth_headers: Any, factories: Factories, monkeypatch: pytest.MonkeyPatch
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import features.face_enrollment.service as fe_service
 
     monkeypatch.setattr(
         fe_service,
         "assess_image_bytes",
-        lambda _content: FaceQualityResult(ok=False, code="no_face_detected", message="No face detected"),
+        lambda _content: FaceQualityResult(
+            ok=False, code="no_face_detected", message="No face detected"
+        ),
     )
 
     admin = await factories.user(role=UserRole.ADMIN.value)
@@ -264,10 +285,14 @@ async def test_no_face_detected_is_400(
 
 
 async def test_embedding_failure_is_400(
-    api_client: Any, auth_headers: Any, factories: Factories, monkeypatch: pytest.MonkeyPatch
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import features.face_enrollment.service as fe_service
     from shared.face_embedding_generator import FaceEmbeddingGenerationError
+
+    import features.face_enrollment.service as fe_service
 
     def _raise(*_a, **_kw):
         raise FaceEmbeddingGenerationError("boom")

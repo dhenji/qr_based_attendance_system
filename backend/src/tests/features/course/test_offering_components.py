@@ -12,9 +12,10 @@ from typing import Any, Callable, Coroutine
 
 from sqlalchemy import select
 
+from shared.enums import UserRole
+
 from features.course.model import OfferingComponent
 from features.session.model import Session
-from shared.enums import UserRole
 from tests.conftest import Factories
 
 OFFERINGS = "/api/admin/offerings"
@@ -187,7 +188,9 @@ async def test_component_crud_roundtrip(
     offering_id = seed["offering"].id
     headers = await _admin_headers(auth_headers, factories)
 
-    listed = await api_client.get(f"{OFFERINGS}/{offering_id}/components", headers=headers)
+    listed = await api_client.get(
+        f"{OFFERINGS}/{offering_id}/components", headers=headers
+    )
     assert listed.status_code == 200
     # Factory-seeded offerings bypass the service, so no default component.
     assert listed.json() == []
@@ -382,9 +385,7 @@ async def test_open_lab_session_with_coordinates_persists_type(
     assert opened.json()["session_type"] == "lab"
 
     session_id = opened.json()["id"]
-    active = await api_client.get(
-        f"{SESSIONS}/active/{session_id}", headers=headers
-    )
+    active = await api_client.get(f"{SESSIONS}/active/{session_id}", headers=headers)
     assert active.status_code == 200
     assert active.json()["session_type"] == "lab"
 
@@ -458,7 +459,9 @@ async def test_session_list_history_and_ledger_filter_by_type(
 ) -> None:
     seed = await _seed_offering_with_lab(factories, db_factory)
     offering_id = seed["offering"].id
-    headers = await _assigned_professor_headers(factories, auth_headers, seed["offering"])
+    headers = await _assigned_professor_headers(
+        factories, auth_headers, seed["offering"]
+    )
     await test_db_session.commit()
 
     lecture = await api_client.post(
@@ -532,13 +535,13 @@ async def test_attendance_ledger_carries_session_type(
     student = await factories.student(seed["year_level"])
     await factories.enrollment(student, offering)
     row = (
-        await factories.db.scalars(select(Session).where(Session.id == opened.json()["id"]))
+        await factories.db.scalars(
+            select(Session).where(Session.id == opened.json()["id"])
+        )
     ).one()
     await factories.attendance(student, row)
 
-    ledger = await api_client.get(
-        "/api/professor/attendance", headers=headers
-    )
+    ledger = await api_client.get("/api/professor/attendance", headers=headers)
     assert ledger.status_code == 200
     assert [item["session_type"] for item in ledger.json()["items"]] == ["lab"]
 

@@ -11,6 +11,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import get_settings
 from core.security import hash_password, verify_password
 from core.timezones import resolve_timezone
+
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.csv_import import (
+    CsvColumn,
+    CsvEmailCheck,
+    CsvGroup,
+    CsvRow,
+    CsvSchema,
+    parse_import_csv,
+    strip_lower,
+)
+from shared.enums import AuditAction, AuditEntity, SessionType
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    PaginatedResponse,
+)
+from shared.schedule import meeting_minutes, openable_session_types
+
 from features.auth.model import User
 from features.course.exceptions import OfferingNotFoundException
 from features.course.model import Course, CourseOffering, OfferingComponent
@@ -21,10 +41,10 @@ from features.enrollment.model import Enrollment
 from features.professor.exceptions import (
     CurrentPasswordInvalidException,
     PasswordReusedException,
+    ProfessorAccountUnlinkedException,
     ProfessorEmailExistsException,
     ProfessorHasRecordsException,
     ProfessorNotArchivedException,
-    ProfessorAccountUnlinkedException,
     ProfessorNotFoundException,
 )
 from features.professor.model import Professor
@@ -44,25 +64,6 @@ from features.program.model import Program, YearLevel
 from features.session.model import Session
 from features.session.plan import next_meeting
 from features.student.model import Student
-from shared.audit import record_audit
-from shared.base import BaseCRUD
-from shared.csv_import import (
-    CsvColumn,
-    CsvEmailCheck,
-    CsvGroup,
-    CsvRow,
-    CsvSchema,
-    parse_import_csv,
-    strip_lower,
-)
-from shared.enums import AuditAction, AuditEntity, SessionType
-from shared.schedule import meeting_minutes, openable_session_types
-from shared.pagination import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    PaginatedResponse,
-)
 
 ROSTER_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn("first_name"),
@@ -588,9 +589,7 @@ class ProfessorService:
             session_count=session_count,
         )
 
-    async def _archive_row(
-        self, professor: Professor, actor_id: int | None
-    ) -> None:
+    async def _archive_row(self, professor: Professor, actor_id: int | None) -> None:
         # Soft archive touches only its own row for course data (ADR-058): no
         # cascade to course_professors / sessions. The linked login IS synced
         # (users.is_active) because auth gates only on the users table — an
@@ -720,9 +719,7 @@ class ProfessorService:
         starting today. The UI keys course rows by offering id, so collapse
         duplicates here and keep the most current assignment.
         """
-        rows = (
-            await self._session.execute(_assignments_stmt(professor_id))
-        ).all()
+        rows = (await self._session.execute(_assignments_stmt(professor_id))).all()
 
         by_offering: dict[int, AssignedOfferingItem] = {}
         for row in rows:
@@ -903,7 +900,9 @@ class ProfessorService:
     async def _assign_offering(
         self, *, professor_id: int, offering_id: int, assigned_by: int
     ) -> CourseProfessor:
-        offering: CourseOffering = await self._get_offering_or_404(offering_id)
+        # Presence check only: the helper raises 404 when the offering is gone.
+        # The returned row is intentionally unused here.
+        await self._get_offering_or_404(offering_id)
         today: date = date.today()
 
         overlap_service = CourseProfessorService(self._session)

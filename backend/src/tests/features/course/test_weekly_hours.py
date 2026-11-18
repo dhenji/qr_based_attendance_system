@@ -12,8 +12,9 @@ from __future__ import annotations
 from datetime import time
 from typing import Any, Callable, Coroutine
 
-from features.course.model import OfferingComponent
 from shared.enums import UserRole
+
+from features.course.model import OfferingComponent
 from tests.conftest import Factories
 
 OFFERINGS = "/api/admin/offerings"
@@ -23,9 +24,7 @@ async def _admin_headers(auth_headers: Any, factories: Factories) -> dict[str, s
     return await auth_headers(await factories.user(role=UserRole.ADMIN.value))
 
 
-async def _seed(
-    factories: Factories, **course_overrides: Any
-) -> dict[str, Any]:
+async def _seed(factories: Factories, **course_overrides: Any) -> dict[str, Any]:
     program = await factories.program()
     year_level = await factories.year_level(program)
     course = await factories.course(units=3, **course_overrides)
@@ -38,7 +37,9 @@ async def _seed(
     }
 
 
-def _offering_payload(seed: dict[str, Any], components: list[dict[str, Any]]) -> dict[str, Any]:
+def _offering_payload(
+    seed: dict[str, Any], components: list[dict[str, Any]]
+) -> dict[str, Any]:
     first = components[0]
     return {
         "course_id": seed["course"].id,
@@ -434,13 +435,13 @@ async def test_over_limit_edit_free_but_add_blocked(
     assert archived.status_code == 204
 
 
-async def test_reactivating_a_component_revalidates_the_total(    api_client: Any, auth_headers: Any, factories: Factories
+async def test_reactivating_a_component_revalidates_the_total(
+    api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:
     """Build an exact 3.0h schedule, swap a meeting, then prove reactivating
     the archived row back on top is rejected while reactivating into an
     exact total passes."""
     seed = await _seed(factories)
-    offering_id = seed["offering"].id
     headers = await _admin_headers(auth_headers, factories)
 
     created = await api_client.post(
@@ -640,7 +641,9 @@ async def test_activate_mismatched_offering_is_422(
     headers = await _admin_headers(auth_headers, factories)
     # A failing request rolls back the uncommitted seed — commit first.
     over = await _seed_inactive(
-        factories, db_factory, [("M", time(7, 0), time(8, 30)), ("T", time(13, 0), time(15, 0))]
+        factories,
+        db_factory,
+        [("M", time(7, 0), time(8, 30)), ("T", time(13, 0), time(15, 0))],
     )
     under = await _seed_inactive(
         factories, db_factory, [("M", time(7, 0), time(8, 30))]
@@ -664,9 +667,7 @@ async def test_activate_mismatched_offering_is_422(
 
     # The rows stay inactive after the rejected transitions.
     for offering_id in offering_ids:
-        fetched = await api_client.get(
-            f"{OFFERINGS}/{offering_id}", headers=headers
-        )
+        fetched = await api_client.get(f"{OFFERINGS}/{offering_id}", headers=headers)
         assert fetched.json()["is_active"] is False
 
 
@@ -688,6 +689,8 @@ async def test_deactivate_and_unrelated_patch_ignore_the_gate(
     assert down.status_code == 200
 
     untouched = await api_client.patch(
-        f"{OFFERINGS}/{offering_id}", json={"classroom_name": "Room 202"}, headers=headers
+        f"{OFFERINGS}/{offering_id}",
+        json={"classroom_name": "Room 202"},
+        headers=headers,
     )
     assert untouched.status_code == 200, untouched.text

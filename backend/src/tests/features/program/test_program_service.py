@@ -244,9 +244,11 @@ async def test_hard_delete_blocked_by_students(
 async def test_hard_delete_clean_cascades_empty_years(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
-    from features.system.model import AuditLog
-    from shared.enums import AuditAction, AuditEntity
     from sqlalchemy import select
+
+    from shared.enums import AuditAction, AuditEntity
+
+    from features.system.model import AuditLog
 
     program = await factories.program(code="BSCS")
     year = await factories.year_level(program, year_number=1)
@@ -437,9 +439,7 @@ async def test_get_year_scoped_to_program(
         )
 
 
-async def test_update_year(
-    test_db_session: AsyncSession, factories: Factories
-) -> None:
+async def test_update_year(test_db_session: AsyncSession, factories: Factories) -> None:
     program = await factories.program(code="BSCS")
     year = await factories.year_level(program, year_number=1)
 
@@ -541,9 +541,7 @@ async def test_program_routes_over_http(
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
 
-    fetched = await api_client.get(
-        f"/api/admin/programs/{program_id}", headers=headers
-    )
+    fetched = await api_client.get(f"/api/admin/programs/{program_id}", headers=headers)
     assert fetched.status_code == 200
     assert fetched.json()["code"] == "BSCS"
 
@@ -592,9 +590,7 @@ async def test_program_hard_delete_routes_over_http(
     )
     assert deleted.status_code == 204
 
-    fetched = await api_client.get(
-        f"/api/admin/programs/{program_id}", headers=headers
-    )
+    fetched = await api_client.get(f"/api/admin/programs/{program_id}", headers=headers)
     assert fetched.status_code == 404
 
     missing = await api_client.delete("/api/admin/programs/9999", headers=headers)

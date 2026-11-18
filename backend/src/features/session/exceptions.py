@@ -222,9 +222,7 @@ class SessionOutsideScheduledTimeException(SessionDomainException):
     status_code: int = 422
     code: str = "session_outside_scheduled_time"
 
-    def __init__(
-        self, *, reason: str, scheduled: str | None, current: str
-    ) -> None:
+    def __init__(self, *, reason: str, scheduled: str | None, current: str) -> None:
         if reason == "not_scheduled_today":
             message: str = (
                 "This session is outside its scheduled time — this course has "

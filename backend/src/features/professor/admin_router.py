@@ -4,6 +4,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
+from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
+
 from api.deps import AuthServiceDep, ProfessorServiceDep, require_role
 from features.auth.model import User
 from features.auth.schema import AdminPasswordResetResponse
@@ -21,8 +24,6 @@ from features.professor.schema import (
     ProfessorRead,
     ProfessorUpdate,
 )
-from shared.enums import UserRole
-from shared.pagination import PaginatedResponse
 
 # This module owns /admin/professors ONLY.
 #

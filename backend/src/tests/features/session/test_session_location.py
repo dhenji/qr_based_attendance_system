@@ -7,20 +7,17 @@ of truth: a cleared room stays null instead of falling back to the offering.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from features.course.model import CourseOffering
+
 from features.session.model import Session
 from features.session.schema import SessionCreate
 from features.session.service import SessionService
 from tests.conftest import Factories
-from tests.features.session.conftest import SESSION_NOW
 
 
 async def _offering(
@@ -75,9 +72,7 @@ async def test_session_with_explicit_physical_location_persists(
     )
 
     row = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.classroom_name == "Lab 2"
     assert row.classroom_lat == 1.5
@@ -108,9 +103,7 @@ async def test_session_with_cleared_location_stays_null(
     )
 
     row = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.classroom_name is None
     assert row.classroom_lat is None
@@ -135,9 +128,7 @@ async def test_session_inherits_offering_location_by_default(
     )
 
     row = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.classroom_name == "Room 101"
     assert row.classroom_lat == 14.5
@@ -160,9 +151,7 @@ async def test_remote_session_has_no_coordinates(
     )
 
     row = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.is_remote is True
     assert row.classroom_lat is None
@@ -186,9 +175,7 @@ async def test_cleared_session_with_offering_coordinates_stays_null(
     )
 
     row = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.classroom_lat is None
     assert row.classroom_lng is None
@@ -210,9 +197,7 @@ async def test_omitted_fields_with_override_stay_null(
     )
 
     row = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.classroom_name is None
     assert row.classroom_lat is None
@@ -242,9 +227,7 @@ async def test_attendance_geofence_disabled_for_cleared_session(
     # Should not raise.
     att_service._validate_geofence(
         (
-            await test_db_session.scalars(
-                select(Session).where(Session.id == read.id)
-            )
+            await test_db_session.scalars(select(Session).where(Session.id == read.id))
         ).one(),
         type("G", (), {"lat": 0.0, "lng": 0.0})(),
     )

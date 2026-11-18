@@ -30,6 +30,10 @@ from core.security import (
     hash_otp,
     hash_password,
 )
+
+from shared.enums import OtpPurpose
+from shared.rate_limit import RateLimitedException
+
 from features.auth.constants import (
     LOGIN_OTP_IP_MAX_ATTEMPTS,
     LOGIN_OTP_MAX_ATTEMPTS,
@@ -37,8 +41,6 @@ from features.auth.constants import (
 from features.auth.exceptions import InvalidCredentialsException, OtpInvalidException
 from features.auth.model import OtpCodes
 from features.auth.service import AuthService
-from shared.enums import OtpPurpose
-from shared.rate_limit import RateLimitedException
 from tests.conftest import Factories
 
 PASSWORD = "correct-horse-battery-staple"
@@ -53,9 +55,7 @@ def _email(tag: str) -> str:
     return f"login.otp.{tag}@isu.edu.ph"
 
 
-async def _user(
-    factories: Factories, tag: str, **overrides: Any
-):
+async def _user(factories: Factories, tag: str, **overrides: Any):
     defaults: dict[str, Any] = {
         "email": _email(tag),
         "password_hash": hash_password(PASSWORD),
@@ -319,9 +319,7 @@ async def test_resend_needs_the_grant(
 async def test_student_with_mfa_keeps_totp_path_and_no_email(
     api_client: Any, test_db_session: AsyncSession, factories: Factories
 ) -> None:
-    user = await _user(
-        factories, "mfa-student", mfa_enabled=True, mfa_secret=SECRET
-    )
+    user = await _user(factories, "mfa-student", mfa_enabled=True, mfa_secret=SECRET)
     email = user.email
     await test_db_session.commit()
 
@@ -416,7 +414,6 @@ async def test_grant_for_another_email_is_invalid_credentials(
     test_db_session: AsyncSession, factories: Factories, settings: Any
 ) -> None:
     user = await _user(factories, "grant-email")
-    email = user.email
     await test_db_session.commit()
 
     forged = create_login_otp_token(user.id, "someone.else@isu.edu.ph", settings)
@@ -430,7 +427,6 @@ async def test_expired_grant_is_invalid_credentials(
     test_db_session: AsyncSession, factories: Factories
 ) -> None:
     user = await _user(factories, "grant-expiry")
-    email = user.email
     await test_db_session.commit()
 
     expired_settings = Settings(

@@ -15,6 +15,7 @@ from shared.constants import (
 )
 from shared.enums import SessionType, ValidationStatus
 from shared.pagination import PaginatedResponse
+
 from features.session.constants import (
     CLASSROOM_NAME_MAX_LENGTH,
     DURATION_MINUTES_MAX,
@@ -52,9 +53,7 @@ class SessionCreate(BaseModel):
     geofence_enabled: bool = True
     # Per-student attempt cap for this session. None inherits the admin
     # default; 0 means unlimited. Bounded 0..10.
-    attendance_attempt_limit: int | None = Field(
-        default=None, ge=0, le=10
-    )
+    attendance_attempt_limit: int | None = Field(default=None, ge=0, le=10)
     # Whether the professor explicitly overrode the offering's classroom. When
     # True, the payload's classroom fields are used as-is (including None),
     # so an intentionally cleared room is not replaced by the offering's
@@ -75,9 +74,7 @@ class SessionCreate(BaseModel):
     classroom_name: str | None = Field(
         default=None, max_length=CLASSROOM_NAME_MAX_LENGTH
     )
-    classroom_lat: float | None = Field(
-        default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX
-    )
+    classroom_lat: float | None = Field(default=None, ge=LATITUDE_MIN, le=LATITUDE_MAX)
     classroom_lng: float | None = Field(
         default=None, ge=LONGITUDE_MIN, le=LONGITUDE_MAX
     )
@@ -94,7 +91,9 @@ class SessionCreate(BaseModel):
     start_time: time | None = None
     # D94: why the professor moved the class, in their own words. Optional,
     # and only meaningful with an override.
-    override_reason: str | None = Field(default=None, max_length=OVERRIDE_REASON_MAX_LENGTH)
+    override_reason: str | None = Field(
+        default=None, max_length=OVERRIDE_REASON_MAX_LENGTH
+    )
 
     @model_validator(mode="after")
     def _windows_within_duration(self) -> "SessionCreate":

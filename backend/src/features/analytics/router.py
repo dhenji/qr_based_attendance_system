@@ -6,6 +6,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from shared.constants import SEMESTER_MAX_LENGTH
+from shared.enums import RiskLevel, SessionType, UserRole
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.rate_limit import rate_limit
+
 from api.deps import AnalyticsServiceDep, require_role
 from features.analytics.schema import (
     AnalyticsExportRequest,
@@ -20,10 +25,6 @@ from features.analytics.schema import (
     TrendResponse,
 )
 from features.auth.model import User
-from shared.constants import SEMESTER_MAX_LENGTH
-from shared.enums import RiskLevel, SessionType, UserRole
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.rate_limit import rate_limit
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
 # This module owns /admin/analytics ONLY.

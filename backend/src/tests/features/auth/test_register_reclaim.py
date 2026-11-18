@@ -19,8 +19,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import _get_active_user
 from core.security import hash_otp, hash_password, verify_password
+
+from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
+
+from api.deps import _get_active_user
 from features.admin.exceptions import EmailAlreadyExists, RosterLinkImpossible
 from features.admin.schema import AdminUserCreate
 from features.admin.service import AdminService
@@ -33,7 +36,6 @@ from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.auth.service import AuthService
 from features.student.service import StudentService
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
 from tests.conftest import Factories
 
 OLD_PASSWORD = "old-holder-pass-1"
@@ -99,9 +101,7 @@ async def _user_audit_rows(session: AsyncSession, user_id: int) -> list[AuditLog
     return list(rows.all())
 
 
-async def _user_activation_rows(
-    session: AsyncSession, user_id: int
-) -> list[AuditLog]:
+async def _user_activation_rows(session: AsyncSession, user_id: int) -> list[AuditLog]:
     """USER rows that revive the login (`is_active` False -> True).
 
     Setup itself writes a USER deactivation row via the archive cascade, so
@@ -121,9 +121,7 @@ async def _hard_deleted_claim(
     """A claimed student, archived + hard-deleted: login retained, inactive."""
     program = await factories.program()
     year = await factories.year_level(program)
-    user = await factories.user(
-        email=email, password_hash=hash_password(OLD_PASSWORD)
-    )
+    user = await factories.user(email=email, password_hash=hash_password(OLD_PASSWORD))
     student = await factories.student(year, user=user, email=email)
     service = StudentService(session)
     await service.archive(student_id=student.id, actor_id=user.id)
@@ -239,14 +237,10 @@ async def test_register_reclaim_resets_mfa_lockout_and_credentials(
     orphan.is_locked = True
     orphan.failed_login_attempts = 3
     test_db_session.add(
-        MfaBackupCodes(
-            user_id=orphan.id, code_hash="h1", code_fingerprint="f1"
-        )
+        MfaBackupCodes(user_id=orphan.id, code_hash="h1", code_fingerprint="f1")
     )
     test_db_session.add(
-        MfaBackupCodes(
-            user_id=orphan.id, code_hash="h2", code_fingerprint="f2"
-        )
+        MfaBackupCodes(user_id=orphan.id, code_hash="h2", code_fingerprint="f2")
     )
     await test_db_session.flush()
 
@@ -314,8 +308,7 @@ async def test_admin_create_reclaims_inactive_login(
 
     rows = await _user_audit_rows(test_db_session, orphan.id)
     assert any(
-        row.action == AuditAction.UPDATE
-        and row.new_value == {"is_active": True}
+        row.action == AuditAction.UPDATE and row.new_value == {"is_active": True}
         for row in rows
     )
 

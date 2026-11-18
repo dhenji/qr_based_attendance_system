@@ -35,6 +35,9 @@ from core.scheduler import (
     scheduled_job_running,
     track,
 )
+
+from shared.enums import BackupKind, BackupStatus, BackupStorage
+
 from features.analytics import batch as analytics_batch
 from features.analytics.batch import run_scheduled_risk_batch
 from features.analytics.constants import RISK_BATCH_RUNTIME_BUDGET_MS
@@ -43,7 +46,6 @@ from features.system import service as system_service
 from features.system.exceptions import BackupFailedException
 from features.system.model import BackupLog
 from features.system.service import SystemService, run_scheduled_backup
-from shared.enums import BackupKind, BackupStatus, BackupStorage
 
 
 def _cron_settings(settings: Settings, **overrides: Any) -> Settings:
@@ -61,9 +63,7 @@ async def _noop() -> None:
     return None
 
 
-def _use_test_session(
-    monkeypatch: pytest.MonkeyPatch, session: AsyncSession
-) -> None:
+def _use_test_session(monkeypatch: pytest.MonkeyPatch, session: AsyncSession) -> None:
     """Point every `database.get_session()` at the test session."""
 
     @asynccontextmanager
@@ -284,9 +284,7 @@ async def test_scheduled_risk_batch_commits_its_scores(
     assert summary["processed"] == 1
 
     await test_db_session.commit()
-    rows = (
-        await test_db_session.scalars(select(StudentRiskScore))
-    ).all()
+    rows = (await test_db_session.scalars(select(StudentRiskScore))).all()
     assert len(rows) == 1
     assert rows[0].student_id == student.id
 
@@ -508,9 +506,7 @@ async def test_scheduled_backup_prunes_under_retention(
     assert backup_id is not None
 
     await test_db_session.commit()
-    filenames = (
-        (await test_db_session.scalars(select(BackupLog.filename))).all()
-    )
+    filenames = (await test_db_session.scalars(select(BackupLog.filename))).all()
     assert stale.filename not in filenames
     # The two survivors are the recent row and the one this run just wrote.
     assert len(filenames) == 2

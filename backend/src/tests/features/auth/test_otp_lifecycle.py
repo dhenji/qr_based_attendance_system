@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from sqlalchemy.sql import operators
 
 from core.config import Settings
-from features.auth.service import AuthService
+
 from shared.enums import OtpPurpose
+
+from features.auth.service import AuthService
 
 PURPOSE = OtpPurpose.CLAIM
 

@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from core.config import Settings
+
 from shared import email as email_module
 from shared.email import (
     DEFAULT_FROM_ADDRESS,

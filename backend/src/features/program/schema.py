@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from shared.schedule import TERM_WEEKS_MAX, TERM_WEEKS_MIN
+
 from features.admin.constants import NAME_MAX_LENGTH, NAME_MIN_LENGTH
 from features.program.constants import (
     CODE_MAX_LENGTH,
@@ -18,7 +20,6 @@ from features.program.constants import (
     YEAR_NUMBER_MAX,
     YEAR_NUMBER_MIN,
 )
-from shared.schedule import TERM_WEEKS_MAX, TERM_WEEKS_MIN
 
 
 class ProgramCreate(BaseModel):
