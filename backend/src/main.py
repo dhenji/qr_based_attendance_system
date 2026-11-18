@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Coroutine
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -11,11 +10,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api.router import api_router
 from core.config import Settings, get_settings
 from core.database import database
 from core.exceptions import AppException
 from core.scheduler import JOB_BACKUP, JOB_RISK_BATCH, get_scheduler
+
+from api.router import api_router
 from features.analytics.batch import run_scheduled_risk_batch
 from features.system.service import run_scheduled_backup
 

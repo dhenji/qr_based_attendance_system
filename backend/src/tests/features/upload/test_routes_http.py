@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from core.config import Settings
+
 from shared import storage as storage_module
 from shared.enums import UserRole
 
@@ -57,9 +58,7 @@ async def test_returns_the_fields_the_client_needs_to_upload(
     assert body["upload_url"].endswith(body["object_key"])
 
 
-async def test_content_type_is_optional(
-    api_client: Any, auth_headers: Any
-) -> None:
+async def test_content_type_is_optional(api_client: Any, auth_headers: Any) -> None:
     response = await api_client.post(
         ENDPOINT,
         json={"filename": "scan.png", "size_bytes": 1024},
@@ -157,7 +156,9 @@ async def test_a_declared_type_contradicting_the_extension_is_400(
 async def test_a_malformed_body_is_422(
     api_client: Any, auth_headers: Any, payload: dict[str, Any]
 ) -> None:
-    response = await api_client.post(ENDPOINT, json=payload, headers=await auth_headers())
+    response = await api_client.post(
+        ENDPOINT, json=payload, headers=await auth_headers()
+    )
 
     assert response.status_code == 422
 

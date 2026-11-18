@@ -6,6 +6,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
+from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
+
 from api.deps import CourseServiceDep, require_role
 from features.auth.model import User
 from features.course.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -23,8 +26,6 @@ from features.course.schema import (
     ProfessorReopen,
     RosterItem,
 )
-from shared.enums import UserRole
-from shared.pagination import PaginatedResponse
 
 # This module owns /admin/offerings ONLY.
 #
@@ -257,9 +258,7 @@ async def permanently_remove_professor(
     effective_from: Annotated[
         date,
         Query(
-            description=(
-                "Start date of the exact assignment row to permanently remove"
-            )
+            description=("Start date of the exact assignment row to permanently remove")
         ),
     ],
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],

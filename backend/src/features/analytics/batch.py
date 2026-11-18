@@ -15,8 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.database import database
 from core.scheduler import JOB_RISK_BATCH, track
+
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, SyncStatus, ValidationStatus
+from shared.schedule import term_weeks
+
 from features.analytics.constants import (
     FEATURE_DECIMALS,
     RISK_BATCH_RUNTIME_BUDGET_MS,
@@ -35,7 +38,6 @@ from features.course.model import CourseOffering
 from features.enrollment.model import Enrollment
 from features.program.model import YearLevel
 from features.session.model import Session
-from shared.schedule import term_weeks
 
 logger = logging.getLogger(__name__)
 
@@ -219,14 +221,12 @@ def _risk_probability(
     cfg: Settings,
 ) -> float:
     blended = (
-        WEIGHT_ABSENCE_RATE
-        * _capped_ratio(absence_rate, cfg.risk_absence_rate_high)
+        WEIGHT_ABSENCE_RATE * _capped_ratio(absence_rate, cfg.risk_absence_rate_high)
         + WEIGHT_MAX_STREAK
         * _capped_ratio(float(max_streak), float(cfg.risk_streak_gaps_high))
         + WEIGHT_SYNC_LAG
         * _capped_ratio(float(sync_lag), float(cfg.risk_sync_lag_high))
-        + WEIGHT_TREND_SLOPE
-        * _capped_ratio(max(trend_slope, 0.0), TREND_POSITIVE_NORM)
+        + WEIGHT_TREND_SLOPE * _capped_ratio(max(trend_slope, 0.0), TREND_POSITIVE_NORM)
     )
     return round(max(0.0, min(1.0, blended)), FEATURE_DECIMALS)
 
@@ -252,9 +252,7 @@ async def _load_active_targets(
 ) -> list[tuple[int, int, str]]:
     rows: Sequence[tuple[int, int, str]] = (
         await session.execute(
-            select(
-                Enrollment.student_id, Enrollment.offering_id, Enrollment.semester
-            )
+            select(Enrollment.student_id, Enrollment.offering_id, Enrollment.semester)
             .join(CourseOffering, CourseOffering.id == Enrollment.offering_id)
             .where(CourseOffering.is_active.is_(True))
         )
@@ -354,9 +352,7 @@ def _score_targets(
     # `executor.map` preserves input order, so sharded runs score identically
     # to the serial path while spreading chunks across worker threads.
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        return [
-            item for part in executor.map(_score_slice, slices) for item in part
-        ]
+        return [item for part in executor.map(_score_slice, slices) for item in part]
 
 
 async def _upsert_scores(
@@ -375,9 +371,7 @@ async def _upsert_scores(
             .where(StudentRiskScore.computed_day == computed_day)
         )
     ).all()
-    by_key = {
-        (row.student_id, row.offering_id, row.semester): row for row in existing
-    }
+    by_key = {(row.student_id, row.offering_id, row.semester): row for row in existing}
 
     high = medium = low = 0
     for item in scored:
@@ -427,9 +421,7 @@ async def _stage_scores(
             .where(StudentRiskScoreStaging.computed_day == computed_day)
         )
     ).all()
-    by_key = {
-        (row.student_id, row.offering_id, row.semester): row for row in existing
-    }
+    by_key = {(row.student_id, row.offering_id, row.semester): row for row in existing}
 
     high = medium = low = 0
     for item in scored:

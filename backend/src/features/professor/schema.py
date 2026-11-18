@@ -12,6 +12,9 @@ from pydantic import (
     model_validator,
 )
 
+from shared.enums import SessionType
+from shared.validators import password_strength
+
 from features.professor.constants import (
     DEPARTMENT_MAX_LENGTH,
     EMAIL_MAX_LENGTH,
@@ -20,8 +23,6 @@ from features.professor.constants import (
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
 )
-from shared.enums import SessionType
-from shared.validators import password_strength
 
 
 class AssignedCourse(BaseModel):

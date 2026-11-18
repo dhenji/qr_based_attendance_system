@@ -4,9 +4,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from api.deps import ExcuseServiceDep, require_role
-from features.auth.model import User
-from features.excuse.schema import ExcuseRequestRead
 from shared.enums import UserRole
 from shared.pagination import (
     DEFAULT_PAGE,
@@ -14,6 +11,10 @@ from shared.pagination import (
     MAX_PAGE_SIZE,
     PaginatedResponse,
 )
+
+from api.deps import ExcuseServiceDep, require_role
+from features.auth.model import User
+from features.excuse.schema import ExcuseRequestRead
 
 # This module owns /admin/excuses ONLY.
 #

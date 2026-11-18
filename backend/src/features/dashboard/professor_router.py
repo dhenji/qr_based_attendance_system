@@ -4,10 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from shared.enums import UserRole
+
 from api.deps import DashboardServiceDep, ProfessorServiceDep, require_role
 from features.auth.model import User
 from features.dashboard.schema import ProfessorDashboardResponse
-from shared.enums import UserRole
 
 # Sibling of student_router.py and admin_router.py in this slice; see the module
 # docstring in service.py for why the three dashboards are not owned by the

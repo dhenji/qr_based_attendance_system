@@ -7,9 +7,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
+from shared.enums import ExcuseStatus
+
 from features.session.model import Session
 from features.student.model import Student
-from shared.enums import ExcuseStatus
 
 
 class ExcuseRequest(Base):

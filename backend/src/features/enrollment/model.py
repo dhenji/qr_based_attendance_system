@@ -4,9 +4,11 @@ from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
+from shared.mixins import CreatedAtMixin
+
 from features.course.model import CourseOffering
 from features.student.model import Student
-from shared.mixins import CreatedAtMixin
 
 
 class Enrollment(CreatedAtMixin, Base):

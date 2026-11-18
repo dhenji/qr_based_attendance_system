@@ -191,7 +191,7 @@ session is `closed`. Scanned students keep their server-decided status.
 | Frontend  | SvelteKit 2 (Svelte 5 runes) + TypeScript (strict)                                       |
 | Database  | PostgreSQL 16                                                                            |
 | Platform  | Progressive Web App (works on any device; planned)                                       |
-| Tooling   | Docker / docker-compose, html5-qrcode (session QR), qrcode, zod, @mediapipe/tasks-vision |
+| Tooling   | Docker / docker-compose, Ruff (backend lint/format), html5-qrcode (session QR), qrcode, zod, @mediapipe/tasks-vision |
 
 The MediaPipe face-landmark model and its WASM runtime are vendored under
 `frontend/static/` (`models/`, `wasm/`), so face enrollment needs no CDN.
@@ -205,7 +205,8 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 ## Repository Layout
 
 ```
-├── .gitignore            # Root-level ignores (env/venv, node, docker data, build output)
+├── .editorconfig         # Editor defaults (UTF-8, LF, final newline; 4-space Python, tabs for frontend)
+├── .gitignore            # Root-level ignores (env/venv, node, docker data, build output, .ruff_cache)
 ├── frontend/             # SvelteKit app — feature slices + routes (real API by default, opt-in mock)
 │   ├── Dockerfile.dev    # Vite dev server on :5173 (node:22-alpine)
 │   ├── static/           # PWA manifest + icons, robots.txt, and vendored MediaPipe assets (models/face_landmarker.task, wasm/)
@@ -224,7 +225,12 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
  │   │   ├── api/          # deps.py (_get_db, _get_current_user, _get_optional_current_user, require_role, *ServiceDep incl. SessionServiceDep) + router.py (23 routers over 15 mount paths, no prefix= arg — each APIRouter bakes its own prefix in)
 │   │   ├── features/     # 18 slices: admin, analytics, attendance, auth, course, course_professor, dashboard, enrollment, excuse, face_enrollment, professor, program, reports, session, student, sync, system, upload
 │   │   │   └── */        # model.py in 13 slices (21 classes; admin, dashboard, face_enrollment, reports, upload are model-less); see the router table below for mount points. 23 mounted routers over 24 *router*.py files — enrollment intentionally unmounted; service.py ×15, schema.py ×15, exceptions.py ×13, constants.py ×12
- │   │   └── tests/        # pytest suite — 1112 cases in 84 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini │   ├── alembic/          # env.py imports all 13 feature models; 25 revisions — 679a319c12d6 (baseline, 16 tables), 2a437ca93c53 + 33eabbfbfa6a (mfa_backup_codes + fingerprint index), c3e913d02be0 (enrollments.created_at), a562c3f8a6f7 (FK restrict), d4e5f6a7b8c9 (risk-score staging), e7f8a9b0c1d2 (app_settings), f4a9c2b7d103 (audit_logs), b1c4e7f0a2d6, 1e1582c4e9f8 (timestamp indexes), c9d4e5f6a7b8 (drop users.username, ADR-073), e8f9a0b1c2d3 (sessions.session_type + offering_components, D77), f1a2b3c4d5e6 (term-scoped session weeks), b2c3d4e5f6a7 (drop course_professors.semester), c3d4e5f6a7b8 (repair assignment date ranges), d5e6f7a8b9c0 (demote duplicate primaries), e6f7a8b9c0d1 (audit_logs action index, ADR-089), ff8df9fe1302 (otp failed_attempts), g8h9i0j1k2l3 (face embedding algorithm), 850d6b2e1652 (lockout escalation), a8b9c0d1e2f3 (nullable offering window defaults), 199665127004 (session is_remote), 2a3b4c5d6e7f (session geofence_enabled), b9c0d1e2f3a4 (session start-window columns, D94) → head b9c0d1e2f3a4│   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
+ │   │   └── tests/        # pytest suite — 1121 cases in 87 files. conftest.py (test_db_session, api_client/test_client, auth_headers, factories) + sync hand-rolled-fake tests + DB-backed async tests. Config: backend/pytest.ini
+│   ├── alembic/          # env.py imports all 13 feature models; 31 revisions, head 768d6ae62710 (attempt-counter check constraint). Chain: 679a319c12d6 (baseline) → 2a437ca93c53 (MFA backup codes) → 33eabbfbfa6a (enrollment timestamps) → c3e913d02be0 (FK restrict) → a562c3f8a6f7 (risk staging) → d4e5f6a7b8c9 (app settings) → e7f8a9b0c1d2 (audit logs) → f4a9c2b7d103 (app-settings key) → b1c4e7f0a2d6 (timestamp indexes) → 1e1582c4e9f8 (drop users.username, ADR-073) → c9d4e5f6a7b8 (session types + offering components, D77) → e8f9a0b1c2d3 (term weeks, D86) → f1a2b3c4d5e6 (drop course_professors.semester) → b2c3d4e5f6a7 (repair assignment ranges) → c3d4e5f6a7b8 (demote duplicate primaries) → d5e6f7a8b9c0 (audit action index) → e6f7a8b9c0d1 (schedule override + geofence radius) → f7a8b9c0d1e2 (offering window defaults, D93) → a8b9c0d1e2f3 (start-window columns, D94) → b9c0d1e2f3a4 (session is_remote) → 199665127004 (geofence enabled) → 2a3b4c5d6e7f (face-embedding algorithm) → g8h9i0j1k2l3 (lockout escalation) → 850d6b2e1652 (OTP failed attempts) → ff8df9fe1302 (token_version) → a19c02a79e75 (last_activity_at) → c2d3e4f5a6b7 (Super Admin recovery fields) → h9i0j1k2l3m4 (attempt limit) → 55d6238fab9f (attempt counters) → 768d6ae62710 (attempt-counter check constraint)
+│   ├── requirements.txt # Python dependencies (includes the pinned Ruff)
+│   ├── pyproject.toml   # Ruff lint/format config (ADR-094)
+│   ├── pytest.ini       # pytest config (testpaths, asyncio_mode, markers)
+│   ├── test_seed_data.py # Seed CLI entry point → src/tests/seed_data.py (--scale small|medium|large|xl, --reset, --load-fixtures N)
 │   ├── locustfile.py     # Concurrent-scan load harness (locust; 30 VUs over a pool of SEED-LOAD-* sessions)
 │   ├── bench_timings.py  # One-shot risk-batch / backup timings + the import-safe helpers locustfile reuses
 │   └── Dockerfile.dev    # Multi-stage: builder (venv /opt/venv) → runtime (uvicorn) → migrate (alembic upgrade head)
@@ -427,7 +433,7 @@ Backend tests (Compose — realistic Postgres path):
 docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test
 ```
 
-This runs the suite (**1112 cases across 84 files**) against the dedicated
+This runs the suite (**1121 cases across 87 files**) against the dedicated
 `attendance_test` database: `test-db-init` creates it idempotently, then
 `api-test` sets `TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/attendance_test`.
 The suite runs `create_all`/`drop_all` per test, so it must never point at
@@ -497,20 +503,28 @@ Frontend watch mode:
 cd frontend && npm run check:watch
 ```
 
-There are no linters or formatters configured. The backend suite is 1112 cases
-across 84 files (314 sync + 752 async test functions, plus parametrized expansions).
+Ruff is the backend linter and formatter (`backend/pyproject.toml`, pinned in
+`backend/requirements.txt`; the `lint` CI job installs that exact pin and runs
+`ruff check` / `ruff format --check` from `backend/` — ADR-094). Editor defaults
+live in `.editorconfig`. The backend suite is 1121 cases across 87 files (315
+sync + 763 async test functions, plus parametrized expansions).
+
 The frontend suite uses Vitest + @testing-library/svelte (jsdom) under `frontend/src/**/*.test.ts`;
 run it with `npm run test` / `npm run test:coverage`.
+
 ### CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
-`main`, every pull request, and manually via `workflow_dispatch`, as three parallel jobs — rationale in
-[ADR-069](docs/project/decision-log.md):
+`main`, every pull request, and manually via `workflow_dispatch`, as four
+parallel jobs — rationale in [ADR-069](docs/project/decision-log.md) and
+[ADR-094](docs/project/decision-log.md):
 
-| Job          | Gate                                                            | Needs                          |
-| ------------ | --------------------------------------------------------------- | ------------------------------ |
-| `backend`    | `python -m pytest src/tests -q` — 1112 cases on in-memory SQLite | nothing                        || `migrations` | `alembic upgrade head && alembic check`                         | a `postgres:16-alpine` service |
-| `frontend`   | `npm ci && npm run check && npm run test:coverage && npm run build` | nothing                        |
+| Job          | Gate                                                                 | Needs                          |
+| ------------ | -------------------------------------------------------------------- | ------------------------------ |
+| `backend`    | `python -m pytest src/tests -q` — 1121 cases on in-memory SQLite      | nothing                        |
+| `migrations` | `alembic upgrade head && alembic check`                              | a `postgres:16-alpine` service |
+| `frontend`   | `npm ci && npm run check && npm run test:coverage && npm run build`  | nothing                        |
+| `lint`       | `ruff check . && ruff format --check .` (from `backend/`)             | nothing                        |
 
 No job reads a secret. The `migrations` job is the one that matters: the test
 schema is built with `Base.metadata.create_all`, straight from the models, so
@@ -518,9 +532,9 @@ the suite exercises the migration chain in neither direction and **cannot** catc
 drift (ADR-065). `alembic check` is the only thing that does — the local
 equivalent is the schema drift check above.
 
-CI **reports**; it only _blocks_ a merge once `backend`, `migrations`, and
-`frontend` are added as required status checks in the repository's branch
-protection settings. **`main` is not protected today** — on a private repository
+CI **reports**; it only _blocks_ a merge once `backend`, `migrations`,
+`frontend`, and `lint` are added as required status checks in the repository's
+branch protection settings. **`main` is not protected today** — on a private repository
 GitHub gates branch protection and rulesets behind a paid plan, so merges are
 currently enforced by convention, not by the platform.
 
@@ -570,7 +584,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 
 ### Design
 
-- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (21 tables landed)
+- [`docs/design/database-er.md`](docs/design/database-er.md) — entity-relationship diagram (22 tables landed)
 - [`docs/design/wireframes.md`](docs/design/wireframes.md) — screen wireframes
 
 ### Developer
@@ -597,7 +611,7 @@ See [`docs/deployment/deployment-workflow.md`](docs/deployment/deployment-workfl
 ### Project
 
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) — 13-phase implementation roadmap (Phase 0–12; 0, 9 and 12 marked `[Done]`)
-- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D83, ADR-001–ADR-083)
+- [`docs/project/decision-log.md`](docs/project/decision-log.md) — authoritative decision log (D1–D83, ADR-001–ADR-094)
 - [`docs/project/glossary.md`](docs/project/glossary.md) — terminology definitions
 
 ### Testing
@@ -620,9 +634,11 @@ default (`PUBLIC_MOCK_MODE=false`) — mock mode is opt-in for UI work.
 
 | Area       | Status                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend    | 18 feature slices / 22 model classes / 22 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `768d6ae62710` (29 revisions; adds `users.token_version` for session revocation and Super Admin recovery fields); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra                                               || Frontend   | 51 +page.svelte files (50 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 12 feature components and 16 shared ones (adds `RadiusSelector`, `Pagination`, `AcademicYearPicker`); typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts`. Student scan now runs a bounded GPS location check (accuracy/distance/radius feedback, retry, continue gating) before face liveness; `ClassroomMapPicker` shows a radius circle, a distinct GPS marker, an accuracy circle (radius = reported horizontal accuracy) and a "Use my location" control that targets a fixed 50 m high-accuracy fix independent of the geofence radius; scan surfaces specific 422 validation details as friendly copy and guards against a missing captured face frame; professor dashboard course-identity join is re-warmed per login and invalidated on logout/account switch (`invalidateCourseCache`), preventing stale generic “Offering N” rows; student scan confirmation now displays the session's scheduled start time (`scheduledStartTime`, from `sessions.scheduled_start_time`, including overridden values) before attendance confirmation, cached for offline reuse; rejected liveness evidence now triggers an email to the student with the admin's reason and retake availability, and the student history page offers "Retake Attendance" while the session is still open; professor excuse requests now use a searchable student selector plus advanced, URL-synced filters and filter chips; the quick-excuse modal now resolves the selected student's enrolled courses from the offering rosters and lists them first in the course picker, with the selected course filtering the session dropdown; the attendance ledger adds a collapsible advanced filter panel; admin attendance analytics dashboard (KPIs, status distribution, per-course table, detailed records with instructor, pagination, exports); admin analytics filter rail redesigned to a labeled responsive grid with presets, auto-apply, shared pagination, drill-down, and student-name search on at-risk/staging; Add Offering modal now uses an academic-year picker and a per-meeting interactive map (ClassroomMapPicker) for coordinates, with section grouping, required markers, and field-level validation; admin student/professor/program/offerings forms now align with `/admin/courses` (field-level validation, inline errors/hints, required markers, reactivate confirmations, green reactivate styling), student edit pre-populates Program/Year and enforces required fields, and offering settings use inline field errors; **student scan location step** now hides "Retry Location" once the location is accepted and gives disabled buttons clear visual feedback (opacity + not-allowed cursor, no hover-lift); **session timing UI** now shows a visual timeline bar, duration preset chips, inline window-fit validation, and a confirmation panel restating scan window vs. class end on the create page, and a single centered scan-window countdown with a progress bar, overtime/shortened badges, and a clarified "Schedule and time" details card on the active page; the professor dashboard's "Class ends" metric now uses the scheduled end time instead of the scan-window expiry
-| Schema     | 21 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes` and `offering_components` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82) and are stored as an integer with a minimum of 1 and no hardcoded maximum              |
-| Tests      | 1112 backend cases in 84 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend: 106 Vitest unit/component cases (co-located `*.test.ts` + `src/testing/` helpers) plus `npm run check`; coverage thresholds enforced in CI (11/7/5/13)                                                                                                                                                                                                          || Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |
+| Backend    | 18 feature slices / 22 model classes / 22 tables; 23 routers over 15 mount paths under `/api` (see the mount table above); head migration `768d6ae62710` (31 revisions; the latest revisions add the per-student attendance attempt limit, durable attempt counters, and an attempt-counter check constraint, plus `users.token_version` for session revocation and Super Admin recovery fields); APScheduler crons for the 02:00 risk batch and 03:00 backup; `AppException` handler, lifespan `SELECT 1` boot check, shared `rates.py`/`schedule.py`/`audit.py`/`email.py` infra                                                |
+| Frontend   | 51 +page.svelte files (50 pages across landing/auth/student/professor/admin + 1 /admin redirect stub); 12 top-level feature dirs (+ analytics under admin) (`admin` has 9 sub-slices) + runes stores (auth, student, professor, admin) + 12 feature components and 16 shared ones (adds `RadiusSelector`, `Pagination`, `AcademicYearPicker`); typed `api/client.ts` + an `EndpointDef` registry; PWA via `static/manifest.webmanifest` and `src/service-worker.ts`. Student scan now runs a bounded GPS location check (accuracy/distance/radius feedback, retry, continue gating) before face liveness; `ClassroomMapPicker` shows a radius circle, a distinct GPS marker, an accuracy circle (radius = reported horizontal accuracy) and a "Use my location" control that targets a fixed 50 m high-accuracy fix independent of the geofence radius; scan surfaces specific 422 validation details as friendly copy and guards against a missing captured face frame; professor dashboard course-identity join is re-warmed per login and invalidated on logout/account switch (`invalidateCourseCache`), preventing stale generic “Offering N” rows; student scan confirmation now displays the session's scheduled start time (`scheduledStartTime`, from `sessions.scheduled_start_time`, including overridden values) before attendance confirmation, cached for offline reuse; rejected liveness evidence now triggers an email to the student with the admin's reason and retake availability, and the student history page offers "Retake Attendance" while the session is still open; professor excuse requests now use a searchable student selector plus advanced, URL-synced filters and filter chips; the quick-excuse modal now resolves the selected student's enrolled courses from the offering rosters and lists them first in the course picker, with the selected course filtering the session dropdown; the attendance ledger adds a collapsible advanced filter panel; admin attendance analytics dashboard (KPIs, status distribution, per-course table, detailed records with instructor, pagination, exports); admin analytics filter rail redesigned to a labeled responsive grid with presets, auto-apply, shared pagination, drill-down, and student-name search on at-risk/staging; Add Offering modal now uses an academic-year picker and a per-meeting interactive map (ClassroomMapPicker) for coordinates, with section grouping, required markers, and field-level validation; admin student/professor/program/offerings forms now align with `/admin/courses` (field-level validation, inline errors/hints, required markers, reactivate confirmations, green reactivate styling), student edit pre-populates Program/Year and enforces required fields, and offering settings use inline field errors; **student scan location step** now hides "Retry Location" once the location is accepted and gives disabled buttons clear visual feedback (opacity + not-allowed cursor, no hover-lift); **session timing UI** now shows a visual timeline bar, duration preset chips, inline window-fit validation, and a confirmation panel restating scan window vs. class end on the create page, and a single centered scan-window countdown with a progress bar, overtime/shortened badges, and a clarified "Schedule and time" details card on the active page; the professor dashboard's "Class ends" metric now uses the scheduled end time instead of the scan-window expiry |
+| Schema     | 22 tables modelled and migrated, including `app_settings`, `audit_logs`, `student_risk_scores_staging`, `mfa_backup_codes`, `offering_components` and `attendance_attempt_counters` ([ERD](docs/design/database-er.md)); `sessions.session_type` and offering components are persisted (D77); `users.username` removed (D73, email is the whole identity); course `units` are an exact weekly-hours requirement (D79–D82) and are stored as an integer with a minimum of 1 and no hardcoded maximum              |
+| Tests      | 1121 backend cases in 87 files (SQLite by default, or `TEST_DATABASE_URL` for Postgres), run through the `api-test` Compose service or the local venv; frontend: 106 Vitest unit/component cases (co-located `*.test.ts` + `src/testing/` helpers) plus `npm run check`; coverage thresholds enforced in CI (11/7/5/13)                                                                                                                                                                                                           |
+| Benchmarks | Measured load run 2026-10-04: 11.0 scans/s over 300s, p95 26ms, p99 33ms, 0 duplicate rejections; risk batch 4.2s for 10,058 students. Backup leg environment-blocked on OpenSSL 3 AEAD — see [performance-benchmarks.md](docs/testing/performance-benchmarks.md) §7                                                                                                                                    |
 
 The remaining known gaps are operational rather than structural: Phase 10
 (production launch) and Phase 11 (ongoing operations) are deployment and process

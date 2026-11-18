@@ -4,6 +4,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
+
 from api.deps import AdminServiceDep, AuthServiceDep, require_role
 from features.admin.constants import (
     DEFAULT_PAGE,
@@ -23,8 +26,6 @@ from features.auth.schema import (
     LockoutReasonRequest,
     LockoutStatusResponse,
 )
-from shared.enums import UserRole
-from shared.pagination import PaginatedResponse
 
 # The full contract path is baked into the router and mounted without a prefix
 # argument (api/router.py). This module owns the admin *user* endpoints only;
@@ -49,7 +50,11 @@ async def list_users(
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> PaginatedResponse[AdminUserRead]:
     return await service.list_users(
-        search=search, role=role, is_active=is_active, page=page, size=size,
+        search=search,
+        role=role,
+        is_active=is_active,
+        page=page,
+        size=size,
         actor_id=actor.id,
         actor_role=actor.role,
     )
@@ -98,7 +103,9 @@ async def deactivate_user(
     actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: AdminServiceDep,
 ) -> None:
-    await service.deactivate_user(actor_id=actor.id, user_id=user_id, actor_role=actor.role)
+    await service.deactivate_user(
+        actor_id=actor.id, user_id=user_id, actor_role=actor.role
+    )
 
 
 @router.patch(
@@ -111,7 +118,9 @@ async def reactivate_user(
     actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: AdminServiceDep,
 ) -> None:
-    await service.reactivate_user(actor_id=actor.id, user_id=user_id, actor_role=actor.role)
+    await service.reactivate_user(
+        actor_id=actor.id, user_id=user_id, actor_role=actor.role
+    )
 
 
 @router.get(
@@ -125,7 +134,9 @@ async def get_lockout_status(
     actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     auth_service: AuthServiceDep,
 ) -> LockoutStatusResponse:
-    data = await auth_service.get_lockout_status(user_id, actor_id=actor.id, actor_role=actor.role)
+    data = await auth_service.get_lockout_status(
+        user_id, actor_id=actor.id, actor_role=actor.role
+    )
     return LockoutStatusResponse(**data)
 
 

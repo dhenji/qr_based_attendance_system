@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -28,6 +27,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
+
+from shared.enums import QueueStatus, ScannedVia, UserRole, ValidationStatus
+from shared.face_embeddings import (
+    cosine_similarity,
+    deserialize_embedding,
+    embedding_to_base64,
+    serialize_embedding,
+)
+
+from features.attendance import service as attendance_service
 from features.attendance.exceptions import (
     AttendanceAttemptLimitReachedException,
     AttendanceDomainException,
@@ -37,7 +46,6 @@ from features.attendance.exceptions import (
     StudentNumberMismatchException,
 )
 from features.attendance.model import Attendance, AttendanceAttemptCounter
-from features.attendance import service as attendance_service
 from features.attendance.schema import (
     GPSInput,
     LivenessEvidence,
@@ -57,14 +65,8 @@ from features.student.exceptions import (
     NotEnrolledException,
     StudentNotFoundException,
 )
+from features.student.model import Student
 from features.sync.model import SyncQueue
-from shared.enums import QueueStatus, ScannedVia, UserRole, ValidationStatus
-from shared.face_embeddings import (
-    cosine_similarity,
-    deserialize_embedding,
-    embedding_to_base64,
-    serialize_embedding,
-)
 from tests.conftest import Factories
 
 
@@ -74,9 +76,13 @@ def _make_live_emb(score: float = 0.9) -> str:
     ref = ref / np.linalg.norm(ref)
     # Create live embedding close to ref for high score
     if score >= 0.8:
-        live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+        live = (
+            ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+        )
     elif score >= 0.65:
-        live = ref * 0.8 + np.random.RandomState(123).randn(128).astype(np.float32) * 0.1
+        live = (
+            ref * 0.8 + np.random.RandomState(123).randn(128).astype(np.float32) * 0.1
+        )
     else:
         live = np.random.RandomState(999).randn(128).astype(np.float32)
     return embedding_to_base64(live)
@@ -134,9 +140,7 @@ def scan_request(
     return ScanRequest(**fields)
 
 
-async def seed(
-    factories: Factories, **session_overrides: Any
-) -> dict[str, Any]:
+async def seed(factories: Factories, **session_overrides: Any) -> dict[str, Any]:
     """Full stack with geofence coordinates wired to a live session."""
 
     stack: dict[str, Any] = await factories.full_stack(**session_overrides)
@@ -173,7 +177,7 @@ async def test_scan_inside_present_window_is_present(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -195,7 +199,7 @@ async def test_scan_after_present_window_is_late(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=8),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.LATE.value
@@ -217,7 +221,7 @@ async def test_scan_after_late_window_is_rejected(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=20),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.REJECTED.value
@@ -244,7 +248,7 @@ async def test_present_window_boundary_is_inclusive(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=minutes),
-        )
+        ),
     )
 
     assert result.status == expected
@@ -266,7 +270,7 @@ async def test_late_window_boundary_is_inclusive(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=15),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.LATE.value
@@ -295,7 +299,9 @@ async def test_score_in_review_band_is_pending_with_original_status(
     r, _, _ = deserialize_embedding(stack["student"].face_embedding)
     score = cosine_similarity(r, live)
     if not (0.65 <= score < 0.70):
-        live = ref * 0.6 + np.random.RandomState(33).randn(128).astype(np.float32) * 0.08
+        live = (
+            ref * 0.6 + np.random.RandomState(33).randn(128).astype(np.float32) * 0.08
+        )
         live = live / np.linalg.norm(live)
         score = cosine_similarity(r, live)
     assert 0.65 <= score < 0.70
@@ -307,7 +313,7 @@ async def test_score_in_review_band_is_pending_with_original_status(
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
             live_face_embedding=embedding_to_base64(live),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -348,7 +354,7 @@ async def test_review_band_preserves_late_as_original_status(
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=8),
             live_face_embedding=embedding_to_base64(live),
-        )
+        ),
     )
 
     row: Attendance = (
@@ -393,7 +399,7 @@ async def test_review_band_record_reads_identically_on_student_history_and_profe
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
             live_face_embedding=embedding_to_base64(live),
-        )
+        ),
     )
 
     history = await attendance_service.get_history(user_id=stack["student"].user_id)
@@ -444,7 +450,7 @@ async def test_late_review_band_record_reads_identically_on_student_history_and_
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=8),
             live_face_embedding=embedding_to_base64(live),
-        )
+        ),
     )
 
     history = await attendance_service.get_history(user_id=stack["student"].user_id)
@@ -479,16 +485,15 @@ def _review_band_live_embedding(
     ref, _, _ = deserialize_embedding(student.face_embedding)
 
     for seed_value in (27, 33, 7, 123):
-        live = ref * target + np.random.RandomState(seed_value).randn(128).astype(
-            np.float32
-        ) * 0.08
+        live = (
+            ref * target
+            + np.random.RandomState(seed_value).randn(128).astype(np.float32) * 0.08
+        )
         live = live / np.linalg.norm(live)
         if 0.65 <= cosine_similarity(ref, live) < 0.70:
             return live
 
-    raise AssertionError(
-        f"could not build a review-band embedding for target={target}"
-    )
+    raise AssertionError(f"could not build a review-band embedding for target={target}")
 
 
 async def test_score_below_review_band_raises_face_mismatch(
@@ -511,7 +516,7 @@ async def test_score_below_review_band_raises_face_mismatch(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 live_face_embedding=embedding_to_base64(live),
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 403
@@ -538,7 +543,7 @@ async def test_rejected_score_writes_no_attendance_row(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 live_face_embedding=embedding_to_base64(live),
-            )
+            ),
         )
 
     count: int = await test_db_session.scalar(
@@ -567,7 +572,7 @@ async def test_scan_outside_geofence_raises(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 gps=OUTSIDE_GPS,
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 403
@@ -590,7 +595,7 @@ async def test_scan_with_ambiguous_geofence_is_reviewed(
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
             gps=AMBIGUOUS_GPS,
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -633,7 +638,7 @@ async def test_session_without_classroom_coords_skips_geofence(
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
             gps=OUTSIDE_GPS,
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -664,7 +669,7 @@ async def test_scan_without_gps_succeeds_when_geofence_disabled(
             student.student_id,
             scanned_at=session.created_at + timedelta(minutes=2),
             gps=None,
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -689,7 +694,7 @@ async def test_scan_without_gps_fails_when_geofence_required(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 gps=None,
-            )
+            ),
         )
 
 
@@ -727,7 +732,7 @@ async def test_failing_liveness_evidence_raises(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 liveness_evidence=valid_evidence(**overrides),
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 403
@@ -751,7 +756,7 @@ async def test_empty_pnp_evidence_fails_liveness(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 liveness_evidence=valid_evidence(pnp_evidence={}),
-            )
+            ),
         )
 
 
@@ -801,7 +806,7 @@ async def test_empty_ear_samples_fail_the_grade(
                 student.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
                 liveness_evidence=evidence,
-            )
+            ),
         )
 
     assert excinfo.value.code == "liveness_failed"
@@ -824,9 +829,7 @@ async def test_unknown_session_raises_not_found(
     unknown = unknown.model_copy(update={"session_id": UNKNOWN_SESSION_ID})
 
     with pytest.raises(SessionNotFoundException) as excinfo:
-        await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=unknown)
+        await service.submit_scan(user_id=stack["student"].user_id, payload=unknown)
 
     assert excinfo.value.status_code == 404
     assert excinfo.value.code == "session_not_found"
@@ -850,7 +853,7 @@ async def test_authenticated_user_without_a_student_row_raises(
                 stack["session"],
                 stack["student"].student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 404
@@ -880,7 +883,7 @@ async def test_scanning_as_another_student_is_refused(
                 stack["session"],
                 victim.student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 403
@@ -909,7 +912,7 @@ async def test_scanned_student_number_comparison_ignores_case(
             stack["session"],
             student.student_id.lower(),
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -934,7 +937,7 @@ async def test_unenrolled_student_raises_not_enrolled(
                 stack["session"],
                 stack["student"].student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 403
@@ -957,7 +960,7 @@ async def test_inactive_student_raises_not_enrolled(
                 stack["session"],
                 stack["student"].student_id,
                 scanned_at=stack["session"].created_at + timedelta(minutes=2),
-            )
+            ),
         )
 
 
@@ -975,14 +978,10 @@ async def test_second_scan_raises_duplicate(
         scanned_at=stack["session"].created_at + timedelta(minutes=2),
     )
 
-    await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=payload)
+    await service.submit_scan(user_id=stack["student"].user_id, payload=payload)
 
     with pytest.raises(DuplicateScanException) as excinfo:
-        await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=payload)
+        await service.submit_scan(user_id=stack["student"].user_id, payload=payload)
 
     assert excinfo.value.status_code == 409
     assert excinfo.value.code == "duplicate_scan"
@@ -1078,11 +1077,11 @@ async def test_idempotency_key_replays_cached_response(
     )
 
     first = await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=payload, idempotency_key="key-abc")
+        user_id=stack["student"].user_id, payload=payload, idempotency_key="key-abc"
+    )
     second = await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=payload, idempotency_key="key-abc")
+        user_id=stack["student"].user_id, payload=payload, idempotency_key="key-abc"
+    )
 
     assert second.id == first.id
 
@@ -1109,13 +1108,13 @@ async def test_distinct_idempotency_keys_write_distinct_rows(
     )
 
     await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=payload, idempotency_key="key-one")
+        user_id=stack["student"].user_id, payload=payload, idempotency_key="key-one"
+    )
 
     with pytest.raises(DuplicateScanException):
         await service.submit_scan(
-        user_id=stack["student"].user_id,
-        payload=payload, idempotency_key="key-two")
+            user_id=stack["student"].user_id, payload=payload, idempotency_key="key-two"
+        )
 
 
 # --- persisted shape ------------------------------------------------------
@@ -1136,7 +1135,7 @@ async def test_persisted_scan_records_gps_status_and_evidence(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
-        )
+        ),
     )
 
     row: Attendance = (
@@ -1179,7 +1178,7 @@ async def test_fresh_scan_writes_no_sync_queue_row(
             stack["session"],
             student.student_id,
             scanned_at=now,
-        )
+        ),
     )
 
     queued: int = await test_db_session.scalar(select(SyncQueue.id))
@@ -1202,7 +1201,7 @@ async def test_stale_offline_scan_queues_a_sync_record(
 
     result = await service.submit_scan(
         user_id=stack["student"].user_id,
-        payload=scan_request(stack["session"], student.student_id, scanned_at)
+        payload=scan_request(stack["session"], student.student_id, scanned_at),
     )
 
     queued: SyncQueue | None = (
@@ -1253,7 +1252,7 @@ async def test_a_stale_scan_raises_the_active_session_pending_count(
             stack["session"],
             student.student_id,
             now - timedelta(seconds=SYNC_STALE_SECONDS + 30),
-        )
+        ),
     )
 
     after = await live.get_active_session(
@@ -1312,7 +1311,7 @@ async def test_naive_scanned_at_is_treated_as_utc(
             stack["session"],
             student.student_id,
             scanned_at=created_at + timedelta(minutes=2),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -1348,7 +1347,7 @@ async def test_session_created_at_anchors_the_window_not_the_schedule(
             session,
             student.student_id,
             scanned_at=session.created_at + timedelta(minutes=1),
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.PRESENT.value
@@ -1364,7 +1363,8 @@ async def test_precheck_reports_enrolled_and_unscanned(
     stack: dict[str, Any] = await seed(factories)
     service = AttendanceService(test_db_session)
 
-    precheck = await service.precheck_scan(user_id=stack["student"].user_id,
+    precheck = await service.precheck_scan(
+        user_id=stack["student"].user_id,
         session_id=stack["session"].id,
         student_number=stack["student"].student_id,
     )
@@ -1841,9 +1841,7 @@ async def test_attempt_counter_supports_a_connection_bound_session(
     async with test_engine.connect() as conn:
         async with AsyncSession(bind=conn, expire_on_commit=False) as bound:
             service = AttendanceService(bound, settings)
-            first = await service._increment_attempt_counter(
-                student.id, session_row.id
-            )
+            first = await service._increment_attempt_counter(student.id, session_row.id)
             second = await service._increment_attempt_counter(
                 student.id, session_row.id
             )
@@ -1900,11 +1898,13 @@ async def test_precheck_reports_already_scanned(
             stack["session"],
             student.student_id,
             scanned_at=stack["session"].created_at + timedelta(minutes=2),
-        )
+        ),
     )
 
-    precheck = await service.precheck_scan(        user_id=stack["student"].user_id,
-        session_id=stack["session"].id, student_number=student.student_id
+    precheck = await service.precheck_scan(
+        user_id=stack["student"].user_id,
+        session_id=stack["session"].id,
+        student_number=student.student_id,
     )
 
     assert precheck.already_scanned is True
@@ -1917,7 +1917,8 @@ async def test_precheck_writes_nothing(
     stack: dict[str, Any] = await seed(factories)
     service = AttendanceService(test_db_session)
 
-    await service.precheck_scan(user_id=stack["student"].user_id,
+    await service.precheck_scan(
+        user_id=stack["student"].user_id,
         session_id=stack["session"].id,
         student_number=stack["student"].student_id,
     )
@@ -1959,7 +1960,7 @@ async def test_scanned_at_after_expiry_is_refused_while_the_session_is_live(
                 stack["session"],
                 student.student_id,
                 scanned_at=expires_at + timedelta(minutes=1),
-            )
+            ),
         )
 
     assert excinfo.value.status_code == 410
@@ -1985,7 +1986,7 @@ async def test_scanned_at_exactly_at_expiry_is_accepted(
             stack["session"],
             student.student_id,
             scanned_at=expires_at,
-        )
+        ),
     )
 
     assert result.status == ValidationStatus.REJECTED.value
@@ -2001,7 +2002,8 @@ async def test_precheck_raises_on_expired_session(
     service = AttendanceService(test_db_session)
 
     with pytest.raises(SessionExpiredException):
-        await service.precheck_scan(user_id=stack["student"].user_id,
+        await service.precheck_scan(
+            user_id=stack["student"].user_id,
             session_id=stack["session"].id,
             student_number=stack["student"].student_id,
         )
@@ -2043,7 +2045,10 @@ async def test_idempotency_entry_is_reprocessed_once_expired(
     monkeypatch.setattr(
         attendance_service,
         "_IDEMPOTENCY_STORE",
-        {key: (backdate, resp) for key, (_, resp) in attendance_service._IDEMPOTENCY_STORE.items()},
+        {
+            key: (backdate, resp)
+            for key, (_, resp) in attendance_service._IDEMPOTENCY_STORE.items()
+        },
     )
 
     with pytest.raises(DuplicateScanException):
@@ -2148,9 +2153,7 @@ async def test_benchmark_mode_skips_geofence_and_liveness(
 
     stack: dict[str, Any] = await seed(factories)
     student = stack["student"]
-    bench = Settings(
-        debug=True, jwt_secret=TEST_JWT_SECRET, benchmark_mode=True
-    )
+    bench = Settings(debug=True, jwt_secret=TEST_JWT_SECRET, benchmark_mode=True)
     service = AttendanceService(test_db_session, bench)
 
     result = await service.submit_scan(
@@ -2287,9 +2290,7 @@ async def test_persist_scan_exception_receives_remaining_suffix(
     service = AttendanceService(test_db_session, settings)
 
     async def boom(*args: Any, **kwargs: Any) -> None:
-        raise AttendanceDomainException(
-            message="Persist failed", code="persist_failed"
-        )
+        raise AttendanceDomainException(message="Persist failed", code="persist_failed")
 
     monkeypatch.setattr(service, "_persist_scan", boom)
 

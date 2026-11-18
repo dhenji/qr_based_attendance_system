@@ -4,19 +4,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from api.deps import ExcuseServiceDep, require_role
-from features.auth.model import User
-from features.excuse.schema import (
-    ExcuseRequestRead,
-    StudentExcuseRequest,
-    StudentSubmitResponse,
-)
 from shared.enums import UserRole
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     PaginatedResponse,
+)
+
+from api.deps import ExcuseServiceDep, require_role
+from features.auth.model import User
+from features.excuse.schema import (
+    ExcuseRequestRead,
+    StudentExcuseRequest,
+    StudentSubmitResponse,
 )
 
 # Excuse student routes under the shared /student mount point.

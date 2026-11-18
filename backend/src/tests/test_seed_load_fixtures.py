@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from core.database import Base
+
 import features.analytics.model  # noqa: F401
 import features.excuse.model  # noqa: F401
 import features.sync.model  # noqa: F401
 import features.system.model  # noqa: F401
 import tests.conftest  # noqa: F401
-from core.database import Base
 from features.auth.model import User
 from features.auth.schema import LoginRequest
 from features.course.model import Course, CourseOffering
@@ -128,9 +129,7 @@ async def test_load_email_migrated_from_reserved_domain(tmp_path: object) -> Non
             assert row.email == "loadtest01@load.uni.edu"
 
             domains = (
-                await db.scalars(
-                    select(User.email).where(User.email.like("loadtest%"))
-                )
+                await db.scalars(select(User.email).where(User.email.like("loadtest%")))
             ).all()
             assert len(domains) == 30
             assert all(address.endswith("@load.uni.edu") for address in domains)

@@ -26,6 +26,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import ExcuseInitiatedBy, ExcuseStatus, UserRole, ValidationStatus
+
 from features.excuse.exceptions import (
     ExcuseNotFoundException,
     ProfessorNotAssignedException,
@@ -37,7 +39,6 @@ from features.excuse.schema import (
     StudentExcuseRequest,
 )
 from features.excuse.service import ExcuseService
-from shared.enums import ExcuseInitiatedBy, ExcuseStatus, UserRole, ValidationStatus
 from tests.conftest import Factories
 
 ABSENT = ValidationStatus.ABSENT.value

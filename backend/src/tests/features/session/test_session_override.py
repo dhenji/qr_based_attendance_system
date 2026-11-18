@@ -27,15 +27,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
+
 from features.course.model import CourseOffering, OfferingComponent
 from features.session.exceptions import (
     ScheduledStartInPastException,
     SessionDateInPastException,
 )
 from features.session.model import Session
-from features.system.model import AppSetting
 from features.session.schema import SessionCreate
 from features.session.service import SessionService
+from features.system.model import AppSetting
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
 
@@ -210,9 +211,7 @@ async def test_the_plan_is_inherited_rather_than_retyped(
     assert read.schedule_overridden is False
 
     row: Session = (
-        await test_db_session.scalars(
-            select(Session).where(Session.id == read.id)
-        )
+        await test_db_session.scalars(select(Session).where(Session.id == read.id))
     ).one()
     assert row.classroom_name == "Room 101"
     assert row.classroom_lat == 14.5
@@ -278,7 +277,5 @@ async def test_a_lab_session_without_coordinates_is_refused(
     with pytest.raises(LabCoordinatesRequiredException):
         await service.create_session(
             professor_id=stack["professor"].id,
-            payload=SessionCreate(
-                offering_id=stack["offering"].id, session_type="lab"
-            ),
+            payload=SessionCreate(offering_id=stack["offering"].id, session_type="lab"),
         )

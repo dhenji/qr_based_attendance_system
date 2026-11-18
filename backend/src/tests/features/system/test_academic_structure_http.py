@@ -6,8 +6,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.system.model import AuditLog
 from shared.enums import UserRole
+
+from features.system.model import AuditLog
 from tests.conftest import Factories
 
 ENDPOINT = "/api/admin/system/academic-structure"
@@ -18,9 +19,7 @@ async def _admin_headers(auth_headers: Any, factories: Factories) -> dict[str, s
     return await auth_headers(admin)
 
 
-async def _seed(
-    test_db_session: AsyncSession, rows: list[AuditLog]
-) -> list[AuditLog]:
+async def _seed(test_db_session: AsyncSession, rows: list[AuditLog]) -> list[AuditLog]:
     test_db_session.add_all(rows)
     await test_db_session.commit()
     return rows
@@ -238,9 +237,7 @@ async def test_academic_structure_requires_admin(
 ) -> None:
     student_user = await factories.user()
 
-    response = await api_client.get(
-        ENDPOINT, headers=await auth_headers(student_user)
-    )
+    response = await api_client.get(ENDPOINT, headers=await auth_headers(student_user))
 
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "insufficient_permissions"

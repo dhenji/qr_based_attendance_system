@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from datetime import datetime, time
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -12,6 +11,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from shared.validators import password_strength
 
 from features.student.constants import (
     EMAIL_MAX_LENGTH,
@@ -23,7 +24,6 @@ from features.student.constants import (
     STUDENT_ID_MAX_LENGTH,
     STUDENT_ID_MIN_LENGTH,
 )
-from shared.validators import password_strength
 
 
 class StudentCreate(BaseModel):

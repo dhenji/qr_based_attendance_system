@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE
+
 from features.system.constants import (
     ATTENDANCE_ATTEMPT_LIMIT_MAX,
     ATTENDANCE_ATTEMPT_LIMIT_MIN,
@@ -19,7 +21,6 @@ from features.system.constants import (
     WINDOW_MAX_MINUTES,
     WINDOW_MIN_MINUTES,
 )
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE
 
 
 class SystemSettingsRead(BaseModel):
@@ -64,6 +65,7 @@ class SystemSettingsUpdate(BaseModel):
         ge=ATTENDANCE_ATTEMPT_LIMIT_MIN,
         le=ATTENDANCE_ATTEMPT_LIMIT_MAX,
     )
+
 
 class BackupRead(BaseModel):
     id: int

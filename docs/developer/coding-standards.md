@@ -28,15 +28,41 @@
 
 ### 1.1 Style Guide
 
-Follow **ruff** conventions. Ruff is **not yet installed** and there is currently no
-linter, formatter, or CI enforced (per AGENTS.md). These are aspirational standards
-to follow by convention until tooling is added:
+Follow **Ruff** conventions. Ruff **is installed and enforced** (ADR-094):
+configuration lives in `backend/pyproject.toml`, and the `lint` CI job runs
+`ruff check` and `ruff format --check` from `backend/`. The enforced rules:
 
-- **Line length:** 88 characters (ruff default).
-- **Quotes:** double quotes for strings.
-- **Imports:** sorted by ruff rules — stdlib first, then third-party, then local. Put `from __future__ import annotations` at the top of every module.
-- **Trailing commas:** yes on multi-line collections and function signatures.
-- **Type hints:** required on all function signatures (args + return). Use `X | None` over `Optional[X]`.
+- **Line length:** 88 characters (`line-length = 88`). `ruff format` wraps code
+  to 88 columns; E501 is not selected because the formatter owns the target and
+  its residue is long strings/comments/docstrings it cannot split.
+- **Quotes:** double quotes for strings (the formatter's default quote style).
+- **Imports:** sorted by ruff's isort rules in the five-group order documented
+  in §1.4 — standard library, third-party, `core`, `shared`, `features`. `api`,
+  `tests`, and the `main` entry point are first-party too and sort inside that
+  final local section. Put `from __future__ import annotations` at the top of
+  every module.
+- **Trailing commas:** yes on multi-line collections and function signatures
+  (the formatter's magic trailing comma).
+- **Rule set:** `select = ["E", "F", "I"]` — pycodestyle errors, pyflakes,
+  isort. Two exemptions live in `backend/pyproject.toml`: `alembic/versions/`
+  is excluded from lint and format (applied migrations are frozen history,
+  ADR-065), and `**/constants.py` keeps F401 off because those modules
+  re-export shared bounds by design (§1.9).
+- **Type hints:** required on all function signatures (args + return). Use
+  `X | None` over `Optional[X]`. This remains a review rule — it is not yet
+  lint-enforced.
+
+Editor defaults live in `.editorconfig` at the repository root: UTF-8, LF, a
+final newline, 4-space Python indentation, and tabs for the frontend.
+
+Run the checks locally from `backend/` (`ruff` is pinned in
+`backend/requirements.txt`, so `.venv/bin/ruff` matches CI):
+
+```bash
+ruff check .          # lint; add --fix for the safe auto-fixes
+ruff format .         # format in place
+ruff format --check . # verify formatting without writing (what CI runs)
+```
 
 ### 1.2 Formatting Rules
 
@@ -45,8 +71,8 @@ to follow by convention until tooling is added:
 | Double quotes       | `"hello"` not `'hello'`                                                                 |
 | f-strings preferred | `f"User {user.id}"` not `"User %s" % user.id`                                           |
 | No wildcard imports | `from features.student.model import Student` not `from features.student.model import *` |
-| Max line length 88  | Break long lines with parens or backslash                                               |
-| Trailing commas     | `def foo(a, b,)` on multi-line signatures                                               |
+| Max line length 88  | `ruff format` wraps code; E501 is not selected (long strings/comments may exceed 88)   |
+| Trailing commas     | On multi-line collections/signatures; `ruff format` adds them                           |
 
 ### 1.3 Function & Method Design
 

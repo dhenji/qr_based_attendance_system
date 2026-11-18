@@ -12,6 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
+
+from shared.enums import BackupStatus
+from shared.storage import StorageUnconfiguredException
+
 from features.system import service as system_service
 from features.system.exceptions import (
     BackupFailedException,
@@ -29,8 +33,6 @@ from features.system.service import (
     select_prune_candidates,
     sha256_file,
 )
-from shared.enums import BackupStatus
-from shared.storage import StorageUnconfiguredException
 
 
 def _local_settings(
@@ -327,9 +329,7 @@ class _FakeS3Client:
         return {}
 
 
-def _install_fake_boto3(
-    monkeypatch: pytest.MonkeyPatch, client: _FakeS3Client
-) -> None:
+def _install_fake_boto3(monkeypatch: pytest.MonkeyPatch, client: _FakeS3Client) -> None:
     module = ModuleType("boto3")
     module.client = lambda **kwargs: client  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "boto3", module)
@@ -390,9 +390,7 @@ async def test_run_backup_s3_without_boto3_is_failed(
         tmp_enc.write_bytes(b"encrypted-backup-bytes")
 
     monkeypatch.setattr(SystemService, "_run_pipeline", _fake_pipeline)
-    cfg = _s3_settings(settings).model_copy(
-        update={"backup_local_dir": str(tmp_path)}
-    )
+    cfg = _s3_settings(settings).model_copy(update={"backup_local_dir": str(tmp_path)})
     with pytest.raises(StorageUnconfiguredException):
         await SystemService(test_db_session, cfg).run_backup()
 

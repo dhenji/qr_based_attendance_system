@@ -29,9 +29,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.attendance.model import Attendance
 from shared.enums import UserRole
 from shared.pagination import MAX_PAGE_SIZE
+
+from features.attendance.model import Attendance
 from tests.conftest import Factories
 
 HEADER = (

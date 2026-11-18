@@ -11,6 +11,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
+
+from shared.cohorts import CohortKey, group_by_cohort
+from shared.datetimes import ensure_aware
+from shared.enums import ValidationStatus
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from shared.query import apply_if
+from shared.rates import attendance_rates
+
 from features.analytics.schema import TrendGranularity
 from features.attendance.model import Attendance
 from features.course.model import Course, CourseOffering
@@ -30,12 +38,6 @@ from features.reports.schema import (
 from features.session.model import Session
 from features.session.service import SessionService
 from features.student.model import Student
-from shared.cohorts import CohortKey, group_by_cohort
-from shared.datetimes import ensure_aware
-from shared.enums import ValidationStatus
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.query import apply_if
-from shared.rates import attendance_rates
 
 
 def _bucket_key(moment: datetime, granularity: TrendGranularity) -> date:
@@ -54,9 +56,7 @@ def _normalize_paging(page: int, size: int) -> tuple[int, int]:
     return max(page, 1), min(max(size, 1), MAX_PAGE_SIZE)
 
 
-def _pick_rate(
-    compliance: float, participation: float, metric: ReportMetric
-) -> float:
+def _pick_rate(compliance: float, participation: float, metric: ReportMetric) -> float:
     match metric:
         case "participation":
             return participation
@@ -151,9 +151,7 @@ class ReportsService:
             )
 
         expected_all: int = _expected_for(sessions, enrolled_by_offering)
-        tallies_all: Counter[str] = await self._tallies(
-            [row.id for row in sessions]
-        )
+        tallies_all: Counter[str] = await self._tallies([row.id for row in sessions])
         avg_compliance, avg_participation = attendance_rates(
             present=tallies_all.get(ValidationStatus.PRESENT.value, 0),
             late=tallies_all.get(ValidationStatus.LATE.value, 0),
@@ -224,9 +222,7 @@ class ReportsService:
             sessions: Sequence[Session] = await self._sessions_in(
                 offering_ids, date_from, date_to, session_type
             )
-            tallies: Counter[str] = await self._tallies(
-                [row.id for row in sessions]
-            )
+            tallies: Counter[str] = await self._tallies([row.id for row in sessions])
             compliance, participation = attendance_rates(
                 present=tallies.get(ValidationStatus.PRESENT.value, 0),
                 late=tallies.get(ValidationStatus.LATE.value, 0),
@@ -235,9 +231,7 @@ class ReportsService:
             )
             course: Course | None = course_map.get(course_id)
             program: Program | None = program_map.get(cohort_program_id)
-            year_level: YearLevel | None = year_level_map.get(
-                cohort_year_level_id
-            )
+            year_level: YearLevel | None = year_level_map.get(cohort_year_level_id)
             items.append(
                 ReportsComparisonItem(
                     course_id=course_id,
@@ -460,9 +454,7 @@ class ReportsService:
 
             if "timestamp" in wanted:
                 row.append(
-                    record.timestamp.isoformat()
-                    if record.timestamp is not None
-                    else ""
+                    record.timestamp.isoformat() if record.timestamp is not None else ""
                 )
 
             if "gps" in wanted:
@@ -485,9 +477,7 @@ class ReportsService:
 
         return buffer.getvalue()
 
-    async def _students_by_id(
-        self, student_ids: set[int]
-    ) -> dict[int, Student]:
+    async def _students_by_id(self, student_ids: set[int]) -> dict[int, Student]:
         if not student_ids:
             return {}
 
@@ -535,9 +525,7 @@ class ReportsService:
         by it, or past sessions vanish once an assignment lapses.
         """
         today: date = date.today()
-        opened = select(Session.offering_id).where(
-            Session.professor_id == professor_id
-        )
+        opened = select(Session.offering_id).where(Session.professor_id == professor_id)
         assigned = select(CourseProfessor.offering_id).where(
             CourseProfessor.professor_id == professor_id,
             CourseProfessor.effective_from <= today,
@@ -623,24 +611,18 @@ class ReportsService:
             if row.created_at is None:
                 continue
 
-            buckets.setdefault(
-                _bucket_key(row.created_at, granularity), []
-            ).append(row)
+            buckets.setdefault(_bucket_key(row.created_at, granularity), []).append(row)
 
         session_ids: list[int] = [row.id for row in sessions]
         tallies: dict[date, Counter[str]] = {}
 
         if session_ids:
-            stmt = select(
-                Attendance.timestamp, Attendance.validation_status
-            ).where(Attendance.session_id.in_(session_ids))
-            stmt = apply_if(
-                stmt, date_from, lambda v: Attendance.timestamp >= v
+            stmt = select(Attendance.timestamp, Attendance.validation_status).where(
+                Attendance.session_id.in_(session_ids)
             )
+            stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
             stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
-            rows: Sequence[tuple[Any, str]] = (
-                await self._session.execute(stmt)
-            ).all()  # type: ignore[assignment]
+            rows: Sequence[tuple[Any, str]] = (await self._session.execute(stmt)).all()  # type: ignore[assignment]
 
             for stamped_at, status in rows:
                 if stamped_at is None:
@@ -656,9 +638,7 @@ class ReportsService:
             return {}
 
         rows: Sequence[Course] = (
-            await self._session.scalars(
-                select(Course).where(Course.id.in_(course_ids))
-            )
+            await self._session.scalars(select(Course).where(Course.id.in_(course_ids)))
         ).all()
 
         return {row.id: row for row in rows}
@@ -675,9 +655,7 @@ class ReportsService:
 
         return {row.id: row for row in rows}
 
-    async def _year_level_map(
-        self, year_level_ids: list[int]
-    ) -> dict[int, YearLevel]:
+    async def _year_level_map(self, year_level_ids: list[int]) -> dict[int, YearLevel]:
         if not year_level_ids:
             return {}
 

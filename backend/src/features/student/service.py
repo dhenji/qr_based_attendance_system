@@ -10,44 +10,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password, verify_password
-from features.analytics.model import StudentRiskScore
-from features.attendance.model import Attendance
-from features.auth.model import User
-from features.course.model import Course, CourseOffering
-from features.course_professor.model import CourseProfessor
-from features.enrollment.model import Enrollment
-from features.excuse.model import ExcuseRequest
-from features.professor.model import Professor
-from features.program.exceptions import (
-    ProgramNotFoundException,
-    YearLevelNotFoundException,
-)
-from features.program.model import Program, YearLevel
-from features.student.exceptions import (
-    CurrentPasswordInvalidException,
-    PasswordReusedException,
-    FaceEmbeddingNotFoundException,
-    StudentEmailExistsException,
-    StudentHasRecordsException,
-    StudentIdExistsException,
-    StudentNotArchivedException,
-    StudentAccountUnlinkedException,
-    StudentNotFoundException,
-    YearLevelMismatchException,
-)
-from features.student.model import Student
-from features.student.schema import (
-    ChangePasswordRequest,
-    FaceEmbeddingResponse,
-    ScheduleItem,
-    ScheduleResponse,
-    StudentCreate,
-    StudentDetail,
-    StudentImportError,
-    StudentImportResult,
-    StudentRead,
-    StudentUpdate,
-)
+
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.cache import get_face_embedding_cached
@@ -65,6 +28,44 @@ from shared.enums import AuditAction, AuditEntity
 from shared.pagination import PaginatedResponse
 from shared.query import apply_if
 from shared.schedule import day_weekdays
+
+from features.analytics.model import StudentRiskScore
+from features.attendance.model import Attendance
+from features.auth.model import User
+from features.course.model import Course, CourseOffering
+from features.course_professor.model import CourseProfessor
+from features.enrollment.model import Enrollment
+from features.excuse.model import ExcuseRequest
+from features.professor.model import Professor
+from features.program.exceptions import (
+    ProgramNotFoundException,
+    YearLevelNotFoundException,
+)
+from features.program.model import Program, YearLevel
+from features.student.exceptions import (
+    CurrentPasswordInvalidException,
+    FaceEmbeddingNotFoundException,
+    PasswordReusedException,
+    StudentAccountUnlinkedException,
+    StudentEmailExistsException,
+    StudentHasRecordsException,
+    StudentIdExistsException,
+    StudentNotArchivedException,
+    StudentNotFoundException,
+    YearLevelMismatchException,
+)
+from features.student.model import Student
+from features.student.schema import (
+    FaceEmbeddingResponse,
+    ScheduleItem,
+    ScheduleResponse,
+    StudentCreate,
+    StudentDetail,
+    StudentImportError,
+    StudentImportResult,
+    StudentRead,
+    StudentUpdate,
+)
 
 ROSTER_CSV_COLUMNS: tuple[CsvColumn, ...] = (
     CsvColumn(
@@ -345,9 +346,7 @@ class StudentService:
         if student is None:
             raise StudentNotFoundException(user_id)
 
-        rows = (
-            await self._session.execute(_schedule_stmt(student.id))
-        ).all()
+        rows = (await self._session.execute(_schedule_stmt(student.id))).all()
 
         names: dict[int, str] = await self._schedule_professor_names(
             [row[0] for row in rows]
@@ -495,11 +494,11 @@ class StudentService:
         program_id: int | None = values.pop("program_id", None)
         year_level_id: int | None = values.pop("year_level_id", None)
 
-        for field, value in values.items():
-            if handler := self._FIELD_HANDLERS.get(field):
+        for field_name, value in values.items():
+            if handler := self._FIELD_HANDLERS.get(field_name):
                 await handler(self, student, value, student_id, actor_id)
             else:
-                setattr(student, field, value)
+                setattr(student, field_name, value)
 
         if program_id is not None or year_level_id is not None:
             await self._resolve_and_set_cohort(student, program_id, year_level_id)
@@ -585,9 +584,7 @@ class StudentService:
 
         return await self._to_read(student)
 
-    async def reactivate(
-        self, *, student_id: int, actor_id: int | None
-    ) -> StudentRead:
+    async def reactivate(self, *, student_id: int, actor_id: int | None) -> StudentRead:
         student: Student = await self._get_or_404(student_id)
         old_value: dict[str, Any] = self._student_snapshot(student)
         student.is_active = True
@@ -695,9 +692,7 @@ class StudentService:
             imported=state.imported, duplicates=state.duplicates, errors=errors
         )
 
-    async def _is_duplicate_row(
-        self, row: _RosterRow, state: _ImportState
-    ) -> bool:
+    async def _is_duplicate_row(self, row: _RosterRow, state: _ImportState) -> bool:
         """Row collides with an earlier row in this file or with the database.
 
         Both the id and the email are checked, in-file first, so a repeat of

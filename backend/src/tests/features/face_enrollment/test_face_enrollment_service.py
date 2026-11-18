@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from shared.enums import AuditAction, AuditEntity
+from shared.face_quality import FaceQualityResult
+
+import features.face_enrollment.service as face_enrollment_service
 from features.face_enrollment import router as face_router
 from features.face_enrollment.exceptions import InvalidImageException
 from features.face_enrollment.service import FaceEnrollmentService
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
-from shared.face_quality import FaceQualityResult
-import features.face_enrollment.service as face_enrollment_service
 
 # Bypass quality gates in unit tests (quality is enforced via shared.face_quality)
 face_enrollment_service.assess_image_bytes = lambda _content: FaceQualityResult(ok=True)
@@ -138,7 +138,7 @@ def test_enroll_writes_stub_blob_and_bumps_version() -> None:
     student = session.store[(Student, 1)]
     assert student.face_embedding is not None
     # New behavior: real embedding blob (versioned binary format)
-    from shared.face_embeddings import is_stub_embedding, deserialize_embedding
+    from shared.face_embeddings import deserialize_embedding, is_stub_embedding
 
     assert not is_stub_embedding(student.face_embedding)
     emb, algo, ver = deserialize_embedding(student.face_embedding)

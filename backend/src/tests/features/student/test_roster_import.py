@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+from shared.enums import AuditAction, AuditEntity
+
 from features.program.model import Program, YearLevel
 from features.student.exceptions import (
     StudentHasRecordsException,
@@ -14,7 +16,6 @@ from features.student.exceptions import (
 from features.student.model import Student
 from features.student.service import StudentService, parse_roster_csv
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc)
 
@@ -176,9 +177,7 @@ def test_import_roster_creates_duplicates_and_errors() -> None:
         "S004,Carol,,Tan,carol@example.com,UNKNOWN,C,1\n"
     ).encode()
 
-    result = _run(
-        StudentService(session).import_roster(content=content, actor_id=None)
-    )
+    result = _run(StudentService(session).import_roster(content=content, actor_id=None))
 
     assert result.imported == 1
     assert result.duplicates == 1
@@ -204,9 +203,7 @@ def test_import_roster_resolves_year_label() -> None:
     )
     content = (f"{HEADER}\nS009,Zed,,Roe,zed@example.com,BSCS,Z,1st year\n").encode()
 
-    result = _run(
-        StudentService(session).import_roster(content=content, actor_id=None)
-    )
+    result = _run(StudentService(session).import_roster(content=content, actor_id=None))
 
     assert result.imported == 1
     assert result.duplicates == 0

@@ -11,6 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import ForbiddenException
 from core.security import hash_password
+
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.enums import AuditAction, AuditEntity, UserRole
+from shared.pagination import PaginatedResponse
+from shared.user_management_policy import (
+    can_assign_role,
+    can_manage_target,
+    hide_sensitive_fields,
+)
+
 from features.admin.constants import TEMP_PASSWORD_LENGTH
 from features.admin.exceptions import (
     AdminUserNotFound,
@@ -26,16 +37,6 @@ from features.admin.schema import (
 from features.auth.model import MfaBackupCodes, User
 from features.professor.model import Professor
 from features.student.model import Student
-from shared.audit import record_audit
-from shared.base import BaseCRUD
-from shared.enums import AuditAction, AuditEntity, UserRole
-from shared.user_management_policy import (
-    can_assign_role,
-    can_manage_target,
-    can_view_target,
-    hide_sensitive_fields,
-)
-from shared.pagination import PaginatedResponse
 
 
 @dataclass(frozen=True)
@@ -136,9 +137,17 @@ class AdminService:
         actor_role: UserRole | str | None = None,
     ) -> UserRole:
         if actor_role is not None:
-            return UserRole(actor_role) if not isinstance(actor_role, UserRole) else actor_role
+            return (
+                UserRole(actor_role)
+                if not isinstance(actor_role, UserRole)
+                else actor_role
+            )
         if viewer_role is not None:
-            return UserRole(viewer_role) if not isinstance(viewer_role, UserRole) else viewer_role
+            return (
+                UserRole(viewer_role)
+                if not isinstance(viewer_role, UserRole)
+                else viewer_role
+            )
         if actor_id is not None:
             try:
                 user: User | None = await self._users.get(actor_id)
@@ -305,7 +314,10 @@ class AdminService:
 
         return PaginatedResponse[AdminUserRead](
             items=[
-                _to_admin_user_read(*row, viewer_role=resolved_viewer_role, actor_id=actor_id) for row in rows
+                _to_admin_user_read(
+                    *row, viewer_role=resolved_viewer_role, actor_id=actor_id
+                )
+                for row in rows
             ],
             total=total,
             page=page,

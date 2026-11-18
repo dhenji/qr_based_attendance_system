@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from shared.storage import get_presigned_upload_url
+
 from api.deps import CurrentUserDep
 from features.upload.schema import PresignedUrlRequest, PresignedUrlResponse
-from shared.storage import get_presigned_upload_url
 
 # Attachment upload routes. Prefix baked in here; mounted with no prefix=
 # argument in api/router.py (the mount lives there - do NOT add an

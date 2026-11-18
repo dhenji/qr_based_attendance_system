@@ -5,12 +5,24 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from api.deps import CourseServiceDep, ProfessorServiceDep, SessionServiceDep, require_role
+from shared.enums import SessionType, UserRole, ValidationStatus
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
+
+from api.deps import (
+    CourseServiceDep,
+    ProfessorServiceDep,
+    SessionServiceDep,
+    require_role,
+)
 from features.auth.model import User
 from features.course.schema import RosterItem
 from features.professor.schema import AssignedOfferingItem
 from features.session.schema import (
-    ProfessorAttendanceItem,
     ProfessorAttendanceResponse,
     SessionActiveResponse,
     SessionCloseResponse,
@@ -19,13 +31,6 @@ from features.session.schema import (
     SessionListItem,
     SessionPlanRead,
     SessionRead,
-)
-from shared.enums import SessionType, UserRole, ValidationStatus
-from shared.pagination import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    PaginatedResponse,
 )
 
 # Session routes are professor-scoped; the prefix is baked in here and the

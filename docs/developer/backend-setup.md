@@ -58,7 +58,7 @@ alembic upgrade head
 
 > **Note:** `alembic upgrade head` applies the baseline migration
 > (`679a319c12d6`) **and** the revisions on top of it, ending at head
-> `b9c0d1e2f3a4` (session start-window columns, D94). That chain carries the schema to the current **21 tables** — including
+> `768d6ae62710` (attempt-counter check constraint; 31 revisions). That chain carries the schema to the current **22 tables** — including
 > `mfa_backup_codes`, `audit_logs`, `app_settings`, `student_risk_scores_staging`,
 > and `offering_components`.
 > See [migration-strategy.md](../architecture/migration-strategy.md) for the target schema
@@ -87,7 +87,7 @@ cd backend
 python -m pytest src/tests/ -v
 ```
 
-The suite holds **1060 cases across 82 files** (282 sync + 647 async test functions, plus parametrized expansions). `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov` and `httpx` are all in `backend/requirements.txt`; config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers).
+The suite holds **1121 cases across 87 files** (315 sync + 763 async test functions, plus parametrized expansions). `src/tests/conftest.py` provides the database and client fixtures, backed by in-memory SQLite by default — no database or Docker is required. `pytest`, `pytest-asyncio`, `aiosqlite`, `pytest-cov`, `httpx` and `ruff` are all in `backend/requirements.txt`; pytest config lives in `backend/pytest.ini` (`asyncio_mode = auto` plus the `slow`/`integration` markers), and Ruff config lives in `backend/pyproject.toml`.
 
 Set `TEST_DATABASE_URL` to run the same suite against a real Postgres instead. Create a dedicated test database first — the Compose Postgres only creates `attendance_sys`, and the suite runs `create_all`/`drop_all` per test, so never point `TEST_DATABASE_URL` at `attendance_sys` itself:
 
@@ -114,6 +114,25 @@ DEBUG=true JWT_SECRET=test-secret-0123456789abcdef PYTHONPATH=src \
 
 CI runs the whole suite on SQLite; see
 [test-plan.md §9](../testing/test-plan.md) for what CI gates versus what stays manual.
+
+## Lint & Format
+
+Ruff is the backend linter and formatter, configured in `backend/pyproject.toml`
+and pinned in `backend/requirements.txt` (ADR-094). After
+`pip install -r requirements.txt`, run both checks from `backend/`:
+
+```bash
+cd backend
+ruff check .           # lint; add --fix for the safe auto-fixes
+ruff format --check .  # verify formatting (what CI runs)
+ruff format .          # format in place
+```
+
+`alembic/versions/` is excluded because applied migrations are frozen history
+(ADR-065), and `**/constants.py` keeps F401 off because those modules re-export
+shared bounds by design. The `lint` CI job installs the exact pin from
+`backend/requirements.txt`, so local and CI versions match. Editor defaults live
+in `.editorconfig` at the repository root.
 
 ---
 

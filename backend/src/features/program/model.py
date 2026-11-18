@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
 from shared.mixins import TimestampMixin
 
 

@@ -6,6 +6,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from shared.constants import SEMESTER_MAX_LENGTH
+from shared.enums import SessionType, UserRole
+from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+
 from api.deps import ProfessorServiceDep, ReportsServiceDep, require_role
 from features.analytics.schema import TrendGranularity
 from features.auth.model import User
@@ -16,9 +20,6 @@ from features.reports.schema import (
     ReportsComparisonResponse,
     ReportsTrendResponse,
 )
-from shared.constants import SEMESTER_MAX_LENGTH
-from shared.enums import SessionType, UserRole
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
 #
@@ -50,9 +51,7 @@ async def reports_all_courses(
     date_to: datetime | None = Query(default=None),
     session_type: SessionType | None = Query(default=None),
 ) -> AllCoursesResponse:
-    professor_id: int = await professor_service.resolve_professor_id(
-        user_id=user.id
-    )
+    professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
 
     return await service.get_all_courses(
         professor_id=professor_id,
@@ -81,9 +80,7 @@ async def reports_comparison(
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> ReportsComparisonResponse:
-    professor_id: int = await professor_service.resolve_professor_id(
-        user_id=user.id
-    )
+    professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
 
     return await service.get_comparison(
         professor_id=professor_id,
@@ -116,9 +113,7 @@ async def reports_trends(
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
 ) -> ReportsTrendResponse:
-    professor_id: int = await professor_service.resolve_professor_id(
-        user_id=user.id
-    )
+    professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
 
     return await service.get_trends(
         professor_id=professor_id,
@@ -143,9 +138,7 @@ async def export_professor_reports(
     service: ReportsServiceDep,
     professor_service: ProfessorServiceDep,
 ) -> StreamingResponse:
-    professor_id: int = await professor_service.resolve_professor_id(
-        user_id=user.id
-    )
+    professor_id: int = await professor_service.resolve_professor_id(user_id=user.id)
     content: str = await service.export_attendance(
         professor_id=professor_id,
         course_id=payload.course_id,

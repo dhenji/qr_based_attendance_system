@@ -5,11 +5,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import AuditAction, AuditEntity, UserRole, ValidationStatus
+
 from features.attendance.model import Attendance
 from features.excuse.model import ExcuseRequest
 from features.excuse.service import ExcuseService
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity, UserRole, ValidationStatus
 from tests.conftest import Factories
 
 QUICK_REASON = "Family emergency kept the student home today."
@@ -37,9 +38,7 @@ async def _seed(factories: Factories) -> dict[str, Any]:
     await factories.enrollment(student, offering)
 
     session = await factories.session(offering, professor)
-    record = await factories.attendance(
-        student, session, validation_status=ABSENT
-    )
+    record = await factories.attendance(student, session, validation_status=ABSENT)
     return {
         "offering": offering,
         "course": course,
@@ -142,9 +141,7 @@ async def test_professor_edit_and_revoke_over_http(
     headers = await auth_headers(graph["professor_user"])
     url = _excuse_url(graph["session"].id, graph["student"].id)
 
-    created = await api_client.post(
-        url, json={"reason": QUICK_REASON}, headers=headers
-    )
+    created = await api_client.post(url, json={"reason": QUICK_REASON}, headers=headers)
     assert created.status_code == 201
 
     edited = await api_client.patch(
@@ -196,8 +193,11 @@ async def test_professor_list_and_review_over_http(
 
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=student_headers,
     )
     assert submitted.status_code == 201
@@ -225,6 +225,47 @@ async def test_professor_list_and_review_over_http(
     assert filtered.json()["total"] == 1
 
 
+async def test_professor_list_accepts_date_only_filters(
+    api_client: Any, auth_headers: Any, factories: Factories
+) -> None:
+    """Date inputs are `YYYY-MM-DD`; the route must parse them as datetimes.
+
+    Regression cover for the unresolved `datetime` annotations: a date-filtered
+    request raised inside the service (500) instead of returning a page, and
+    the same annotations broke `/openapi.json`.
+    """
+    graph = await _seed(factories)
+    student_headers = await auth_headers(graph["student_user"])
+    professor_headers = await auth_headers(graph["professor_user"])
+
+    submitted = await api_client.post(
+        "/api/student/excuse-requests",
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
+        headers=student_headers,
+    )
+    assert submitted.status_code == 201
+
+    inside = await api_client.get(
+        "/api/professor/excuse-requests",
+        params={"from": "2000-01-01", "to": "2099-12-31"},
+        headers=professor_headers,
+    )
+    assert inside.status_code == 200, inside.text
+    assert inside.json()["total"] == 1
+
+    outside = await api_client.get(
+        "/api/professor/excuse-requests",
+        params={"to": "2000-12-31"},
+        headers=professor_headers,
+    )
+    assert outside.status_code == 200, outside.text
+    assert outside.json()["total"] == 0
+
+
 async def test_professor_review_reject_over_http(
     api_client: Any, auth_headers: Any, factories: Factories
 ) -> None:
@@ -234,8 +275,11 @@ async def test_professor_review_reject_over_http(
 
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=student_headers,
     )
     assert submitted.status_code == 201
@@ -262,8 +306,11 @@ async def test_student_submit_list_and_detail_over_http(
 
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=headers,
     )
     assert submitted.status_code == 201
@@ -290,8 +337,11 @@ async def test_admin_list_excuses_over_http(
     student_headers = await auth_headers(graph["student_user"])
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=student_headers,
     )
     assert submitted.status_code == 201
@@ -319,8 +369,11 @@ async def test_excuse_queues_name_the_student_and_the_class(
     student_headers = await auth_headers(graph["student_user"])
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=student_headers,
     )
     assert submitted.status_code == 201
@@ -357,8 +410,11 @@ async def test_a_reviewed_excuse_names_its_reviewer(
     student_headers = await auth_headers(graph["student_user"])
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=student_headers,
     )
     assert submitted.status_code == 201
@@ -417,8 +473,11 @@ async def test_approve_preserves_original_status(
 
     await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": graph["session"].id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": graph["session"].id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=student_headers,
     )
     queued = await api_client.get(
@@ -487,8 +546,11 @@ async def test_approve_rolls_back_when_record_is_no_longer_excusable(
 
     submitted = await api_client.post(
         "/api/student/excuse-requests",
-        json={"session_id": session_id, "reason": STUDENT_REASON,
-              "attachment_urls": ["https://files.test/clinic.pdf"]},
+        json={
+            "session_id": session_id,
+            "reason": STUDENT_REASON,
+            "attachment_urls": ["https://files.test/clinic.pdf"],
+        },
         headers=await auth_headers(graph["student_user"]),
     )
     assert submitted.status_code == 201

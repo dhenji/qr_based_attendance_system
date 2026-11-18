@@ -17,10 +17,11 @@ from typing import Any
 import pytest
 
 from core.config import Settings
+
 from shared.storage import (
+    PRESIGNED_URL_EXPIRES_SECONDS,
     AttachmentInvalidException,
     AttachmentTooLargeException,
-    PRESIGNED_URL_EXPIRES_SECONDS,
     StorageUnconfiguredException,
     build_object_key,
     get_presigned_upload_url,
@@ -55,9 +56,7 @@ class _FakeS3Client:
         return f"https://bucket.test/{Params['Key']}?signature=abc"
 
 
-def _fake_boto3(
-    client_factory: Callable[[ModuleType], Any]
-) -> dict[str, ModuleType]:
+def _fake_boto3(client_factory: Callable[[ModuleType], Any]) -> dict[str, ModuleType]:
     """A stand-in `boto3` + `botocore.exceptions` pair for `sys.modules`.
 
     Real module objects, because the production import is a lazy
@@ -154,9 +153,7 @@ def test_validate_attachment_rejects_a_negative_size() -> None:
 
 
 def test_validate_attachment_accepts_exactly_the_cap() -> None:
-    assert (
-        validate_attachment("evidence.pdf", FIVE_MIB, settings=_settings()) == "pdf"
-    )
+    assert validate_attachment("evidence.pdf", FIVE_MIB, settings=_settings()) == "pdf"
 
 
 def test_validate_attachment_rejects_one_byte_over_the_cap() -> None:
@@ -330,9 +327,7 @@ def test_s3_backend_presigns_a_put_with_the_derived_content_type(
     assert call["params"]["Key"] == result["object_key"]
     assert call["expires_in"] == PRESIGNED_URL_EXPIRES_SECONDS
     assert result["upload_url"].startswith("https://bucket.test/")
-    assert result["object_url"] == (
-        f"s3://attendance-evidence/{result['object_key']}"
-    )
+    assert result["object_url"] == (f"s3://attendance-evidence/{result['object_key']}")
 
 
 def test_s3_backend_targets_a_custom_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -343,9 +338,7 @@ def test_s3_backend_targets_a_custom_endpoint(monkeypatch: pytest.MonkeyPatch) -
         def generate_presigned_url(self, *args: Any, **kwargs: Any) -> str:
             return "https://bucket.test/presigned"
 
-    modules = _install_fake_boto3(
-        monkeypatch, lambda _exceptions: _RecordingClient()
-    )
+    modules = _install_fake_boto3(monkeypatch, lambda _exceptions: _RecordingClient())
 
     settings = _settings(
         attachments_storage_type="s3",

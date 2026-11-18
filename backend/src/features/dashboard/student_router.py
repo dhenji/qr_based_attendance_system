@@ -4,10 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from shared.enums import UserRole
+
 from api.deps import DashboardServiceDep, require_role
 from features.auth.model import User
 from features.dashboard.schema import StudentDashboardResponse
-from shared.enums import UserRole
 
 # The student dashboard needs attendance *and* schedule, so it cannot live in
 # either slice without one of them depending on the other. It therefore gets its

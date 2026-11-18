@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from core.security import hash_password, verify_password
+
 from features.professor.exceptions import (
     CurrentPasswordInvalidException,
     ProfessorNotFoundException,

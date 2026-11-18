@@ -6,13 +6,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from shared.constants import SEMESTER_MAX_LENGTH
+from shared.enums import SessionType, UserRole
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
+
 from api.deps import AttendanceServiceDep, require_role
 from features.attendance.constants import (
     RECENT_SCANS_DEFAULT_LIMIT,
     RECENT_SCANS_MAX_LIMIT,
     REVIEW_STATUS_MAX_LENGTH,
 )
-from shared.constants import SEMESTER_MAX_LENGTH
 from features.attendance.schema import (
     AttendanceRecordsResponse,
     AttendanceSummaryResponse,
@@ -23,13 +31,6 @@ from features.attendance.schema import (
     ResolveReviewResponse,
 )
 from features.auth.model import User
-from shared.enums import SessionType, UserRole
-from shared.pagination import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    PaginatedResponse,
-)
 
 # This module owns /admin/attendance ONLY.
 #
@@ -72,7 +73,6 @@ async def get_attendance_overview(
         date_from=date_from,
         date_to=date_to,
     )
-
 
 
 @router.get(

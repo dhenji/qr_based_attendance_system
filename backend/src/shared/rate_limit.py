@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """In-memory, per-key fixed-window rate limiter (process-local).
 
 WARNING: this limiter lives in process memory only. When the API runs as
@@ -12,6 +10,8 @@ leftmost X-Forwarded-For entry when (and only when) the peer is inside the
 configured `trusted_proxy_cidrs`. Without that setting, every IP-keyed
 bucket behind a balancer collapses onto the balancer's address.
 """
+
+from __future__ import annotations
 
 import asyncio
 import ipaddress
@@ -183,9 +183,7 @@ def _trusted_networks(raw: str) -> tuple[ipaddress._BaseNetwork, ...]:
     )
 
 
-def client_ip(
-    request: Request, settings: Settings | None = None
-) -> str | None:
+def client_ip(request: Request, settings: Settings | None = None) -> str | None:
     """Best-effort client IP for limiter keys and Turnstile `remoteip`.
 
     Default (no trusted proxies configured): the direct peer, exactly as

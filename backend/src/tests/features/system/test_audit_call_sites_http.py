@@ -13,15 +13,16 @@ never took effect is worse than none.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity, UserRole
+
+from features.system.model import AuditLog
 from tests.conftest import SESSION_TEST_NOW, Factories
 
 AUDIT_ENDPOINT = "/api/admin/audit-logs"
@@ -50,9 +51,7 @@ async def _assigned_professor(
     professor_user = await factories.user(role=UserRole.PROFESSOR.value)
     stack["professor"].user_id = professor_user.id
     assigner = await factories.user(role=UserRole.ADMIN.value)
-    await factories.assignment(
-        stack["offering"], stack["professor"], assigner
-    )
+    await factories.assignment(stack["offering"], stack["professor"], assigner)
     return stack, await auth_headers(professor_user), professor_user
 
 
@@ -293,6 +292,7 @@ async def test_component_changes_use_the_component_entity_type(
 
 # --- professor archive -----------------------------------------------------
 
+
 async def test_professor_archive_writes_one_row(
     api_client: Any,
     auth_headers: Any,
@@ -345,7 +345,7 @@ async def test_blocked_hard_delete_leaves_no_trail(
     """The has-records guard rejects the delete, so no row may survive."""
     program = await factories.program()
     year = await factories.year_level(program)
-    student = await factories.student(year)
+    await factories.student(year)
     course = await factories.course()
     offering = await factories.offering(course, program, year)
     professor = await factories.professor(is_active=False)
@@ -486,9 +486,7 @@ async def test_a_professor_opened_session_is_attributed_to_them(
     factories: Factories,
     test_db_session: AsyncSession,
 ) -> None:
-    stack, headers, professor_user = await _assigned_professor(
-        factories, auth_headers
-    )
+    stack, headers, professor_user = await _assigned_professor(factories, auth_headers)
 
     opened = await api_client.post(
         "/api/professor/sessions",

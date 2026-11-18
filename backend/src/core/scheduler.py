@@ -124,10 +124,7 @@ async def drain_in_flight(
     """
     caller = asyncio.current_task()
     pending = {
-        task
-        for tasks in _IN_FLIGHT.values()
-        for task in tasks
-        if task is not caller
+        task for tasks in _IN_FLIGHT.values() for task in tasks if task is not caller
     }
     if not pending:
         return set()

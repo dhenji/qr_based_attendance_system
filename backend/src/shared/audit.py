@@ -4,8 +4,9 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity
+
+from features.system.model import AuditLog
 
 
 async def record_audit(

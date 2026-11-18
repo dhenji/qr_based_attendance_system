@@ -1,9 +1,13 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from alembic import context
+from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from core.config import get_settings
+from core.database import Base
 
 import features.analytics.model  # noqa: F401
 import features.attendance.model  # noqa: F401
@@ -18,9 +22,6 @@ import features.session.model  # noqa: F401
 import features.student.model  # noqa: F401
 import features.sync.model  # noqa: F401
 import features.system.model  # noqa: F401
-from alembic import context
-from core.config import get_settings
-from core.database import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

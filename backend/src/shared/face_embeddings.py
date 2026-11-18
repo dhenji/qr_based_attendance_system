@@ -3,10 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import struct
-from typing import Any
 
 import numpy as np
-
 
 EMBEDDING_DIM = 128
 ALLOWED_DIMS = {128, 512}
@@ -37,7 +35,12 @@ def is_stub_embedding(blob: bytes | None) -> bool:
     try:
         payload = json.loads(blob.decode("utf-8"))
         if isinstance(payload, dict):
-            return bool(payload.get("stub")) or payload.get("version") is not None and "mean" in payload and isinstance(payload.get("mean"), list)
+            return (
+                bool(payload.get("stub"))
+                or payload.get("version") is not None
+                and "mean" in payload
+                and isinstance(payload.get("mean"), list)
+            )
     except Exception:
         pass
     # Also check if it's the old format
@@ -64,7 +67,9 @@ def serialize_embedding(
             f"expected one of {sorted(ALLOWED_DIMS)}"
         )
     algo_bytes = algorithm.encode("utf-8")
-    header = HEADER_STRUCT.pack(HEADER_MAGIC, version & 0xFF, len(algo_bytes), embedding.size)
+    header = HEADER_STRUCT.pack(
+        HEADER_MAGIC, version & 0xFF, len(algo_bytes), embedding.size
+    )
     return header + algo_bytes + embedding.tobytes()
 
 
@@ -104,6 +109,8 @@ def embedding_from_base64(b64: str) -> np.ndarray:
         raise FaceEmbeddingError(str(e)) from e
 
 
-def embedding_to_base64(embedding: np.ndarray, algorithm: str = "mediapipe-v1", version: int = 1) -> str:
+def embedding_to_base64(
+    embedding: np.ndarray, algorithm: str = "mediapipe-v1", version: int = 1
+) -> str:
     blob = serialize_embedding(embedding, algorithm=algorithm, version=version)
     return base64.b64encode(blob).decode("utf-8")

@@ -16,17 +16,16 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity, UserRole
+
+from features.system.model import AuditLog
 from tests.conftest import Factories
 
 ENDPOINT = "/api/admin/audit-logs"
 STRUCTURAL_ENDPOINT = "/api/admin/system/academic-structure"
 
 
-async def _admin_headers(
-    auth_headers: Any, factories: Factories
-) -> dict[str, str]:
+async def _admin_headers(auth_headers: Any, factories: Factories) -> dict[str, str]:
     admin = await factories.user(role=UserRole.ADMIN.value)
     return await auth_headers(admin)
 
@@ -281,9 +280,7 @@ async def test_audit_logs_keeps_a_student_number_as_a_number(
 
     enrollment = by_type["enrollment"]
     student_change = next(
-        change
-        for change in enrollment["changes"]
-        if change["field"] == "student_id"
+        change for change in enrollment["changes"] if change["field"] == "student_id"
     )
     # A string stays a string — it is already the number.
     assert student_change["after"] == "2024-0001"
@@ -505,9 +502,7 @@ async def test_audit_logs_paginates(
 
     assert len(first) == 2
     assert len(second) == 2
-    assert {i["entity_id"] for i in first}.isdisjoint(
-        {i["entity_id"] for i in second}
-    )
+    assert {i["entity_id"] for i in first}.isdisjoint({i["entity_id"] for i in second})
 
     response = await api_client.get(ENDPOINT, headers=headers, params={"size": 2})
     assert response.json()["total"] == 5

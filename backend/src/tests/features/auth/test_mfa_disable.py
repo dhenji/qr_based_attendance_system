@@ -25,9 +25,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_otp, hash_password
+
+from shared.enums import AuditAction, AuditEntity, OtpPurpose
+
 from features.auth.model import MfaBackupCodes, OtpCodes, User
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity, OtpPurpose
 from tests.conftest import Factories
 
 PASSWORD = "correct-horse-battery-staple"
@@ -138,9 +140,7 @@ async def test_disable_clears_flag_secret_and_codes(
     rows = await _backup_codes(test_db_session, user)
     await test_db_session.commit()
 
-    response = await _disable(
-        api_client, await auth_headers(user), PASSWORD
-    )
+    response = await _disable(api_client, await auth_headers(user), PASSWORD)
 
     assert response.status_code == 204
 

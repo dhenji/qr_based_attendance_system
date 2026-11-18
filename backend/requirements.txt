@@ -23,6 +23,9 @@ aiosqlite==0.22.1
 pytest-cov==7.1.0
 # Load profile only: the concurrent-scan harness (locustfile.py).
 locust==2.46.6
+# Lint and format gate (ADR-094). Pinned so developers and CI agree on the
+# exact rule set; `ruff check` / `ruff format --check` run from backend/.
+ruff==0.17.5
 
 numpy==1.26.4
 opencv-python-headless==4.9.0.80

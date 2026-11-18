@@ -4,6 +4,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
+from shared.csv_import import csv_template_header
+from shared.enums import UserRole
+from shared.pagination import PaginatedResponse
+
 from api.deps import ProgramServiceDep, require_role
 from features.auth.model import User
 from features.program.constants import (
@@ -23,9 +27,6 @@ from features.program.schema import (
     YearLevelUpdate,
 )
 from features.program.service import PROGRAM_CSV_COLUMNS
-from shared.csv_import import csv_template_header
-from shared.enums import UserRole
-from shared.pagination import PaginatedResponse
 
 # ALREADY MOUNTED at /api/admin/programs (see api/router.py), with no prefix=
 # argument there - the contract path is baked in below. DO NOT change this prefix
@@ -126,7 +127,9 @@ async def update_program(
     user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
     service: ProgramServiceDep,
 ) -> ProgramRead:
-    return await service.update(program_id=program_id, payload=payload, actor_id=user.id)
+    return await service.update(
+        program_id=program_id, payload=payload, actor_id=user.id
+    )
 
 
 @router.delete(

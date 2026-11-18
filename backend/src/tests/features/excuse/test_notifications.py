@@ -32,6 +32,9 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.email import OutboundEmail
+from shared.enums import UserRole, ValidationStatus
+
 from features.course_professor.model import CourseProfessor
 from features.excuse import notifications
 from features.excuse import service as excuse_service
@@ -43,8 +46,6 @@ from features.excuse.schema import (
     StudentExcuseRequest,
 )
 from features.excuse.service import ExcuseService
-from shared.email import OutboundEmail
-from shared.enums import UserRole, ValidationStatus
 from tests.conftest import Factories
 
 SESSION_DATE = datetime(2026, 3, 14, 9, 0, tzinfo=timezone.utc)
@@ -418,7 +419,9 @@ async def test_bulk_excuse_notifies_every_student_in_one_batch(
         "student2.account@test",
     ]
     for message in queued:
-        assert message.subject == f"You have been excused: {graph['course'].course_code}"
+        assert (
+            message.subject == f"You have been excused: {graph['course'].course_code}"
+        )
         assert BULK_REASON in message.body
         assert SESSION_DATE_TEXT in message.body
 

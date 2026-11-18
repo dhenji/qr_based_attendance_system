@@ -6,12 +6,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
-from api.deps import AttendanceServiceDep, require_role
 from core.config import get_settings
+
 from shared.constants import SEMESTER_MAX_LENGTH
 from shared.enums import UserRole, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.rate_limit import rate_limit
+
+from api.deps import AttendanceServiceDep, require_role
 from features.attendance.constants import (
     HISTORY_SORT_BY_MAX_LENGTH,
     HISTORY_SORT_DIR_MAX_LENGTH,
@@ -67,7 +69,7 @@ async def submit_scan(
         alias="X-Idempotency-Key",
         max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
     ),
-    _: None = Depends(_scan_rate_limit)
+    _: None = Depends(_scan_rate_limit),
 ) -> ScanResponse:
     # `payload.student_number` is checked against the authenticated account
     # rather than used to select the student: any student could otherwise

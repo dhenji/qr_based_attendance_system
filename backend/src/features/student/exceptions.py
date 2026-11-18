@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.exceptions import AppException, DatabaseException, DomainException
+from core.exceptions import AppException, DomainException
 
 
 class StudentException(AppException):
@@ -55,9 +55,7 @@ class StudentAccountUnlinkedException(StudentDomainException):
     code: str = "student_account_unlinked"
 
     def __init__(self, student_id: int) -> None:
-        super().__init__(
-            message=f"Student {student_id} has no linked account to reset"
-        )
+        super().__init__(message=f"Student {student_id} has no linked account to reset")
 
 
 class StudentIdExistsException(StudentDomainException):
@@ -100,8 +98,7 @@ class YearLevelMismatchException(StudentDomainException):
     def __init__(self, year_level_id: int, program_id: int) -> None:
         super().__init__(
             message=(
-                f"Year level {year_level_id} "
-                f"does not belong to program {program_id}"
+                f"Year level {year_level_id} does not belong to program {program_id}"
             )
         )
 

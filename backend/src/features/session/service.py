@@ -4,7 +4,7 @@ import secrets
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import ColumnElement, Select, func, or_, select
@@ -13,6 +13,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import Settings, get_settings
 from core.security import build_qr_payload, generate_session_code
 from core.timezones import resolve_timezone
+
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    QueueStatus,
+    SessionType,
+    ValidationStatus,
+)
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
+from shared.query import apply_if
+from shared.rates import attendance_rates
+from shared.schedule import meeting_minutes, openable_session_types
+
 from features.attendance.attempt_meta import AttemptMeta, meta_for
 from features.attendance.exceptions import AttendanceAttemptLimitReachedException
 from features.attendance.model import Attendance, AttendanceAttemptCounter
@@ -20,14 +40,17 @@ from features.course.exceptions import (
     OfferingNotFoundException,
     WindowsExceedDurationException,
 )
-from features.excuse.exceptions import ProfessorNotAssignedException
 from features.course.model import Course, CourseOffering, OfferingComponent
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
+from features.excuse.exceptions import ProfessorNotAssignedException
 from features.program.model import Program, YearLevel
 from features.session.constants import OVERRIDE_PAST_GRACE_MINUTES
 from features.session.exceptions import (
     InvalidSessionTimeException,
+    LabCoordinatesRequiredException,
+    OfferingScheduleMismatchException,
+    RemoteNotAllowedForLabException,
     ScheduledStartInPastException,
     SessionAlreadyActiveException,
     SessionDateInPastException,
@@ -35,12 +58,8 @@ from features.session.exceptions import (
     SessionNotFoundException,
     SessionOutsideScheduledTimeException,
     SessionTypeNotConfiguredException,
-    LabCoordinatesRequiredException,
-    RemoteNotAllowedForLabException,
-    OfferingScheduleMismatchException,
 )
 from features.session.model import Session
-from features.system.service import SystemService
 from features.session.plan import (
     SessionPlan,
     active_components,
@@ -66,18 +85,7 @@ from features.session.schema import (
 )
 from features.student.model import Student
 from features.sync.model import SyncQueue
-from shared.audit import record_audit
-from shared.base import BaseCRUD
-from shared.enums import AuditAction, AuditEntity, QueueStatus, SessionType, ValidationStatus
-from shared.pagination import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    PaginatedResponse,
-)
-from shared.query import apply_if
-from shared.rates import attendance_rates
-from shared.schedule import meeting_minutes, openable_session_types
+from features.system.service import SystemService
 
 
 def _utcnow() -> datetime:
@@ -311,12 +319,8 @@ class SessionService:
             classroom_lng = payload.classroom_lng
         else:
             classroom_name = payload.classroom_name or plan.classroom_name
-            classroom_lat = _or_fallback(
-                payload.classroom_lat, plan.classroom_lat
-            )
-            classroom_lng = _or_fallback(
-                payload.classroom_lng, plan.classroom_lng
-            )
+            classroom_lat = _or_fallback(payload.classroom_lat, plan.classroom_lat)
+            classroom_lng = _or_fallback(payload.classroom_lng, plan.classroom_lng)
 
         # Remote / online sessions never carry a physical geofence, even when
         # the offering they were opened against has one.
@@ -532,9 +536,9 @@ class SessionService:
         day: date = session_date or plan.session_date or local_now.date()
         wall: time = start_time or plan.start_time or local_now.time()
 
-        scheduled_start: datetime = datetime.combine(
-            day, wall, tzinfo=zone
-        ).astimezone(timezone.utc)
+        scheduled_start: datetime = datetime.combine(day, wall, tzinfo=zone).astimezone(
+            timezone.utc
+        )
 
         if scheduled_start < now - timedelta(minutes=OVERRIDE_PAST_GRACE_MINUTES):
             raise ScheduledStartInPastException(
@@ -547,11 +551,11 @@ class SessionService:
         # fall back to the requested duration so a class with no schedule
         # still gets a sensible end.
         class_length: int = (
-            plan.meeting_minutes if plan.meeting_minutes and plan.meeting_minutes > 0 else duration_minutes
+            plan.meeting_minutes
+            if plan.meeting_minutes and plan.meeting_minutes > 0
+            else duration_minutes
         )
-        scheduled_end: datetime = scheduled_start + timedelta(
-            minutes=class_length
-        )
+        scheduled_end: datetime = scheduled_start + timedelta(minutes=class_length)
 
         if scheduled_end <= scheduled_start:
             raise InvalidSessionTimeException()
@@ -576,9 +580,7 @@ class SessionService:
 
         # The active session's course and window, so the message names what is
         # open rather than the offering id a professor would have to decode.
-        course: Course | None = await self._session.get(
-            Course, offering.course_id
-        )
+        course: Course | None = await self._session.get(Course, offering.course_id)
         course_code: str = (
             course.course_code if course is not None else f"offering {offering.id}"
         )
@@ -692,9 +694,7 @@ class SessionService:
 
         return row
 
-    async def _stamp_session(
-        self, row: Session, duration: int, now: datetime
-    ) -> None:
+    async def _stamp_session(self, row: Session, duration: int, now: datetime) -> None:
         """Second flush: derive the code from the assigned id and stamp expiry.
 
         D49/D12: `expires_at = min(created_at + duration, scheduled_end_time)`.
@@ -792,7 +792,9 @@ class SessionService:
             classroom_radius_meters=getattr(row, "classroom_radius_meters", 0) or 0,
             schedule_overridden=_schedule_overridden_of(row),
             actual_start_time=getattr(row, "actual_start_time", None),
-            original_scheduled_start_time=getattr(row, "original_scheduled_start_time", None),
+            original_scheduled_start_time=getattr(
+                row, "original_scheduled_start_time", None
+            ),
             override_reason=getattr(row, "override_reason", None),
             created_at=getattr(row, "created_at", None),
             compliance_rate=compliance,
@@ -912,7 +914,8 @@ class SessionService:
             ),
             "override_reason": row.override_reason,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None,
-            "attendance_attempt_limit": getattr(row, "attendance_attempt_limit", 0) or 0,
+            "attendance_attempt_limit": getattr(row, "attendance_attempt_limit", 0)
+            or 0,
         }
 
     async def verify_code(
@@ -1135,9 +1138,7 @@ class SessionService:
             for row in rows
         ]
 
-    async def _session_list_item(
-        self, row: Session, now: datetime
-    ) -> SessionListItem:
+    async def _session_list_item(self, row: Session, now: datetime) -> SessionListItem:
         """One list tile: present/late/absent plus the derived session status."""
         counts, scanned = _summarize(await self._attendance_rows(row.id))
         enrolled: int = await self._enrollment_count(row.offering_id)
@@ -1214,9 +1215,7 @@ class SessionService:
             if not await self._matches_section(row.offering_id, section):
                 continue
 
-            row_status = _session_status(
-                row.expires_at, row.scheduled_start_time, now
-            )
+            row_status = _session_status(row.expires_at, row.scheduled_start_time, now)
             if status is not None and row_status != status:
                 continue
 
@@ -1317,10 +1316,7 @@ class SessionService:
 
         scoped = stmt.subquery()
         total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(scoped)
-            )
-            or 0
+            await self._session.scalar(select(func.count()).select_from(scoped)) or 0
         )
         status_rows = (
             await self._session.execute(
@@ -1332,13 +1328,17 @@ class SessionService:
         counts = {str(row[0]): int(row[1]) for row in status_rows}
         total_students: int = (
             await self._session.scalar(
-                select(func.count(func.distinct(scoped.c.student_id))).select_from(scoped)
+                select(func.count(func.distinct(scoped.c.student_id))).select_from(
+                    scoped
+                )
             )
             or 0
         )
         total_sessions: int = (
             await self._session.scalar(
-                select(func.count(func.distinct(scoped.c.session_id))).select_from(scoped)
+                select(func.count(func.distinct(scoped.c.session_id))).select_from(
+                    scoped
+                )
             )
             or 0
         )
@@ -1415,8 +1415,12 @@ class SessionService:
         if course_id is not None:
             stmt = stmt.where(CourseOffering.course_id == course_id)
         stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
-        stmt = apply_if(stmt, year_level_id, lambda v: CourseOffering.year_level_id == v)
-        stmt = apply_if(stmt, academic_year, lambda v: CourseOffering.academic_year == v)
+        stmt = apply_if(
+            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
+        stmt = apply_if(
+            stmt, academic_year, lambda v: CourseOffering.academic_year == v
+        )
         stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
 
         stmt = apply_if(stmt, offering_id, lambda v: Session.offering_id == v)
@@ -1568,9 +1572,7 @@ class SessionService:
 
         return offering
 
-    async def _get_scoped_or_404(
-        self, session_id: int, professor_id: int
-    ) -> Session:
+    async def _get_scoped_or_404(self, session_id: int, professor_id: int) -> Session:
         """Resolve a session the professor may act on.
 
         `Session.professor_id` records who opened the session and nothing more,
@@ -1680,9 +1682,7 @@ class SessionService:
         components: Sequence[OfferingComponent] = await active_components(
             self._session, offering.id
         )
-        self._require_configured_type(
-            components=components, session_type=session_type
-        )
+        self._require_configured_type(components=components, session_type=session_type)
 
         course: Course | None = await self._session.get(Course, offering.course_id)
         plan: SessionPlan = await resolve_session_plan(

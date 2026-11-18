@@ -582,6 +582,7 @@ async def test_program_service_requires_a_unique_code(
 - [ ] Happy-path tests for each endpoint
 - [ ] Edge cases tested (404, validation errors)
 - [ ] Run: `docker compose -f docker-compose.dev.yml --profile test run --rm --build api-test` or `cd backend && python -m pytest src/tests/ -v`
+- [ ] Lint and format: `cd backend && ruff check . && ruff format --check .`
 
 ---
 

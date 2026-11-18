@@ -34,9 +34,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_otp, hash_password
+
+from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
+
 from features.auth.model import OtpCodes, User
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity, OtpPurpose, UserRole
 from tests.conftest import Factories
 
 # `LoginRequest.email` is an `EmailStr`, and email-validator rejects the
@@ -51,14 +53,10 @@ PASSWORD = "correct-horse-battery-staple"
 async def _admin(
     factories: Factories, *, role: str = UserRole.SUPER_ADMIN.value
 ) -> User:
-    return await factories.user(
-        email=ADMIN_EMAIL, role=role, is_active=True
-    )
+    return await factories.user(email=ADMIN_EMAIL, role=role, is_active=True)
 
 
-async def _target(
-    factories: Factories, *, email: str, role: str
-) -> User:
+async def _target(factories: Factories, *, email: str, role: str) -> User:
     """A linked account with a known password, optionally locked out."""
 
     return await factories.user(
@@ -528,9 +526,7 @@ async def test_reset_requires_authentication(
         role=UserRole.STUDENT.value,
     )
 
-    response = await api_client.post(
-        f"/api/admin/users/{target.id}/reset-password"
-    )
+    response = await api_client.post(f"/api/admin/users/{target.id}/reset-password")
 
     assert response.status_code in (401, 403)
 

@@ -25,11 +25,12 @@ from typing import Any
 
 import numpy as np
 
+from shared.enums import ScannedVia
+from shared.face_embeddings import embedding_to_base64
+
 from features.attendance.schema import GPSInput, LivenessEvidence, ScanRequest
 from features.attendance.service import AttendanceService
 from features.session.model import Session
-from shared.enums import ScannedVia
-from shared.face_embeddings import embedding_to_base64
 
 
 def _make_live_emb_p() -> str:

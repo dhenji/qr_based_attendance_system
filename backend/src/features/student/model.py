@@ -16,9 +16,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
+from shared.mixins import TimestampMixin
+
 from features.auth.model import User
 from features.program.model import YearLevel
-from shared.mixins import TimestampMixin
 
 
 class Student(TimestampMixin, Base):

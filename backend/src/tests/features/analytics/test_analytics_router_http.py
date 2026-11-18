@@ -11,8 +11,9 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
-from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from shared.enums import UserRole, ValidationStatus
+
+from features.analytics.model import StudentRiskScore, StudentRiskScoreStaging
 from tests.conftest import Factories
 
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
@@ -602,9 +603,7 @@ async def test_overview_honors_course_ids(
     seed = await _seed_scope(factories)
     headers = await auth_headers(seed["admin"])
 
-    unfiltered = await api_client.get(
-        "/api/admin/analytics/overview", headers=headers
-    )
+    unfiltered = await api_client.get("/api/admin/analytics/overview", headers=headers)
     assert unfiltered.json()["total_courses"] == 2
     assert unfiltered.json()["total_sessions"] == 2
 
@@ -638,9 +637,7 @@ async def test_at_risk_honors_course_ids(
         )
     headers = await auth_headers(seed["admin"])
 
-    unfiltered = await api_client.get(
-        "/api/admin/analytics/at-risk", headers=headers
-    )
+    unfiltered = await api_client.get("/api/admin/analytics/at-risk", headers=headers)
     assert unfiltered.json()["total"] == 2
 
     filtered = await api_client.get(
@@ -709,4 +706,3 @@ async def test_risk_staging_promote_honors_course_ids(
         headers=headers,
     )
     assert still_staged.json()["total"] == 1
-

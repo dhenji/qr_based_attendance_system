@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from core.config import Settings
+
 from shared.captcha import CaptchaInvalidException, verify_turnstile_token
 
 

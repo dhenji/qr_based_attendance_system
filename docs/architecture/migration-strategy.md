@@ -5,10 +5,11 @@
 > on a fresh database produces the current target schema with correct columns, constraints,
 > and FKs. **No backfill functions or data migration scripts are needed.**
 >
-> **Forward-looking:** four tables landed with later backend-phases —
+> **Forward-looking:** five tables landed with later backend phases —
 > `mfa_backup_codes` (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase
-> 12.0), `student_risk_scores_staging` (`d4e5f6a7b8c9`), and `offering_components`
-> (D77, `e8f9a0b1c2d3`) — bringing the baseline to a **21-table** target schema.
+> 12.0), `student_risk_scores_staging` (`d4e5f6a7b8c9`), `offering_components`
+> (D77, `e8f9a0b1c2d3`), and `attendance_attempt_counters` (`55d6238fab9f`) —
+> bringing the baseline to a **22-table** target schema.
 > Each addition gets its own
 > `alembic revision --autogenerate`. `audit_logs` (`f4a9c2b7d103`) carries structural
 > rows today and takes the broader audit coverage in Phase 8.7.
@@ -45,13 +46,15 @@ Enums: `UserRole`, `OtpPurpose`, `ValidationStatus` (valid/pending/rejected), `S
 
 ## Target Schema (§6 — Authoritative Reference)
 
-Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `offering_components`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `excuse_requests`, `student_risk_scores`, `student_risk_scores_staging`, `mfa_backup_codes`, `audit_logs`, `app_settings`, `backup_log`, `sync_queue`
+Tables: `users`, `otp_codes`, `programs`, `year_levels`, `courses`, `course_offerings`, `offering_components`, `course_professors`, `students`, `professors`, `enrollments`, `sessions`, `attendance_records`, `attendance_attempt_counters`, `excuse_requests`, `student_risk_scores`, `student_risk_scores_staging`, `mfa_backup_codes`, `audit_logs`, `app_settings`, `backup_log`, `sync_queue`
 The baseline migration creates these 16 tables with correct columns, constraints, and FKs. See [database-er.md](../design/database-er.md) for the full ERD.
 
-> **Target grows to 21 tables** as the later tables are added: `mfa_backup_codes`
+> **Target grows to 22 tables** as the later tables are added: `mfa_backup_codes`
 > (Phase 2.11), `audit_logs` (Phase 8.5), `app_settings` (Phase 12.0),
-> `student_risk_scores_staging` (`d4e5f6a7b8c9`), and `offering_components` (D77). All five> models are imported into `backend/alembic/env.py` (the first two via
-> `features.auth.model` / `features.system.model`) and have their own revisions.
+> `student_risk_scores_staging` (`d4e5f6a7b8c9`), `offering_components` (D77), and
+> `attendance_attempt_counters` (`55d6238fab9f`). All six models are imported into
+> `backend/alembic/env.py` (the first two via `features.auth.model` /
+> `features.system.model`) and have their own revisions.
 
 ---
 

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+
+from shared.enums import UserRole
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
 
 from api.deps import ExcuseServiceDep, require_role
 from features.auth.model import User
@@ -19,13 +28,6 @@ from features.excuse.schema import (
     ProfWithEvidenceRequest,
     QuickExcuseRequest,
     RevokeExcuseResponse,
-)
-from shared.enums import UserRole
-from shared.pagination import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    PaginatedResponse,
 )
 
 # Excuse professor routes under the shared /professor mount point.

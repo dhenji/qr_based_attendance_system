@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import io
 import os
 import threading
 from typing import Tuple
@@ -18,7 +16,12 @@ try:
 except Exception:  # pragma: no cover
     mp = None
 
-from shared.face_embeddings import ALLOWED_DIMS, EMBEDDING_DIM, l2_normalize, serialize_embedding
+from shared.face_embeddings import (
+    ALLOWED_DIMS,
+    EMBEDDING_DIM,
+    l2_normalize,
+    serialize_embedding,
+)
 
 
 class FaceEmbeddingGenerationError(Exception):
@@ -118,7 +121,9 @@ def _load_image_bytes(content: bytes):
         arr = np.frombuffer(content, dtype=np.uint8)
         if arr.size == 0:
             raise FaceEmbeddingGenerationError("empty image")
-        rng = np.random.RandomState(int(arr[:4].view(np.uint32)[0]) if arr.size >= 4 else 12345)
+        rng = np.random.RandomState(
+            int(arr[:4].view(np.uint32)[0]) if arr.size >= 4 else 12345
+        )
         emb = rng.randn(EMBEDDING_DIM).astype(np.float32)
         return emb
     nparr = np.frombuffer(content, np.uint8)
@@ -147,10 +152,19 @@ def _five_points(img) -> np.ndarray | None:
             result = landmarker.detect(mp_image)
             if getattr(result, "face_landmarks", None):
                 landmarks = result.face_landmarks[0]
-                idxs = [_LEFT_EYE_IDX, _RIGHT_EYE_IDX, _NOSE_TIP_IDX, _LEFT_MOUTH_IDX, _RIGHT_MOUTH_IDX]
+                idxs = [
+                    _LEFT_EYE_IDX,
+                    _RIGHT_EYE_IDX,
+                    _NOSE_TIP_IDX,
+                    _LEFT_MOUTH_IDX,
+                    _RIGHT_MOUTH_IDX,
+                ]
                 try:
                     pts = np.array(
-                        [[landmarks[i].x * width, landmarks[i].y * height] for i in idxs],
+                        [
+                            [landmarks[i].x * width, landmarks[i].y * height]
+                            for i in idxs
+                        ],
                         dtype=np.float32,
                     )
                     return pts
@@ -170,7 +184,13 @@ def _five_points(img) -> np.ndarray | None:
             face_mesh.close()
             if results.multi_face_landmarks:
                 landmarks = results.multi_face_landmarks[0].landmark
-                idxs = [_LEFT_EYE_IDX, _RIGHT_EYE_IDX, _NOSE_TIP_IDX, _LEFT_MOUTH_IDX, _RIGHT_MOUTH_IDX]
+                idxs = [
+                    _LEFT_EYE_IDX,
+                    _RIGHT_EYE_IDX,
+                    _NOSE_TIP_IDX,
+                    _LEFT_MOUTH_IDX,
+                    _RIGHT_MOUTH_IDX,
+                ]
                 pts = np.array(
                     [[landmarks[i].x * width, landmarks[i].y * height] for i in idxs],
                     dtype=np.float32,
@@ -345,7 +365,9 @@ def _fallback_embedding(content: bytes) -> np.ndarray:
             if img is not None:
                 arr = np.frombuffer(content, dtype=np.uint8)
                 rng = np.random.RandomState(
-                    int(arr[:4].view(np.uint32)[0]) if arr.size >= 4 else hash(content) % (2**32)
+                    int(arr[:4].view(np.uint32)[0])
+                    if arr.size >= 4
+                    else hash(content) % (2**32)
                 )
                 return rng.randn(EMBEDDING_DIM).astype(np.float32)
     except Exception:
@@ -353,7 +375,9 @@ def _fallback_embedding(content: bytes) -> np.ndarray:
     arr = np.frombuffer(content, dtype=np.uint8)
     if arr.size == 0:
         raise FaceEmbeddingGenerationError("empty image")
-    rng = np.random.RandomState(int(arr[:4].view(np.uint32)[0]) if arr.size >= 4 else 12345)
+    rng = np.random.RandomState(
+        int(arr[:4].view(np.uint32)[0]) if arr.size >= 4 else 12345
+    )
     return rng.randn(EMBEDDING_DIM).astype(np.float32)
 
 

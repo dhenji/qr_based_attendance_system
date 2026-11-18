@@ -174,9 +174,7 @@ def dispatch_emails(
         _deliver(batch, current)
         return
 
-    future: asyncio.Future[None] = loop.run_in_executor(
-        None, _deliver, batch, current
-    )
+    future: asyncio.Future[None] = loop.run_in_executor(None, _deliver, batch, current)
     _PENDING.add(future)
     future.add_done_callback(_settle)
 
@@ -184,7 +182,11 @@ def dispatch_emails(
 def _deliver(batch: Sequence[OutboundEmail], settings: Settings) -> None:
     for message in batch:
         send_email(
-            message.to, message.subject, message.body, html=message.html, settings=settings
+            message.to,
+            message.subject,
+            message.body,
+            html=message.html,
+            settings=settings,
         )
 
 
@@ -227,7 +229,9 @@ def _smtp_client(settings: Settings) -> Iterator[smtplib.SMTP]:
     timeout: float = settings.smtp_timeout_seconds
 
     if settings.smtp_use_ssl:
-        client = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=timeout)
+        client = smtplib.SMTP_SSL(
+            settings.smtp_host, settings.smtp_port, timeout=timeout
+        )
     else:
         client = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=timeout)
 

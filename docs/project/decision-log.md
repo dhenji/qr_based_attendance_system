@@ -1574,7 +1574,12 @@
   threshold, no frontend test runner, no linters.
 - **Date:** 2026-10-05
 - **Status:** Accepted
-- **Forward note (2026-10-31):** the counts above are a historical snapshot. The suite is now 1060 cases across 82 test files and the migration chain has 25 revisions ending at `b9c0d1e2f3a4` (session start-window columns, D94).- **Context:** The suite was strong and entirely unenforced — 719 cases across 49
+- **Forward note (2026-10-31):** the counts above are a historical snapshot. At that
+  date the suite was 1060 cases across 82 test files and the migration chain had 25
+  revisions ending at `b9c0d1e2f3a4` (session start-window columns, D94).
+- **Current state (2026-11-18):** 31 revisions ending at `768d6ae62710`, 22 tables,
+  1121 test cases, and Ruff enforced by CI — see ADR-094.
+- **Context:** The suite was strong and entirely unenforced — 719 cases across 49
   files, green on SQLite and Postgres, with no `.github/`, no `Makefile`, no
   `tox.ini`, and no `pyproject.toml`. Every count in the docs was maintained by
   hand. The consequential gap was migration drift: `conftest.py` builds the test
@@ -1630,7 +1635,102 @@
   (`Settings.env_file` is CWD-relative; `alembic.ini` uses
   `script_location = alembic`). CI **reports**; only required status checks in
   repo settings make it block a merge, and that half is configured GitHub-side,
-  not in the repo.
+  not in the repo. **Amended by ADR-094 (2026-11-18):** the gate set is now
+  four — a `lint` job runs `ruff check` and `ruff format --check` against the
+  backend; nothing else about this decision changes.
+
+### ADR-094: Coding Standards Are Enforced by Ruff and a Fourth CI Gate
+
+- **Decision:** The backend's documented style (`coding-standards.md` §1.1/§1.4)
+  becomes executable instead of aspirational. `backend/pyproject.toml`
+  configures Ruff 0.17.5 (pinned in `backend/requirements.txt`): line length 88,
+  `target-version = "py312"`, `select = ["E", "F", "I"]` with `ignore = ["E501"]`,
+  and the five-group import order — standard library, third-party, `core`,
+  `shared`, `features` (with the other first-party packages, `api`, `tests`,
+  and the `main` entry point, folded into that final local section).
+  `per-file-ignores` keeps F401 off `**/constants.py` (re-export surfaces,
+  §1.9), and `alembic/versions/` is excluded from lint and format entirely
+  (frozen history, ADR-065). The tree is
+  formatted once with `ruff format`, and `.github/workflows/ci.yml` gains a
+  fourth parallel job, `lint`, running `ruff check` and `ruff format --check`
+  from `backend/`. That job installs Ruff by reading the pin out of
+  `requirements.txt`, so CI and local development cannot drift onto different
+  versions. **Amends ADR-069:** "three gates and nothing more" becomes
+  four gates; the historical decision stands otherwise.
+- **Date:** 2026-11-18
+- **Status:** Accepted
+- **Context:** §1.1 said "Ruff is **not yet installed**" and ADR-069 deliberately
+  ran no linters when the suite was otherwise unenforced. Since then the backend
+  grew to 294 modules and the standard had measurably drifted. The first check
+  with this configuration found 245 violations: 160 import blocks not in §1.4's
+  order, 47 dead imports, 12 imports flagged E402 (a module docstring sat below
+  `from __future__` in two files), 12 undefined names, 10 unused bindings, and
+  4 assorted (two loop variables shadowing an import, one duplicate import, one
+  `== True`). The undefined names traced to four missing imports; two were
+  user-visible defects: a `NameError`-500 on the documented 422
+  `password_policy_violation` path in `AuthService.change_password`, and eight
+  unresolved `datetime` query annotations in the professor excuse router that
+  broke `/openapi.json` and every date-filtered request. The other two were
+  annotation-only (`time` in `SessionService`) and test-only (`Student`). A
+  convention nobody checks decays exactly the way ADR-069 said it would.
+- **Rationale:**
+  - **The rule set is the enforceable core of §1.1, not a maximal one.**
+    pycodestyle errors, pyflakes, and isort automate the rules that are actually
+    mechanical. The type-hint conventions stay review rules: `flake8-annotations`
+    would flag hundreds of pre-existing signatures and is its own decision.
+  - **E501 is off; the formatter owns the 88-column target.** `ruff format`
+    wraps code to 88 columns. E501's post-format residue is long strings,
+    comments, and docstrings (69 sites, 17 of them HTML email templates in
+    `shared/otp_email.py`) that the formatter cannot split — enabling it would
+    force risky string surgery for no enforcement gain.
+  - **Five groups, three folded in.** §1.4 names stdlib → third-party → core →
+    shared → features. `api`, `tests`, and the `main` entry point are also
+    first-party, so they sort inside the final local section rather than
+    inventing sixth and seventh sections that §1.4 does not describe.
+  - **Frozen history and re-export surfaces are exempt, not "fixed".**
+    Applying I001/F401 inside `alembic/versions/` would edit applied revisions,
+    which ADR-065 forbids. `**/constants.py` keeps F401 off because those
+    modules re-export shared bounds by design (§1.9); a blind F401 fix there
+    breaks every importing service (verified against
+    `features/course/constants.py`).
+  - **The F821s were fixed, not suppressed.** The four missing imports were
+    repaired: `PasswordPolicyException` restores the documented 422
+    `password_policy_violation`; `datetime` makes the excuse router's query
+    annotations resolvable, which also restores `/openapi.json`; `time`
+    resolves two annotations in `SessionService`; and `Student` fixes a test
+    module. The full suite passes on the fixed tree, so no behavior was altered
+    beyond those intended repairs.
+  - **The format pass is provably semantics-free.** A before/after AST
+    comparison across all 294 files reported zero differing trees (one
+    docstring-indentation-only delta inside an applied migration, which was
+    reverted and is now excluded), so the large one-time diff is mechanical.
+- **Alternatives considered:** enforcing E501 (rejected: 69 manual wraps,
+  several inside email templates); enabling `flake8-annotations`/`UP` in the same
+  pass (rejected: out of scope, hundreds of pre-existing sites); per-line
+  `# noqa` for the re-export modules instead of per-file-ignores (rejected: 22
+  noqas drifting across five files); `pip install -r requirements.txt` in the
+  lint job (rejected: the job needs only Ruff, and installing
+  numpy/mediapipe/onnxruntime would add minutes for nothing); re-running the
+  docstring move as a `# noqa: E402` (rejected: the docstrings were simply
+  below the `__future__` import, so hoisting them makes them real module
+  docstrings with no suppression).
+- **Consequences:** CI now reports four gates — `backend`, `migrations`,
+  `frontend`, `lint` — and all four job names remain load-bearing for branch
+  protection. The one-time diff is large but mechanical: 208 auto-fixes, 37
+  triaged manual fixes, and a `ruff format` pass over 135 files (23 of them
+  frozen migrations, restored untouched). Regression tests pin both user-visible
+  repairs: `test_change_password_policy.py` (the 422 contract, including its
+  `field`), `test_openapi_schema.py` (`/openapi.json` serves typed excuse
+  filters), and the date-only filter test in `test_routes_http.py`.
+  `.editorconfig` carries the editor-side conventions (UTF-8, LF, final newline;
+  4-space Python, tabbed frontend) so editors agree with the formatter.
+  `coding-standards.md` §1.1 now
+  documents the enforced configuration and the local commands instead of the
+  "not yet installed" caveat. **Frontend linting is deliberately not part of
+  this decision:** ESLint + Prettier for SvelteKit 2 / Svelte 5 would add five
+  or more devDependencies, a flat config, a repo-wide format diff, and a fifth
+  gate — a self-contained follow-up that deserves its own ADR rather than a
+  partial gate bolted onto this one.
 
 ### ADR-070: Composing Handles Earns a Service Class but Is Not Required
 

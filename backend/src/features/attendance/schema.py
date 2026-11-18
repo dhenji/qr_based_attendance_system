@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from shared.constants import (
     LATITUDE_MAX,
@@ -13,13 +19,12 @@ from shared.constants import (
 )
 from shared.enums import ScannedVia, ValidationStatus
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE
+
 from features.attendance.constants import (
     EAR_SAMPLES_MAX_COUNT,
     EAR_SAMPLES_MIN_COUNT,
     EAR_VALUE_MAX,
     EAR_VALUE_MIN,
-    FACE_MATCH_SCORE_MAX,
-    FACE_MATCH_SCORE_MIN,
     GPS_ACCURACY_MAX,
     GPS_ACCURACY_MIN,
     REVIEW_NOTE_MAX_LENGTH,

@@ -12,14 +12,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import _get_active_user
 from core.security import hash_password
+
+from shared.enums import AuditAction, AuditEntity
+
+from api.deps import _get_active_user
 from features.auth.exceptions import InvalidCredentialsException
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.professor.service import ProfessorService
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 from tests.conftest import Factories
 
 PASSWORD = "correct-horse-battery-staple"
@@ -34,9 +36,7 @@ async def _reload_user(session: AsyncSession, user_id: int) -> User:
 async def test_archive_deactivates_linked_user_and_blocks_login(
     test_db_session: AsyncSession, factories: Factories, settings: Any
 ) -> None:
-    user = await factories.user(
-        password_hash=hash_password(PASSWORD), role="professor"
-    )
+    user = await factories.user(password_hash=hash_password(PASSWORD), role="professor")
     professor = await factories.professor(user=user)
 
     await ProfessorService(test_db_session).archive(
@@ -70,9 +70,7 @@ async def test_archive_deactivates_linked_user_and_blocks_login(
 async def test_reactivate_restores_login(
     test_db_session: AsyncSession, factories: Factories, settings: Any
 ) -> None:
-    user = await factories.user(
-        password_hash=hash_password(PASSWORD), role="professor"
-    )
+    user = await factories.user(password_hash=hash_password(PASSWORD), role="professor")
     professor = await factories.professor(user=user)
     service = ProfessorService(test_db_session)
 
@@ -97,9 +95,7 @@ async def test_update_is_active_true_restores_login(
     """
     from features.professor.schema import ProfessorUpdate
 
-    user = await factories.user(
-        password_hash=hash_password(PASSWORD), role="professor"
-    )
+    user = await factories.user(password_hash=hash_password(PASSWORD), role="professor")
     professor = await factories.professor(user=user)
     service = ProfessorService(test_db_session)
 
@@ -116,9 +112,7 @@ async def test_update_is_active_true_restores_login(
 async def test_hard_delete_deactivates_linked_user(
     test_db_session: AsyncSession, factories: Factories, settings: Any
 ) -> None:
-    user = await factories.user(
-        password_hash=hash_password(PASSWORD), role="professor"
-    )
+    user = await factories.user(password_hash=hash_password(PASSWORD), role="professor")
     professor = await factories.professor(user=user)
     service = ProfessorService(test_db_session)
 

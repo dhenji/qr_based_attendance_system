@@ -7,6 +7,19 @@ from typing import Any, Sequence
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.audit import record_audit
+from shared.base import BaseCRUD
+from shared.email import OutboundEmail, dispatch_emails
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    ExcuseInitiatedBy,
+    ExcuseInitiatedVia,
+    ExcuseStatus,
+    ValidationStatus,
+)
+from shared.pagination import PaginatedResponse
+
 from features.attendance.model import Attendance
 from features.auth.model import User
 from features.course.model import Course, CourseOffering
@@ -47,18 +60,6 @@ from features.excuse.schema import (
 from features.professor.model import Professor
 from features.session.model import Session
 from features.student.model import Student
-from shared.audit import record_audit
-from shared.base import BaseCRUD
-from shared.email import OutboundEmail, dispatch_emails
-from shared.enums import (
-    AuditAction,
-    AuditEntity,
-    ExcuseInitiatedBy,
-    ExcuseInitiatedVia,
-    ExcuseStatus,
-    ValidationStatus,
-)
-from shared.pagination import PaginatedResponse
 
 
 def _utcnow() -> datetime:
@@ -325,9 +326,7 @@ class ExcuseService:
         await self._require_enrollment(
             student_id=student.id, offering_id=session.offering_id
         )
-        record: Attendance = await self._get_attendance_or_404(
-            student.id, session.id
-        )
+        record: Attendance = await self._get_attendance_or_404(student.id, session.id)
         self._require_reviewable(record, student.id, session.id)
         await self._require_no_open_request(student.id, session.id)
 
@@ -600,7 +599,11 @@ class ExcuseService:
             .join(CourseOffering, CourseOffering.id == Session.offering_id)
             .join(Course, Course.id == CourseOffering.course_id)
             .outerjoin(Student, Student.id == ExcuseRequest.student_id)
-            .outerjoin(Attendance, (Attendance.student_id == ExcuseRequest.student_id) & (Attendance.session_id == ExcuseRequest.session_id))
+            .outerjoin(
+                Attendance,
+                (Attendance.student_id == ExcuseRequest.student_id)
+                & (Attendance.session_id == ExcuseRequest.session_id),
+            )
             .outerjoin(User, User.id == ExcuseRequest.reviewed_by)
             .where(assigned)
         )
@@ -618,11 +621,13 @@ class ExcuseService:
 
         if has_evidence is True:
             stmt = stmt.where(
-                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0) > 0
+                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0)
+                > 0
             )
         elif has_evidence is False:
             stmt = stmt.where(
-                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0) == 0
+                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0)
+                == 0
             )
 
         if original_status is not None and original_status.strip():
@@ -641,10 +646,7 @@ class ExcuseService:
             bound_to = date_to
             if bound_to.tzinfo is None:
                 bound_to = bound_to.replace(tzinfo=timezone.utc)
-            if (
-                bound_to.timetuple()[3:6] == (0, 0, 0)
-                and bound_to.microsecond == 0
-            ):
+            if bound_to.timetuple()[3:6] == (0, 0, 0) and bound_to.microsecond == 0:
                 bound_to = bound_to.replace(
                     hour=23, minute=59, second=59, microsecond=999999
                 )
@@ -660,13 +662,8 @@ class ExcuseService:
             bound = submitted_to
             if bound.tzinfo is None:
                 bound = bound.replace(tzinfo=timezone.utc)
-            if (
-                bound.timetuple()[3:6] == (0, 0, 0)
-                and bound.microsecond == 0
-            ):
-                bound = bound.replace(
-                    hour=23, minute=59, second=59, microsecond=999999
-                )
+            if bound.timetuple()[3:6] == (0, 0, 0) and bound.microsecond == 0:
+                bound = bound.replace(hour=23, minute=59, second=59, microsecond=999999)
             stmt = stmt.where(ExcuseRequest.requested_at <= bound)
 
         if reviewed_from is not None:
@@ -679,13 +676,8 @@ class ExcuseService:
             bound = reviewed_to
             if bound.tzinfo is None:
                 bound = bound.replace(tzinfo=timezone.utc)
-            if (
-                bound.timetuple()[3:6] == (0, 0, 0)
-                and bound.microsecond == 0
-            ):
-                bound = bound.replace(
-                    hour=23, minute=59, second=59, microsecond=999999
-                )
+            if bound.timetuple()[3:6] == (0, 0, 0) and bound.microsecond == 0:
+                bound = bound.replace(hour=23, minute=59, second=59, microsecond=999999)
             stmt = stmt.where(ExcuseRequest.reviewed_at <= bound)
 
         if reviewer is not None and reviewer.strip():
@@ -733,7 +725,9 @@ class ExcuseService:
             "status": ExcuseRequest.status,
             "id": ExcuseRequest.id,
         }
-        sort_col = sort_column_map.get(sort_by or "requested_at", ExcuseRequest.requested_at)
+        sort_col = sort_column_map.get(
+            sort_by or "requested_at", ExcuseRequest.requested_at
+        )
         if sort_by == "student_name":
             sort_col = Student.last_name
         descending = (sort_dir or "desc").lower() != "asc"
@@ -741,9 +735,7 @@ class ExcuseService:
 
         rows: Sequence[ExcuseRequest] = (
             await self._session.scalars(
-                stmt.order_by(order_expr)
-                .offset((page - 1) * size)
-                .limit(size)
+                stmt.order_by(order_expr).offset((page - 1) * size).limit(size)
             )
         ).all()
 
@@ -1224,9 +1216,7 @@ class ExcuseService:
 
         return row
 
-    async def _require_assignment(
-        self, *, offering_id: int, professor_id: int
-    ) -> None:
+    async def _require_assignment(self, *, offering_id: int, professor_id: int) -> None:
         today: date = date.today()
         row: CourseProfessor | None = (
             await self._session.scalars(
@@ -1349,9 +1339,7 @@ class ExcuseService:
         ):
             raise ExcuseNotEligibleException(student_id, session_id)
 
-    async def _require_no_open_request(
-        self, student_id: int, session_id: int
-    ) -> None:
+    async def _require_no_open_request(self, student_id: int, session_id: int) -> None:
         existing: ExcuseRequest | None = (
             await self._session.scalars(
                 select(ExcuseRequest)

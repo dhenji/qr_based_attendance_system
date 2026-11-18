@@ -13,8 +13,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from features.system.model import AuditLog
 from shared.enums import AuditAction, AuditEntity, UserRole
+
+from features.system.model import AuditLog
 from tests.conftest import Factories
 
 
@@ -124,9 +125,10 @@ async def test_reassign_professor_returns_201_and_keeps_history(
     )
     assert rows.status_code == 200
     by_professor = {row["professor_id"]: row for row in rows.json()}
-    assert by_professor[seed["professor"].id]["effective_to"] == (
-        today - timedelta(days=1)
-    ).isoformat()
+    assert (
+        by_professor[seed["professor"].id]["effective_to"]
+        == (today - timedelta(days=1)).isoformat()
+    )
     assert by_professor[replacement.id]["effective_to"] is None
 
 
@@ -169,8 +171,7 @@ async def test_end_future_assignment_cancels_without_500(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{seed['offering'].id}/professors/"
-        f"{seed['professor'].id}",
+        f"/api/admin/offerings/{seed['offering'].id}/professors/{seed['professor'].id}",
         params={"effective_from": tomorrow.isoformat()},
         headers=headers,
     )
@@ -215,8 +216,7 @@ async def test_end_assignment_without_effective_from_uses_open_ended_row(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{seed['offering'].id}/professors/"
-        f"{seed['professor'].id}",
+        f"/api/admin/offerings/{seed['offering'].id}/professors/{seed['professor'].id}",
         headers=headers,
     )
 
@@ -246,8 +246,7 @@ async def test_end_current_assignment_sets_today(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{seed['offering'].id}/professors/"
-        f"{seed['professor'].id}",
+        f"/api/admin/offerings/{seed['offering'].id}/professors/{seed['professor'].id}",
         params={"effective_from": start.isoformat()},
         headers=headers,
     )
@@ -498,8 +497,7 @@ async def test_reopen_rejects_when_a_later_assignment_exists(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.post(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{seed['professor'].id}/reopen",
+        f"/api/admin/offerings/{offering_id}/professors/{seed['professor'].id}/reopen",
         json={"effective_from": first_start.isoformat()},
         headers=headers,
     )
@@ -508,7 +506,9 @@ async def test_reopen_rejects_when_a_later_assignment_exists(
     assert response.json()["detail"]["code"] == "assignment_reopen_conflict"
 
     rows = await _assignment_rows(api_client, headers, offering_id)
-    first = next(row for row in rows if row["effective_from"] == first_start.isoformat())
+    first = next(
+        row for row in rows if row["effective_from"] == first_start.isoformat()
+    )
     assert first["effective_to"] == first_end.isoformat()
 
 
@@ -574,9 +574,7 @@ async def test_assign_primary_rejected_when_another_primary_overlaps(
     offering_id = seed["offering"].id
     professor_id = seed["professor"].id
     today = date.today()
-    await _seed_primary(
-        factories, seed, start=today - timedelta(days=10), end=None
-    )
+    await _seed_primary(factories, seed, start=today - timedelta(days=10), end=None)
     await test_db_session.commit()
 
     headers = await auth_headers(seed["admin"])
@@ -606,9 +604,7 @@ async def test_assign_assistant_allowed_when_another_primary_overlaps(
     offering_id = seed["offering"].id
     professor_id = seed["professor"].id
     today = date.today()
-    await _seed_primary(
-        factories, seed, start=today - timedelta(days=10), end=None
-    )
+    await _seed_primary(factories, seed, start=today - timedelta(days=10), end=None)
     await test_db_session.commit()
 
     headers = await auth_headers(seed["admin"])
@@ -718,8 +714,7 @@ async def test_reassign_to_primary_rejected_when_another_primary_overlaps(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.post(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/reassign",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/reassign",
         json={
             "new_professor_id": replacement_id,
             "is_primary": True,
@@ -763,8 +758,7 @@ async def test_reassign_to_assistant_allowed_when_another_primary_overlaps(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.post(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/reassign",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/reassign",
         json={
             "new_professor_id": replacement_id,
             "is_primary": False,
@@ -803,8 +797,7 @@ async def test_reopen_primary_rejected_when_another_primary_overlaps(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.post(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/reopen",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/reopen",
         json={"effective_from": start.isoformat()},
         headers=headers,
     )
@@ -840,8 +833,7 @@ async def test_reopen_as_assistant_allowed_when_another_primary_overlaps(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.post(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/reopen",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/reopen",
         json={"effective_from": start.isoformat(), "is_primary": False},
         headers=headers,
     )
@@ -874,8 +866,7 @@ async def test_permanently_remove_unused_assignment_deletes_and_audits(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/permanent",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/permanent",
         params={"effective_from": start.isoformat()},
         headers=headers,
     )
@@ -925,8 +916,7 @@ async def test_permanently_remove_assignment_with_sessions_returns_409(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/permanent",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/permanent",
         params={"effective_from": start.isoformat()},
         headers=headers,
     )
@@ -961,8 +951,7 @@ async def test_permanently_remove_active_assignment_returns_409(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/permanent",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/permanent",
         params={"effective_from": start.isoformat()},
         headers=headers,
     )
@@ -998,8 +987,7 @@ async def test_permanently_remove_live_assignment_with_future_end_returns_409(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/permanent",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/permanent",
         params={"effective_from": start.isoformat()},
         headers=headers,
     )
@@ -1031,8 +1019,7 @@ async def test_permanently_remove_requires_the_exact_assignment_start(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/permanent",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/permanent",
         params={"effective_from": (start + timedelta(days=1)).isoformat()},
         headers=headers,
     )
@@ -1129,8 +1116,7 @@ async def test_permanently_remove_ignores_sessions_outside_the_row_window(
 
     headers = await auth_headers(seed["admin"])
     response = await api_client.delete(
-        f"/api/admin/offerings/{offering_id}/professors/"
-        f"{professor_id}/permanent",
+        f"/api/admin/offerings/{offering_id}/professors/{professor_id}/permanent",
         params={"effective_from": first_start.isoformat()},
         headers=headers,
     )

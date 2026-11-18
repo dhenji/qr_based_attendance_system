@@ -11,7 +11,9 @@ from __future__ import annotations
 from typing import Any
 
 from core.security import hash_password
+
 from shared.enums import UserRole
+
 from tests.conftest import Factories
 
 

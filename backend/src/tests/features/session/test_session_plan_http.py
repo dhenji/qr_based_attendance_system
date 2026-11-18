@@ -13,9 +13,10 @@ from typing import Any, Callable, Coroutine
 
 from sqlalchemy import select
 
+from shared.enums import UserRole
+
 from features.course.model import OfferingComponent
 from features.system.model import AppSetting
-from shared.enums import UserRole
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
 

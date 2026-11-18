@@ -15,14 +15,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import _get_active_user
 from core.security import hash_password
+
+from shared.enums import AuditAction, AuditEntity
+
+from api.deps import _get_active_user
 from features.auth.exceptions import InvalidCredentialsException
 from features.auth.model import User
 from features.auth.service import AuthService
 from features.student.service import StudentService
 from features.system.model import AuditLog
-from shared.enums import AuditAction, AuditEntity
 from tests.conftest import Factories
 
 PASSWORD = "correct-horse-battery-staple"
@@ -34,9 +36,7 @@ async def _reload_user(session: AsyncSession, user_id: int) -> User:
     return user
 
 
-async def _user_audit_rows(
-    session: AsyncSession, user_id: int
-) -> list[AuditLog]:
+async def _user_audit_rows(session: AsyncSession, user_id: int) -> list[AuditLog]:
     rows = await session.scalars(
         select(AuditLog)
         .where(

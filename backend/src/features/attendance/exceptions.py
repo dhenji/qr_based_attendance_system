@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.exceptions import AppException, DatabaseException, DomainException
+from core.exceptions import AppException, DomainException
 
 
 class AttendanceException(AppException):

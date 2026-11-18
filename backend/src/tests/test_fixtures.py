@@ -19,11 +19,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.enums import UserRole, ValidationStatus
+from shared.face_embeddings import embedding_to_base64, serialize_embedding
+
 from features.attendance.model import Attendance
 from features.auth.model import User
 from features.program.model import YearLevel
-from shared.enums import UserRole, ValidationStatus
-from shared.face_embeddings import embedding_to_base64, serialize_embedding
 from tests.conftest import Factories
 
 
@@ -216,7 +217,8 @@ async def test_validation_error_is_422_with_field_detail(
     headers = await auth_headers(role=UserRole.ADMIN.value)
 
     response = await api_client.post(
-        "/api/admin/programs", json={"code": "", "name": "", "total_years": 99},
+        "/api/admin/programs",
+        json={"code": "", "name": "", "total_years": 99},
         headers=headers,
     )
 
@@ -284,9 +286,7 @@ async def test_student_scans_a_live_session_over_http(
     assert response.status_code == 200
     assert response.json()["status"] == ValidationStatus.PRESENT.value
 
-    rows: list[Attendance] = (
-        await test_db_session.scalars(select(Attendance))
-    ).all()
+    rows: list[Attendance] = (await test_db_session.scalars(select(Attendance))).all()
     assert len(rows) == 1
     assert rows[0].student_id == student.id
     assert rows[0].session_id == session.id
@@ -448,9 +448,7 @@ async def test_rate_limiter_does_not_bleed_between_tests(
 
     for _ in range(3):
         response = await api_client.get(
-            "/api/admin/programs", headers=await auth_headers(
-                role=UserRole.ADMIN.value
-            )
+            "/api/admin/programs", headers=await auth_headers(role=UserRole.ADMIN.value)
         )
         assert response.status_code == 200
 

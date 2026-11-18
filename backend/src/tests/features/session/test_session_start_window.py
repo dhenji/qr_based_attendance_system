@@ -18,7 +18,7 @@ that need another moment pass it to the service.
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -26,7 +26,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings
-from features.course.model import CourseOffering
+
+from shared.enums import UserRole
+
 from features.session.exceptions import (
     ScheduledStartInPastException,
     SessionDateInPastException,
@@ -36,7 +38,6 @@ from features.session.model import Session
 from features.session.schema import SessionCreate
 from features.session.service import SessionService
 from features.system.model import AppSetting
-from shared.enums import UserRole
 from tests.conftest import Factories
 from tests.features.session.conftest import SESSION_NOW
 
@@ -190,9 +191,7 @@ async def test_the_late_open_grace_admits_a_class_still_running(
 
     read = await service.create_session(
         professor_id=stack["professor"].id,
-        payload=SessionCreate(
-            offering_id=stack["offering"].id, duration_minutes=15
-        ),
+        payload=SessionCreate(offering_id=stack["offering"].id, duration_minutes=15),
         now=SESSION_NOW + timedelta(minutes=40),
     )
 
@@ -225,9 +224,7 @@ async def test_an_offering_with_no_meeting_is_not_gated(
 ) -> None:
     """Nothing to be outside of: the session starts now, as it always did."""
 
-    stack, service = await _offering(
-        factories, settings, schedule_days=""
-    )
+    stack, service = await _offering(factories, settings, schedule_days="")
 
     read = await service.create_session(
         professor_id=stack["professor"].id,

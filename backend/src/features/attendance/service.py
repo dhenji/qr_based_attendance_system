@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import math
@@ -7,7 +8,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -21,7 +22,41 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from core.config import Settings, get_settings
+from core.exceptions import AppException
+
+from shared.audit import record_audit
+from shared.email import OutboundEmail, dispatch_emails
+from shared.enums import (
+    AuditAction,
+    AuditEntity,
+    QueueStatus,
+    SyncStatus,
+    ValidationStatus,
+)
+from shared.face_embedding_generator import (
+    FaceEmbeddingGenerationError,
+    generate_embedding_from_image,
+)
+from shared.face_embeddings import (
+    FaceEmbeddingError,
+    cosine_similarity,
+    deserialize_embedding,
+    embedding_from_base64,
+    is_stub_embedding,
+)
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    PaginatedResponse,
+)
+from shared.query import apply_if
+from shared.rates import attendance_rates
+
+from features.attendance import notifications as attendance_notifications
+from features.attendance.attempt_meta import AttemptMeta, meta_for, remaining_after
 from features.attendance.constants import (
+    _IDEMPOTENCY_MAX_ENTRIES,
     EAR_MEAN_MAX,
     EAR_MEAN_MIN,
     HISTORY_DEFAULT_SORT_BY,
@@ -34,17 +69,14 @@ from features.attendance.constants import (
     REVIEW_DECISIONS,
     REVIEW_DEFAULT_STATUS,
     REVIEW_NOTE_EVIDENCE_KEY,
-    REVIEWED_AT_EVIDENCE_KEY,
-    REVIEWED_BY_EVIDENCE_KEY,
     REVIEW_REASON_ACCURACY_LOW,
     REVIEW_REASON_FACE_BAND,
     REVIEW_REASON_GEOFENCE,
     REVIEW_STATUSES,
+    REVIEWED_AT_EVIDENCE_KEY,
+    REVIEWED_BY_EVIDENCE_KEY,
     SYNC_STALE_SECONDS,
-    _IDEMPOTENCY_MAX_ENTRIES,
 )
-from core.exceptions import AppException
-from features.attendance.attempt_meta import AttemptMeta, meta_for, remaining_after
 from features.attendance.exceptions import (
     AttendanceAttemptLimitReachedException,
     AttendanceDomainException,
@@ -57,8 +89,10 @@ from features.attendance.exceptions import (
     StudentNumberMismatchException,
 )
 from features.attendance.model import Attendance, AttendanceAttemptCounter
-from features.attendance import notifications as attendance_notifications
 from features.attendance.schema import (
+    AttendanceRecordItem,
+    AttendanceRecordsResponse,
+    AttendanceSummaryResponse,
     GPSInput,
     HistoryCounts,
     HistoryItem,
@@ -66,12 +100,8 @@ from features.attendance.schema import (
     HistorySummary,
     LivenessEvidence,
     LivenessReviewItem,
-    AttendanceRecordItem,
-    AttendanceRecordsResponse,
-    AttendanceSummaryResponse,
     OverviewItem,
     OverviewResponse,
-    PrecheckRequest,
     PrecheckResponse,
     RecentScanItem,
     RecentScansResponse,
@@ -79,11 +109,13 @@ from features.attendance.schema import (
     ScanRequest,
     ScanResponse,
 )
+from features.auth.model import User
 from features.course.model import Course, CourseOffering
-from features.program.model import Program, YearLevel
 from features.course_professor.model import CourseProfessor
 from features.enrollment.model import Enrollment
 from features.face_enrollment.exceptions import StubEmbeddingException
+from features.professor.model import Professor
+from features.program.model import Program, YearLevel
 from features.session.exceptions import (
     DuplicateScanException,
     SessionExpiredException,
@@ -97,39 +129,7 @@ from features.student.exceptions import (
     StudentNotFoundException,
 )
 from features.student.model import Student
-from features.professor.model import Professor
-from features.auth.model import User
 from features.sync.model import SyncQueue
-from shared.audit import record_audit
-from shared.email import OutboundEmail, dispatch_emails
-from shared.enums import (
-    AuditAction,
-    AuditEntity,
-    QueueStatus,
-    SyncStatus,
-    ValidationStatus,
-)
-import base64
-
-from shared.face_embeddings import (
-    FaceEmbeddingError,
-    cosine_similarity,
-    deserialize_embedding,
-    embedding_from_base64,
-    is_stub_embedding,
-)
-from shared.face_embedding_generator import (
-    FaceEmbeddingGenerationError,
-    generate_embedding_from_image,
-)
-from shared.pagination import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    PaginatedResponse,
-)
-from shared.query import apply_if
-from shared.rates import attendance_rates
 
 EARTH_RADIUS_METERS: float = 6371000.0
 
@@ -288,9 +288,7 @@ async def _keyed_by_id[M: DeclarativeBase](
 
     return {
         obj.id: obj
-        for obj in (
-            await session.scalars(select(model).where(model.id.in_(ids)))
-        ).all()
+        for obj in (await session.scalars(select(model).where(model.id.in_(ids)))).all()
     }
 
 
@@ -303,7 +301,11 @@ _HISTORY_COUNT_FIELDS: dict[str, str] = {
 
 
 def _pending_review_filter(stmt: Select[Any]) -> Select[Any]:
-    return stmt.where(cast(Attendance.liveness_evidence["review"], Boolean) == True)
+    # The admin review queue keys on this predicate (see _load_pending_review).
+    # SQLAlchemy renders `== True` as `= true`; keep the comparison unchanged
+    # rather than altering the query in a lint-only pass.
+    is_review = cast(Attendance.liveness_evidence["review"], Boolean)
+    return stmt.where(is_review == True)  # noqa: E712
 
 
 def _approved_review_filter(stmt: Select[Any]) -> Select[Any]:
@@ -469,7 +471,11 @@ class AttendanceService:
         scanned_at: datetime = _ensure_aware(payload.scanned_at)
 
         db_session, student = await self._resolve_scan_parties(
-            payload.session_id, scanned_at, now, user_id, payload.student_number,
+            payload.session_id,
+            scanned_at,
+            now,
+            user_id,
+            payload.student_number,
             allow_expired=idempotency_key is not None,
         )
         attempt_limit: int = getattr(db_session, "attendance_attempt_limit", 0) or 0
@@ -495,7 +501,9 @@ class AttendanceService:
         try:
             await self._require_face_enrollment(student)
 
-            if student.face_embedding is None or is_stub_embedding(student.face_embedding):
+            if student.face_embedding is None or is_stub_embedding(
+                student.face_embedding
+            ):
                 raise StubEmbeddingException("Face enrollment requires re-enrollment")
 
             try:
@@ -509,12 +517,16 @@ class AttendanceService:
                     live_emb = embedding_from_base64(payload.live_face_embedding)  # type: ignore[arg-type]
                 ref_emb, _algo, _ver = deserialize_embedding(student.face_embedding)
             except (FaceEmbeddingError, FaceEmbeddingGenerationError, ValueError) as e:
-                raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+                raise StubEmbeddingException(
+                    "Face enrollment requires re-enrollment"
+                ) from e
 
             try:
                 score = cosine_similarity(ref_emb, live_emb)
             except ValueError as e:
-                raise StubEmbeddingException("Face enrollment requires re-enrollment") from e
+                raise StubEmbeddingException(
+                    "Face enrollment requires re-enrollment"
+                ) from e
             threshold = self._settings.face_match_threshold
             review_low = self._settings.face_review_band_low
             if score < review_low:
@@ -529,7 +541,9 @@ class AttendanceService:
                     if hard_floor <= 0:
                         hard_floor = 1000.0
                     if float(payload.gps.accuracy) > hard_floor:
-                        raise GpsAccuracyTooLowException(float(payload.gps.accuracy), hard_floor)
+                        raise GpsAccuracyTooLowException(
+                            float(payload.gps.accuracy), hard_floor
+                        )
                 geofence_review, geofence_details = self._validate_geofence(
                     db_session, payload.gps
                 )
@@ -613,9 +627,11 @@ class AttendanceService:
             rejected_only = all(
                 r.validation_status == ValidationStatus.REJECTED.value for r in rows
             ) and bool(rows)
-            if rejected_only and db_session.expires_at is not None and _ensure_aware(
-                db_session.expires_at
-            ) > _utcnow():
+            if (
+                rejected_only
+                and db_session.expires_at is not None
+                and _ensure_aware(db_session.expires_at) > _utcnow()
+            ):
                 retake_available = True
                 already_scanned = False
 
@@ -645,7 +661,10 @@ class AttendanceService:
         )
 
     async def _get_active_session(
-        self, session_id: int, scanned_at: datetime, now: datetime,
+        self,
+        session_id: int,
+        scanned_at: datetime,
+        now: datetime,
         allow_expired: bool = False,
     ) -> Session:
         row: Session | None = await self._session.get(Session, session_id)
@@ -655,7 +674,9 @@ class AttendanceService:
 
         expires_at: datetime | None = row.expires_at
 
-        if not allow_expired and (expires_at is None or _ensure_aware(expires_at) <= now):
+        if not allow_expired and (
+            expires_at is None or _ensure_aware(expires_at) <= now
+        ):
             raise SessionExpiredException(row.id)
 
         if scanned_at > _ensure_aware(expires_at):
@@ -1294,16 +1315,19 @@ class AttendanceService:
             reviewed_at = None
             if isinstance(reviewed_at_raw, str):
                 try:
-                    reviewed_at = datetime.fromisoformat(reviewed_at_raw.replace("Z", "+00:00"))
+                    reviewed_at = datetime.fromisoformat(
+                        reviewed_at_raw.replace("Z", "+00:00")
+                    )
                 except ValueError:
                     reviewed_at = None
 
             retake_available = False
             if record.validation_status == ValidationStatus.REJECTED.value:
                 if (record.student_id, record.session_id) not in successful_pairs:
-                    if db_session.expires_at is not None and _ensure_aware(
-                        db_session.expires_at
-                    ) > _utcnow():
+                    if (
+                        db_session.expires_at is not None
+                        and _ensure_aware(db_session.expires_at) > _utcnow()
+                    ):
                         retake_available = True
 
             items.append(
@@ -1316,7 +1340,8 @@ class AttendanceService:
                     status=record.validation_status,  # type: ignore[arg-type]
                     original_status=record.original_status,  # type: ignore[arg-type]
                     excuse_reason=record.excuse_reason,
-                    review_note=evidence.get(REVIEW_NOTE_EVIDENCE_KEY) or evidence.get("review_note"),
+                    review_note=evidence.get(REVIEW_NOTE_EVIDENCE_KEY)
+                    or evidence.get("review_note"),
                     reviewed_at=reviewed_at,
                     retake_available=retake_available,
                     scanned_at=record.timestamp,
@@ -1347,7 +1372,9 @@ class AttendanceService:
         ).all()
         return records, total
 
-    async def _load_review_maps(self, records: Sequence[Attendance]) -> tuple[
+    async def _load_review_maps(
+        self, records: Sequence[Attendance]
+    ) -> tuple[
         dict[int, Student],
         dict[int, Session],
         dict[int, CourseOffering],
@@ -1489,7 +1516,11 @@ class AttendanceService:
         return recomputed
 
     async def _apply_resolution(
-        self, row: Attendance, evidence: dict, status: str, note: str | None,
+        self,
+        row: Attendance,
+        evidence: dict,
+        status: str,
+        note: str | None,
         actor_id: int | None = None,
     ) -> None:
         row.validation_status = status
@@ -1538,9 +1569,7 @@ class AttendanceService:
             self._session,
             actor_id=actor_id,
             action=(
-                AuditAction.APPROVE
-                if decision == "approve"
-                else AuditAction.REJECT
+                AuditAction.APPROVE if decision == "approve" else AuditAction.REJECT
             ),
             entity_type=AuditEntity.ATTENDANCE_RECORD,
             entity_id=row.id,
@@ -1555,9 +1584,7 @@ class AttendanceService:
         # dispatch_emails never raises, so a relay failure cannot roll back the
         # decision above. Done last, after the audit row is flushed.
         if decision == "reject":
-            await self._notify_liveness_rejected(
-                row=row, note=note, actor_id=actor_id
-            )
+            await self._notify_liveness_rejected(row=row, note=note, actor_id=actor_id)
 
         return ResolveReviewResponse(
             id=row.id,
@@ -1569,14 +1596,16 @@ class AttendanceService:
     async def _notify_liveness_rejected(
         self, *, row: Attendance, note: str | None, actor_id: int
     ) -> None:
-        '''Email the affected student about a rejected liveness review.'''
+        """Email the affected student about a rejected liveness review."""
         now: datetime = _utcnow()
 
         db_session: Session | None = await self._session.get(Session, row.session_id)
         if db_session is None:
             return
 
-        offering: CourseOffering | None = await self._session.get(CourseOffering, db_session.offering_id)
+        offering: CourseOffering | None = await self._session.get(
+            CourseOffering, db_session.offering_id
+        )
         course_name: str = "your course"
         if offering is not None:
             course: Course | None = await self._session.get(Course, offering.course_id)
@@ -1603,7 +1632,9 @@ class AttendanceService:
             and _ensure_aware(db_session.expires_at) > now
         )
 
-        session_date: str = _ensure_aware(db_session.scheduled_start_time).strftime("%Y-%m-%d")
+        session_date: str = _ensure_aware(db_session.scheduled_start_time).strftime(
+            "%Y-%m-%d"
+        )
 
         subject, body = attendance_notifications.liveness_rejected(
             course=course_name,
@@ -1648,8 +1679,8 @@ class AttendanceService:
         sessions: Sequence[Session] = await self._overview_sessions(
             offering_ids, date_from, date_to, session_type
         )
-        enrolled_by_offering: dict[int, set[int]] = (
-            await self._overview_enrollments(offering_ids)
+        enrolled_by_offering: dict[int, set[int]] = await self._overview_enrollments(
+            offering_ids
         )
         tallies: dict[int, Counter[str]] = await self._overview_tallies(
             [row.id for row in sessions]
@@ -1735,7 +1766,9 @@ class AttendanceService:
     ) -> list[int]:
         stmt = select(CourseOffering.id)
         stmt = apply_if(stmt, program_id, lambda v: CourseOffering.program_id == v)
-        stmt = apply_if(stmt, year_level_id, lambda v: CourseOffering.year_level_id == v)
+        stmt = apply_if(
+            stmt, year_level_id, lambda v: CourseOffering.year_level_id == v
+        )
         stmt = apply_if(stmt, semester, lambda v: CourseOffering.semester == v)
         stmt = apply_if(stmt, course_id, lambda v: CourseOffering.course_id == v)
 
@@ -1841,9 +1874,7 @@ class AttendanceService:
         mid: int = len(ordered) // 2
 
         def _rate(rows: list[Session]) -> float:
-            enrolled: int = sum(
-                enrolled_by_session.get(row.id, 0) for row in rows
-            )
+            enrolled: int = sum(enrolled_by_session.get(row.id, 0) for row in rows)
             present, late, excused = self._overview_status_counts(rows, tallies)
             return attendance_rates(
                 present=present, late=late, excused=excused, enrolled=enrolled
@@ -1875,9 +1906,7 @@ class AttendanceService:
         if not records:
             return RecentScansResponse(items=[])
 
-        students, sessions, offerings, courses = await self._load_review_maps(
-            records
-        )
+        students, sessions, offerings, courses = await self._load_review_maps(records)
         items: list[RecentScanItem] = []
 
         for record in records:
@@ -2036,9 +2065,7 @@ class AttendanceService:
                         Professor.first_name,
                         Professor.last_name,
                     )
-                    .join(
-                        Professor, Professor.id == CourseProfessor.professor_id
-                    )
+                    .join(Professor, Professor.id == CourseProfessor.professor_id)
                     .where(CourseProfessor.offering_id.in_(offering_ids))
                     .where(CourseProfessor.effective_from <= today)
                     .where(
@@ -2048,12 +2075,12 @@ class AttendanceService:
                 )
             ).all()
             for offering_id, first, last in prof_rows:
-                prof_by_offering[offering_id] = " ".join(
-                    p for p in (first, last) if p
-                )
+                prof_by_offering[offering_id] = " ".join(p for p in (first, last) if p)
 
         stmt = (
-            select(Attendance, Session, CourseOffering, Course, Student, YearLevel, Program)
+            select(
+                Attendance, Session, CourseOffering, Course, Student, YearLevel, Program
+            )
             .join(Session, Session.id == Attendance.session_id)
             .join(CourseOffering, CourseOffering.id == Session.offering_id)
             .join(Course, Course.id == CourseOffering.course_id)
@@ -2076,7 +2103,9 @@ class AttendanceService:
 
         # count
         total = (
-            await self._session.scalar(select(func.count()).select_from(stmt.subquery()))
+            await self._session.scalar(
+                select(func.count()).select_from(stmt.subquery())
+            )
             or 0
         )
 
@@ -2103,7 +2132,13 @@ class AttendanceService:
                     id=att.id,
                     student_id=student.id,
                     student_name=" ".join(
-                        p for p in (student.first_name, student.middle_name, student.last_name) if p
+                        p
+                        for p in (
+                            student.first_name,
+                            student.middle_name,
+                            student.last_name,
+                        )
+                        if p
                     ),
                     student_number=student.student_id,
                     course_id=course.id,
@@ -2125,15 +2160,41 @@ class AttendanceService:
         **kwargs: Any,
     ) -> str:
         # reuse get_records with max page
-        resp = await self.get_records(page=1, size=MAX_PAGE_SIZE, **{k: v for k, v in kwargs.items() if k not in ("page", "size")})
+        resp = await self.get_records(
+            page=1,
+            size=MAX_PAGE_SIZE,
+            **{k: v for k, v in kwargs.items() if k not in ("page", "size")},
+        )
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
-            ["id", "student_number", "student_name", "course_code", "course_name", "program_code", "year_level", "session_code", "status", "scanned_at"]
+            [
+                "id",
+                "student_number",
+                "student_name",
+                "course_code",
+                "course_name",
+                "program_code",
+                "year_level",
+                "session_code",
+                "status",
+                "scanned_at",
+            ]
         )
         for r in resp.items:
             writer.writerow(
-                [r.id, r.student_number, r.student_name, r.course_code, r.course_name, r.program_code, r.year_level_label, r.session_code, r.status, r.scanned_at]
+                [
+                    r.id,
+                    r.student_number,
+                    r.student_name,
+                    r.course_code,
+                    r.course_name,
+                    r.program_code,
+                    r.year_level_label,
+                    r.session_code,
+                    r.status,
+                    r.scanned_at,
+                ]
             )
         return buffer.getvalue()
 
@@ -2226,9 +2287,7 @@ class AttendanceService:
         filtered = self._apply_history_filters(self._history_base(student.id), filters)
 
         records: Sequence[Attendance] = (
-            await self._session.scalars(
-                self._history_ordered(filtered, sort_key, desc)
-            )
+            await self._session.scalars(self._history_ordered(filtered, sort_key, desc))
         ).all()
 
         buffer = io.StringIO()

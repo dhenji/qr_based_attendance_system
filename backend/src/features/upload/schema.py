@@ -20,9 +20,9 @@ class PresignedUrlRequest(BaseModel):
         str, Field(min_length=FILENAME_MIN_LENGTH, max_length=FILENAME_MAX_LENGTH)
     ]
     size_bytes: int = Field(gt=0)
-    content_type: Annotated[
-        str | None, Field(max_length=CONTENT_TYPE_MAX_LENGTH)
-    ] = None
+    content_type: Annotated[str | None, Field(max_length=CONTENT_TYPE_MAX_LENGTH)] = (
+        None
+    )
 
     @field_validator("filename")
     @classmethod

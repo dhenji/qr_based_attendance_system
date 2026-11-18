@@ -18,9 +18,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
+
+from shared.mixins import CreatedAtMixin
+
 from features.course.model import CourseOffering
 from features.professor.model import Professor
-from shared.mixins import CreatedAtMixin
 
 
 class Session(CreatedAtMixin, Base):

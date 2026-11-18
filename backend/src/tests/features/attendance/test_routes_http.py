@@ -22,16 +22,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import numpy as np
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password
-from features.attendance.model import Attendance, AttendanceAttemptCounter
+
 from shared.enums import UserRole, ValidationStatus
 from shared.face_embeddings import embedding_to_base64, serialize_embedding
+
+from features.attendance.model import Attendance, AttendanceAttemptCounter
 from tests.conftest import Factories
-import numpy as np
 
 # One point either side of the classroom coordinates below.
 INSIDE_LAT = 14.0001
@@ -74,13 +76,13 @@ def scan_body(
         "gps": {"lat": INSIDE_LAT, "lng": INSIDE_LNG, "accuracy": 5.0},
         "liveness_evidence": liveness_evidence_payload(),
         "live_face_embedding": _make_live_emb_http(),
-        "scanned_at": scanned_at.isoformat() if hasattr(scanned_at, 'isoformat') else scanned_at,
+        "scanned_at": scanned_at.isoformat()
+        if hasattr(scanned_at, "isoformat")
+        else scanned_at,
         "scanned_via": "qr_camera",
     }
     body.update(overrides)
     return body
-
-
 
 
 async def linked_stack(
@@ -144,12 +146,16 @@ async def test_precheck_writes_nothing(
 
 
 async def test_precheck_flips_already_scanned_after_a_scan(
-    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
 ) -> None:
     """The second step of the flow: scan, then precheck reports the duplicate."""
 
     stack = await linked_stack(factories)
     import numpy as np
+
     from shared.face_embeddings import serialize_embedding
 
     ref = np.ones(128, dtype=np.float32) * 0.1
@@ -192,6 +198,7 @@ async def test_scan_enforces_ear_sample_limit(
 ) -> None:
     stack = await linked_stack(factories)
     import numpy as np
+
     from shared.face_embeddings import serialize_embedding
 
     ref = np.ones(128, dtype=np.float32) * 0.1
@@ -367,6 +374,7 @@ async def test_idempotency_key_is_scoped_to_the_caller(
 
     stack = await linked_stack(factories)
     import numpy as np
+
     from shared.face_embeddings import serialize_embedding
 
     ref = np.ones(128, dtype=np.float32) * 0.1
@@ -386,7 +394,10 @@ async def test_idempotency_key_is_scoped_to_the_caller(
             stack["student"].student_id,
             stack["session"].created_at + timedelta(minutes=2),
         ),
-        headers={**(await auth_headers(stack["user"])), "X-Idempotency-Key": shared_key},
+        headers={
+            **(await auth_headers(stack["user"])),
+            "X-Idempotency-Key": shared_key,
+        },
     )
     second = await api_client.post(
         "/api/student/attendance/scan",
@@ -831,7 +842,10 @@ async def test_resolving_an_already_resolved_record_is_409(
 
 
 async def test_review_note_is_dropped_when_absent(
-    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
 ) -> None:
     """A resolve without a note must not leave a stale key behind."""
 
@@ -852,6 +866,7 @@ async def test_review_note_is_dropped_when_absent(
     await test_db_session.refresh(record)
     assert "review_note" not in (record.liveness_evidence or {})
 
+
 # --- attempt metadata over HTTP (machine-readable contract) ----------------
 
 
@@ -869,7 +884,10 @@ def _mismatch_http_embedding() -> str:
 
 
 async def test_scan_exhaustion_envelope_carries_attempt_details(
-    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
 ) -> None:
     """The 409 body carries `detail.details` with the post-increment state.
 
@@ -911,7 +929,10 @@ async def test_scan_exhaustion_envelope_carries_attempt_details(
 
 
 async def test_scan_success_response_carries_attempt_fields(
-    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
 ) -> None:
     """A 200 scan reports limit/used/remaining in the body the client maps."""
 
@@ -938,7 +959,10 @@ async def test_scan_success_response_carries_attempt_fields(
 
 
 async def test_post_increment_mismatch_envelope_carries_attempt_details(
-    api_client: Any, auth_headers: Any, factories: Factories, test_db_session: AsyncSession
+    api_client: Any,
+    auth_headers: Any,
+    factories: Factories,
+    test_db_session: AsyncSession,
 ) -> None:
     """A consuming failure (face mismatch) reports the updated remaining count."""
 
@@ -955,7 +979,9 @@ async def test_post_increment_mismatch_envelope_carries_attempt_details(
     body["live_face_embedding"] = _mismatch_http_embedding()
 
     response = await api_client.post(
-        "/api/student/attendance/scan", json=body, headers=await auth_headers(stack["user"])
+        "/api/student/attendance/scan",
+        json=body,
+        headers=await auth_headers(stack["user"]),
     )
 
     assert response.status_code == 403

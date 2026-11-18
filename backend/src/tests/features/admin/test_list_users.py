@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from features.admin.service import AdminService
 from shared.enums import UserRole
+
+from features.admin.service import AdminService
 from tests.conftest import Factories
 
 ADMIN_EMAIL = "list.admin@isu.edu.ph"
@@ -194,9 +195,7 @@ async def test_search_matches_a_professor_roster_name(
     assert [item.email for item in result.items] == [PROFESSOR_EMAIL]
 
 
-async def test_search_matches_email(
-    test_db_session: Any, factories: Factories
-) -> None:
+async def test_search_matches_email(test_db_session: Any, factories: Factories) -> None:
     await _seed(factories)
     await test_db_session.commit()
 
@@ -211,9 +210,7 @@ async def test_search_matches_email(
     assert [item.email for item in by_email.items] == [ADMIN_EMAIL]
 
 
-async def test_role_filter_narrows(
-    test_db_session: Any, factories: Factories
-) -> None:
+async def test_role_filter_narrows(test_db_session: Any, factories: Factories) -> None:
     await _seed(factories)
     await test_db_session.commit()
 
@@ -239,9 +236,7 @@ async def test_is_active_filter_narrows(
     assert [item.email for item in result.items] == [ADMIN_EMAIL]
 
 
-async def test_filters_combine(
-    test_db_session: Any, factories: Factories
-) -> None:
+async def test_filters_combine(test_db_session: Any, factories: Factories) -> None:
     await _seed(factories)
     await test_db_session.commit()
 

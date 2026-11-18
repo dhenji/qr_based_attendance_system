@@ -7,6 +7,16 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
+
+from shared.audit import record_audit
+from shared.cache import invalidate_face_embedding
+from shared.enums import AuditAction, AuditEntity
+from shared.face_embedding_generator import (
+    FaceEmbeddingGenerationError,
+    generate_embedding_from_images,
+)
+from shared.face_quality import assess_image_bytes
+
 from features.face_enrollment.exceptions import (
     InvalidImageException,
     MultipleFacesException,
@@ -14,14 +24,8 @@ from features.face_enrollment.exceptions import (
     QualityTooLowException,
 )
 from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
-from shared.face_quality import assess_image_bytes
 from features.student.exceptions import StudentNotFoundException
 from features.student.model import Student
-from shared.audit import record_audit
-from shared.cache import invalidate_face_embedding
-from shared.enums import AuditAction, AuditEntity
-from shared.face_embedding_generator import FaceEmbeddingGenerationError, generate_embedding_from_images
-from shared.face_embeddings import is_stub_embedding
 
 
 def _validate_photo(

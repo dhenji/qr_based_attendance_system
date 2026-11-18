@@ -49,14 +49,13 @@ call it. Three consequences worth knowing:
   own and inherits 409 through `SessionDatabaseException → DatabaseException`, as
   does `year_level_program_mismatch` inheriting 422 via `DomainException`.
 
-**Four codes are defined but unreachable**, so no endpoint row can list them:
+**Three codes are defined but unreachable**, so no endpoint row can list them:
 
 | Code | Why it cannot occur |
 | ---- | ------------------- |
 | `database_error` | `DatabaseException` has a 409 handler but no `raise` site anywhere. |
 | `invalid_semester` | `InvalidSemesterException` is never raised; `semester` is a free-text column with no vocabulary. |
 | `role_mismatch` | `RoleMismatchException` is never raised; `require_role` returns an `HTTPException` with `insufficient_permissions` (403). |
-| `password_policy_violation` | `PasswordPolicyException` is never raised. New passwords *are* strength-checked, but through a Pydantic `password_strength` validator that fails as the generic 422 `validation_error` — so the custom code can never be emitted and was removed from the change-password row rather than left implying otherwise. |
 
 Unhandled non-`AppException` failures are caught by `UnhandledExceptionMiddleware`
 inside CORS and returned as a 500 `internal_error` JSON envelope, so the browser
@@ -1078,10 +1077,8 @@ admins; admins manage students/professors. Password resets set a temp password
 a security question during the forced password change; super-admin keeps the
 password-only flow.
 
-| Method | Path                                    | Purpose                                            | Role        |
-| Errors |
-| --- |
-| ------ | --------------------------------------- | -------------------------------------------------- | ----------- |
+| Method | Path                                    | Purpose                                            | Role | Errors |
+| ------ | --------------------------------------- | -------------------------------------------------- | ----------- | ------ |
 | GET    | `/admin/users`                          | List users (search, role/status filters, sortable) | admin (super_admin) | — |
 | POST   | `/admin/users`                          | Create user (name, email, role, temp password?)   | admin (super_admin) | 409 `admin_user_email_exists` · 409 `roster_link_impossible` · 403 `insufficient_permissions` |
 | PATCH  | `/admin/users/{user_id}/deactivate`          | Soft-deactivate user (rejects self-deactivation)  | admin (super_admin) | 404 `admin_user_not_found` · 409 `self_deactivation_forbidden` · 403 `insufficient_permissions` |
@@ -1256,6 +1253,11 @@ List excuse requests for professor's courses (filterable).
 | ---------------- | ----------------------------------------------- |
 | **Query**        | `?status=pending|approved|rejected&search=&course=&section=&initiated_via=quick|prof_with_evidence|request&has_evidence=true|false&original_status=absent|late|rejected|unknown&reviewer=&from=&to=&submitted_from=&submitted_to=&reviewed_from=&reviewed_to=&sort_by=requested_at|reviewed_at|status|student_name|id&sort_dir=asc|desc&page=1&size=20` |
 | **Response 200** | `{ items: [ExcuseRequest], total, page, size }` |
+
+> The date filters (`from`/`to`, `submitted_from`/`submitted_to`, and
+> `reviewed_from`/`reviewed_to`) accept ISO-8601 datetimes. Date-only
+> `YYYY-MM-DD` values are accepted as midnight UTC; a date-only `*_to` bound is
+> widened to the end of that day, while an explicit datetime is used as given.
 
 > The same `ExcuseRequest` shape as the admin view, with the same resolved
 > display identity (ADR-090).
@@ -1594,10 +1596,8 @@ refresh, then a redirect to `/auth/login?reason=session_expired`; the login page
 also renders `?reason=idle` and `?reason=signed_out_elsewhere` notices). Header
 regression: `backend/src/tests/test_unauthorized_response_headers.py`.
 
-| Method | Path                               | Purpose                                              |
-| Errors |
-| --- |
-| ------ | ---------------------------------- | ---------------------------------------------------- |
+| Method | Path                               | Purpose | Errors |
+| ------ | ---------------------------------- | ---------------------------------------------------- | ------ |
 | POST   | `/auth/otp/request`                | Request 6-digit OTP (email) | 400 `invalid_credentials` |
 | POST   | `/auth/otp/verify`                 | Verify OTP code | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
 | POST   | `/auth/register`                   | Claim-based registration (OTP + password + security question; revives a deactivated login for a re-created roster row) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` · 404 `unrecognized_email` · 409 `ambiguous_account` · 409 `user_exists` |
@@ -1613,7 +1613,7 @@ regression: `backend/src/tests/test_unauthorized_response_headers.py`.
 | POST   | `/auth/recovery-code`              | Set/rotate the Super Admin break-glass recovery code (authenticated, password-verified) | 400 `current_password_invalid` |
 | POST   | `/auth/password-recovery/start`    | Start recovery for the authenticated user — mints a grant, sends OTP, returns `{ recovery_token, masked_email }` | 401 unauthorized |
 | POST   | `/auth/password-recovery/reset`    | Reset the authenticated user's password with an OTP (email derived from the session) | 400 `otp_expired` · 400 `otp_invalid` · 400 `otp_max_attempts` |
-| POST   | `/auth/change-password`            | Change password (authenticated; optional `security_question`/`security_answer`) | 400 `current_password_invalid` · 400 `password_reused` · 422 `password_policy_violation` |
+| POST   | `/auth/change-password`            | Change password (authenticated; optional `security_question`/`security_answer` — both or neither) | 400 `current_password_invalid` · 400 `password_reused` · 422 `password_policy_violation` |
 | POST   | `/auth/security-question`          | Set/update security question (authenticated) | — |
 | POST   | `/auth/mfa/backup-codes`           | Generate 10 backup codes (plaintext, once) | — |
 | GET    | `/auth/mfa/backup-codes`           | Backup-code summary (total/remaining) | — |

@@ -47,7 +47,9 @@ GEOFENCE_RADIUS_MAX: int = 1000
 ATTENDANCE_ATTEMPT_LIMIT_MIN: int = 0
 ATTENDANCE_ATTEMPT_LIMIT_MAX: int = 10
 WINDOW_MIN_MINUTES: int = 1
-WINDOW_MAX_MINUTES: int = 120# The open-window grace (D94). Zero is a legal value on both sides — "no
+WINDOW_MAX_MINUTES: int = 120
+
+# The open-window grace (D94). Zero is a legal value on both sides — "no
 # early opening" and "no late opening" are exactly what a strict
 # institution wants — so the lower bound is 0 and not 1.
 OPEN_GRACE_MIN_MINUTES: int = 0
