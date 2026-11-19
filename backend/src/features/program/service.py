@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.audit import record_audit
@@ -18,8 +18,8 @@ from shared.csv_import import (
     strip_upper,
 )
 from shared.enums import AuditAction, AuditEntity
-from shared.pagination import PaginatedResponse
-from shared.query import apply_if
+from shared.pagination import PaginatedResponse, paginate_scalars
+from shared.query import apply_if, ilike_search
 
 from features.admin.constants import NAME_MAX_LENGTH
 from features.course.model import CourseOffering
@@ -264,18 +264,12 @@ class ProgramService:
             search=search, is_active=is_active
         )
 
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        rows, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(Program.id),
+            page=page,
+            size=size,
         )
-
-        rows: Sequence[Program] = (
-            await self._session.scalars(
-                stmt.order_by(Program.id).offset((page - 1) * size).limit(size)
-            )
-        ).all()
 
         items: list[ProgramRead] = []
 
@@ -294,8 +288,7 @@ class ProgramService:
         stmt = apply_if(stmt, is_active, lambda v: Program.is_active == v)
 
         if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(or_(Program.code.ilike(term), Program.name.ilike(term)))
+            stmt = ilike_search(stmt, search.strip(), Program.code, Program.name)
 
         return stmt
 

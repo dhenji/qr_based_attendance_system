@@ -28,7 +28,9 @@ from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
     PaginatedResponse,
+    paginate_scalars,
 )
+from shared.query import ilike_search
 from shared.schedule import meeting_minutes, openable_session_types
 
 from features.auth.model import User
@@ -306,30 +308,21 @@ class ProfessorService:
             stmt = stmt.where(Professor.is_active == is_active)
 
         if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Professor.first_name.ilike(term),
-                    Professor.middle_name.ilike(term),
-                    Professor.last_name.ilike(term),
-                    Professor.email.ilike(term),
-                )
+            stmt = ilike_search(
+                stmt,
+                search.strip(),
+                Professor.first_name,
+                Professor.middle_name,
+                Professor.last_name,
+                Professor.email,
             )
 
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        rows, total = await paginate_scalars(
+            self._session,
+            self._apply_order(stmt, sort_by=sort_by, sort_dir=sort_dir),
+            page=page,
+            size=size,
         )
-
-        rows: Sequence[Professor] = (
-            await self._session.scalars(
-                self._apply_order(stmt, sort_by=sort_by, sort_dir=sort_dir)
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
 
         return PaginatedResponse[ProfessorRead](
             items=[await self._to_read(row) for row in rows],

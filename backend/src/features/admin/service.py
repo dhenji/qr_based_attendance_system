@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import ForbiddenException
@@ -16,6 +16,7 @@ from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.enums import AuditAction, AuditEntity, UserRole
 from shared.pagination import PaginatedResponse
+from shared.query import ilike_any
 from shared.user_management_policy import (
     can_assign_role,
     can_manage_target,
@@ -81,14 +82,14 @@ def _users_filters(
         filters.append(User.is_active == is_active)
 
     if search:
-        term = f"%{search.strip()}%"
         filters.append(
-            or_(
-                User.email.ilike(term),
-                Student.first_name.ilike(term),
-                Student.last_name.ilike(term),
-                Professor.first_name.ilike(term),
-                Professor.last_name.ilike(term),
+            ilike_any(
+                search.strip(),
+                User.email,
+                Student.first_name,
+                Student.last_name,
+                Professor.first_name,
+                Professor.last_name,
             )
         )
 

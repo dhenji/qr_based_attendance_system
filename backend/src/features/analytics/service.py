@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
@@ -15,8 +15,13 @@ from core.exceptions import DomainException
 from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, ValidationStatus
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.query import apply_if
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    normalize_paging,
+)
+from shared.query import apply_if, ilike_search
 from shared.rates import attendance_rates
 
 from features.analytics.batch import run_risk_batch
@@ -49,10 +54,6 @@ def _full_name(
     first_name: str | None, middle_name: str | None, last_name: str | None
 ) -> str:
     return " ".join(part for part in (first_name, middle_name, last_name) if part)
-
-
-def _normalize_paging(page: int, size: int) -> tuple[int, int]:
-    return max(page, 1), min(max(size, 1), MAX_PAGE_SIZE)
 
 
 def _bucket_key(moment: datetime, granularity: TrendGranularity) -> date:
@@ -307,7 +308,7 @@ class AnalyticsService:
         its own row so the same subject is compared across cohorts (D34). Rows
         are ordered by course code, then program, then year level.
         """
-        page, size = _normalize_paging(page, size)
+        page, size = normalize_paging(page, size)
         offerings: Sequence[CourseOffering] = (
             await self._session.scalars(
                 _offerings_stmt(program_id, year_level_id, semester, course_ids)
@@ -405,12 +406,11 @@ class AnalyticsService:
         stmt = select(Course).where(Course.id.in_(select(scoped.c.course_id)))
 
         if query and query.strip():
-            needle = f"%{query.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Course.course_code.ilike(needle),
-                    Course.course_name.ilike(needle),
-                )
+            stmt = ilike_search(
+                stmt,
+                query.strip(),
+                Course.course_code,
+                Course.course_name,
             )
 
         total: int = (
@@ -452,7 +452,7 @@ class AnalyticsService:
         size: int = DEFAULT_PAGE_SIZE,
     ) -> TrendResponse:
         """Bucketed rates; buckets are period-start dates in ascending order."""
-        page, size = _normalize_paging(page, size)
+        page, size = normalize_paging(page, size)
         offerings: Sequence[CourseOffering] = (
             await self._session.scalars(
                 _offerings_stmt(program_id, year_level_id, semester, course_ids)
@@ -552,7 +552,7 @@ class AnalyticsService:
         size: int = DEFAULT_PAGE_SIZE,
     ) -> AtRiskResponse:
         """Read stored risk rows; feature values come from the JSONB snapshot."""
-        page, size = _normalize_paging(page, size)
+        page, size = normalize_paging(page, size)
         stmt = (
             select(
                 StudentRiskScore, Student, Program, YearLevel, CourseOffering, Course
@@ -575,13 +575,12 @@ class AnalyticsService:
             lambda v: StudentRiskScore.risk_level == v.value,
         )
         if q:
-            needle = f"%{q.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Student.first_name.ilike(needle),
-                    Student.middle_name.ilike(needle),
-                    Student.last_name.ilike(needle),
-                )
+            stmt = ilike_search(
+                stmt,
+                q.strip(),
+                Student.first_name,
+                Student.middle_name,
+                Student.last_name,
             )
         ordered = stmt.order_by(
             StudentRiskScore.risk_probability.desc(),
@@ -697,7 +696,7 @@ class AnalyticsService:
         size: int = DEFAULT_PAGE_SIZE,
     ) -> RiskStagingResponse:
         """Read staged dry-run rows without touching live scores."""
-        page, size = _normalize_paging(page, size)
+        page, size = normalize_paging(page, size)
         stmt = (
             select(
                 StudentRiskScoreStaging,
@@ -728,13 +727,12 @@ class AnalyticsService:
             lambda v: StudentRiskScoreStaging.risk_level == v.value,
         )
         if q:
-            needle = f"%{q.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Student.first_name.ilike(needle),
-                    Student.middle_name.ilike(needle),
-                    Student.last_name.ilike(needle),
-                )
+            stmt = ilike_search(
+                stmt,
+                q.strip(),
+                Student.first_name,
+                Student.middle_name,
+                Student.last_name,
             )
         if unpromoted_only:
             stmt = stmt.where(StudentRiskScoreStaging.promoted_at.is_(None))

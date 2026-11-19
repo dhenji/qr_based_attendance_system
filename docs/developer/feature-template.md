@@ -210,7 +210,7 @@ schemas**. This is a service **class**: `__init__` composes one `BaseCRUD` handl
 touches, so the router never constructs it (see `coding-standards.md` §1.7).
 
 ```python
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from features.program.exceptions import ProgramCodeExistsException
@@ -219,8 +219,8 @@ from features.program.schema import ProgramCreate, ProgramRead
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.enums import AuditAction, AuditEntity
-from shared.pagination import PaginatedResponse
-from shared.query import apply_if
+from shared.pagination import PaginatedResponse, paginate_scalars
+from shared.query import apply_if, ilike_search
 
 
 class ProgramService:
@@ -260,15 +260,12 @@ class ProgramService:
             search=search, is_active=is_active
         )
 
-        total: int = (
-            await self._session.scalar(select(func.count()).select_from(stmt.subquery()))
-            or 0
+        rows, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(Program.id),
+            page=page,
+            size=size,
         )
-        rows = (
-            await self._session.scalars(
-                stmt.order_by(Program.id).offset((page - 1) * size).limit(size)
-            )
-        ).all()
 
         return PaginatedResponse[ProgramRead](
             items=[ProgramRead(**self._read_fields(p)) for p in rows],
@@ -289,8 +286,7 @@ class ProgramService:
         stmt = apply_if(stmt, is_active, lambda v: Program.is_active == v)
 
         if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(or_(Program.code.ilike(term), Program.name.ilike(term)))
+            stmt = ilike_search(stmt, search.strip(), Program.code, Program.name)
 
         return stmt
 ```
@@ -317,10 +313,15 @@ ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
 - **Keyword-only arguments after `self`,** and payloads arrive as the Create schema rather than
   as loose scalars.
 - **Every list returns `PaginatedResponse[T]`** with an explicit `total` count, and takes
-  `page`/`size` bounds from `shared/pagination.py`. `BaseCRUD.list()` has its own `limit=50`
+  `page`/`size` bounds from `shared/pagination.py`. Fetch the page with
+  `paginate_scalars(session, ordered_stmt, page=page, size=size)`; it returns `(rows, total)`
+  and expects an unpaged, single-entity select. Queries with grouped or custom count
+  semantics keep their explicit count + `execute`. `BaseCRUD.list()` has its own `limit=50`
   default and is for internal lookups — do not return it from a list endpoint.
 - Use `apply_if(stmt, value, build)` for optional filters; it skips building a criterion for a
-  `None` value, which a bare comparison would reject at construction time.
+  `None` value, which a bare comparison would reject at construction time. Use
+  `ilike_search(stmt, term, *columns)` for multi-column search and trim the term at the call
+  site — the helper uses it verbatim.
 - **Return read schemas.** `model_validate` cannot see derived aggregates, so a response that
   carries counts or collections is built as `ProgramRead(**self._read_fields(row))`.
 - **Sensitive mutations call `record_audit(...)`** in the caller's transaction, so the audit

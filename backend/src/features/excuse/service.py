@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.audit import record_audit
 from shared.base import BaseCRUD
+from shared.datetimes import end_of_day, ensure_aware
 from shared.email import OutboundEmail, dispatch_emails
 from shared.enums import (
     AuditAction,
@@ -18,7 +19,8 @@ from shared.enums import (
     ExcuseStatus,
     ValidationStatus,
 )
-from shared.pagination import PaginatedResponse
+from shared.pagination import PaginatedResponse, normalize_paging, paginate_scalars
+from shared.query import ilike_any
 
 from features.attendance.model import Attendance
 from features.auth.model import User
@@ -637,72 +639,56 @@ class ExcuseService:
             )
 
         if date_from is not None:
-            bound_from = date_from
-            if bound_from.tzinfo is None:
-                bound_from = bound_from.replace(tzinfo=timezone.utc)
+            bound_from = ensure_aware(date_from)
             stmt = stmt.where(Session.created_at >= bound_from)
 
         if date_to is not None:
-            bound_to = date_to
-            if bound_to.tzinfo is None:
-                bound_to = bound_to.replace(tzinfo=timezone.utc)
-            if bound_to.timetuple()[3:6] == (0, 0, 0) and bound_to.microsecond == 0:
-                bound_to = bound_to.replace(
-                    hour=23, minute=59, second=59, microsecond=999999
-                )
+            bound_to = end_of_day(ensure_aware(date_to))
             stmt = stmt.where(Session.created_at <= bound_to)
 
         if submitted_from is not None:
-            bound = submitted_from
-            if bound.tzinfo is None:
-                bound = bound.replace(tzinfo=timezone.utc)
+            bound = ensure_aware(submitted_from)
             stmt = stmt.where(ExcuseRequest.requested_at >= bound)
 
         if submitted_to is not None:
-            bound = submitted_to
-            if bound.tzinfo is None:
-                bound = bound.replace(tzinfo=timezone.utc)
-            if bound.timetuple()[3:6] == (0, 0, 0) and bound.microsecond == 0:
-                bound = bound.replace(hour=23, minute=59, second=59, microsecond=999999)
+            bound = end_of_day(ensure_aware(submitted_to))
             stmt = stmt.where(ExcuseRequest.requested_at <= bound)
 
         if reviewed_from is not None:
-            bound = reviewed_from
-            if bound.tzinfo is None:
-                bound = bound.replace(tzinfo=timezone.utc)
+            bound = ensure_aware(reviewed_from)
             stmt = stmt.where(ExcuseRequest.reviewed_at >= bound)
 
         if reviewed_to is not None:
-            bound = reviewed_to
-            if bound.tzinfo is None:
-                bound = bound.replace(tzinfo=timezone.utc)
-            if bound.timetuple()[3:6] == (0, 0, 0) and bound.microsecond == 0:
-                bound = bound.replace(hour=23, minute=59, second=59, microsecond=999999)
+            bound = end_of_day(ensure_aware(reviewed_to))
             stmt = stmt.where(ExcuseRequest.reviewed_at <= bound)
 
         if reviewer is not None and reviewer.strip():
-            term = f"%{reviewer.strip()}%"
             try:
                 reviewer_id = int(reviewer.strip())
             except ValueError:
                 reviewer_id = None
             conditions = [
-                User.first_name.ilike(term),
-                User.last_name.ilike(term),
-                User.email.ilike(term),
+                ilike_any(
+                    reviewer.strip(),
+                    User.first_name,
+                    User.last_name,
+                    User.email,
+                )
             ]
             if reviewer_id is not None:
                 conditions.append(ExcuseRequest.reviewed_by == reviewer_id)
             stmt = stmt.where(or_(*conditions))
 
         if search is not None and search.strip():
-            term = f"%{search.strip()}%"
             search_conditions = [
-                Student.first_name.ilike(term),
-                Student.last_name.ilike(term),
-                Student.student_id.ilike(term),
-                Session.session_code.ilike(term),
-                Course.course_code.ilike(term),
+                ilike_any(
+                    search.strip(),
+                    Student.first_name,
+                    Student.last_name,
+                    Student.student_id,
+                    Session.session_code,
+                    Course.course_code,
+                )
             ]
             try:
                 search_conditions.append(ExcuseRequest.id == int(search.strip()))
@@ -710,14 +696,7 @@ class ExcuseService:
                 pass
             stmt = stmt.where(or_(*search_conditions))
 
-        page = max(page, 1)
-        size = min(max(size, 1), 200)
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
-        )
+        page, size = normalize_paging(page, size)
 
         sort_column_map = {
             "requested_at": ExcuseRequest.requested_at,
@@ -733,11 +712,12 @@ class ExcuseService:
         descending = (sort_dir or "desc").lower() != "asc"
         order_expr = sort_col.desc() if descending else sort_col.asc()
 
-        rows: Sequence[ExcuseRequest] = (
-            await self._session.scalars(
-                stmt.order_by(order_expr).offset((page - 1) * size).limit(size)
-            )
-        ).all()
+        rows, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(order_expr),
+            page=page,
+            size=size,
+        )
 
         await self._resolve_names(rows)
 
@@ -1100,21 +1080,13 @@ class ExcuseService:
     async def _paginate(
         self, stmt, *, page: int, size: int
     ) -> PaginatedResponse[ExcuseRequestRead]:
-        page = max(page, 1)
-        size = min(max(size, 1), 200)
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        page, size = normalize_paging(page, size)
+        rows, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(ExcuseRequest.id.desc()),
+            page=page,
+            size=size,
         )
-        rows: Sequence[ExcuseRequest] = (
-            await self._session.scalars(
-                stmt.order_by(ExcuseRequest.id.desc())
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
 
         await self._resolve_names(rows)
 

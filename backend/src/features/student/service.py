@@ -25,8 +25,8 @@ from shared.csv_import import (
     strip_upper,
 )
 from shared.enums import AuditAction, AuditEntity
-from shared.pagination import PaginatedResponse
-from shared.query import apply_if
+from shared.pagination import PaginatedResponse, paginate_scalars
+from shared.query import apply_if, ilike_search
 from shared.schedule import day_weekdays
 
 from features.analytics.model import StudentRiskScore
@@ -422,20 +422,12 @@ class StudentService:
             is_active=is_active,
         )
 
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        rows, total = await paginate_scalars(
+            self._session,
+            self._apply_order(stmt, sort_by=sort_by, sort_dir=sort_dir),
+            page=page,
+            size=size,
         )
-
-        rows: Sequence[Student] = (
-            await self._session.scalars(
-                self._apply_order(stmt, sort_by=sort_by, sort_dir=sort_dir)
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
 
         return PaginatedResponse[StudentRead](
             items=[await self._to_read(row) for row in rows],
@@ -471,15 +463,14 @@ class StudentService:
         stmt = apply_if(stmt, is_active, lambda v: Student.is_active == v)
 
         if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Student.student_id.ilike(term),
-                    Student.first_name.ilike(term),
-                    Student.middle_name.ilike(term),
-                    Student.last_name.ilike(term),
-                    Student.email.ilike(term),
-                )
+            stmt = ilike_search(
+                stmt,
+                search.strip(),
+                Student.student_id,
+                Student.first_name,
+                Student.middle_name,
+                Student.last_name,
+                Student.email,
             )
 
         return stmt

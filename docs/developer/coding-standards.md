@@ -100,7 +100,7 @@ ruff format --check . # verify formatting without writing (what CI runs)
 - **Early returns / guard clauses** over nested blocks.
 - **Private helpers** prefixed with `_` — module-level for pure logic, `self._method` for service-internal.
 - **Extract shared logic to `shared/`**: If the same helper logic appears in **two or more feature modules**, move it to a module under `src/shared/` (e.g., `shared/validators.py`, `shared/utils.py`, `shared/csv_import.py`) and import it. Avoid copy-pasting logic across slices.
-  - Examples already in codebase: `shared/csv_import.py` (parsing + email validation), `shared/validators.py`, `shared/enums.py`, `shared/pagination.py`, `shared/rate_limit.py`.
+  - Examples already in codebase: `shared/csv_import.py` (parsing + email validation), `shared/validators.py`, `shared/enums.py`, `shared/pagination.py` (bounds, `normalize_paging`, `paginate_scalars`), `shared/query.py` (`apply_if`, `ilike_any`, `ilike_search`), `shared/datetimes.py` (`ensure_aware`, `end_of_day`), `shared/rate_limit.py`.
   - New shared helpers should be **pure functions** (no DB session) or **session-accepting functions** with clear signatures.
 - **No inline magic values**: All field bounds, limits, thresholds, and config-like constants live in **`constants.py`** files:
   - Per-slice: `features/<slice>/constants.py` (e.g., `CODE_MAX_LENGTH`, `TOTAL_YEARS_MAX`)
@@ -219,9 +219,21 @@ class ConcreteConflict(FeatureDomainException):     # 409
 - **Every list returns `PaginatedResponse[T]`** with an explicit `total` count and `page`/`size`
   bounds from `shared/pagination.py`. `BaseCRUD.list()` has its own `limit=50` default and is
   for internal lookups — do not return it from a list endpoint.
+- **Page fetching goes through `shared/pagination.paginate_scalars`**, which returns
+  `(rows, total)` from one complete, ordered, single-entity select. Do not hand-roll a
+  `count(*) FROM (subquery)` plus `offset`/`limit`; the helper deliberately does not clamp
+  `page`/`size`, so services that accept paging from outside FastAPI `Query` bounds call
+  `normalize_paging` first. Complex joins or grouped queries with custom count semantics keep
+  their explicit count + `execute`; adopt the helper only where the count and rows are
+  demonstrably the same statement.
 - **Optional filters go through `shared/query.apply_if(stmt, value, build)`**, which skips
   building a criterion for a `None` value; a bare `>=` comparison rejects `None` at
-  construction time.
+  construction time. Wrap multi-column search in `ilike_search(stmt, term, *columns)` /
+  `ilike_any(term, *columns)` rather than re-writing `f"%{...}%"`, and trim the term at the
+  call site — the helpers use it verbatim.
+- **Timezone and day-bound coercion use `shared/datetimes`**: `ensure_aware` attaches UTC to
+  naive comparison values, and `end_of_day` widens a midnight `date_to` bound to
+  `23:59:59.999999` while leaving explicit instants untouched.
 - **Return read schemas.** `model_validate` cannot see derived aggregates, so a response
   carrying counts or collections is built as `ProgramRead(**self._read_fields(row))`.
 - **Sensitive mutations call `shared/audit.record_audit(...)`** in the caller's transaction, so

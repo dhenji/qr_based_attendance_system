@@ -16,6 +16,7 @@ from core.timezones import resolve_timezone
 
 from shared.audit import record_audit
 from shared.base import BaseCRUD
+from shared.datetimes import end_of_day, ensure_aware
 from shared.enums import (
     AuditAction,
     AuditEntity,
@@ -26,10 +27,11 @@ from shared.enums import (
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
     PaginatedResponse,
+    normalize_paging,
+    paginate_scalars,
 )
-from shared.query import apply_if
+from shared.query import apply_if, ilike_search
 from shared.rates import attendance_rates
 from shared.schedule import meeting_minutes, openable_session_types
 
@@ -90,10 +92,6 @@ from features.system.service import SystemService
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _normalize_page(page: int, size: int) -> tuple[int, int]:
-    return max(page, 1), min(max(size, 1), MAX_PAGE_SIZE)
 
 
 _STATUS_COUNT_FIELDS: dict[str, str] = {
@@ -173,11 +171,7 @@ def _session_status(
     # yet: it reads as "scheduled" until its start time is reached, even
     # though its expiry (and therefore its scan window) lies in the future.
     if scheduled_start_time is not None:
-        scheduled = (
-            scheduled_start_time
-            if scheduled_start_time.tzinfo is not None
-            else scheduled_start_time.replace(tzinfo=timezone.utc)
-        )
+        scheduled = ensure_aware(scheduled_start_time)
         if now < scheduled:
             return "scheduled"
 
@@ -185,20 +179,6 @@ def _session_status(
         return "active"
 
     return "closed"
-
-
-def _end_of_day(value: datetime | None) -> datetime | None:
-    """Treat a midnight ``date_to`` as the end of that day.
-
-    Date-only query parameters parse to midnight, which would otherwise
-    exclude every record after 00:00. An explicit non-midnight value is
-    preserved so callers can still bound a precise instant.
-    """
-    if value is None:
-        return None
-    if value.timetuple()[3:6] == (0, 0, 0) and value.microsecond == 0:
-        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
-    return value
 
 
 class SessionService:
@@ -703,12 +683,8 @@ class SessionService:
         session that was born expired, and the "now + duration" reading of the
         cap would leave the scan window with nowhere to run.
         """
-        created: datetime = row.created_at or now
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
-        scheduled: datetime = row.scheduled_start_time
-        if scheduled.tzinfo is None:
-            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        created: datetime = ensure_aware(row.created_at or now)
+        scheduled: datetime = ensure_aware(row.scheduled_start_time)
         base: datetime = scheduled if scheduled > created else created
         # Duration is independent of the offering's scheduled end time: the
         # scan window runs for the full requested duration, even when that
@@ -1032,29 +1008,22 @@ class SessionService:
         page: int = DEFAULT_PAGE,
         size: int = DEFAULT_PAGE_SIZE,
     ) -> PaginatedResponse[SessionListItem]:
-        page, size = _normalize_page(page, size)
+        page, size = normalize_paging(page, size)
         now: datetime = _utcnow()
         stmt: Select[tuple[Session]] = self._sessions_stmt(
             professor_id,
             offering_id=offering_id,
             session_type=session_type,
             date_from=date_from,
-            date_to=_end_of_day(date_to),
+            date_to=end_of_day(date_to),
         )
 
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        rows, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(Session.created_at.desc(), Session.id.desc()),
+            page=page,
+            size=size,
         )
-        rows: Sequence[Session] = (
-            await self._session.scalars(
-                stmt.order_by(Session.created_at.desc(), Session.id.desc())
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
 
         items: list[SessionListItem] = []
 
@@ -1194,14 +1163,14 @@ class SessionService:
         Python after the counts are computed so the rate sort stays exact;
         session volumes per professor are small enough for this.
         """
-        page, size = _normalize_page(page, size)
+        page, size = normalize_paging(page, size)
         now: datetime = _utcnow()
         stmt: Select[tuple[Session]] = self._sessions_stmt(
             professor_id,
             offering_id=offering_id,
             session_type=session_type,
             date_from=date_from,
-            date_to=_end_of_day(date_to),
+            date_to=end_of_day(date_to),
             search=search,
         )
 
@@ -1296,7 +1265,7 @@ class SessionService:
         carry no section column). Sortable columns mirror the table headers:
         date, student, section, status, time.
         """
-        page, size = _normalize_page(page, size)
+        page, size = normalize_paging(page, size)
         stmt: Select[tuple[Attendance]] = self._attendance_stmt(
             professor_id,
             program_id=program_id,
@@ -1311,7 +1280,7 @@ class SessionService:
             status=status,
             search=search,
             date_from=date_from,
-            date_to=_end_of_day(date_to),
+            date_to=end_of_day(date_to),
         )
 
         scoped = stmt.subquery()
@@ -1427,13 +1396,12 @@ class SessionService:
         stmt = apply_if(stmt, section, lambda v: Student.section == v)
         stmt = apply_if(stmt, session_id, lambda v: Attendance.session_id == v)
         if search is not None:
-            pattern = f"%{search}%"
-            stmt = stmt.where(
-                or_(
-                    Student.student_id.ilike(pattern),
-                    Student.first_name.ilike(pattern),
-                    Student.last_name.ilike(pattern),
-                )
+            stmt = ilike_search(
+                stmt,
+                search,
+                Student.student_id,
+                Student.first_name,
+                Student.last_name,
             )
         if session_type is not None:
             value: str = (
@@ -1552,15 +1520,14 @@ class SessionService:
         # date-only query param to midnight without tzinfo). Coerce them to UTC
         # so they compare correctly against the tz-aware `created_at` column
         # instead of being treated as server-local wall time.
-        if date_from is not None and date_from.tzinfo is None:
-            date_from = date_from.replace(tzinfo=timezone.utc)
-        if date_to is not None and date_to.tzinfo is None:
-            date_to = date_to.replace(tzinfo=timezone.utc)
+        if date_from is not None:
+            date_from = ensure_aware(date_from)
+        if date_to is not None:
+            date_to = ensure_aware(date_to)
         stmt = apply_if(stmt, date_from, lambda v: Session.created_at >= v)
         stmt = apply_if(stmt, date_to, lambda v: Session.created_at <= v)
         if search:
-            needle = f"%{search.strip()}%"
-            stmt = stmt.where(Session.session_code.ilike(needle))
+            stmt = ilike_search(stmt, search.strip(), Session.session_code)
 
         return stmt
 

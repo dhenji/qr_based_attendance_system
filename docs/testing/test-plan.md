@@ -403,7 +403,7 @@ and [ADR-094](../project/decision-log.md).
 
 | Job | Command | Runs against | Fails on |
 | --- | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1121 cases |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1139 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
 | `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
 | `lint` | `ruff check . && ruff format --check .` (from `backend/`) | — | a lint violation or formatting drift |

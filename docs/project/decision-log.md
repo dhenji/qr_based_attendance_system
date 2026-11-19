@@ -1577,8 +1577,8 @@
 - **Forward note (2026-10-31):** the counts above are a historical snapshot. At that
   date the suite was 1060 cases across 82 test files and the migration chain had 25
   revisions ending at `b9c0d1e2f3a4` (session start-window columns, D94).
-- **Current state (2026-11-18):** 31 revisions ending at `768d6ae62710`, 22 tables,
-  1121 test cases, and Ruff enforced by CI — see ADR-094.
+- **Current state (2026-11-19):** 31 revisions ending at `768d6ae62710`, 22 tables,
+  1139 test cases, and Ruff enforced by CI — see ADR-094.
 - **Context:** The suite was strong and entirely unenforced — 719 cases across 49
   files, green on SQLite and Postgres, with no `.github/`, no `Makefile`, no
   `tox.ini`, and no `pyproject.toml`. Every count in the docs was maintained by
