@@ -1,5 +1,9 @@
 # Project Folder Structure — QR Attendance System
 
+> **Historical document.** This file represents historical project-structure
+> information. It has been superseded by the current `README.md`. Readers
+> should consult `README.md` for authoritative, current documentation.
+
 > Historical intent, not current state: this doc shows the planned layout.
 > Truth is `README.md` + the code — 18 feature slices, 22 tables, 23 routers over 15 mounts, 51 `+page.svelte` files.
 ```

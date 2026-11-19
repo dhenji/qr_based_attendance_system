@@ -2055,9 +2055,9 @@
   The Enrolled tab gains a per-row Remove with a confirm modal; the roster
   path id is the student string id, matching the row key.
 
-### ADR-075: Reactivate Admin User Accounts
+### ADR-095: Reactivate Admin User Accounts
 
-- **Decision (D75):** `PATCH /admin/users/{user_id}/reactivate` restores a
+- **Decision (D95):** `PATCH /admin/users/{user_id}/reactivate` restores a
   deactivated account by setting `users.is_active = True`. It is the symmetric
   counterpart to `PATCH /admin/users/{user_id}/deactivate` and is available
   from the User Management page for any inactive account.

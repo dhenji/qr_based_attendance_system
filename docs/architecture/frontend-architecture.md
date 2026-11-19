@@ -1,5 +1,9 @@
 # Frontend Architecture — QR Attendance System
 
+> **Historical document.** This file represents historical architecture
+> information. It has been superseded by the current `README.md`. Readers
+> should consult `README.md` for authoritative, current documentation.
+
 > Historical intent, not current state: the "pending slices" and ~22-page
 > tree below predate the landed frontend. Truth is `README.md` + the code —
 > 12 feature dirs, 51 `+page.svelte` files, real API by default.
