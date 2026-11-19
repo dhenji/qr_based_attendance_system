@@ -19,9 +19,10 @@ from shared.csv_import import (
     parse_import_csv,
     strip_upper,
 )
+from shared.datetimes import ensure_aware
 from shared.enums import AuditAction, AuditEntity, SessionType
-from shared.pagination import PaginatedResponse
-from shared.query import apply_if
+from shared.pagination import PaginatedResponse, paginate_scalars
+from shared.query import apply_if, ilike_search
 from shared.schedule import (
     distinct_day_count,
     meeting_length_minutes,
@@ -388,18 +389,12 @@ class CourseService:
         if is_active is not None:
             stmt = stmt.where(Course.is_active == is_active)
 
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        rows, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(Course.id),
+            page=page,
+            size=size,
         )
-
-        rows = (
-            await self._session.scalars(
-                stmt.order_by(Course.id).offset((page - 1) * size).limit(size)
-            )
-        ).all()
 
         return PaginatedResponse[CourseRead](
             items=[CourseRead.model_validate(row) for row in rows],
@@ -901,8 +896,7 @@ class CourseService:
     def _session_in_assignment_window(
         created_at: datetime, start: datetime, end: datetime | None
     ) -> bool:
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
+        created_at = ensure_aware(created_at)
         return created_at >= start and (end is None or created_at < end)
 
     async def _assignment_has_sessions(self, row: CourseProfessor) -> bool:
@@ -1677,15 +1671,14 @@ class CourseService:
         stmt = apply_if(stmt, section, lambda v: Student.section == v)
 
         if search:
-            term: str = f"%{search.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Student.student_id.ilike(term),
-                    Student.first_name.ilike(term),
-                    Student.middle_name.ilike(term),
-                    Student.last_name.ilike(term),
-                    Student.email.ilike(term),
-                )
+            stmt = ilike_search(
+                stmt,
+                search.strip(),
+                Student.student_id,
+                Student.first_name,
+                Student.middle_name,
+                Student.last_name,
+                Student.email,
             )
 
         return stmt

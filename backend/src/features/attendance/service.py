@@ -25,6 +25,7 @@ from core.config import Settings, get_settings
 from core.exceptions import AppException
 
 from shared.audit import record_audit
+from shared.datetimes import end_of_day, ensure_aware
 from shared.email import OutboundEmail, dispatch_emails
 from shared.enums import (
     AuditAction,
@@ -49,8 +50,10 @@ from shared.pagination import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     PaginatedResponse,
+    normalize_paging,
+    paginate_scalars,
 )
-from shared.query import apply_if
+from shared.query import apply_if, ilike_search
 from shared.rates import attendance_rates
 
 from features.attendance import notifications as attendance_notifications
@@ -162,13 +165,6 @@ class _HistoryFilters:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _ensure_aware(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-
-    return value
 
 
 def _haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -331,14 +327,6 @@ _REVIEW_FILTERS: dict[str, Callable[[Select[Any]], Select[Any]]] = {
 }
 
 
-def _end_of_day(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.timetuple()[3:6] == (0, 0, 0) and value.microsecond == 0:
-        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
-    return value
-
-
 class AttendanceService:
     """Student scan submissions (online + offline-sync replay).
 
@@ -468,7 +456,7 @@ class AttendanceService:
             return cached
 
         now: datetime = _utcnow()
-        scanned_at: datetime = _ensure_aware(payload.scanned_at)
+        scanned_at: datetime = ensure_aware(payload.scanned_at)
 
         db_session, student = await self._resolve_scan_parties(
             payload.session_id,
@@ -630,7 +618,7 @@ class AttendanceService:
             if (
                 rejected_only
                 and db_session.expires_at is not None
-                and _ensure_aware(db_session.expires_at) > _utcnow()
+                and ensure_aware(db_session.expires_at) > _utcnow()
             ):
                 retake_available = True
                 already_scanned = False
@@ -675,14 +663,14 @@ class AttendanceService:
         expires_at: datetime | None = row.expires_at
 
         if not allow_expired and (
-            expires_at is None or _ensure_aware(expires_at) <= now
+            expires_at is None or ensure_aware(expires_at) <= now
         ):
             raise SessionExpiredException(row.id)
 
-        if scanned_at > _ensure_aware(expires_at):
+        if scanned_at > ensure_aware(expires_at):
             raise SessionExpiredException(row.id)
 
-        if now < _ensure_aware(row.scheduled_start_time):
+        if now < ensure_aware(row.scheduled_start_time):
             raise SessionNotStartedException(row.id)
 
         return row
@@ -767,7 +755,7 @@ class AttendanceService:
         db_session: Session | None = await self._session.get(Session, session_id)
         if db_session is None or db_session.expires_at is None:
             raise DuplicateScanException(student_id, session_id)
-        if _ensure_aware(db_session.expires_at) <= _utcnow():
+        if ensure_aware(db_session.expires_at) <= _utcnow():
             raise DuplicateScanException(student_id, session_id)
 
     async def _require_face_enrollment(self, student: Student) -> None:
@@ -889,8 +877,8 @@ class AttendanceService:
         return score < threshold
 
     def _compute_status(self, session: Session, scanned_at: datetime) -> str:
-        created: datetime = _ensure_aware(session.created_at)
-        scheduled: datetime = _ensure_aware(session.scheduled_start_time)
+        created: datetime = ensure_aware(session.created_at)
+        scheduled: datetime = ensure_aware(session.scheduled_start_time)
         # Measure from the actual class start, not the moment the session
         # was opened — a session opened ahead of its scheduled start (or
         # scheduled for the future) must not penalise early scans.
@@ -1018,7 +1006,7 @@ class AttendanceService:
         size: int = DEFAULT_PAGE_SIZE,
     ) -> HistoryResponse:
         """Student history: filter -> count -> summarize -> paginate."""
-        page, size = self._normalize_history_paging(page, size)
+        page, size = normalize_paging(page, size)
         student = await self._history_student(user_id)
         sort_key, desc = self._history_sort(sort_by, sort_dir)
         filters = _HistoryFilters(
@@ -1028,7 +1016,7 @@ class AttendanceService:
             course_id=course_id,
             status=status,
             date_from=date_from,
-            date_to=_end_of_day(date_to),
+            date_to=end_of_day(date_to),
         )
 
         filtered = self._apply_history_filters(self._history_base(student.id), filters)
@@ -1044,11 +1032,6 @@ class AttendanceService:
         return await self._build_history_response(
             records=records, total=total, page=page, size=size, summary=summary
         )
-
-    def _normalize_history_paging(self, page: int, size: int) -> tuple[int, int]:
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
-        return page, size
 
     def _summarize_history(
         self, tallies: dict[str, int], enrolled: int, scanned: int
@@ -1326,7 +1309,7 @@ class AttendanceService:
                 if (record.student_id, record.session_id) not in successful_pairs:
                     if (
                         db_session.expires_at is not None
-                        and _ensure_aware(db_session.expires_at) > _utcnow()
+                        and ensure_aware(db_session.expires_at) > _utcnow()
                     ):
                         retake_available = True
 
@@ -1357,19 +1340,12 @@ class AttendanceService:
     async def _review_page(
         self, stmt: Select[Any], page: int, size: int
     ) -> tuple[Sequence[Attendance], int]:
-        total: int = (
-            await self._session.scalar(
-                select(func.count()).select_from(stmt.subquery())
-            )
-            or 0
+        records, total = await paginate_scalars(
+            self._session,
+            stmt.order_by(Attendance.timestamp.desc(), Attendance.id.desc()),
+            page=page,
+            size=size,
         )
-        records: Sequence[Attendance] = (
-            await self._session.scalars(
-                stmt.order_by(Attendance.timestamp.desc(), Attendance.id.desc())
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
         return records, total
 
     async def _load_review_maps(
@@ -1446,8 +1422,7 @@ class AttendanceService:
                 code="invalid_status",
                 field="status",
             )
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
+        page, size = normalize_paging(page, size)
 
         stmt = await self._review_stmt(key)
         records, total = await self._review_page(stmt, page, size)
@@ -1505,7 +1480,7 @@ class AttendanceService:
         if db_session is None:
             raise ReviewNotFoundException(record_id)
 
-        recomputed: str = self._compute_status(db_session, _ensure_aware(row.timestamp))
+        recomputed: str = self._compute_status(db_session, ensure_aware(row.timestamp))
 
         if recomputed not in (
             ValidationStatus.PRESENT.value,
@@ -1629,10 +1604,10 @@ class AttendanceService:
 
         retake_available: bool = (
             db_session.expires_at is not None
-            and _ensure_aware(db_session.expires_at) > now
+            and ensure_aware(db_session.expires_at) > now
         )
 
-        session_date: str = _ensure_aware(db_session.scheduled_start_time).strftime(
+        session_date: str = ensure_aware(db_session.scheduled_start_time).strftime(
             "%Y-%m-%d"
         )
 
@@ -1659,7 +1634,7 @@ class AttendanceService:
         date_to: datetime | None = None,
     ) -> OverviewResponse:
         """Per-course sessions, compliance rate, and trend over the filter set."""
-        date_to = _end_of_day(date_to)
+        date_to = end_of_day(date_to)
         offering_ids: list[int] = await self._overview_offering_ids(
             program_id, year_level_id, semester, course_id, professor_id
         )
@@ -1717,7 +1692,7 @@ class AttendanceService:
         for current_id in course_ids:
             course_sessions: list[Session] = sorted(
                 sessions_by_course.get(current_id, []),
-                key=lambda row: (_ensure_aware(row.created_at), row.id),
+                key=lambda row: (ensure_aware(row.created_at), row.id),
             )
             course: Course | None = course_map.get(current_id)
             expected: int = sum(
@@ -1955,7 +1930,7 @@ class AttendanceService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> AttendanceSummaryResponse:
-        date_to = _end_of_day(date_to)
+        date_to = end_of_day(date_to)
         offering_ids = await self._overview_offering_ids(
             program_id, year_level_id, semester, course_id, professor_id
         )
@@ -1993,7 +1968,7 @@ class AttendanceService:
             prev_to = date_from - timedelta(days=1)
             prev_from = date_from - delta
             prev_sessions = await self._overview_sessions(
-                offering_ids, prev_from, _end_of_day(prev_to), session_type
+                offering_ids, prev_from, end_of_day(prev_to), session_type
             )
             prev_tallies = await self._overview_tallies(
                 [row.id for row in prev_sessions]
@@ -2044,9 +2019,8 @@ class AttendanceService:
         sort_by: str = "scanned_at",
         sort_dir: str = "desc",
     ) -> AttendanceRecordsResponse:
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
-        date_to = _end_of_day(date_to)
+        page, size = normalize_paging(page, size)
+        date_to = end_of_day(date_to)
 
         offering_ids = await self._overview_offering_ids(
             program_id, year_level_id, semester, course_id, professor_id
@@ -2094,11 +2068,12 @@ class AttendanceService:
         stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
         stmt = apply_if(stmt, status, lambda v: Attendance.validation_status == v)
         if student_search and student_search.strip():
-            needle = f"%{student_search.strip()}%"
-            stmt = stmt.where(
-                (Student.student_id.ilike(needle))
-                | (Student.first_name.ilike(needle))
-                | (Student.last_name.ilike(needle))
+            stmt = ilike_search(
+                stmt,
+                student_search.strip(),
+                Student.student_id,
+                Student.first_name,
+                Student.last_name,
             )
 
         # count
@@ -2211,7 +2186,7 @@ class AttendanceService:
             course_id=course_id,
             professor_id=professor_id,
             date_from=date_from,
-            date_to=_end_of_day(date_to),
+            date_to=end_of_day(date_to),
         )
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -2281,7 +2256,7 @@ class AttendanceService:
             course_id=course_id,
             status=status,
             date_from=date_from,
-            date_to=_end_of_day(date_to),
+            date_to=end_of_day(date_to),
         )
 
         filtered = self._apply_history_filters(self._history_base(student.id), filters)

@@ -51,8 +51,13 @@ from shared.enums import (
     BackupStorage,
     QueueStatus,
 )
-from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from shared.query import apply_if
+from shared.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    normalize_paging,
+    paginate_scalars,
+)
+from shared.query import apply_if, ilike_any
 from shared.storage import StorageUnconfiguredException, s3_client
 
 from features.attendance.model import Attendance
@@ -248,13 +253,15 @@ def _actor_ids(actor: str) -> Select[Any]:
     whose account did it.
     """
     needle = actor.strip()
-    term = f"%{needle}%"
     conditions = [
-        User.email.ilike(term),
-        Student.first_name.ilike(term),
-        Student.last_name.ilike(term),
-        Professor.first_name.ilike(term),
-        Professor.last_name.ilike(term),
+        ilike_any(
+            needle,
+            User.email,
+            Student.first_name,
+            Student.last_name,
+            Professor.first_name,
+            Professor.last_name,
+        )
     ]
     if needle.isdigit():
         conditions.append(User.id == int(needle))
@@ -774,8 +781,7 @@ class SystemService:
         self, *, page: int = DEFAULT_PAGE, size: int = DEFAULT_PAGE_SIZE
     ) -> BackupListResponse:
         """Newest-first backup log page."""
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
+        page, size = normalize_paging(page, size)
         total = await self._session.scalar(select(func.count(BackupLog.id)))
         rows = (
             await self._session.scalars(
@@ -796,28 +802,23 @@ class SystemService:
         self, *, page: int = DEFAULT_PAGE, size: int = DEFAULT_PAGE_SIZE
     ) -> AcademicStructureListResponse:
         """Newest-first page of structural audit rows."""
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
+        page, size = normalize_paging(page, size)
         scope = select(AuditLog).where(
             AuditLog.entity_type.in_(STRUCTURAL_ENTITY_TYPES)
         )
-        total = await self._session.scalar(
-            select(func.count()).select_from(scope.subquery())
+        rows, total = await paginate_scalars(
+            self._session,
+            scope.order_by(AuditLog.performed_at.desc(), AuditLog.id.desc()),
+            page=page,
+            size=size,
         )
-        rows = (
-            await self._session.scalars(
-                scope.order_by(AuditLog.performed_at.desc(), AuditLog.id.desc())
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
         views = await AuditLabelResolver(self._session).resolve(rows)
         return AcademicStructureListResponse(
             items=[
                 _to_audit_read(row, view, AcademicStructureRead)
                 for row, view in zip(rows, views)
             ],
-            total=int(total or 0),
+            total=total,
             page=page,
             size=size,
         )
@@ -859,8 +860,7 @@ class SystemService:
         happens in the database, so it orders the WHOLE trail rather than
         the page a client happens to have loaded (ADR-086).
         """
-        page = max(page, 1)
-        size = min(max(size, 1), MAX_PAGE_SIZE)
+        page, size = normalize_paging(page, size)
 
         # A blank query parameter is "no filter", not an unknown value: a client
         # that sends its form fields verbatim sends `?entity_type=` for an unset
@@ -914,16 +914,12 @@ class SystemService:
             ),
         )
 
-        total = await self._session.scalar(
-            select(func.count()).select_from(scope.subquery())
+        rows, total = await paginate_scalars(
+            self._session,
+            scope.order_by(*_audit_order(sort_by, sort_dir)),
+            page=page,
+            size=size,
         )
-        rows = (
-            await self._session.scalars(
-                scope.order_by(*_audit_order(sort_by, sort_dir))
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-        ).all()
 
         views = await AuditLabelResolver(self._session).resolve(rows)
         return AuditLogListResponse(
@@ -931,7 +927,7 @@ class SystemService:
                 _to_audit_read(row, view, AuditLogRead)
                 for row, view in zip(rows, views)
             ],
-            total=int(total or 0),
+            total=total,
             page=page,
             size=size,
         )
