@@ -1409,7 +1409,6 @@ async def test_verify_code_reports_attempt_fields(
     assert verified.attendance_attempt_limit == 3
     assert verified.attempts_used == 1
     assert verified.attempts_remaining == 2
-    assert verified.limit_reached is False
 
 
 async def test_verify_code_attempt_fields_absent_for_unlimited_session(
@@ -1434,7 +1433,6 @@ async def test_verify_code_attempt_fields_absent_for_unlimited_session(
     assert verified.attendance_attempt_limit == 0
     assert verified.attempts_used is None
     assert verified.attempts_remaining is None
-    assert verified.limit_reached is False
 
 
 async def test_verify_code_attempt_fields_absent_without_student_link(
@@ -1462,4 +1460,3 @@ async def test_verify_code_attempt_fields_absent_without_student_link(
     assert verified.attendance_attempt_limit == 3
     assert verified.attempts_used is None
     assert verified.attempts_remaining is None
-    assert verified.limit_reached is False

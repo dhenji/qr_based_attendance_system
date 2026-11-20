@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, File, Query, Response, UploadFile, status
 
 from shared.csv_import import csv_template_header
-from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-from api.deps import ProgramServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, ProgramServiceDep
 from features.program.constants import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -48,7 +46,7 @@ router = APIRouter(prefix="/admin/programs")
     summary="List programs (search, status filter, derived aggregates, paginated)",
 )
 async def list_programs(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProgramServiceDep,
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     is_active: bool | None = Query(default=None),
@@ -66,7 +64,7 @@ async def list_programs(
 )
 async def create_program(
     payload: ProgramCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> ProgramRead:
     return await service.create(payload=payload, actor_id=user.id)
@@ -81,7 +79,7 @@ async def create_program(
 )
 async def import_programs(
     file: Annotated[UploadFile, File(description="programs.csv")],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> ProgramImportResult:
     content: bytes = await file.read()
@@ -94,7 +92,7 @@ async def import_programs(
     summary="Download the program import CSV template",
 )
 async def download_import_template(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
 ) -> Response:
     return Response(
         content=csv_template_header(PROGRAM_CSV_COLUMNS),
@@ -110,7 +108,7 @@ async def download_import_template(
 )
 async def get_program(
     program_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProgramServiceDep,
 ) -> ProgramDetail:
     return await service.get(program_id=program_id)
@@ -124,7 +122,7 @@ async def get_program(
 async def update_program(
     program_id: int,
     payload: ProgramUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> ProgramRead:
     return await service.update(
@@ -139,7 +137,7 @@ async def update_program(
 )
 async def hard_delete_program(
     program_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> None:
     await service.hard_delete(program_id=program_id, actor_id=user.id)
@@ -152,7 +150,7 @@ async def hard_delete_program(
 )
 async def list_year_levels(
     program_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProgramServiceDep,
     page: int = Query(default=DEFAULT_PAGE, ge=1),
     size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
@@ -169,7 +167,7 @@ async def list_year_levels(
 async def create_year_level(
     program_id: int,
     payload: YearLevelCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> YearLevelRead:
     return await service.create_year(
@@ -185,7 +183,7 @@ async def create_year_level(
 async def get_year_level(
     program_id: int,
     year_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProgramServiceDep,
 ) -> YearLevelRead:
     return await service.get_year(program_id=program_id, year_id=year_id)
@@ -200,7 +198,7 @@ async def update_year_level(
     program_id: int,
     year_id: int,
     payload: YearLevelUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> YearLevelRead:
     return await service.update_year(
@@ -216,7 +214,7 @@ async def update_year_level(
 async def delete_year_level(
     program_id: int,
     year_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> None:
     await service.delete_year(program_id=program_id, year_id=year_id, actor_id=user.id)

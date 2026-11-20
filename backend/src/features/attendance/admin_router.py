@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from shared.constants import SEMESTER_MAX_LENGTH
-from shared.enums import SessionType, UserRole
+from shared.enums import SessionType
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -15,7 +14,7 @@ from shared.pagination import (
     PaginatedResponse,
 )
 
-from api.deps import AttendanceServiceDep, require_role
+from api.deps import AdminUser, AttendanceServiceDep
 from features.attendance.constants import (
     RECENT_SCANS_DEFAULT_LIMIT,
     RECENT_SCANS_MAX_LIMIT,
@@ -30,7 +29,6 @@ from features.attendance.schema import (
     ResolveReviewRequest,
     ResolveReviewResponse,
 )
-from features.auth.model import User
 
 # This module owns /admin/attendance ONLY.
 #
@@ -40,8 +38,6 @@ from features.auth.model import User
 # Do not add admin routes to attendance/router.py — they would register as
 # /api/student/... instead of /api/admin/attendance/...
 router = APIRouter(prefix="/admin/attendance")
-
-AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 OVERVIEW_EXPORT_FILENAME = "attendance-overview.csv"
 

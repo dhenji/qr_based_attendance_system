@@ -27,6 +27,8 @@ def _otp(**kwargs):
         otp_hash="hash",
         consumed_at=None,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        failed_attempts=0,
+        recovery_grant_jti=None,
     )
 
     defaults.update(kwargs)

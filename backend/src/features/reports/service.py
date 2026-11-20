@@ -10,12 +10,11 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.exceptions import DomainException
-
 from shared.assignments import active_assignment_clause
 from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import end_of_day, ensure_aware
 from shared.enums import ValidationStatus
+from shared.exceptions import PdfExportUnavailableException
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, normalize_paging
 from shared.query import apply_if
 from shared.rates import attendance_rates
@@ -322,11 +321,7 @@ class ReportsService:
         separate — this returns text, the router streams it.
         """
         if format != "csv":
-            raise DomainException(
-                "PDF export is not available yet; request format csv",
-                code="validation_error",
-                field="format",
-            )
+            raise PdfExportUnavailableException()
 
         wanted: set[str] = (
             set(include) if include is not None else set(DEFAULT_EXPORT_INCLUDE)

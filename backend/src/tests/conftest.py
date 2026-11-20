@@ -49,6 +49,7 @@ os.environ["DEBUG"] = "true"
 os.environ["JWT_SECRET"] = TEST_JWT_SECRET
 os.environ["INSTITUTION_TIMEZONE"] = "UTC"
 
+import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from sqlalchemy import BigInteger, DateTime, event  # noqa: E402
 from sqlalchemy.dialects.postgresql import JSONB  # noqa: E402
@@ -64,6 +65,7 @@ from core.config import Settings  # noqa: E402
 from core.database import Base  # noqa: E402
 
 from shared.enums import SyncStatus, UserRole, ValidationStatus  # noqa: E402
+from shared.face_embeddings import embedding_to_base64  # noqa: E402
 
 from features.attendance.model import Attendance  # noqa: E402
 from features.auth.model import User  # noqa: E402
@@ -170,6 +172,35 @@ def apply_utc_datetimes() -> None:
 
 
 apply_utc_datetimes()
+
+
+def make_live_embedding(score: float = 0.9) -> str:
+    """A base64 live embedding whose cosine against the fixture reference lands
+    in the requested band.
+
+    ``score >= 0.8`` is a confident match (seed 42), ``0.65 <= score < 0.8``
+    sits in the review band (seed 123), and anything lower is a mismatch (seed
+    999). The vector is normalized; `cosine_similarity` normalizes both sides
+    anyway, so callers can pick a band without re-tuning a threshold.
+    """
+
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+
+    if score >= 0.8:
+        live = (
+            ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
+        )
+    elif score >= 0.65:
+        live = (
+            ref * 0.68 + np.random.RandomState(123).randn(128).astype(np.float32) * 0.06
+        )
+    else:
+        live = np.random.RandomState(999).randn(128).astype(np.float32)
+
+    live = live / np.linalg.norm(live)
+
+    return embedding_to_base64(live)
 
 
 @pytest.fixture

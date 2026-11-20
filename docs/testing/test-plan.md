@@ -133,7 +133,7 @@
 | A-AN-3 | D35          | At-risk prediction — high threshold | Student has 35% absence rate                                          | At-Risk tab loads                                          | Student row shows risk_level=high; absence_rate=0.35       |
 | A-AN-4 | D35          | Manual risk refresh                 | Admin clicks [Refresh Risk]                                           | POST /admin/analytics/refresh-risk                         | Batch job runs on-demand; scores updated                   |
 | A-AN-5 | D36          | Compliance vs participation toggle  | Session with 8 present, 2 late, 1 excused, 9 absent (total=20)        | Toggle metric                                              | Compliance = 8/20 = 40%; Participation = (8+2+1)/20 = 55%  |
-| A-AN-6 | D33          | Export with current filter set      | Filters applied                                                       | Click Export → CSV/PDF                                     | File contains only filtered rows                           |
+| A-AN-6 | D33          | Export with current filter set      | Filters applied                                                       | Click Export → CSV                                         | File contains only filtered rows                           |
 | A-AN-7 | D33          | Date range filter                   | Data across weeks                                                     | Set date range to 2026-07-01 to 2026-07-31                 | Only July data shown                                       |
 
 ### 2.8 System Settings & Backup
@@ -403,7 +403,7 @@ and [ADR-094](../project/decision-log.md).
 
 | Job | Command | Runs against | Fails on |
 | --- | --- | --- | --- |
-| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1150 cases |
+| `backend` | `python -m pytest src/tests -q` | in-memory SQLite | any of the 1152 cases |
 | `migrations` | `alembic upgrade head && alembic check` | `postgres:16-alpine` service | a model and the revision chain disagreeing |
 | `frontend` | `npm ci && npm run check && npm run test:coverage && npm run build` | — | a svelte-check *error* (warnings pass), a failing Vitest case, a coverage-threshold miss, or a build error |
 | `lint` | `ruff check . && ruff format --check .` (from `backend/`) | — | a lint violation or formatting drift |

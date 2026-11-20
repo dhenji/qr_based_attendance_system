@@ -78,7 +78,7 @@ async def _get_current_user(
 
     now: datetime = datetime.now(timezone.utc)
     timeout_seconds: int = _idle_timeout_seconds(user, settings)
-    last_activity: datetime | None = getattr(user, "last_activity_at", None)
+    last_activity: datetime | None = user.last_activity_at
     if (
         last_activity is not None
         and timeout_seconds > 0
@@ -123,7 +123,7 @@ async def _get_optional_current_user(
 
     now: datetime = datetime.now(timezone.utc)
     timeout_seconds: int = _idle_timeout_seconds(user, settings)
-    last_activity: datetime | None = getattr(user, "last_activity_at", None)
+    last_activity: datetime | None = user.last_activity_at
     if (
         last_activity is not None
         and timeout_seconds > 0
@@ -148,7 +148,7 @@ async def _get_active_user(session: AsyncSession, user_id: int) -> User | None:
 
 
 def _idle_timeout_seconds(user: User, settings: Settings) -> int:
-    role = getattr(user, "role", "student")
+    role = user.role
     if role in ("admin", "super_admin"):
         minutes = settings.idle_timeout_minutes_admin
     elif role == "professor":
@@ -191,6 +191,11 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
         return user
 
     return role_guard
+
+
+# The admin guard. Defined once here so every router annotates its actor with
+# the same dependency instead of re-spelling the role inside the signature.
+AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 
 async def _get_auth_service(

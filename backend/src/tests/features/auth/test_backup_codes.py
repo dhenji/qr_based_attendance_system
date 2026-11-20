@@ -34,6 +34,7 @@ def _user(**kwargs):
         mfa_enabled=True,
         mfa_secret="JBSWY3DPEB2XS2LP",
         must_change_password=False,
+        token_version=0,
     )
 
     defaults.update(kwargs)

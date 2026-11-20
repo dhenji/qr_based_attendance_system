@@ -16,13 +16,14 @@ student's `compliance_rate` is literally `get_history(...).summary
 .avg_compliance_rate`. Where a figure had to be computed locally it is
 documented at the call site.
 
-**"Today" means UTC.** `attendance` uses `_utcnow()` and `session`/`reports`
-use `date.today()`; a dashboard mixing the two would be off by hours and
-disagree with its own components. Everything below anchors to UTC. Note the
-consequence: `Attendance.timestamp` and `Session.created_at` are both stored in
-UTC, so for a Philippine deployment a class at 7am local is "yesterday" until
-midnight UTC. That is pre-existing behaviour across the whole slice list, not
-something a dashboard should quietly disagree with.
+**"Today" means UTC.** `attendance` uses `_utcnow()` and `session` uses
+`datetime.now(timezone.utc).date()`; only `reports` still uses `date.today()`.
+A dashboard mixing local dates in would be off by hours and disagree with its
+own components. Everything below anchors to UTC. Note the consequence:
+`Attendance.timestamp` and `Session.created_at` are both stored in UTC, so for
+a Philippine deployment a class at 7am local is "yesterday" until midnight UTC.
+That is pre-existing behaviour across the whole slice list, not something a
+dashboard should quietly disagree with.
 """
 
 from __future__ import annotations

@@ -293,8 +293,7 @@ async def _register_failed_attempt(user_id: int, lockout_attempts: int) -> None:
             user.is_locked = True
             user.locked_at = now
             user.last_lockout_at = now
-            if hasattr(user, "token_version"):
-                user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+            user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             session,
@@ -447,7 +446,7 @@ class AuthService:
         if record.expires_at < now:
             raise OtpExpiredException()
         if not verify_otp_hash(code, record.otp_hash):
-            current_attempts: int = getattr(record, "failed_attempts", 0) or 0
+            current_attempts: int = record.failed_attempts or 0
             record.failed_attempts = current_attempts + 1
             if record.failed_attempts >= self._settings.otp_max_attempts:
                 record.consumed_at = now
@@ -722,19 +721,7 @@ class AuthService:
             await self.verify_otp(normalized, code, OtpPurpose.LOGIN)
         except OtpExpiredException:
             raise
-        except OtpMaxAttemptsException:
-            await _login_otp_limiter.hit(
-                limiter_key,
-                LOGIN_OTP_MAX_ATTEMPTS,
-                window_seconds,
-            )
-            await _login_otp_ip_limiter.hit(
-                ip_key,
-                LOGIN_OTP_IP_MAX_ATTEMPTS,
-                window_seconds,
-            )
-            raise
-        except OtpInvalidException:
+        except (OtpMaxAttemptsException, OtpInvalidException):
             await _login_otp_limiter.hit(
                 limiter_key,
                 LOGIN_OTP_MAX_ATTEMPTS,
@@ -819,7 +806,7 @@ class AuthService:
             timeout_minutes = self._settings.idle_timeout_minutes_professor
         else:
             timeout_minutes = self._settings.idle_timeout_minutes_student
-        last_activity: datetime | None = getattr(user, "last_activity_at", None)
+        last_activity: datetime | None = user.last_activity_at
         if (
             last_activity is not None
             and (now - last_activity).total_seconds() > timeout_minutes * 60
@@ -835,13 +822,12 @@ class AuthService:
         return self._build_tokens(user)
 
     async def logout(self, user: User) -> None:
-        if hasattr(user, "token_version"):
-            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
         await self._session.flush()
 
     def get_session_policy(self, user: User) -> dict[str, int]:
         settings = self._settings
-        role = getattr(user, "role", "student")
+        role = user.role
         if role in ("admin", "super_admin"):
             timeout = settings.idle_timeout_minutes_admin
         elif role == "professor":
@@ -875,9 +861,7 @@ class AuthService:
 
         # Break-glass recovery code (Super Admin path): no security question is
         # stored, but a recovery code is, so step 2 collects the code instead.
-        if user.security_question_hash is None and getattr(
-            user, "recovery_code_hash", None
-        ):
+        if user.security_question_hash is None and user.recovery_code_hash:
             return SecurityQuestionResponse(
                 question="Enter your recovery code.", set=False, recovery_code_mode=True
             )
@@ -928,11 +912,8 @@ class AuthService:
         # answer so Super Admins without a security question can still recover.
         verified: bool = False
 
-        if user is not None and getattr(user, "recovery_code_hash", None):
-            if (
-                recovery_code is not None
-                and getattr(user, "recovery_code_used_at", None) is None
-            ):
+        if user is not None and user.recovery_code_hash:
+            if recovery_code is not None and user.recovery_code_used_at is None:
                 verified = verify_password(
                     (recovery_code or "").strip(), user.recovery_code_hash
                 )
@@ -952,11 +933,7 @@ class AuthService:
             raise SecurityAnswerInvalidException()
 
         # Consume a break-glass code so it cannot be reused.
-        if (
-            user is not None
-            and getattr(user, "recovery_code_hash", None)
-            and recovery_code is not None
-        ):
+        if user is not None and user.recovery_code_hash and recovery_code is not None:
             user.recovery_code_used_at = now
 
         return RecoveryGrantResponse(
@@ -997,7 +974,7 @@ class AuthService:
             raise UnrecognizedEmailException()
 
         # Super Admins must not reuse their current password on recovery.
-        if str(getattr(user, "role", "")).lower() == "super_admin" and verify_password(
+        if str(user.role).lower() == "super_admin" and verify_password(
             new_password, user.password_hash
         ):
             raise PasswordReusedException()
@@ -1014,9 +991,7 @@ class AuthService:
             .order_by(OtpCodes.id.desc())
         )
         consumed_record: OtpCodes | None = (await self._session.scalars(stmt)).first()
-        if consumed_record is not None and getattr(
-            consumed_record, "recovery_grant_jti", None
-        ):
+        if consumed_record is not None and consumed_record.recovery_grant_jti:
             jti = consumed_record.recovery_grant_jti
             reuse_stmt = select(OtpCodes).where(
                 OtpCodes.recovery_grant_jti == jti,
@@ -1034,7 +1009,7 @@ class AuthService:
         user.is_locked = False
         user.locked_at = None
         user.must_change_password = False
-        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             self._session,
@@ -1118,7 +1093,7 @@ class AuthService:
 
         user.password_hash = hash_password(new_password)
         user.must_change_password = False
-        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
         if security_question is not None or security_answer is not None:
             if not security_question or not security_answer:
                 raise PasswordPolicyException(field="security_question")
@@ -1210,7 +1185,7 @@ class AuthService:
         user.lockout_level = 0
         user.last_lockout_at = None
         user.lockout_override_until = None
-        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             self._session,
@@ -1349,8 +1324,7 @@ class AuthService:
         user.failed_login_attempts = 0
         user.lockout_level = 0
         user.last_lockout_at = None
-        if hasattr(user, "token_version"):
-            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             self._session,
@@ -1386,8 +1360,7 @@ class AuthService:
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_level = 0
         user.last_lockout_at = None
-        if hasattr(user, "token_version"):
-            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             self._session,
@@ -1431,8 +1404,7 @@ class AuthService:
         now: datetime = datetime.now(timezone.utc)
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = now + timedelta(minutes=duration_minutes)
-        if hasattr(user, "token_version"):
-            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             self._session,
@@ -1466,8 +1438,7 @@ class AuthService:
 
         old_value: dict[str, Any] = _account_snapshot(user)
         user.lockout_override_until = None
-        if hasattr(user, "token_version"):
-            user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         await record_audit(
             self._session,
@@ -1536,7 +1507,7 @@ class AuthService:
 
         user.mfa_enabled = False
         user.mfa_secret = None
-        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
 
         # `_account_snapshot` deliberately omits every MFA field, so this audit
         # row carries its own snapshot rather than widening the three other
@@ -1704,12 +1675,12 @@ class AuthService:
                 user.id,
                 user.role,
                 self._settings,
-                token_version=getattr(user, "token_version", 0) or 0,
+                token_version=user.token_version or 0,
             ),
             refresh_token=create_refresh_token(
                 user.id,
                 self._settings,
-                token_version=getattr(user, "token_version", 0) or 0,
+                token_version=user.token_version or 0,
             ),
             must_change_password=user.must_change_password,
         )

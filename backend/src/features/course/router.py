@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, File, Query, Response, UploadFile, status
 
 from shared.csv_import import csv_template_header
-from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-from api.deps import CourseServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, CourseServiceDep
 from features.course.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from features.course.schema import (
     CourseCreate,
@@ -39,7 +37,7 @@ router = APIRouter(prefix="/admin/courses")
     summary="List course templates (status filter, paginated)",
 )
 async def list_courses(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
     is_active: bool | None = Query(default=None),
     page: int = Query(default=DEFAULT_PAGE, ge=1),
@@ -56,7 +54,7 @@ async def list_courses(
 )
 async def create_course(
     payload: CourseCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> CourseRead:
     return await service.create(payload=payload, actor_id=user.id)
@@ -71,7 +69,7 @@ async def create_course(
 )
 async def import_courses(
     file: Annotated[UploadFile, File(description="courses.csv")],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> CourseImportResult:
     content: bytes = await file.read()
@@ -84,7 +82,7 @@ async def import_courses(
     summary="Download the course import CSV template",
 )
 async def download_import_template(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
 ) -> Response:
     return Response(
         content=csv_template_header(COURSE_CSV_COLUMNS),
@@ -100,7 +98,7 @@ async def download_import_template(
 )
 async def get_course(
     course_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
 ) -> CourseRead:
     return await service.get(course_id=course_id)
@@ -114,7 +112,7 @@ async def get_course(
 async def update_course(
     course_id: int,
     payload: CourseUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> CourseRead:
     return await service.update(course_id=course_id, payload=payload, actor_id=user.id)
@@ -127,7 +125,7 @@ async def update_course(
 )
 async def hard_delete_course(
     course_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> None:
     await service.hard_delete(course_id=course_id, actor_id=user.id)

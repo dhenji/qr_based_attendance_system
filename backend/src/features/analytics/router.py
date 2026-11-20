@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from shared.constants import SEMESTER_MAX_LENGTH
-from shared.enums import RiskLevel, SessionType, UserRole
+from shared.enums import RiskLevel, SessionType
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from shared.rate_limit import rate_limit
 
-from api.deps import AnalyticsServiceDep, require_role
+from api.deps import AdminUser, AnalyticsServiceDep
 from features.analytics.schema import (
     AnalyticsExportRequest,
     AtRiskResponse,
@@ -24,13 +23,10 @@ from features.analytics.schema import (
     TrendGranularity,
     TrendResponse,
 )
-from features.auth.model import User
 
 # Prefix baked in here; mounted without a prefix argument in api/router.py.
 # This module owns /admin/analytics ONLY.
 router = APIRouter(prefix="/admin/analytics")
-
-AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 EXPORT_FILENAME = "analytics-course-comparison.csv"
 

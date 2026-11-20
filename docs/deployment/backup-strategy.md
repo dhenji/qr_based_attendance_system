@@ -281,7 +281,7 @@ A separate, lighter-weight export for non-disaster-recovery purposes:
 ```
 POST /admin/analytics/export
 Body: {
-  "format": "csv" | "pdf",
+  "format": "csv",
   "filters": {
     "program_id": 1,
     "year_level": 2,
@@ -296,7 +296,7 @@ Body: {
 | Property  | Value                                                      |
 | --------- | ---------------------------------------------------------- |
 | Content   | Aggregated attendance data (no raw PII beyond student IDs) |
-| Format    | CSV (tabular) or PDF (formatted report)                    |
+| Format    | CSV only (PDF is rejected with 422 `validation_error`)     |
 | Storage   | Same backend as backups (`ATTACHMENTS_STORAGE_TYPE`)       |
 | Logged    | Yes — `backup_log.kind = 'analytics'`                      |
 | Retention | Same as backups (30D daily, 12M monthly)                   |

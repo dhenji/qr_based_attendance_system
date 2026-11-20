@@ -67,26 +67,7 @@ from features.student.exceptions import (
 )
 from features.student.model import Student
 from features.sync.model import SyncQueue
-from tests.conftest import Factories
-
-
-def _make_live_emb(score: float = 0.9) -> str:
-    # Create a reference embedding
-    ref = np.ones(128, dtype=np.float32) * 0.1
-    ref = ref / np.linalg.norm(ref)
-    # Create live embedding close to ref for high score
-    if score >= 0.8:
-        live = (
-            ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
-        )
-    elif score >= 0.65:
-        live = (
-            ref * 0.8 + np.random.RandomState(123).randn(128).astype(np.float32) * 0.1
-        )
-    else:
-        live = np.random.RandomState(999).randn(128).astype(np.float32)
-    return embedding_to_base64(live)
-
+from tests.conftest import Factories, make_live_embedding
 
 # Somewhere inside the default radius of the fixture classroom.
 INSIDE_GPS = GPSInput(lat=14.0001, lng=121.0001, accuracy=5.0)
@@ -132,7 +113,7 @@ def scan_request(
         "student_number": student_number,
         "gps": INSIDE_GPS,
         "liveness_evidence": valid_evidence(),
-        "live_face_embedding": _make_live_emb(0.92),
+        "live_face_embedding": make_live_embedding(0.92),
         "scanned_at": scanned_at,
         "scanned_via": ScannedVia.QR_CAMERA,
     }
@@ -1036,7 +1017,7 @@ async def test_face_mismatch_counts_as_attempt(
         student.student_id,
         scanned_at=stack["session"].created_at + timedelta(minutes=2),
     )
-    mismatch_payload.live_face_embedding = _make_live_emb(0.40)
+    mismatch_payload.live_face_embedding = make_live_embedding(0.40)
 
     with pytest.raises(FaceMismatchException):
         await service.submit_scan(
@@ -1449,7 +1430,7 @@ async def test_post_increment_failure_carries_attempt_details(
         student.student_id,
         scanned_at=stack["session"].created_at + timedelta(minutes=2),
     )
-    mismatch_payload.live_face_embedding = _make_live_emb(0.40)
+    mismatch_payload.live_face_embedding = make_live_embedding(0.40)
 
     with pytest.raises(FaceMismatchException) as excinfo:
         await service.submit_scan(
@@ -1644,7 +1625,7 @@ async def test_unlimited_session_scan_reports_no_attempt_state(
         student.student_id,
         scanned_at=stack["session"].created_at + timedelta(minutes=21),
     )
-    mismatch_payload.live_face_embedding = _make_live_emb(0.40)
+    mismatch_payload.live_face_embedding = make_live_embedding(0.40)
     with pytest.raises(FaceMismatchException) as excinfo:
         await service.submit_scan(
             user_id=stack["student"].user_id,

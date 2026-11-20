@@ -431,7 +431,6 @@ class VerifyCodeResponse(BaseModel):
     attendance_attempt_limit: int = 0
     attempts_used: int | None = None
     attempts_remaining: int | None = None
-    limit_reached: bool = False
     course_code: str
     course_name: str
     program_code: str

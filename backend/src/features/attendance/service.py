@@ -207,7 +207,7 @@ def _validate_liveness_evidence(evidence: LivenessEvidence) -> bool:
         return False
 
     # Multiple faces in the frame are not safe to verify.
-    if getattr(evidence, "face_count", 1) != 1:
+    if evidence.face_count != 1:
         return False
 
     pnp = evidence.pnp_evidence
@@ -467,7 +467,7 @@ class AttendanceService:
             payload.student_number,
             allow_expired=idempotency_key is not None,
         )
-        attempt_limit: int = getattr(db_session, "attendance_attempt_limit", 0) or 0
+        attempt_limit: int = db_session.attendance_attempt_limit or 0
 
         # Durable per-student attempt counter. Incremented in its own
         # committed transaction so that attempts that fail validation (and
@@ -496,7 +496,7 @@ class AttendanceService:
                 raise StubEmbeddingException("Face enrollment requires re-enrollment")
 
             try:
-                if getattr(payload, "live_face_image", None):
+                if payload.live_face_image:
                     raw = payload.live_face_image
                     if "," in raw and raw.strip().lower().startswith("data:"):
                         raw = raw.split(",", 1)[1]
@@ -526,9 +526,7 @@ class AttendanceService:
             accuracy_review: bool = False
             if not self._settings.benchmark_mode:
                 if payload.gps is not None:
-                    hard_floor = self._settings.gps_hard_floor_meters
-                    if hard_floor <= 0:
-                        hard_floor = 1000.0
+                    hard_floor: float = self._settings.gps_hard_floor_meters
                     if float(payload.gps.accuracy) > hard_floor:
                         raise GpsAccuracyTooLowException(
                             float(payload.gps.accuracy), hard_floor
@@ -566,15 +564,14 @@ class AttendanceService:
                 attempt_meta,
             )
         except AppException as exc:
-            if attempt_meta is not None:
+            if attempt_meta is not None and exc.details is None:
                 # Machine-readable attempt state for this request's outcome
                 # (authoritative; the message suffix below stays only as the
                 # legacy human-readable carrier during the contract rollout).
                 exc.details = attempt_meta.to_details()
-                if "remaining" not in (exc.message or ""):
-                    exc.message = (
-                        f"{exc.message} ({attempt_meta.remaining} attempts remaining)"
-                    )
+                exc.message = (
+                    f"{exc.message} ({attempt_meta.remaining} attempts remaining)"
+                )
             raise
 
     async def precheck_scan(
@@ -624,7 +621,7 @@ class AttendanceService:
                 retake_available = True
                 already_scanned = False
 
-        attempt_limit: int = getattr(db_session, "attendance_attempt_limit", 0) or 0
+        attempt_limit: int = db_session.attendance_attempt_limit or 0
         attempt_count: int = 0
         if attempt_limit > 0:
             attempt_count = await self._get_attempt_count(student.id, db_session.id)
@@ -825,7 +822,7 @@ class AttendanceService:
         Raises ``OutsideGeofenceException`` when the position is clearly
         outside the radius even after accounting for uncertainty.
         """
-        if not getattr(session, "geofence_enabled", True):
+        if session.geofence_enabled is False:
             return False, None
         if session.classroom_lat is None or session.classroom_lng is None:
             return False, None
@@ -843,9 +840,7 @@ class AttendanceService:
         radius: float = session.classroom_radius_meters
         # Cap the uncertainty so a wildly inaccurate (or spoofed) fix cannot
         # neutralise the geofence entirely. Configurable via settings.
-        cap = self._settings.geofence_uncertainty_cap_meters
-        if cap <= 0:
-            cap = 50.0
+        cap: float = self._settings.geofence_uncertainty_cap_meters
         uncertainty: float = min(float(gps.accuracy), cap)
 
         details: dict = {
@@ -1665,10 +1660,13 @@ class AttendanceService:
             row.id: len(enrolled_by_offering.get(row.offering_id, set()))
             for row in sessions
         }
+        offering_by_id: dict[int, CourseOffering] = {
+            offering.id: offering for offering in offerings
+        }
         sessions_by_course: dict[int, list[Session]] = {}
 
         for row in sessions:
-            offering = next((o for o in offerings if o.id == row.offering_id), None)
+            offering = offering_by_id.get(row.offering_id)
 
             if offering is None:
                 continue

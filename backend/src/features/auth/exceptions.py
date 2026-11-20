@@ -84,7 +84,7 @@ class AccountLockedException(AuthDomainException):
         )
 
 
-class PermanentAccountLockedException(AppException):
+class PermanentAccountLockedException(AuthDomainException):
     """423 - account is permanently locked; only an admin can release it."""
 
     status_code: int = 423

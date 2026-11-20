@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, File, Query, UploadFile, status
 
-from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-from api.deps import AuthServiceDep, ProfessorServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, AuthServiceDep, ProfessorServiceDep
 from features.auth.schema import AdminPasswordResetResponse
 from features.professor.constants import (
     DEFAULT_PAGE,
@@ -47,7 +45,7 @@ router = APIRouter(prefix="/admin/professors")
     summary="List professors (search, department/status filters, paginated)",
 )
 async def list_professors(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProfessorServiceDep,
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     department: str | None = Query(default=None, max_length=DEPARTMENT_MAX_LENGTH),
@@ -76,7 +74,7 @@ async def list_professors(
 )
 async def create_professor(
     payload: ProfessorCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProfessorServiceDep,
 ) -> ProfessorRead:
     return await service.create(payload=payload, assigned_by=user.id)
@@ -91,7 +89,7 @@ async def create_professor(
 )
 async def import_professors(
     file: Annotated[UploadFile, File(description="professors.csv")],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProfessorServiceDep,
 ) -> ProfessorImportResult:
     content: bytes = await file.read()
@@ -106,7 +104,7 @@ async def import_professors(
 )
 async def get_professor(
     professor_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProfessorServiceDep,
 ) -> ProfessorDetail:
     return await service.get(professor_id=professor_id)
@@ -120,7 +118,7 @@ async def get_professor(
 async def update_professor(
     professor_id: int,
     payload: ProfessorUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProfessorServiceDep,
 ) -> ProfessorRead:
     return await service.update(
@@ -135,7 +133,7 @@ async def update_professor(
 )
 async def hard_delete_professor(
     professor_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProfessorServiceDep,
 ) -> None:
     await service.hard_delete(professor_id=professor_id, actor_id=user.id)
@@ -148,7 +146,7 @@ async def hard_delete_professor(
 )
 async def reset_professor_password(
     professor_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProfessorServiceDep,
     auth_service: AuthServiceDep,
 ) -> AdminPasswordResetResponse:

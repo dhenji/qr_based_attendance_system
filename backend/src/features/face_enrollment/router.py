@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, File, UploadFile, status
 
-from shared.enums import UserRole
-
-from api.deps import FaceEnrollmentServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, FaceEnrollmentServiceDep
 from features.face_enrollment.schema import FaceEnrollmentResponse, FaceEnrollmentStatus
 
 # This module owns /admin/face-enrollment ONLY.
@@ -26,7 +23,7 @@ router = APIRouter(prefix="/admin/face-enrollment")
 )
 async def get_face_enrollment_status(
     student_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: FaceEnrollmentServiceDep,
 ) -> FaceEnrollmentStatus:
     return await service.get_face_enrollment_status(student_id=student_id)
@@ -43,7 +40,7 @@ async def enroll_face(
     front: Annotated[UploadFile, File(description="Front-facing photo")],
     left: Annotated[UploadFile, File(description="Left-profile photo")],
     right: Annotated[UploadFile, File(description="Right-profile photo")],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: FaceEnrollmentServiceDep,
 ) -> FaceEnrollmentResponse:
     front_bytes: bytes = await front.read()
@@ -69,7 +66,7 @@ async def enroll_face(
 )
 async def revoke_face_enrollment(
     student_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: FaceEnrollmentServiceDep,
 ) -> None:
     await service.revoke_face_enrollment(student_id=student_id, actor_id=user.id)

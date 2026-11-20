@@ -615,13 +615,13 @@ Semester/dates are filter axes, not identity.
 
 #### `POST /admin/analytics/export`
 
-Export analytics as CSV/PDF.
+Export analytics as CSV.
 
 |                  |                            |
 | ---------------- | -------------------------- |
 | **Request**      | `{ format: "csv", program_id?, year_level_id?, semester?, course_ids?, date_from?, date_to?, session_type? }` |
 | **Response 200** | File download (CSV) |
-| **Errors**       | 422 `unsupported_export_format` for any format other than `csv` |
+| **Errors**       | 422 `validation_error` (field `format`) for `pdf` or any value outside `csv`/`pdf` |
 
 #### `POST /admin/analytics/refresh-risk`
 
@@ -1340,8 +1340,9 @@ Export attendance for the professor's own assigned courses (wireframes.md 3.7/3.
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
 | **Request**      | `{ course_id?, date_from?, date_to?, format: "csv", include: ["student_id","name","timestamp","gps","liveness"], statuses: [ValidationStatus], session_type? }` |
 | **Response 200** | Generated file (download)                                                                                             |
+| **Errors**       | 422 `validation_error` (field `format`) when `pdf` is requested — no PDF writer is installed                         |
 
-**Scope note:** Excel/Print are frontend concerns — backend emits CSV or PDF only.
+**Scope note:** Excel/Print are frontend concerns — backend emits CSV only.
 
 ---
 
@@ -1380,8 +1381,8 @@ Verify a typed session code. The scan page also posts raw decoded QR text as `co
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Role**         | student                                                                                                                                                            |
 | **Request**      | `{ code: string }`                                                                                                                                                 |
-| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_start_time, scheduled_end_time, classroom_name, geofence: { radius, lat, lng, uncertainty_cap_meters }, present_window_minutes, late_window_minutes, attendance_attempt_limit, attempts_used?, attempts_remaining?, limit_reached }` |
-| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`, `uncertainty_cap_meters` → configured `GEOFENCE_UNCERTAINTY_CAP_METERS` (default 50). `scheduled_start_time` is the authoritative class start (including professor overrides; `actual_start_time` is audit-only) and is what the student scan confirmation renders as "Start time". Attempt fields (ADR-092): `attendance_attempt_limit` is the per-session cap (0 = unlimited); `attempts_used`/`attempts_remaining` are populated only when the caller resolves to a student row and the cap is positive, `attempts_remaining` is `null` when unlimited, and `limit_reached` is always `false` in a 200 — the exhausted case raises 409 instead. |
+| **Response 200** | `{ session_id, offering_id, session_type, is_remote, course_code, course_name, program_code, year_level_label, expires_at, scheduled_start_time, scheduled_end_time, classroom_name, geofence: { radius, lat, lng, uncertainty_cap_meters }, present_window_minutes, late_window_minutes, attendance_attempt_limit, attempts_used?, attempts_remaining? }` |
+| **Notes**        | Nested `geofence` keys map to columns: `radius` → `classroom_radius_meters`, `lat` → `classroom_lat`, `lng` → `classroom_lng`, `uncertainty_cap_meters` → configured `GEOFENCE_UNCERTAINTY_CAP_METERS` (default 50). `scheduled_start_time` is the authoritative class start (including professor overrides; `actual_start_time` is audit-only) and is what the student scan confirmation renders as "Start time". Attempt fields (ADR-092): `attendance_attempt_limit` is the per-session cap (0 = unlimited); `attempts_used`/`attempts_remaining` are populated only when the caller resolves to a student row and the cap is positive, `attempts_remaining` is `null` when unlimited, and the exhausted case raises 409 instead. |
 | **Errors**       | 404 `session_not_found` · 410 `session_expired` · 404 `offering_not_found` · 409 `attendance_attempt_limit_reached` (carries `detail.details` attempt metadata with `attempt_consumed: false` — this endpoint only reads the counter) |
 
 ---

@@ -38,7 +38,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import Settings, get_settings
 from core.database import database
-from core.exceptions import DomainException
 from core.scheduler import JOB_BACKUP, scheduled_job_running, track
 
 from shared.accounts import account_query
@@ -52,6 +51,7 @@ from shared.enums import (
     BackupStorage,
     QueueStatus,
 )
+from shared.exceptions import PdfExportUnavailableException
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -989,11 +989,7 @@ class SystemService:
         Only CSV is built: no PDF writer is installed.
         """
         if format != "csv":
-            raise DomainException(
-                "PDF export is not available yet; request format csv",
-                code="validation_error",
-                field="format",
-            )
+            raise PdfExportUnavailableException()
         from features.analytics.service import AnalyticsService
 
         content: str = await AnalyticsService(self._session).export_course_comparison(
