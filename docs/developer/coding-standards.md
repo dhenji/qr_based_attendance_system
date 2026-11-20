@@ -100,7 +100,7 @@ ruff format --check . # verify formatting without writing (what CI runs)
 - **Early returns / guard clauses** over nested blocks.
 - **Private helpers** prefixed with `_` — module-level for pure logic, `self._method` for service-internal.
 - **Extract shared logic to `shared/`**: If the same helper logic appears in **two or more feature modules**, move it to a module under `src/shared/` (e.g., `shared/validators.py`, `shared/utils.py`, `shared/csv_import.py`) and import it. Avoid copy-pasting logic across slices.
-  - Examples already in codebase: `shared/csv_import.py` (parsing + email validation), `shared/validators.py`, `shared/enums.py`, `shared/pagination.py` (bounds, `normalize_paging`, `paginate_scalars`), `shared/query.py` (`apply_if`, `ilike_any`, `ilike_search`), `shared/datetimes.py` (`ensure_aware`, `end_of_day`), `shared/rate_limit.py`.
+  - Examples already in codebase: `shared/csv_import.py` (parsing + email validation), `shared/validators.py`, `shared/enums.py`, `shared/pagination.py` (bounds, `normalize_paging`, `paginate_scalars`), `shared/query.py` (`apply_if`, `ilike_any`, `ilike_search`), `shared/datetimes.py` (`ensure_aware`, `end_of_day`), `shared/rate_limit.py`, `shared/assignments.py` (`active_assignment_clause`), `shared/accounts.py` (`Account`, `account_query`, `account_from_row`).
   - New shared helpers should be **pure functions** (no DB session) or **session-accepting functions** with clear signatures.
 - **No inline magic values**: All field bounds, limits, thresholds, and config-like constants live in **`constants.py`** files:
   - Per-slice: `features/<slice>/constants.py` (e.g., `CODE_MAX_LENGTH`, `TOTAL_YEARS_MAX`)
