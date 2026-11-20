@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.exceptions import ForbiddenException
 from core.security import hash_password
 
+from shared.accounts import Account, account_from_row, account_query
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.enums import AuditAction, AuditEntity, UserRole
@@ -52,24 +53,6 @@ class _RosterHandle:
     label: str
 
 
-def _users_stmt() -> Select[Any]:
-    """Users with the optional student/professor name columns outer-joined.
-
-    Projected in `_to_admin_user_read` order.
-    """
-    return (
-        select(
-            User,
-            Student.first_name,
-            Student.last_name,
-            Professor.first_name,
-            Professor.last_name,
-        )
-        .outerjoin(Student, Student.user_id == User.id)
-        .outerjoin(Professor, Professor.user_id == User.id)
-    )
-
-
 def _users_filters(
     search: str | None, role: UserRole | None, is_active: bool | None
 ) -> list[Any]:
@@ -98,10 +81,7 @@ def _users_filters(
 
 def _to_admin_user_read(
     user: User,
-    student_first: str | None,
-    student_last: str | None,
-    professor_first: str | None,
-    professor_last: str | None,
+    account: Account,
     *,
     viewer_role: UserRole | str | None = None,
     actor_id: int | None = None,
@@ -114,8 +94,8 @@ def _to_admin_user_read(
         id=user.id,
         email=None if sensitive else user.email,
         role=target_role,
-        first_name=None if sensitive else (student_first or professor_first),
-        last_name=None if sensitive else (student_last or professor_last),
+        first_name=None if sensitive else account.first_name,
+        last_name=None if sensitive else account.last_name,
         is_active=user.is_active,
         must_change_password=user.must_change_password,
         last_login=user.last_login,
@@ -294,7 +274,7 @@ class AdminService:
         )
 
         filters = _users_filters(search, role, is_active)
-        stmt: Select[Any] = _users_stmt()
+        stmt: Select[Any] = account_query()
         if resolved_viewer_role == UserRole.ADMIN:
             stmt = stmt.where(User.role != UserRole.SUPER_ADMIN.value)
         if filters:
@@ -316,7 +296,10 @@ class AdminService:
         return PaginatedResponse[AdminUserRead](
             items=[
                 _to_admin_user_read(
-                    *row, viewer_role=resolved_viewer_role, actor_id=actor_id
+                    row[0],
+                    account_from_row(row),
+                    viewer_role=resolved_viewer_role,
+                    actor_id=actor_id,
                 )
                 for row in rows
             ],

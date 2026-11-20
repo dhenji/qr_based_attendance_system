@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.accounts import Account, account_from_row, account_query
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.datetimes import end_of_day, ensure_aware
@@ -74,25 +75,6 @@ def _full_name(
     return " ".join(part for part in (first_name, middle_name, last_name) if part)
 
 
-@dataclass
-class _Account:
-    """A `users` row with the name its roster carries, if any.
-
-    The `users` table has no name columns — a person's name lives on their
-    student or professor row — so the name is outer-joined in, exactly as
-    `features/admin/service.py::_users_stmt` does it.
-    """
-
-    id: int
-    email: str
-    first_name: str | None = None
-    last_name: str | None = None
-
-    @property
-    def name(self) -> str:
-        return _full_name(self.first_name, None, self.last_name) or self.email
-
-
 def _session_date(session: Session) -> str:
     """The session's calendar day, as it reads in a notification.
 
@@ -131,7 +113,7 @@ class ExcuseService:
         self._sessions_by_id: dict[int, Session] = {}
         self._offerings_by_id: dict[int, CourseOffering] = {}
         self._courses_by_id: dict[int, Course] = {}
-        self._accounts_by_id: dict[int, _Account] = {}
+        self._accounts_by_id: dict[int, Account] = {}
 
     async def quick_excuse(
         self,
@@ -587,11 +569,7 @@ class ExcuseService:
             .where(
                 CourseProfessor.offering_id == Session.offering_id,
                 CourseProfessor.professor_id == professor.id,
-                CourseProfessor.effective_from <= today,
-                or_(
-                    CourseProfessor.effective_to.is_(None),
-                    CourseProfessor.effective_to >= today,
-                ),
+                active_assignment_clause(today),
             )
             .exists()
         )
@@ -868,11 +846,7 @@ class ExcuseService:
                 .outerjoin(User, User.id == Professor.user_id)
                 .where(
                     CourseProfessor.offering_id == offering_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
             )
         ).all()
@@ -998,32 +972,14 @@ class ExcuseService:
 
         if wanted_reviewers:
             # The reviewer's name is on their student or professor row, so
-            # the accounts are outer-joined the way
-            # `features/admin/service.py::_users_stmt` does it.
+            # the accounts are outer-joined through the shared helper.
             rows = (
                 await self._session.execute(
-                    select(
-                        User,
-                        Student.first_name,
-                        Student.last_name,
-                        Professor.first_name,
-                        Professor.last_name,
-                    )
-                    .outerjoin(Student, Student.user_id == User.id)
-                    .outerjoin(Professor, Professor.user_id == User.id)
-                    .where(User.id.in_(wanted_reviewers))
+                    account_query().where(User.id.in_(wanted_reviewers))
                 )
             ).all()
             self._accounts_by_id.update(
-                {
-                    row[0].id: _Account(
-                        id=row[0].id,
-                        email=row[0].email,
-                        first_name=row[1] or row[3],
-                        last_name=row[2] or row[4],
-                    )
-                    for row in rows
-                }
+                {row[0].id: account_from_row(row) for row in rows}
             )
 
     def _to_read(self, excuse: ExcuseRequest) -> ExcuseRequestRead:
@@ -1196,11 +1152,7 @@ class ExcuseService:
                 .where(
                     CourseProfessor.offering_id == offering_id,
                     CourseProfessor.professor_id == professor_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
                 .order_by(CourseProfessor.effective_from.desc())
                 .limit(1)

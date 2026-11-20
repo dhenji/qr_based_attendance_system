@@ -6,11 +6,12 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import hash_password, verify_password
 
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.cache import get_face_embedding_cached
@@ -381,11 +382,7 @@ class StudentService:
                 .join(Professor, Professor.id == CourseProfessor.professor_id)
                 .where(
                     CourseProfessor.offering_id.in_(offering_ids),
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
             )
         ).all()

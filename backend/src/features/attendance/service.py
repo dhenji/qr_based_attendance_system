@@ -24,6 +24,7 @@ from sqlalchemy.orm import DeclarativeBase
 from core.config import Settings, get_settings
 from core.exceptions import AppException
 
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.datetimes import end_of_day, ensure_aware
 from shared.email import OutboundEmail, dispatch_emails
@@ -1752,11 +1753,7 @@ class AttendanceService:
             assigned = (
                 select(CourseProfessor.offering_id)
                 .where(CourseProfessor.professor_id == professor_id)
-                .where(CourseProfessor.effective_from <= today)
-                .where(
-                    (CourseProfessor.effective_to.is_(None))
-                    | (CourseProfessor.effective_to >= today)
-                )
+                .where(active_assignment_clause(today))
             )
             stmt = stmt.where(CourseOffering.id.in_(assigned))
 
@@ -2041,11 +2038,7 @@ class AttendanceService:
                     )
                     .join(Professor, Professor.id == CourseProfessor.professor_id)
                     .where(CourseProfessor.offering_id.in_(offering_ids))
-                    .where(CourseProfessor.effective_from <= today)
-                    .where(
-                        (CourseProfessor.effective_to.is_(None))
-                        | (CourseProfessor.effective_to >= today)
-                    )
+                    .where(active_assignment_clause(today))
                 )
             ).all()
             for offering_id, first, last in prof_rows:

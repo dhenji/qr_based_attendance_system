@@ -41,6 +41,7 @@ from typing import Any, Iterable, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.accounts import Account, account_from_row, account_query
 from shared.enums import AuditAction, AuditEntity
 
 from features.auth.model import User
@@ -514,26 +515,6 @@ class AuditActor:
 
 
 @dataclass
-class _Account:
-    """A `users` row with the name its roster carries, if any.
-
-    The `users` table has no name columns — a person's name lives on their
-    student or professor row — so the name is outer-joined in, exactly as
-    `features/admin/service.py::_users_stmt` does it.
-    """
-
-    id: int
-    email: str
-    role: str
-    first_name: str | None = None
-    last_name: str | None = None
-
-    @property
-    def name(self) -> str:
-        return _full_name(self.first_name, self.last_name) or self.email
-
-
-@dataclass
 class AuditLookups:
     """The names a page of audit rows refers to, gathered once.
 
@@ -547,7 +528,7 @@ class AuditLookups:
     functions that can be exercised without a database.
     """
 
-    users: dict[int, "_Account"] = field(default_factory=dict)
+    users: dict[int, Account] = field(default_factory=dict)
     programs: dict[int, Program] = field(default_factory=dict)
     year_levels: dict[int, YearLevel] = field(default_factory=dict)
     courses: dict[int, Course] = field(default_factory=dict)
@@ -714,25 +695,10 @@ class AuditLabelResolver:
 
         if user_ids:
             self._lookups.users = {
-                row[0].id: _Account(
-                    id=row[0].id,
-                    email=row[0].email,
-                    role=row[0].role,
-                    first_name=row[1] or row[3],
-                    last_name=row[2] or row[4],
-                )
+                row[0].id: account_from_row(row, trim_name_parts=True)
                 for row in (
                     await self._session.execute(
-                        select(
-                            User,
-                            Student.first_name,
-                            Student.last_name,
-                            Professor.first_name,
-                            Professor.last_name,
-                        )
-                        .outerjoin(Student, Student.user_id == User.id)
-                        .outerjoin(Professor, Professor.user_id == User.id)
-                        .where(User.id.in_(user_ids))
+                        account_query().where(User.id.in_(user_ids))
                     )
                 ).all()
             }

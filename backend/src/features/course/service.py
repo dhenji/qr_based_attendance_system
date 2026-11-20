@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.csv_import import (
@@ -1646,11 +1647,7 @@ class CourseService:
                 select(CourseProfessor).where(
                     CourseProfessor.offering_id == offering_id,
                     CourseProfessor.professor_id == professor_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
             )
         ).one_or_none()
