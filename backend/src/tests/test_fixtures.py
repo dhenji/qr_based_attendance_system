@@ -19,22 +19,19 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import Settings
+
 from shared.enums import UserRole, ValidationStatus
-from shared.face_embeddings import embedding_to_base64, serialize_embedding
+from shared.face_embeddings import (
+    cosine_similarity,
+    embedding_from_base64,
+    serialize_embedding,
+)
 
 from features.attendance.model import Attendance
 from features.auth.model import User
 from features.program.model import YearLevel
-from tests.conftest import Factories
-
-
-def _make_live_emb_fix() -> str:
-    ref = np.ones(128, dtype=np.float32) * 0.1
-    ref = ref / np.linalg.norm(ref)
-    live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
-    live = live / np.linalg.norm(live)
-    return embedding_to_base64(live)
-
+from tests.conftest import Factories, make_live_embedding
 
 CLASSROOM_LAT = 14.0
 CLASSROOM_LNG = 121.0
@@ -276,7 +273,7 @@ async def test_student_scans_a_live_session_over_http(
                 "ear_samples": [0.2, 0.21],
                 "pnp_evidence": {"depth_mean": 0.4},
             },
-            "live_face_embedding": _make_live_emb_fix(),
+            "live_face_embedding": make_live_embedding(),
             "scanned_at": session.created_at.isoformat(),
             "scanned_via": "qr_camera",
         },
@@ -329,7 +326,7 @@ async def test_scan_outside_the_geofence_returns_403(
                 "ear_samples": [0.2],
                 "pnp_evidence": {"depth_mean": 0.4},
             },
-            "live_face_embedding": _make_live_emb_fix(),
+            "live_face_embedding": make_live_embedding(),
             "scanned_at": session.created_at.isoformat(),
             "scanned_via": "qr_camera",
         },
@@ -369,7 +366,7 @@ async def test_idempotency_header_makes_a_resubmission_a_replay(
             "ear_samples": [0.2, 0.21],
             "pnp_evidence": {"depth_mean": 0.4},
         },
-        "live_face_embedding": _make_live_emb_fix(),
+        "live_face_embedding": make_live_embedding(),
         "scanned_at": session.created_at.isoformat(),
         "scanned_via": "qr_camera",
     }
@@ -657,3 +654,30 @@ async def test_session_factory_respects_the_window_check_constraint(
         session.present_window_minutes + session.late_window_minutes
         <= session.duration_minutes
     )
+
+
+# --- make_live_embedding helper -----------------------------------------
+
+
+def test_make_live_embedding_lands_in_the_requested_band(settings: Settings) -> None:
+    """Each branch must land on the right side of the configured thresholds.
+
+    The helper hard-codes the fixture reference vector, so the bands are a
+    property of the recipe rather than of the database. This pins them so a
+    re-tune cannot silently turn the review branch into a mismatch.
+    """
+
+    ref = np.ones(128, dtype=np.float32) * 0.1
+    ref = ref / np.linalg.norm(ref)
+
+    high = embedding_from_base64(make_live_embedding(0.9))
+    review = embedding_from_base64(make_live_embedding(0.7))
+    mismatch = embedding_from_base64(make_live_embedding(0.4))
+
+    assert cosine_similarity(ref, high) >= settings.face_match_threshold
+    assert (
+        settings.face_review_band_low
+        <= cosine_similarity(ref, review)
+        < settings.face_match_threshold
+    )
+    assert cosine_similarity(ref, mismatch) < settings.face_review_band_low

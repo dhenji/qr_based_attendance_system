@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Query, status
 
 from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-from api.deps import AdminServiceDep, AuthServiceDep, require_role
+from api.deps import AdminServiceDep, AdminUser, AuthServiceDep
 from features.admin.constants import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -19,7 +17,6 @@ from features.admin.schema import (
     AdminUserCreateResponse,
     AdminUserRead,
 )
-from features.auth.model import User
 from features.auth.schema import (
     AdminPasswordResetResponse,
     LockoutOverrideRequest,
@@ -41,7 +38,7 @@ router = APIRouter(prefix="/admin/users")
     summary="List users (search, role/status filters, paginated)",
 )
 async def list_users(
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     service: AdminServiceDep,
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     role: UserRole | None = Query(default=None),
@@ -69,7 +66,7 @@ async def list_users(
 )
 async def create_user(
     payload: AdminUserCreate,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     service: AdminServiceDep,
 ) -> AdminUserCreateResponse:
     return await service.create_user(payload=payload, actor_id=actor.id)
@@ -82,7 +79,7 @@ async def create_user(
 )
 async def reset_user_password(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     auth_service: AuthServiceDep,
 ) -> AdminPasswordResetResponse:
     # `AuthService` owns the credential write — this route names a `users.id`
@@ -100,7 +97,7 @@ async def reset_user_password(
 )
 async def deactivate_user(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     service: AdminServiceDep,
 ) -> None:
     await service.deactivate_user(
@@ -115,7 +112,7 @@ async def deactivate_user(
 )
 async def reactivate_user(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     service: AdminServiceDep,
 ) -> None:
     await service.reactivate_user(
@@ -131,7 +128,7 @@ async def reactivate_user(
 )
 async def get_lockout_status(
     user_id: int,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     auth_service: AuthServiceDep,
 ) -> LockoutStatusResponse:
     data = await auth_service.get_lockout_status(
@@ -148,7 +145,7 @@ async def get_lockout_status(
 async def release_lockout(
     user_id: int,
     payload: LockoutReasonRequest,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.release_lockout(
@@ -164,7 +161,7 @@ async def release_lockout(
 async def reset_lockout_counter(
     user_id: int,
     payload: LockoutReasonRequest,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.reset_violation_counter(
@@ -180,7 +177,7 @@ async def reset_lockout_counter(
 async def grant_lockout_override(
     user_id: int,
     payload: LockoutOverrideRequest,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.grant_override(
@@ -200,7 +197,7 @@ async def grant_lockout_override(
 async def revoke_lockout_override(
     user_id: int,
     payload: LockoutReasonRequest,
-    actor: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    actor: AdminUser,
     auth_service: AuthServiceDep,
 ) -> None:
     await auth_service.revoke_override(

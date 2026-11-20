@@ -25,6 +25,7 @@ attendance-system/
 │   │   │   ├── enums.py              # UserRole, AuditEntity, AuditAction, OtpPurpose, ValidationStatus, ExcuseInitiatedBy, ExcuseInitiatedVia, ExcuseStatus, RiskLevel, BackupKind, BackupStorage, BackupStatus, ScannedVia, SessionType, SyncStatus, QueueStatus (16)
 │   │   │   ├── mixins.py             # CreatedAtMixin, TimestampMixin
 │   │   │   ├── dependencies.py       # pagination + reusable annotated deps
+│   │   │   ├── exceptions.py         # cross-feature exceptions (e.g. PdfExportUnavailableException)
 │   │   │   ├── captcha.py            # Cloudflare Turnstile siteverify (key-gated no-op when unset)
 │   │   │   ├── email.py              # SMTP sender (OTP + excuse notifications), config-gated no-op when SMTP_HOST unset
 │   │   │   ├── cache.py              # LRU cache (O(1) student lookup)
@@ -36,7 +37,7 @@ attendance-system/
 │   │   ├── api/                      # Router aggregation
 │   │   │   ├── __init__.py
 │   │   │   ├── router.py             # mounts auth, admin/users, student, attendance, session, professor; course & enrollment routers exist unmounted
-│   │   │   └── deps.py               # _get_db, _get_current_user, require_role, AuthServiceDep/AdminServiceDep
+│   │   │   └── deps.py               # _get_db, _get_current_user, require_role, AdminUser, AuthServiceDep/AdminServiceDep
 │   │   │
 │   │   ├── features/                 # Vertical slices — one folder per domain
 │   │   │   ├── auth/                 # model.py: User, OtpCodes, MfaBackupCodes (routers mounted)

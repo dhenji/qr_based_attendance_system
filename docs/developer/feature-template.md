@@ -351,12 +351,9 @@ ProgramServiceDep = Annotated[ProgramService, Depends(_get_program_service)]
 FastAPI router with endpoint definitions.
 
 ```python
-from typing import Annotated
+from fastapi import APIRouter, Query, status
 
-from fastapi import APIRouter, Depends, Query, status
-
-from api.deps import ProgramServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, ProgramServiceDep
 from features.program.constants import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -364,7 +361,6 @@ from features.program.constants import (
     SEARCH_MAX_LENGTH,
 )
 from features.program.schema import ProgramCreate, ProgramRead
-from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
 # The full contract path lives here, not in api/router.py: it passes no prefix=
@@ -379,7 +375,7 @@ router = APIRouter(prefix="/admin/programs")
     summary="List programs (search, status filter, paginated)",
 )
 async def list_programs(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProgramServiceDep,
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     is_active: bool | None = Query(default=None),
@@ -397,7 +393,7 @@ async def list_programs(
 )
 async def create_program(
     payload: ProgramCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: ProgramServiceDep,
 ) -> ProgramRead:
     return await service.create(payload=payload, actor_id=user.id)
@@ -406,7 +402,7 @@ async def create_program(
 @router.get("/{program_id}", response_model=ProgramRead, summary="Get one program")
 async def get_program(
     program_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: ProgramServiceDep,
 ) -> ProgramRead:
     return await service.get(program_id=program_id)
@@ -429,8 +425,10 @@ the handler forwards `actor_id=user.id` to the service for the audit row.
 - The session dependency is **`_get_db`** — there is no public `get_db`
 - The admin CRUD route set is `GET ""`, `POST ""`, `GET /{id}`, `PATCH /{id}`,
   `DELETE /{id}` — in that order in the module, each with a one-line `summary=`
-- **Every admin route carries its own role guard**:
-  `_: Annotated[User, Depends(require_role(UserRole.ADMIN))]`. `super_admin` passes
+- **Every admin route carries its own role guard**: the shared `AdminUser` alias
+  (`api/deps.py`, defined once as
+  `Annotated[User, Depends(require_role(UserRole.ADMIN))]`). Name the parameter `_` when
+  unused, or `user` when the handler forwards `actor_id=user.id`. `super_admin` passes
   automatically, so routes never name both roles
 - Pagination and search bounds are declared per route via `Query(...)` so they appear in the
   OpenAPI schema. **Import those constants from the slice's `constants.py`**, which

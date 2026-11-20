@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, File, Query, Response, UploadFile, status
 
 from shared.csv_import import csv_template_header
-from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-from api.deps import AuthServiceDep, StudentServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, AuthServiceDep, StudentServiceDep
 from features.auth.schema import AdminPasswordResetResponse
 from features.student.constants import (
     DEFAULT_PAGE,
@@ -49,7 +47,7 @@ router = APIRouter(prefix="/admin/students")
     summary="List students (search, program/year/section/status filters, paginated)",
 )
 async def list_students(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: StudentServiceDep,
     search: str | None = Query(default=None, max_length=SEARCH_MAX_LENGTH),
     program_id: int | None = Query(default=None, gt=0),
@@ -84,7 +82,7 @@ async def list_students(
 )
 async def create_student(
     payload: StudentCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: StudentServiceDep,
 ) -> StudentRead:
     return await service.create(payload=payload, actor_id=user.id)
@@ -99,7 +97,7 @@ async def create_student(
 )
 async def import_students(
     file: Annotated[UploadFile, File(description="students.csv")],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: StudentServiceDep,
 ) -> StudentImportResult:
     content: bytes = await file.read()
@@ -112,7 +110,7 @@ async def import_students(
     summary="Download the student import CSV template",
 )
 async def download_import_template(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
 ) -> Response:
     return Response(
         content=csv_template_header(ROSTER_CSV_COLUMNS),
@@ -128,7 +126,7 @@ async def download_import_template(
 )
 async def get_student(
     student_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: StudentServiceDep,
 ) -> StudentDetail:
     return await service.get(student_id=student_id)
@@ -142,7 +140,7 @@ async def get_student(
 async def update_student(
     student_id: int,
     payload: StudentUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: StudentServiceDep,
 ) -> StudentRead:
     return await service.update(
@@ -157,7 +155,7 @@ async def update_student(
 )
 async def hard_delete_student(
     student_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: StudentServiceDep,
 ) -> None:
     await service.hard_delete(student_id=student_id, actor_id=user.id)
@@ -170,7 +168,7 @@ async def hard_delete_student(
 )
 async def reset_student_password(
     student_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: StudentServiceDep,
     auth_service: AuthServiceDep,
 ) -> AdminPasswordResetResponse:

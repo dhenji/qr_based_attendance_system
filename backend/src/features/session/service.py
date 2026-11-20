@@ -146,21 +146,19 @@ def _session_type_of(row: Session) -> SessionType:
 
 
 def _is_remote_of(row: Session) -> bool:
-    """Remote flag, defaulting to False for hand-rolled fakes."""
-    value = getattr(row, "is_remote", False)
-    return bool(value) if value is not None else False
+    """Remote flag, defaulting to False on an unflushed row."""
+    return bool(row.is_remote)
 
 
 def _geofence_enabled_of(row: Session) -> bool:
-    """Geofence flag, defaulting to True for hand-rolled fakes."""
-    value = getattr(row, "geofence_enabled", True)
-    return bool(value) if value is not None else True
+    """Geofence flag, defaulting to True on an unflushed row."""
+    value = row.geofence_enabled
+    return True if value is None else bool(value)
 
 
 def _schedule_overridden_of(row: Session) -> bool:
-    """Override flag, defaulting to False for hand-rolled fakes."""
-    value = getattr(row, "schedule_overridden", False)
-    return bool(value) if value is not None else False
+    """Override flag, defaulting to False on an unflushed row."""
+    return bool(row.schedule_overridden)
 
 
 def _session_status(
@@ -389,7 +387,7 @@ class SessionService:
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
-            attendance_attempt_limit=getattr(row, "attendance_attempt_limit", 0) or 0,
+            attendance_attempt_limit=row.attendance_attempt_limit or 0,
             qr_payload=QRPayload.model_validate_json(qr_json),
             expires_at=row.expires_at,
             scheduled_start_time=row.scheduled_start_time,
@@ -744,7 +742,7 @@ class SessionService:
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
-            attendance_attempt_limit=getattr(row, "attendance_attempt_limit", 0) or 0,
+            attendance_attempt_limit=row.attendance_attempt_limit or 0,
             session_code=row.session_code,
             scan_window_remaining=self._scan_window_remaining(row, now),
             scheduled_start_time=row.scheduled_start_time,
@@ -760,20 +758,18 @@ class SessionService:
             enrolled_count=enrolled_count,
             remaining=max(0, enrolled_count - scanned),
             pending_sync_count=await self._pending_sync_count(session_id),
-            duration_minutes=getattr(row, "duration_minutes", 0) or 0,
-            present_window_minutes=getattr(row, "present_window_minutes", 0) or 0,
-            late_window_minutes=getattr(row, "late_window_minutes", 0) or 0,
-            classroom_name=getattr(row, "classroom_name", None),
-            classroom_lat=getattr(row, "classroom_lat", None),
-            classroom_lng=getattr(row, "classroom_lng", None),
-            classroom_radius_meters=getattr(row, "classroom_radius_meters", 0) or 0,
+            duration_minutes=row.duration_minutes or 0,
+            present_window_minutes=row.present_window_minutes or 0,
+            late_window_minutes=row.late_window_minutes or 0,
+            classroom_name=row.classroom_name,
+            classroom_lat=row.classroom_lat,
+            classroom_lng=row.classroom_lng,
+            classroom_radius_meters=row.classroom_radius_meters or 0,
             schedule_overridden=_schedule_overridden_of(row),
-            actual_start_time=getattr(row, "actual_start_time", None),
-            original_scheduled_start_time=getattr(
-                row, "original_scheduled_start_time", None
-            ),
-            override_reason=getattr(row, "override_reason", None),
-            created_at=getattr(row, "created_at", None),
+            actual_start_time=row.actual_start_time,
+            original_scheduled_start_time=row.original_scheduled_start_time,
+            override_reason=row.override_reason,
+            created_at=row.created_at,
             compliance_rate=compliance,
             participation_rate=participation,
             students=self._active_student_items(students, records, status),
@@ -891,8 +887,7 @@ class SessionService:
             ),
             "override_reason": row.override_reason,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None,
-            "attendance_attempt_limit": getattr(row, "attendance_attempt_limit", 0)
-            or 0,
+            "attendance_attempt_limit": row.attendance_attempt_limit or 0,
         }
 
     async def verify_code(
@@ -941,10 +936,9 @@ class SessionService:
         # report the caller's attempt state in the response. Read-only:
         # verify_code consumes nothing, so the exhaustion raise carries
         # consumed=False while submit_scan's own rejection reports True.
-        limit: int = getattr(row, "attendance_attempt_limit", 0) or 0
+        limit: int = row.attendance_attempt_limit or 0
         attempts_used: int | None = None
         meta: AttemptMeta | None = None
-        limit_reached: bool = False
         if user_id is not None and limit > 0:
             student: Student | None = await self._session.scalar(
                 select(Student).where(Student.user_id == user_id).limit(1)
@@ -977,7 +971,6 @@ class SessionService:
             # Same single definition the scan path reports from; None when
             # unlimited or the caller has no resolvable student row.
             attempts_remaining=meta.remaining if meta is not None else None,
-            limit_reached=limit_reached,
             course_code=course.course_code,
             course_name=course.course_name,
             program_code=program.code,

@@ -4,13 +4,11 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, File, Query, UploadFile, status
 
-from shared.enums import UserRole
 from shared.pagination import PaginatedResponse
 
-from api.deps import CourseServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, CourseServiceDep
 from features.course.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from features.course.schema import (
     AssignmentRead,
@@ -47,7 +45,7 @@ router = APIRouter(prefix="/admin/offerings")
     summary="List offerings (program/year/semester/course/status filters, paginated)",
 )
 async def list_offerings(
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
     program_id: int | None = Query(default=None, gt=0),
     year_level_id: int | None = Query(default=None, gt=0),
@@ -76,7 +74,7 @@ async def list_offerings(
 )
 async def create_offering(
     payload: OfferingCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> OfferingRead:
     return await service.create_offering(payload=payload, actor_id=user.id)
@@ -89,7 +87,7 @@ async def create_offering(
 )
 async def get_offering(
     offering_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
 ) -> OfferingRead:
     return await service.get_offering(offering_id=offering_id)
@@ -103,7 +101,7 @@ async def get_offering(
 async def update_offering(
     offering_id: int,
     payload: OfferingUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> OfferingRead:
     return await service.update_offering(
@@ -118,7 +116,7 @@ async def update_offering(
 )
 async def hard_delete_offering(
     offering_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> None:
     await service.hard_delete_offering(offering_id=offering_id, actor_id=user.id)
@@ -134,7 +132,7 @@ async def hard_delete_offering(
 )
 async def list_components(
     offering_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
 ) -> Sequence[ComponentRead]:
     return await service.list_components(offering_id=offering_id)
@@ -149,7 +147,7 @@ async def list_components(
 async def create_component(
     offering_id: int,
     payload: ComponentCreate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> ComponentRead:
     return await service.create_component(
@@ -166,7 +164,7 @@ async def update_component(
     offering_id: int,
     component_id: int,
     payload: ComponentUpdate,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> ComponentRead:
     return await service.update_component(
@@ -185,7 +183,7 @@ async def update_component(
 async def archive_component(
     offering_id: int,
     component_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> None:
     await service.archive_component(
@@ -200,7 +198,7 @@ async def archive_component(
 )
 async def list_professors(
     offering_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
 ) -> Sequence[AssignmentRead]:
     return await service.list_assignments(offering_id=offering_id)
@@ -215,7 +213,7 @@ async def list_professors(
 async def assign_professor(
     offering_id: int,
     payload: ProfessorAssignment,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> AssignmentRead:
     return await service.assign_professor(
@@ -230,7 +228,7 @@ async def assign_professor(
 async def remove_professor(
     offering_id: int,
     professor_id: int,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
     effective_from: Annotated[
         date | None,
@@ -261,7 +259,7 @@ async def permanently_remove_professor(
             description=("Start date of the exact assignment row to permanently remove")
         ),
     ],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> None:
     await service.permanently_remove_professor(
@@ -282,7 +280,7 @@ async def reassign_professor(
     offering_id: int,
     professor_id: int,
     payload: ProfessorReassignment,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> AssignmentRead:
     return await service.reassign_professor(
@@ -302,7 +300,7 @@ async def reopen_professor(
     offering_id: int,
     professor_id: int,
     payload: ProfessorReopen,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> AssignmentRead:
     return await service.reopen_professor(
@@ -322,7 +320,7 @@ async def reopen_professor(
 async def bulk_enroll(
     offering_id: int,
     file: Annotated[UploadFile, File(description="students.csv")],
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> BulkEnrollResult:
     content: bytes = await file.read()
@@ -339,7 +337,7 @@ async def bulk_enroll(
 )
 async def get_roster(
     offering_id: int,
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    _: AdminUser,
     service: CourseServiceDep,
     section: str | None = Query(default=None),
     search: str | None = Query(default=None),
@@ -359,7 +357,7 @@ async def get_roster(
 async def unenroll_student(
     offering_id: int,
     student_number: str,
-    user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    user: AdminUser,
     service: CourseServiceDep,
 ) -> None:
     await service.unenroll_student(

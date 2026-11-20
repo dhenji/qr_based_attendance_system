@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Query, Response, status
 
-from shared.enums import UserRole
 from shared.pagination import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
-from api.deps import SystemServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, SystemServiceDep
 from features.system.constants import (
     ACTION_MAX_LENGTH,
     ACTOR_MAX_LENGTH,
@@ -30,8 +28,6 @@ from features.system.schema import (
 # ONLY. All three paths are unique across the mounted admin routers, so one
 # router covers the slice.
 router = APIRouter(prefix="/admin")
-
-AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 
 @router.get(

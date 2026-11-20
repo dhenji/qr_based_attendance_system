@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated
+from fastapi import APIRouter
 
-from fastapi import APIRouter, Depends
-
-from shared.enums import UserRole
-
-from api.deps import DashboardServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, DashboardServiceDep
 from features.dashboard.schema import AdminDashboardResponse
 
 # Sibling of student_router.py and professor_router.py in this slice; see the
@@ -19,8 +14,6 @@ from features.dashboard.schema import AdminDashboardResponse
 # `/admin/system/*`, `/admin/backups*` and `/admin/audit-logs`; `/dashboard` is
 # unique among them. DO NOT mount this router twice.
 router = APIRouter(prefix="/admin")
-
-AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 
 @router.get(

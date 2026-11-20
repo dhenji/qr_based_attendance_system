@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import database
+from core.exceptions import DomainException
 from core.security import hash_password
 
 from shared.enums import AuditAction, AuditEntity
@@ -28,6 +29,7 @@ from shared.enums import AuditAction, AuditEntity
 from features.auth.exceptions import (
     AccountLockedException,
     InvalidCredentialsException,
+    PermanentAccountLockedException,
 )
 from features.auth.model import User
 from features.auth.service import AuthService
@@ -160,6 +162,30 @@ async def test_locked_account_reports_the_remaining_window(
 
     reloaded = await _reload(test_db_session, user)
     assert reloaded.is_locked is True
+
+
+async def test_permanently_locked_account_reports_a_domain_error(
+    test_db_session: AsyncSession, factories: Factories
+) -> None:
+    """A level past the escalation table never auto-clears.
+
+    The permanent branch is the one lockout path with no natural expiry, so
+    it is also the one an admin must be able to distinguish from a temporary
+    lock. It raises the domain-level exception (423), not a bare AppException.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    user = await _user(factories, is_locked=True, lockout_level=99)
+    user.locked_at = datetime.now(timezone.utc) - timedelta(days=365)
+    await test_db_session.commit()
+    service = await _service(test_db_session)
+
+    with pytest.raises(PermanentAccountLockedException) as excinfo:
+        await service.login(user.email, PASSWORD)
+
+    assert isinstance(excinfo.value, DomainException)
+    assert excinfo.value.status_code == 423
+    assert excinfo.value.code == "account_permanently_locked"
 
 
 async def test_expired_lock_releases_and_allows_login(

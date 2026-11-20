@@ -33,7 +33,7 @@ from shared.enums import UserRole, ValidationStatus
 from shared.face_embeddings import embedding_to_base64, serialize_embedding
 
 from features.attendance.model import Attendance, AttendanceAttemptCounter
-from tests.conftest import Factories
+from tests.conftest import Factories, make_live_embedding
 
 # One point either side of the classroom coordinates below.
 INSIDE_LAT = 14.0001
@@ -42,14 +42,6 @@ CLASSROOM_LAT = 14.0
 CLASSROOM_LNG = 121.0
 HIGH_SCORE = 0.92
 REVIEW_BAND_SCORE = 0.68
-
-
-def _make_live_emb_http() -> str:
-    ref = np.ones(128, dtype=np.float32) * 0.1
-    ref = ref / np.linalg.norm(ref)
-    live = ref * 0.95 + np.random.RandomState(42).randn(128).astype(np.float32) * 0.01
-    live = live / np.linalg.norm(live)
-    return embedding_to_base64(live)
 
 
 def liveness_evidence_payload() -> dict[str, Any]:
@@ -75,7 +67,7 @@ def scan_body(
         "student_number": student_number,
         "gps": {"lat": INSIDE_LAT, "lng": INSIDE_LNG, "accuracy": 5.0},
         "liveness_evidence": liveness_evidence_payload(),
-        "live_face_embedding": _make_live_emb_http(),
+        "live_face_embedding": make_live_embedding(),
         "scanned_at": scanned_at.isoformat()
         if hasattr(scanned_at, "isoformat")
         else scanned_at,

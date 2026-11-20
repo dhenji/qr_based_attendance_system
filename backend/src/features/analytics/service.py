@@ -15,6 +15,7 @@ from core.exceptions import DomainException
 from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import ensure_aware
 from shared.enums import RiskLevel, ValidationStatus
+from shared.exceptions import PdfExportUnavailableException
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -917,11 +918,7 @@ class AnalyticsService:
         persistence stay separate — this returns text, the router streams it.
         """
         if format != "csv":
-            raise DomainException(
-                "PDF export is not available yet; request format csv",
-                code="validation_error",
-                field="format",
-            )
+            raise PdfExportUnavailableException()
 
         compared: CourseComparisonResponse = await self.get_course_comparison(
             program_id=program_id,

@@ -55,6 +55,10 @@ def _user(**kwargs):
         lockout_level=0,
         last_lockout_at=None,
         lockout_override_until=None,
+        token_version=0,
+        last_activity_at=None,
+        recovery_code_hash=None,
+        recovery_code_used_at=None,
     )
 
     defaults.update(kwargs)
@@ -369,10 +373,16 @@ def _resettable_user(**kwargs):
         lockout_level=0,
         last_lockout_at=None,
         lockout_override_until=None,
+        token_version=0,
+        last_activity_at=None,
+        recovery_code_hash=None,
+        recovery_code_used_at=None,
         password_hash=hash_password("OldPass1!"),
         consumed_at=None,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
         otp_hash=hash_otp("123456"),
+        failed_attempts=0,
+        recovery_grant_jti=None,
     )
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)

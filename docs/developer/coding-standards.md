@@ -195,6 +195,9 @@ class ConcreteConflict(FeatureDomainException):     # 409
 
 - **Codes come from `api-contracts.md`** — never invent new ones
 - 404 may fold ID into message; 409 reuses existing class names where contract overlaps (`EmailAlreadyExists`)
+- **A contract enforced identically by several slices lives in `shared/exceptions.py`** — e.g.
+  `PdfExportUnavailableException` keeps the message/code/field for the analytics, system, and
+  professor-report exports in one place. Feature-local `exceptions.py` modules stay the default.
 
 ### 1.7 Service Conventions
 
@@ -294,10 +297,12 @@ seam, and is imported by three service modules and one admin router rather than 
   does not have.
 - **The admin CRUD route set** is `GET ""`, `POST ""`, `GET /{id}`, `PATCH /{id}`,
   `DELETE /{id}` — in that order in the module, each with a one-line `summary=`.
-- **Every admin route carries its own role guard**: a
-  `_: Annotated[User, Depends(require_role(UserRole.ADMIN))]` parameter. `super_admin`
-  passes automatically (`_role_matches` treats it as a superset of `admin`), so routes
-  never need to name both roles.
+- **Every admin route carries its own role guard**: the shared `AdminUser` alias
+  (`api/deps.py`, defined once as
+  `Annotated[User, Depends(require_role(UserRole.ADMIN))]`). Name the parameter `_` when
+  unused, or `user`/`actor` when the handler needs the actor id. `super_admin` passes
+  automatically (`_role_matches` treats it as a superset of `admin`), so routes never need
+  to name both roles.
 - **Pagination is declared per route, not via a dependency**, so the bounds are visible
   in the OpenAPI schema: `page: int = Query(default=DEFAULT_PAGE, ge=1)` and
   `size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)`, with the
@@ -310,8 +315,8 @@ seam, and is imported by three service modules and one admin router rather than 
 - **204 responses declare `status_code=status.HTTP_204_NO_CONTENT` and return `None`** —
   never a body, and never a status code the contract does not document.
 - Mount all feature routers in `api/router.py`.
-- Dependencies: `_get_db` for session (there is no public `get_db`), role-guard
-  dependencies for authorization via `require_role(*UserRole)`, `<Feature>ServiceDep` for
+- Dependencies: `_get_db` for session (there is no public `get_db`), `AdminUser` for
+  admin routes (or `require_role(*UserRole)` for other roles), `<Feature>ServiceDep` for
   a class-based service.
 - Use `response_model` on endpoint decorators (`PaginatedResponse[FooRead]` for lists).
 - Paginated responses: `{items, total, page, size}`.

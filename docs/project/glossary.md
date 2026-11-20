@@ -217,7 +217,7 @@ Account activation flow where a student/professor enters their official email â†
 | Value       | Meaning                                |
 | ----------- | -------------------------------------- |
 | `full`      | Full pg_dump of all tables (encrypted) |
-| `analytics` | Aggregated CSV/PDF export              |
+| `analytics` | Aggregated CSV export                  |
 
 ### BackupStorageBackend (`backup_log.storage_backend`)
 

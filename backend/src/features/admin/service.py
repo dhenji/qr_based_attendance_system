@@ -331,7 +331,7 @@ class AdminService:
             raise ForbiddenException()
 
         user.is_active = False
-        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
         await self._session.flush()
 
     async def reactivate_user(
@@ -357,7 +357,7 @@ class AdminService:
             raise ForbiddenException()
 
         user.is_active = True
-        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+        user.token_version = (user.token_version or 0) + 1
         await self._session.flush()
 
     def _roster_handles(self) -> dict[UserRole, _RosterHandle]:

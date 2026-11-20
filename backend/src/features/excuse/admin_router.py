@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated
+from fastapi import APIRouter, Query
 
-from fastapi import APIRouter, Depends, Query
-
-from shared.enums import UserRole
 from shared.pagination import (
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
@@ -12,8 +9,7 @@ from shared.pagination import (
     PaginatedResponse,
 )
 
-from api.deps import ExcuseServiceDep, require_role
-from features.auth.model import User
+from api.deps import AdminUser, ExcuseServiceDep
 from features.excuse.schema import ExcuseRequestRead
 
 # This module owns /admin/excuses ONLY.
@@ -25,8 +21,6 @@ from features.excuse.schema import ExcuseRequestRead
 # Do not add admin routes to the other two — they would register under
 # /api/professor/... or /api/student/... instead of /api/admin/excuses/...
 router = APIRouter(prefix="/admin/excuses")
-
-AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 
 
 @router.get(
