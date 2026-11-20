@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import Row, Select, func, or_, select
+from sqlalchemy import Row, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.security import hash_password, verify_password
 from core.timezones import resolve_timezone
 
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.csv_import import (
@@ -157,11 +158,7 @@ def _assignments_stmt(professor_id: int) -> Select[tuple[Any, ...]]:
         .join(YearLevel, YearLevel.id == CourseOffering.year_level_id)
         .where(
             CourseProfessor.professor_id == professor_id,
-            CourseProfessor.effective_from <= today,
-            or_(
-                CourseProfessor.effective_to.is_(None),
-                CourseProfessor.effective_to >= today,
-            ),
+            active_assignment_clause(today),
             CourseOffering.is_active.is_(True),
         )
         .order_by(CourseOffering.id.asc())

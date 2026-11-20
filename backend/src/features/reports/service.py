@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DomainException
 
+from shared.assignments import active_assignment_clause
 from shared.cohorts import CohortKey, group_by_cohort
 from shared.datetimes import end_of_day, ensure_aware
 from shared.enums import ValidationStatus
@@ -501,11 +502,7 @@ class ReportsService:
         opened = select(Session.offering_id).where(Session.professor_id == professor_id)
         assigned = select(CourseProfessor.offering_id).where(
             CourseProfessor.professor_id == professor_id,
-            CourseProfessor.effective_from <= today,
-            or_(
-                CourseProfessor.effective_to.is_(None),
-                CourseProfessor.effective_to >= today,
-            ),
+            active_assignment_clause(today),
         )
         rows: Sequence[int] = (
             await self._session.scalars(opened.union(assigned))

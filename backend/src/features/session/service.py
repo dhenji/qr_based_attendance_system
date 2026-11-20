@@ -14,6 +14,7 @@ from core.config import Settings, get_settings
 from core.security import build_qr_payload, generate_session_code
 from core.timezones import resolve_timezone
 
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.datetimes import end_of_day, ensure_aware
@@ -1582,11 +1583,7 @@ class SessionService:
             .where(
                 CourseProfessor.offering_id == offering_id,
                 CourseProfessor.professor_id == professor_id,
-                CourseProfessor.effective_from <= today,
-                or_(
-                    CourseProfessor.effective_to.is_(None),
-                    CourseProfessor.effective_to >= today,
-                ),
+                active_assignment_clause(today),
             )
             .exists()
         )
@@ -1607,11 +1604,7 @@ class SessionService:
                 .where(
                     CourseProfessor.offering_id == offering_id,
                     CourseProfessor.professor_id == professor_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
                 .order_by(CourseProfessor.effective_from.desc())
                 .limit(1)

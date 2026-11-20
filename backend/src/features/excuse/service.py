@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.assignments import active_assignment_clause
 from shared.audit import record_audit
 from shared.base import BaseCRUD
 from shared.datetimes import end_of_day, ensure_aware
@@ -587,11 +588,7 @@ class ExcuseService:
             .where(
                 CourseProfessor.offering_id == Session.offering_id,
                 CourseProfessor.professor_id == professor.id,
-                CourseProfessor.effective_from <= today,
-                or_(
-                    CourseProfessor.effective_to.is_(None),
-                    CourseProfessor.effective_to >= today,
-                ),
+                active_assignment_clause(today),
             )
             .exists()
         )
@@ -868,11 +865,7 @@ class ExcuseService:
                 .outerjoin(User, User.id == Professor.user_id)
                 .where(
                     CourseProfessor.offering_id == offering_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
             )
         ).all()
@@ -1196,11 +1189,7 @@ class ExcuseService:
                 .where(
                     CourseProfessor.offering_id == offering_id,
                     CourseProfessor.professor_id == professor_id,
-                    CourseProfessor.effective_from <= today,
-                    or_(
-                        CourseProfessor.effective_to.is_(None),
-                        CourseProfessor.effective_to >= today,
-                    ),
+                    active_assignment_clause(today),
                 )
                 .order_by(CourseProfessor.effective_from.desc())
                 .limit(1)
