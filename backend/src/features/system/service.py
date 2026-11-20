@@ -41,6 +41,7 @@ from core.database import database
 from core.exceptions import DomainException
 from core.scheduler import JOB_BACKUP, scheduled_job_running, track
 
+from shared.accounts import account_query
 from shared.audit import record_audit
 from shared.datetimes import ensure_aware
 from shared.enums import (
@@ -265,12 +266,7 @@ def _actor_ids(actor: str) -> Select[Any]:
     ]
     if needle.isdigit():
         conditions.append(User.id == int(needle))
-    return (
-        select(User.id)
-        .outerjoin(Student, Student.user_id == User.id)
-        .outerjoin(Professor, Professor.user_id == User.id)
-        .where(or_(*conditions))
-    )
+    return account_query(User.id).where(or_(*conditions))
 
 
 def _audit_order(sort_by: str, sort_dir: str) -> tuple[Any, ...]:
