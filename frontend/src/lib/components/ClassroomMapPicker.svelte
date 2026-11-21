@@ -3,6 +3,7 @@
 	import { searchLocation, type LocationSearchResult, reverseGeocode } from '$lib/shared/utils/geo';
 	import { acquire } from '$lib/shared/location/manager';
 import { toMapPickerMessage } from '$lib/features/liveness/errors';
+	import { debounce } from '$lib/shared/utils/debounce';
 
 	interface Props {
 		lat: number | null;
@@ -43,7 +44,6 @@ let radiusCircle: any = null;
 	let results = $state<LocationSearchResult[]>([]);
 	let searching = $state(false);
 	let showResults = $state(false);
-	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	let expanded = $state(false);
 	const effectiveHeight = $derived(expanded ? '70vh' : height);
 
@@ -141,21 +141,26 @@ let radiusCircle: any = null;
 		}
 	}
 
+	const runSearch = debounce(async (query: string) => {
+		searching = true;
+		try {
+			const found = await searchLocation(query);
+			results = found;
+			showResults = found.length > 0;
+		} finally {
+			searching = false;
+		}
+	});
+
 	function scheduleSearch() {
-		if (searchTimer) clearTimeout(searchTimer);
 		const q = searchQuery;
 		if (q.trim().length < 3) {
+			runSearch.cancel();
 			results = [];
 			showResults = false;
 			return;
 		}
-		searchTimer = setTimeout(async () => {
-			searching = true;
-			const found = await searchLocation(q);
-			results = found;
-			showResults = found.length > 0;
-			searching = false;
-		}, 300);
+		runSearch(q);
 	}
 
 	function selectResult(r: LocationSearchResult) {
@@ -257,6 +262,7 @@ let radiusCircle: any = null;
 	});
 
 	onDestroy(() => {
+		runSearch.cancel();
 		if (locateAbortController) {
 			try { locateAbortController.abort(); } catch { /* ignore */ }
 			locateAbortController = null;

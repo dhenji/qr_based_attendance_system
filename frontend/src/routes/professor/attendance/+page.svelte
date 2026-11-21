@@ -22,6 +22,8 @@
 	} from '$lib/features/report/service';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
 	import { formatDate, formatTime } from '$lib/shared/utils/format';
+	import { downloadTextFile } from '$lib/shared/utils/file';
+	import { debounce } from '$lib/shared/utils/debounce';
 
 	type LedgerRow = Awaited<ReturnType<typeof listRecords>>['items'][number];
 
@@ -93,13 +95,14 @@
 	let showAdvanced = $state(false);
 
 	// Debounce search
+	const searchDebounced = debounce((value: string) => {
+		search = value.trim();
+		currentPage = 1;
+	});
+
 	$effect(() => {
-		const value = searchInput;
-		const timer = setTimeout(() => {
-			search = value.trim();
-			currentPage = 1;
-		}, 300);
-		return () => clearTimeout(timer);
+		searchDebounced(searchInput);
+		return () => searchDebounced.cancel();
 	});
 
 	const byAcademicYear = $derived(
@@ -493,14 +496,7 @@
 					row.excuse_reason ?? ''
 				])
 			);
-			const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-			const anchor = document.createElement('a');
-			anchor.href = url;
-			anchor.download = `attendance-${to || initialRange.to}.csv`;
-			document.body.appendChild(anchor);
-			anchor.click();
-			anchor.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+			downloadTextFile(csv, `attendance-${to || initialRange.to}.csv`);
 		} catch (e: unknown) {
 			if (exportToken === token)
 				exportError = e instanceof Error && e.message ? e.message : 'Export failed. Please try again.';

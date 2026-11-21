@@ -6,6 +6,7 @@
 	import ReportBarChart from '$lib/features/report/components/ReportBarChart.svelte';
 	import ReportTrendChart from '$lib/features/report/components/ReportTrendChart.svelte';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { debounce } from '$lib/shared/utils/debounce';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import AttendanceSnapshot from '$lib/features/admin/analytics/components/AttendanceSnapshot.svelte';
 	import { page } from '$app/state';
@@ -101,9 +102,9 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	let datePreset = $state<'custom' | 'today' | 'week' | 'month' | 'semester' | 'year' | 'all'>('custom');
 	let advancedOpen = $state(false);
 	let atRiskSearch = $state('');
-	let atRiskSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	const atRiskSearchDebounced = debounce(() => void loadAtRiskPage(1));
 	let stagingSearch = $state('');
-	let stagingSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	const stagingSearchDebounced = debounce(() => void loadStagingPage(1));
 	let atriskPage = $state(1);
 	let stagingPage = $state(1);
 	let comparisonPage = $state(1);
@@ -321,7 +322,9 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 
 	onDestroy(() => {
 		pageAlive = false;
-		if (courseSearchTimer) clearTimeout(courseSearchTimer);
+		courseSearchDebounced.cancel();
+		atRiskSearchDebounced.cancel();
+		stagingSearchDebounced.cancel();
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -370,15 +373,14 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 		}
 	};
 
-	let courseSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	const courseSearchDebounced = debounce(() => void loadScopedCourseChoices(false));
 
 	const onCourseSearch = (value: string) => {
 		courseSearch = value;
 		// Catalogue search filters instantly via `visibleChoices`; a scoped
 		// search round-trips, so debounce it.
 		if (!programFilter) return;
-		if (courseSearchTimer) clearTimeout(courseSearchTimer);
-		courseSearchTimer = setTimeout(() => void loadScopedCourseChoices(false), 250);
+		courseSearchDebounced();
 	};
 
 	const clearCourseSelection = () => {
@@ -979,7 +981,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 					aria-label="Search at-risk students"
 					placeholder="Search by name"
 					bind:value={atRiskSearch}
-					oninput={() => { if (atRiskSearchTimer) clearTimeout(atRiskSearchTimer); atRiskSearchTimer = setTimeout(() => void loadAtRiskPage(1), 250); }}
+					oninput={() => atRiskSearchDebounced()}
 				/>
 				<select class="input" aria-label="Risk level filter" bind:value={riskLevel} onchange={apply}>
 					<option value="">All levels</option>
@@ -1084,7 +1086,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 					aria-label="Search staged students"
 					placeholder="Search by name"
 					bind:value={stagingSearch}
-					oninput={() => { if (stagingSearchTimer) clearTimeout(stagingSearchTimer); stagingSearchTimer = setTimeout(() => void loadStagingPage(1), 250); }}
+					oninput={() => stagingSearchDebounced()}
 				/>
 				<select class="input" aria-label="Risk level filter" bind:value={riskLevel} onchange={apply}>
 					<option value="">All levels</option>

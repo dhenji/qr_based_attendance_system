@@ -22,6 +22,7 @@
 	import { listCourses } from '$lib/features/admin/courses/service';
 	import { listProfessors } from '$lib/features/admin/service';
 	import { listPrograms, listYearLevels } from '$lib/features/admin/programs/service';
+	import { debounce } from '$lib/shared/utils/debounce';
 	import type {
 		AdminCourse,
 		AdminProfessor,
@@ -52,7 +53,7 @@
 	let dateTo = $state('');
 	let datePreset = $state<'custom' | 'today' | 'week' | 'month' | 'semester' | 'year' | 'all'>('custom');
 	let advancedOpen = $state(false);
-	let studentSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	const studentSearchDebounced = debounce(() => void load());
 	let sortBy = $state<SortColumn>('course');
 	let sortDir = $state<'asc' | 'desc'>('asc');
 
@@ -231,7 +232,7 @@
 
 	onDestroy(() => {
 		pageAlive = false;
-		if (studentSearchTimer) clearTimeout(studentSearchTimer);
+		studentSearchDebounced.cancel();
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -416,7 +417,7 @@
 				</div>
 				<div class="field">
 					<label class="form-label" for="att-student-search">Student search</label>
-					<input id="att-student-search" class="form-input" type="search" placeholder="Student name or number" bind:value={studentSearch} oninput={() => { if (studentSearchTimer) clearTimeout(studentSearchTimer); studentSearchTimer = setTimeout(() => void load(), 250); }} />
+					<input id="att-student-search" class="form-input" type="search" placeholder="Student name or number" bind:value={studentSearch} oninput={() => studentSearchDebounced()} />
 				</div>
 				<div class="field">
 					<span class="form-label">&nbsp;</span>

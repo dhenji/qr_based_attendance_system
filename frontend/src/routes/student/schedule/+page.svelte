@@ -5,6 +5,7 @@
 	import { getSchedule } from '$lib/features/student/service';
 	import type { ScheduledClass } from '$lib/shared/types';
 	import { dayLabels, formatWallClock } from '$lib/shared/utils/schedule';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	// My Schedule — live on GET /student/schedule (no params; identity from
 	// the Bearer token). One row per active enrollment ordered by offering_id;
@@ -12,11 +13,13 @@
 	// empty-state copy below.
 
 	const today = $derived(
-		new Date().toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric',
+		formatLocalDateTime(new Date(), {
+			date: {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric',
+			}
 		})
 	);
 

@@ -21,7 +21,7 @@
 	import { AUDIT_ACTION_TONES, subjectHref } from '$lib/features/admin/audit/present-fields';
 	import { auditFilterSchema } from '$lib/features/admin/audit/schema';
 	import { Routes } from '$lib/shared/constants/routes';
-	import { formatTime, formatUTCTimestamp } from '$lib/shared/utils/format';
+	import { formatLocalDateTime, formatTime, formatUTCTimestamp } from '$lib/shared/utils/format';
 	import type { AuditAction, AuditEntityType } from '$lib/shared/types';
 
 	// Admin Audit Logs (wireframe 4.8, `/admin/audit-logs`).
@@ -90,11 +90,13 @@
 		const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 		if (sameDay(date, today)) return 'Today';
 		if (sameDay(date, yesterday)) return 'Yesterday';
-		return date.toLocaleDateString(undefined, {
-			weekday: 'short',
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
+		return formatLocalDateTime(date, {
+			date: {
+				weekday: 'short',
+				year: 'numeric',
+				month: 'short',
+				day: 'numeric',
+			},
 		});
 	};
 

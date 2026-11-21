@@ -2,6 +2,7 @@
 	import SkeletonDetail from '$lib/components/SkeletonDetail.svelte';
 	import { onMount } from 'svelte';
 	import { professorState, initProfessor } from '$lib/features/professor/store.svelte';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	onMount(() => {
 		initProfessor();
@@ -26,10 +27,7 @@
 
 	const accountLabel = $derived(
 		professor?.createdAt
-			? new Date(professor.createdAt).toLocaleDateString(undefined, {
-					month: 'short',
-					year: 'numeric',
-				})
+			? formatLocalDateTime(professor.createdAt, { date: { month: 'short', year: 'numeric' } })
 			: '—'
 	);
 </script>

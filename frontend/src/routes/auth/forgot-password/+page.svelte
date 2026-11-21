@@ -11,6 +11,7 @@
 	import { Routes } from '$lib/shared/constants/routes';
 	import { defaultRouteFor, doResetPassword, createOtpWindow } from '$lib/features/auth/store.svelte';
 	import { evaluatePassword, isPasswordStrong } from '$lib/shared/utils/password';
+	import { describeError } from '$lib/shared/utils/errors';
 	import OtpInput from '$lib/components/OtpInput.svelte';
 	import OtpCodeRow from '$lib/components/OtpCodeRow.svelte';
 	import Turnstile from '$lib/components/Turnstile.svelte';
@@ -106,7 +107,7 @@
 			return recoveryCodeMode
 				? 'Recovery code is invalid. Check the length and try again.'
 				: 'Invalid input. Check your entries and try again.';
-		return e instanceof Error && e.message ? e.message : fallback;
+		return describeError(e, fallback);
 	};
 
 	async function handleStep1() {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import AppIcon from '$lib/components/AppIcon.svelte';
@@ -9,6 +9,7 @@
 	import { listOfferingStudents } from '$lib/features/professor/service';
 	import type { AdminRosterItem } from '$lib/shared/types';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { debounce } from '$lib/shared/utils/debounce';
 
 	const offeringId = $derived(Number(page.params.offeringId));
 
@@ -17,11 +18,7 @@
 	let items = $state<AdminRosterItem[]>([]);
 	let total = $state(0);
 	let searchQuery = $state('');
-	let searchTimer: ReturnType<typeof setTimeout> | null = null;
-	const scheduleLoad = () => {
-		if (searchTimer) clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => void load(), 250);
-	};
+	const scheduleLoad = debounce(() => void load());
 
 	const offering = $derived(
 		professorState.courses.find((c) => c.offeringId === offeringId) ?? null
@@ -37,6 +34,8 @@
 		}
 		await load();
 	});
+
+	onDestroy(() => scheduleLoad.cancel());
 
 	async function load() {
 		loading = true;

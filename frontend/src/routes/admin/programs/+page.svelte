@@ -20,6 +20,7 @@
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
+	import { debounce } from '$lib/shared/utils/debounce';
 
 	// Program Management list (wireframe 4.5a): search + status filter over
 	// GET /admin/programs. Aggregates (Years/Terms/Courses) are derived
@@ -28,9 +29,6 @@
 	// page. Deactivate/Reactivate PATCHes is_active; Delete permanently
 	// removes an archived program (DELETE /admin/programs/{id}, blocked with
 	// 409 while offerings or students still reference it).
-
-	// Keystrokes pause this long before a live-search request goes out.
-	const SEARCH_DEBOUNCE_MS = 250;
 
 	let search = $state('');
 	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
@@ -115,10 +113,11 @@
 	// only costs one request. The effect body reads `search` (that is what makes
 	// it re-run) and `isActiveFilter` is read inside the timeout, so switching the
 	// status filter does not double up with applyFilters.
+	const searchDebounced = debounce((term: string) => load(1, term));
 	$effect(() => {
 		const term = search.trim();
-		const timer = setTimeout(() => load(1, term), SEARCH_DEBOUNCE_MS);
-		return () => clearTimeout(timer);
+		searchDebounced(term);
+		return () => searchDebounced.cancel();
 	});
 
 	const applyFilters = () => {

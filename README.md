@@ -216,7 +216,7 @@ The MediaPipe face-landmark model and its WASM runtime are vendored under
 │       ├── api/          # client.ts (fetch wrapper, real API unless PUBLIC_MOCK_MODE=true) + endpoints.ts (named typed EndpointDefs with mock fixtures, collected into an `endpoints` registry)
  │       ├── components/   # ~31 shared components (see docs/developer/frontend-components.md), incl. shared `Pagination.svelte`
  │       ├── features/     # 12 top-level dirs (+ analytics under admin = 13th conceptual slice): admin (9 sub-slices: analytics/audit/courses/excuses/liveness/offerings/programs/settings/setup-wizard), liveness, attendance (professor ledger, real API), auth, excuse, notifications (poll.ts only), professor, report, session, settings, student, sync — services + runes stores (auth, student, admin) + 5 feature components (DashboardStats, QRScanner, FaceScanner, ReportBarChart, ReportTrendChart)
- │       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user + index.ts), constants/ (roles/routes/status/terms), utils/ (format/gen/geo/timing), actions/ (focusTrap), theme.css
+ │       └── shared/       # types/ (admin/attendance/auth/course/enrollment/excuse/liveness/professor/program/session/student/sync/user + index.ts), constants/ (roles/routes/status/terms), utils/ (format/gen/geo/timing/file/debounce/errors), actions/ (focusTrap), theme.css
 ├── backend/              # FastAPI app — vertical feature slices + Alembic
 │   ├── src/
 │   │   ├── main.py       # App entry point (/health, CORS, lifespan SELECT 1 on boot + cron scheduler, AppException handler)

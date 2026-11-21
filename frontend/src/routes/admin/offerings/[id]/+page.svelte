@@ -68,6 +68,8 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		WEEKLY_HOURS_CODES,
 		friendlyActionError,
 	} from '$lib/shared/utils/deleteErrors';
+	import { debounce } from '$lib/shared/utils/debounce';
+	import { describeError } from '$lib/shared/utils/errors';
 
 	// Offering Detail (wireframe 4.5d, admin-manual §2.4): schedule, classroom
 	// GPS, weeks, and default windows live here — the course template page
@@ -288,7 +290,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	let addReport = $state<{ enrolled: number; skipped: number; failures: string[] } | null>(
 		null
 	);
-	let addSearchTimer: ReturnType<typeof setTimeout> | null = null;
+	const addSearchDebounced = debounce(() => void loadAddCandidates(1));
 	let unenrollTarget = $state<AdminRosterItem | null>(null);
 	let unenrollBusy = $state(false);
 	// alive-guard for the async onMount below: if the route unmounts while
@@ -299,7 +301,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 
 	onDestroy(() => {
 		pageAlive = false;
-		if (addSearchTimer) clearTimeout(addSearchTimer);
+		addSearchDebounced.cancel();
 		for (const stop of autoRefreshStops) stop();
 	});
 
@@ -563,7 +565,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	// never render.
 	const compFailure = (e: unknown, fallback: string): string => {
 		if (e instanceof APIError && e.code && WEEKLY_HOURS_CODES.has(e.code)) {
-			return e.message;
+			return describeError(e, fallback);
 		}
 		return friendlyActionError(e, fallback);
 	};
@@ -1013,8 +1015,7 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 	};
 
 	const onAddQuery = () => {
-		if (addSearchTimer) clearTimeout(addSearchTimer);
-		addSearchTimer = setTimeout(() => void loadAddCandidates(1), 300);
+		addSearchDebounced();
 	};
 
 	// One loader for browse, pager, and search: empty query + cohort ids is

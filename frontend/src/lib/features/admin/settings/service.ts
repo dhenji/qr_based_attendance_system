@@ -15,6 +15,7 @@
 // genuine gap: see downloadBackupDescriptor below.
 
 import { backupDownloadPath, get, getBlob, invalidateApiCache, isMockMode, patch, post } from '$lib/api/client';
+import { downloadBlob, downloadTextFile } from '$lib/shared/utils/file';
 import type {
 	BackupLogItemResponse,
 	SystemSettingsResponse
@@ -79,28 +80,20 @@ export const cleanupSystem = async (): Promise<{ removed: number }> =>
 // never calls this directly — downloadBackupArchive below fetches the
 // encrypted archive first.
 export const downloadBackupDescriptor = (row: BackupLogItem): void => {
-	const blob = new Blob(
-		[
-			JSON.stringify(
-				{
-					mock: true,
-					note: 'Mock-mode descriptor only — the backup archive itself is unavailable without a backend.',
-					backup: row
-				},
-				null,
-				2
-			)
-		],
-		{ type: 'application/json;charset=utf-8' }
+	const descriptor = JSON.stringify(
+		{
+			mock: true,
+			note: 'Mock-mode descriptor only — the backup archive itself is unavailable without a backend.',
+			backup: row
+		},
+		null,
+		2
 	);
-	const url = URL.createObjectURL(blob);
-	const link = document.createElement('a');
-	link.href = url;
-	link.download = `backup-${row.id}-mock-descriptor.json`;
-	document.body.appendChild(link);
-	link.click();
-	link.remove();
-	setTimeout(() => URL.revokeObjectURL(url), 60_000);
+	downloadTextFile(
+		descriptor,
+		`backup-${row.id}-mock-descriptor.json`,
+		'application/json;charset=utf-8'
+	);
 };
 
 // downloadBackupArchive
@@ -112,14 +105,7 @@ export const downloadBackupDescriptor = (row: BackupLogItem): void => {
 export const downloadBackupArchive = async (row: BackupLogItem): Promise<void> => {
 	try {
 		const { blob, filename } = await getBlob(backupDownloadPath(row.id));
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = filename || row.filename;
-		document.body.appendChild(link);
-		link.click();
-		link.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		downloadBlob(blob, filename || row.filename);
 	} catch (e) {
 		if (isMockMode()) {
 			downloadBackupDescriptor(row);

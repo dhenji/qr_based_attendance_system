@@ -26,6 +26,8 @@
 	} from '$lib/features/professor/store.svelte';
 	import type { ExcuseInitiatedVia, ExcuseOriginalStatus, ExcuseRequest, ExcuseStatus } from '$lib/shared/types/excuse';
 	import { formatDate } from '$lib/shared/utils/format';
+	import { debounce } from '$lib/shared/utils/debounce';
+	import { describeError } from '$lib/shared/utils/errors';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -154,13 +156,14 @@
 		if (!courseOptions.includes(quickCourse)) quickCourse = courseOptions[0] ?? 'CS101';
 	});
 
+	const searchDebounced = debounce((value: string) => {
+		search = value.trim();
+		currentPage = 1;
+	});
+
 	$effect(() => {
-		const value = searchInput;
-		const timer = setTimeout(() => {
-			search = value.trim();
-			currentPage = 1;
-		}, 300);
-		return () => clearTimeout(timer);
+		searchDebounced(searchInput);
+		return () => searchDebounced.cancel();
 	});
 
 	let urlReady = $state(false);
@@ -362,7 +365,7 @@
 					: `Rejected — ${updated.studentName} keeps ${originalLabel(updated.originalStatus)} status.`;
 			reloadToken += 1;
 		} catch (error) {
-			reviewError = error instanceof Error ? error.message : 'Review failed.';
+			reviewError = describeError(error, 'Review failed.');
 		} finally {
 			reviewBusy = false;
 		}
@@ -592,7 +595,7 @@
 			currentPage = 1;
 			reloadToken += 1;
 		} catch (error) {
-			quickError = error instanceof Error ? error.message : 'Quick-excuse failed.';
+			quickError = describeError(error, 'Quick-excuse failed.');
 		} finally {
 			quickBusy = false;
 		}
@@ -612,7 +615,7 @@
 			notice = `Excuse #${updated.id} updated.`;
 			reloadToken += 1;
 		} catch (error) {
-			editError = error instanceof Error ? error.message : 'Edit failed.';
+			editError = describeError(error, 'Edit failed.');
 		} finally {
 			editBusy = false;
 		}
@@ -632,7 +635,7 @@
 					: `Excuse #${selected.id} revoked.`;
 			reloadToken += 1;
 		} catch (error) {
-			revokeError = error instanceof Error ? error.message : 'Revoke failed.';
+			revokeError = describeError(error, 'Revoke failed.');
 		} finally {
 			revokeBusy = false;
 		}
