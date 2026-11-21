@@ -22,6 +22,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import { APIError, isMockMode } from '$lib/api/client';
 	import { Routes, professorSessionCreate } from '$lib/shared/constants/routes';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
+	import { downloadTextFile } from '$lib/shared/utils/file';
+	import { describeError } from '$lib/shared/utils/errors';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	type LiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 
@@ -96,16 +99,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	// all courses. Feed rows here carry the full session record, so building
 	// locally is the true per-session file.
 	const saveExport = (text: string, filename: string) => {
-		const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = filename;
-		document.body.appendChild(link);
-		link.click();
-		link.remove();
-		// Revoke late: immediate revoke can abort large downloads on Safari.
-		setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		downloadTextFile(text, filename);
 	};
 	const exportCurrent = () => {
 		const current = session;
@@ -190,7 +184,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			excuseTarget = null;
 			reloadToken += 1;
 		} catch (error: unknown) {
-			excuseError = error instanceof Error && error.message ? error.message : 'Excuse failed.';
+			excuseError = describeError(error, 'Excuse failed.');
 		} finally {
 			excuseBusy = false;
 		}
@@ -215,7 +209,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			bulkReason = '';
 			reloadToken += 1;
 		} catch (error: unknown) {
-			bulkError = error instanceof Error && error.message ? error.message : 'Bulk excuse failed.';
+			bulkError = describeError(error, 'Bulk excuse failed.');
 		} finally {
 			bulkBusy = false;
 		}
@@ -394,7 +388,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	};
 
 	const formatClock = (iso: string): string =>
-		new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+		formatLocalDateTime(iso, { time: { hour: 'numeric', minute: '2-digit' } });
 
 	const formatDateTime = (timestamp: number): string => {
 		const date = new Date(timestamp);
@@ -402,8 +396,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		const day =
 			date.toDateString() === today.toDateString()
 				? 'Today'
-				: date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-		return `${day}, ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+				: formatLocalDateTime(date, {
+						date: { weekday: 'short', month: 'short', day: 'numeric' }
+					});
+		return `${day}, ${formatLocalDateTime(date, { time: { hour: 'numeric', minute: '2-digit' } })}`;
 	};
 
 	const scanEndedText = $derived(scanExpiresAt === null ? null : formatDateTime(scanExpiresAt));

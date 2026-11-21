@@ -23,6 +23,7 @@ import { initProfessorCourses, professorState } from '$lib/features/professor/st
 import { listSessionHistory, type SessionHistoryRow } from '$lib/features/session/service';
 import { REPORT_SESSIONS, type ReportSessionRecord } from '$lib/features/report/mock';
 import type { ProfessorCourseSummary } from '$lib/shared/types';
+import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 export type ReportGranularity = 'daily' | 'weekly' | 'monthly';
 export type ReportMetric = 'compliance' | 'participation';
@@ -95,7 +96,7 @@ const bucketFor = (dateKey: string, granularity: ReportGranularity): AggregateBu
 		const key = toDateKey(monday);
 		return {
 			key,
-			label: `Week of ${monday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
+			label: `Week of ${formatLocalDateTime(monday, { date: { month: 'short', day: 'numeric' } })}`,
 			date: key,
 			total_sessions: 0,
 			total_students: 0,
@@ -106,7 +107,7 @@ const bucketFor = (dateKey: string, granularity: ReportGranularity): AggregateBu
 	if (granularity === 'monthly') {
 		return {
 			key: dateKey.slice(0, 7),
-			label: date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }),
+			label: formatLocalDateTime(date, { date: { month: 'short', year: 'numeric' } }),
 			date: `${dateKey.slice(0, 7)}-01`,
 			total_sessions: 0,
 			total_students: 0,
@@ -116,7 +117,7 @@ const bucketFor = (dateKey: string, granularity: ReportGranularity): AggregateBu
 	}
 	return {
 		key: dateKey,
-		label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+		label: formatLocalDateTime(date, { date: { month: 'short', day: 'numeric' } }),
 		date: dateKey,
 		total_sessions: 0,
 		total_students: 0,

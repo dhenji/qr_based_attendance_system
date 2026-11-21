@@ -23,6 +23,7 @@
 	import { PROFESSOR_COURSES } from '$lib/features/professor/mock';
 	import { isMockMode } from '$lib/api/client';
 	import { formatPercentage } from '$lib/shared/utils/format';
+	import { downloadTextFile } from '$lib/shared/utils/file';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	type Tab = 'all' | 'comparison' | 'trends';
@@ -328,15 +329,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	});
 
 	const saveCsv = (text: string) => {
-		const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = csvFilename;
-		document.body.appendChild(link);
-		link.click();
-		link.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		downloadTextFile(text, csvFilename);
 	};
 
 	// Server-first export (POST /professor/reports/export): the download
@@ -361,15 +354,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 			exportNote =
 				'Server per-scan export unavailable — downloaded the on-screen aggregate rows instead (fewer columns). Narrow filters and retry for the full export.';
 			const fallback = buildCsv(csvHeader, csvRows);
-			const blob = new Blob([fallback], { type: 'text/csv;charset=utf-8' });
-			const url = URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = csvFilename.replace(/\.csv$/, '-onscreen.csv');
-			document.body.appendChild(link);
-			link.click();
-			link.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+			downloadTextFile(fallback, csvFilename.replace(/\.csv$/, '-onscreen.csv'));
 		}
 	};
 

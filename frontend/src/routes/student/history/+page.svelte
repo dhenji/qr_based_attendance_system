@@ -23,6 +23,7 @@
 		validateAttachmentFiles,
 	} from '$lib/features/excuse/attachments';
 	import { formatDate, formatTime, formatLocalDateTime } from '$lib/shared/utils/format';
+	import { downloadTextFile } from '$lib/shared/utils/file';
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
@@ -401,17 +402,10 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 				return;
 			}
 
-			const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
 			const stamp = new Date().toISOString().slice(0, 10);
 			const scope = filterStatus !== 'All' ? filterStatus.toLowerCase() : 'all';
-			a.download = `attendance-history-${scope}-${stamp}.csv`.replace(/[^a-z0-9._-]+/gi, '-');
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+			const filename = `attendance-history-${scope}-${stamp}.csv`.replace(/[^a-z0-9._-]+/gi, '-');
+			downloadTextFile(csv, filename);
 
 			if (droppedFilters.length > 0 && !exportNote) {
 				exportNote = `Exported every matching row. ${droppedFilters.join(' and ')} ${

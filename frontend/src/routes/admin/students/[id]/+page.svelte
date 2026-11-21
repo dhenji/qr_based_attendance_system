@@ -8,6 +8,7 @@
 	import { Routes } from '$lib/shared/constants/routes';
 	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	// Student profile (admin): read-only card opened by clicking a student's
 	// email on the roster. Edits stay on the Student Management modal.
@@ -120,7 +121,7 @@
 				{#if student.faceEnrolledAt}
 					<div>
 						<dt>Face enrolled at</dt>
-						<dd>{new Date(student.faceEnrolledAt).toLocaleDateString()}</dd>
+						<dd>{formatLocalDateTime(student.faceEnrolledAt, { date: {} })}</dd>
 					</div>
 				{/if}
 				<div>
@@ -129,7 +130,7 @@
 				</div>
 				<div>
 					<dt>Member since</dt>
-					<dd>{new Date(student.createdAt).toLocaleDateString()}</dd>
+					<dd>{formatLocalDateTime(student.createdAt, { date: {} })}</dd>
 				</div>
 			</dl>
 		</section>

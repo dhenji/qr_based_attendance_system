@@ -8,6 +8,7 @@
 	import type { ProfessorCourseSummary } from '$lib/shared/types';
 	import { professorCourseStudents, professorReport, professorSessionCreate } from '$lib/shared/constants/routes';
 	import { dayLabels, formatWallClock } from '$lib/shared/utils/schedule';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	onMount(() => {
 		initProfessorCourses();
@@ -120,11 +121,13 @@
 	};
 
 	const today = $derived(
-		new Date().toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric',
+		formatLocalDateTime(new Date(), {
+			date: {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric'
+			}
 		})
 	);
 </script>

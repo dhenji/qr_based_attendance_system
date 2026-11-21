@@ -29,6 +29,7 @@
 		zonedDateInputValue,
 		zonedTimeInputValue
 	} from '$lib/shared/utils/schedule';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	// D11: two entry points, one page. Arriving from a My Courses card carries
 	// ?offering=, which locks the course and hides the selector. Arriving from
@@ -380,10 +381,12 @@ let selectedOfferingId = $state<number | null>(null);
 		const dayText =
 			day === null
 				? ''
-				: day.toLocaleDateString(undefined, {
-						weekday: 'short',
-						month: 'short',
-						day: 'numeric'
+				: formatLocalDateTime(day, {
+						date: {
+							weekday: 'short',
+							month: 'short',
+							day: 'numeric'
+						}
 					});
 		return `${dayText} ${formatWallClock(start)}–${formatWallClock(end)}`.trim();
 	});
@@ -740,10 +743,10 @@ let selectedOfferingId = $state<number | null>(null);
 	};
 
 	const clockText = (date: Date) =>
-		date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+		formatLocalDateTime(date, { time: { hour: 'numeric', minute: '2-digit' } });
 
 	const dateText = (date: Date) =>
-		date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+		formatLocalDateTime(date, { date: { weekday: 'short', month: 'short', day: 'numeric' } });
 
 	const dateTimeText = (date: Date): string => {
 		const today = new Date();

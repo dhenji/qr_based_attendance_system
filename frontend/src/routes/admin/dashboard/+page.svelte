@@ -80,11 +80,13 @@ import { listOfferings } from '$lib/features/admin/offerings/service';
 	});
 
 	const today = $derived(
-		new Date().toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric',
+		formatLocalDateTime(new Date(), {
+			date: {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric',
+			}
 		})
 	);
 

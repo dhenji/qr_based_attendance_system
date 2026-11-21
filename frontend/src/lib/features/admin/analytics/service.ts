@@ -14,6 +14,7 @@
 
 import { get, getText, post, postText, TEXT_EXPORTS, type QueryParams } from '$lib/api/client';
 import { buildCsv, COMPARISON_PAGE_SIZE } from '$lib/features/report/service';
+import { downloadTextFile } from '$lib/shared/utils/file';
 import type {
 	AdminAnalyticsFilters,
 	AdminCourse,
@@ -382,13 +383,5 @@ export const fetchAnalyticsExportCsv = (body: AnalyticsExportBody): Promise<stri
 	postText(TEXT_EXPORTS.adminAnalytics, { format: 'csv', ...body });
 
 export const downloadCsv = (filename: string, csv: string): void => {
-	const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-	const url = URL.createObjectURL(blob);
-	const link = document.createElement('a');
-	link.href = url;
-	link.download = filename;
-	document.body.appendChild(link);
-	link.click();
-	link.remove();
-	setTimeout(() => URL.revokeObjectURL(url), 60_000);
+	downloadTextFile(csv, filename);
 };

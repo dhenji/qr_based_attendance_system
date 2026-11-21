@@ -3,6 +3,7 @@
 	import AppIcon from '$lib/components/AppIcon.svelte';
 	import { csvFileSchema } from '$lib/features/admin/schema';
 	import { notifyEntityChanged, type AdminEntity } from '$lib/shared/utils/entityEvents';
+	import { downloadTextFile } from '$lib/shared/utils/file';
 
 	// Shared CSV import page (students/professors pattern, reused by
 	// programs/courses): Step 1 download template, Step 2 upload file,
@@ -179,15 +180,7 @@
 			// when reachable, matching static header otherwise) — only the
 			// DOM download below could.
 			const text = await fetchTemplate();
-			const blob = new Blob([text], { type: 'text/csv' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = templateFilename;
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+			downloadTextFile(text, templateFilename, 'text/csv');
 		} finally {
 			templateBusy = false;
 		}
@@ -196,15 +189,7 @@
 	const downloadErrorsCsv = () => {
 		if (!result || result.errors.length === 0) return;
 		const lines = ['line,reason', ...result.errors.map((e) => `${e.line},"${String(e.reason).replace(/"/g, '""')}"`)];
-		const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = errorsFilename;
-		document.body.appendChild(a);
-		a.click();
-		a.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		downloadTextFile(lines.join('\r\n'), errorsFilename, 'text/csv');
 	};
 
 	const confirmImport = async () => {

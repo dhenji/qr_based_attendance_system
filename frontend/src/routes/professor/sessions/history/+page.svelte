@@ -21,6 +21,8 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 	import { professorActiveSession } from '$lib/shared/constants/routes';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
 	import { formatDate, formatPercentage } from '$lib/shared/utils/format';
+	import { downloadTextFile } from '$lib/shared/utils/file';
+	import { debounce } from '$lib/shared/utils/debounce';
 
 	type HistoryRow = Awaited<ReturnType<typeof listSessionHistory>>['items'][number];
 
@@ -92,13 +94,14 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		}
 	});
 
+	const searchDebounced = debounce((value: string) => {
+		searchQuery = value;
+		currentPage = 1;
+	});
+
 	$effect(() => {
-		const value = searchInput;
-		const timer = setTimeout(() => {
-			searchQuery = value;
-			currentPage = 1;
-		}, 300);
-		return () => clearTimeout(timer);
+		searchDebounced(searchInput);
+		return () => searchDebounced.cancel();
 	});
 
 	$effect(() => {
@@ -324,14 +327,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 					Math.round(row.participation_rate * 100)
 				])
 			);
-			const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-			const anchor = document.createElement('a');
-			anchor.href = url;
-			anchor.download = `session-history-${to || initialRange.to}.csv`;
-			document.body.appendChild(anchor);
-			anchor.click();
-			anchor.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+			downloadTextFile(csv, `session-history-${to || initialRange.to}.csv`);
 		} catch (e: unknown) {
 			if (exportToken === token)
 				exportError = friendlyActionError(e, 'Export failed. Please try again.');

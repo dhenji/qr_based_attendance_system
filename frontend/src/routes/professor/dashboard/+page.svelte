@@ -3,7 +3,7 @@
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import { goto } from '$app/navigation';
 	import AppIcon from '$lib/components/AppIcon.svelte';
-	import { formatPercentage } from '$lib/shared/utils/format';
+	import { formatLocalDateTime, formatPercentage } from '$lib/shared/utils/format';
 	import { Routes, professorActiveSession } from '$lib/shared/constants/routes';
 	import type { ProfessorDashboardResponse } from '$lib/shared/types';
 
@@ -53,12 +53,8 @@
 	// midnight and leave rows with no matching tile.
 	const toUtcDayKey = (date: Date): string => date.toISOString().slice(0, 10);
 
-	const formatClock = (iso: string | null): string => {
-		if (!iso) return '—';
-		const parsed = new Date(iso);
-		if (Number.isNaN(parsed.getTime())) return '—';
-		return parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-	};
+	const formatClock = (iso: string | null): string =>
+		iso ? formatLocalDateTime(iso, { time: { hour: 'numeric', minute: '2-digit' } }) : '—';
 
 	let sessions = $state<DashboardSession[]>([]);
 	let summary = $state<ProfessorDashboardResponse | null>(null);
@@ -66,11 +62,13 @@
 	let loadError = $state<string | null>(null);
 
 	const today = $derived(
-		new Date().toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric'
+		formatLocalDateTime(new Date(), {
+			date: {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric'
+			}
 		})
 	);
 

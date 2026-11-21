@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { studentState, initStudent } from '$lib/features/student/store.svelte';
 	import { faceCacheState, refreshFaceCache } from '$lib/features/student/face.svelte';
-	import { formatDate } from '$lib/shared/utils/format';
+	import { formatDate, formatLocalDateTime } from '$lib/shared/utils/format';
 
 	const faceCacheLabel = $derived(
 		faceCacheState.state === 'current' || faceCacheState.state === 'updated'
@@ -72,10 +72,7 @@
 
 	const accountLabel = $derived(
 		student?.createdAt
-			? new Date(student.createdAt).toLocaleDateString(undefined, {
-					month: 'short',
-					year: 'numeric',
-				})
+			? formatLocalDateTime(student.createdAt, { date: { month: 'short', year: 'numeric' } })
 			: '—'
 	);
 </script>

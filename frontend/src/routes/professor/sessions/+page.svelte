@@ -12,7 +12,7 @@
 		professorActiveSession,
 		professorSessionCreate
 	} from '$lib/shared/constants/routes';
-	import { formatDate } from '$lib/shared/utils/format';
+	import { formatDate, formatLocalDateTime } from '$lib/shared/utils/format';
 
 	type SessionSummary = Awaited<ReturnType<typeof listSessions>>['items'][number];
 
@@ -27,11 +27,13 @@
 	let sortDirection = $state<SortDirection>('desc');
 
 	const today = $derived(
-		new Date().toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric'
+		formatLocalDateTime(new Date(), {
+			date: {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric'
+			}
 		})
 	);
 

@@ -547,6 +547,33 @@ Filenames are **unprefixed** — the directory already namespaces the slice, so 
 - Feature imports: `import { StudentCard } from '$lib/features/student/components'`.
 - Never use relative paths going more than two levels up.
 
+### 2.7 Shared Utilities
+
+Four concerns have exactly one implementation under `src/lib/shared/utils/`. Do not
+re-introduce a local copy at a call site.
+
+| Utility       | Export                                                                                | Use for                                                         |
+| ------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `file.ts`     | `downloadTextFile(text, filename, mimeType?)`, `downloadBlob(blob, filename)`         | Browser download of generated text/CSV/JSON or a fetched binary |
+| `debounce.ts` | `debounce(fn, delay?)`, `SEARCH_DEBOUNCE_MS`                                          | Live-search inputs; the returned callable has `.cancel()`       |
+| `errors.ts`   | `describeError(error, fallback)`                                                      | Turning an unknown thrown value into a user-facing message      |
+| `format.ts`   | `formatLocalDateTime(value)`, `formatLocalDateTime(value, { date, time, separator })` | Any date/time rendering                                         |
+
+- **Downloads** go through `file.ts` so the anchor/object-URL lifecycle and cleanup are
+  identical everywhere. The object URL is revoked 60 s after a successful click
+  (`OBJECT_URL_REVOKE_DELAY_MS`, Safari-safe) and immediately if the click never happened.
+  Default MIME is `text/csv;charset=utf-8`; pass an explicit type for JSON/other formats.
+- **Search debounce** defaults to `SEARCH_DEBOUNCE_MS` (300 ms). In a `$effect`, return
+  `() => debounced.cancel()` as the cleanup; in `onDestroy`, call `.cancel()`.
+- **`describeError` is the generic fallback**, not a replacement for code-aware copy.
+  `shared/utils/deleteErrors.ts` (`friendlyActionError`/`friendlyDeleteError`) and
+  `features/auth/errors.ts` (`toAuthMessage`) still map stable backend codes to curated
+  strings first; `features/liveness/errors.ts` still owns scan/GPS/map copy.
+- **`formatLocalDateTime(value)`** keeps the legacy machine format `YYYY-MM-DD HH:MM:SS`
+  (admin tables, scan/history timestamps). Pass the options form for locale-aware
+  rendering; `date: {}` reproduces a bare `toLocaleDateString()`. Do not inline
+  `toLocaleDateString`/`toLocaleTimeString` in a page.
+
 ---
 
 ## 3. Naming Conventions

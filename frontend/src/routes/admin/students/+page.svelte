@@ -38,6 +38,8 @@
 	import { trapFocus } from '$lib/shared/actions/focusTrap';
 	import { initFaceModel } from '$lib/features/liveness/model';
 	import { friendlyActionError } from '$lib/shared/utils/deleteErrors';
+	import { debounce } from '$lib/shared/utils/debounce';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	// Student Management (wireframe 4.2): search + sortable table + pagination
 	// over GET /admin/students. Active roster only; deactivated rows live in the
@@ -110,19 +112,18 @@
 	const displayTotal = $derived(
 		clientYearFiltered ? visibleStudents.length : adminStudentsState.total
 	);
-	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	const loadDebounced = debounce(() => void load(1));
 	let searchAbort: AbortController | null = null;
 	const autoRefreshStops: (() => void)[] = [];
 
 	onDestroy(() => {
-		if (searchTimer) clearTimeout(searchTimer);
+		loadDebounced.cancel();
 		searchAbort?.abort();
 		for (const stop of autoRefreshStops) stop();
 	});
 
 	const onSearchInput = () => {
-		if (searchTimer) clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => void load(1), 300);
+		loadDebounced();
 	};
 
 	let formOpen = $state(false);
@@ -510,10 +511,7 @@
 	};
 
 	const applyFilters = () => {
-		if (searchTimer) {
-			clearTimeout(searchTimer);
-			searchTimer = null;
-		}
+		loadDebounced.cancel();
 		load(1);
 	};
 
@@ -1255,7 +1253,7 @@
 				</div>
 			{:else if faceStatus?.enrolled}
 				<p class="muted" role="status">
-					Enrolled{#if faceStatus.faceEmbeddingVersion} (v{faceStatus.faceEmbeddingVersion}){/if}{#if faceStatus.faceEnrolledAt} · {new Date(faceStatus.faceEnrolledAt).toLocaleDateString()}{/if}.
+					Enrolled{#if faceStatus.faceEmbeddingVersion} (v{faceStatus.faceEmbeddingVersion}){/if}{#if faceStatus.faceEnrolledAt} · {formatLocalDateTime(faceStatus.faceEnrolledAt, { date: {} })}{/if}.
 					Uploading replaces the enrollment.
 				</p>
 			{:else}

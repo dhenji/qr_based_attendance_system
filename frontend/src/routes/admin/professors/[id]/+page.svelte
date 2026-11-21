@@ -14,6 +14,7 @@
 	import type { AdminOffering, AdminProfessor } from '$lib/shared/types';
 	import { subscribeEntity } from '$lib/shared/utils/entityEvents';
 	import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 	import { Routes } from '$lib/shared/constants/routes';
 
 	// Professor profile (admin): card opened by clicking a professor's email
@@ -178,7 +179,7 @@
 				</div>
 				<div>
 					<dt>Member since</dt>
-					<dd>{new Date(professor.createdAt).toLocaleDateString()}</dd>
+					<dd>{formatLocalDateTime(professor.createdAt, { date: {} })}</dd>
 				</div>
 			</dl>
 		</section>

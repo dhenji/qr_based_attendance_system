@@ -12,6 +12,7 @@
 	} from '$lib/features/student/store.svelte';
 	import DashboardStats from '$lib/features/student/components/DashboardStats.svelte';
 	import { Routes } from '$lib/shared/constants/routes';
+	import { formatLocalDateTime } from '$lib/shared/utils/format';
 
 	onMount(() => {
 		initStudent();
@@ -20,11 +21,13 @@
 	const firstName = $derived(studentState.student?.firstName ?? 'Student');
 
 	const today = $derived(
-		new Date().toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric',
+		formatLocalDateTime(new Date(), {
+			date: {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric',
+			}
 		})
 	);
 </script>
