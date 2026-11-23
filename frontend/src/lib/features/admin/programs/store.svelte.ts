@@ -18,6 +18,10 @@ import {
 import { friendlyDeleteError, friendlyActionError } from '$lib/shared/utils/deleteErrors';
 import { APIError } from '$lib/api/client';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
+import { createRequestTokenGuard } from '$lib/shared/requestToken';
+
+// A load that starts later always wins over an earlier one.
+const programsListGuard = createRequestTokenGuard();
 
 export type ProgramSortColumn = 'code' | 'name';
 
@@ -68,23 +72,27 @@ export const initAdminPrograms = async (
 	size = 20,
 	opts?: { signal?: AbortSignal | null }
 ): Promise<void> => {
+	const token = programsListGuard.begin();
 	adminProgramsState.loading = true;
 	adminProgramsState.error = null;
 	try {
 		const result = await listPrograms({ ...filters, page, size }, opts);
+		if (!programsListGuard.isCurrent(token)) return;
 		adminProgramsState.items = result.items;
 		adminProgramsState.total = result.total;
 		adminProgramsState.page = result.page;
 		adminProgramsState.size = result.size;
 		adminProgramsState.filters = filters;
 	} catch (e: unknown) {
+		if (!programsListGuard.isCurrent(token)) return;
 		if (e instanceof APIError && e.code === 'request_cancelled') {
 			// Superseded search — a newer request is provably in flight.
 			return;
 		}
 		adminProgramsState.error = e instanceof APIError && e.code === 'request_timeout' ? 'The request timed out. Try again.' : toMessage(e, 'Failed to load programs');
 	} finally {
-		adminProgramsState.loading = false;
+		// Only the newest request owns the loading flag.
+		if (programsListGuard.isCurrent(token)) adminProgramsState.loading = false;
 	}
 };
 

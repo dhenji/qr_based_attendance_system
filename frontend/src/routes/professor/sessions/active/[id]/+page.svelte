@@ -1255,21 +1255,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		color: var(--text);
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.7rem 1.2rem;
-		border-radius: 8px;
-		border: 1px solid transparent;
-		font: inherit;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.btn:focus-visible,
 	.mini:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 2px;
@@ -1281,25 +1266,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		color: var(--text-strong);
 	}
 
-	.btn-primary {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border-color: var(--border-strong);
-		color: var(--text-strong);
-	}
-
-	.btn-danger {
-		background: var(--danger-strong);
-		border-color: var(--danger-strong);
-		color: var(--on-brand);
-	}
-
 	.btn:disabled {
+		/* Shared .btn:disabled adds opacity; keep the grey state solid. */
+		opacity: 1;
 		background: var(--bg-page);
 		border-color: var(--border);
 		color: var(--text-muted);
@@ -1971,22 +1940,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		color: var(--text-secondary);
 	}
 
+	/* Intentional textarea variant; the shared .form-input supplies the rest. */
 	.form-input {
-		width: 100%;
-		padding: 0.625rem 0.75rem;
-		border: 1px solid var(--border-strong);
-		border-radius: 8px;
-		font: inherit;
-		font-size: 0.9375rem;
-		color: var(--text-strong);
-		background: var(--bg-card);
 		resize: vertical;
-	}
-
-	.form-input:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-		border-color: var(--accent);
 	}
 
 	.footer {

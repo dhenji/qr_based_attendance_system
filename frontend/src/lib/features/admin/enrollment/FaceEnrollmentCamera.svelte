@@ -625,11 +625,12 @@ const useReviewPhoto = async () => {
 	.step-label { font-size: 0.875rem; color: var(--text-muted, #64748b); margin: 0; }
 	.status { font-size: 0.875rem; color: var(--text-secondary, #475569); margin: 0; }
 	.actions { display: flex; gap: 0.5rem; }
+	/* Camera-local variant; keeps working even when theme tokens are absent. */
 	.btn { padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border-strong, #cbd5e1); background: var(--bg-card, #fff); color: var(--text-strong, #0f172a); font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
-	.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
 	.btn.ghost { background: transparent; }
 	.btn.primary { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
-	.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 	.review { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; width: 100%; }
 	.review img { display: block; width: 100%; max-width: 22rem; max-height: 45vh; object-fit: contain; border-radius: 10px; background: #0f172a; }
 	.auto-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-secondary, #475569); }

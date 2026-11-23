@@ -52,7 +52,7 @@ const analyticsParams = (f: AdminAnalyticsFilters): QueryParams => {
 	if (f.granularity) params.granularity = f.granularity;
 	if (f.risk_level) params.risk_level = f.risk_level;
 	if (f.session_type) params.session_type = f.session_type;
-	if ((f as any).q) params.q = (f as any).q;
+	if (f.q) params.q = f.q;
 	return params;
 };
 
@@ -94,8 +94,8 @@ export const enrichComparison = (
 export const getAnalyticsComparison = async (
 	filters: AdminAnalyticsFilters = {}
 ): Promise<{ items: AnalyticsComparisonItemResponse[]; total: number }> => {
-	const page = (filters as any).page ?? 1;
-	const size = (filters as any).size ?? COMPARISON_PAGE_SIZE;
+	const page = filters.page ?? 1;
+	const size = filters.size ?? COMPARISON_PAGE_SIZE;
 	const response = await get<{
 		items: AnalyticsComparisonItemResponse[];
 		total?: number;
@@ -149,8 +149,8 @@ export const getCourseOptions = async (
 export const getAnalyticsTrends = async (
 	filters: AdminAnalyticsFilters = {}
 ): Promise<{ items: AnalyticsTrendItemResponse[]; total: number }> => {
-	const page = (filters as any).page ?? 1;
-	const size = (filters as any).size ?? 20;
+	const page = filters.page ?? 1;
+	const size = filters.size ?? 20;
 	const params = { ...analyticsParams(filters), page: String(page), size: String(size) };
 	const response = await get<{
 		items: AnalyticsTrendItemResponse[];
@@ -163,8 +163,8 @@ export const getAnalyticsTrends = async (
 export const getAtRisk = async (
 	filters: AdminAnalyticsFilters = {}
 ): Promise<{ items: AnalyticsAtRiskItemResponse[]; total: number }> => {
-	const page = (filters as any).page ?? 1;
-	const size = (filters as any).size ?? 20;
+	const page = filters.page ?? 1;
+	const size = filters.size ?? 20;
 	const params = { ...analyticsParams(filters), page: String(page), size: String(size) };
 	const response = await get<{
 		items: AnalyticsAtRiskItemResponse[];
@@ -191,7 +191,7 @@ const stagingParams = (f: RiskStagingFilters): QueryParams => {
 	if (f.course_ids && f.course_ids.length > 0)
 		params.course_ids = f.course_ids.map(String);
 	if (f.risk_level) params.risk_level = f.risk_level;
-	if ((f as any).q) params.q = (f as any).q;
+	if (f.q) params.q = f.q;
 	if (f.unpromoted_only !== undefined) params.unpromoted_only = String(f.unpromoted_only);
 	params.page = String(f.page ?? 1);
 	params.size = String(f.size ?? 20);

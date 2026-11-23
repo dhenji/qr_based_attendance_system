@@ -376,6 +376,7 @@
 		outline-offset: -1px;
 	}
 
+	/* Intentional settings button; the shared .btn is the canonical control. */
 	.btn {
 		display: inline-block;
 		padding: 0.625rem 1.25rem;
@@ -392,11 +393,6 @@
 
 	.btn:hover:not(:disabled) {
 		background: var(--brand-hover);
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.btn.ghost {

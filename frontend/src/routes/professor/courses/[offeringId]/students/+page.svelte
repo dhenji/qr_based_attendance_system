@@ -201,23 +201,9 @@
 		font-size: 0.9375rem;
 		margin: 0 0 1rem;
 	}
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.625rem 1rem;
-		border-radius: 8px;
-		font-size: 0.875rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		white-space: nowrap;
-	}
+
+	/* Intentional layout variant; the shared .btn-secondary supplies the colors. */
 	.btn-secondary {
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		color: var(--text-strong);
 		align-self: flex-start;
 	}
 </style>

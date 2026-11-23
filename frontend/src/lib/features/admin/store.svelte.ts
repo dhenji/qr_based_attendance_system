@@ -28,6 +28,11 @@ import {
 import { friendlyDeleteError, friendlyActionError } from '$lib/shared/utils/deleteErrors';
 import { APIError } from '$lib/api/client';
 import { notifyEntityChanged } from '$lib/shared/utils/entityEvents';
+import { createRequestTokenGuard } from '$lib/shared/requestToken';
+
+// One guard per roster: a load that starts later always wins.
+const studentsListGuard = createRequestTokenGuard();
+const professorsListGuard = createRequestTokenGuard();
 
 export const adminStudentsState = $state({
 	items: [] as AdminStudent[],
@@ -60,16 +65,19 @@ export const initAdminStudents = async (
 	size = 20,
 	opts?: { signal?: AbortSignal | null }
 ): Promise<void> => {
+	const token = studentsListGuard.begin();
 	adminStudentsState.loading = true;
 	adminStudentsState.error = null;
 	try {
 		const result = await listStudents({ ...filters, page, size }, opts);
+		if (!studentsListGuard.isCurrent(token)) return;
 		adminStudentsState.items = result.items;
 		adminStudentsState.total = result.total;
 		adminStudentsState.page = result.page;
 		adminStudentsState.size = result.size;
 		adminStudentsState.filters = filters;
 	} catch (e: unknown) {
+		if (!studentsListGuard.isCurrent(token)) return;
 		if (e instanceof APIError && e.code === 'request_cancelled') {
 			// Superseded search — a newer request is provably in flight. Leave
 			// the current rows alone rather than flashing an error.
@@ -80,7 +88,9 @@ export const initAdminStudents = async (
 		// admin reads the page as current when the query never applied.
 		adminStudentsState.error = e instanceof APIError && e.code === 'request_timeout' ? 'The request timed out. Try again.' : toMessage(e, 'Failed to load students');
 	} finally {
-		adminStudentsState.loading = false;
+		// Only the newest request owns the loading flag, so a stale response
+		// cannot clear a spinner belonging to its successor.
+		if (studentsListGuard.isCurrent(token)) adminStudentsState.loading = false;
 	}
 };
 
@@ -137,19 +147,22 @@ export const initAdminProfessors = async (
 	page = 1,
 	size = 20
 ): Promise<void> => {
+	const token = professorsListGuard.begin();
 	adminProfessorsState.loading = true;
 	adminProfessorsState.error = null;
 	try {
 		const result = await listProfessors({ ...filters, page, size });
+		if (!professorsListGuard.isCurrent(token)) return;
 		adminProfessorsState.items = result.items;
 		adminProfessorsState.total = result.total;
 		adminProfessorsState.page = result.page;
 		adminProfessorsState.size = result.size;
 		adminProfessorsState.filters = filters;
 	} catch (e: unknown) {
+		if (!professorsListGuard.isCurrent(token)) return;
 		adminProfessorsState.error = toMessage(e, 'Failed to load professors');
 	} finally {
-		adminProfessorsState.loading = false;
+		if (professorsListGuard.isCurrent(token)) adminProfessorsState.loading = false;
 	}
 };
 

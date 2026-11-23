@@ -66,6 +66,7 @@
 		justify-content: center;
 	}
 
+	/* Standalone error-page variant; independent of the app shell. */
 	.btn {
 		display: inline-flex;
 		align-items: center;

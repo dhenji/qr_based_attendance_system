@@ -700,6 +700,8 @@ export interface AdminAnalyticsFilters {
 	risk_level?: AnalyticsRiskLevel;
 	session_type?: 'lecture' | 'lab';
 	q?: string;
+	page?: number;
+	size?: number;
 }
 
 

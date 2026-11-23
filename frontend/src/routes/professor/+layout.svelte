@@ -572,16 +572,6 @@ import { clearTokens, startTokenSync } from '$lib/features/auth/tokens';
 		justify-content: center;
 	}
 
-	.btn {
-		padding: 0.625rem 1.25rem;
-		border: none;
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background 0.15s ease, color 0.15s ease;
-	}
-
 	.btn-ghost {
 		background: var(--bg-muted);
 		color: var(--text-secondary);
@@ -589,15 +579,6 @@ import { clearTokens, startTokenSync } from '$lib/features/auth/tokens';
 
 	.btn-ghost:hover {
 		background: var(--border);
-	}
-
-	.btn-danger {
-		background: var(--danger);
-		color: var(--on-brand);
-	}
-
-	.btn-danger:hover {
-		background: var(--danger-strong);
 	}
 
 	@media (max-width: 640px) {

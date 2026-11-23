@@ -441,18 +441,6 @@
 		background: linear-gradient(90deg, var(--brand), var(--accent) 55%, transparent 90%);
 	}
 
-	.error-banner {
-		background: var(--danger-bg);
-		border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
-		border-left: 3px solid var(--danger);
-		border-radius: 8px;
-		padding: 0.625rem 0.875rem;
-		margin-bottom: 1.25rem;
-		color: var(--danger);
-		font-size: 0.8125rem;
-		line-height: 1.45;
-	}
-
 	.field {
 		margin-bottom: 1.25rem;
 	}
@@ -465,6 +453,8 @@
 		margin-bottom: 0.375rem;
 	}
 
+	/* Intentional auth variant: taller 10px-radius controls; the shared
+	   .form-input is the canonical app control. */
 	.form-input {
 		width: 100%;
 		padding: 0.6875rem 0.875rem;
@@ -626,6 +616,7 @@
 		color: var(--success);
 	}
 
+	/* Intentional auth variant: full-width gradient CTA. */
 	.btn-primary {
 		width: 100%;
 		padding: 0.8125rem;

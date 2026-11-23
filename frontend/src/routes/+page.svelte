@@ -382,6 +382,7 @@
 		flex: none;
 	}
 
+	/* Landing-page hero variant; intentionally larger than the shared .btn. */
 	.btn-primary {
 		display: inline-flex;
 		align-items: center;
@@ -410,6 +411,7 @@
 		transform: translateY(0);
 	}
 
+	/* Landing-page hero variant; intentionally larger than the shared .btn. */
 	.btn-ghost {
 		display: inline-flex;
 		align-items: center;

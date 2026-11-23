@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import {
 		editExcuse,
@@ -278,7 +279,6 @@
 	});
 
 	const pageCount = $derived(Math.max(1, Math.ceil(total / pageSize)));
-	const pageNumbers = $derived(Array.from({ length: pageCount }, (_, index) => index + 1));
 	const rangeText = $derived.by(() => {
 		if (total === 0) return '0 of 0 requests';
 		const start = (currentPage - 1) * pageSize + 1;
@@ -1023,39 +1023,15 @@
 			</div>
 			<div class="table-foot">
 				<p class="average">{summaryText}</p>
-				<nav class="pages no-print" aria-label="Excuse pages">
-					<button
-						class="page"
-						type="button"
-						disabled={currentPage <= 1}
-						onclick={() => (currentPage = Math.max(1, currentPage - 1))}
-						aria-label="Go to previous excuse page"
-					>
-						Previous
-					</button>
-					{#each pageNumbers as pageNumber (pageNumber)}
-						<button
-							class="page"
-							class:current={pageNumber === currentPage}
-							type="button"
-							disabled={pageNumber === currentPage}
-							onclick={() => (currentPage = pageNumber)}
-							aria-label={`Go to excuse page ${pageNumber}`}
-							aria-current={pageNumber === currentPage ? 'page' : undefined}
-						>
-							{pageNumber}
-						</button>
-					{/each}
-					<button
-						class="page"
-						type="button"
-						disabled={currentPage >= pageCount}
-						onclick={() => (currentPage = Math.min(pageCount, currentPage + 1))}
-						aria-label="Go to next excuse page"
-					>
-						Next
-					</button>
-				</nav>
+				<div class="no-print">
+					<Pagination
+						page={currentPage}
+						totalPages={pageCount}
+						onPageChange={(next) => (currentPage = next)}
+						spacing={false}
+						ariaLabel="Excuse pages"
+					/>
+				</div>
 			</div>
 		</section>
 	{/if}
@@ -1572,21 +1548,6 @@
 		color: var(--text-secondary);
 	}
 
-	.form-input {
-		padding: 0.625rem 0.75rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		background: var(--bg-card);
-		outline: none;
-	}
-
-	.form-input:focus {
-		border-color: var(--accent);
-	}
-
 	.area {
 		width: 100%;
 		resize: vertical;
@@ -1628,28 +1589,6 @@
 		color: var(--danger-strong);
 	}
 
-	.btn {
-		padding: 0.625rem 1.25rem;
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		border: 1px solid transparent;
-		transition: background 0.15s ease;
-	}
-
-	.btn-primary {
-		background: var(--accent);
-		color: var(--on-brand);
-		border-color: var(--accent);
-		white-space: nowrap;
-	}
-
-	.btn-primary:hover:not(:disabled) {
-		background: var(--accent-hover);
-	}
-
 	.btn-ghost {
 		background: var(--bg-card);
 		border-color: var(--border-strong);
@@ -1658,27 +1597,6 @@
 
 	.btn-ghost:hover:not(:disabled) {
 		background: var(--bg-hover);
-	}
-
-	.btn-secondary {
-		background: var(--bg-muted);
-		color: var(--text-secondary);
-		border-color: var(--border);
-	}
-
-	.btn-danger {
-		background: var(--danger);
-		color: var(--on-brand);
-		border-color: var(--danger);
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		background: var(--danger-strong);
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.table-card {
@@ -1795,48 +1713,6 @@
 		font-size: 0.9375rem;
 		font-weight: 600;
 		color: var(--text-secondary);
-	}
-
-	.pages {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.375rem;
-	}
-
-	.page {
-		min-width: 2.375rem;
-		padding: 0.4375rem 0.625rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.page:hover:not(:disabled) {
-		background: var(--bg-hover);
-	}
-
-	.page:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-	}
-
-	.page.current {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.page:disabled:not(.current) {
-		color: var(--text-muted);
-		background: var(--bg-page);
-		border-color: var(--border);
-		cursor: not-allowed;
 	}
 
 	.sr-only {

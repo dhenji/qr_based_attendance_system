@@ -1661,22 +1661,6 @@ let selectedOfferingId = $state<number | null>(null);
 		color: var(--text-secondary);
 	}
 
-	.form-input {
-		padding: 0.625rem 0.75rem;
-		border: 1px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		background: var(--bg-card);
-	}
-
-	.form-input:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-		border-color: var(--accent);
-	}
-
 	.form-input.invalid {
 		border-color: var(--danger);
 	}
@@ -2090,44 +2074,14 @@ let selectedOfferingId = $state<number | null>(null);
 		gap: 0.75rem;
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.75rem 1.25rem;
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		white-space: nowrap;
-		transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-	}
-
-	.btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
+	/* Intentional confirmation CTA: fills the action row and carries a shadow. */
 	.btn-primary {
 		flex: 1 1 auto;
-		background: var(--brand);
-		border: 1px solid var(--brand);
-		color: var(--on-brand);
 		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: var(--brand-hover);
-		border-color: var(--brand-hover);
 		transform: translateY(-1px);
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		color: var(--text-strong);
 	}
 
 	/* The ghost variant is the professor portal's back-control treatment
@@ -2143,6 +2097,8 @@ let selectedOfferingId = $state<number | null>(null);
 	}
 
 	.btn:disabled {
+		/* Shared .btn:disabled adds opacity; keep the grey state solid. */
+		opacity: 1;
 		color: var(--text-muted);
 		background: var(--bg-page);
 		border-color: var(--border);

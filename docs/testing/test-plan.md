@@ -427,7 +427,7 @@ migration, never the model**.
 | Postgres leg of the backend cases | `TEST_DATABASE_URL` unset in CI; SQLite shims (`JSONB`→`JSON`, `BigInteger`→`INTEGER`, aware `DateTime`) cover the suite | Phase 9 status in `roadmap.md`: green on both |
 | Load / throughput | needs a live API in `BENCHMARK_MODE` plus locust | `performance-benchmarks.md` §7 |
 | Backup pipeline | host needs `openssl enc` with AEAD (`-aes-256-gcm`) | `performance-benchmarks.md` §7 — currently environment-blocked |
-| Frontend runtime tests | Vitest 5 + @testing-library/svelte + jsdom; 100 co-located `*.test.ts` cases plus `src/testing/` helpers | `npm run test` / `npm run test:coverage` |
+| Frontend runtime tests | Vitest 5 + @testing-library/svelte + jsdom; 255 co-located `*.test.ts` cases in 33 files plus `src/testing/` helpers | `npm run test` / `npm run test:coverage` |
 | Linting / formatting | none configured in the repo | manual |
 
 CI **reports**; it only blocks a merge once all three jobs are added as required

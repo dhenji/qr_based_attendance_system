@@ -503,22 +503,6 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		color: var(--text-secondary);
 	}
 
-	.form-input {
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		outline: none;
-		background: var(--bg-input);
-		width: 100%;
-	}
-
-	.form-input:focus {
-		border-color: var(--accent);
-	}
-
 	.actions {
 		display: flex;
 		gap: 0.5rem;
@@ -526,26 +510,12 @@ import RadiusSelector from '$lib/components/RadiusSelector.svelte';
 		margin-top: 1rem;
 	}
 
-	.btn {
-		border-radius: 8px;
-		padding: 0.625rem 1.25rem;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		border: 1px solid transparent;
-	}
-
-	.btn-primary {
-		background: var(--brand);
-		color: var(--on-brand);
-	}
-
 	.btn-primary:disabled {
 		opacity: 0.6;
 		cursor: wait;
 	}
 
+	/* Intentional settings variant: brand-colored secondary action. */
 	.btn-secondary {
 		background: var(--bg-card);
 		border-color: var(--border-strong);
