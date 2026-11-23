@@ -470,41 +470,10 @@
 		font-size: 0.9375rem;
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.7rem 1.2rem;
-		border-radius: 8px;
-		border: 1px solid transparent;
-		font: inherit;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.btn:focus-visible,
 	.mini:focus-visible,
 	.link:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 2px;
-	}
-
-	.btn-primary {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.btn-primary:hover:not(:disabled) {
-		background: var(--brand-hover);
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border-color: var(--border-strong);
-		color: var(--text-strong);
 	}
 
 	.btn-ghost {
@@ -516,6 +485,8 @@
 	}
 
 	.btn:disabled {
+		/* Shared .btn:disabled adds opacity; keep the grey state solid. */
+		opacity: 1;
 		background: var(--bg-page);
 		border-color: var(--border);
 		color: var(--text-muted);
@@ -540,14 +511,12 @@
 		color: var(--text-secondary);
 	}
 
+	/* Intentional compact filter variant; the shared .form-input supplies the
+	   border, radius, colors, and focus ring. */
 	.form-input {
+		width: auto;
 		padding: 0.5rem 0.625rem;
-		border: 1px solid var(--border-strong);
-		border-radius: 8px;
 		font-size: 0.875rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		background: var(--bg-card);
 		max-width: 16rem;
 	}
 

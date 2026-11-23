@@ -49,6 +49,8 @@ import { onFocusRevalidate } from '$lib/shared/utils/revalidateOnFocus';
 import type { AdminCourse, Program, YearLevel } from '$lib/shared/types';
 import { formatPercentage, formatLocalDate } from '$lib/shared/utils/format';
 import Pagination from '$lib/components/Pagination.svelte';
+import FilterRail from '$lib/components/FilterRail.svelte';
+import { type DatePresetId, type PresetId, presetDateRange } from '$lib/components/filter-rail';
 import { goto } from '$app/navigation';
 import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 
@@ -99,7 +101,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	let filterNotice = $state<string | null>(null);
 	let refreshBusy = $state(false);
 	// New UX state: date presets, advanced panel, pagination, chips.
-	let datePreset = $state<'custom' | 'today' | 'week' | 'month' | 'semester' | 'year' | 'all'>('custom');
+	let datePreset = $state<DatePresetId>('custom');
 	let advancedOpen = $state(false);
 	let atRiskSearch = $state('');
 	const atRiskSearchDebounced = debounce(() => void loadAtRiskPage(1));
@@ -238,33 +240,15 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 		].filter((v) => String(v).trim() !== '').length
 	);
 
-	const applyPreset = (preset: typeof datePreset) => {
+	const applyPreset = (preset: PresetId) => {
 		datePreset = preset;
-		const now = new Date();
-		const toIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-		if (preset === 'today') {
-			dateFrom = toIso(now);
-			dateTo = toIso(now);
-		} else if (preset === 'week') {
-			const start = new Date(now);
-			start.setDate(now.getDate() - now.getDay());
-			dateFrom = toIso(start);
-			dateTo = toIso(now);
-		} else if (preset === 'month') {
-			const start = new Date(now.getFullYear(), now.getMonth(), 1);
-			dateFrom = toIso(start);
-			dateTo = toIso(now);
-		} else if (preset === 'year') {
-			const start = new Date(now.getFullYear(), 0, 1);
-			dateFrom = toIso(start);
-			dateTo = toIso(now);
-		} else if (preset === 'all') {
-			dateFrom = '';
-			dateTo = '';
-		}
+		const range = presetDateRange(preset);
+		dateFrom = range.from;
+		dateTo = range.to;
 	};
 
 	const resetFilters = () => {
+		courseSearchDebounced.cancel();
 		programFilter = '';
 		yearFilter = '';
 		semesterFilter = '';
@@ -280,6 +264,17 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 		stagingPage = 1;
 		comparisonPage = 1;
 		trendsPage = 1;
+		void apply();
+	};
+
+	// Clear only the advanced-panel controls, then re-apply so the table never
+	// disagrees with the visible filters.
+	const clearAdvanced = () => {
+		courseSearchDebounced.cancel();
+		semesterFilter = '';
+		riskLevel = '';
+		clearCourseSelection();
+		courseSearch = '';
 		void apply();
 	};
 
@@ -493,7 +488,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	const loadAtRiskPage = async (p: number) => {
 		atriskPage = p;
 		try {
-			const r = await getAtRisk({ ...baseFilters(), q: atRiskSearch.trim() || undefined, page: p, size: PAGE_SIZE } as any);
+			const r = await getAtRisk({ ...baseFilters(), q: atRiskSearch.trim() || undefined, page: p, size: PAGE_SIZE });
 			adminAnalyticsState.atRisk = r.items;
 			adminAnalyticsState.atRiskTotal = r.total;
 		} catch (e) {
@@ -517,7 +512,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	const loadComparisonPage = async (p: number) => {
 		comparisonPage = p;
 		try {
-			const r = await getAnalyticsComparison({ ...baseFilters(), page: p, size: PAGE_SIZE } as any);
+			const r = await getAnalyticsComparison({ ...baseFilters(), page: p, size: PAGE_SIZE });
 			adminAnalyticsState.comparison = r.items;
 			adminAnalyticsState.comparisonTotal = r.total;
 		} catch (e) {
@@ -528,7 +523,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	const loadTrendsPage = async (p: number) => {
 		trendsPage = p;
 		try {
-			const r = await getAnalyticsTrends({ ...baseFilters(), page: p, size: PAGE_SIZE } as any);
+			const r = await getAnalyticsTrends({ ...baseFilters(), page: p, size: PAGE_SIZE });
 			adminAnalyticsState.trends = r.items;
 			adminAnalyticsState.trendsTotal = r.total;
 		} catch (e) {
@@ -654,123 +649,98 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 
 	{#if tab !== 'attendance'}
 		<section class="card filters" aria-label="Analytics filters">
-			<p class="eyebrow">Scope</p>
-			<div class="filter-grid">
-				<div class="field">
-					<label class="form-label" for="an-program">Program</label>
-					<select id="an-program" class="form-input" bind:value={programFilter} onchange={changeProgram}>
-						<option value="">All programs</option>
-						{#each programOptions as p (p.id)}
-							<option value={p.id}>{p.code} — {p.name}</option>
-						{/each}
-					</select>
-				</div>
-				<div class="field">
-					<label class="form-label" for="an-year">Year level</label>
-					<select
-						id="an-year"
-						class="form-input"
-						bind:value={yearFilter}
-						onchange={changeYear}
-						disabled={!programFilter}
-						title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
-					>
-						<option value="">All years</option>
-						{#each yearOptions as y (y.id)}
-							<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
-						{/each}
-					</select>
-				</div>
-				<div class="field">
-					<label class="form-label" for="an-semester">Semester</label>
-					<select
-						id="an-semester"
-						class="form-input"
-						bind:value={semesterFilter}
-						onchange={changeSemester}
-						disabled={!yearFilter || semesterOptions.length === 0}
-						title={!yearFilter
-							? "Pick a year level first — semesters are the year level's terms"
-							: semesterOptions.length === 0
-								? 'This year level has no terms configured'
-								: undefined}
-					>
-						<option value="">All semesters</option>
-						{#each semesterOptions as t (t.code)}
-							<option value={t.code}>{t.label}</option>
-						{/each}
-					</select>
-				</div>
-				<div class="field">
-					<label class="form-label" for="an-session-type">Session type</label>
-					<select id="an-session-type" class="form-input" bind:value={sessionTypeFilter} onchange={apply}>
-						<option value="">All session types</option>
-						<option value="lecture">Lecture (LEC)</option>
-						<option value="lab">Laboratory (LAB)</option>
-					</select>
-				</div>
-				{#if tab === 'trends'}
+			<FilterRail
+				idPrefix="an"
+				preset={datePreset}
+				from={dateFrom}
+				to={dateTo}
+				advancedOpen={advancedOpen}
+				advancedActiveCount={advancedActiveCount}
+				onPreset={(preset) => {
+					applyPreset(preset);
+					void apply();
+				}}
+				onFromChange={(value) => {
+					dateFrom = value;
+					datePreset = 'custom';
+					void apply();
+				}}
+				onToChange={(value) => {
+					dateTo = value;
+					datePreset = 'custom';
+					void apply();
+				}}
+				onReset={resetFilters}
+				onAdvancedToggle={() => (advancedOpen = !advancedOpen)}
+				onClearAdvanced={clearAdvanced}
+			>
+				{#snippet scope()}
 					<div class="field">
-						<label class="form-label" for="an-granularity">Granularity</label>
-						<select id="an-granularity" class="form-input" bind:value={granularity} onchange={apply}>
-							<option value="daily">Daily</option>
-							<option value="weekly">Weekly</option>
-							<option value="monthly">Monthly</option>
+						<label class="form-label" for="an-program">Program</label>
+						<select id="an-program" class="form-input" bind:value={programFilter} onchange={changeProgram}>
+							<option value="">All programs</option>
+							{#each programOptions as p (p.id)}
+								<option value={p.id}>{p.code} — {p.name}</option>
+							{/each}
 						</select>
 					</div>
-				{/if}
-			</div>
+					<div class="field">
+						<label class="form-label" for="an-year">Year level</label>
+						<select
+							id="an-year"
+							class="form-input"
+							bind:value={yearFilter}
+							onchange={changeYear}
+							disabled={!programFilter}
+							title={!programFilter ? 'Pick a program first — year levels belong to a program' : undefined}
+						>
+							<option value="">All years</option>
+							{#each yearOptions as y (y.id)}
+								<option value={y.id}>{y.label}{y.terms.length === 0 ? ' (no terms)' : ''}</option>
+							{/each}
+						</select>
+					</div>
+					<div class="field">
+						<label class="form-label" for="an-semester">Semester</label>
+						<select
+							id="an-semester"
+							class="form-input"
+							bind:value={semesterFilter}
+							onchange={changeSemester}
+							disabled={!yearFilter || semesterOptions.length === 0}
+							title={!yearFilter
+								? "Pick a year level first — semesters are the year level's terms"
+								: semesterOptions.length === 0
+									? 'This year level has no terms configured'
+									: undefined}
+						>
+							<option value="">All semesters</option>
+							{#each semesterOptions as t (t.code)}
+								<option value={t.code}>{t.label}</option>
+							{/each}
+						</select>
+					</div>
+					<div class="field">
+						<label class="form-label" for="an-session-type">Session type</label>
+						<select id="an-session-type" class="form-input" bind:value={sessionTypeFilter} onchange={apply}>
+							<option value="">All session types</option>
+							<option value="lecture">Lecture (LEC)</option>
+							<option value="lab">Laboratory (LAB)</option>
+						</select>
+					</div>
+					{#if tab === 'trends'}
+						<div class="field">
+							<label class="form-label" for="an-granularity">Granularity</label>
+							<select id="an-granularity" class="form-input" bind:value={granularity} onchange={apply}>
+								<option value="daily">Daily</option>
+								<option value="weekly">Weekly</option>
+								<option value="monthly">Monthly</option>
+							</select>
+						</div>
+					{/if}
+				{/snippet}
 
-			<p class="eyebrow" style="margin-top:1rem;">Time range</p>
-			<div class="preset-row">
-				{#each [
-					{ id: 'today', label: 'Today' },
-					{ id: 'week', label: 'This week' },
-					{ id: 'month', label: 'This month' },
-					{ id: 'year', label: 'This year' },
-					{ id: 'all', label: 'All time' },
-				] as p (p.id)}
-					<button
-						class="btn btn-ghost"
-						class:selected={datePreset === p.id}
-						type="button"
-						onclick={() => { applyPreset(p.id as any); void apply(); }}
-					>
-						{p.label}
-					</button>
-				{/each}
-			</div>
-			<div class="filter-grid filter-grid-4">
-				<div class="field">
-					<label class="form-label" for="an-from">From date</label>
-					<input id="an-from" class="form-input" type="date" bind:value={dateFrom} onchange={() => { datePreset = 'custom'; void apply(); }} />
-				</div>
-				<div class="field">
-					<label class="form-label" for="an-to">To date</label>
-					<input id="an-to" class="form-input" type="date" bind:value={dateTo} onchange={() => { datePreset = 'custom'; void apply(); }} />
-				</div>
-				<div class="field">
-					<span class="form-label">&nbsp;</span>
-					<button class="btn btn-secondary" type="button" onclick={resetFilters}>Reset filters</button>
-				</div>
-				<div class="field">
-					<span class="form-label">&nbsp;</span>
-					<button
-						class="btn btn-secondary advanced-toggle"
-						type="button"
-						aria-expanded={advancedOpen}
-						aria-controls="advanced-filters"
-						onclick={() => (advancedOpen = !advancedOpen)}
-					>
-						Advanced filters{#if advancedActiveCount > 0} ({advancedActiveCount}){/if}
-					</button>
-				</div>
-			</div>
-
-
-
-			{#if advancedOpen}
-				<div id="advanced-filters" class="advanced-panel">
+				{#snippet advanced()}
 					<fieldset class="courses">
 						<legend>Courses (multi)</legend>
 						<div class="course-picker">
@@ -826,20 +796,16 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 							<option value="low">Low</option>
 						</select>
 					</div>
-					<div class="field">
-						<span class="form-label">&nbsp;</span>
-						<button class="btn btn-secondary" type="button" onclick={() => { semesterFilter=''; riskLevel=''; clearCourseSelection(); courseSearch=''; void apply(); }}>Clear advanced</button>
-					</div>
-				</div>
-			{/if}
+				{/snippet}
+			</FilterRail>
 
 			{#if formError}
 				<p class="error" role="alert">{formError}</p>
-		{/if}
-		{#if filterNotice}
-			<p class="muted" role="status">{filterNotice}</p>
-		{/if}
-	</section>
+			{/if}
+			{#if filterNotice}
+				<p class="muted" role="status">{filterNotice}</p>
+			{/if}
+		</section>
 	{/if}
 
 	<nav class="tabs" aria-label="Analytics sections">
@@ -1516,20 +1482,16 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 		margin-top: 0.75rem;
 	}
 
+	/* Intentional lift variant; the shared .btn supplies the colors, so keep
+	   the transform/box-shadow in the transition. */
 	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.625rem 1rem;
-		border-radius: 8px;
-		font-size: 0.875rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		white-space: nowrap;
-		transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+		transition:
+			background 0.15s ease,
+			border-color 0.15s ease,
+			transform 0.18s ease,
+			box-shadow 0.18s ease;
 	}
+
 	.btn:hover:not(:disabled) {
 		transform: translateY(-1px);
 		box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
@@ -1537,36 +1499,6 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	.btn:active:not(:disabled) {
 		transform: translateY(0);
 		box-shadow: none;
-	}
-
-	.btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-primary {
-		background: var(--brand);
-		border: 1px solid var(--brand);
-		color: var(--on-brand);
-	}
-
-	.btn-primary:hover:not(:disabled) {
-		background: var(--brand-hover);
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		color: var(--text-strong);
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--divider);
 	}
 
 	.btn-secondary.selected {
@@ -1607,26 +1539,6 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	}
 	.link:hover { text-decoration: underline; }
 
-	.eyebrow {
-		margin: 0 0 0.5rem;
-		font-size: 0.7rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--text-muted);
-	}
-	.filter-grid {
-		display: grid;
-		gap: 1rem;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-	}
-	.filter-grid-4 {
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-	}
-	.filter-grid .btn {
-		width: 100%;
-		justify-content: center;
-	}
 	.field {
 		display: flex;
 		flex-direction: column;
@@ -1639,54 +1551,7 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 		letter-spacing: 0.02em;
 		color: var(--text-secondary);
 	}
-	.form-input {
-		padding: 0.625rem 0.75rem;
-		border: 1px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		background: var(--bg-card);
-		width: 100%;
-	}
-	.form-input:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-		border-color: var(--accent);
-	}
-	.form-input:disabled {
-		background: var(--divider);
-		color: var(--text-muted);
-		cursor: not-allowed;
-	}
-	.preset-row {
-		display: flex;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-		align-items: center;
-		margin: 0.75rem 0;
-	}
-	.btn-ghost {
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		color: var(--text-strong);
-		padding: 0.5rem 0.9rem;
-		font-size: 0.875rem;
-		border-radius: 8px;
-	}
-	.btn-ghost:hover:not(:disabled) {
-		background: var(--bg-hover, var(--divider));
-	}
-	.btn-ghost.selected {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-	.btn-ghost.selected:hover:not(:disabled) {
-		background: var(--brand-hover);
-		border-color: var(--brand-hover);
-		color: var(--on-brand);
-	}
+
 	.course-grid {
 		display: flex;
 		gap: 0.5rem 1rem;
@@ -1694,21 +1559,6 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 		align-items: center;
 		margin-top: 0.5rem;
 	}
-	.advanced-toggle {
-		justify-content: center;
-	}
-	.advanced-panel {
-		display: flex;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-		align-items: center;
-		margin-top: 0.75rem;
-		padding: 0.75rem;
-		border: 1px dashed var(--border);
-		border-radius: 8px;
-		background: var(--bg-muted, transparent);
-	}
-
 	.chips {
 		display: flex;
 		flex-direction: column;
@@ -1738,18 +1588,6 @@ import { adminCourse, adminStudent } from '$lib/shared/constants/routes';
 	}
 	.chip-x:hover { color: var(--danger); }
 
-	@media (max-width: 860px) {
-		.filter-grid,
-		.filter-grid-4 {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
-	@media (max-width: 560px) {
-		.filter-grid,
-		.filter-grid-4 {
-			grid-template-columns: minmax(0, 1fr);
-		}
-	}
 	@media (max-width: 900px) {
 		.kpis {
 			grid-template-columns: repeat(2, minmax(0, 1fr));

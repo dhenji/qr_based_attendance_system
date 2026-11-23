@@ -509,7 +509,7 @@ Svelte 5 runes are **forced on** via `vite.config.ts`. Write all reactive code u
 - Props via `$props()` rune.
 - Events: use callback props (`onAction`), not `createEventDispatcher`.
 - Slots: use `{@render children()}` (Svelte 5 snippet API), not `<slot>`.
-- CSS: scoped by default; use `:global()` only when necessary.
+- CSS: scoped by default; use `:global()` only when necessary. Canonical controls live in `src/lib/shared/theme.css` (`.btn` family, `.form-input`, `.error-banner`); pages keep only documented context variants instead of re-declaring them.
 
 ### 2.5 File Organization (Feature Slices)
 
@@ -573,6 +573,27 @@ re-introduce a local copy at a call site.
   (admin tables, scan/history timestamps). Pass the options form for locale-aware
   rendering; `date: {}` reproduces a bare `toLocaleDateString()`. Do not inline
   `toLocaleDateString`/`toLocaleTimeString` in a page.
+
+### 2.8 Shared List Controls and Request Races
+
+- **Pagination:** `Pagination.svelte` is the one pager. Use `variant="full"` for
+  analytics, attendance, history, and excuse tables; use `variant="compact"` for the
+  archive pages. Pass `spacing={false}` when the parent already owns the surrounding
+  padding (for example a table footer). Do not re-add a local pager.
+- **Filter rail:** `FilterRail.svelte` is presentational — the parent owns filter
+  values, course search, advanced-open state, and fetching. Entity-specific controls
+  go through the `scope` and `advanced` snippets. Preset ids/labels and
+  `presetDateRange()` live in `filter-rail.ts`; use them instead of re-implementing
+  date math. The admin analytics page and `AttendanceSnapshot.svelte` are the two
+  consumers.
+- **Archive roster:** `ArchiveRosterPage.svelte` + `archive-roster.ts` back both
+  `/admin/students/archive` and `/admin/professors/archive`. Route files are thin
+  wrappers that pass a typed `ArchiveRosterConfig<T>` and the store's roster state.
+- **Request races:** overlapping list loads use `createRequestTokenGuard()` from
+  `$lib/shared/requestToken`. Call `begin()` before the request, ignore writes when
+  `!isCurrent(token)`, and clear `loading` only for the newest token. This complements
+  per-search `AbortController` cancellation — abort covers cancellable searches,
+  tokens cover focus/entity refreshes that cannot be aborted.
 
 ---
 

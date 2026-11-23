@@ -261,47 +261,6 @@
 		margin: 0;
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.625rem 1rem;
-		border-radius: 8px;
-		font-size: 0.875rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		white-space: nowrap;
-		transition: background 0.15s ease, border-color 0.15s ease;
-	}
-
-	.btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		color: var(--text-strong);
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--divider);
-	}
-
-	.btn-ghost {
-		background: var(--divider);
-		border: 1px solid transparent;
-		color: var(--text-secondary);
-	}
-
 	.btn-sm {
 		padding: 0.375rem 0.75rem;
 		font-size: 0.8125rem;

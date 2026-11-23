@@ -633,27 +633,45 @@ export async function loadPrograms(page = 1, size = 20): Promise<void> {
 
 ```ts
 import { get, isMockMode, post } from '$lib/api/client';
-import type { Paginated, Program } from '$lib/shared/types';
+import type { Paginated } from '$lib/api/endpoints';
+import type { Program, ProgramCreatePayload, ProgramResponse } from '$lib/shared/types';
 import { mockPrograms } from './mock';
 
 // `isMockMode()` is the ONLY mock gate — it reads PUBLIC_MOCK_MODE, which
-// api/client.ts:18 owns. Never branch on import.meta.env.DEV, on the presence of
+// api/client.ts owns. Never branch on import.meta.env.DEV, on the presence of
 // PUBLIC_API_URL, or on a service-local USE_MOCK flag: the API is real by default
 // and mock mode is an explicit opt-in for UI work without a backend.
 export async function listPrograms(params: {
 	page: number;
 	size: number;
 }): Promise<Paginated<Program>> {
-	if (isMockMode()) return mockPrograms(params);
+	if (isMockMode()) {
+		return {
+			items: mockPrograms,
+			total: mockPrograms.length,
+			page: params.page,
+			size: params.size
+		};
+	}
 
 	// Endpoint keys are EndpointDefs registered in api/endpoints.ts, not raw paths —
 	// client.ts adds the /api prefix and handles auth, refresh and error envelopes.
-	return await get<Paginated<Program>>('adminProgramList', params);
+	const response = await get<Paginated<ProgramResponse>>('adminPrograms', params);
+	// toProgram is the slice's wire → view mapper (snake_case → camelCase).
+	return { ...response, items: (response.items ?? []).map(toProgram) };
 }
 
-export async function createProgram(payload: Program): Promise<Program> {
-	if (isMockMode()) return payload;
-	return await post<Program>('adminProgramCreate', payload);
+export async function createProgram(payload: ProgramCreatePayload): Promise<Program> {
+	if (isMockMode()) {
+		return {
+			...mockPrograms[0],
+			id: 0,
+			code: payload.code,
+			name: payload.name,
+			totalYears: payload.total_years
+		};
+	}
+	return toProgram(await post<ProgramResponse>('adminProgramCreate', payload));
 }
 ```
 

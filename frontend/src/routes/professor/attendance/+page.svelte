@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import SkeletonTable from '$lib/components/SkeletonTable.svelte';
 	import SkeletonCards from '$lib/components/SkeletonCards.svelte';
 	import { goto } from '$app/navigation';
@@ -279,18 +280,6 @@
 	});
 
 	const pageCount = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-	const visiblePages = $derived.by((): Array<number | 'gap-start' | 'gap-end'> => {
-		if (pageCount <= 7)
-			return Array.from({ length: pageCount }, (_, index) => index + 1);
-		const window: Array<number | 'gap-start' | 'gap-end'> = [1];
-		const start = Math.max(2, currentPage - 2);
-		const end = Math.min(pageCount - 1, currentPage + 2);
-		if (start > 2) window.push('gap-start');
-		for (let page = start; page <= end; page += 1) window.push(page);
-		if (end < pageCount - 1) window.push('gap-end');
-		window.push(pageCount);
-		return window;
-	});
 	const rangeText = $derived.by(() => {
 		if (total === 0) return '0 of 0 records';
 		const start = (currentPage - 1) * PAGE_SIZE + 1;
@@ -802,22 +791,15 @@
 				{#if directoryWarning}
 					<p class="warning" role="status">{directoryWarning}</p>
 				{/if}
-				<nav class="pages no-print" aria-label="Attendance pages">
-					<button class="page" type="button" disabled={currentPage <= 1} onclick={() => (currentPage = 1)} aria-label="Go to first attendance page">First</button>
-					<button class="page" type="button" disabled={currentPage <= 1} onclick={() => (currentPage = Math.max(1, currentPage - 1))} aria-label="Go to previous attendance page">Previous</button>
-					{#each visiblePages as pageNumber (pageNumber)}
-						{#if typeof pageNumber === 'number'}
-							<button class="page" class:current={pageNumber === currentPage} type="button" disabled={pageNumber === currentPage} onclick={() => (currentPage = pageNumber)} aria-label={`Go to attendance page ${pageNumber}`} aria-current={pageNumber === currentPage ? 'page' : undefined}>
-								{pageNumber}
-							</button>
-						{:else}
-							<span class="gap" aria-hidden="true">…</span>
-						{/if}
-					{/each}
-					<button class="page" type="button" disabled={currentPage >= pageCount} onclick={() => (currentPage = Math.min(pageCount, currentPage + 1))} aria-label="Go to next attendance page">Next</button>
-					<button class="page" type="button" disabled={currentPage >= pageCount} onclick={() => (currentPage = pageCount)} aria-label="Go to last attendance page">Last</button>
-					<span class="page-count" aria-live="polite">Page {currentPage} of {pageCount}</span>
-				</nav>
+				<div class="no-print">
+					<Pagination
+						page={currentPage}
+						totalPages={pageCount}
+						onPageChange={(next) => (currentPage = next)}
+						spacing={false}
+						ariaLabel="Attendance pages"
+					/>
+				</div>
 				<div class="table-actions no-print">
 					<button class="btn btn-secondary" type="button" onclick={() => (pendingExport = { run: print, title: 'Confirm Print', message: 'Are you sure you want to print this data? Your browser’s print dialog will open after you confirm.', confirmLabel: 'Confirm Print', details: [{ label: 'Format', value: 'Print' }] })}>
 						<AppIcon name="file" size={18} />
@@ -969,23 +951,6 @@
 		color: var(--text-secondary);
 	}
 
-	.form-input {
-		padding: 0.625rem 0.75rem;
-		border: 1px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		background: var(--bg-card);
-		width: 100%;
-	}
-
-	.form-input:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-		border-color: var(--accent);
-	}
-
 	.filter-actions {
 		display: flex;
 		justify-content: flex-end;
@@ -1052,8 +1017,7 @@
 	}
 
 	.sort:focus-visible,
-	.mini:focus-visible,
-	.btn:focus-visible {
+	.mini:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 1px;
 	}
@@ -1154,87 +1118,10 @@
 		color: var(--text-secondary);
 	}
 
-	.pages {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.75rem;
-	}
-
-	.page {
-		min-width: 2.375rem;
-		padding: 0.4375rem 0.625rem;
-		border-radius: 8px;
-		border: 1px solid var(--border-strong);
-		background: var(--bg-card);
-		color: var(--text-strong);
-		font: inherit;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.page:hover:not(:disabled) {
-		background: var(--bg-hover);
-	}
-
-	.page:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-	}
-
-	.page.current {
-		background: var(--brand);
-		border-color: var(--brand);
-		color: var(--on-brand);
-	}
-
-	.page:disabled:not(.current) {
-		color: var(--text-muted);
-		background: var(--bg-page);
-		border-color: var(--border);
-		cursor: not-allowed;
-	}
-
-	.gap {
-		padding: 0 0.125rem;
-		color: var(--text-muted);
-		font-weight: 700;
-		user-select: none;
-	}
-
-	.page-count {
-		margin-left: 0.5rem;
-		font-size: 0.8125rem;
-		font-weight: 600;
-		color: var(--text-muted);
-		white-space: nowrap;
-	}
-
 	.table-actions {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.75rem;
-	}
-
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.7rem 1.2rem;
-		border-radius: 8px;
-		border: 1px solid transparent;
-		font: inherit;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border-color: var(--border-strong);
-		color: var(--text-strong);
 	}
 
 	.btn-ghost {
@@ -1246,6 +1133,8 @@
 	}
 
 	.btn:disabled {
+		/* Shared .btn:disabled adds opacity; keep the grey state solid. */
+		opacity: 1;
 		background: var(--bg-page);
 		border-color: var(--border);
 		color: var(--text-muted);
@@ -1301,8 +1190,7 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.btn,
-		.mini,
-		.page {
+		.mini {
 			transition: none;
 		}
 	}

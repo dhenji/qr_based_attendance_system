@@ -763,7 +763,7 @@ import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 				studentNumber: submitNumber,
 				gps,
 				livenessEvidence,
-				liveFaceImage: (livenessEvidence as any).faceImage,
+				liveFaceImage: livenessEvidence.faceImage,
 				scannedAt: scanTimestamp,
 				idempotencyKey,
 			});
@@ -810,7 +810,7 @@ import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 							studentNumber: submitNumber,
 							gps,
 							livenessEvidence,
-							liveFaceImage: (livenessEvidence as any).faceImage,
+							liveFaceImage: livenessEvidence.faceImage,
 							scannedAt: scanTimestamp,
 							idempotencyKey
 						}
@@ -871,7 +871,7 @@ import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 		// A scan cannot be validated without a captured face frame; surface a
 		// clear, retryable error instead of submitting a payload the backend
 		// will reject as 422 validation_error.
-		if (!(livenessEvidence as any)?.faceImage) {
+		if (!livenessEvidence.faceImage) {
 			rejectionReason = 'Could not capture your face image. Try again in good lighting.';
 			showFailure = true;
 			return;
@@ -1571,22 +1571,6 @@ import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 		gap: 0.75rem;
 	}
 
-	.form-input {
-		width: 100%;
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		outline: none;
-		transition: border-color 0.15s;
-		background: var(--bg-card);
-	}
-
-	.form-input:focus {
-		border-color: var(--accent);
-	}
-
 	.code-input {
 		flex: 1;
 		min-width: 0;
@@ -1599,29 +1583,21 @@ import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 		text-transform: none;
 	}
 
+	/* Intentional scan-action size: the shared variants supply the colors. */
 	.btn-primary,
 	.btn-secondary,
+	/* Intentional outline danger variant for the scan cancel action. */
 	.btn-danger {
 		padding: 0.625rem 1.125rem;
-		border-radius: 8px;
 		font-size: 0.9375rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		white-space: nowrap;
-		transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 	}
 
 	.btn-primary {
-		background: var(--brand);
-		border: 1px solid var(--brand);
-		color: var(--on-brand);
 		box-shadow: 0 4px 14px rgba(30, 58, 95, 0.28);
 	}
 
+	/* Intentional lift variant; the shared .btn-primary supplies the colors. */
 	.btn-primary:hover:not(:disabled) {
-		background: var(--brand-hover);
-		border-color: var(--brand-hover);
 		transform: translateY(-1px);
 	}
 
@@ -1630,16 +1606,6 @@ import { attemptUpdateFromError } from '$lib/features/liveness/attempts';
 		cursor: not-allowed;
 		box-shadow: none;
 		transform: none;
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border: 1px solid var(--border-strong);
-		color: var(--text-strong);
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--bg-hover);
 	}
 
 	.btn-secondary:disabled {

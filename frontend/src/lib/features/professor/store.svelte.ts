@@ -3,6 +3,10 @@
 
 import type { Professor, ProfessorCourseSummary } from '$lib/shared/types';
 import { getProfile, listCourses } from '$lib/features/professor/service';
+import { createRequestTokenGuard } from '$lib/shared/requestToken';
+
+// A course load that starts later always wins over an earlier one.
+const coursesListGuard = createRequestTokenGuard();
 
 // Professor state
 // Read-only self profile for /professor/profile, plus the course-assignment
@@ -41,14 +45,18 @@ export const initProfessor = async (): Promise<void> => {
 // into state. A 404 means the signed-in user has no claimed professor row
 // (unclaimed roster) — the page renders its empty state for that case.
 export const initProfessorCourses = async (): Promise<void> => {
+	const token = coursesListGuard.begin();
 	professorState.coursesLoading = true;
 	professorState.coursesError = null;
 	try {
-		professorState.courses = await listCourses();
+		const courses = await listCourses();
+		if (!coursesListGuard.isCurrent(token)) return;
+		professorState.courses = courses;
 	} catch (e: unknown) {
+		if (!coursesListGuard.isCurrent(token)) return;
 		professorState.coursesError = toMessage(e, 'Failed to load course assignments');
 	} finally {
-		professorState.coursesLoading = false;
+		if (coursesListGuard.isCurrent(token)) professorState.coursesLoading = false;
 	}
 };
 

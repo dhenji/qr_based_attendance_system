@@ -214,9 +214,11 @@
 	.recovery { display: flex; flex-direction: column; gap: 0.75rem; }
 	.step-sub { color: var(--text-muted); font-size: 0.8125rem; line-height: 1.5; margin: 0 0 0.75rem; }
 	.step-sub strong { color: var(--text-strong); }
-	.error-banner { background: var(--danger-bg); border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent); border-left: 3px solid var(--danger); border-radius: 8px; padding: 0.625rem 0.875rem; margin-bottom: 1rem; color: var(--danger); font-size: 0.8125rem; line-height: 1.45; }
+
 	.field { margin-bottom: 1.25rem; }
 	.form-label { display: block; font-weight: 600; font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 0.375rem; }
+	/* Intentional auth variant: taller 10px-radius controls; the shared
+	   .form-input is the canonical app control. */
 	.form-input { width: 100%; padding: 0.6875rem 0.875rem; background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong); border-radius: 10px; font-size: 0.9375rem; font-family: inherit; outline: none; }
 	.pwd-wrap { position: relative; }
 	.pwd-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 0; }
@@ -226,6 +228,7 @@
 	.match-banner { border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; }
 	.match-banner.match { background: var(--success-bg); border-left: 3px solid var(--success); color: var(--success); }
 	.match-banner.no-match { background: var(--danger-bg); border-left: 3px solid var(--danger); color: var(--danger); }
+	/* Intentional auth variant: full-width gradient CTA. */
 	.btn-primary { width: 100%; padding: 0.8125rem; border: 1px solid color-mix(in srgb, var(--brand) 80%, #0a1220); border-radius: 10px; background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 70%, #0a1220)); color: var(--on-brand); font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; }
 	.btn-primary:disabled { background: var(--border-strong); color: var(--text-muted); cursor: not-allowed; }
 	.success-banner { background: var(--success-bg); border: 1px solid color-mix(in srgb, var(--success) 22%, transparent); border-left: 3px solid var(--success); border-radius: 8px; padding: 0.625rem 0.875rem; margin-bottom: 1rem; color: var(--success); font-size: 0.8125rem; font-weight: 600; }

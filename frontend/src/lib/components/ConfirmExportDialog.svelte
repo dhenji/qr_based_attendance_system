@@ -193,36 +193,6 @@
 		font-weight: 600;
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 0.625rem 1.125rem;
-		border: 1px solid transparent;
-		border-radius: 8px;
-		font-size: 0.875rem;
-		font-weight: 600;
-		font-family: inherit;
-		cursor: pointer;
-		transition: background 0.15s ease;
-	}
-
-	.btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-primary {
-		background: var(--brand);
-		color: var(--on-brand);
-	}
-
 	.btn-ghost {
 		background: transparent;
 		color: var(--text-secondary);

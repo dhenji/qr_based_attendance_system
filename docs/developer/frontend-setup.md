@@ -175,13 +175,13 @@ VitePWA({
 
 ## Mock Service Pattern
 
-The feature-slice structure (under `src/lib/features/`) uses mock services for
-frontend development without a live backend.
+The feature-slice structure (under `src/lib/features/`) can use mock fixtures
+for frontend development without a live backend; the default is the real API.
 
-> **Canonical mock toggle:** the global switch is `MOCK = true` in
-> `src/lib/api/client.ts` (mock data comes from `src/lib/api/endpoints.ts`).
-> The per-service fallback pattern below is how individual services can also
-> short-circuit in dev when `PUBLIC_API_URL` is unset.
+> **Canonical mock toggle:** `PUBLIC_MOCK_MODE=true` is read once in
+> `src/lib/api/client.ts` and exposed as `isMockMode()`; the default is the real
+> API. Services branch on `isMockMode()` and use their local fixtures only for the
+> mock leg — never hard-code a per-service `MOCK = true`.
 
 ### Directory pattern per feature
 
@@ -221,35 +221,23 @@ export const mockPrograms: Program[] = [
 ### Conditional mock/real switching
 
 ```ts
-// src/lib/features/program/service.ts
-import { PUBLIC_API_URL } from "$env/static/public";
+// Abbreviated excerpt — the real features/admin/programs/service.ts also
+// accepts filters/page/size and returns a paginated result.
+import { get, isMockMode } from "$lib/api/client";
+import type { Paginated } from "$lib/api/endpoints";
 import { mockPrograms } from "./mock";
-import type { Program } from "./schema";
+import type { Program, ProgramResponse } from "$lib/shared/types";
 
-const USE_MOCK = import.meta.env.DEV && !PUBLIC_API_URL;
+export const listPrograms = async (): Promise<Program[]> => {
+  if (isMockMode()) return mockPrograms;
 
-export async function getPrograms(): Promise<Program[]> {
-  if (USE_MOCK) {
-    return mockPrograms;
-  }
-
-  const res = await fetch(`${PUBLIC_API_URL}/admin/programs`);
-  if (!res.ok) throw new Error("Failed to fetch programs");
-  return res.json();
-}
+  const response = await get<Paginated<ProgramResponse>>("adminPrograms");
+  return (response.items ?? []).map(toProgram); // toProgram maps snake_case → camelCase
+};
 ```
 
-Or use an environment variable:
-
-```ts
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
-```
-
-Add to `.env`:
-
-```bash
-VITE_USE_MOCK=true
-```
+`PUBLIC_MOCK_MODE` is the only mock switch; do not add another environment
+variable or a per-service `USE_MOCK` constant.
 
 ---
 
@@ -325,3 +313,18 @@ module-level flag (`coursesReady`). These flags must be invalidated on
 login/logout/account-switch together with the runes store resets, otherwise
 stale or empty identity leaks between accounts. See
 `invalidateCourseCache()` and its callers in `features/auth/store.svelte.ts`.
+
+## Shared list controls and request races
+
+- `Pagination.svelte` is the one pager. Use `variant="full"` for analytics,
+  attendance, history, and excuse tables; use `variant="compact"` for the archive
+  pages. Pass `spacing={false}` when the parent owns the padding.
+- The admin analytics page and `AttendanceSnapshot.svelte` share the presentational
+  `FilterRail.svelte`. The parent owns filter values, course search, advanced-open
+  state, and fetching; preset date math lives in `filter-rail.ts::presetDateRange`.
+- `/admin/students/archive` and `/admin/professors/archive` are thin wrappers over
+  `ArchiveRosterPage.svelte`; `archive-roster.ts` holds the shared config types.
+- Overlapping list loads use `createRequestTokenGuard()` from
+  `$lib/shared/requestToken`: call `begin()` before the request, ignore writes when
+  `!isCurrent(token)`, and clear `loading` only for the newest token. This
+  complements the debounced-search `AbortController`.

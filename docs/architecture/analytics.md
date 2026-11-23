@@ -90,12 +90,21 @@ Last verified against commit: see `git rev-parse HEAD`.
   manual Apply button); default date range is "All time"; pagination via
   shared `Pagination.svelte` on Comparison/Trends/At-Risk/Staging tabs;
   drill-down links to admin course/student pages. The Attendance tab
-  delegates to `AttendanceSnapshot.svelte`, which mirrors the same layout.
+  delegates to `AttendanceSnapshot.svelte`, which uses the same shared
+  `FilterRail.svelte` shell.
+- `frontend/src/lib/components/FilterRail.svelte` — presentational filter
+  shell shared by the analytics page and `AttendanceSnapshot`; the parent owns
+  filter values, course search, advanced-open state, and fetching, and passes
+  entity-specific controls through the `scope` and `advanced` snippets.
+  Preset ids/labels and `presetDateRange()` live in
+  `frontend/src/lib/components/filter-rail.ts` (local calendar dates,
+  Sunday-start week).
 - `frontend/src/lib/features/admin/analytics/service.ts` — API calls.
 - `frontend/src/lib/features/admin/analytics/store.svelte.ts` — state.
 - `frontend/src/lib/features/admin/analytics/schema.ts` — types.
-- `frontend/src/lib/components/Pagination.svelte` — shared pagination
-  control reused across analytics and attendance tabs.
+- `frontend/src/lib/components/Pagination.svelte` — shared pager
+  (`full`/`compact` variants) reused across analytics, attendance, history,
+  excuse, and archive pages.
 
 ## Course picker
 

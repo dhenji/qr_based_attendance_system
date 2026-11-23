@@ -566,24 +566,12 @@ let error = $state('');
 		box-shadow: var(--shadow-sm);
 	}
 
-
 	.error-banner.redirecting {
 		font-size: 0.9rem;
 		font-weight: 700;
 		text-align: center;
 		background: color-mix(in srgb, var(--danger) 18%, var(--bg-card));
 		border-color: var(--danger);
-	}
-
-	.error-banner {
-		border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
-		border-left: 3px solid var(--danger);
-		border-radius: 8px;
-		padding: 0.625rem 0.875rem;
-		margin-bottom: 1.25rem;
-		color: var(--danger);
-		font-size: 0.8125rem;
-		line-height: 1.45;
 	}
 
 	.field {
@@ -598,6 +586,8 @@ let error = $state('');
 		margin-bottom: 0.375rem;
 	}
 
+	/* Intentional auth variant: taller 10px-radius controls; the shared
+	   .form-input is the canonical app control. */
 	.form-input {
 		width: 100%;
 		padding: 0.6875rem 0.875rem;
@@ -697,6 +687,7 @@ let error = $state('');
 		content: '✔ ';
 	}
 
+	/* Intentional auth variant: full-width gradient CTA. */
 	.btn-primary {
 		width: 100%;
 		padding: 0.8125rem;

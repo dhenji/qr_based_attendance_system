@@ -58,6 +58,7 @@
 		font-size: 0.9375rem;
 	}
 
+	/* Standalone error-page variant; independent of the app shell. */
 	.btn {
 		margin-top: 0.75rem;
 		padding: 0.625rem 1.25rem;

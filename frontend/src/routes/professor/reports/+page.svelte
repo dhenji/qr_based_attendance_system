@@ -762,16 +762,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		color: var(--text-secondary);
 	}
 
-	.form-input {
-		padding: 0.625rem 0.75rem;
-		border: 1px solid var(--border-strong);
-		border-radius: 8px;
-		font: inherit;
-		font-size: 0.9375rem;
-		color: var(--text-strong);
-		background: var(--bg-card);
-	}
-
 	.option-row {
 		display: flex;
 		flex-wrap: wrap;
@@ -937,26 +927,9 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		border-bottom: none;
 	}
 
-	.btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0.7rem 1.2rem;
-		border-radius: 8px;
-		border: 1px solid transparent;
-		font: inherit;
-		font-size: 0.9375rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.btn-secondary {
-		background: var(--bg-card);
-		border-color: var(--border-strong);
-		color: var(--text-strong);
-	}
-
 	.btn:disabled {
+		/* Shared .btn:disabled adds opacity; keep the grey state solid. */
+		opacity: 1;
 		background: var(--bg-page);
 		border-color: var(--border);
 		color: var(--text-muted);

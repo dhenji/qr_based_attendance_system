@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Skeleton from '$lib/components/Skeleton.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { APIError } from '$lib/api/client';
@@ -758,27 +759,13 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		</div>
 
 		<div class="pagination">
-			<button
-				class="page-btn"
-				onclick={() => (page = Math.max(1, page - 1))}
-				disabled={page === 1}
-				aria-label="Previous page"
-			>
-				‹
-			</button>
-			{#each Array.from({ length: pages }, (_, i) => i + 1) as p (p)}
-				<button class="page-btn" class:active={p === page} onclick={() => (page = p)} aria-current={p === page ? 'page' : undefined}>
-					{p}
-				</button>
-			{/each}
-			<button
-				class="page-btn"
-				onclick={() => (page = Math.min(pages, page + 1))}
-				disabled={page === pages}
-				aria-label="Next page"
-			>
-				›
-			</button>
+			<Pagination
+				page={page}
+				totalPages={pages}
+				onPageChange={(next) => (page = next)}
+				spacing={false}
+				ariaLabel="Attendance history pages"
+			/>
 		</div>
 	</div>
 
@@ -964,22 +951,6 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 
 	.filters .select-input {
 		min-width: 0;
-	}
-
-	.form-input {
-		padding: 0.625rem 0.875rem;
-		border: 1.5px solid var(--border-strong);
-		border-radius: 8px;
-		font-size: 0.9375rem;
-		font-family: inherit;
-		color: var(--text-strong);
-		outline: none;
-		transition: border-color 0.15s;
-		background: var(--bg-card);
-	}
-
-	.form-input:focus {
-		border-color: var(--accent);
 	}
 
 	.actions {
@@ -1312,6 +1283,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		margin-top: 1.25rem;
 	}
 
+	/* Intentional compact history actions; sizes differ from the shared .btn. */
 	.btn-primary {
 		background: var(--brand);
 		border: 1px solid var(--brand);
@@ -1320,7 +1292,7 @@ import ConfirmExportDialog from '$lib/components/ConfirmExportDialog.svelte';
 		font-size: 0.875rem;
 		font-weight: 600;
 		font-family: inherit;
-color: var(--on-brand);
+		color: var(--on-brand);
 	}
 
 	.btn-primary:disabled {
@@ -1373,33 +1345,6 @@ color: var(--on-brand);
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-	}
-
-	.page-btn {
-		background: none;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		padding: 0.25rem 0.625rem;
-		font-family: inherit;
-		font-size: 0.875rem;
-		color: var(--brand);
-		cursor: pointer;
-	}
-
-	.page-btn:hover:not(:disabled) {
-		background: var(--bg-hover);
-	}
-
-	.page-btn.active {
-		background: var(--brand);
-		color: var(--on-brand);
-		font-weight: 700;
-		border-color: var(--brand);
-	}
-
-	.page-btn:disabled {
-		color: var(--text-muted);
-		cursor: not-allowed;
 	}
 
 	:global(.page :is(button, input, select):focus-visible) {
