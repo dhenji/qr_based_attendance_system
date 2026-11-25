@@ -36,7 +36,7 @@ rather than a multiple of the page size.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -307,128 +307,201 @@ def _bytes_text(value: Any) -> str:
     return f"{size:.0f} {units[unit]}" if unit == 0 else f"{size:.1f} {units[unit]}"
 
 
-def format_value(field: str, value: Any, lookups: AuditLookups | None = None) -> str:
-    """One snapshot value, as something an administrator can read.
+_INITIATED_BY_LABELS: dict[str, str] = {
+    "professor": "Professor",
+    "student": "Student",
+}
 
-    `lookups` turns an id into a name. Without it the id shows as an id,
-    which is the fallback for a reference to a row that no longer exists.
-    """
-    if field == "is_active":
-        return "Active" if value is True else "Archived" if value is False else "—"
-    if field == "is_locked":
-        return "Locked" if value is True else "Not locked" if value is False else "—"
-    if field == "must_change_password":
-        if value is True:
-            return "Yes — must change at next sign-in"
-        return "No" if value is False else "—"
-    if field == "enrolled":
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return str(value)
-        return "Yes" if value is True else "No" if value is False else "—"
-    if field == "validation_status" or field == "status":
-        return _status_text(value)
-    if field == "role":
-        return _role_text(value)
-    if field == "initiated_by":
-        return {"professor": "Professor", "student": "Student"}.get(value, "—")
-    if field == "initiated_via":
-        return {
-            "quick_excuse": "Quick excuse",
-            "prof_with_evidence": "With evidence",
-            "request": "Request",
-        }.get(value, "—")
-    if field == "session_type":
-        return {"lecture": "Lecture", "lab": "Laboratory"}.get(value, "—")
-    if field == "schedule_days":
-        return _days_text(value)
-    if field in ("schedule_start_time", "schedule_end_time"):
-        return _time_only(value)
-    if field in (
-        "scheduled_start_time",
-        "scheduled_end_time",
-        "expires_at",
-        "locked_at",
-        "face_enrolled_at",
-    ):
-        return value if isinstance(value, str) and value else "—"
-    if field in ("effective_from", "effective_to"):
-        return _date_text(value)
-    if field == "term_structure":
-        return _term_text(value)
-    if field == "size_bytes":
-        return _bytes_text(value)
-    if field == "sha256":
-        if isinstance(value, str) and len(value) > 16:
-            return f"{value[:16]}…"
-        return str(value) if value else "—"
-    if field == "kind":
-        return {"full": "Full database", "analytics": "Analytics"}.get(value, "—")
-    if field == "storage_backend":
-        return {"local": "Local", "s3": "S3"}.get(value, "—")
-    if field == "total_years":
-        return f"{value} years" if isinstance(value, int) else "—"
-    if field == "session_duration_hours":
-        if isinstance(value, (int, float)):
-            return f"{value} {'hour' if value == 1 else 'hours'}"
+_INITIATED_VIA_LABELS: dict[str, str] = {
+    "quick_excuse": "Quick excuse",
+    "prof_with_evidence": "With evidence",
+    "request": "Request",
+}
+
+_SESSION_TYPE_LABELS: dict[str, str] = {
+    "lecture": "Lecture",
+    "lab": "Laboratory",
+}
+
+_BACKUP_KIND_LABELS: dict[str, str] = {
+    "full": "Full database",
+    "analytics": "Analytics",
+}
+
+_STORAGE_BACKEND_LABELS: dict[str, str] = {
+    "local": "Local",
+    "s3": "S3",
+}
+
+
+# Every formatter takes the same `(value, lookups)` pair so the dispatch table
+# stays uniform; only the reference formatters read `lookups`.
+def _format_is_active(value: Any, lookups: AuditLookups | None) -> str:
+    return "Active" if value is True else "Archived" if value is False else "—"
+
+
+def _format_is_locked(value: Any, lookups: AuditLookups | None) -> str:
+    return "Locked" if value is True else "Not locked" if value is False else "—"
+
+
+def _format_must_change_password(value: Any, lookups: AuditLookups | None) -> str:
+    if value is True:
+        return "Yes — must change at next sign-in"
+    return "No" if value is False else "—"
+
+
+def _format_enrolled(value: Any, lookups: AuditLookups | None) -> str:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return "Yes" if value is True else "No" if value is False else "—"
+
+
+def _format_status(value: Any, lookups: AuditLookups | None) -> str:
+    return _status_text(value)
+
+
+def _format_role(value: Any, lookups: AuditLookups | None) -> str:
+    return _role_text(value)
+
+
+def _format_initiated_by(value: Any, lookups: AuditLookups | None) -> str:
+    return _INITIATED_BY_LABELS.get(value, "—")
+
+
+def _format_initiated_via(value: Any, lookups: AuditLookups | None) -> str:
+    return _INITIATED_VIA_LABELS.get(value, "—")
+
+
+def _format_session_type(value: Any, lookups: AuditLookups | None) -> str:
+    return _SESSION_TYPE_LABELS.get(value, "—")
+
+
+def _format_days(value: Any, lookups: AuditLookups | None) -> str:
+    return _days_text(value)
+
+
+def _format_clock(value: Any, lookups: AuditLookups | None) -> str:
+    return _time_only(value)
+
+
+def _format_instant(value: Any, lookups: AuditLookups | None) -> str:
+    return value if isinstance(value, str) and value else "—"
+
+
+def _format_date(value: Any, lookups: AuditLookups | None) -> str:
+    return _date_text(value)
+
+
+def _format_term(value: Any, lookups: AuditLookups | None) -> str:
+    return _term_text(value)
+
+
+def _format_size(value: Any, lookups: AuditLookups | None) -> str:
+    return _bytes_text(value)
+
+
+def _format_checksum(value: Any, lookups: AuditLookups | None) -> str:
+    if isinstance(value, str) and len(value) > 16:
+        return f"{value[:16]}…"
+    return str(value) if value else "—"
+
+
+def _format_backup_kind(value: Any, lookups: AuditLookups | None) -> str:
+    return _BACKUP_KIND_LABELS.get(value, "—")
+
+
+def _format_storage_backend(value: Any, lookups: AuditLookups | None) -> str:
+    return _STORAGE_BACKEND_LABELS.get(value, "—")
+
+
+def _format_total_years(value: Any, lookups: AuditLookups | None) -> str:
+    return f"{value} years" if isinstance(value, int) else "—"
+
+
+def _format_duration_hours(value: Any, lookups: AuditLookups | None) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value} {'hour' if value == 1 else 'hours'}"
+    return "—"
+
+
+def _format_minutes(value: Any, lookups: AuditLookups | None) -> str:
+    return f"{value} min" if isinstance(value, int) else "—"
+
+
+def _format_radius(value: Any, lookups: AuditLookups | None) -> str:
+    return f"{value} m" if isinstance(value, int) else "—"
+
+
+def _format_primary(value: Any, lookups: AuditLookups | None) -> str:
+    return "Primary" if value is True else "Assistant" if value is False else "—"
+
+
+def _format_year_number(value: Any, lookups: AuditLookups | None) -> str:
+    return f"Year {value}" if isinstance(value, int) else "—"
+
+
+def _format_attachment_count(value: Any, lookups: AuditLookups | None) -> str:
+    if isinstance(value, int):
+        return f"{value} attachment{'' if value == 1 else 's'}"
+    return "—"
+
+
+def _format_embedding_version(value: Any, lookups: AuditLookups | None) -> str:
+    return f"v{value}" if isinstance(value, int) else "—"
+
+
+# The id-shaped fields. A snapshot records a REFERENCE, and a reference is
+# only readable once it is resolved to the record it points at.
+def _format_offering_ref(value: Any, lookups: AuditLookups | None) -> str:
+    if value is None:
         return "—"
-    if field in (
-        "default_present_window_minutes",
-        "default_late_window_minutes",
-        "present_window_default",
-        "late_window_default",
-    ):
-        return f"{value} min" if isinstance(value, int) else "—"
-    if field == "geofence_default_radius":
-        return f"{value} m" if isinstance(value, int) else "—"
-    if field == "is_primary":
-        return "Primary" if value is True else "Assistant" if value is False else "—"
-    if field == "year_number":
-        return f"Year {value}" if isinstance(value, int) else "—"
-    if field == "attachment_count":
-        if isinstance(value, int):
-            return f"{value} attachment{'' if value == 1 else 's'}"
+    return lookups.offering_title(value) if lookups else f"Offering #{value}"
+
+
+def _format_professor_ref(value: Any, lookups: AuditLookups | None) -> str:
+    if value is None:
         return "—"
-    if field == "face_embedding_version":
-        return f"v{value}" if isinstance(value, int) else "—"
+    return lookups.professor_label(value) if lookups else f"Professor #{value}"
 
-    # The id-shaped fields. A snapshot records a REFERENCE, and a reference
-    # is only readable once it is resolved to the record it points at.
-    if field == "offering_id":
-        if value is None:
-            return "—"
-        return lookups.offering_title(value) if lookups else f"Offering #{value}"
-    if field == "professor_id":
-        if value is None:
-            return "—"
-        return lookups.professor_label(value) if lookups else f"Professor #{value}"
-    if field == "course_id":
-        if value is None:
-            return "—"
-        return lookups.course_label(value) if lookups else f"Course #{value}"
-    if field == "program_id":
-        if value is None:
-            return "—"
-        return lookups.program_label(value) if lookups else f"Program #{value}"
-    if field == "year_level_id":
-        if value is None:
-            return "—"
-        return lookups.year_label(value) if lookups else f"Year level #{value}"
-    if field == "reviewed_by":
-        if value is None:
-            return "—"
-        return lookups.user_label(value) if lookups else f"User #{value}"
-    if field == "student_id":
-        # TWO MEANINGS, and the field name alone does not tell them apart.
-        # The student and enrollment snapshots carry the student NUMBER (a
-        # string); the excuse snapshot carries a student ROW id (a number).
-        # A number is a reference and is resolved; a string is already the
-        # thing an administrator reads.
-        if value is None:
-            return "—"
-        if isinstance(value, str):
-            return value or "—"
-        return lookups.student_label(value) if lookups else f"Student #{value}"
 
+def _format_course_ref(value: Any, lookups: AuditLookups | None) -> str:
+    if value is None:
+        return "—"
+    return lookups.course_label(value) if lookups else f"Course #{value}"
+
+
+def _format_program_ref(value: Any, lookups: AuditLookups | None) -> str:
+    if value is None:
+        return "—"
+    return lookups.program_label(value) if lookups else f"Program #{value}"
+
+
+def _format_year_level_ref(value: Any, lookups: AuditLookups | None) -> str:
+    if value is None:
+        return "—"
+    return lookups.year_label(value) if lookups else f"Year level #{value}"
+
+
+def _format_user_ref(value: Any, lookups: AuditLookups | None) -> str:
+    if value is None:
+        return "—"
+    return lookups.user_label(value) if lookups else f"User #{value}"
+
+
+def _format_student_ref(value: Any, lookups: AuditLookups | None) -> str:
+    # TWO MEANINGS, and the field name alone does not tell them apart.
+    # The student and enrollment snapshots carry the student NUMBER (a
+    # string); the excuse snapshot carries a student ROW id (a number).
+    # A number is a reference and is resolved; a string is already the
+    # thing an administrator reads.
+    if value is None:
+        return "—"
+    if isinstance(value, str):
+        return value or "—"
+    return lookups.student_label(value) if lookups else f"Student #{value}"
+
+
+def _format_generic(value: Any, lookups: AuditLookups | None) -> str:
     if value is None:
         return "—"
     if isinstance(value, bool):
@@ -438,6 +511,64 @@ def format_value(field: str, value: Any, lookups: AuditLookups | None = None) ->
     if isinstance(value, str):
         return value if value else "—"
     return str(value)
+
+
+_VALUE_FORMATTERS: dict[str, Callable[[Any, AuditLookups | None], str]] = {
+    "is_active": _format_is_active,
+    "is_locked": _format_is_locked,
+    "must_change_password": _format_must_change_password,
+    "enrolled": _format_enrolled,
+    "validation_status": _format_status,
+    "status": _format_status,
+    "role": _format_role,
+    "initiated_by": _format_initiated_by,
+    "initiated_via": _format_initiated_via,
+    "session_type": _format_session_type,
+    "schedule_days": _format_days,
+    "schedule_start_time": _format_clock,
+    "schedule_end_time": _format_clock,
+    "scheduled_start_time": _format_instant,
+    "scheduled_end_time": _format_instant,
+    "expires_at": _format_instant,
+    "locked_at": _format_instant,
+    "face_enrolled_at": _format_instant,
+    "effective_from": _format_date,
+    "effective_to": _format_date,
+    "term_structure": _format_term,
+    "size_bytes": _format_size,
+    "sha256": _format_checksum,
+    "kind": _format_backup_kind,
+    "storage_backend": _format_storage_backend,
+    "total_years": _format_total_years,
+    "session_duration_hours": _format_duration_hours,
+    "default_present_window_minutes": _format_minutes,
+    "default_late_window_minutes": _format_minutes,
+    "present_window_default": _format_minutes,
+    "late_window_default": _format_minutes,
+    "geofence_default_radius": _format_radius,
+    "is_primary": _format_primary,
+    "year_number": _format_year_number,
+    "attachment_count": _format_attachment_count,
+    "face_embedding_version": _format_embedding_version,
+    # The id-shaped fields resolve through `AuditLookups`; without it they
+    # fall back to an explicitly labelled id.
+    "offering_id": _format_offering_ref,
+    "professor_id": _format_professor_ref,
+    "course_id": _format_course_ref,
+    "program_id": _format_program_ref,
+    "year_level_id": _format_year_level_ref,
+    "reviewed_by": _format_user_ref,
+    "student_id": _format_student_ref,
+}
+
+
+def format_value(field: str, value: Any, lookups: AuditLookups | None = None) -> str:
+    """One snapshot value, as something an administrator can read.
+
+    `lookups` turns an id into a name. Without it the id shows as an id,
+    which is the fallback for a reference to a row that no longer exists.
+    """
+    return _VALUE_FORMATTERS.get(field, _format_generic)(value, lookups)
 
 
 # --- The diff ----------------------------------------------------------------
@@ -834,363 +965,394 @@ class AuditLabelResolver:
             sublabel=caption or None,
         )
 
-    def _subject(self, row: AuditLog) -> AuditSubject:
-        snapshot = row.new_value or row.old_value or {}
-        entity_type = row.entity_type
-        entity_id = row.entity_id
-
-        if entity_type == AuditEntity.PROGRAM:
-            if entity_id is None:
-                return AuditSubject(
-                    type=entity_type,
-                    label="Program import",
-                    sublabel=_import_caption(snapshot),
-                )
-            code = str(snapshot.get("code") or "")
-            name = str(snapshot.get("name") or "")
+    def _program_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        if entity_id is None:
             return AuditSubject(
                 type=entity_type,
-                id=entity_id,
-                label=f"{code} · {name}"
+                label="Program import",
+                sublabel=_import_caption(snapshot),
+            )
+        code = str(snapshot.get("code") or "")
+        name = str(snapshot.get("name") or "")
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=f"{code} · {name}"
+            if code and name
+            else code or name or f"Program #{entity_id}",
+            sublabel=str(snapshot.get("description") or "") or None,
+        )
+
+    def _year_level_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        label = str(snapshot.get("label") or "")
+        program_id = snapshot.get("program_id")
+        program = (
+            self._lookups.programs.get(program_id)
+            if isinstance(program_id, int)
+            else None
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=(
+                f"{program.code} · {label}"
+                if program is not None and label
+                else label or f"Year level #{entity_id}"
+            ),
+            sublabel=program.name if program is not None else None,
+        )
+
+    def _course_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        if entity_id is None:
+            return AuditSubject(
+                type=entity_type,
+                label="Course import",
+                sublabel=_import_caption(snapshot),
+            )
+        code = str(snapshot.get("course_code") or "")
+        name = str(snapshot.get("course_name") or "")
+        units = snapshot.get("units")
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=(
+                f"{code} · {name}"
                 if code and name
-                else code or name or f"Program #{entity_id}",
-                sublabel=str(snapshot.get("description") or "") or None,
-            )
+                else code or name or f"Course #{entity_id}"
+            ),
+            sublabel=f"{units} units" if isinstance(units, int) else None,
+        )
 
-        if entity_type == AuditEntity.YEAR_LEVEL:
-            label = str(snapshot.get("label") or "")
-            program_id = snapshot.get("program_id")
-            program = (
-                self._lookups.programs.get(program_id)
-                if isinstance(program_id, int)
-                else None
-            )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=(
-                    f"{program.code} · {label}"
-                    if program is not None and label
-                    else label or f"Year level #{entity_id}"
-                ),
-                sublabel=program.name if program is not None else None,
-            )
-
-        if entity_type == AuditEntity.COURSE:
-            if entity_id is None:
-                return AuditSubject(
-                    type=entity_type,
-                    label="Course import",
-                    sublabel=_import_caption(snapshot),
-                )
-            code = str(snapshot.get("course_code") or "")
-            name = str(snapshot.get("course_name") or "")
-            units = snapshot.get("units")
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=(
-                    f"{code} · {name}"
-                    if code and name
-                    else code or name or f"Course #{entity_id}"
-                ),
-                sublabel=f"{units} units" if isinstance(units, int) else None,
-            )
-
-        if entity_type == AuditEntity.COURSE_OFFERING:
-            # LEGACY: before ADR-086 a schedule component was written as
-            # `course_offering` with the OFFERING's id, so the member had two
-            # id spaces. A component's snapshot carries `session_type` and no
-            # `semester`; an offering's is the other way round. Old rows are
-            # read as what they are rather than migrated.
-            if (
-                snapshot.get("session_type") is not None
-                and snapshot.get("semester") is None
-            ):
-                return self._component_subject(entity_type, entity_id, snapshot)
-            course_id = snapshot.get("course_id")
-            program_id = snapshot.get("program_id")
-            year_level_id = snapshot.get("year_level_id")
-            semester = str(snapshot.get("semester") or "")
-            academic_year = str(snapshot.get("academic_year") or "")
-            caption = " · ".join(
-                part
-                for part in (
-                    self._program_label(program_id) if program_id is not None else "",
-                    self._year_label(year_level_id)
-                    if year_level_id is not None
-                    else "",
-                    f"{semester} Sem" if semester else "",
-                    academic_year,
-                )
-                if part
-            )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=self._course_label(course_id),
-                sublabel=caption or None,
-            )
-
-        if entity_type == AuditEntity.OFFERING_COMPONENT:
+    def _course_offering_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        # LEGACY: before ADR-086 a schedule component was written as
+        # `course_offering` with the OFFERING's id, so the member had two
+        # id spaces. A component's snapshot carries `session_type` and no
+        # `semester`; an offering's is the other way round. Old rows are
+        # read as what they are rather than migrated.
+        if (
+            snapshot.get("session_type") is not None
+            and snapshot.get("semester") is None
+        ):
             return self._component_subject(entity_type, entity_id, snapshot)
-
-        if entity_type == AuditEntity.STUDENT:
-            if entity_id is None:
-                return AuditSubject(
-                    type=entity_type,
-                    label="Student import",
-                    sublabel=_import_caption(snapshot),
-                )
-            number = str(snapshot.get("student_id") or "")
-            name = _full_name(
-                str(snapshot.get("first_name") or ""),
-                str(snapshot.get("last_name") or ""),
+        course_id = snapshot.get("course_id")
+        program_id = snapshot.get("program_id")
+        year_level_id = snapshot.get("year_level_id")
+        semester = str(snapshot.get("semester") or "")
+        academic_year = str(snapshot.get("academic_year") or "")
+        caption = " · ".join(
+            part
+            for part in (
+                self._program_label(program_id) if program_id is not None else "",
+                self._year_label(year_level_id) if year_level_id is not None else "",
+                f"{semester} Sem" if semester else "",
+                academic_year,
             )
+            if part
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=self._course_label(course_id),
+            sublabel=caption or None,
+        )
+
+    def _student_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        if entity_id is None:
             return AuditSubject(
                 type=entity_type,
-                id=entity_id,
+                label="Student import",
+                sublabel=_import_caption(snapshot),
+            )
+        number = str(snapshot.get("student_id") or "")
+        name = _full_name(
+            str(snapshot.get("first_name") or ""),
+            str(snapshot.get("last_name") or ""),
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=(
+                f"{number} · {name}"
+                if number and name
+                else number or name or f"Student #{entity_id}"
+            ),
+            sublabel=str(snapshot.get("email") or "") or None,
+        )
+
+    def _professor_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        if entity_id is None:
+            return AuditSubject(
+                type=entity_type,
+                label="Professor import",
+                sublabel=_import_caption(snapshot),
+            )
+        name = _full_name(
+            str(snapshot.get("first_name") or ""),
+            str(snapshot.get("last_name") or ""),
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=name or f"Professor #{entity_id}",
+            sublabel=str(snapshot.get("email") or "")
+            or str(snapshot.get("department") or "")
+            or None,
+        )
+
+    def _enrollment_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        offering_id = snapshot.get("offering_id")
+        offering = (
+            self._lookups.offerings.get(offering_id)
+            if isinstance(offering_id, int)
+            else None
+        )
+        if entity_id is None:
+            return AuditSubject(
+                type=entity_type,
                 label=(
-                    f"{number} · {name}"
-                    if number and name
-                    else number or name or f"Student #{entity_id}"
+                    f"Enrolled students in {self._offering_headline(offering)}"
+                    if offering is not None
+                    else "Bulk enrollment"
                 ),
-                sublabel=str(snapshot.get("email") or "") or None,
-            )
-
-        if entity_type == AuditEntity.PROFESSOR:
-            if entity_id is None:
-                return AuditSubject(
-                    type=entity_type,
-                    label="Professor import",
-                    sublabel=_import_caption(snapshot),
-                )
-            name = _full_name(
-                str(snapshot.get("first_name") or ""),
-                str(snapshot.get("last_name") or ""),
-            )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=name or f"Professor #{entity_id}",
-                sublabel=str(snapshot.get("email") or "")
-                or str(snapshot.get("department") or "")
-                or None,
-            )
-
-        if entity_type == AuditEntity.ENROLLMENT:
-            offering_id = snapshot.get("offering_id")
-            offering = (
-                self._lookups.offerings.get(offering_id)
-                if isinstance(offering_id, int)
-                else None
-            )
-            if entity_id is None:
-                return AuditSubject(
-                    type=entity_type,
-                    label=(
-                        f"Enrolled students in {self._offering_headline(offering)}"
-                        if offering is not None
-                        else "Bulk enrollment"
-                    ),
-                    sublabel=(
-                        self._offering_caption(offering)
-                        if offering is not None
-                        else f"{snapshot.get('enrolled', 0)} enrolled · "
-                        f"{snapshot.get('skipped', 0)} skipped"
-                    ),
-                )
-            number = str(snapshot.get("student_id") or "")
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=(
-                    f"{number} in {self._offering_headline(offering)}"
-                    if number and offering is not None
-                    else number or f"Enrollment #{entity_id}"
-                ),
-                sublabel=(
-                    self._offering_caption(offering) if offering is not None else None
-                ),
-            )
-
-        if entity_type == AuditEntity.COURSE_PROFESSOR:
-            offering_id = snapshot.get("offering_id")
-            professor_id = snapshot.get("professor_id")
-            offering = (
-                self._lookups.offerings.get(offering_id)
-                if isinstance(offering_id, int)
-                else None
-            )
-            professor = (
-                self._lookups.professors.get(professor_id)
-                if isinstance(professor_id, int)
-                else None
-            )
-            professor_name = (
-                _full_name(professor.first_name, professor.last_name)
-                if professor is not None
-                else f"Professor #{professor_id}"
-            )
-            course = (
-                self._offering_headline(offering)
-                if offering is not None
-                else f"offering #{offering_id}"
-            )
-            role = "Primary" if snapshot.get("is_primary") is True else "Assistant"
-            effective_from = snapshot.get("effective_from")
-            effective_to = snapshot.get("effective_to")
-            caption = " · ".join(
-                part
-                for part in (
-                    role,
-                    f"from {_date_text(effective_from)}" if effective_from else "",
-                    f"to {_date_text(effective_to)}" if effective_to else "",
-                )
-                if part
-            )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=f"{professor_name} → {course}",
-                sublabel=caption or None,
-            )
-
-        if entity_type == AuditEntity.EXCUSE:
-            student_id = snapshot.get("student_id")
-            student = (
-                self._lookups.students.get(student_id)
-                if isinstance(student_id, int)
-                else None
-            )
-            if student is not None:
-                label = f"{_full_name(student.first_name, student.last_name)} ({student.student_id})"
-            else:
-                label = f"Excuse request #{entity_id}"
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=label,
-                sublabel=str(snapshot.get("reason") or "") or None,
-            )
-
-        if entity_type == AuditEntity.SESSION:
-            offering_id = snapshot.get("offering_id")
-            offering = (
-                self._lookups.offerings.get(offering_id)
-                if isinstance(offering_id, int)
-                else None
-            )
-            code = str(snapshot.get("session_code") or "")
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=code or f"Session #{entity_id}",
                 sublabel=(
                     self._offering_caption(offering)
                     if offering is not None
-                    else format_value("session_type", snapshot.get("session_type"))
+                    else f"{snapshot.get('enrolled', 0)} enrolled · "
+                    f"{snapshot.get('skipped', 0)} skipped"
                 ),
             )
+        number = str(snapshot.get("student_id") or "")
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=(
+                f"{number} in {self._offering_headline(offering)}"
+                if number and offering is not None
+                else number or f"Enrollment #{entity_id}"
+            ),
+            sublabel=(
+                self._offering_caption(offering) if offering is not None else None
+            ),
+        )
 
-        if entity_type == AuditEntity.FACE_ENROLLMENT:
-            student = (
-                self._lookups.students.get(entity_id)
-                if isinstance(entity_id, int)
-                else None
+    def _course_professor_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        offering_id = snapshot.get("offering_id")
+        professor_id = snapshot.get("professor_id")
+        offering = (
+            self._lookups.offerings.get(offering_id)
+            if isinstance(offering_id, int)
+            else None
+        )
+        professor = (
+            self._lookups.professors.get(professor_id)
+            if isinstance(professor_id, int)
+            else None
+        )
+        professor_name = (
+            _full_name(professor.first_name, professor.last_name)
+            if professor is not None
+            else f"Professor #{professor_id}"
+        )
+        course = (
+            self._offering_headline(offering)
+            if offering is not None
+            else f"offering #{offering_id}"
+        )
+        role = "Primary" if snapshot.get("is_primary") is True else "Assistant"
+        effective_from = snapshot.get("effective_from")
+        effective_to = snapshot.get("effective_to")
+        caption = " · ".join(
+            part
+            for part in (
+                role,
+                f"from {_date_text(effective_from)}" if effective_from else "",
+                f"to {_date_text(effective_to)}" if effective_to else "",
             )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=(
-                    f"Face template — {_full_name(student.first_name, student.last_name)}"
-                    if student is not None
-                    else f"Face template #{entity_id}"
-                ),
-                sublabel=student.student_id if student is not None else None,
-            )
+            if part
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=f"{professor_name} → {course}",
+            sublabel=caption or None,
+        )
 
-        if entity_type == AuditEntity.ATTENDANCE_RECORD:
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=f"Attendance record #{entity_id}",
-                sublabel=format_value(
-                    "validation_status", snapshot.get("validation_status")
-                ),
-            )
+    def _excuse_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        student_id = snapshot.get("student_id")
+        student = (
+            self._lookups.students.get(student_id)
+            if isinstance(student_id, int)
+            else None
+        )
+        if student is not None:
+            label = f"{_full_name(student.first_name, student.last_name)} ({student.student_id})"
+        else:
+            label = f"Excuse request #{entity_id}"
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=label,
+            sublabel=str(snapshot.get("reason") or "") or None,
+        )
 
-        if entity_type == AuditEntity.BACKUP:
-            filename = str(snapshot.get("filename") or "")
-            caption = " · ".join(
-                part
-                for part in (
-                    format_value("kind", snapshot.get("kind")),
-                    format_value("size_bytes", snapshot.get("size_bytes")),
-                    format_value("status", snapshot.get("status")),
-                )
-                if part and part != "—"
-            )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=filename or f"Backup #{entity_id}",
-                sublabel=caption or None,
-            )
+    def _session_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        offering_id = snapshot.get("offering_id")
+        offering = (
+            self._lookups.offerings.get(offering_id)
+            if isinstance(offering_id, int)
+            else None
+        )
+        code = str(snapshot.get("session_code") or "")
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=code or f"Session #{entity_id}",
+            sublabel=(
+                self._offering_caption(offering)
+                if offering is not None
+                else format_value("session_type", snapshot.get("session_type"))
+            ),
+        )
 
-        if entity_type == AuditEntity.APP_SETTING:
-            names = [FIELD_LABELS.get(key, key) for key in snapshot]
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label="System settings",
-                sublabel=", ".join(names) or None,
-            )
+    def _face_enrollment_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        student = (
+            self._lookups.students.get(entity_id)
+            if isinstance(entity_id, int)
+            else None
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=(
+                f"Face template — {_full_name(student.first_name, student.last_name)}"
+                if student is not None
+                else f"Face template #{entity_id}"
+            ),
+            sublabel=student.student_id if student is not None else None,
+        )
 
-        if entity_type == AuditEntity.USER:
-            user = (
-                self._lookups.users.get(entity_id)
-                if isinstance(entity_id, int)
-                else None
-            )
-            email = str(snapshot.get("email") or "") or (user.email if user else "")
-            role = snapshot.get("role") or (user.role if user else None)
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=email or f"User #{entity_id}",
-                sublabel=format_value("role", role) if role else None,
-            )
+    def _attendance_record_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=f"Attendance record #{entity_id}",
+            sublabel=format_value(
+                "validation_status", snapshot.get("validation_status")
+            ),
+        )
 
-        if entity_type == AuditEntity.MAINTENANCE:
-            is_sync = "processed" in snapshot
-            is_cleanup = "removed" in snapshot
-            caption = " · ".join(
-                f"{FIELD_LABELS.get(key, key)}: {format_value(key, value)}"
-                for key, value in snapshot.items()
+    def _backup_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        filename = str(snapshot.get("filename") or "")
+        caption = " · ".join(
+            part
+            for part in (
+                format_value("kind", snapshot.get("kind")),
+                format_value("size_bytes", snapshot.get("size_bytes")),
+                format_value("status", snapshot.get("status")),
             )
-            return AuditSubject(
-                type=entity_type,
-                id=entity_id,
-                label=(
-                    "Offline sync reconciliation"
-                    if is_sync
-                    else "Expired-data cleanup"
-                    if is_cleanup
-                    else "Maintenance run"
-                ),
-                sublabel=caption or None,
-            )
+            if part and part != "—"
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=filename or f"Backup #{entity_id}",
+            sublabel=caption or None,
+        )
 
+    def _app_setting_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        names = [FIELD_LABELS.get(key, key) for key in snapshot]
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label="System settings",
+            sublabel=", ".join(names) or None,
+        )
+
+    def _user_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        user = (
+            self._lookups.users.get(entity_id) if isinstance(entity_id, int) else None
+        )
+        email = str(snapshot.get("email") or "") or (user.email if user else "")
+        role = snapshot.get("role") or (user.role if user else None)
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=email or f"User #{entity_id}",
+            sublabel=format_value("role", role) if role else None,
+        )
+
+    def _maintenance_subject(
+        self, entity_type: str, entity_id: int | None, snapshot: dict[str, Any]
+    ) -> AuditSubject:
+        is_sync = "processed" in snapshot
+        is_cleanup = "removed" in snapshot
+        caption = " · ".join(
+            f"{FIELD_LABELS.get(key, key)}: {format_value(key, value)}"
+            for key, value in snapshot.items()
+        )
+        return AuditSubject(
+            type=entity_type,
+            id=entity_id,
+            label=(
+                "Offline sync reconciliation"
+                if is_sync
+                else "Expired-data cleanup"
+                if is_cleanup
+                else "Maintenance run"
+            ),
+            sublabel=caption or None,
+        )
+
+    @staticmethod
+    def _unknown_subject(entity_type: str, entity_id: int | None) -> AuditSubject:
         return AuditSubject(
             type=entity_type,
             id=entity_id,
             label=f"{ENTITY_LABELS.get(entity_type, entity_type)} #{entity_id}",
         )
 
+    def _resolve_subject_labels(self, row: AuditLog) -> AuditSubject:
+        snapshot = row.new_value or row.old_value or {}
+        builder = _SUBJECT_BUILDERS.get(row.entity_type)
+
+        if builder is None:
+            return self._unknown_subject(row.entity_type, row.entity_id)
+
+        return builder(self, row.entity_type, row.entity_id, snapshot)
+
     def _view(self, row: AuditLog) -> AuditRowView:
         actor = self._actor(row)
-        subject = self._subject(row)
+        subject = self._resolve_subject_labels(row)
         changes = diff_snapshots(row.old_value, row.new_value, self._lookups)
         verb = ACTION_LABELS.get(row.action, row.action.replace("_", " "))
         if row.action == AuditAction.ENROLL:
@@ -1216,6 +1378,32 @@ class AuditLabelResolver:
             action_label=verb,
             changes=changes,
         )
+
+
+# One builder per entity type, so the flat if/elif chain becomes a lookup.
+# `offering_component` reuses the component builder because a component row and
+# a legacy component-shaped `course_offering` row read the same way.
+_SUBJECT_BUILDERS: dict[
+    str, Callable[[AuditLabelResolver, str, int | None, dict[str, Any]], AuditSubject]
+] = {
+    AuditEntity.PROGRAM: AuditLabelResolver._program_subject,
+    AuditEntity.YEAR_LEVEL: AuditLabelResolver._year_level_subject,
+    AuditEntity.COURSE: AuditLabelResolver._course_subject,
+    AuditEntity.COURSE_OFFERING: AuditLabelResolver._course_offering_subject,
+    AuditEntity.OFFERING_COMPONENT: AuditLabelResolver._component_subject,
+    AuditEntity.STUDENT: AuditLabelResolver._student_subject,
+    AuditEntity.PROFESSOR: AuditLabelResolver._professor_subject,
+    AuditEntity.ENROLLMENT: AuditLabelResolver._enrollment_subject,
+    AuditEntity.COURSE_PROFESSOR: AuditLabelResolver._course_professor_subject,
+    AuditEntity.EXCUSE: AuditLabelResolver._excuse_subject,
+    AuditEntity.SESSION: AuditLabelResolver._session_subject,
+    AuditEntity.FACE_ENROLLMENT: AuditLabelResolver._face_enrollment_subject,
+    AuditEntity.ATTENDANCE_RECORD: AuditLabelResolver._attendance_record_subject,
+    AuditEntity.BACKUP: AuditLabelResolver._backup_subject,
+    AuditEntity.APP_SETTING: AuditLabelResolver._app_setting_subject,
+    AuditEntity.USER: AuditLabelResolver._user_subject,
+    AuditEntity.MAINTENANCE: AuditLabelResolver._maintenance_subject,
+}
 
 
 def _import_caption(snapshot: dict[str, Any]) -> str | None:

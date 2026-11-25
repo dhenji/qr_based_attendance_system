@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.accounts import Account, account_from_row, account_query
@@ -85,6 +86,33 @@ def _session_date(session: Session) -> str:
     """
 
     return session.scheduled_start_time.strftime("%d %b %Y")
+
+
+@dataclass(frozen=True, kw_only=True)
+class _ProfessorExcuseFilters:
+    """The optional filters of the professor excuse queue.
+
+    Grouped so the query builder takes one value instead of sixteen keyword
+    arguments. `list_for_professor` keeps its own keyword surface — the router
+    and the tests call it that way — and builds this from it.
+    """
+
+    status: str | None = None
+    search: str | None = None
+    course: str | None = None
+    section: str | None = None
+    initiated_via: str | None = None
+    has_evidence: bool | None = None
+    original_status: str | None = None
+    reviewer: str | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    submitted_from: datetime | None = None
+    submitted_to: datetime | None = None
+    reviewed_from: datetime | None = None
+    reviewed_to: datetime | None = None
+    sort_by: str | None = None
+    sort_dir: str | None = None
 
 
 class ExcuseService:
@@ -563,132 +591,29 @@ class ExcuseService:
         every request once per row.
         """
         professor: Professor = await self._resolve_professor(user_id)
-        today: date = date.today()
-        assigned = (
-            select(CourseProfessor.offering_id)
-            .where(
-                CourseProfessor.offering_id == Session.offering_id,
-                CourseProfessor.professor_id == professor.id,
-                active_assignment_clause(today),
-            )
-            .exists()
+        filters = _ProfessorExcuseFilters(
+            status=status,
+            search=search,
+            course=course,
+            section=section,
+            initiated_via=initiated_via,
+            has_evidence=has_evidence,
+            original_status=original_status,
+            reviewer=reviewer,
+            date_from=date_from,
+            date_to=date_to,
+            submitted_from=submitted_from,
+            submitted_to=submitted_to,
+            reviewed_from=reviewed_from,
+            reviewed_to=reviewed_to,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
         )
-        stmt = (
-            select(ExcuseRequest)
-            .join(Session, Session.id == ExcuseRequest.session_id)
-            .join(CourseOffering, CourseOffering.id == Session.offering_id)
-            .join(Course, Course.id == CourseOffering.course_id)
-            .outerjoin(Student, Student.id == ExcuseRequest.student_id)
-            .outerjoin(
-                Attendance,
-                (Attendance.student_id == ExcuseRequest.student_id)
-                & (Attendance.session_id == ExcuseRequest.session_id),
-            )
-            .outerjoin(User, User.id == ExcuseRequest.reviewed_by)
-            .where(assigned)
-        )
-        if status is not None:
-            stmt = stmt.where(ExcuseRequest.status == status)
-
-        if initiated_via is not None and initiated_via.strip():
-            stmt = stmt.where(ExcuseRequest.initiated_via == initiated_via.strip())
-
-        if course is not None and course.strip():
-            stmt = stmt.where(Course.course_code == course.strip().upper())
-
-        if section is not None and section.strip():
-            stmt = stmt.where(Student.section == section.strip())
-
-        if has_evidence is True:
-            stmt = stmt.where(
-                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0)
-                > 0
-            )
-        elif has_evidence is False:
-            stmt = stmt.where(
-                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0)
-                == 0
-            )
-
-        if original_status is not None and original_status.strip():
-            stmt = stmt.where(
-                func.coalesce(Attendance.original_status, Attendance.validation_status)
-                == original_status.strip()
-            )
-
-        if date_from is not None:
-            bound_from = ensure_aware(date_from)
-            stmt = stmt.where(Session.created_at >= bound_from)
-
-        if date_to is not None:
-            bound_to = end_of_day(ensure_aware(date_to))
-            stmt = stmt.where(Session.created_at <= bound_to)
-
-        if submitted_from is not None:
-            bound = ensure_aware(submitted_from)
-            stmt = stmt.where(ExcuseRequest.requested_at >= bound)
-
-        if submitted_to is not None:
-            bound = end_of_day(ensure_aware(submitted_to))
-            stmt = stmt.where(ExcuseRequest.requested_at <= bound)
-
-        if reviewed_from is not None:
-            bound = ensure_aware(reviewed_from)
-            stmt = stmt.where(ExcuseRequest.reviewed_at >= bound)
-
-        if reviewed_to is not None:
-            bound = end_of_day(ensure_aware(reviewed_to))
-            stmt = stmt.where(ExcuseRequest.reviewed_at <= bound)
-
-        if reviewer is not None and reviewer.strip():
-            try:
-                reviewer_id = int(reviewer.strip())
-            except ValueError:
-                reviewer_id = None
-            conditions = [
-                ilike_any(
-                    reviewer.strip(),
-                    User.first_name,
-                    User.last_name,
-                    User.email,
-                )
-            ]
-            if reviewer_id is not None:
-                conditions.append(ExcuseRequest.reviewed_by == reviewer_id)
-            stmt = stmt.where(or_(*conditions))
-
-        if search is not None and search.strip():
-            search_conditions = [
-                ilike_any(
-                    search.strip(),
-                    Student.first_name,
-                    Student.last_name,
-                    Student.student_id,
-                    Session.session_code,
-                    Course.course_code,
-                )
-            ]
-            try:
-                search_conditions.append(ExcuseRequest.id == int(search.strip()))
-            except ValueError:
-                pass
-            stmt = stmt.where(or_(*search_conditions))
+        stmt = self._professor_queue_stmt(professor.id)
+        stmt = self._filter_clauses(stmt, filters)
 
         page, size = normalize_paging(page, size)
-
-        sort_column_map = {
-            "requested_at": ExcuseRequest.requested_at,
-            "reviewed_at": ExcuseRequest.reviewed_at,
-            "status": ExcuseRequest.status,
-            "id": ExcuseRequest.id,
-        }
-        sort_col = sort_column_map.get(
-            sort_by or "requested_at", ExcuseRequest.requested_at
-        )
-        if sort_by == "student_name":
-            sort_col = Student.last_name
-        descending = (sort_dir or "desc").lower() != "asc"
-        order_expr = sort_col.desc() if descending else sort_col.asc()
+        order_expr = self._order_expression(filters)
 
         rows, total = await paginate_scalars(
             self._session,
@@ -705,6 +630,163 @@ class ExcuseService:
             page=page,
             size=size,
         )
+
+    def _professor_queue_stmt(self, professor_id: int) -> Select[Any]:
+        """The queue's base statement: the professor's assigned offerings."""
+        today: date = date.today()
+        assigned = (
+            select(CourseProfessor.offering_id)
+            .where(
+                CourseProfessor.offering_id == Session.offering_id,
+                CourseProfessor.professor_id == professor_id,
+                active_assignment_clause(today),
+            )
+            .exists()
+        )
+        return (
+            select(ExcuseRequest)
+            .join(Session, Session.id == ExcuseRequest.session_id)
+            .join(CourseOffering, CourseOffering.id == Session.offering_id)
+            .join(Course, Course.id == CourseOffering.course_id)
+            .outerjoin(Student, Student.id == ExcuseRequest.student_id)
+            .outerjoin(
+                Attendance,
+                (Attendance.student_id == ExcuseRequest.student_id)
+                & (Attendance.session_id == ExcuseRequest.session_id),
+            )
+            .outerjoin(User, User.id == ExcuseRequest.reviewed_by)
+            .where(assigned)
+        )
+
+    def _filter_clauses(
+        self, stmt: Select[Any], filters: _ProfessorExcuseFilters
+    ) -> Select[Any]:
+        """Apply the queue's optional filters, preserving their order."""
+        stmt = self._attribute_clauses(stmt, filters)
+        stmt = self._date_clauses(stmt, filters)
+        return self._search_clauses(stmt, filters)
+
+    def _attribute_clauses(
+        self, stmt: Select[Any], filters: _ProfessorExcuseFilters
+    ) -> Select[Any]:
+        if filters.status is not None:
+            stmt = stmt.where(ExcuseRequest.status == filters.status)
+
+        if filters.initiated_via is not None and filters.initiated_via.strip():
+            stmt = stmt.where(
+                ExcuseRequest.initiated_via == filters.initiated_via.strip()
+            )
+
+        if filters.course is not None and filters.course.strip():
+            stmt = stmt.where(Course.course_code == filters.course.strip().upper())
+
+        if filters.section is not None and filters.section.strip():
+            stmt = stmt.where(Student.section == filters.section.strip())
+
+        if filters.has_evidence is True:
+            stmt = stmt.where(
+                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0)
+                > 0
+            )
+        elif filters.has_evidence is False:
+            stmt = stmt.where(
+                func.coalesce(func.jsonb_array_length(ExcuseRequest.attachment_urls), 0)
+                == 0
+            )
+
+        if filters.original_status is not None and filters.original_status.strip():
+            stmt = stmt.where(
+                func.coalesce(Attendance.original_status, Attendance.validation_status)
+                == filters.original_status.strip()
+            )
+
+        return stmt
+
+    def _date_clauses(
+        self, stmt: Select[Any], filters: _ProfessorExcuseFilters
+    ) -> Select[Any]:
+        if filters.date_from is not None:
+            bound_from = ensure_aware(filters.date_from)
+            stmt = stmt.where(Session.created_at >= bound_from)
+
+        if filters.date_to is not None:
+            bound_to = end_of_day(ensure_aware(filters.date_to))
+            stmt = stmt.where(Session.created_at <= bound_to)
+
+        if filters.submitted_from is not None:
+            bound = ensure_aware(filters.submitted_from)
+            stmt = stmt.where(ExcuseRequest.requested_at >= bound)
+
+        if filters.submitted_to is not None:
+            bound = end_of_day(ensure_aware(filters.submitted_to))
+            stmt = stmt.where(ExcuseRequest.requested_at <= bound)
+
+        if filters.reviewed_from is not None:
+            bound = ensure_aware(filters.reviewed_from)
+            stmt = stmt.where(ExcuseRequest.reviewed_at >= bound)
+
+        if filters.reviewed_to is not None:
+            bound = end_of_day(ensure_aware(filters.reviewed_to))
+            stmt = stmt.where(ExcuseRequest.reviewed_at <= bound)
+
+        return stmt
+
+    def _search_clauses(
+        self, stmt: Select[Any], filters: _ProfessorExcuseFilters
+    ) -> Select[Any]:
+        if filters.reviewer is not None and filters.reviewer.strip():
+            try:
+                reviewer_id = int(filters.reviewer.strip())
+            except ValueError:
+                reviewer_id = None
+            conditions = [
+                ilike_any(
+                    filters.reviewer.strip(),
+                    User.first_name,
+                    User.last_name,
+                    User.email,
+                )
+            ]
+            if reviewer_id is not None:
+                conditions.append(ExcuseRequest.reviewed_by == reviewer_id)
+            stmt = stmt.where(or_(*conditions))
+
+        if filters.search is not None and filters.search.strip():
+            search_conditions = [
+                ilike_any(
+                    filters.search.strip(),
+                    Student.first_name,
+                    Student.last_name,
+                    Student.student_id,
+                    Session.session_code,
+                    Course.course_code,
+                )
+            ]
+            try:
+                search_conditions.append(
+                    ExcuseRequest.id == int(filters.search.strip())
+                )
+            except ValueError:
+                pass
+            stmt = stmt.where(or_(*search_conditions))
+
+        return stmt
+
+    @staticmethod
+    def _order_expression(filters: _ProfessorExcuseFilters) -> Any:
+        sort_column_map = {
+            "requested_at": ExcuseRequest.requested_at,
+            "reviewed_at": ExcuseRequest.reviewed_at,
+            "status": ExcuseRequest.status,
+            "id": ExcuseRequest.id,
+        }
+        sort_col = sort_column_map.get(
+            filters.sort_by or "requested_at", ExcuseRequest.requested_at
+        )
+        if filters.sort_by == "student_name":
+            sort_col = Student.last_name
+        descending = (filters.sort_dir or "desc").lower() != "asc"
+        return sort_col.desc() if descending else sort_col.asc()
 
     async def list_for_student(
         self, *, user_id: int, page: int, size: int

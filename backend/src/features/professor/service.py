@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, tzinfo
 from typing import Any
 
 from sqlalchemy import Row, Select, func, select
@@ -735,15 +735,18 @@ class ProfessorService:
     async def _enrich_assigned_offerings(
         self, items: Sequence[AssignedOfferingItem]
     ) -> None:
-        """Fill enrolled_count and section for one page of assignments.
+        """Fill one page of assignments from their enrollments and meetings.
 
-        Both aggregates run as a single GROUP BY query each over the page's
-        offering ids, so enrichment stays constant-query regardless of page
+        The enrollment count and section aggregates each run as one GROUP BY
+        query over the page's offering ids, and the active meetings are read
+        in one more, so enrichment stays constant-query regardless of page
         size. `section` is the distinct set of `students.section` across the
         offering's enrollments (derived — no stored column backs it).
         `schedule_ok` compares the merged meeting total against the row's
         units in whole minutes (same rule as the session-open gate); rows
-        with no configured meetings stay True.
+        with no configured meetings stay True. The same component rows also
+        produce `session_types`, the component DTOs and the next occurrence
+        of the first meeting.
         """
         if not items:
             return
@@ -753,6 +756,33 @@ class ProfessorService:
             item.offering_id: item for item in items
         }
 
+        await self._apply_enrollment_counts(by_offering, offering_ids)
+        await self._apply_sections(by_offering, offering_ids)
+        (
+            minutes_by_offering,
+            components_by_offering,
+        ) = await self._load_component_minutes(offering_ids)
+        self._apply_schedule_ok(by_offering, minutes_by_offering)
+
+        # D93: the meetings a session inherits, and the next occurrence of the
+        # first one. The occurrence is resolved with the shared pure helper —
+        # no query per offering — so the list stays a constant number of
+        # round trips however many assignments a professor holds.
+        zone = resolve_timezone(
+            get_settings().institution_timezone, label="institution timezone"
+        )
+        now = datetime.now(timezone.utc)
+
+        self._apply_session_types(by_offering, components_by_offering)
+        self._apply_component_details(
+            by_offering, components_by_offering, now=now, zone=zone
+        )
+
+    async def _apply_enrollment_counts(
+        self,
+        by_offering: dict[int, AssignedOfferingItem],
+        offering_ids: list[int],
+    ) -> None:
         counts = (
             await self._session.execute(
                 select(Enrollment.offering_id, func.count())
@@ -767,6 +797,11 @@ class ProfessorService:
             if item is not None:
                 item.enrolled_count = int(count)
 
+    async def _apply_sections(
+        self,
+        by_offering: dict[int, AssignedOfferingItem],
+        offering_ids: list[int],
+    ) -> None:
         section_rows = (
             await self._session.execute(
                 select(Enrollment.offering_id, Student.section)
@@ -791,6 +826,10 @@ class ProfessorService:
             if item is not None:
                 item.section = sections
 
+    async def _load_component_minutes(
+        self, offering_ids: list[int]
+    ) -> tuple[dict[int, float], dict[int, list[OfferingComponent]]]:
+        """Active meetings per offering, and their merged minute totals."""
         component_rows: Sequence[OfferingComponent] = (
             await self._session.scalars(
                 select(OfferingComponent)
@@ -817,21 +856,24 @@ class ProfessorService:
                 component
             )
 
+        return minutes_by_offering, components_by_offering
+
+    @staticmethod
+    def _apply_schedule_ok(
+        by_offering: dict[int, AssignedOfferingItem],
+        minutes_by_offering: dict[int, float],
+    ) -> None:
         for offering_id, total_minutes in minutes_by_offering.items():
             item = by_offering.get(offering_id)
 
             if item is not None:
                 item.schedule_ok = int(round(total_minutes)) == int(item.units) * 60
 
-        # D93: the meetings a session inherits, and the next occurrence of the
-        # first one. The occurrence is resolved with the shared pure helper —
-        # no query per offering — so the list stays a constant number of
-        # round trips however many assignments a professor holds.
-        zone = resolve_timezone(
-            get_settings().institution_timezone, label="institution timezone"
-        )
-        now = datetime.now(timezone.utc)
-
+    @staticmethod
+    def _apply_session_types(
+        by_offering: dict[int, AssignedOfferingItem],
+        components_by_offering: dict[int, list[OfferingComponent]],
+    ) -> None:
         # D95: every assignment reports the types it can open — the ones it
         # configures as active meetings, or a lecture when it has none. The
         # shared helper owns the rule, so this list and the admin's badge
@@ -842,6 +884,14 @@ class ProfessorService:
                 for component in components_by_offering.get(offering_id, [])
             )
 
+    @staticmethod
+    def _apply_component_details(
+        by_offering: dict[int, AssignedOfferingItem],
+        components_by_offering: dict[int, list[OfferingComponent]],
+        *,
+        now: datetime,
+        zone: tzinfo,
+    ) -> None:
         for offering_id, components in components_by_offering.items():
             item = by_offering.get(offering_id)
 

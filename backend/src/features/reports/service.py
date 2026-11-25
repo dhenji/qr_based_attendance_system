@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.assignments import active_assignment_clause
@@ -326,6 +326,57 @@ class ReportsService:
         wanted: set[str] = (
             set(include) if include is not None else set(DEFAULT_EXPORT_INCLUDE)
         )
+        stmt = self._export_statement(
+            professor_id=professor_id,
+            course_id=course_id,
+            date_from=date_from,
+            date_to=date_to,
+            session_type=session_type,
+            statuses=statuses,
+        )
+
+        records: Sequence[Attendance] = (
+            await self._session.scalars(
+                stmt.order_by(Attendance.timestamp.asc(), Attendance.id.asc())
+            )
+        ).all()
+        students: dict[int, Student] = await self._students_by_id(
+            {row.student_id for row in records}
+        )
+        session_types = await self._session_types_for(records)
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(self._export_header(wanted))
+
+        for record in records:
+            student: Student | None = students.get(record.student_id)
+
+            if student is None:
+                continue
+
+            writer.writerow(
+                self._export_row(
+                    record=record,
+                    student=student,
+                    session_type=session_types.get(record.session_id, ""),
+                    wanted=wanted,
+                )
+            )
+
+        return buffer.getvalue()
+
+    def _export_statement(
+        self,
+        *,
+        professor_id: int,
+        course_id: int | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+        session_type: str | None,
+        statuses: Sequence[ValidationStatus | str] | None,
+    ) -> Select[Any]:
+        """The scoped, filtered query behind the export."""
         stmt = (
             select(Attendance)
             .join(Session, Session.id == Attendance.session_id)
@@ -345,11 +396,11 @@ class ReportsService:
                 CourseOffering, CourseOffering.id == Session.offering_id
             ).where(CourseOffering.course_id == course_id)
 
-        date_from = ensure_aware(date_from) if date_from is not None else None
-        date_to = end_of_day(ensure_aware(date_to)) if date_to is not None else None
+        bound_from = ensure_aware(date_from) if date_from is not None else None
+        bound_to = end_of_day(ensure_aware(date_to)) if date_to is not None else None
 
-        stmt = apply_if(stmt, date_from, lambda v: Attendance.timestamp >= v)
-        stmt = apply_if(stmt, date_to, lambda v: Attendance.timestamp <= v)
+        stmt = apply_if(stmt, bound_from, lambda v: Attendance.timestamp >= v)
+        stmt = apply_if(stmt, bound_to, lambda v: Attendance.timestamp <= v)
         stmt = apply_if(stmt, session_type, lambda v: Session.session_type == v)
 
         if statuses:
@@ -362,25 +413,26 @@ class ReportsService:
                 )
             )
 
-        records: Sequence[Attendance] = (
-            await self._session.scalars(
-                stmt.order_by(Attendance.timestamp.asc(), Attendance.id.asc())
-            )
-        ).all()
-        students: dict[int, Student] = await self._students_by_id(
-            {row.student_id for row in records}
-        )
-        session_types: dict[int, str] = {}
-        if records:
-            rows: Sequence[tuple[int, str]] = (
-                await self._session.execute(
-                    select(Session.id, Session.session_type).where(
-                        Session.id.in_({row.session_id for row in records})
-                    )
-                )
-            ).all()  # type: ignore[assignment]
-            session_types = {sid: st for sid, st in rows}
+        return stmt
 
+    async def _session_types_for(self, records: Sequence[Attendance]) -> dict[int, str]:
+        """The session type of every session these records belong to."""
+        if not records:
+            return {}
+
+        rows: Sequence[tuple[int, str]] = (
+            await self._session.execute(
+                select(Session.id, Session.session_type).where(
+                    Session.id.in_({row.session_id for row in records})
+                )
+            )
+        ).all()  # type: ignore[assignment]
+
+        return {sid: st for sid, st in rows}
+
+    @staticmethod
+    def _export_header(wanted: set[str]) -> list[str]:
+        """The CSV header, in the same order the row builder appends cells."""
         header: list[str] = ["session_id", "session_type"]
 
         if "student_id" in wanted:
@@ -400,51 +452,48 @@ class ReportsService:
 
         header.append("status")
 
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(header)
+        return header
 
-        for record in records:
-            student: Student | None = students.get(record.student_id)
+    @staticmethod
+    def _export_row(
+        *,
+        record: Attendance,
+        student: Student,
+        session_type: str,
+        wanted: set[str],
+    ) -> list[Any]:
+        """One record's cells, mirroring `_export_header`'s optional columns."""
+        row: list[Any] = [record.session_id, session_type]
 
-            if student is None:
-                continue
+        if "student_id" in wanted:
+            row.append(student.student_id)
 
-            row: list[Any] = [
-                record.session_id,
-                session_types.get(record.session_id, ""),
-            ]
+        if "name" in wanted:
+            row.append(f"{student.first_name} {student.last_name}")
 
-            if "student_id" in wanted:
-                row.append(student.student_id)
+        if "timestamp" in wanted:
+            row.append(
+                record.timestamp.isoformat() if record.timestamp is not None else ""
+            )
 
-            if "name" in wanted:
-                row.append(f"{student.first_name} {student.last_name}")
+        if "gps" in wanted:
+            row.extend(
+                [
+                    record.gps_lat if record.gps_lat is not None else "",
+                    record.gps_lng if record.gps_lng is not None else "",
+                ]
+            )
 
-            if "timestamp" in wanted:
-                row.append(
-                    record.timestamp.isoformat() if record.timestamp is not None else ""
-                )
+        if "liveness" in wanted:
+            row.append(
+                float(record.face_match_score)
+                if record.face_match_score is not None
+                else ""
+            )
 
-            if "gps" in wanted:
-                row.extend(
-                    [
-                        record.gps_lat if record.gps_lat is not None else "",
-                        record.gps_lng if record.gps_lng is not None else "",
-                    ]
-                )
+        row.append(record.validation_status)
 
-            if "liveness" in wanted:
-                row.append(
-                    float(record.face_match_score)
-                    if record.face_match_score is not None
-                    else ""
-                )
-
-            row.append(record.validation_status)
-            writer.writerow(row)
-
-        return buffer.getvalue()
+        return row
 
     async def _students_by_id(self, student_ids: set[int]) -> dict[int, Student]:
         if not student_ids:
