@@ -211,20 +211,16 @@ class SessionService:
     ) -> SessionRead:
         """Open a new attendance session for an offering.
 
-        The session inherits the offering's plan (D93): the meeting it
-        belongs to, the next occurrence of that meeting, the attendance
-        windows, the classroom and the geofence radius. A professor may
-        override the scheduled time — and the date — for one session, which is
-        recorded on the session and never written back to the offering.
+        The session inherits the offering's plan (D93): the meeting, its next
+        occurrence, the windows, the classroom and the geofence radius. A
+        professor may override the time and date for one session, recorded on
+        the session and never written back to the offering.
 
-        A session may only be opened while its class is running (D94). The
-        plan resolves the open window, and an un-overridden open outside it
-        is refused; an explicit override is the professor's way past the
-        window, and it carries its own validation.
+        A session may only be opened while its class is running (D94); an
+        explicit override is the professor's way past that window.
 
-        The session code derives from the assigned row id, so the row is
-        written in two flushes: insert with a random placeholder, then stamp
-        the code and expiry.
+        The session code derives from the assigned row id, so the row is written
+        in two flushes: insert with a placeholder, then stamp the code and expiry.
         """
         moment: datetime = now or _utcnow()
         offering: CourseOffering = await self._get_offering_or_404(payload.offering_id)
@@ -233,99 +229,25 @@ class SessionService:
         )
         await self._require_no_active_session(offering=offering, now=moment)
 
-        # One read of the offering's active meetings, shared by the
-        # weekly-hours gate, the type gate and the session plan.
-        components: Sequence[OfferingComponent] = await active_components(
-            self._session, offering.id
-        )
+        components = await active_components(self._session, offering.id)
         await self._require_schedule_requirement(offering, components)
-
-        # D95: the offering declares what it meets. A session of a type it
-        # does not configure would inherit the lecture's room and the course
-        # template's duration, so it is refused — before the lab-coordinates
-        # check, which is about a different mistake.
         self._require_configured_type(
             components=components, session_type=payload.session_type
         )
 
-        course: Course | None = await self._session.get(Course, offering.course_id)
-        plan: SessionPlan = await resolve_session_plan(
-            self._session,
-            offering=offering,
-            course=course,
-            components=components,
-            session_type=payload.session_type,
-            now=moment,
-            settings=self._settings,
-        )
-
-        duration: int = payload.duration_minutes or plan.duration_minutes
-        windows: _SessionWindows = _SessionWindows(
-            present=payload.present_window_minutes or plan.present_window_minutes,
-            late=payload.late_window_minutes or plan.late_window_minutes,
-        )
+        plan = await self._resolve_plan(offering, components, payload, moment)
+        duration, windows = self._resolve_scan_policy(payload, plan)
         self._check_windows(windows, duration)
-
-        # D94: the class has to be running before we even consider the
-        # duration — an open outside the window is refused with its own
-        # error, ahead of any duration check.
-        if payload.session_date is None and payload.start_time is None:
-            self._require_within_start_window(plan=plan, now=moment)
-
-        # Duration is independent of the offering's original schedule: the
-        # course offering is only the default reference. A professor may set
-        # a custom duration that extends beyond the offering's scheduled end
-        # time, so no cap is applied here. Invalid (non-positive) durations
-        # are still rejected by the schema and by `_apply_override`.
+        self._require_start_window(payload=payload, plan=plan, now=moment)
 
         radius: int = payload.classroom_radius_meters or plan.radius_meters
-
-        # Per-student attempt cap: professor override, else admin default.
-        if payload.attendance_attempt_limit is None:
-            effective_attempt_limit: int = await SystemService(
-                self._session, self._settings
-            ).get_attendance_attempt_limit_default()
-        else:
-            effective_attempt_limit = int(payload.attendance_attempt_limit)
-
-        # The classroom falls back payload -> matching active component ->
-        # offering, which the plan has already resolved. An explicit
-        # override (D93/D94) is taken verbatim, so a professor who clears the
-        # room keeps a null location instead of inheriting the offering's.
-        if payload.classroom_override:
-            classroom_name = payload.classroom_name
-            classroom_lat = payload.classroom_lat
-            classroom_lng = payload.classroom_lng
-        else:
-            classroom_name = payload.classroom_name or plan.classroom_name
-            classroom_lat = _or_fallback(payload.classroom_lat, plan.classroom_lat)
-            classroom_lng = _or_fallback(payload.classroom_lng, plan.classroom_lng)
-
-        # Remote / online sessions never carry a physical geofence, even when
-        # the offering they were opened against has one.
-        if payload.is_remote:
-            classroom_lat = None
-            classroom_lng = None
-
-        # An explicitly disabled geofence (e.g. an in-person session in a
-        # room with no known coordinates) carries no classroom identity, so
-        # the offering's room is not inherited for it.
-        if not payload.geofence_enabled:
-            classroom_name = None
-            classroom_lat = None
-            classroom_lng = None
-
-        # Remote / online mode is only available for lectures: labs always
-        # enforce the geofence, so a remote lab would bypass it.
-        if payload.session_type == SessionType.LAB and payload.is_remote:
-            raise RemoteNotAllowedForLabException()
-
-        # D77: laboratory sessions always enforce the geofence, so a lab open
-        # that resolves to no coordinates is rejected.
-        if payload.session_type == SessionType.LAB and (
-            classroom_lat is None or classroom_lng is None
-        ):
-            raise LabCoordinatesRequiredException()
+        effective_attempt_limit = await self._resolve_attempt_limit(payload)
+        classroom_name, classroom_lat, classroom_lng = self._resolve_classroom(
+            payload=payload, plan=plan
+        )
+        self._require_classroom_policy(
+            payload=payload, classroom_lat=classroom_lat, classroom_lng=classroom_lng
+        )
 
         scheduled_start, scheduled_end, overridden = self._apply_override(
             plan=plan,
@@ -356,9 +278,124 @@ class SessionService:
             attendance_attempt_limit=effective_attempt_limit,
         )
         await self._stamp_session(row, duration, moment)
+        await self._record_session_open(row, actor_id)
 
-        # After the stamp, not before: `session_code` is still the random
-        # placeholder until `_stamp_session` derives it from the assigned id.
+        return self._session_read(row, offering.id, plan, radius, windows, moment)
+
+    async def _resolve_plan(
+        self,
+        offering: CourseOffering,
+        components: Sequence[OfferingComponent],
+        payload: SessionCreate,
+        now: datetime,
+    ) -> SessionPlan:
+        """Resolve the session plan from the offering's active meetings."""
+        course: Course | None = await self._session.get(Course, offering.course_id)
+        return await resolve_session_plan(
+            self._session,
+            offering=offering,
+            course=course,
+            components=components,
+            session_type=payload.session_type,
+            now=now,
+            settings=self._settings,
+        )
+
+    @staticmethod
+    def _resolve_scan_policy(
+        payload: SessionCreate, plan: SessionPlan
+    ) -> tuple[int, _SessionWindows]:
+        """The duration and scan windows of the session.
+
+        Duration is independent of the offering's original schedule: the
+        course offering is only the default reference. A professor may set a
+        custom duration that extends beyond the offering's scheduled end
+        time, so no cap is applied here. Invalid (non-positive) durations are
+        still rejected by the schema and by `_apply_override`.
+        """
+        duration: int = payload.duration_minutes or plan.duration_minutes
+        windows = _SessionWindows(
+            present=payload.present_window_minutes or plan.present_window_minutes,
+            late=payload.late_window_minutes or plan.late_window_minutes,
+        )
+        return duration, windows
+
+    async def _resolve_attempt_limit(self, payload: SessionCreate) -> int:
+        """Per-student attempt cap: professor override, else admin default."""
+        if payload.attendance_attempt_limit is None:
+            return await SystemService(
+                self._session, self._settings
+            ).get_attendance_attempt_limit_default()
+
+        return int(payload.attendance_attempt_limit)
+
+    def _resolve_classroom(
+        self, *, payload: SessionCreate, plan: SessionPlan
+    ) -> tuple[str | None, float | None, float | None]:
+        """The room and geofence a session inherits, payload -> plan.
+
+        The classroom falls back payload -> matching active component ->
+        offering, which the plan has already resolved. An explicit override
+        (D93/D94) is taken verbatim, so a professor who clears the room keeps
+        a null location instead of inheriting the offering's.
+        """
+        if payload.classroom_override:
+            classroom_name = payload.classroom_name
+            classroom_lat = payload.classroom_lat
+            classroom_lng = payload.classroom_lng
+        else:
+            classroom_name = payload.classroom_name or plan.classroom_name
+            classroom_lat = _or_fallback(payload.classroom_lat, plan.classroom_lat)
+            classroom_lng = _or_fallback(payload.classroom_lng, plan.classroom_lng)
+
+        # Remote / online sessions never carry a physical geofence, even when
+        # the offering they were opened against has one.
+        if payload.is_remote:
+            classroom_lat = None
+            classroom_lng = None
+
+        # An explicitly disabled geofence (e.g. an in-person session in a
+        # room with no known coordinates) carries no classroom identity, so
+        # the offering's room is not inherited for it.
+        if not payload.geofence_enabled:
+            classroom_name = None
+            classroom_lat = None
+            classroom_lng = None
+
+        return classroom_name, classroom_lat, classroom_lng
+
+    @staticmethod
+    def _require_classroom_policy(
+        *,
+        payload: SessionCreate,
+        classroom_lat: float | None,
+        classroom_lng: float | None,
+    ) -> None:
+        # Remote / online mode is only available for lectures: labs always
+        # enforce the geofence, so a remote lab would bypass it.
+        if payload.session_type == SessionType.LAB and payload.is_remote:
+            raise RemoteNotAllowedForLabException()
+
+        # D77: laboratory sessions always enforce the geofence, so a lab open
+        # that resolves to no coordinates is rejected.
+        if payload.session_type == SessionType.LAB and (
+            classroom_lat is None or classroom_lng is None
+        ):
+            raise LabCoordinatesRequiredException()
+
+    def _require_start_window(
+        self, *, payload: SessionCreate, plan: SessionPlan, now: datetime
+    ) -> None:
+        """The open-window gate, applied only to a plan-following open.
+
+        D94: an open outside the class's start window is refused with its
+        own error; an explicit override is the professor's way past it.
+        """
+        if payload.session_date is None and payload.start_time is None:
+            self._require_within_start_window(plan=plan, now=now)
+
+    async def _record_session_open(self, row: Session, actor_id: int | None) -> None:
+        """Audit the open after the stamp, when the session code is final."""
         await record_audit(
             self._session,
             actor_id=actor_id,
@@ -368,13 +405,22 @@ class SessionService:
             new_value=self._session_snapshot(row),
         )
 
+    def _session_read(
+        self,
+        row: Session,
+        offering_id: int,
+        plan: SessionPlan,
+        radius: int,
+        windows: _SessionWindows,
+        moment: datetime,
+    ) -> SessionRead:
         # Canonical QR serialization: build_qr_payload owns the versioned
         # compact-key JSON contract ({v,code,offering,radius,pw,lw}); QRPayload
         # validates the same JSON so the contract is exercised on every open.
         qr_json: str = build_qr_payload(
             row.id,
             row.session_code,
-            offering.id,
+            offering_id,
             radius,
             windows.present,
             windows.late,
@@ -383,7 +429,7 @@ class SessionService:
         return SessionRead(
             id=row.id,
             session_code=row.session_code,
-            offering_id=offering.id,
+            offering_id=offering_id,
             session_type=_session_type_of(row),
             is_remote=_is_remote_of(row),
             geofence_enabled=_geofence_enabled_of(row),
