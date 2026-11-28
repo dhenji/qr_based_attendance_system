@@ -654,8 +654,9 @@ export async function listPrograms(params: {
 		};
 	}
 
-	// Endpoint keys are EndpointDefs registered in api/endpoints.ts, not raw paths —
-	// client.ts adds the /api prefix and handles auth, refresh and error envelopes.
+	// Endpoint keys are EndpointDefs registered in api/endpoints.ts (their mock
+	// handlers live in api/endpoints.mock.ts), not raw paths — client.ts adds
+	// the /api prefix and handles auth, refresh and error envelopes.
 	const response = await get<Paginated<ProgramResponse>>('adminPrograms', params);
 	// toProgram is the slice's wire → view mapper (snake_case → camelCase).
 	return { ...response, items: (response.items ?? []).map(toProgram) };
@@ -684,7 +685,7 @@ re-deciding *whether* to mock. `PUBLIC_API_URL` is optional and falls back to
 - [ ] Files created only where the slice needs them (not scaffolded empty)
 - [ ] Components use runes syntax ($state, $derived, $effect, $props)
 - [ ] Mock branching goes through `isMockMode()` and nothing else
-- [ ] URLs referenced as `EndpointDef` keys from `api/endpoints.ts`
+- [ ] URLs referenced as `EndpointDef` keys from `api/endpoints.ts` (mock handlers live in `api/endpoints.mock.ts`)
 - [ ] Type check passes: `npm run check`
 
 ---

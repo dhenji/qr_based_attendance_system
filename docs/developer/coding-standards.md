@@ -547,6 +547,16 @@ Filenames are **unprefixed** — the directory already namespaces the slice, so 
 - Feature imports: `import { StudentCard } from '$lib/features/student/components'`.
 - Never use relative paths going more than two levels up.
 
+### 2.6.1 Endpoint mocks
+
+- Endpoint mocks are named handlers in `src/lib/api/endpoints.mock.ts`, never
+  inline closures in `src/lib/api/endpoints.ts`. Each `EndpointDef.mock` points
+  at its handler (`mock: mockSessionQR`); handlers are typed as
+  `NonNullable<(typeof defs.XEndpoint)['mock']>` and the mock module imports
+  the definitions with `import type`, so the runtime graph stays acyclic.
+- `client.ts` remains the sole reader of `PUBLIC_MOCK_MODE`; do not add a
+  second gate or a per-service `USE_MOCK`.
+
 ### 2.7 Shared Utilities
 
 Four concerns have exactly one implementation under `src/lib/shared/utils/`. Do not
