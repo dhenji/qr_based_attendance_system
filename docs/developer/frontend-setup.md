@@ -239,6 +239,45 @@ export const listPrograms = async (): Promise<Program[]> => {
 `PUBLIC_MOCK_MODE` is the only mock switch; do not add another environment
 variable or a per-service `USE_MOCK` constant.
 
+### Endpoint-level mocks
+
+The `EndpointDef` registry in `src/lib/api/endpoints.ts` stays pure and
+typed: each definition's optional `mock` field points at a named handler in
+the sibling `src/lib/api/endpoints.mock.ts`. That module owns all fixtures,
+mutable state, and handlers; it imports the endpoint types with `import type`,
+so the runtime graph stays acyclic.
+
+```ts
+// src/lib/api/endpoints.ts
+import { mockSessionQR } from './endpoints.mock';
+
+export const SessionQREndpoint: EndpointDef<SessionVerificationResponse> = {
+	url: '/student/sessions/verify-code',
+	method: 'POST',
+	mock: mockSessionQR,
+};
+```
+
+```ts
+// src/lib/api/endpoints.mock.ts
+import type * as defs from './endpoints';
+
+export const mockSessionQR: NonNullable<(typeof defs.SessionQREndpoint)['mock']> = () => ({
+	session_id: 1,
+	course_code: 'CS101',
+	// ...
+});
+```
+
+Rules:
+
+- Keep `mock:` out of `endpoints.ts`'s fixtures — handlers live in
+  `endpoints.mock.ts` only.
+- `client.ts` remains the sole reader of `PUBLIC_MOCK_MODE`; do not add a
+  second gate.
+- Feature-level `mock.ts` files remain valid for service-level fixtures that
+  are not keyed through an `EndpointDef`.
+
 ---
 
 ## Type Checking
